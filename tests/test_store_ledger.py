@@ -22,8 +22,8 @@ Works with:   src/crb/store/ledger.py (under test), src/crb/core/ledger.py (the 
               whose hashes must match), src/crb/store/db.py (the write lock and triggers),
               tests/conftest_store.py, tests/test_ledger.py (the core chain's own suite)
 Tested by:    tests/test_store_ledger.py
-Touch when:   a column is added to ``grades`` (the export must re-verify — pin it); the write
-              lock changes (the concurrency case is the proof).
+Touch when:   never for a new repository; a column is added to ``grades`` (the export must re-verify
+              — pin it); the write lock changes (the concurrency case is the proof).
 """
 
 from __future__ import annotations
@@ -188,7 +188,7 @@ def test_import_rows_rechains_and_keeps_source_row_hash(ledger: DbLedger, tmp_pa
     ]
     assert src.verify() == 3
 
-    n = ledger.import_rows(src.rows())
+    n = len(ledger.import_rows(src.rows(), imported_by="admin-1", imported_at="2026-09-27"))
     assert n == 3
     imported = list(ledger.rows())
     assert [r.labels["source_row_hash"] for r in imported] == [o.row_hash for o in originals]
@@ -197,15 +197,31 @@ def test_import_rows_rechains_and_keeps_source_row_hash(ledger: DbLedger, tmp_pa
     assert ledger.verify() == 3
 
     # a second import appends after the existing chain, never restarts it
-    ledger.import_rows([grade_row(trial="9")])
+    ledger.import_rows([grade_row(trial="9")], imported_by="admin-1", imported_at="2026-09-27")
     assert ledger.verify() == 4
     assert list(ledger.rows())[3].prev_hash == imported[2].row_hash
 
 
 def test_import_rows_keeps_an_existing_source_row_hash_label(ledger: DbLedger) -> None:
     row = grade_row(labels={"source_row_hash": "f" * 64}).chained(GENESIS_HASH)
-    ledger.import_rows([row])
+    ledger.import_rows([row], imported_by="admin-1", imported_at="2026-09-27")
     assert next(iter(ledger.rows())).labels["source_row_hash"] == "f" * 64
+
+
+def test_import_rows_stamps_every_row_inside_its_hash(ledger: DbLedger) -> None:
+    """EI-2: the store's import never keeps the file's actor or a ``measured`` provenance —
+    the stamp is in the hashed body, so removing it breaks the chain."""
+    row = grade_row(actor="alice", trial="1")  # a measured row from another ledger
+    census = grade_row(provenance="imported:census", trial="2")
+    [a, b] = ledger.import_rows(
+        [row, census], imported_by="admin-1", imported_at="2026-09-27", import_sha256="ab"
+    )
+    assert a.provenance == "imported:ledger" and a.actor == "import"
+    assert b.provenance == "imported:census"  # an import of an import keeps its origin
+    assert a.labels["source_actor"] == "alice" and a.labels["source_provenance"] == "measured"
+    assert a.labels["source_row_hash"] == ""  # always present: the row came unchained
+    assert a.labels["imported_by"] == "admin-1" and a.labels["import_sha256"] == "ab"
+    assert a.verify_hash() and ledger.verify() == 2
 
 
 def test_export_jsonl_reverifies_standalone(ledger: DbLedger, tmp_path: Path) -> None:

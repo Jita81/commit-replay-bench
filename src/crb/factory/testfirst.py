@@ -73,6 +73,7 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from crb.builders.budget import DEFAULT_PRICING, Pricing, load_pricing
+from crb.core.confine import PathEscape, write_text_confined
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
@@ -300,11 +301,12 @@ def worktree_at(
 
 
 def write_authored(ws: Workspace, authored: AuthoredTest) -> Path:
-    """Write the authored test into the worktree (parents created); returns its path."""
-    p = ws.root / authored.path
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(authored.content, encoding="utf-8")
-    return p
+    """Write the authored test into the worktree (parents created); returns its path. The
+    path is model output a ticket's text steers, and the worktree is the customer's tree:
+    the write goes through :func:`crb.core.confine.write_text_confined`, so a component or
+    final entry the repository commits as a symbolic link is refused (``PathEscape``), never
+    followed out of the worktree (governance review 2026-09-27, GOV-5)."""
+    return write_text_confined(ws.root, authored.path, authored.content)
 
 
 def prove_red(
@@ -339,7 +341,10 @@ def prove_red(
     ws = worktree_at(repo, head, dest, config=config)
     try:
         existed = ws.exists(authored.path)
-        write_authored(ws, authored)
+        try:
+            write_authored(ws, authored)
+        except PathEscape as exc:
+            raise NotRed(f"{authored.path!r} cannot be written inside the worktree: {exc}") from exc
         if not runner.is_valid_oracle(ws.root, authored.path):
             raise NotRed(f"{authored.path!r} is a malformed oracle (defines no tests)")
         scope = runner.target_scope([authored.path])

@@ -467,7 +467,7 @@ describe('FactoryPage — the shipped contract', () => {
     expect(box).toHaveTextContent('not linked — no pull request')
   })
 
-  it('when the repository can deliver, the opt-in says where the pull request goes and the approver’s override is explained in visible text', async () => {
+  it('when the repository can deliver, the opt-in says where the pull request goes and the second approver’s override is explained in visible text', async () => {
     const { calls } = mockApi(
       base({
         'GET /auth/me': { ...PRINCIPAL, role: 'approver' },
@@ -483,12 +483,14 @@ describe('FactoryPage — the shipped contract', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(deliver)
     expect(box).toHaveTextContent('on — a clean build in a deliver cell pushes a branch to acme/cobra and opens a pull request against main; nothing is written to main.')
-    const override = within(box).getByRole('checkbox', { name: /Override the route gate/ })
-    expect(box).toHaveTextContent('Recorded on the evidence chain as your override of the route gate, under your name.')
-    await userEvent.click(override)
+    // GOV-4: the override is a SECOND approver's act on the run's page — never asked for at enqueue
+    expect(within(box).queryByRole('checkbox', { name: /Override the route gate/ })).toBeNull()
+    expect(within(box).getByTestId('factory-override-note')).toHaveTextContent('An override of the route gate is a second approver’s act: once this run is queued, another approver grants it on the run’s page, under their name.')
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
-    expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))).toMatchObject({ deliver: true, deliver_override: true })
+    const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
+    expect(body).toMatchObject({ deliver: true })
+    expect(body).not.toHaveProperty('deliver_override')
   })
 
   it('an item that was built opens its evidence and links its run; a refused item says why and what to do (F15, J-FAC-15)', async () => {
@@ -533,6 +535,27 @@ describe('FactoryPage — the shipped contract', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(within(banner).getByRole('button', { name: 'Cancel the run' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === `/runs/${runId}/cancel`)).toBe(true))
+  })
+
+  it('the active-run banner arrives inside a polite live region that was already on the page, so it is announced (G-905)', async () => {
+    // before any run: the live region is there, empty
+    mockApi(base({}))
+    const first = renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const idle = await screen.findByTestId('factory-run-live')
+    expect(idle).toHaveAttribute('role', 'status')
+    expect(idle).toHaveAttribute('aria-live', 'polite')
+    expect(within(idle).queryByTestId('factory-active-run')).toBeNull()
+    first.unmount()
+    vi.unstubAllGlobals()
+    // with a run in flight: the banner is inside that same region
+    mockApi(
+      base({
+        'GET /runs': { items: [{ id: 'b'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued', progress: null, started: null, cost_usd: 0, counts: {}, finished: null }], total: 1, limit: 10, offset: 0 },
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const banner = await screen.findByTestId('factory-active-run')
+    expect(banner.closest('[data-testid="factory-run-live"]')).toHaveAttribute('aria-live', 'polite')
   })
 
   it('a viewer sees the active-run banner without a Cancel button', async () => {
@@ -688,5 +711,13 @@ describe('FactoryPage — the shipped contract', () => {
 
   it('deliverableCount counts the items whose cell routes deliver', () => {
     expect(deliverableCount(TASKS)).toBe(1)
+  })
+  it('an item stopped for a weak test links to the strengthen report on Learn (G-348)', async () => {
+    const reason = 'the reviewer found the oracle weak'
+    const stopped: FactoryTask = { ...TASKS[0]!, status: 'oracle_needs_strengthening', outcome_reason: reason, error: reason, refusal: { step: 'review', reason, reason_code: '', measured_route: '' } }
+    mockApi(base({ 'GET /factory/alpha/tasks': [stopped, TASKS[1]!] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const refusal = await screen.findByTestId('refusal-I-1')
+    expect(within(refusal).getByRole('link', { name: 'Strengthen the tests on Learn' })).toHaveAttribute('href', '/learn?repo=alpha#strengthen')
   })
 })

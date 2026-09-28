@@ -70,6 +70,7 @@ from crb.server.app import API_PREFIX, create_app
 from crb.server.auth import (
     CSRF_COOKIE,
     SESSION_COOKIE,
+    LoginRateLimited,
     credential_version,
     csrf_cookie_name,
     csrf_token_for,
@@ -368,6 +369,50 @@ class TestWhoIsSignedIn:
                 assert SESSION_COOKIE not in c.cookies
         assert "'vera'" in caplog.text and "disabled" in caplog.text
 
+    def test_an_account_no_sign_in_path_admits_signs_nobody_in(
+        self, app: Any, local: TestClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # the settings refuse the pairing at start-up; this is the route's own check, the
+        # accounts ``SignInPaths`` admits (DL-077) and nothing wider, should they ever drift
+        app.state.settings.local_auth_enabled = False
+        with caplog.at_level(logging.WARNING):
+            r = local.post(AUTOLOGIN)
+        assert r.status_code == 403 and err(r)["code"] == "dev_autologin_unavailable"
+        assert SESSION_COOKIE not in local.cookies
+        assert "local sign-in is off" in caplog.text
+        assert _autologin_events(app) == []
+
+    def test_a_lost_race_for_the_trail_is_retried_not_refused(
+        self, app: Any, local: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # the sign-in and its events are one ``commit_audited`` write, as a password sign-in's
+        # are: a concurrent writer that took the trail's next ``seq`` is retried (DL-068)
+        from crb.server.routes import admin as routes_admin
+        from crb.server.routes import auth as routes_auth
+
+        real = routes_admin.record_user_event
+        lost: list[int] = []
+
+        def racing(db: Any, **kw: Any) -> None:
+            real(db, **kw)
+            if kw["action"] == "auth.dev_autologin" and not lost:
+                lost.append(1)
+                (mine,) = [o for o in db.new if isinstance(o, Event) and o.action == kw["action"]]
+                cols = [c.name for c in Event.__table__.columns if c.name != "id"]
+                twin = Event(**{c: getattr(mine, c) for c in cols})
+                twin.event_id = "f" * 32
+                db.add(twin)
+
+        monkeypatch.setattr(routes_auth, "record_user_event", racing)
+        r = local.post(AUTOLOGIN)
+        assert r.status_code == 200, r.text
+        assert lost == [1] and len(_autologin_events(app)) == 1
+        with app.state.session_factory() as db:
+            signed_in = list(
+                db.execute(select(Event).where(Event.action == "user.signed_in")).scalars()
+            )
+        assert [e.payload_json["by"] for e in signed_in] == ["dev_autologin"]
+
 
 def _login_root(c: TestClient) -> None:
     r = c.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
@@ -572,8 +617,12 @@ class TestTheLoginLimit:
         for _ in range(limiter.ip_limit + 5):
             local.cookies.clear()
             assert local.post(AUTOLOGIN).status_code == 200
-        assert limiter.retry_after("root", "127.0.0.1") is None
-        assert limiter.retry_after("anyone", "127.0.0.1") is None
+        # nothing reserved: a guess for another name is still evaluated (401, not 429), and the
+        # account's own password still signs in
+        r = local.post(
+            f"{API_PREFIX}/auth/login", json={"username": "anyone", "password": "wrong-pw"}
+        )
+        assert r.status_code == 401, r.text
         r = local.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
         assert r.status_code == 200, r.text
 
@@ -585,7 +634,7 @@ class TestTheLoginLimit:
             )
             assert r.status_code == 401, r.text
         assert local.post(AUTOLOGIN).status_code == 200
-        assert limiter.retry_after("root", "127.0.0.1") is not None
+        local.cookies.clear()
         r = local.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": ROOT_PW})
         assert r.status_code == 429 and err(r)["code"] == "rate_limited"
 
@@ -614,7 +663,9 @@ class TestTheLoginLimit:
         # own refusals (remote peer, proxy, foreign host) do not depend on the bucket
         limiter = local.app.state.login_limiter  # type: ignore[attr-defined]
         for i in range(limiter.ip_limit):
-            limiter.record_failure(f"guess{i}", "127.0.0.1")
+            limiter.acquire(f"guess{i}", "127.0.0.1")  # a slot never given back is a failure
+        with pytest.raises(LoginRateLimited):
+            limiter.acquire("root", "127.0.0.1")
         assert local.post(AUTOLOGIN).status_code == 200
         assert local.get(f"{API_PREFIX}/auth/me").status_code == 200
 

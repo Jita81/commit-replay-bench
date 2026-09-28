@@ -26,8 +26,8 @@ Works with:   src/crb/factory/build.py (under test), src/crb/factory/testfirst.p
               src/crb/core/ledger.py (``PROCESS_FACTORY`` rows), tests/test_factory_delivery.py,
               tests/test_factory_review.py and tests/test_factory_loop.py (import this harness)
 Tested by:    tests/test_factory_build.py
-Touch when:   the build step gains a stage (a harness method and a case); never so that a
-              factory row can be clean under a belt the replay row could not.
+Touch when:   never for a new repository; the build step gains a stage (a harness method and a
+              case); never so that a factory row can be clean under a belt the replay row could not.
 """
 
 from __future__ import annotations
@@ -40,6 +40,8 @@ from typing import Any
 import pytest
 
 from crb.builders.base import Budget, BuildBrief, BuildOutcome, Rung
+from crb.core.checks import RepoChecks, ResolvedChecks
+from crb.core.checks import resolve as resolve_checks
 from crb.core.evidence import verify_pack
 from crb.core.execution import LocalExecutor
 from crb.core.grade import FalseQ1Violation
@@ -215,9 +217,11 @@ class Harness:
         events: list[tuple[str, Mapping[str, Any]]] | None = None,
         trial: str = "r1",
         ledger: bool = True,
+        checks: ResolvedChecks | None = None,
     ) -> fb.BuildResult:
         """``build`` for ``item`` under ``builder`` with the rig's instrument; ``events`` collects
-        the emitted ``(kind, payload)`` pairs when given.
+        the emitted ``(kind, payload)`` pairs when given; ``checks`` the run's resolved switches
+        (``None`` — the repository's own block).
         """
         return fb.build_item(
             self.repo.repo,
@@ -226,6 +230,7 @@ class Harness:
             proof,
             builder=builder,
             budget=Budget(),
+            checks=checks,
             config=self.repo.config,
             runner=self.runner,
             executor=self.executor,
@@ -445,3 +450,93 @@ def test_a_factory_blame_needs_the_env_probe_witness(harness: Harness) -> None:
     assert res.grade_context is not None and res.grade_context.qualification.is_qualified
     assert any(a == "grade.control" and p["kind"] == "env_probe" for a, p in events)
     assert res.pack.apparatus.posture["posture_id"] == res.row.labels["posture_id"]
+
+
+# ---------------------------------------------------------------------------
+# GOV-3 — a factory build is graded on the checks arm whose rows license it
+# ---------------------------------------------------------------------------
+
+#: ``add`` gains a parameter — a change to an existing public symbol (the tests still pass).
+ADD_WIDENED = "\n\ndef add(a: int, b: int, c: int = 0) -> int:\n    return a + b + c\n"
+
+
+def _checked(pyrepo: pr.PyRepo, tmp_path: Path, checks: Mapping[str, Any]) -> Harness:
+    """A harness over ``pyrepo`` whose repository switches ``checks`` on."""
+    from dataclasses import replace
+
+    cfg = replace(pyrepo.config, checks=dict(checks))
+    return Harness(
+        repo=replace(pyrepo, config=cfg),
+        scratch=tmp_path / "scratch",
+        evidence_dir=tmp_path / "packs",
+        ledger=JsonlLedger(tmp_path / "grades.jsonl"),
+        runner=PytestRunner(cfg),
+        executor=LocalExecutor(),
+    )
+
+
+def test_a_factory_build_is_graded_on_the_repositorys_checks_arm(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-3 (governance review 2026-09-27): the delivery gate reads the repository's own
+    checks arm (ADR-0024 §6). A factory build is graded on that arm too — belt 6 evaluated
+    when the repository has it on, the ``checks`` stamp on its row — so its row counts in
+    the arm that licenses it. Forward mode has no gold: a public symbol the change ADDS is
+    the feature the item asked for, never a finding."""
+    h = _checked(pyrepo, tmp_path, {"api_stable": True})
+    item, authored = multiply_item(), authored_multiply()
+    res = h.build(item, authored, h.prove(item, authored), FakeBuilder())
+    try:
+        assert res.row is not None and res.row.clean
+        repo_arm = resolve_checks(RepoChecks.from_config(h.repo.config.checks), None).arm
+        assert repo_arm == "api" and res.row.checks_arm == repo_arm
+        assert res.row.labels["checks"].startswith("fmt=0:default;gate=0:default;api=1:repo")
+        assert res.row.labels["api_stable"] == "true" and res.grade.belts.api_stable is True
+    finally:
+        res.close()
+
+
+def test_belt_6_on_a_factory_build_refuses_a_change_to_an_existing_public_symbol(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-3: with belt 6 on, a factory build that changes an existing public signature is
+    not clean (the break the licensing evidence would have refused); the same build on a
+    repository with belt 6 off is clean, on arm ``off``."""
+    edit = append_src(MULTIPLY_DEF + ADD_WIDENED)
+    item, authored = multiply_item(), authored_multiply()
+    on = _checked(pyrepo, tmp_path / "on", {"api_stable": True})
+    res = on.build(item, authored, on.prove(item, authored), FakeBuilder(edit=edit))
+    try:
+        assert res.row is not None and not res.row.clean
+        assert res.grade.belts.api_stable is False and res.row.checks_arm == "api"
+        assert "add" in res.row.labels.get("api_findings", "")
+    finally:
+        res.close()
+    off = _checked(pyrepo, tmp_path / "off", {})
+    res2 = off.build(item, authored, off.prove(item, authored), FakeBuilder(edit=edit))
+    try:
+        assert res2.row is not None and res2.row.clean and res2.row.checks_arm == "off"
+    finally:
+        res2.close()
+
+
+def test_the_runs_own_checks_reach_the_factory_build_and_every_switch_says_what_ran(
+    harness: Harness,
+) -> None:
+    """GOV-3: the run's switches (``params.checks`` over the repository's block) reach the
+    build: the format step runs and says so, belt 6 is evaluated, the row pools in the run's
+    arm; the finish gate — not on the arm — says it did not run on the factory path rather
+    than claim it did."""
+    checks = resolve_checks(
+        RepoChecks(), {"format_step": True, "finish_gate": True, "api_stable": True}
+    )
+    item, authored = multiply_item(), authored_multiply()
+    res = harness.build(item, authored, harness.prove(item, authored), FakeBuilder(), checks=checks)
+    try:
+        assert res.row is not None and res.row.checks_arm == "fmt,api" == checks.arm
+        assert res.row.labels["checks"] == checks.label()
+        assert "format_step" in res.row.labels
+        assert res.row.labels["finish_gate"] == "skipped=not_on_the_factory_path"
+        assert res.row.labels["api_stable"] in ("true", "none")
+    finally:
+        res.close()

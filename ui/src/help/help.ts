@@ -9,8 +9,10 @@
  *               GOV.UK tone: a purpose, a next step per role (viewer is the fallback), what
  *               the numbers mean (n, interval, apparatus), the glossary ids on the screen and
  *               the guide sections to read. The About block in ui/src/components/Help.tsx
- *               reads it from the current route, so a screen needs no wiring. The help
- *               routes themselves have no entry.
+ *               reads it from the current route, so a screen needs no wiring. The four
+ *               shell screens have entries too — `/login` (which mounts the block itself,
+ *               outside the shell), `/help`, `/help/docs/:name` and the catch-all `*`,
+ *               declared last so it never answers for a routed screen (G-926).
  * How:          `helpFor` runs react-router's `matchPath` over `HELP` in declaration order and
  *               returns the first hit; patterns are the route table's own strings.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -55,7 +57,7 @@ export const HELP: ScreenHelp[] = [
       approver: 'Nothing here needs you until task 7 is done and a cell reaches your Decisions. Read the baseline meanwhile.',
       admin: 'Task 1 (the GitHub App) and task 7 (an approver account) are yours; both are in Settings.',
     },
-    numbers: '“Working changes per £ (blind)” is the product’s north star: blind attempts that came out clean, times the share of clean patches a reviewer would merge, over every pound spent on blind attempts; n is the blind attempts behind it. “n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval.',
+    numbers: '“Working changes per £ (blind)” is the product’s north star: blind attempts that came out clean, times the share of clean patches a reviewer would merge, over every pound spent on blind attempts; n is the blind attempts behind it. “n of 8 tasks” counts tasks marked Completed. It is progress, not a quality figure; the quality figures live on the Baseline with their n and interval. Signing in and finding your way here costs nothing: no screen on the way calls a model, and the onboarding guide says how long it takes.',
     terms: ['cell', 'apparatus', 'signoff', 'oracle_strength'],
     readMore: [
       { to: 'ONBOARDING-A-REPO', label: 'Using Commit Replay Bench on a repository, step by step' },
@@ -269,10 +271,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/learn',
-    purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The three reports act on nothing; the register acts only under an operator’s switch.',
+    purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.',
     next: {
-      viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them.',
-      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: copy a candidate corpus line, freeze a strengthening item, or queue the re-measurement runs the plan lists.',
+      viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them. The decisions are an operator’s.',
+      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each says what it wrote; queueing spends the budget, so it shows the estimate first. Once the tests are stronger, an item’s row opens Runs with its task filled in to re-qualify, re-score or re-run the controls.',
     },
     numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],
@@ -280,6 +282,7 @@ export const HELP: ScreenHelp[] = [
       { to: 'LEARNING-LOOP#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring', label: 'Prevention: a bug is closed by a change that stops it recurring' },
       { to: 'LEARNING-LOOP', label: 'The learning loop' },
       { to: 'LEARNING-LOOP#3-what-still-needs-a-human-and-why-that-is-deliberate', label: 'What still needs a human' },
+      { to: 'LEARNING-LOOP#24-what-strengthening-costs-a-person', label: 'What strengthening costs a person' },
     ],
   },
   {
@@ -338,22 +341,62 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/settings',
-    purpose: 'The instrument’s health, the builder sign-in, the GitHub App and, for admins, the non-secret configuration and user accounts. Secrets are never returned by the API and never shown here.',
+    purpose: 'The instrument’s health, the builder sign-in, the GitHub App, your own password and, for admins, the non-secret configuration and user accounts. Secrets are never returned by the API and never shown here.',
     next: {
-      viewer: 'Read the health probes; ask an admin for anything else.',
-      admin: 'Register the GitHub App, store the builder token, create an approver account. A probe that is not ok explains itself in its detail line.',
+      viewer: 'Read the health probes and change your own password; ask an admin for anything else.',
+      admin: 'Register the GitHub App, store the builder token, create an approver account. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. A probe that is not ok explains itself in its detail line.',
     },
-    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule).',
+    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and deactivating an account ends every session it held, so reactivating it brings none of them back.',
     terms: ['apparatus', 'negative_controls'],
     readMore: [
       { to: 'GITHUB-APP#2-register-the-app-once-per-deployment', label: 'Register the GitHub App' },
       { to: 'SECURITY#33-credentials', label: 'How credentials are held' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
+      { to: 'OPERATOR#9-users', label: 'Users, and what to do when nobody can sign in' },
     ],
+  },
+  // The four shell screens (G-926): the sign-in page, the help pages and the catch-all carry an
+  // About block like every other screen. `/login` sits outside the shell, so LoginPage mounts
+  // the block itself; nobody there has a role yet, so `next.viewer` is the only step it needs.
+  {
+    route: '/login',
+    purpose: 'This is where you sign in. The product measures what an AI builder can be trusted to change in your repository, graded by your own tests.',
+    next: {
+      viewer: 'Sign in with the username and password your admin gave you, or with your organisation account when that button is offered. If you cannot sign in, ask an admin. Accounts are not created or reset here.',
+    },
+    readMore: [
+      { to: 'OPERATOR#9-users', label: 'Accounts, roles and password resets' },
+      { to: 'SECURITY', label: 'How sign-in and sessions are secured' },
+    ],
+  },
+  {
+    route: '/help',
+    purpose: 'Every term the screens use, in plain English, with the guides and the decision records built into this deployment. Nothing here reads or changes your data.',
+    next: {
+      viewer: 'Find the word you met on a screen, or open a guide or a decision record. Use your browser’s Back button to return to the screen you came from.',
+    },
+    readMore: [{ to: 'ONBOARDING-A-REPO', label: 'Using Commit Replay Bench on a repository, step by step' }],
+  },
+  {
+    route: '/help/docs/:name',
+    purpose: 'One guide or decision record, copied into this deployment when it was built, so you can read it without leaving the product or reaching the internet.',
+    next: {
+      viewer: 'Read the section you were sent to. Back to glossary and guides, or your browser’s Back button, returns you. The text cannot be edited here: it is the repository’s file.',
+    },
+    readMore: [{ to: 'DEPLOYMENT#7-air-gap-posture', label: 'Why the guides are built in: the air-gap posture' }],
+  },
+  {
+    // the catch-all: declared LAST — `helpFor` returns the first match, and `*` matches everything
+    route: '*',
+    purpose: 'Nothing lives at the address you asked for. The address failed, not the product: every other screen still works.',
+    next: {
+      viewer: 'Check the address for a typing mistake, then go back to Home. A link from an older version, or to a run or task that no longer exists, can also lead here.',
+    },
+    readMore: [{ to: 'ONBOARDING-A-REPO', label: 'Where each step of the journey lives' }],
   },
 ]
 
-/** The first entry whose pattern matches `pathname`, or `undefined` (the help pages, the 404). */
+/** The first entry whose pattern matches `pathname`; the catch-all `*` answers for an address the route table does not know. */
 export function helpFor(pathname: string): ScreenHelp | undefined {
   return HELP.find((h) => matchPath({ path: h.route, end: true }, pathname) !== null)
 }

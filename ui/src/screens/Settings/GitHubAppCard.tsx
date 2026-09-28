@@ -10,8 +10,9 @@
  *               why not; never shows a secret (the API returns none). A read-only
  *               installation says which of the two write permissions delivery needs it
  *               lacks, what it holds today and that Sync installations refreshes the record
- *               after GitHub changes (J-FAC-17). The setup guide is a link into the bundled
- *               docs, not a file path.
+ *               after GitHub changes (J-FAC-17). A finished sync says what it recorded (how
+ *               many installations, how many can deliver) in a `role=status` sentence. The
+ *               setup guide is a link into the bundled docs, not a file path.
  * How:          `useGitHubApp` + `useSyncGitHubInstallations`; `missingForDelivery` reads
  *               `installation.permissions` against the same pair the server's `can_deliver`
  *               checks.
@@ -23,12 +24,14 @@
  *               operator's picker over the same installations), ui/src/components/Help.tsx
  *               (`DocLink`), docs/GITHUB-APP.md (the setup guide it links)
  * Tested by:    ui/src/screens/Settings/GitHubAppCard.test.tsx (the read-only sentence, the
- *               guide link), ui/src/screens/Connect/GitHubConnectDialog.test.tsx (configured
- *               and error states)
- * Touch when:   a field is added to `GitHubAppInfo`, or delivery needs a different permission
- *               pair (src/crb/server/routes/github.py `can_deliver`).
+ *               guide link, the sync sentence),
+ *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (configured and error
+ *               states)
+ * Touch when:   never for a new repository; a field is added to `GitHubAppInfo`, or delivery needs
+ *               a different permission pair (src/crb/server/routes/github.py `can_deliver`).
  */
 
+import { useState } from 'react'
 import { useGitHubApp, useSyncGitHubInstallations } from '../../api/hooks'
 import type { GitHubInstallation } from '../../api/types'
 import { Button } from '../../components/Button'
@@ -64,17 +67,27 @@ function ReadOnlyNote({ installation }: { installation: GitHubInstallation }) {
   )
 }
 
+/** What a finished sync recorded, in one sentence (G-922). */
+export function syncSentence(found: readonly GitHubInstallation[]): string {
+  const n = found.length
+  const writers = found.filter((i) => i.can_deliver).length
+  const recorded = `${n} ${n === 1 ? 'installation' : 'installations'} recorded`
+  const deliver = writers === 0 ? 'none of them can deliver' : `${writers} of them can deliver`
+  return n === 0 ? 'Sync done: GitHub reports no installation of the App.' : `Sync done: ${recorded}, ${deliver}.`
+}
+
 export function GitHubAppCard() {
   const { can } = useAuth()
   const app = useGitHubApp()
   const sync = useSyncGitHubInstallations()
+  const [synced, setSynced] = useState('')
   return (
     <Card
       title="GitHub App"
       eyebrow="the enterprise connection · no tokens handed over"
       actions={
         app.data?.configured && can('operator') ? (
-          <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate()} hint="button.settings.github_sync">
+          <Button size="sm" disabled={sync.isPending} onClick={() => sync.mutate(undefined, { onSuccess: (found) => setSynced(syncSentence(found)) })} hint="button.settings.github_sync">
             Sync installations
           </Button>
         ) : undefined
@@ -124,6 +137,11 @@ export function GitHubAppCard() {
                 </li>
               ))}
             </ul>
+          )}
+          {synced && !sync.isPending && (
+            <p role="status" className="m-0 text-sm" data-testid="github-sync-said">
+              {synced}
+            </p>
           )}
           {sync.isError && <ErrorState compact error={sync.error} />}
         </div>

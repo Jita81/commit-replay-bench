@@ -28,8 +28,8 @@ Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (under test),
               src/crb/intake/http.py (the status → reason table),
               src/crb/intake/client.py (the protocol both must satisfy)
 Tested by:    tests/test_intake_adapters.py
-Touch when:   a tracker changes an api-version or a route — change it here first and watch
-              this suite fail, never the other way round.
+Touch when:   never for a new repository; a tracker changes an api-version or a route — change it
+              here first and watch this suite fail, never the other way round.
 """
 
 from __future__ import annotations
@@ -807,3 +807,36 @@ def test_the_adapters_read_who_created_the_ticket() -> None:
         )
 
     assert _jira(jira_handler).read("WID-12").author == "5b10ac8d82e05b22cc7d4ef5"
+
+
+def test_the_allowlist_never_reads_a_name_the_ticket_author_can_choose() -> None:
+    """GOV-7 (governance review 2026-09-27): ADR-0022's allowlist keys on the creator's
+    SIGN-IN name. An Azure DevOps identity with no ``uniqueName`` must not fall back to its
+    ``displayName`` — a profile field its owner sets, so it can read as an allowlisted
+    sign-in name — and the older API's string form counts only its bracketed sign-in name.
+    A ticket whose creator carries no sign-in name has no author, so it always waits for an
+    operator's Register act."""
+    from crb.server.intake import ApprovalPolicy
+
+    policy = ApprovalPolicy(required=True, allow_authors=("lead@corp.example",))
+    chosen = ado._identity({"displayName": "lead@corp.example"})
+    assert chosen == "" and policy.approver_for(chosen) is None
+    assert ado._identity("lead@corp.example") == ""  # a bare display string, no sign-in name
+    assert ado._identity("Lead <lead@corp.example>") == "lead@corp.example"
+    assert ado._identity({"displayName": "Ada", "uniqueName": "ada@corp.example"}) == (
+        "ada@corp.example"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json(
+            {
+                "id": 4711,
+                "fields": {
+                    ado.FIELD_TITLE: "Add a route",
+                    "System.CreatedBy": {"displayName": "lead@corp.example"},
+                },
+            }
+        )
+
+    ticket = _ado(handler).read("4711")
+    assert ticket.author == "" and policy.approver_for(ticket.author) is None

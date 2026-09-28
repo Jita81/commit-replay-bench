@@ -36,9 +36,9 @@
  *               ui/src/screens/Capability/contract.ts (`ControlsVerdict`, `FailureSplit`,
  *               `ReasonCode` reused in the snapshot), ui/src/api/types.ts (`Signoff`)
  * Tested by:    ui/src/screens/Signoff/SignoffPage.test.tsx, ui/e2e/walkthrough/08-signoff.spec.ts
- * Touch when:   a refusal clause is added (src/crb/core/signoff.py; docs/API.md "POST
- *               /signoffs") — extend `RefusalCode` and `REFUSAL_DISPLAY` here and the gate
- *               row in ui/src/screens/Signoff/SignoffPage.tsx; never for a new repository.
+ * Touch when:   never for a new repository; a refusal clause is added (src/crb/core/signoff.py;
+ *               docs/API.md "POST /signoffs") — extend `RefusalCode` and `REFUSAL_DISPLAY` here and
+ *               the gate row in ui/src/screens/Signoff/SignoffPage.tsx.
  * Claims:       What a signed cell may be claimed to mean is fixed by the policy version
  *               stamped on the record
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
@@ -66,6 +66,8 @@ export type RefusalCode =
   | 'oracle_weak'
   | `route_not_deliver:${ReasonCode | 'unrouted' | 'unknown'}`
   | 'attestation_missing'
+  | 'attested_row_not_measured'
+  | 'attested_row_without_pack'
   | 'same_actor'
 
 /** The policy this reading was written against; the server's `policy_version` is what is displayed. */
@@ -221,7 +223,9 @@ export const signoffKeys = {
 
 /**
  * The preview re-fetches as the approver's choices change (the cell, the named row):
- * it reflects exactly what the POST would do with the form as it stands.
+ * it reflects exactly what the POST would do with the form as it stands — once it has
+ * answered. While a newly named row of the same cell loads, `data` is the previous row's
+ * answer and `isPlaceholderData` is true; a gate reads neither (P-169).
  */
 export function useSignoffPreview(repo: string, cell: Record<string, string> | null, reviewedRowHash = ''): UseQueryResult<SignoffPreview, ApiError> {
   const key = cell ?? {}
@@ -231,6 +235,17 @@ export function useSignoffPreview(repo: string, cell: Record<string, string> | n
     enabled: repo.length > 0 && cell !== null && Boolean(cell.capability_class),
     retry: false,
     staleTime: 5_000,
+    // Naming another row of the SAME cell keeps the cell's preview on screen while the row's
+    // loads. Without it `data` went undefined for the refetch, the Accepted row select (disabled
+    // until a preview exists) was disabled under the keyboard person's focus and focus fell to
+    // the page — found by the walkthrough's keyboard step (G-905). A different cell or
+    // repository starts empty: its rows and refusals are not the old cell's. The placeholder
+    // is the previous ROW's answer, so no verdict may be read from it: a caller builds its
+    // gate from `isPlaceholderData ? undefined : data` (P-169, SignoffPage's `current`).
+    placeholderData: (previous, previousQuery) => {
+      const k = previousQuery?.queryKey
+      return k && k[1] === repo && JSON.stringify(k[2]) === JSON.stringify(key) ? previous : undefined
+    },
   })
 }
 
@@ -285,6 +300,8 @@ export const REFUSAL_DISPLAY: Record<string, string> = {
   oracle_weak: 'oracle too weak to license auto-delivery',
   route_not_deliver: 'the routing rule does not say deliver',
   attestation_missing: 'name the accepted row you read and affirm it — no policy can waive this',
+  attested_row_not_measured: 'the row you named was imported, not measured here — attest to a row this deployment graded; no policy can waive this',
+  attested_row_without_pack: 'the row you named has no stored, verified evidence pack, so there is no diff to have read; no policy can waive this',
   same_actor: 'you produced this evidence — you queued the run that graded the attested row, or every accepted row in the cell is yours; a second approver must sign; no policy can waive this',
 }
 

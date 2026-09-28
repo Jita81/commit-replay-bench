@@ -25,7 +25,8 @@ ADRs:         none
 Works with:   tests/fixtures/pkgmirror.py (the tarballs it locks), tests/fixtures/langs/__init__.py
               (the two-commit shape), tests/test_provision_node.py (the consumer)
 Tested by:    tests/test_provision_node.py
-Touch when:   the Node recipe needs another lock shape (a scoped package, a named install script).
+Touch when:   never for a new repository; the Node recipe needs another lock shape (a scoped
+              package, a named install script).
 """
 
 from __future__ import annotations

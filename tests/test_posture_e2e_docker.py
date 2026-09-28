@@ -35,9 +35,9 @@ Works with:   src/crb/server/posture_gate.py (``PostureGate``: admission and ``c
               tests/fixtures/goproxy.py and tests/fixtures/langs/gorepo_deps.py (the
               repository and its mirror), tests/conftest_langs.py (the images)
 Tested by:    tests/test_posture_e2e_docker.py
-Touch when:   the sealed posture's contract changes — provisioning, qualification, the gate or
-              the witness; docs/reviews/2026-09-25-sealed-posture.md repeats this proof on
-              cobra.
+Touch when:   never for a new repository; the sealed posture's contract changes — provisioning,
+              qualification, the gate or the witness; docs/reviews/2026-09-25-sealed-posture.md
+              repeats this proof on cobra.
 """
 
 from __future__ import annotations

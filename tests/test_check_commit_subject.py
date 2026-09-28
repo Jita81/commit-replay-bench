@@ -26,8 +26,8 @@ Works with:   scripts/check_commit_subject.py (the code under test), docs/CONTRI
               (the commit convention it enforces), .github/workflows/commit-subjects.yml
               (the job that runs it, re-run when a title is edited)
 Tested by:    (this is a test file)
-Touch when:   a Conventional Commits type is added to the convention, or the imperative
-              heuristic changes (add the case here in the same change).
+Touch when:   never for a new repository; a Conventional Commits type is added to the convention, or
+              the imperative heuristic changes (add the case here in the same change).
 """
 
 from __future__ import annotations

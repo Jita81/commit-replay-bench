@@ -20,8 +20,8 @@ Works with:   src/crb/builders/editblock.py (under test), src/crb/builders/opena
               (the chat transport it scripts), src/crb/builders/base.py (guards and budget),
               tests/fixtures/builders_repo.py, src/crb/core/grade.py (the verdict)
 Tested by:    tests/test_builders_editblock.py
-Touch when:   the edit-block grammar gains a marker form (a parser case); the feedback loop
-              changes what it tells the model after a failed apply.
+Touch when:   never for a new repository; the edit-block grammar gains a marker form (a parser
+              case); the feedback loop changes what it tells the model after a failed apply.
 """
 
 from __future__ import annotations

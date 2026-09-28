@@ -21,8 +21,8 @@ Works with:   src/crb/store/jobs.py (under test), src/crb/store/models.py (the `
               src/crb/server/worker.py (the consumer), tests/test_worker.py (the queue under the
               worker), tests/test_server_routes_runs.py (the producer)
 Tested by:    tests/test_store_jobs.py
-Touch when:   a run kind or status is added (``RUN_KINDS`` and the terminal-status cases); the
-              liveness window or reclaim limit changes.
+Touch when:   never for a new repository; a run kind or status is added (``RUN_KINDS`` and the
+              terminal-status cases); the liveness window or reclaim limit changes.
 """
 
 from __future__ import annotations

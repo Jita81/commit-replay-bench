@@ -4,18 +4,19 @@ Navigation
 ----------
 What it is:   ``/runs``'s test suite — list / filters, create → enqueue, cancel, the per-task
               table, the event log and SSE.
-What it does: Pins the list shape and order, filters and pagination, the queue lister when
-              present, counts / progress / cost (derived when the worker wrote none), 404; create
-              RBAC, the enqueued fields, blind kind implies blind mode, non-build kinds need no
-              builder, 422 validation, unknown repo 404 and queue unavailable 503, the
-              ``JobQueue`` class adapter; a ``claude_code`` auth with no credential refused
-              at submit (422 ``builder_credential_missing``, presence only, nothing queued —
-              docs/PREVENTION.md P-003); the budget ladder (forwarded only as set, object rungs
-              stored as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused
-              unless the budget differs, ``labels.budget_tier`` on task rows); cancel RBAC /
-              queue call / terminal 409 / 404; the task table and error rows; the paginated,
-              redacted event log; and SSE replay-then-done, resume with ``after``, 404 / 401,
-              live polling with keepalives, and disconnect stopping the poll.
+What it does: Pins the list shape and order, filters and pagination, the queue lister when present,
+              counts / progress / cost (derived when the worker wrote none), 404; create RBAC, the
+              enqueued fields, blind kind implies blind mode, non-build kinds need no builder, 422
+              validation, unknown repo 404 and queue unavailable 503, the ``JobQueue`` class
+              adapter; a ``claude_code`` auth with no credential refused at submit (422
+              ``builder_credential_missing``, presence only, nothing queued — docs/PREVENTION.md
+              P-003), and every server function that enqueues a run passing ``submit_refusals``
+              (P-160, an AST ratchet); the budget ladder (forwarded only as set, object rungs stored
+              as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused unless the
+              budget differs, ``labels.budget_tier`` on task rows); cancel RBAC / queue call /
+              terminal 409 / 404; the task table and error rows; the paginated, redacted event log;
+              and SSE replay-then-done, resume with ``after``, 404 / 401, live polling with
+              keepalives, and disconnect stopping the poll.
 How:          ``make_env`` over the seed; ``FakeJobs`` records queue calls and persists the run;
               SSE frames parsed from the streamed text.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -705,6 +706,58 @@ class TestCredentialPresence:
         for name in names:
             assert name in CREDENTIAL_CHECKS or name in CREDENTIAL_EXEMPT, name
         assert all(why.strip() for why in CREDENTIAL_EXEMPT.values())
+
+    def test_every_function_that_enqueues_a_run_passes_the_submit_gate(self) -> None:
+        """P-160, the route half of P-003's class: a second route that queues runs (Learn's
+        re-measurement queue) enqueued them with no credential check, so a cell whose builder
+        had no key was queued to fail at $0. Every function in the server that calls
+        ``.enqueue(`` (or stages a run with ``stage_queued(``, which puts a run on the queue
+        inside the caller's transaction — EI-1, P-420) must call ``submit_refusals`` — the
+        one gate ``POST /runs`` applies — or be named here with the reason it cannot queue a
+        build."""
+        import ast
+
+        queue_calls = {"enqueue", "stage_queued"}
+
+        import crb.server as server_pkg
+
+        exempt = {
+            ("routes/runs.py", "_jobs_api"): "builds the queue adapter the gated routes call",
+            ("routes/runs.py", "_enqueue"): "the queue adapter itself, called by the gated routes",
+            ("routes/repos.py", "probe_repo"): "queues kind probe only: no builder, no spend",
+        }
+        root = Path(server_pkg.__file__).parent
+        seen: set[tuple[str, str]] = set()
+        ungated: list[str] = []
+        for path in sorted(root.rglob("*.py")):
+            rel = path.relative_to(root).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for fn in ast.walk(tree):
+                if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                    continue
+                calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)]
+                # ``.enqueue(`` commits a run; ``stage_queued(`` adds one to the caller's own
+                # transaction (the Learn queue, EI-1) — both put a run on the queue
+                enqueues = any(
+                    (isinstance(c.func, ast.Attribute) and c.func.attr in queue_calls)
+                    or (isinstance(c.func, ast.Name) and c.func.id in queue_calls)
+                    for c in calls
+                )
+                if not enqueues:
+                    continue
+                seen.add((rel, fn.name))
+                gated = any(
+                    isinstance(c.func, ast.Name) and c.func.id == "submit_refusals" for c in calls
+                )
+                if not gated and (rel, fn.name) not in exempt:
+                    ungated.append(f"{rel}::{fn.name}")
+        assert ungated == [], f"these enqueue a run without submit_refusals: {ungated}"
+        # the gated routes were found, and every exemption still names a real call site
+        assert {
+            ("routes/runs.py", "create_run"),
+            ("routes/learn.py", "queue_remeasurement"),
+        } <= seen
+        assert set(exempt) <= seen
 
     def test_the_stored_token_is_never_read_only_its_presence(
         self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

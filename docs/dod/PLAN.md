@@ -64,9 +64,10 @@ Waves 2 to 4 have not started.
 Some ids the base carried are retired on this branch because they were **merged or narrowed,
 not closed**: the criteria that cited them are still open under the id that replaced them.
 Merged: G-100, G-252 and G-445 into G-977; G-116 and G-220 into G-979; G-118 into G-907;
-G-141 and G-364 into G-978; G-261, G-381 and G-398 into G-976. Narrowed: G-925 into G-556
-(`connect-and-prove.measure.14`) and G-584 (`run-the-platform.measure.14`), its other three
-criteria met.
+G-141 and G-364 into G-978; G-261, G-381 and G-398 into G-976. Narrowed: G-905 into G-992
+(`factory.accessibility.18`) and G-993 (`signoff.accessibility.14`), its other three
+criteria met; G-925 into G-556 (`connect-and-prove.measure.14`) and G-584
+(`run-the-platform.measure.14`), its other three criteria met.
 
 ## Wave 0 — correct the record (autonomous; integrated on `feat/ns1`)
 
@@ -74,7 +75,7 @@ criteria met.
 |---|---|---|
 | D0 · the artefacts | G-930, G-661, G-662, G-663, G-664, G-703, G-403, G-480, G-500, G-548, G-907, G-976, G-977, G-978, G-979 | `product.evidence.6` kept `partial` on G-930, cut to what remains: `scripts/check_branch_protection.py` compares the required-check list with ci.yml's jobs, and a daily workflow runs it once the operator provisions its token; criteria 202 to 205 `partial`, citing what landed, each gap line cut to what remains; P-008 closed with #56's tests; the external assessment vendored as `docs/reviews/2026-09-25-external-assessment.md`; F42 and F43 given their own backlog rows and F5b re-scoped against the assessment's C8; the orphan gap lines (G-931, G-940 to G-944, the stray copies of G-905) deleted and G-605 folded into G-929; each duplicated change that no other stream owns carried by one id; the non-goals that contradicted a gap rewritten; the Results throughput copy, README's status paragraph and the `/health` probe list in the guides corrected; this plan rewritten |
 | D0 · registered, not yet closed | G-970, G-971, G-972 | the docker-wait flake class, the five executor and mining defects (the assessment's B5) and the append-only probe (A5(c)) registered in `docs/PREVENTION.md`, each pending with its gap |
-| D0 · the integration's own links | G-997 | the changelog entry of this pull request linked GitHub's create-a-pull-request form (`pull/new/feat/ns1-a`), which never becomes the pull request's page; it now links #64, and the changelog test refuses a create-form link (P-191 closed) |
+| D0 · the integration's own links | G-997 | the changelog entries of this integration linked GitHub's create-a-pull-request form (`pull/new/feat/ns1`, and part A's `pull/new/feat/ns1-a`), which never becomes the pull request's page; they now link #64 and #65, and the changelog test refuses a create-form link (P-191 closed) |
 | D0 · the criteria Wave 2 needs | G-973, G-974, G-975 | the criteria the assessment's A3 (`lint_status`), A6 (`mutation.v2`) and C4 (the delivered change's own cell) need before Wave 2 may build them, added `unmet` |
 
 D1, the checker, closes in the same change the register rows that name it (P-118, "the record
@@ -107,6 +108,8 @@ Five of these streams restart work parked on 25 September (`feat/w2-m`, `feat/w2
 | E · economics · `feat/ns1-e` | F35 | known-n counts and a t interval per cell; tiles show n, the interval and the apparatus; an unknown value is a dash |
 | A1 · keyboard, phone and nav · `feat/ns1-a1` | G-905, F26, G-192, G-196, G-197, G-292, G-914, G-919, G-448, G-301 | the five keyboard steps; the phone menu under 640 px; `/login` swept before sign-in; nav entries at `viewer`; the `/repos` journey eyebrow |
 | A2 · wayfinding and help · `feat/ns1-a2` | G-926, G-911, G-164, G-165, G-166, G-148, G-149, G-150, G-156, G-157, G-413, G-414 | the shell screens' About blocks; the approver's Home; Home shows its failed reads; the help pages' gaps; the orient walkthrough, timed |
+| B · evidence and import (the security and governance review, EI-2, EI-3, EI-6) · `fix/audit-b` | G-755, G-756, G-757, G-758, G-759 | imported rows stamped inside their hash and audited, never counted by a sign-off or the route that licenses delivery; no attestation of an imported or pack-less row; the worker never appends a clean row without its kept pack; the sign-off and review chains verified by `/ledger/verify`, `GET /signoffs/verify` and `/health` |
+| A · the security review's auth findings · `fix/audit-a` | G-750, G-751, G-752, G-753, G-754 | the operator's internal security and governance review (2026-09-27): the login limiter reserves an attempt before it checks the password, so a burst cannot outrun it (AUTH-1); the identity provider's claims never demote the last active admin (AUTH-2); deactivation ends an account's sessions for good (AUTH-3); every credential change and every sign-out is an event naming who made it (EI-8); the re-check's two residuals — the last-admin count takes only admins who can sign in, and a finished Claude sign-in is recorded with its own time though nobody reads it back (G-754) |
 
 **Done when:** on the merged branch, `GAP-ANALYSIS.md` no longer lists G-532, G-912, F23, F35,
 G-905, G-911, G-919 or F26, and G-925 is replaced by narrower gaps for what nothing records;
@@ -128,12 +131,12 @@ apparatus bump to 2.4 with `routing.v2`.
 | stream | gaps | what ships |
 |---|---|---|
 | R · `routing.v2` | G-661, G-540, G-973, G-974 | one ADR; apparatus 2.4; a distinct-task minimum; `calibrate` on an unmeasured oracle; the sealed-posture clause; `lint_status` and `mutation.v2` in the same bump; the map and `/value` split by learn label |
-| F · factory | G-662, G-538, G-707, G-975 | the required, scoreable strength probe and the `oracle_not_scoreable` stop; factory builds get the loop's overlay and labels; the worker re-checks the builder credential when it claims a run; a pull request opens only when the delivered change's own cell routes `deliver` |
-| I · audit | G-663, F51, G-601, G-924, G-972 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table |
+| F · factory | G-662, G-538, G-707, G-975 | the required, scoreable strength probe and the `oracle_not_scoreable` stop; factory builds get the loop's overlay and labels; the worker re-checks the builder credential when it claims a run; an item with no size estimate is `unsized` and routes `human` |
+| I · audit | G-663, F51, G-601, G-924, G-972, G-709 | an audit event naming who set the unsealed override; the `events` table hash-chained and verified; the head `row_hash` served and logged at worker start; `crb_signoffs_total`; the append-only probe on every table; the migration job's own owner URL in the chart and compose, so the API and the worker connect as a role that does not own the ledger |
 | H · gates and spend | G-664, G-602, F5b, G-705, G-706, G-970, G-971 | `uv.lock`, CI installing from it, and a fresh-clone job as root with no docker daemon; a `PrometheusRule` template; a per-run spend cap (the assessment's C8 re-scoped to it); the reaper test on a fake clock; the Helm API and worker share the evidence directories; the docker-wait sites and their ratchet; the executor and mining edge cases |
 | E2 · economics in one scope | G-990, G-991, G-989 | a cell's flat cost and latency means, the Pareto frontier, the best config and the forecast's price read one apparatus version and one posture class or are withheld; `GET /value` filters by posture class and refuses to pool two; a help-copy ratchet ties "not yet served" sentences to the API's fields (opened by Wave 1's stream E) |
 | S0 · the approver task · from `feat/w2-s` | G-477 | Home task 7 reads the real two-person readiness: Completed only when an approver other than the operator who would queue exists, never on the bootstrap admin alone |
-| C · claims | G-929, G-660 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked |
+| C · claims | G-929, G-660, G-994, G-996, G-995, G-998 | the claims allowlist widened page by page, `docs/dod/**` included; the rows locator and the re-derivation test, ready for Wave 3's rows; the README routing bar generated and checked; a scheduled mutation pass that proves the evidence of a met criterion or a closed prevention row can fail, and a check that a criterion flipped to met kept its words; one owner per shared defect class in a wave, so parallel streams stop fixing one class several ways; a `[measured]` tag whose method names a source the repository does not carry is refused |
 
 The builder-endpoint work parked on `feat/w3-x` joins this wave when its criteria reach the
 record; until then it is not a wave item.
@@ -169,7 +172,7 @@ posture.23 and go-live.18 read met.
 |---|---|---|
 | S · the second person · `feat/w2-s` | G-517, G-518, G-516, G-476, G-478, G-479, G-480, G-481, G-284, G-285, G-286 | a signed cell licenses delivery by default (ADR-0018); an approver is invited with a one-time link (task 7's readiness rule lands first, in Wave 2's S0); a decision carries its age; the sign-off gate shows the evidence's posture |
 | P · posture and go-live · new | G-317, G-316, G-318, G-319, G-580, G-581, G-583, G-584, G-582, G-212, G-213, G-214, G-215, G-320, G-321, G-950, G-951, G-966 | `/posture` lists each go-live line as proven, attested or unproven; each posture row names its source and the page prints; the go-live walkthrough; mirror credentials; the remaining lock formats sealed; a damaged sealed set quarantined |
-| T · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control |
+| T · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
 
 **Done when:** an invited approver can accept, sign in and sign a cell on the walkthrough stack;
 the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state; the

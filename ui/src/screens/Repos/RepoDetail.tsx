@@ -220,6 +220,8 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
 /** The mined tasks with class, size, pool, churn, gold status and RED-checked. */
 function TasksTab({ name }: { name: string }) {
   const tasks = useRepoTasks(name, { limit: 500 })
+  const { can } = useAuth()
+  const operator = can('operator')
   const columns = useMemo<Column<TaskSpec>[]>(
     () => [
       { key: 'task_id', header: 'Task', hint: 'col.tasks.task', mono: true, sortValue: (t) => t.task_id, cell: (t) => <Link to={`/tasks/${encodeURIComponent(t.repo)}/${t.task_id}`}><ShortId value={t.task_id} /></Link> },
@@ -250,8 +252,27 @@ function TasksTab({ name }: { name: string }) {
       },
       { key: 'red', header: 'RED-checked', hint: 'col.tasks.red', sortValue: (t) => Number(t.red_checked), cell: (t) => (t.red_checked ? '✓' : '—'), hideBelowMd: true },
       { key: 'authored', header: 'Authored', hint: 'col.tasks.authored', sortValue: (t) => t.authored, cell: (t) => <span className="text-xs text-on-surface-muted">{fmtDate(t.authored)}</span>, hideBelowMd: true },
+      ...(operator
+        ? [
+            {
+              // G-431 — a task that is not gold-clean after a configuration change is walked
+              // again (`mine` + its sha) without re-mining the history; the dialog arrives
+              // pre-filled and queueing it is still the operator's act. It re-checks the
+              // gold; "Re-qualify" is posture qualification (ADR-0019), a different act (P-163)
+              key: 'recheck_gold',
+              header: 'Re-check gold',
+              hint: 'col.tasks.recheck_gold' as const,
+              cell: (t: TaskSpec) =>
+                t.gold_clean === true ? null : (
+                  <Hint as={Link} id="link.tasks.recheck_gold" to={`/runs?repo=${encodeURIComponent(name)}&new=mine&tasks=${t.task_id}`} className="text-xs">
+                    Re-check gold
+                  </Hint>
+                ),
+            },
+          ]
+        : []),
     ],
-    [],
+    [name, operator],
   )
   return (
     <Card padded={false} title="Mined tasks">
@@ -297,7 +318,7 @@ export function RepoDetail() {
 
   return (
     <>
-      <PageHeader eyebrow="Instrument · Repositories" title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
+      <PageHeader title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
       <div role="tablist" aria-label="Repository sections" className="flex gap-1 border-b border-border">
         {tabs.map((t) => (
           <Hint

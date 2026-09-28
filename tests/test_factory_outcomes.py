@@ -25,8 +25,8 @@ Works with:   src/crb/factory/evidence.py (the once-per-PR recorder), src/crb/se
               ``delivery_counts``, ``register_evolution``, the task view),
               src/crb/factory/backlog.py (``evolve``, ``lineage``)
 Tested by:    tests/test_factory_outcomes.py
-Touch when:   an outcome field is added, the once-per-PR rule changes (an ADR), or the task
-              view's supersession shape changes (docs/API.md first).
+Touch when:   never for a new repository; an outcome field is added, the once-per-PR rule changes
+              (an ADR), or the task view's supersession shape changes (docs/API.md first).
 """
 
 from __future__ import annotations

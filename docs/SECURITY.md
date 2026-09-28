@@ -313,9 +313,10 @@ made under that override carries it in its apparatus (§5, ADR-0023).
   table to keep or leak. A copied cookie therefore dies with the logout, not at
   `session_ttl`. [measured] `tests/test_server_auth.py::TestSessionRevocation`
   A deactivated account is refused on its very next request and for as long as it
-  is inactive; the active flag is not part of the version, so re-activating within
-  `session_ttl` restores the sessions issued before — containing a compromised account
-  means deactivating **and** signing it out everywhere (or setting a new password). A self-service change
+  is inactive, and deactivating rotates its nonce too, so re-activating it brings back no
+  session issued before (AUTH-3 — before 2026-09-27 re-activation within `session_ttl`
+  revived them). [measured]
+  `tests/test_server_admin_users.py::TestActive::test_deactivate_ends_sessions_for_good_and_reactivate_allows_login` A self-service change
   (`PUT /users/me/password`) requires the current password — a borrowed session cannot
   change it — and re-issues the cookie only to the browser that made the change. The
   break-glass path (`crb users set-password | deactivate` on the host, where database
@@ -372,7 +373,18 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   `crb.core.redact` (`sk-…` prefixes) are defence in depth behind that. [measured]
   `tests/test_server_routes_admin_secrets.py`, `tests/test_builders_claude_code.py`
 - **What is logged.** `secret set` / `secret removed` with `secret`, `fingerprint`,
-  `set_by`; `secret unreadable` with the permission reason. The verify probe's stderr
+  `set_by`; `secret unreadable` with the permission reason. Every store and removal of the
+  Claude Code token or the tracker token — and a token the Claude sign-in stored — is also
+  a `settings.secret_set` / `settings.secret_deleted` event naming the admin, with the
+  secret's name and fingerprint, never its value, so who removed a credential survives the
+  removal (EI-8). [measured]
+  `tests/test_server_routes_admin_secrets.py::test_each_store_and_removal_is_one_event_naming_the_admin`
+  The sign-in helper has no database, so the API records its token at the next read of the
+  secrets list or of a sign-in session, or at its next start, with the helper's own
+  `stored_at` — a late record still says when the token was stored; until one of those, the
+  event is not yet written. [measured]
+  `tests/test_server_claude_login.py::test_a_stored_sign_in_nobody_read_back_is_recorded_by_the_secrets_list`
+  The verify probe's stderr
   tail is redacted and capped before it is returned.
 - **Verify is metered.** `POST …/verify` runs one no-tool Haiku turn through the
   builder's exact environment and is limited to one call per 10 s per deployment
@@ -406,16 +418,40 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   **first** sign-in only; after that the role is the admin's to change and a sign-in does
   not revert it. `CRB_OIDC__ROLE_FROM_CLAIMS=always` makes the provider the source of truth
   instead (a removal from the admin group then demotes at the next sign-in) and records
-  every change it makes as `user.role_overridden` with the role before and after.
+  every change it makes as `user.role_overridden` with the role before and after — except
+  a demotion of the last active admin, which is refused: the role is kept and the conflict
+  recorded as `user.role_override_refused`, so a directory clean-up or a group-id typo
+  cannot leave a deployment nobody can administer (AUTH-2). [measured]
+  `tests/test_server_auth.py::TestOidcRoleSource::test_always_never_demotes_the_last_active_admin`
+  The last-admin rule counts only admins who can sign in: a local account only while local
+  sign-in is on, an OIDC account only from the configured issuer. The bootstrap admin kept
+  active with `CRB_LOCAL_AUTH_ENABLED=false` (DEPLOYMENT §8 allows it) therefore never
+  stands in for a second admin — the claims, the role route and the active route all refuse
+  to take the last OIDC admin. The break-glass `crb users` verbs run without the service's
+  settings and count every active admin; host access is itself the recovery. [measured]
+  `tests/test_server_auth.py::TestOidcRoleSource::test_an_admin_nobody_can_sign_in_as_never_counts_as_the_other_admin`
   [design — exercised with an injected fake provider in tests; not yet run against a live
   IdP]
 - Local accounts (argon2id, constant-time compare) exist for bootstrap and air-gapped
   installs; disable with `CRB_LOCAL_AUTH_ENABLED=false` once OIDC works. Failed sign-ins are
   limited in the API process: five a minute per username and address, and twenty a minute
-  per address whatever the usernames (a spray across accounts). The limiter is in memory and
-  per process, so **production must also limit `POST /api/v1/auth/login` per client address
+  per address whatever the usernames (a spray across accounts). An attempt is counted
+  before its password is checked, so a burst sent at once has at most five evaluated and a
+  right password behind them is refused too (AUTH-1); the self password change shares the
+  limiter. [measured] `tests/test_server_auth.py::TestLoginLimiterUnderConcurrency` The
+  limiter is in memory and per process, so **production must also limit `POST /api/v1/auth/login` per client address
   at the reverse proxy**, which sees every replica ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
   [measured] `tests/test_server_auth.py::TestLoginRateLimitPerIp`
+- Every sign-in is an audit event on the account's own trail: `user.login` (local or
+  organisation; an automatic sign-in on a development stack writes `auth.dev_autologin`
+  instead, §3.8) and `user.login_failed` (actor `anonymous`, with the reason). A refused name
+  that is no local account is recorded without the name and logged as `(not an account)`, so a
+  password typed into the username box is stored in neither the audit table nor the server
+  log, and a refusal writes on both paths so its cost does not say
+  whether an account exists (DL-068). A failed organisation sign-in returns to `/login` with
+  a code from a closed list; the provider's own words stay in the server log.
+  `tests/test_server_auth.py::TestSignInIsAudited`,
+  `tests/test_server_auth.py::TestOidcFailureReturnsToLogin`
 - Where a registered repository may live: a `clone_path` must resolve inside
   `$CRB_HOME/repos`, where the worker clones. A path elsewhere on the host is an admin's
   decision and is recorded (`repo.clone_path.outside_home`); anyone else — including a model
@@ -527,8 +563,22 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 ### 3.5 Evidence integrity — `crb.core.ledger`, `crb.store`
 
 - Grade rows, events and sign-offs are **append-only**: database triggers refuse `UPDATE`
-  and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); `/health` proves the
-  triggers are live on every call (`assert_append_only`). [measured] `tests/test_store_*.py`
+  and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); SQLite's `REPLACE`
+  meets the delete trigger because every product connection turns `recursive_triggers` on,
+  and PostgreSQL's `TRUNCATE` meets a statement-level trigger (DL-081). `/health` proves the
+  triggers are live on every call: each expected trigger on its own table with the
+  installer's whole definition (a `WHEN` that never holds is not live) and, on PostgreSQL,
+  enabled and calling an unaltered function, plus a refused `UPDATE` (and on SQLite a
+  refused `REPLACE`) once `grades` has a row — on an empty ledger the detail says no write
+  was tried (`probe_append_only`, `assert_append_only`). What remains is DDL, on the
+  tables or on their triggers, which only the tables' owner can issue: a trigger dropped,
+  disabled or neutered, or a table altered so rows change with no trigger firing
+  (`ALTER TABLE … ALTER COLUMN … TYPE … USING`, `DROP COLUMN`, `DROP TABLE`; `verify`
+  catches a rewrite that was not re-hashed). On PostgreSQL run the
+  API and the worker as a role that does not own the tables
+  ([DEPLOYMENT §3.3](DEPLOYMENT.md#33-postgresql)) — the shipped chart and compose do not
+  split the roles yet [gap] G-709 (docs/PREVENTION.md P-210). [measured]
+  `tests/test_store_db.py`, on SQLite and PostgreSQL
 - Every grade row carries `prev_hash` and `row_hash` (SHA-256 over canonical JSON); the chain
   verifies end to end (`crb ledger verify`, `GET /ledger/verify`); an exported JSONL verifies
   standalone without the database. [measured] 1,071-row census: chain verifies; a single
@@ -619,7 +669,10 @@ machine:
   session. It never skips a role check, and it neither adds to nor clears the login
   limiter's buckets — the per-address bucket or the account's own (username, address)
   bucket, which a password success clears — it checks no password, and a full bucket still
-  refuses the next password attempt after it. [measured — n = 4 tests in
+  refuses the next password attempt after it (it acquires no slot, and a full bucket does
+  not refuse it). It signs in only an account `SignInPaths` admits — one a password could
+  sign in (DL-077) — and takes no users lock, since it changes no role or active flag.
+  [measured — n = 4 tests in
   `tests/test_server_dev_autologin.py::TestTheSession`, 6 test cases in
   `::TestTheSessionIsThePasswordSession` (cookies compared with a password sign-in's with
   `Secure` on and off, the nonce in the version, the CSRF token refused on another session,
@@ -627,7 +680,8 @@ machine:
   2.2; pass/fail, not a rate]
 - **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's trace
   (actor = the account, `payload.client` = the peer) and the `user.signed_in` event every
-  sign-in writes (ADR-0028 §8, `by` = `dev_autologin`), and logs one warning line; start-up logs
+  sign-in writes (ADR-0028 §8, `by` = `dev_autologin`) in one `commit_audited` write (the
+  events lock; a lost `seq` race is retried, DL-068), and logs one warning line; start-up logs
   a warning; `crb doctor` shows `warn  dev_autologin`; `GET /health` and `GET /version` report
   `dev_autologin`; and the UI shows a banner on every page, the sign-in page included.
   `/health` and `/version` say `on` only to a caller the route would sign in. Anyone else
@@ -668,7 +722,7 @@ rebinding) arrives with its own name in `Host` and is refused.
 | T7c | The verify button is used to burn subscription quota | API | 3.3.1 one probe per 10 s per deployment, one no-tool Haiku turn, admin-only |
 | T7d | API-host compromise | secrets file | token compromise: rotate (`claude setup-token`, paste, revoke the old one) — see 3.3.1 |
 | T7e | The `claude setup-token` CLI reads the API's own secrets from its environment | API host | 3.3.1 allowlisted environment and a throwaway `CLAUDE_CONFIG_DIR` |
-| T8 | An insider edits a past verdict | ledger | 3.5 triggers + hash chain + `/health` proof |
+| T8 | An insider edits a past verdict | ledger | 3.5 triggers (UPDATE, DELETE, REPLACE, TRUNCATE) + hash chain + `/health` proof of live triggers; the application role does not own the tables where the platform allows (DEPLOYMENT §3.3) |
 | T9 | A false pass is recorded because a runner could not attribute a failure | grade | fail-closed parse rule (`unattributed failure` ⇒ belt 3 false), harness errors ⇒ not clean |
 | T10 | A green with no real change is credited (build-cache ghost) | grade | belt 4 `source_changed` |
 | T11 | Session hijack / CSRF / privilege escalation | API | 3.3 `__Host-` cookies, session-bound CSRF, revocable sessions (logout, sign out everywhere), 3.4 RBAC, first-login OIDC roles |

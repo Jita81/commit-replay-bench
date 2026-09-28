@@ -20,8 +20,8 @@
  * Works with:   ui/src/api/client.ts (the code under test), docs/API.md (the conventions these
  *               cases pin), ui/src/test/setup.ts (jest-dom matchers, jsdom environment)
  * Tested by:    ui/src/api/client.test.ts
- * Touch when:   a convention in docs/API.md changes (envelope, cookie, header, timeout) —
- *               update ui/src/api/client.ts and the matching case together.
+ * Touch when:   never for a new repository; a convention in docs/API.md changes (envelope, cookie,
+ *               header, timeout) — update ui/src/api/client.ts and the matching case together.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { API_TIMEOUT_MS, ApiError, api, fetchBounded, qs, readCookie, readCsrfToken } from './client'

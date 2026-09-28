@@ -176,6 +176,7 @@ export const keys = {
   intake: (repo: string) => ['factory', repo, 'intake'] as const,
   flow: (repo: string) => ['flow', repo] as const,
   users: ['users'] as const,
+  userEvents: (id: string, p?: PageParams) => ['users', id, 'events', p ?? {}] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
   value: (repo: string) => ['value', repo] as const,
@@ -348,6 +349,26 @@ export function useRepo(name: string): UseQueryResult<RepoDetail, ApiError> {
   })
 }
 
+/**
+ * Tells the server, once per repository per mount, that this person has the repository's
+ * baseline in front of them (`POST /repos/{name}/baseline-read` → a `repo.baseline_read`
+ * event, once per person). The Baseline screen calls it when the map of a repository with
+ * rows has loaded; the repository is then re-read, so Home's task 6 "Read the baseline"
+ * completes on a recorded read rather than only on a sign-off (G-165, DL-074). A failed record
+ * changes nothing the reader sees — Home keeps reading the task as not yet done.
+ */
+export function useRecordBaselineRead(repo: string, ready: boolean): void {
+  const qc = useQueryClient()
+  const sent = useRef<string | null>(null)
+  useEffect(() => {
+    if (!ready || !repo || sent.current === repo) return
+    sent.current = repo
+    api<unknown>(`/repos/${enc(repo)}/baseline-read`, { method: 'POST' })
+      .then(() => qc.invalidateQueries({ queryKey: keys.repo(repo) }))
+      .catch(() => undefined)
+  }, [repo, ready, qc])
+}
+
 /** `POST /repos`; invalidates the list. */
 export function useCreateRepo(): UseMutationResult<RepoDetail, ApiError, RepoCreateRequest> {
   const qc = useQueryClient()
@@ -513,6 +534,19 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id) => api<Run>(`/runs/${enc(id)}/cancel`, { method: 'POST' }),
+    onSuccess: (_r, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
+  })
+}
+
+/**
+ * `POST /runs/{id}/deliver-override` — a SECOND approver overrides a factory run's route gate
+ * (ADR-0003 amendment 2026-09-27): refused 409 `same_actor` for the run's own actor; the grant
+ * is an event on the run's trace and never lifts a false-Q1 cell.
+ */
+export function useGrantDeliverOverride(): UseMutationResult<Run, ApiError, string> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api<Run>(`/runs/${enc(id)}/deliver-override`, { method: 'POST' }),
     onSuccess: (_r, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
   })
 }
@@ -913,6 +947,80 @@ export function useSetUserRole(): UseMutationResult<User, ApiError, { id: string
   return useMutation({
     mutationFn: ({ id, role }) => api<User>(`/users/${enc(id)}/role`, { method: 'PUT', body: { role } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.users }),
+  })
+}
+
+/**
+ * `PUT /users/{id}/active` (admin) — deactivate a leaver or bring an account back.
+ *
+ * The API refuses the last active admin with 409 `last_admin`; the screen disables that
+ * toggle before it is used, so the refusal is the belt, not the message the person reads.
+ * Invalidates the list and that account's audit trail, which gains an event either way.
+ */
+export function useSetUserActive(): UseMutationResult<User, ApiError, { id: string; active: boolean }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, active }) => api<User>(`/users/${enc(id)}/active`, { method: 'PUT', body: { active } }),
+    onSuccess: (_u, { id }) => {
+      void qc.invalidateQueries({ queryKey: keys.users })
+      void qc.invalidateQueries({ queryKey: ['users', id, 'events'] })
+    },
+  })
+}
+
+/**
+ * `PUT /users/{id}/password` (admin) — set another account's password.
+ *
+ * Every session that account holds ends on its next request. The password is sent once and
+ * never held in a query cache: only the account's row and its audit trail are invalidated.
+ */
+export function useSetUserPassword(): UseMutationResult<User, ApiError, { id: string; password: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, password }) => api<User>(`/users/${enc(id)}/password`, { method: 'PUT', body: { password } }),
+    onSuccess: (_u, { id }) => {
+      void qc.invalidateQueries({ queryKey: keys.users })
+      void qc.invalidateQueries({ queryKey: ['users', id, 'events'] })
+    },
+  })
+}
+
+/**
+ * `POST /users/{id}/sessions/revoke` (admin) — "sign out everywhere": the account's session
+ * nonce rotates, so every session it holds (a local or an identity-provider account) ends on its
+ * next request. The account can sign in again at once.
+ */
+export function useRevokeUserSessions(): UseMutationResult<User, ApiError, { id: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id }) => api<User>(`/users/${enc(id)}/sessions/revoke`, { method: 'POST' }),
+    onSuccess: (_u, { id }) => {
+      void qc.invalidateQueries({ queryKey: keys.users })
+      void qc.invalidateQueries({ queryKey: ['users', id, 'events'] })
+    },
+  })
+}
+
+/**
+ * `PUT /users/me/password` — the signed-in account changes its own password with the current
+ * one. The response re-issues this browser's cookie, so the person stays signed in here while
+ * every other session of the account ends.
+ */
+export function useChangeOwnPassword(): UseMutationResult<User, ApiError, { current_password: string; new_password: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => api<User>('/users/me/password', { method: 'PUT', body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.users }),
+  })
+}
+
+/** `GET /users/{id}/events` (admin) — the account's `user.*` audit trail, newest first. */
+export function useUserEvents(id: string, p: PageParams = {}): UseQueryResult<Page<StepEvent>, ApiError> {
+  return useQuery({
+    queryKey: keys.userEvents(id, p),
+    queryFn: () => api<Page<StepEvent>>(`/users/${enc(id)}/events${qs({ limit: p.limit, offset: p.offset })}`),
+    enabled: id.length > 0,
+    retry: false,
   })
 }
 

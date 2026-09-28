@@ -20,8 +20,8 @@ Works with:   src/crb/server/routes/ledger.py (under test), src/crb/store/ledger
               import, export), src/crb/core/federated.py (the abstract allowlist),
               tests/fixtures/server_seed.py, docs/API.md (ledger)
 Tested by:    tests/test_server_routes_ledger.py
-Touch when:   an export format is added (a header / escaping case); a row field is added (the
-              CSV and abstract cases decide whether it is exported).
+Touch when:   never for a new repository; an export format is added (a header / escaping case); a
+              row field is added (the CSV and abstract cases decide whether it is exported).
 """
 
 from __future__ import annotations
@@ -77,9 +77,13 @@ class TestVerify:
             "broken_at",
             "detail",
             "clean_without_pack",
+            "signoffs",
+            "reviews",
             "verified_at",
         }
         assert d["rows"] == 50 and d["ok"] is True and d["false_q1_total"] == 0
+        # EI-6: the sign-off and review chains are walked with the grades chain
+        assert d["signoffs"]["chain_ok"] is True and d["reviews"]["chain_ok"] is True
         assert d["chain_ok"] is True and d["broken_at"] is None and d["clean_without_pack"] == 0
         assert d["detail"] == "50 rows, chain intact, false_q1=0"
 

@@ -19,7 +19,9 @@
  *               button names the estimate, never a cap (F5b: nothing on this page promises
  *               a ceiling nothing enforces). While
  *               a factory run is active the chain polls and a banner names the run and the
- *               item in hand (J-FAC-5 / J-TEL-9). A built item opens its evidence (F15); a
+ *               item in hand (J-FAC-5 / J-TEL-9), inside a polite live region that is on the
+ *               page before the run starts, so its arrival is announced (G-905). A built
+ *               item opens its evidence (F15); a
  *               stopped item says the way forward — an evolution that supersedes it, the
  *               route the API serves as `way_forward` (DL-049), one sentence naming what must
  *               be different, and that replacement item already drafted from the stop's own
@@ -35,7 +37,8 @@
  *               reading of the map's economics fold; `useSignGap` (POST signoff-gap),
  *               `useRegisterBacklog` (POST backlog, the form or JSON in a dialog),
  *               `useCreateRun` (kind `factory`, `deliver` toggle gated by the backlog's
- *               delivery pre-flight; `deliver_override` for an approver); `EvidenceDrawer`
+ *               delivery pre-flight; the route-gate override explained as a second
+ *               approver's act on the run's page); `EvidenceDrawer`
  *               opens the newest build's pack; `useNarrow` (matchMedia at Tailwind's `sm`)
  *               folds an item's six step cards behind a Details at phone width (J-FAC-14).
  *               A 404 = no backlog registered: the instruction, not an error. `?item=`
@@ -64,7 +67,7 @@
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useRegisterBacklog, useRuns, useSignGap } from '../../api/hooks'
 import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
@@ -548,7 +551,12 @@ export function FactoryPage() {
                     {fmtInt(backlog.data.items.length)} items
                   </Hint>
                 </div>
-                {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
+                {/* a live region that is ALWAYS on the page, so the banner a starting run brings in is
+                    announced to a screen-reader user who pressed Run from the keyboard: a live region
+                    that arrives together with its content is not reliably read (G-905) */}
+                <div role="status" aria-live="polite" data-testid="factory-run-live">
+                  {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
+                </div>
                 {!activeRun && lastRun && <LastRunLine run={lastRun} />}
                 {!activeRun && can('operator') && <BeforeYouStart repo={repo} backlog={backlog.data} tasks={tasks.data} canOverride={can('approver')} />}
               </div>
@@ -654,7 +662,6 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const map = useCapabilityMap(repo, ['capability_class', 'size'])
   const run = useCreateRun()
   const [deliver, setDeliver] = useState(false)
-  const [override, setOverride] = useState(false)
   const [ownBuilder, setOwnBuilder] = useState('')
   const [ownModel, setOwnModel] = useState('')
   const choice = builderChoice(health.data)
@@ -702,7 +709,6 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       kind: 'factory',
       deliver: deliver && canDeliver,
       ...body,
-      ...(deliver && canDeliver && override ? { deliver_override: true } : {}),
     })
   }
 
@@ -761,12 +767,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           </span>
         </Hint>
         {deliver && canDeliver && canOverride && (
-          <Hint as="label" id="field.factory.override" className="flex items-start gap-2">
-            <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
-            <span>
-              Override the route gate (approver)
-              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain as your override of the route gate, under your name.</span>
-            </span>
+          <Hint id="field.factory.override" className="block text-xs text-on-surface-muted" data-testid="factory-override-note">
+            An override of the route gate is a second approver’s act: once this run is queued, another approver grants it on the run’s page, under their name. It never lifts a cell with a false-Q1 row.
           </Hint>
         )}
         <Hint as="div" id="details.factory.own_builder">
@@ -863,6 +865,12 @@ function ItemRow({
             </Button>
           )}
           <PrefilledEvolution t={t} />
+          {t.status === 'oracle_needs_strengthening' && (
+            // G-348 — a weak-test stop is the strengthen report's work: it links there
+            <Hint as={Link} id="link.factory.learn" to={`/learn?repo=${encodeURIComponent(repo)}#strengthen`} className="text-xs underline underline-offset-4">
+              Strengthen the tests on Learn
+            </Hint>
+          )}
         </div>
       )}
       {narrow && (

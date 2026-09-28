@@ -16,7 +16,7 @@ Works with:   src/crb/store/qualifications.py (under test), src/crb/store/models
               (``TaskQualification``), src/crb/core/qualify.py (the record),
               tests/conftest_store.py (the backends)
 Tested by:    tests/test_store_qualifications.py
-Touch when:   a new reading of the records is added to the store module.
+Touch when:   never for a new repository; a new reading of the records is added to the store module.
 """
 
 from __future__ import annotations

@@ -50,10 +50,14 @@ unauthenticated production deployment.
    behave as they do after a typed password. The route is not exempt from the CSRF check,
    and it neither counts toward nor clears the login rate limit — the address's bucket or
    the account's own (username, address) bucket, which a password success clears (it checks
-   no password).
+   no password, so it acquires no slot and gives none to `succeed`; a full bucket does not
+   refuse it). It signs in only an account the deployment's `SignInPaths` admit — the
+   accounts a password could sign in (DL-077) — and changes no role or active flag, so it
+   takes no users lock.
 5. **Recorded and visible.** Every sign-in appends `auth.dev_autologin` on the account's
    trace (actor = the account, `payload.client` = the peer), and the `user.signed_in` event
-   every sign-in writes (ADR-0028 §8, `by` = `dev_autologin`), and logs one warning line.
+   every sign-in writes (ADR-0028 §8, `by` = `dev_autologin`) — both in one `commit_audited`
+   write, under the events lock, a lost `seq` race retried (DL-068) — and logs one warning line.
    Start-up logs a warning. `GET /health` and `GET /version` carry `dev_autologin`, which
    reads `on` only for a caller that point 3 would sign in and `off` for everyone else;
    `crb doctor` reads the settings directly and has a `dev_autologin` line that warns while it

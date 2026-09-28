@@ -9,9 +9,13 @@
  *               the definition text is the glossary's and links to the guide and the glossary;
  *               that `AboutThisScreen` renders the entry for the current route with the next
  *               step for the signed-in role (falling down the ladder to viewer), every term,
- *               the read-more links and the glossary link, and renders nothing on a route
- *               with no entry; that "Elements on this screen" lists every hinted element on
- *               the page when the block opens — deduplicated, the screen's own (under
+ *               the read-more links and the glossary link; that the four shell screens —
+ *               `/help`, a guide, an unknown address and `/login`, which mounts the block
+ *               itself because it sits outside the shell — carry an entry of their own
+ *               (G-926), and that signed out the block offers no link into a screen that
+ *               needs a session (it names the guides as text); that "Elements on this screen"
+ *               lists every hinted element on the page when the block opens —
+ *               deduplicated, the screen's own (under
  *               `<main>`) in DOM order and the shell's after them under their own
  *               sub-heading, with the registry text and never a link; that `DocLink` builds
  *               the /help/docs href.
@@ -22,7 +26,8 @@
  * Works with:   ui/src/components/Help.tsx, ui/src/help/help.ts, ui/src/help/glossary.ts,
  *               ui/src/help/hints.ts (the elements part), ui/src/components/Hint.tsx
  * Tested by:    ui/src/components/Help.test.tsx
- * Touch when:   the About block gains a part or `Term` changes its markup.
+ * Touch when:   never for a new repository; the About block gains a part or `Term` changes its
+ *               markup.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -30,7 +35,8 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TERMS } from '../help/glossary'
 import { HINTS } from '../help/hints'
-import { PRINCIPAL, mockApi, renderApp } from '../test/utils'
+import { LoginPage } from '../screens/Login/LoginPage'
+import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
 import { AboutThisScreen, DocLink, Term, collectHints } from './Help'
 import { Hint } from './Hint'
 
@@ -274,11 +280,45 @@ describe('AboutThisScreen', () => {
     }
   })
 
-  it('renders nothing on a route with no entry', async () => {
+  it('the four shell screens carry an About block of their own: the help pages, a guide and an unknown address', async () => {
+    const cases: Array<{ route: string; path: string; says: string }> = [
+      { route: '/help', path: '/help', says: 'Every term the screens use, in plain English' },
+      { route: '/help/docs/OPERATOR', path: '/help/docs/:name', says: 'copied into this deployment when it was built' },
+      { route: '/nowhere/at/all', path: '*', says: 'Nothing lives at the address you asked for.' },
+    ]
+    for (const c of cases) {
+      mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+      const view = renderApp(<AboutThisScreen />, { route: c.route, path: c.path })
+      const about = await screen.findByTestId('about-this-screen')
+      expect(about, c.route).toHaveTextContent(c.says)
+      expect(within(about).getByRole('heading', { level: 3, name: 'What to do next' })).toBeInTheDocument()
+      view.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('the sign-in page mounts the About block itself (it sits outside the shell), with the step for someone who has no role yet', async () => {
+    mockApi({
+      'GET /auth/me': () => envelope(401, 'unauthenticated', 'no session'),
+      'GET /version': { version: '2.3.0', apparatus_version: '2.3', policy_version: 'routing.v1', oidc_enabled: false },
+    })
+    renderApp(<LoginPage />, { route: '/login', path: '/login' })
+    const about = await screen.findByTestId('about-this-screen')
+    expect(about).toHaveTextContent('This is where you sign in.')
+    expect(about).toHaveTextContent('Accounts are not created or reset here.')
+    // signed out, every screen the block could link to needs a session and would bounce the
+    // reader straight back here: it names the guides as text and offers no link at all
+    await waitFor(() => expect(about).toHaveTextContent('Accounts, roles and password resets'))
+    expect(about).toHaveTextContent('How sign-in and sessions are secured')
+    expect(about).toHaveTextContent('You can open these guides and the glossary once you have signed in.')
+    expect(within(about).queryAllByRole('link')).toEqual([])
+  })
+
+  it('signed in, the same entry links its guides at the section it names', async () => {
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
-    const { container } = renderApp(<AboutThisScreen />, { route: '/help', path: '/help' })
-    await waitFor(() => expect(container.querySelector('[data-testid="user-chip"]')).toBeNull())
-    expect(screen.queryByTestId('about-this-screen')).toBeNull()
-    expect(container).toBeEmptyDOMElement()
+    renderApp(<AboutThisScreen />, { route: '/login', path: '/login' })
+    const about = await screen.findByTestId('about-this-screen')
+    expect(await within(about).findByRole('link', { name: 'Accounts, roles and password resets' })).toHaveAttribute('href', '/help/docs/OPERATOR#9-users')
+    expect(within(about).getByRole('link', { name: 'Glossary and guides' })).toHaveAttribute('href', '/help')
   })
 })

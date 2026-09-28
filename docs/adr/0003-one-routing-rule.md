@@ -229,6 +229,58 @@ build and one pull request across a rework; `tests/test_worker.py` pins the own-
 exclusion. The third B-1b rule (a `weak_oracle` verdict never triggers a rebuild against an
 unchanged oracle) is DL-045's and is not part of this ADR.
 
+## Amendment (2026-09-27) — the override has a floor and a second person, and the licence is for the change delivered
+
+**Context.** An internal governance review of the delivery path (2026-09-27) found three
+ways the 2026-09-16 gate could be passed that the rule never meant to allow. (1) GOV-1: the
+one-run override delivered on any route the map refused, including `do_not_ship` for a
+false-Q1 row — while a sign-off can never relax false-Q1 (`NON_OVERRIDABLE_REFUSALS`), one
+approver could relax it for delivery. (2) GOV-4: the override was granted at enqueue by the
+person queueing the run, so one approver both produced the build and licensed it past the
+map, with no second person — unlike a sign-off (ADR-0016). (3) GOV-2: the route was read on
+the item's DECLARED size (a ticket's story points), never checked against the MEASURED size
+of the change delivered, so a ticket declaring XS could choose the cell whose evidence
+licenses a much larger change.
+
+**Decision.**
+
+1. **The override has a floor.** `FactoryLoop._deliver` never honours an override on a cell
+   that routes `do_not_ship`, carries `reason_code: false_q1`, or counts any false-Q1 row
+   (an unreadable count is not a clean one): the delivery is withheld as `delivery.refused`
+   with `override_refused: false_q1` and `override_by`, and the refusal names the floor.
+   Every other reason code stays overridable.
+2. **The override is a second approver's evented act.** `POST /runs` with
+   `deliver_override: true` is refused 409 `same_actor` and queues nothing. The override is
+   granted afterwards by another approver, `POST /runs/{id}/deliver-override` on a queued or
+   running factory run that delivers: 409 `same_actor` for the run's own actor,
+   `not_a_factory_run`, `run_terminal`, `delivery_off`, `override_already_granted`; the grant
+   stamps `params.deliver_override_by` and appends a `system/run.deliver_override` event on the
+   run's trace in one transaction. The worker reads the grant live at each item's gate
+   (`FactorySpec.deliver_override_for`), honours it only for an account that holds the
+   approver role at that moment, and the loop refuses one that names the run's own actor
+   (`override_refused: same_actor`) — so no route can deliver on an override by the run's
+   actor.
+3. **The licence is for the size of the change delivered.** After the build, the final
+   attempt's measured tier (`size_tier` of its source churn) is compared with the item's
+   estimate. When it is larger, the route is read again for the (class × measured size) cell
+   from the same pre-run map (DL-045's single reading), and that answer licenses the
+   delivery; a measured cell that does not route `deliver` withholds it as
+   `reason_code: size_exceeds_licence` with `size_estimate` and `size_measured` on the chain.
+   The pull-request body names both sizes and the cell the licence was read on. A smaller
+   change keeps the estimate's cell (a larger licence covers it).
+
+**Consequences.** false-Q1 = 0 is a floor for delivery as it is for a sign-off; the
+override is an accountable act by a person other than the one whose run produced the
+evidence; and story points choose which cell is read first, never which cell licenses a
+larger change. Tested by `tests/test_factory_loop.py`
+(`test_no_override_delivers_on_a_false_q1_cell`,
+`test_the_route_gate_override_is_never_the_runs_own_actor`,
+`test_a_change_larger_than_its_licence_is_withheld_size_exceeds_licence`,
+`test_a_larger_change_is_delivered_when_its_measured_cell_routes_deliver`),
+`tests/test_server_routes_factory.py::test_factory_delivery_fields_and_the_second_approver_override`
+and `tests/test_worker.py::test_the_worker_honours_an_override_only_from_a_second_approver`;
+DL-082.
+
 ## Alternatives considered
 
 - **Keep both rules and report both.** Rejected: two bars invite choosing the one that

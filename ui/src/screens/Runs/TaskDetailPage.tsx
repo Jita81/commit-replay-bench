@@ -13,7 +13,10 @@
  *               the factory built (`labels.process === 'factory'`) is introduced as one
  *               factory item — in the header's purpose sentence and the card alike — with its
  *               backlog id, and its id explained (the authored test's sha), so it is not read
- *               as a commit (J-FAC-18).
+ *               as a commit (J-FAC-18). Below md (768 px) the grade table keeps Created, Clean,
+ *               Review and Evidence and folds the rest into the evidence drawer, which shows
+ *               each of them, so the table fits a phone and a line says where the rest went
+ *               (G-292).
  * How:          `useTask` + `useReviews({repo, task_id})` → a `Map` of row hash → latest review
  *               → `DataTable`; the drawer is opened with both the pack hash and the row hash
  *               so the Patch / Review tabs need no resolution.
@@ -26,10 +29,12 @@
  *               src/crb/core/spec.py (`TaskSpec`), src/crb/factory/build.py (the labels a
  *               factory task carries: `item_id`, `process`, `red_proof`)
  * Tested by:    ui/src/screens/Runs/TaskDetailPage.test.tsx (a factory item is named as one;
- *               a commit keeps the commit wording), ui/e2e/walkthrough/09-review.spec.ts (the
- *               task page shows the recorded verdict)
- * Touch when:   `TaskSpec` gains a field worth showing (src/crb/core/spec.py, then
- *               ui/src/api/types.ts); never for a new repository.
+ *               a commit keeps the commit wording; the phone fold),
+ *               ui/e2e/walkthrough/09-review.spec.ts (the task page shows the recorded
+ *               verdict), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe on real
+ *               grade rows; the table inside the phone at 375 px)
+ * Touch when:   never for a new repository; `TaskSpec` gains a field worth showing
+ *               (src/crb/core/spec.py, then ui/src/api/types.ts).
  */
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
@@ -72,9 +77,9 @@ export function TaskDetailPage() {
   const columns = useMemo<Column<GradeRow>[]>(
     () => [
       { key: 'created', header: 'Created', hint: 'col.task.created', sortValue: (r) => r.created, cell: (r) => <span className="text-xs text-on-surface-muted">{fmtDate(r.created)}</span> },
-      { key: 'run', header: 'Run', hint: 'col.task.run', mono: true, sortValue: (r) => r.run_id, cell: (r) => (r.run_id ? <Link to={`/runs/${encodeURIComponent(r.run_id)}`}>{shortId(r.run_id, 8)}</Link> : '—') },
-      { key: 'trial', header: 'Trial', hint: 'col.task.trial', mono: true, sortValue: (r) => r.trial, cell: (r) => `${r.mode} · ${r.trial || 'r1'}` },
-      { key: 'builder', header: 'Builder', hint: 'col.task.builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—') },
+      { key: 'run', header: 'Run', hint: 'col.task.run', mono: true, sortValue: (r) => r.run_id, cell: (r) => (r.run_id ? <Link to={`/runs/${encodeURIComponent(r.run_id)}`}>{shortId(r.run_id, 8)}</Link> : '—'), hideBelowMd: true },
+      { key: 'trial', header: 'Trial', hint: 'col.task.trial', mono: true, sortValue: (r) => r.trial, cell: (r) => `${r.mode} · ${r.trial || 'r1'}`, hideBelowMd: true },
+      { key: 'builder', header: 'Builder', hint: 'col.task.builder', mono: true, sortValue: (r) => r.builder, cell: (r) => (r.builder ? `${r.builder}${r.model ? ` · ${r.model}` : ''}` : '—'), hideBelowMd: true },
       {
         key: 'clean',
         header: 'Clean',
@@ -95,9 +100,9 @@ export function TaskDetailPage() {
             </Pill>
           ),
       },
-      { key: 'belts', header: 'Belts', hint: 'col.task.belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} /> },
-      { key: 'cost', header: 'Cost', hint: 'col.task.cost_latency', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd) },
-      { key: 'latency', header: 'Latency', hint: 'col.task.cost_latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s) },
+      { key: 'belts', header: 'Belts', hint: 'col.task.belts', cell: (r) => <BeltPills belts={beltsOf(r)} beltSet={r.belt_set} showNames={false} />, hideBelowMd: true },
+      { key: 'cost', header: 'Cost', hint: 'col.task.cost_latency', numeric: true, sortValue: (r) => r.cost_usd, cell: (r) => fmtUsd(r.cost_usd), hideBelowMd: true },
+      { key: 'latency', header: 'Latency', hint: 'col.task.cost_latency', numeric: true, sortValue: (r) => r.latency_s, cell: (r) => fmtSeconds(r.latency_s), hideBelowMd: true },
       { key: 'prov', header: 'Provenance', hint: 'col.task.provenance', cell: (r) => <Provenance apparatus={r.apparatus_version} beltSet={r.belt_set} provenance={r.provenance} />, hideBelowMd: true },
       {
         key: 'review',
@@ -205,6 +210,12 @@ export function TaskDetailPage() {
               </Hint>
             </Card>
             <Card padded={false} title="Grade rows">
+              {/* below md (768 px) the table keeps the verdict — when, clean or not, the review, the
+                  evidence — and folds run, trial, builder, belts, cost, latency and provenance into
+                  the evidence drawer, so it fits a phone instead of scrolling past it (G-292) */}
+              <p className="px-5 pt-3 text-xs text-on-surface-muted md:hidden" data-testid="grades-narrow-note">
+                On a narrow screen this table shows the verdict only: open a row’s evidence for its run, trial, builder, belts, cost and latency.
+              </p>
               <DataTable rows={t.grades} columns={columns} rowKey={(r) => r.row_id} caption="Grade rows for this task" dense initialSort={{ key: 'created', dir: 'desc' }} empty={<EmptyState compact title="Not graded yet" reason={isFactory(t.spec) ? 'The factory has not built this item yet.' : 'No run has replayed this task.'} />} />
             </Card>
           </div>

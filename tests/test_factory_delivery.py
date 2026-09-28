@@ -27,9 +27,9 @@ Works with:   src/crb/factory/delivery.py (under test), src/crb/factory/build.py
               (``BuildResult``), src/crb/core/git.py (the branch and push operations),
               tests/test_factory_build.py (the harness), docs/SECURITY.md (credentials, §3.3)
 Tested by:    tests/test_factory_delivery.py
-Touch when:   a forge other than GitHub is supported (a PR + comment seam case; the
-              default-branch refusal must still come first); the branch-naming rule changes;
-              the lease rule changes (the bare-repo test is what proves it).
+Touch when:   never for a new repository; a forge other than GitHub is supported (a PR + comment
+              seam case; the default-branch refusal must still come first); the branch-naming rule
+              changes; the lease rule changes (the bare-repo test is what proves it).
 """
 
 from __future__ import annotations

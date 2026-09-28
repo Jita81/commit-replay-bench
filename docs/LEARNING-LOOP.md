@@ -41,8 +41,9 @@ from its own failures*:
 ## 2. What `crb.core.learn` adds
 
 Three pure functions over `GradeRow`s (stdlib only, ADR-0008), each with a CLI verb
-(`crb learn …`), an optional read-only API route (`GET /learn/{refusals,strengthen,remeasure}`,
-viewer role), and a byte-identity guarantee: same rows → same report.
+(`crb learn …`), an API route (`GET /learn/{refusals,strengthen,remeasure}`, viewer role — the
+reads are pure; the three writes a person authorises are §3), and a byte-identity guarantee:
+same rows → same report.
 
 ### 2.1 Refusal triage — `triage_refusals(rows)` → `crb learn refusals`
 
@@ -113,7 +114,10 @@ Definition-of-Ready gate (`crb.factory.readiness.assess`) says `build` without a
 supplying anything (the review's play-01 finding: structure helps, values leak). And the
 escaped mutants are listed *when the oracle run recorded them* (`CommitOracleScore.outcomes`
 or the report's `escaped_mutants`); otherwise the item carries the count and says so. A held
-cell with no per-task score gets one cell-level item, so a flag is never dropped silently.
+cell with no per-task score gets one cell-level item, and so does a held cell whose scored
+tasks are all strong, chosen by the hold's reason: a controls hold names the escaped control as
+the test work, and an `oracle_weak` hold names the re-measurement that lets the scores reach the
+route — so a flag is never dropped silently.
 
 Item ids are `sha(cell, repo, task)` — a re-run produces the same backlog; `--since <apparatus>`
 keeps only cells and scores stamped at or after that version. `--out backlog.json` writes an
@@ -135,19 +139,51 @@ needed, with `cost_known` false when no row recorded one) and minutes, and the e
 
 `task_ids` re-measures the *same* tasks the stale rows were graded on; when they are fewer
 than the rule needs, a second request asks for the remainder by `limit` and says so. The
-plan queues nothing — `crb learn remeasure` prints JSON; the operator posts it.
+derivation queues nothing — `crb learn remeasure` prints JSON for the operator to post, and
+`POST /learn/remeasure/queue` sends one cell's bodies on an operator's own instruction (§4).
+
+### 2.4 What strengthening costs a person
+
+The re-measurement plan prices the runs; nothing prices the person. The one measured record
+is the `cobra-2154` item's test, strengthened until only a real fix passed it: **five
+author–adversary rounds and about 45 test rows for one XS/S bug fix** [measured — n = 1
+item, 5 revisions, 10 wrong builds; pristine clones of `Jita81/cobra` at `9c0edca`, Go
+1.26.4, `go test -json -count=1 ./...`; apparatus 2.2; the record is
+`docs/reviews/2026-09-21-oracle-adequacy-2154.md`]. One item is not a rate: read it as what
+the work can take, not what it usually takes [hypothesis]. The strengthen report on the
+Learn page quotes the same figures with the same provenance and links here.
+
+Once the tests are stronger, the item's row on the Learn page hands the person back into the
+product: **Re-qualify**, **Re-score** and **Re-run controls** each open the Runs dialog with
+the run kind and the item's task already filled in (`/runs?repo=…&new=<kind>&tasks=<sha>`),
+so the oracle, the controls and the task's qualification are re-measured without re-mining
+the history or typing a task id. Registering the item opens the Factory on the item it
+registered (`/factory?repo=…&item=<id>`).
 
 ## 3. What still needs a human, and why that is deliberate
 
-| Step | Who | Why the product must not do it |
-|---|---|---|
-| Accepting a corpus line (`honest` / `refuse`) | a named person, in a decisions file | A loop that appended its own refusals to its own guard corpus would launder a false positive into policy the moment it happened: the guard refused `curl -sk https://localhost:8701/health` **correctly** (a builder probing the sandbox) and `find … \| grep -v ".git"` **wrongly**, and nothing in the row distinguishes them. The review's play-04 asks for "a sample of refusals read by a person weekly"; `apply_triage` is that reading, with provenance. The report never carries a verdict other than `unsure`, by construction. |
-| Pulling a strengthening item into a sprint (freezing the backlog) | the repo's test owner | The item says *which* mutants escaped; only a person can say whether the target tests should encode that behaviour or whether the mutant is equivalent (review §4.2.5: text-level mutators produce uncompilable and equivalent mutants). A product that froze and built its own strengthening items would spend a builder editing the oracle — the one thing belt 1 exists to prevent — on nobody's authority. |
-| Queuing the re-measurement | the operator | Money and credits. The plan is honest about cost (`cost_known`) precisely so that the person who pays can decide; enterprise-grade autonomy still gates spend. |
+Three decisions, three writes, one rule: **the product proposes and a named person accepts**. What
+changed on 2026-09-23 (G-532) is *where* the person accepts — on the screen that showed them the
+reason, not as a command on the host. The decision itself is no more automatic than it was: each
+write is operator-gated, takes no `decided_by` field (the signed-in operator is the decider, so a
+decision cannot be filed under somebody else's name), and re-derives the thing it writes from the
+ledger: a request carries only the decision or selection fields (a class id with its verdict and
+note, item ids, a cell), and the server composes the corpus line, the backlog item and the run
+requests itself — none of them is ever in a request.
+
+| Step | Who | Where | Why the product must not decide it |
+|---|---|---|---|
+| Accepting a corpus line (`honest` / `refuse`) | a named person | the Learn page's **Decide** form, or `crb learn refusals --apply` | A loop that appended its own refusals to its own guard corpus would launder a false positive into policy the moment it happened: the guard refused `curl -sk https://localhost:8701/health` **correctly** (a builder probing the sandbox) and `find … \| grep -v ".git"` **wrongly**, and nothing in the row distinguishes them. The review's play-04 asks for "a sample of refusals read by a person weekly"; `apply_triage` is that reading, with provenance. The report never carries a verdict other than `unsure`, by construction. |
+| Pulling a strengthening item into a sprint (registering it) | the repo's test owner | the Learn page's **Register** button, or `POST /factory/{repo}/backlog` by hand | The item says *which* mutants escaped; only a person can say whether the target tests should encode that behaviour or whether the mutant is equivalent (review §4.2.5: text-level mutators produce uncompilable and equivalent mutants). A product that froze and built its own strengthening items would spend a builder editing the oracle — the one thing belt 1 exists to prevent — on nobody's authority. |
+| Queuing the re-measurement | the operator | the Learn page's **Queue runs**, which shows the plan's estimate and asks again before it spends | Money and credits. The plan is honest about cost (`cost_known`) precisely so that the person who pays can decide; enterprise-grade autonomy still gates spend. |
 
 None of these is a gap the product will later close. They are the three places the review
 put a human on purpose (§7 items 4–6), and this module's job is to hand each of them a
-finished, reproducible artefact instead of a ledger to read.
+finished, reproducible artefact instead of a ledger to read. The screen's job is to put the
+decision where the reason is: a person who has just read *why* a cell is held should not have
+to retype the item id into a terminal to act on it [hypothesis]. That is why each write reports
+back what it wrote — the verdict and the corpus file, the backlog and the item superseded, the
+runs queued and the estimate — rather than saying "saved".
 
 ## 4. Using it
 
@@ -168,6 +204,50 @@ crb learn strengthen --since 2.1 --by class_size --json
 crb learn remeasure                             # against the running APPARATUS_VERSION
 crb learn remeasure --apparatus 2.2 --json      # what a bump would cost before making it
 ```
+
+### The same three decisions from the screen or the API
+
+Each decision is one operator-gated route, and each records a `learn.*` event with the
+operator's identity (`docs/API.md#learn-the-learning-loop--three-derivations-three-decisions`):
+
+```
+POST /api/v1/learn/refusals/accept?repo=…    {group_id, verdict: honest|refuse, note, command?, prefix?}
+POST /api/v1/learn/strengthen/register?repo=… {item_ids: ["strengthen-…"], by?, since?}
+POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", mode?}
+```
+
+* **accept** appends through the same `apply_triage` the CLI calls, so the API and the host
+  write the same bytes and refuse the same things (a truncated class with no full command, a
+  `command` for a class that is not truncated or one that does not continue the recorded cut
+  example, a line that contradicts the other corpus, a `tamper` offered as a shell refusal).
+  `command` completes a line the recorder cut; it never replaces the line the report computed,
+  so no line nobody saw refused can sit under the provenance of real rows. It is
+  idempotent: a line already present is reported, not written twice, and two operators
+  deciding one class at once are serialised by a lock on the corpus directory, so the same
+  command never lands in both corpora. The note is one line —
+  it is written as the provenance comment, so a note with a line break is refused rather than
+  allowed to write a corpus line nobody decided. The corpus directory is
+  `CRB_LEARN_CORPUS_DIR`, else `<CRB_HOME>/learn/corpus` — this deployment's own record of
+  what its operators decided, served back with the report as `decisions`. **A deployment
+  running from a source checkout should set `CRB_LEARN_CORPUS_DIR` to that checkout's
+  `tests/fixtures`**: the accepted line then binds `tests/test_builders_guard_corpus.py`
+  directly, which is the prevention artefact §2.1 describes. Everywhere else the line is a
+  record to carry upstream — the product still does not edit its own source.
+* **register** goes through the one registration path the freeze route and the intake listener
+  use: the first item freezes a backlog, the rest are evolutions, and an item already on the
+  record is registered as a NEW `<id>-v<n>` superseding the latest of its lineage. Re-registering
+  after a re-score therefore chains; it never overwrites (F32). It is refused while a factory
+  run is in flight, because the backlog that run verifies against cannot change under it.
+* **queue** sends the plan's own `POST /runs` bodies for ONE cell, each re-validated before it is
+  enqueued, with the operator as every run's actor. Every run meets the same submit gate as
+  `POST /runs` before any is enqueued, so a cell whose builder has no credential is refused
+  whole with nothing queued (`builder_credential_missing`). A what-if plan (an `apparatus`
+  other than the running one) is refused: its runs would grade under the running apparatus
+  and could never clear the plan they were queued from. The response repeats the plan's
+  estimate with `cost_known` honoured, so an unknown cost is never read as zero. While the
+  runs an earlier queue of the same cell put on the queue are unfinished, the cell is refused
+  (`remeasure_already_queued`): the plan reads graded rows only, so it still holds the cell,
+  and the page shows the runs in flight in place of the Queue control.
 
 All three read the ledger the way `crb route` does: `--path <ledger.jsonl>` or
 `<workdir>/ledger.jsonl` (`--workdir` / `$CRB_HOME`). `--policy-json` overrides the routing
@@ -190,7 +270,9 @@ summary.
   ids independent of the `registered` stamp; the CLI writes identical files twice.
 * **Never auto-accept**: every group is `unsure`; a `RefusalGroup` with another verdict
   cannot be constructed; `apply_triage` needs `decided_by`, validates every decision before
-  writing, refuses a truncated candidate without a human-supplied full command, refuses to
+  writing, refuses a truncated candidate without a human-supplied full command, refuses a
+  supplied command for a class that is not truncated or that does not continue the cut
+  example, holds a lock across the read, the check and the append, refuses to
   file a `tamper:` as a shell-corpus refusal (that is belt 1's), and is idempotent.
 * **The items pass the factory's gate**: every strengthening item round-trips through
   `BacklogItem.from_dict` and `readiness.assess` as `ready` / `build` with no value gaps, and
@@ -200,7 +282,10 @@ summary.
 ## 6. What this is not (yet)
 
 * It does not fix the guard. A `honest` decision makes the guard corpus test fail on the
-  false positive; the fix is still a code change (`crb.builders.base`), reviewed as one.
+  false positive; the fix is still a code change (`crb.builders.base`), reviewed as one. And
+  where a deployment's corpus is not a source checkout (`CRB_LEARN_CORPUS_DIR` unset), carrying
+  the accepted line into the repository is still a person's job — the decision and its
+  provenance are recorded and served, but nothing opens a pull request for it. [gap]
 * It does not label refusals *instrument* vs *builder* on its own — that is what the human
   verdict is. Once decisions accumulate, the share of `honest` decisions per reason is the
   guard's measured false-positive rate; reporting it over time is a follow-up.

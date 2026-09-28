@@ -29,11 +29,11 @@ Works with:   src/crb/core/grade.py (under test), tests/fixtures/pyrepo.py (the 
               fixtures), tests/fixtures/langs/noderepo.py and tests/fixtures/langs/gorepo.py (the
               polyglot infrastructure cases)
 Tested by:    tests/test_grade.py
-Touch when:   a belt is added or its meaning changes (one case per belt here, an ADR and an
-              apparatus bump); a new test-infrastructure file is added to the table (a
-              disqualification case here and a positive/negative pair in
-              tests/test_test_infra.py); a new way to hide a change from git is found (an
-              integrity case here and in tests/test_workspace.py).
+Touch when:   never for a new repository; a belt is added or its meaning changes (one case per belt
+              here, an ADR and an apparatus bump); a new test-infrastructure file is added to the
+              table (a disqualification case here and a positive/negative pair in
+              tests/test_test_infra.py); a new way to hide a change from git is found (an integrity
+              case here and in tests/test_workspace.py).
 """
 
 from __future__ import annotations

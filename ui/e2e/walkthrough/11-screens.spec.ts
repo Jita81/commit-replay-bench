@@ -13,8 +13,8 @@
  * operator / approver / admin) it visits every route at desktop (1280×900) and phone
  * (375×812) widths, waits for the page to settle (load + bounded network-idle + the main
  * heading), writes a full-page PNG named `<persona>__<route-slug>__<width>.png` under
- * `<CRB_E2E_OUTPUT_DIR>/screens/`, and asserts that every authenticated route except the
- * help pages renders the "About this screen" block (`data-testid="about-this-screen"`) —
+ * `<CRB_E2E_OUTPUT_DIR>/screens/`, and asserts that every authenticated route — the help
+ * pages and the 404 included (G-926) — renders the "About this screen" block (`data-testid="about-this-screen"`) —
  * the one help mechanism, mounted once in the shell, must reach every screen for every role.
  * On every route it also samples up to five hinted elements (`data-hint`: first, last and
  * three evenly spaced), opens each one's bubble — hover at desktop width, a touch
@@ -52,19 +52,26 @@
  *               none (a stack of its own, in CI), selects the personas of its shard,
  *               creates the three non-admin accounts if missing (and, for one that exists,
  *               asserts the stable password signs into it), finds a finished run and a
- *               task to anchor the detail routes, then for each persona × width signs in
- *               through the form, visits every route, saves a full-page screenshot under
- *               `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block is present on
- *               every route that is not a help page or the unknown address and, at 375 px,
- *               that the top bar is at most two rows (a wrapped "Sign out" is a phone-width
- *               defect) and the document does not scroll sideways (or is on the shrinking
- *               `SIDEWAYS_SCROLL_RATCHET` with its gap); opens a sample of
- *               the route's hints (hover, or a touch pointerdown at 375 px) and asserts each bubble shows and axe stays
- *               clean with it open; tabs the route itself at 1280 for the keyboard path;
- *               opens the Add-a-repository dialog once (operator, 1280) for the top-layer,
- *               typing and Escape checks a jsdom test cannot make. It
- *               changes no data; the fixture context goes into the test's annotations, never
- *               stdout.
+ *               task to anchor the detail routes, then for each persona × width first
+ *               checks /login signed out (`loginChecks`: no sideways scroll and Sign in on
+ *               the first screen at 375, axe, the keyboard pass and the hint sample —
+ *               G-192), signs in through the form, visits every route, saves a full-page
+ *               screenshot under `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block
+ *               is present on every route, the help pages and the unknown address
+ *               included,
+ *               and, at 375 px, that the top bar is ONE row (`TOP_BAR_ONE_ROW_PX`), that the
+ *               Menu disclosure (F26, `phoneMenu`) is closed with the nav and Sign out
+ *               hidden, opens with axe clean, takes Tab inside and closes on Escape with
+ *               focus back on the button, and that the document does not scroll sideways
+ *               (or is on the `SIDEWAYS_SCROLL_RATCHET`, now empty, with its gap); opens a
+ *               sample of the route's hints (hover, or a touch pointerdown at 375 px) and
+ *               asserts each bubble shows and axe stays clean with it open; tabs the route
+ *               itself at 1280 for the keyboard path; opens the Add-a-repository dialog
+ *               once (operator, 1280) for the top-layer, typing and Escape checks a jsdom
+ *               test cannot make. It changes no data beyond its seed; the fixture context
+ *               goes into the test's annotations, never stdout. The five keyboard steps that
+ *               OPERATE controls (G-905) are 11b-keyboard's: they need the signed cell and
+ *               the backlog the story makes, which a screens shard's stack has not got.
  * How:          Playwright; `signIn` from support.ts; the routes list is built from the
  *               primary repo, the run and the task found through the API as the admin;
  *               axe with the WCAG tags (ui/e2e/axe.ts); the bubble is found through the
@@ -73,6 +80,8 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts (`env`, `signIn`, `primary`, the seeding helpers),
+ *               ui/e2e/walkthrough/keyboard.ts (`settle`, `bubbleOf`, `escapeUntil`,
+ *               `focusedIs`, shared with 11b-keyboard),
  *               .github/workflows/ci.yml (the `walkthrough-screens` jobs, one per shard,
  *               under the required `walkthrough` aggregator),
  *               ui/src/components/Help.tsx (the About block this asserts),
@@ -89,6 +98,7 @@ import { axeViolations } from '../axe'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { bubbleOf, escapeUntil, focusedIs, settle } from './keyboard'
 import { apiPost, env, personaPassword, primary, signIn, startRunApi, waitRunApi } from './support'
 
 const OUT = join(process.env.CRB_E2E_OUTPUT_DIR ?? 'test-results-walkthrough', 'screens')
@@ -153,7 +163,7 @@ interface Ctx {
 
 const ctx: Ctx = { repo: primary().name, runId: '', taskId: '' }
 
-/** Every authenticated route; `about: false` marks the help pages, which are the help and carry no About block. */
+/** Every authenticated route; `about: false` would mark a route with no About block — since G-926 there is none. */
 function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
   const r = c.repo
   const list: Array<[string, string, boolean?]> = [
@@ -178,27 +188,14 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/learn', 'learn'],
     ['/ledger', 'ledger'],
     ['/settings', 'settings'],
-    ['/help', 'help', false],
-    ['/help/docs/OPERATOR', 'help-docs-operator', false],
+    // the help pages and the 404 carry an About block like every other screen (G-926)
+    ['/help', 'help'],
+    ['/help/docs/OPERATOR', 'help-docs-operator'],
     // an unknown address: the 404 renders inside the shell, so it is captured, hint-sampled
-    // and axe-swept for every persona at both widths like any other route. No About block —
-    // `helpFor` matches no HELP entry for a path the product does not route (G-918).
-    ['/nowhere/at/all', 'not-found', false],
+    // and axe-swept for every persona at both widths like any other route (G-918)
+    ['/nowhere/at/all', 'not-found'],
   ]
   return list.map(([path, slug, about]) => ({ path, slug, about: about ?? true }))
-}
-
-/** load → bounded network-idle (pages that poll never go idle) → main heading → a beat. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForLoadState('load').catch(() => undefined)
-  await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => undefined)
-  await page
-    .getByRole('heading', { level: 1 })
-    .first()
-    .waitFor({ state: 'visible', timeout: 6000 })
-    .catch(() => undefined)
-  // let TanStack Query paint the first response and any skeletons resolve
-  await page.waitForTimeout(700)
 }
 
 async function shot(page: Page, persona: string, slug: string, width: number): Promise<void> {
@@ -206,6 +203,22 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
   await page.screenshot({ path, fullPage: true, animations: 'disabled' })
 }
 
+
+/**
+ * The phone top bar's ceiling: one row (brand and the Menu button, `py-3`) measures about
+ * 60 px; a wrap to a second row adds 40 or more. 90 fails a wrap and tolerates font metrics.
+ */
+const TOP_BAR_ONE_ROW_PX = 90
+
+/**
+ * How many routes in `routes()` render the journey-position eyebrow as its hinted trigger
+ * (`PageHeader` → `journeyEyebrow`): /connect, /connect/:name, /results, /signoff, /factory and
+ * /factory/intake [measured — n = 10 journey and review routes probed at 375 px on the tier-1
+ * stack, 2026-09-25, apparatus 2.2; Home, Measure, Decisions and Deployment render none], and
+ * since G-301 /repos and /repos/:name, which `STEP_OF` places in step 1. At 375 px each must
+ * show it with the menu folded; this floor keeps that check from passing on zero.
+ */
+const JOURNEY_EYEBROW_ROUTES = 8
 
 /**
  * Routes that still scroll sideways at 375 px, by slug, each with the gap that tracks it.
@@ -216,10 +229,11 @@ async function shot(page: Page, persona: string, slug: string, width: number): P
  * The assertion that found these is new (G-905: before it, only /results and /factory were
  * checked). It found two on its first full pass: /help/docs/:name, fixed here in
  * `ui/src/index.css` (an 87-character token in inline `code` set the document's width), and
- * this one, which needs a live stack to place and belongs to the page that owns it.
+ * /tasks/:repo/:taskId (G-292), fixed in `TaskDetailPage.tsx` and measured by 07.
  */
 const SIDEWAYS_SCROLL_RATCHET: Record<string, string> = {
-  'tasks-detail': 'G-292 — the 11-column grade table is wider than a phone when the task has real grade rows (scrollWidth 981 at 375, measured 2026-09-22 and again 2026-09-23, apparatus 2.2); docs/dod/pages/tasks-repo-taskId.md',
+  // empty since G-292 closed (2026-09-26): 'tasks-detail' left when the grade table folded its
+  // secondary columns below md, measured on real grade rows at 375 by 07's task-page test
 }
 
 /**
@@ -261,13 +275,6 @@ function sample(n: number, k: number): number[] {
   const out = new Set<number>()
   for (let i = 0; i < k; i += 1) out.add(Math.round((i * (n - 1)) / (k - 1)))
   return Array.from(out).sort((a, b) => a - b)
-}
-
-/** The `role="tooltip"` a hinted element's `aria-describedby` names (the last id: a field lists its description first). */
-async function bubbleOf(page: Page, el: Locator): Promise<Locator> {
-  const ids = ((await el.getAttribute('aria-describedby')) ?? '').split(' ').filter(Boolean)
-  expect(ids.length, 'a hinted element carries aria-describedby').toBeGreaterThan(0)
-  return page.locator(`#${ids[ids.length - 1]!.replace(/([:.])/g, '\\$1')}`)
 }
 
 /**
@@ -395,6 +402,74 @@ async function keyboardPass(page: Page, where: string, want = 2, maxTabs = 12): 
 }
 
 /**
+ * /login, the screen a person signs in from, gets the checks every other route gets — before
+ * sign-in, at both widths (G-192): at 375 the page does not scroll sideways and the Sign in
+ * button is on the first screen (the page renders outside the shell, so it has no top bar to
+ * measure — its analogue is that no chrome pushes the form off a phone's first screen); axe
+ * (WCAG 2.1 AA) is clean; the keyboard pass (Tab from the top: the page has no `#main`) opens
+ * a field's hint on focus and closes it on leaving; and the hint sample opens each hint by
+ * hover or tap with axe clean while it is open.
+ */
+async function loginChecks(page: Page, where: string, width: number): Promise<void> {
+  await expect(page.getByRole('button', { name: 'Sign in', exact: true }), `${where}: the sign-in form did not render`).toBeVisible()
+  if (width === 375) {
+    const w = await widestOverflow(page)
+    expect(w.scroll, `${where}: the page scrolls sideways (scrollWidth ${w.scroll} > innerWidth ${w.inner}); the widest element is ${w.culprit}`).toBeLessThanOrEqual(w.inner)
+    const submit = await page.getByRole('button', { name: 'Sign in', exact: true }).boundingBox()
+    expect(submit ? submit.y + submit.height : Infinity, `${where}: the Sign in button is below a phone's first screen`).toBeLessThanOrEqual(812)
+  }
+  const violations = await axeViolations(page)
+  expect(violations, `${where}: axe: ${JSON.stringify(violations, null, 2)}`).toEqual([])
+  await keyboardPass(page, where)
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await hintSample(page, where, width)
+}
+
+/**
+ * At 375 px the journey and instrument rows, the health pill, the role chip, Help, the theme
+ * and Sign out are folded behind one "Menu" button (F26). On every route: closed, the button
+ * reads `aria-expanded="false"`, the Primary nav and Sign out are hidden and the journey-
+ * position eyebrow (on a journey route) is still on screen; opened, all of it shows, axe
+ * (WCAG 2.1 AA) is clean with it open, and Tab moves focus into it; Escape closes it — after
+ * first closing the hint bubble that focus opened, one press per layer — and focus goes back
+ * to the button. A failure names the route and the step.
+ */
+async function phoneMenu(page: Page, where: string): Promise<boolean> {
+  const button = page.getByTestId('shell-menu-button')
+  const primaryNav = page.getByRole('navigation', { name: 'Primary' })
+  const signOut = page.getByRole('button', { name: 'Sign out', exact: true }) // not a Users card's "Sign out everywhere" (P-181)
+  await expect(button, `${where}: no Menu button at 375 px`).toBeVisible()
+  await expect(button).toHaveAttribute('aria-expanded', 'false')
+  await expect(primaryNav, `${where}: the journey nav is not folded while the menu is closed`).toBeHidden()
+  await expect(signOut, `${where}: Sign out is not folded while the menu is closed`).toBeHidden()
+  // a journey screen's eyebrow ("Journey · 2 of 4 · Baseline") is how a phone reader knows where
+  // they are once the nav is folded: wherever the screen renders one, it is on screen
+  const eyebrow = page.locator('[data-hint="nav.journey_position"]')
+  const journey = (await eyebrow.count()) > 0
+  if (journey) await expect(eyebrow.first(), `${where}: the journey-position eyebrow is not on screen with the menu closed`).toBeVisible()
+  await button.click()
+  await expect(button).toHaveAttribute('aria-expanded', 'true')
+  await expect(primaryNav, `${where}: the menu opened without the journey nav`).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Instrument' })).toBeVisible()
+  await expect(signOut).toBeVisible()
+  await expect(page.getByTestId('user-chip')).toBeVisible()
+  await expect(page.getByRole('banner').getByRole('link', { name: 'Help' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Switch theme/ })).toBeVisible()
+  const violations = await axeViolations(page)
+  expect(violations, `${where}: axe with the menu open: ${JSON.stringify(violations, null, 2)}`).toEqual([])
+  await page.keyboard.press('Tab')
+  expect(await page.evaluate(() => document.activeElement?.closest('#shell-menu-actions, #shell-nav-primary, #shell-nav-instrument') !== null), `${where}: Tab from the open Menu button did not move into the menu`).toBe(true)
+  await escapeUntil(page, async () => (await button.getAttribute('aria-expanded')) === 'false')
+  await expect(button, `${where}: Escape did not close the menu`).toHaveAttribute('aria-expanded', 'false')
+  expect(await focusedIs(button), `${where}: focus did not return to the Menu button when Escape closed it`).toBe(true)
+  await expect(primaryNav).toBeHidden()
+  // leave the button: its focus hint must not sit open over the next check's sample
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.mouse.move(0, 0)
+  return journey
+}
+
+/**
  * Open a sample of the route's hints — hover at desktop width, a touch pointerdown at phone
  * width, where no hover exists — and assert each bubble shows a full sentence, axe stays
  * clean with it open, and Escape closes it.
@@ -516,21 +591,26 @@ test.describe('11-screens: every route × persona × width, with the About block
       test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
         test.setTimeout(6 * 60_000)
         await page.setViewportSize({ width: vp.width, height: vp.height })
-        // /login as the signed-out screen first
+        // /login as the signed-out screen first — checked like every other route, before
+        // anyone signs in (G-192)
         await page.goto('/login')
         await settle(page)
         await shot(page, persona, 'login', vp.width)
+        await loginChecks(page, `${persona} @ ${vp.width} /login (signed out)`, vp.width)
         await signIn(page, USERNAMES[persona], PASSWORDS[persona])
+        let eyebrows = 0
         for (const r of routes(ctx)) {
           await page.goto(r.path)
           await settle(page)
           await shot(page, persona, r.slug, vp.width)
           if (vp.width === 375) {
-            // the top bar is two rows on a phone (brand; pill · role · help · theme · sign out) —
-            // never three: a third row is ~400 px of chrome before the content
+            // the top bar is ONE row on a phone — the brand and the Menu button; everything else
+            // is folded behind the menu (F26). It was two rows (brand; pill · role · help · theme
+            // · sign out) before, and three nav rows took half the first screen
             const bar = page.getByRole('banner').locator('> div').first()
             const box = await bar.boundingBox()
-            expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past two rows (${box?.height} px)`).toBeLessThan(130)
+            expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past one row (${box?.height} px)`).toBeLessThan(TOP_BAR_ONE_ROW_PX)
+            if (await phoneMenu(page, `${persona} @ 375 ${r.path}`)) eyebrows += 1
             // and the page does not scroll sideways: a phone reader should never have to pan
             // to read a number. Every route, not only the Factory (G-905).
             const width = await widestOverflow(page)
@@ -561,6 +641,8 @@ test.describe('11-screens: every route × persona × width, with the About block
           if (vp.width === 1280) await keyboardPass(page, `${persona} @ 1280 ${r.path}`)
           await hintSample(page, `${persona} @ ${vp.width} ${r.path}`, vp.width)
         }
+        // the eyebrow check is not vacuous: every journey screen that carries one was seen
+        if (vp.width === 375) expect(eyebrows, `${persona} @ 375: journey-position eyebrows seen with the menu closed`).toBeGreaterThanOrEqual(JOURNEY_EYEBROW_ROUTES)
         if (vp.width === 1280 && persona === 'operator') await dialogHints(page, `${persona} @ 1280 /repos`)
         await page.context().clearCookies()
       })

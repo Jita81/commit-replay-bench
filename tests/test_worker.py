@@ -1677,18 +1677,19 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     assert refused[-1].payload["policy_version"] == "routing.v1"
     withheld = [e.action for e in h.events(gated.id) if e.stage == "factory"]
     assert "delivery.withheld" in withheld and "delivery.opened" not in withheld
-    # an approver's override reaches delivery — which then fails closed on the missing
+    # a second approver's override reaches delivery — which then fails closed on the missing
     # credentials, the next gate in line — and the override is on the evidence chain
+    ada = _approver(h, "ada")
     h.enqueue(
         "factory",
         ladder_json=["fake:m0"],
-        params_json={"deliver": True, "deliver_override_by": "approver:ada"},
+        params_json={"deliver": True, "deliver_override_by": ada},
     )
     overridden = h.run_one()
     assert overridden.status == STATUS_SUCCEEDED
     assert overridden.counts_json["by_status"] == {"delivery_failed": 1}
     routes = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
-    assert routes and routes[-1].payload["override_by"] == "approver:ada"
+    assert routes and routes[-1].payload["override_by"] == ada
     assert "delivery.override" in [
         e.action for e in h.events(overridden.id) if e.stage == "factory"
     ]
@@ -1722,6 +1723,152 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     h.enqueue("factory", ladder_json=["fake:m0"])
     again = h.run_one()
     assert again.status == STATUS_FAILED and "no frozen backlog" in again.error
+
+
+def _approver(h: Harness, name: str, role: str = "approver") -> str:
+    """A person's account with ``role`` in the store; returns its id."""
+    from crb.store.models import User
+
+    uid = f"{name:0<32}"[:32]
+    with h.factory() as s:
+        s.add(User(id=uid, subject=f"local:{name}", issuer="local", role=role))
+        s.commit()
+    return uid
+
+
+def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) -> None:
+    """GOV-4 (governance review 2026-09-27): the route gate's override licenses a delivery
+    the map refused, so the worker honours ``deliver_override_by`` only when it names a
+    person with the approver role who is NOT the run's actor — and reads it live at the
+    gate, so a second approver's grant made while the run works reaches it. Anything else
+    is withheld, and a same-actor override is refused on the chain."""
+    from crb.factory import evidence as fe
+
+    home, _item, _ = _multiply_backlog(h)
+    tester = _approver(h, "tester")
+    # the run's own actor named as the approver: refused, recorded
+    h.enqueue(
+        "factory",
+        ladder_json=["fake:m0"],
+        actor=tester,
+        params_json={"deliver": True, "deliver_override_by": tester},
+    )
+    own = h.run_one()
+    assert own.counts_json["by_status"] == {"accepted": 1}
+    refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
+    assert refused[-1].payload["override_refused"] == "same_actor"
+    # an id that is no account, and an account below approver: never an override
+    viewer = _approver(h, "vera", role="viewer")
+    for who in ("approver:ada", viewer):
+        h.enqueue(
+            "factory",
+            ladder_json=["fake:m0"],
+            actor=tester,
+            params_json={"deliver": True, "deliver_override_by": who},
+        )
+        assert h.run_one().counts_json["by_status"] == {"accepted": 1}
+        last = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED][-1].payload
+        assert last["reason"].startswith("route gate:") and "override_by" not in last
+    # the live read: the grant lands on the run's row after the claim, before the gate
+    grace = _approver(h, "grace")
+    run = h.enqueue("factory", ladder_json=["fake:m0"], actor=tester, params_json={"deliver": True})
+    real = h.worker._route_lookup
+
+    def granting(*a: Any, **kw: Any) -> Callable[[Any], Any]:
+        lookup = real(*a, **kw)
+
+        def read(item: Any) -> Any:
+            with h.factory() as s:
+                row = s.get(Run, run.id)
+                assert row is not None
+                row.params_json = {**dict(row.params_json or {}), "deliver_override_by": grace}
+                s.commit()
+            return lookup(item)
+
+        return read
+
+    h.worker._route_lookup = granting  # type: ignore[method-assign]
+    granted = h.run_one()
+    assert granted.counts_json["by_status"] == {"delivery_failed": 1}  # past the gate
+    overrides = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
+    assert overrides[-1].payload["override_by"] == grace
+
+
+def test_the_worker_never_honours_an_override_from_a_deactivated_approver(h: Harness) -> None:
+    """P-229: the worker read the override live at the gate and checked only that its
+    approver's account existed with the approver role — not that it was still active. An
+    approver who granted an override and was then deactivated (a leaver) still licensed the
+    delivery under their name, though deactivation ends everything the account holds. The
+    gate withholds it: no ``override_by`` on the route, the refusal is the route gate's."""
+    from crb.factory import evidence as fe
+    from crb.store.models import User
+
+    home, _item, _ = _multiply_backlog(h)
+    tester = _approver(h, "tester")
+    leaver = _approver(h, "leaver")
+    with h.factory() as s:
+        account = s.get(User, leaver)
+        assert account is not None
+        account.active = False
+        s.commit()
+    h.enqueue(
+        "factory",
+        ladder_json=["fake:m0"],
+        actor=tester,
+        params_json={"deliver": True, "deliver_override_by": leaver},
+    )
+    assert h.run_one().counts_json["by_status"] == {"accepted": 1}
+    refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED][-1].payload
+    assert refused["reason"].startswith("route gate:") and "override_by" not in refused
+    assert not [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
+
+
+def test_every_statement_of_when_the_worker_honours_an_override_names_an_active_account() -> None:
+    """A review of PR #63: docs/API.md stated the P-229 rule twice, and the factory
+    paragraph left out that the approver's account must be active, so a reader could take a
+    leaver's grant as still licensing delivery. Every sentence in the guide that says when
+    the worker honours the override says ``active``."""
+    import re
+
+    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text(encoding="utf-8")
+    rules = [
+        s
+        for s in re.split(r"(?<=[.;|])\s", api)
+        if re.search(r"worker\b.*\bhonours\b", s) and "override" in s.lower()
+    ]
+    assert len(rules) >= 2, rules  # the endpoint's row and the factory paragraph
+    assert [r for r in rules if "active" not in r] == []
+
+
+def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness) -> None:
+    """GOV-3 (governance review 2026-09-27): the worker resolves a factory run's ``checks``
+    exactly as a replay's (``params.checks`` over the repository's block): the build is
+    graded on that arm — belt 6 evaluated, the ``checks`` stamp on its row — the run's
+    apparatus names the switches, and the route gate reads its licence on the same arm, so
+    rows of another arm never license it."""
+    from crb.factory import evidence as fe
+
+    home, item, _ = _multiply_backlog(h)
+    off = h.enqueue("factory", ladder_json=["fake:m0"])
+    assert h.run_one().status == STATUS_SUCCEEDED
+    (off_row,) = h.worker.ledger.rows(run_id=off.id)
+    assert off_row.checks_arm == "off"
+    api = h.enqueue(
+        "factory",
+        ladder_json=["fake:m0"],
+        params_json={"deliver": True, "checks": {"api_stable": True}},
+    )
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    (row,) = h.worker.ledger.rows(run_id=api.id)
+    assert row.checks_arm == "api" and "api_stable" in row.labels
+    assert done.apparatus_json["checks"]["api_stable"] is True
+    # the off-arm row licenses nothing on the api arm: the cell reads unmeasured
+    cells = [e.payload["cell_route"] for e in home.events() if e.kind == fe.EV_ROUTE]
+    assert cells[-1] is None
+    # and the lookup on the off arm still sees the off-arm row
+    seen = h.worker._route_lookup(pr.REPO_NAME, api.id, checks_arm="off")(item)
+    assert seen is not None and seen["n"] == 1
 
 
 def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> None:

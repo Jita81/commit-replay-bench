@@ -78,6 +78,8 @@ from crb.core.secrets_file import (
     SecretsInsecure,
     SecretsStore,
     SecretStatus,
+    clean_value,
+    fingerprint,
 )
 from crb.intake.client import (
     TRACKER_TOKEN_MAX_LEN,
@@ -187,6 +189,12 @@ class SecretsFile:
             extra={"secret": name, "fingerprint": status.fingerprint, "set_by": set_by},
         )
         return status
+
+    def fingerprint_of(self, name: str, value: str) -> str:
+        """The fingerprint :meth:`set` would record for ``value``, writing nothing; raises
+        ``ValueError`` for a bad shape, as :meth:`set` does. The credential routes record the
+        event with it BEFORE the file is written (P-443)."""
+        return fingerprint(clean_value(name, self.spec(name).validate(value)))
 
     def get(self, name: str) -> str | None:
         """The value — for the verify probe and nothing else."""

@@ -41,7 +41,8 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               (tests, vitest titles, walkthrough specs, hint registry and ratchet, API routes,
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
-              gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
+              gaps by fan-out, the gap ids retired, and every open criterion, and the
+              prevention register's pending rows, each with its claim tag); refuses a gap
               line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
               table of the plan, a plan heading that quotes a rank, and a retired id that git
               history does not vouch for; --check exits
@@ -187,6 +188,10 @@ PREVENTION_LEVELS: tuple[str, ...] = ("construction", "gate", "mistake-proofing"
 PREVENTION_STATES: tuple[str, ...] = ("closed", "pending")
 EXECUTABLE_PREFIXES: tuple[str, ...] = ("test", "vitest", "spec", "ci")
 _PREVENTION_ID_RE = re.compile(r"^P-\d{3}$")
+#: The opening of a claim tag (docs/EVIDENCE-AND-CLAIMS.md §1; the words are
+#: scripts/claims_check.py's ``TAGS``): a register row's finding carries one, in its bug cell
+#: or its first-seen cell, and the gap analysis projects it with the row (P-433).
+_CLAIM_TAG_RE = re.compile(r"\[(?:measured|hypothesis|aspiration|gap)\b", re.I)
 _ART_ID_RE = re.compile(r"^dod\.(page|journey|stream)\.[a-z0-9][a-z0-9-]*$|^dod\.product$")
 
 
@@ -571,6 +576,40 @@ class Prevention:
     line: int
 
 
+def claim_tags(text: str) -> list[str]:
+    """Every claim tag in a register cell, verbatim, in order: from ``[measured`` (or
+    ``[hypothesis``, ``[aspiration``, ``[gap``) to its closing bracket. A tag inside a code
+    span is not one, a ``]`` inside a code span does not end one, and a Markdown link's text
+    (``[gap analysis](…)``) is not one."""
+    tags: list[str] = []
+    in_code = False
+    i = 0
+    while i < len(text):
+        if text[i] == "`":
+            in_code = not in_code
+        elif not in_code and _CLAIM_TAG_RE.match(text, i):
+            j, code = i + 1, False
+            while j < len(text) and (code or text[j] != "]"):
+                code = code != (text[j] == "`")
+                j += 1
+            if j == len(text):
+                break  # an unclosed bracket is no tag
+            if not text.startswith("(", j + 1):
+                tags.append(text[i : j + 1])
+            i = j
+        i += 1
+    return tags
+
+
+def projected_finding(r: Prevention) -> str:
+    """The bug cell as the gap analysis shows it: the finding with the claim tags its row
+    carries — those in the bug cell stay where they are, those in the first-seen cell follow
+    it — so a projected claim keeps its provenance (P-433)."""
+    own = claim_tags(r.bug)
+    extra = [t for t in claim_tags(r.first_seen) if t not in own]
+    return " ".join([r.bug, *extra])
+
+
 def parse_prevention(path: Path) -> tuple[list[Prevention], dict[str, str], list[str]]:
     """The register's rows and its ``## Gaps`` lines (the same grammar as an artefact's)."""
     if not path.is_file():
@@ -656,6 +695,12 @@ def validate_prevention(
                     f"recurs — cite a resolving {'/'.join(EXECUTABLE_PREFIXES)} reference"
                 )
         if r.status == "pending":
+            if not claim_tags(f"{r.bug} {r.first_seen}"):
+                errors.append(
+                    f"{where}: its finding carries no claim tag for the gap analysis to "
+                    "project — tag the bug or first-seen cell ([measured — n, method, "
+                    "apparatus] / [hypothesis — …] / [aspiration — …])"
+                )
             if not r.gap:
                 errors.append(f"{where}: pending needs a gap id (an owner and the change)")
             elif r.gap.startswith("G-") and r.gap not in gaps:
@@ -666,7 +711,8 @@ def validate_prevention(
 
 
 def render_prevention(rows: list[Prevention], gaps: dict[str, str]) -> list[str]:
-    """The register's section of GAP-ANALYSIS.md: the counts, then every pending row."""
+    """The register's section of GAP-ANALYSIS.md: the counts, then every pending row with
+    the claim tag its register row carries (P-433)."""
     closed = [r for r in rows if r.status == "closed"]
     pending = [r for r in rows if r.status == "pending"]
     by_level = ", ".join(
@@ -678,16 +724,19 @@ def render_prevention(rows: list[Prevention], gaps: dict[str, str]) -> list[str]
         "## Our own bugs — the prevention register",
         "",
         f"**{len(rows)} registered · {len(closed)} closed ({by_level or 'none'}) · "
-        f"{len(pending)} pending.** A defect is closed only with the artefact that fails if its "
-        "class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.",
+        f"{len(pending)} pending.** [measured — n = {len(rows)} rows of the `## Register` table "
+        "in `docs/PREVENTION.md`, counted by status and level; method: `scripts/dod_check.py` "
+        "over that file at this commit; apparatus n/a, a count of the register] A defect is "
+        "closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` "
+        "§7); the register is `docs/PREVENTION.md`.",
         "",
     ]
     if pending:
         out += [
-            "| id | bug | level | gap | what is missing |",
+            "| id | bug, with its claim tag | level | gap | what is missing |",
             "|---|---|---|---|---|",
             *(
-                f"| {r.id} | {r.bug} | {r.level} | {r.gap} | {gaps.get(r.gap, '')} |"
+                f"| {r.id} | {projected_finding(r)} | {r.level} | {r.gap} | {gaps.get(r.gap, '')} |"
                 for r in pending
             ),
             "",

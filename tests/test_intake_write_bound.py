@@ -38,8 +38,8 @@ Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (the per-verb req
               tests/test_intake_feedback.py (counts the renderers; this counts the calls),
               docs/OPERATOR.md (§11's *Bounds on one pass* cites this file)
 Tested by:    tests/test_intake_write_bound.py
-Touch when:   an adapter changes how many requests a verb costs, or the poll gains a write —
-              change the count here and in docs/API.md, docs/SECURITY.md §2 and
+Touch when:   never for a new repository; an adapter changes how many requests a verb costs, or the
+              poll gains a write — change the count here and in docs/API.md, docs/SECURITY.md §2 and
               docs/OPERATOR.md §11 in the same change.
 """
 

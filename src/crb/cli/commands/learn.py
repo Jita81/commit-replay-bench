@@ -87,6 +87,7 @@ from crb.core.learn import (
     render_refusals,
     render_remeasure,
     render_strengthen,
+    strength_by_task,
     strengthening_backlog,
     triage_refusals,
 )
@@ -437,10 +438,16 @@ def cmd_strengthen(args: argparse.Namespace) -> int:
         if args.controls
         else None
     )
-    cmap = build_capability_map(
-        rows, projection=PROJECTIONS[args.by], policy=policy, controls=controls
-    )
     scores = load_oracle_export(_read_json(args.oracle, what="--oracle")) if args.oracle else []
+    # routed under the scores as the map and the route are (P-426): without --oracle the
+    # rows' own strength is all a bare export carries
+    cmap = build_capability_map(
+        rows,
+        projection=PROJECTIONS[args.by],
+        policy=policy,
+        controls=controls,
+        oracle_by_task=strength_by_task(scores) if scores else None,
+    )
     backlog = strengthening_backlog(
         cmap,
         scores,

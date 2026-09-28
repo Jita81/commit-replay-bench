@@ -43,8 +43,8 @@
  *               here as on the map and the factory),
  *               ui/src/help/help.ts (the About block), ui/src/help/hints.ts (every element)
  * Tested by:    ui/src/screens/Factory/IntakePage.test.tsx, ui/e2e/walkthrough/12-intake.spec.ts
- * Touch when:   a field is added to the intake response (types first); a fifth label or a
- *               new stop reason appears (docs/API.md first).
+ * Touch when:   never for a new repository; a field is added to the intake response (types first);
+ *               a fifth label or a new stop reason appears (docs/API.md first).
  */
 
 import { useState } from 'react'

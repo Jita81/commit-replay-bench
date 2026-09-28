@@ -40,9 +40,9 @@ Works with:   docs/CONTRIBUTING.md (the commit convention it enforces),
               .github/workflows/ci.yml (the commit-subjects job that runs --check on a pull
               request's commits and its title), scripts/claims_check.py (the same gate idiom)
 Tested by:    tests/test_check_commit_subject.py
-Touch when:   a Conventional Commits type is added to the convention (update TYPES and
-              docs/CONTRIBUTING.md together); a real imperative is refused (add it to the
-              matching allowlist as a whole word, never a suffix, with a test case).
+Touch when:   never for a new repository; a Conventional Commits type is added to the convention
+              (update TYPES and docs/CONTRIBUTING.md together); a real imperative is refused (add it
+              to the matching allowlist as a whole word, never a suffix, with a test case).
 """
 
 from __future__ import annotations

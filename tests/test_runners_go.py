@@ -32,8 +32,8 @@ Works with:   src/crb/core/runners/go_runner.py (under test), tests/fixtures/lan
               (the fixture), tests/conftest_langs.py (the probes), tests/test_runners_parsers.py
               (the parser on canned output), docs/CONTRIBUTING.md (how to add a runner)
 Tested by:    tests/test_runners_go.py
-Touch when:   the go runner's argv or parser changes; onboarding a Go module whose package
-              layout the scope mapping cannot address.
+Touch when:   never for a new repository; the go runner's argv or parser changes; onboarding a Go
+              module whose package layout the scope mapping cannot address.
 """
 
 from __future__ import annotations

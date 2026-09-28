@@ -6,8 +6,10 @@ read the last ``row_hash``, chain, validate the false-Q1 invariant, insert.
 Because ``prev_hash``/``row_hash`` are stored, an exported JSONL verifies
 standalone with :func:`crb.core.ledger.verify_chain`.
 
-Imports (``import_rows``) re-chain foreign rows into this ledger and keep the
-source row's own hash in ``labels['source_row_hash']`` for traceability.
+Imports (``import_rows``) re-chain foreign rows into this ledger, stamped as imported inside
+the hashed body (``provenance``, ``actor`` ``import``, who and when, and the source row's own
+hash, actor and provenance in ``labels``) so an imported row can never pass for one measured
+here (:func:`import_stamp`).
 
 :class:`DbReviewLedger` is the same contract for the ``reviews`` table
 (:class:`crb.core.review.ReviewRecord`): its own chain, its own write lock, and the
@@ -23,13 +25,17 @@ What it is:   The database ledgers — ``DbLedger`` for ``grades`` (+ the ``evid
               ``/health``.
 What it does: Appends hash-chained rows under a per-table write lock, re-asserting the
               false-Q1 invariant before every insert; reads rows back as the core's
-              dataclasses; imports foreign JSONL rows by re-chaining them (source hash kept
-              in ``labels``); exports rows that verify standalone. Refuses a review whose row
+              dataclasses; imports foreign JSONL rows by re-chaining them, stamped as
+              imported inside the hash (``import_stamp``); exports rows that verify
+              standalone. Refuses a review whose row
               is unknown, whose pack is not the row's, or which has nothing to anchor to.
 How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` → insert → commit;
               ``verify`` re-walks the chain with the core's ``verify_chain``;
               ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
-              ``check_review_anchor``, then chains and inserts the same way.
+              ``check_review_anchor``, then chains and inserts the same way;
+              ``assert_append_only`` tries a no-op UPDATE on the first ``grades`` row and, on
+              SQLite, a same-row ``REPLACE``, requires both refused, and returns whether it
+              tried (an empty ``grades`` table has no row to try them on).
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -58,11 +64,14 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import EvidencePack
 from crb.core.ledger import (
     GENESIS_HASH,
+    IMPORTED_PROVENANCE_PREFIX,
+    PROVENANCE_IMPORTED_LEDGER,
     GradeRow,
     LedgerIntegrityError,
     verify_chain,
@@ -201,20 +210,28 @@ class DbLedger:
         return verify_chain(self.rows())
 
     # --- import / export ------------------------------------------------------
-    def import_rows(self, rows: Iterable[GradeRow]) -> int:
-        """Re-chain foreign rows into this ledger (source hash kept in labels)."""
+    def import_rows(
+        self,
+        rows: Iterable[GradeRow],
+        *,
+        imported_by: str,
+        imported_at: str,
+        import_sha256: str = "",
+    ) -> list[GradeRow]:
+        """Re-chain foreign rows into this ledger, each STAMPED as imported inside its
+        hashed body (:func:`import_stamp`), and return the chained rows. An imported row is
+        a record of somebody else's measurement: it never counts toward a sign-off or the
+        route the delivery gate reads (:func:`crb.core.ledger.rows_measured_here`)."""
         prepared: list[GradeRow] = []
         for r in rows:
-            labels = dict(r.labels)
-            if r.row_hash:
-                labels.setdefault("source_row_hash", r.row_hash)
-            d = r.fields()
-            d["labels"] = labels
+            d = import_stamp(
+                r, imported_by=imported_by, imported_at=imported_at, import_sha256=import_sha256
+            )
             # Blank prev_hash: ``chained`` in append_many recomputes it against THIS
             # ledger's head; the source ledger's chain position is not ours to keep.
             d["prev_hash"] = ""
             prepared.append(GradeRow(**d))
-        return len(self.append_many(prepared))
+        return self.append_many(prepared)
 
     def export_jsonl(self, path: str | Path) -> int:
         """Write every row, in chain order, as one JSON object per line (sorted keys, so
@@ -227,6 +244,37 @@ class DbLedger:
                 f.write(json.dumps(r.to_dict(), sort_keys=True, ensure_ascii=False) + "\n")
                 n += 1
         return n
+
+
+#: The ``actor`` every imported row carries: the import did not measure anything, and the
+#: source's own actor (kept in ``source_actor``) is not an account of this deployment.
+IMPORT_ACTOR = "import"
+
+
+def import_stamp(
+    row: GradeRow, *, imported_by: str, imported_at: str, import_sha256: str = ""
+) -> dict[str, Any]:
+    """``row``'s fields as an IMPORTED row of this ledger (EI-2, 2026-09-27): ``provenance``
+    ``imported:ledger`` (a source row already ``imported:…`` keeps its own), ``actor``
+    ``import``, and the labels ``imported_by`` (the admin), ``imported_at``,
+    ``import_sha256`` (the file), ``source_actor``, ``source_provenance`` and
+    ``source_row_hash`` — the last ALWAYS present, empty when the source row had no hash.
+    Every value is inside the hashed body, so the stamp cannot be removed without the chain
+    saying so. The file's ``oracle_strength`` is kept as the source recorded it; no reader
+    that licenses anything reads it (the oracle comes from this deployment's scores)."""
+    labels = dict(row.labels)
+    labels.setdefault("source_row_hash", row.row_hash or "")
+    labels.setdefault("source_actor", row.actor)
+    labels.setdefault("source_provenance", row.provenance)
+    labels["imported_by"] = imported_by
+    labels["imported_at"] = imported_at
+    labels["import_sha256"] = import_sha256
+    d = row.fields()
+    d["labels"] = labels
+    d["actor"] = IMPORT_ACTOR
+    if not row.provenance.startswith(IMPORTED_PROVENANCE_PREFIX):
+        d["provenance"] = PROVENANCE_IMPORTED_LEDGER
+    return d
 
 
 def _review_to_model(rec: ReviewRecord) -> Review:
@@ -355,12 +403,16 @@ class DbReviewLedger:
         return verify_review_chain(self.records())
 
 
-def assert_append_only(factory: sessionmaker[Session]) -> None:
-    """Prove the triggers are live: an UPDATE on grades must fail. Used by /health."""
+def assert_append_only(factory: sessionmaker[Session]) -> bool:
+    """Prove the triggers are live: an UPDATE on grades must fail, and on SQLite so must a
+    ``REPLACE`` of the same row. Used by /health. Returns whether a write was TRIED: on an
+    empty ``grades`` table there is no row to try it on, so it returns ``False`` without
+    testing anything, and the caller must not say an UPDATE was refused (the live-trigger
+    count, :func:`crb.store.db.live_triggers`, is then the whole proof)."""
     with factory() as s:
         first = s.execute(select(Grade).order_by(Grade.seq).limit(1)).scalar_one_or_none()
         if first is None:
-            return
+            return False
         try:
             # A no-op UPDATE (actor = actor): a live trigger aborts it; a missing one lets
             # it through, the rollback undoes the harmless write, and we report the gap.
@@ -368,7 +420,32 @@ def assert_append_only(factory: sessionmaker[Session]) -> None:
             s.rollback()
         except Exception:
             s.rollback()
-            return
-        raise LedgerIntegrityError(
-            "grades table accepted an UPDATE — append-only triggers are missing"
+        else:
+            raise LedgerIntegrityError(
+                "grades table accepted an UPDATE — append-only triggers are missing"
+            )
+        if s.get_bind().dialect.name == "sqlite":
+            _assert_replace_refused(s, first.seq)
+    return True
+
+
+def _assert_replace_refused(s: Session, seq: int) -> None:
+    """SQLite's ``REPLACE`` deletes the conflicting row before it inserts, and that delete
+    fires the append-only delete trigger only when the connection has ``recursive_triggers``
+    on (EI-5): the row is replaced by an identical copy, and the rollback undoes it either
+    way. Only the trigger's own refusal counts as refused — any other error propagates."""
+    try:
+        s.execute(
+            text("INSERT OR REPLACE INTO grades SELECT * FROM grades WHERE seq = :seq"),
+            {"seq": seq},
         )
+    except DBAPIError as exc:
+        s.rollback()
+        if "append-only" not in str(exc):
+            raise
+        return
+    s.rollback()
+    raise LedgerIntegrityError(
+        "grades table accepted a REPLACE — this connection does not fire the append-only "
+        "delete trigger (PRAGMA recursive_triggers is off)"
+    )

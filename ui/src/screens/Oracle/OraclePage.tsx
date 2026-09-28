@@ -29,9 +29,9 @@
  *               the run actions per role), ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
  *               (strength, band and gate per task; every control with its verdict; no
  *               VIOLATION), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a control or a verdict word is added (src/crb/core/oracle/controls.py — add it
- *               to `VERDICT_TONE` and `ControlName` in ui/src/api/types.ts); never for a new
- *               repository.
+ * Touch when:   never for a new repository; a control or a verdict word is added
+ *               (src/crb/core/oracle/controls.py — add it to `VERDICT_TONE` and `ControlName` in
+ *               ui/src/api/types.ts).
  * Claims:       A green on a weak or unscored oracle licenses nothing; the gate column is what
  *               a clean grade may be claimed to mean
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
@@ -161,6 +161,16 @@ function ControlsSection({ repo }: { repo: string }) {
           ]}
         />
       </Hint>
+      {(c.escapes > 0 || (v && v.state !== 'passed' && v.state !== 'unmeasured')) && (
+        // G-348 / G-432 — the finding's way forward: the strengthen report names the test work,
+        // registers it, and re-runs the oracle and the controls for the task once it is done
+        <p className="m-0 text-sm">
+          Learning loop, step 2 of 6: deliver is withheld until the tests catch what escaped.{' '}
+          <Hint as={Link} id="link.oracle.learn" to={`/learn?repo=${encodeURIComponent(repo)}#strengthen`} className="underline underline-offset-4">
+            Strengthen the tests on Learn
+          </Hint>
+        </p>
+      )}
       <DataTable rows={c.rows} columns={columns} rowKey={(r) => `${r.task_id}|${r.control}`} caption="Negative-control rows" dense initialSort={{ key: 'verdict', dir: 'desc' }} empty={<EmptyState compact title="No control rows" />} />
     </div>
   )

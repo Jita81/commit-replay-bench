@@ -38,8 +38,9 @@ Works with:   src/crb/intake/client.py (the protocol it satisfies),
               six verbs over JQL), src/crb/server/intake.py (builds it from settings and
               the stored credential)
 Tested by:    tests/test_intake_adapters.py
-Touch when:   Azure DevOps changes an api-version or a field name; a deployment needs a
-              board *column* rather than a state (that is a second query, not an edit here).
+Touch when:   never for a new repository; Azure DevOps changes an api-version or a field name; a
+              deployment needs a board *column* rather than a state (that is a second query, not an
+              edit here).
 """
 
 from __future__ import annotations
@@ -130,14 +131,16 @@ def _quote(value: str) -> str:
 
 def _identity(value: Any) -> str:
     """The sign-in name of an Azure DevOps identity field: ``uniqueName`` of the object
-    the REST API returns, or the ``Name <email>`` string an older API version returns —
-    ``""`` when there is none."""
+    the REST API returns, or the bracketed part of the ``Name <email>`` string an older API
+    version returns — ``""`` when there is none. Never the display name: it is a profile
+    field its owner sets, so it could read as a sign-in name ADR-0022's allowlist trusts
+    (governance review 2026-09-27, GOV-7); an empty author never matches the allowlist."""
     if isinstance(value, Mapping):
-        return str(value.get("uniqueName") or value.get("displayName") or "")
+        return str(value.get("uniqueName") or "")
     text = str(value or "")
     if "<" in text and text.endswith(">"):
-        return text[text.rindex("<") + 1 : -1]
-    return text
+        return text[text.rindex("<") + 1 : -1].strip()
+    return ""
 
 
 class AdoTracker:

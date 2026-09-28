@@ -163,6 +163,8 @@ export const HINTS = {
     'Switch between light, dark and your system’s theme. It changes nothing but how the screens look.',
   'button.shell.sign_out':
     'End your session here and on every other device signed in to this account. Runs in flight carry on without you.',
+  'button.shell.menu':
+    'On a narrow screen the navigation, the instrument health, your role, Help, the theme and Sign out are folded in here. Press it to open them; Escape closes them again. If the instrument is not OK, the button shows the health symbol instead of the three lines.',
   'nav.home':
     'Where this deployment is on the way from an empty install to a change delivered under evidence: the eight tasks and the next one to press.',
   'nav.connect':
@@ -232,7 +234,7 @@ export const HINTS = {
   'task.home.measure':
     'Whether a first sighted measurement has run. This is the task that spends model budget; it says how much before it starts.',
   'task.home.read_baseline':
-    'Incomplete once the map has rows; Completed once someone has acted on the baseline (any active sign-off on this repository).',
+    'Incomplete once the map has rows; Completed once the server has recorded a person opening this repository’s baseline, or a sign-off on it is active. Unavailable when the map or the sign-offs could not be read.',
   'task.home.invite_approver':
     'Whether an account with the approver role exists. Only an admin can add one; the operator who queues runs should not be the approver who signs them.',
   'task.home.deliver':
@@ -518,9 +520,9 @@ export const HINTS = {
   'col.signoff.cell':
     'The class and size (and language or model where projected) the attestation covers.',
   'col.signoff.status':
-    'Active counts now; stale was signed under an older apparatus; invalidated means a false-Q1 row appeared since; superseded means a later attestation covers the same scope; revoked was withdrawn by an approver.',
+    'Active counts now; stale was signed under an older apparatus; invalidated means a false-Q1 row appeared since; superseded means a later attestation covers the same scope; revoked was withdrawn by an approver; chain broken means a stored sign-off was altered, so none lifts a cell until the chain is restored.',
   'pill.signoff.status':
-    'Active counts now; stale lifts nothing until re-signed; invalidated means the cell now has a false-Q1 row; superseded means a later attestation covers the same scope; revoked was withdrawn, with who and when.',
+    'Active counts now; stale lifts nothing until re-signed; invalidated means the cell now has a false-Q1 row; superseded means a later attestation covers the same scope; revoked was withdrawn, with who and when; chain broken means a stored sign-off was altered and no attestation lifts a cell until the chain is restored.',
   'col.signoff.approver':
     'The named person who signed, with the kind of account they signed from. The server refused this record at write if that person had produced the evidence themselves.',
   'pill.signoff.verifier_kind':
@@ -576,7 +578,7 @@ export const HINTS = {
   'stat.factory.deliverable':
     'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; the rest are built and withheld.',
   'field.factory.override':
-    'Let this run open pull requests for items whose cell does not route deliver. The override is recorded on the evidence chain under your name. Approver only.',
+    'The route gate’s override is a second approver’s act: queue the run without it, then another approver grants it on the run’s page. It is recorded under their name and never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -1023,6 +1025,14 @@ export const HINTS = {
     'Constructor overrides applied to every rung and stamped into the run’s apparatus. Model, provider and credential keys are refused here: identity comes from the ladder, secrets from the worker’s environment.',
   'field.run_new.limit':
     'The most tasks to attempt; blank means every eligible task.',
+  'field.run_new.task_ids':
+    'Only these tasks, as commit shas separated by commas. Blank means every task. A hand-off from Learn fills it with the tasks its item names, so a re-score or a re-qualify reaches exactly those.',
+  'text.run_new.learn_step':
+    'Where this run sits in the learning loop: the Learn report handed the reader here with the kind and the task filled in, and queueing it is still a person’s act.',
+  'col.tasks.recheck_gold':
+    'Re-checks the gold of a task that is not gold-clean, without re-mining the history, after the runner or the repository’s configuration changed. This is not qualifying a posture: that is a qualify run. Only an operator sees this column.',
+  'link.tasks.recheck_gold':
+    'Opens the Runs dialog with a mine run for this task’s commit filled in. It re-checks RED at the parent and GREEN with the commit, and queueing it is still your decision.',
   'field.run_new.pool':
     'Limit the run to the standard or the hard pool of tasks.',
   'field.run_new.executor':
@@ -1045,6 +1055,8 @@ export const HINTS = {
     'The mode, builder, model, provider and ladder this run graded under. A rate quoted without these is not a claim.',
   'link.run.repo':
     'The repository this run worked; opens its overview, tasks and configuration.',
+  'button.run.deliver_override':
+    'Let this factory run open pull requests for items whose cell does not route deliver. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace; it never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
   'button.run.cancel':
     'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
   'chart.run.progress':
@@ -1398,9 +1410,9 @@ export const HINTS = {
   'col.learn_refusals.cost':
     'Dollars spent on the attempts in this class before they were refused.',
   'col.learn_refusals.verdict':
-    'Always unsure here: a person decides whether the refusal was honest or should be allowed, and writes the line into the guard corpus.',
+    'Unsure until a person decides whether the guard was right. Once decided it reads honest or refused and names who decided it.',
   'pill.learn.verdict':
-    'The product never decides: a person writes honest or refuse for this class with the command-line tool.',
+    'The product never decides. Nobody has judged this class yet, so nothing has been written into the guard corpus for it.',
   'stat.learn.oracle_held':
     'Cells withheld from deliver because their oracle is under the bar or their controls escaped or were thin, under the routing policy and threshold shown. More attempts will not move these; stronger tests will.',
   'stat.learn.items':
@@ -1482,6 +1494,83 @@ export const HINTS = {
     'Why you are throwing the switch; it is recorded with your name on the prevention chain.',
   'field.learn.revert_reason':
     'Why this change is being undone; it is recorded with your name, and the loop never re-applies it.',
+  // the three decisions beside the reports (G-532), each one a named operator's decision
+  'pill.learn.decided':
+    'The verdict a named person recorded for this class, and the corpus the line was written into: honest allows the command, refused keeps the guard refusing it.',
+  'col.learn_refusals.decide':
+    'Records your verdict on this class. Only an operator sees this column, and the decision is stored with the name of whoever made it.',
+  'button.learn.decide_refusal':
+    'Opens the form that records your verdict on this refusal class and writes the line into the guard corpus.',
+  'field.learn.verdict':
+    'Honest means the guard was wrong and this command must be allowed. Refused means the guard was right and must keep refusing it.',
+  'field.learn.note':
+    'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next. It stays one line: a line break would end the comment.',
+  'field.learn.command':
+    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line. The field starts with the cut example as recorded: add the rest after it.',
+  'field.learn.prefix':
+    'Which guard family to file the refusal under. The refused corpus takes archaeology and network lines only; an attempt to tamper with the tests is judged elsewhere.',
+  'button.learn.accept_refusal':
+    'Writes the line into the guard corpus under your name and records the decision. Repeating it writes nothing.',
+  'button.learn.cancel_decision':
+    'Closes the form. Nothing is written and the class stays unsure.',
+  'button.learn.close_decision':
+    'Closes the form. The decision is already recorded.',
+  'banner.learn.decision':
+    'What the decision wrote: the verdict, who made it, and the corpus file the line landed in.',
+  'col.learn_strengthen.register':
+    'Puts this item on the repository’s backlog. Only an operator sees this column.',
+  'button.learn.register_strengthening':
+    'Registers this item on the repository’s backlog. Registering the same item again supersedes it rather than overwriting it, so the earlier record is kept.',
+  'banner.learn.registered':
+    'What the registration did: the item id, the backlog it is on now, and the item it replaced if any.',
+  'link.learn.factory':
+    'The factory for this repository, where the backlog is read and a run that builds the item is queued.',
+  'col.learn_remeasure.queue':
+    'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
+  'button.learn.queue_remeasure':
+    'Shows what queueing this cell would run and cost before anything is sent.',
+  'link.learn.remeasure_in_flight':
+    'The runs already queued for this cell and not yet finished. Queue comes back once they have graded, so the same estimate is never spent twice.',
+  'button.learn.cancel_queue':
+    'Closes the confirmation. Nothing is queued and nothing is spent.',
+  'button.learn.confirm_queue':
+    'Sends the plan’s runs for this cell. This spends the deployment’s budget.',
+  'button.learn.close_queue':
+    'Closes the confirmation. The runs are already queued.',
+  'banner.learn.queued':
+    'What was queued: how many runs, for which cell and mode, the rows the rule still needs, and what the plan estimated.',
+  'link.learn.queued_runs':
+    'The runs page for this repository, where the runs just queued report their progress.',
+
+  // the loop's hand-offs and position (G-172, G-348, G-352)
+  'col.learn_strengthen.remeasure':
+    'Opens a run for this item’s task once the tests are stronger: re-qualify it, re-score its oracle, or re-run the negative controls. Only an operator sees this column.',
+  'link.learn.requalify':
+    'Opens the Runs dialog with a qualify run for this item’s task filled in. It proves the task in the posture that grades it and spends no model budget.',
+  'link.learn.rescore':
+    'Opens the Runs dialog with an oracle run for this item’s task filled in, to measure whether the stronger tests now kill the mutants that escaped.',
+  'link.learn.recontrols':
+    'Opens the Runs dialog with a negative-controls run for this item’s task filled in, to check that the grader now refuses the cheat that escaped.',
+  'link.learn.connect':
+    'The Connection page, where a repository is registered and walked. Learn needs one repository’s ledger rows to derive its reports.',
+  'step.learn.loop':
+    'The six steps of the learning loop and where each happens: two on this page, one on Oracle, one in your repository, one on Runs, and the decisions back here.',
+  'field.learn.plan_apparatus':
+    'A version to plan against, such as 2.4, to see what re-measuring would cost if the apparatus moved to it. Blank plans for the version this deployment runs.',
+  'button.learn.plan_apparatus':
+    'Reads the plan as if the apparatus were the version typed. It queues nothing and spends nothing.',
+  'button.learn.plan_running':
+    'Returns the plan to the version this deployment runs, where the runs it lists can be queued.',
+  'banner.learn.plan_whatif':
+    'Says the plan below is a preview against another apparatus version, so its rows are not stale yet and no run is offered for them.',
+  'text.learn.strengthen_cost':
+    'The one measured record of what strengthening a test took: a person’s time, not the runs’ spend. It is a single item, so it says what can happen, not what usually does.',
+  'link.oracle.learn':
+    'The Learn page’s strengthening report for this repository: the test work that closes a controls escape or a weak oracle, where it is registered and the oracle re-run.',
+  'link.walk.learn':
+    'The Learn page’s strengthening report for this repository: the finding on this stage is closed by stronger tests, and that report names the work and re-runs the oracle and the controls.',
+  'link.factory.learn':
+    'The Learn page’s strengthening report for this repository: an item stopped for a weak test is closed by stronger tests, and that report names the work.',
 
   // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':
@@ -1565,7 +1654,11 @@ export const HINTS = {
   'button.settings.verify_login':
     'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
   'button.settings.remove_token':
-    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored.',
+    'Delete the stored token from the server; builders in cli mode stop working until a new one is stored. You are asked to confirm first.',
+  'button.settings.remove_token_confirm':
+    'Delete the stored token now. Runs in cli mode fail until a new one is stored.',
+  'button.settings.remove_token_keep':
+    'Keep the stored token and close the question. Nothing is deleted.',
   'pill.settings.signin_state':
     'Where the sign-in flow is: waiting for the code, exchanging it, done or failed.',
   'pill.settings.github_configured':
@@ -1601,9 +1694,53 @@ export const HINTS = {
   'field.settings.new_role':
     'The role the new account starts with. An approver is what task 7 on Home asks for.',
   'field.settings.new_password':
-    'A first password for the local account. It is never echoed back.',
+    'A first password for the local account: at least 12 characters. It is never echoed back, and the person can change it themselves once they are signed in.',
   'button.settings.create_user':
     'Create the local account with the role chosen.',
+  'col.settings.account_kind':
+    'Where the account is issued: local means this deployment holds its password; oidc means the organisation’s identity provider does.',
+  'pill.settings.account_kind':
+    'A local account signs in with a password held here, so an admin can set it. An oidc account’s password belongs to your identity provider. Turning it off here refuses it on this deployment; disabling it at the provider stops it everywhere.',
+  'col.settings.active':
+    'Whether the account can sign in. A deactivated account is refused on its very next request.',
+  'toggle.settings.user_active':
+    'Turn an account off when the person leaves, and back on when they return. Deactivating refuses the account on its very next request and ends every session it held, so reactivating it brings none of them back. An admin can be deactivated only while another active admin can still sign in by a way this deployment has switched on — create that admin first.',
+  'col.settings.last_login':
+    'How long ago the account last signed in successfully. "Never" means it has not been used since it was created.',
+  'stat.settings.last_login':
+    'The last successful sign-in for this account, as an age. An account that has never signed in reads "Never".',
+  'col.settings.account_actions':
+    'Set this account’s password, sign it out on every device, or read its audit trail: every change made to it and every sign-in.',
+  'button.settings.sign_out_everywhere':
+    'End every session this account holds, on every device, on its next request — for a lost laptop or a leaver. It works for an identity-provider account too. The person can sign in again at once; turn the account off as well to keep them out.',
+  'button.settings.set_password':
+    'Set a new password for this account. Only an admin may set another account’s password — you change your own in the “Change my password” card above. It ends every session the account holds, so the person signs in again with the new one, and only a local account has a password to set at all.',
+  'button.settings.account_history':
+    'Show the account’s audit trail — created, role set, password set, deactivated, reactivated, signed out everywhere, and each sign-in and failed sign-in — with who did it (by username) and when.',
+  'field.settings.set_password':
+    'The new password for this account: at least 12 characters. It is never shown back and never recorded in the audit trail.',
+  'field.settings.set_password_confirm':
+    'Type the same new password again, so a typo cannot lock the person out.',
+  'button.settings.set_password_submit':
+    'Set the password now. Every session the account holds ends on its next request.',
+  'tile.settings.account_history':
+    'The account’s own audit trail: one row per recorded change, newest first, each with the actor who made it. A change made on the API host reads cli followed by the operating-system user.',
+  'pill.settings.account_event':
+    'What happened to the account: created, role set, password set, deactivated, reactivated, signed out everywhere, signed in (user.login) or a refused sign-in (user.login_failed, by anonymous).',
+  'link.settings.created_home':
+    'Go back to Home: the task list shows the account you just created, and the next task.',
+  'link.settings.created_connect':
+    'Go on to Connection to connect a repository, the next step once the people who approve are set up.',
+  'tile.settings.my_password':
+    'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
+  'field.settings.my_current_password':
+    'Your current password, which proves the session is yours and not a borrowed one. Five wrong attempts in a minute, for this account from this address, stop further tries, and so do twenty a minute from this address whatever the accounts. The refusal says how many seconds to wait.',
+  'field.settings.my_new_password':
+    'Your new password: at least 12 characters. It is never shown back.',
+  'field.settings.my_new_password_confirm':
+    'Type your new password again, so a typo cannot lock you out.',
+  'button.settings.change_my_password':
+    'Change your password now. This browser stays signed in; every other session of your account ends.',
 
   // ── /help, /help/docs/:name, 404
   'link.help.read_more':
@@ -1614,6 +1751,8 @@ export const HINTS = {
     'Return to the glossary and the list of guides, at the place this guide is listed.',
   'link.help.index':
     'Open the glossary and the list of bundled guides, to find the one you meant.',
+  'link.help.adr':
+    'Open this decision record: a read-only copy of the repository’s file, built into this deployment, that says what was decided and why.',
   'button.notfound.home':
     'Return to Home, the start of the journey, with the navigation intact.',
 } as const satisfies Record<string, string>
@@ -1711,8 +1850,10 @@ export const MIN_HINTS: Record<string, number> = {
   '/oracle': 22,
   '/learn': 44,
   '/ledger': 26,
-  // a viewer's Settings (health, the login card read-only, the GitHub App); the admin's configuration and users are held by the ratchet's variants
-  '/settings': 11,
+  // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
+  // "Change my password" card; the admin's configuration and Users card (and the deeper
+  // set-password dialog and account history) are held by the ratchet's variants
+  '/settings': 16,
   // the four shell screens: signed out, the help pages and an unknown address. They carry few
   // elements, so the floor is small — but it is a floor, and the ratchet no longer skips them
   // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;

@@ -13,7 +13,9 @@ What it does: Pins the whole flow against a fake CLI that prints the sign-in URL
               and nothing stored; a second start while one is pending → 409; cancel; a missing
               CLI → 503; a malformed code → 422; RBAC (admin only); every session file 0600
               under a 0700 directory; a stray token-shaped run in the CLI's output never
-              reaches ``status.json``.
+              reaches ``status.json``; and the stored token is one ``settings.secret_set``
+              event naming the admin who started the sign-in, however often it is polled
+              (EI-8).
 How:          ``FAKE_CLAUDE`` shell script as the binary; ``LoginBroker`` on a temp secrets
               directory with a short TTL; the driver spawned for real (detached) so the
               cross-process file protocol is what is tested; ``TestClient`` for the routes with
@@ -24,7 +26,8 @@ Works with:   src/crb/server/claude_login.py, src/crb/server/claude_login_driver
               src/crb/server/routes/admin.py, src/crb/core/secrets_file.py,
               tests/test_server_routes_admin_secrets.py (the manual-token path this joins)
 Tested by:    tests/test_server_claude_login.py
-Touch when:   the CLI's transcript changes (update ``FAKE_CLAUDE`` from a real observation first).
+Touch when:   never for a new repository; the CLI's transcript changes (update ``FAKE_CLAUDE``
+              from a real observation first).
 """
 
 from __future__ import annotations
@@ -410,6 +413,164 @@ def test_routes_run_the_whole_flow_and_never_return_the_token(
     assert store.get("claude_code_oauth_token") == TOKEN
     r = client.get(f"{LOGIN}/{'0' * 32}")
     assert r.status_code == 404
+    # EI-8: the helper stores the token with no database, so the first read that sees the
+    # session done records it — once, however often the page polls — naming the admin who
+    # started the sign-in, never the value
+    for _ in range(3):
+        assert client.get(f"{LOGIN}/{sid}").json()["state"] == "done"
+    from sqlalchemy import select
+
+    from crb.server.routes.admin import SECRETS_TRACE
+    from crb.store.models import Event
+
+    me = client.get(f"{API_PREFIX}/auth/me").json()["id"]
+    with client.app.state.session_factory() as s:
+        events = list(s.execute(select(Event).where(Event.trace_id == SECRETS_TRACE)).scalars())
+        assert [e.action for e in events] == ["settings.secret_set"]
+        (ev,) = events
+        assert ev.actor == me
+        assert ev.payload_json["via"] == "login" and ev.payload_json["session"] == sid
+        assert ev.payload_json["secret"] == "claude_code_oauth_token"
+        assert ev.payload_json["fingerprint"] == TOKEN[-4:]
+        assert TOKEN not in str(ev.payload_json)
+
+
+def _login_events(app: Any) -> list[Any]:
+    from sqlalchemy import select
+
+    from crb.server.routes.admin import SECRETS_TRACE
+    from crb.store.models import Event
+
+    with app.state.session_factory() as s:
+        rows = list(
+            s.execute(
+                select(Event).where(Event.trace_id == SECRETS_TRACE).order_by(Event.seq)
+            ).scalars()
+        )
+        s.expunge_all()
+        return rows
+
+
+def _finish_unwatched(c: TestClient, tmp_path: Path, fake_claude: Path) -> tuple[str, str]:
+    """Start a sign-in through the API, then let the helper store the token with NO API
+    read of the session after it (the admin pasted the code and closed the tab); returns
+    ``(session id, the helper's stored_at)``."""
+    import json
+
+    r = c.post(LOGIN)
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    broker = cl.LoginBroker(tmp_path / "home" / "secrets", claude_binary=str(fake_claude))
+    broker.submit_code(sid, "good-code-1234#STATE1")  # the helper, not a route
+    assert _wait(broker, sid, {cl.STATE_DONE, cl.STATE_FAILED}).state == cl.STATE_DONE
+    status = json.loads((broker.session_dir(sid) / "status.json").read_text(encoding="utf-8"))
+    assert status["stored_at"], status  # the helper stamps the moment it stored the token
+    return sid, str(status["stored_at"])
+
+
+def test_a_stored_sign_in_nobody_read_back_is_recorded_by_the_secrets_list(
+    client: TestClient, tmp_path: Path, fake_claude: Path
+) -> None:
+    """EI-8's residual (the skeptic, 2026-09-27): a token the sign-in helper stored was
+    recorded only by the next read of ITS session — an admin who pasted the code and closed
+    the tab left it unrecorded until the next sign-in started, stamped with the time it was
+    recorded. ``GET /settings/secrets`` — which every role reads, and which Settings, Runs
+    and the builder checks load — records it too, naming the admin who started the sign-in
+    (not the reader) and carrying the helper's own ``stored_at``."""
+    _login(client)
+    admin_id = client.get(f"{API_PREFIX}/auth/me").json()["id"]
+    r = client.post(
+        f"{API_PREFIX}/users",
+        json={"username": "vera", "password": "a-long-viewer-password-1", "role": "viewer"},
+    )
+    assert r.status_code == 201, r.text
+    sid, stored_at = _finish_unwatched(client, tmp_path, fake_claude)
+    assert _login_events(client.app) == []  # nothing has read the session back
+    with TestClient(client.app) as viewer:
+        _login(viewer, "vera", "a-long-viewer-password-1")
+        for _ in range(2):  # once, however often it is read
+            assert viewer.get(f"{API_PREFIX}/settings/secrets").status_code == 200
+    (ev,) = _login_events(client.app)
+    assert ev.action == "settings.secret_set" and ev.actor == admin_id
+    assert ev.payload_json["session"] == sid and ev.payload_json["via"] == "login"
+    assert ev.payload_json["stored_at"] == stored_at
+    assert TOKEN not in str(ev.payload_json)
+
+
+def test_reading_the_secrets_list_never_waits_for_the_write_lock_once_recorded(
+    client: TestClient, tmp_path: Path, fake_claude: Path
+) -> None:
+    """P-230: every ``GET /settings/secrets`` — which every role reads, and Settings, Runs and
+    the builder checks load — took the events WRITE lock and committed for each finished
+    sign-in, even one recorded long ago, so a read serialised against every writer (the
+    worker's appends, sign-ins, audit events). With another writer holding the lock the read
+    waited out SQLite's busy timeout and failed. Once the sign-in is on the record a read
+    takes no lock: it answers while a writer holds it, and records nothing twice."""
+    from sqlalchemy import text
+
+    _login(client)
+    _finish_unwatched(client, tmp_path, fake_claude)
+    assert client.get(f"{API_PREFIX}/settings/secrets").status_code == 200  # records it
+    assert len(_login_events(client.app)) == 1
+    with client.app.state.session_factory() as writer:
+        writer.execute(text("BEGIN IMMEDIATE"))  # another writer holds the write lock
+        started = time.monotonic()
+        r = client.get(f"{API_PREFIX}/settings/secrets")
+        waited = time.monotonic() - started
+        writer.rollback()
+    assert r.status_code == 200, r.text
+    assert waited < 5.0, f"the read waited {waited:.1f} s for the write lock"
+    assert len(_login_events(client.app)) == 1
+
+
+def test_a_damaged_sign_in_session_never_breaks_the_secrets_list_or_the_start(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    """P-231: ``done_sessions`` — now read by the secrets list, each sign-in read and the API's
+    start — caught only ``LoginError``. A session directory removed while it was listed (a
+    dangling entry), a ``meta.json`` that is not JSON and one with no ``expires_at`` each
+    raised out of it, so ``GET /settings/secrets`` answered 500 for every role, and the
+    ``KeyError`` stopped the API from starting. An unreadable session is skipped; a finished
+    one beside it is still recorded."""
+    import json
+
+    (tmp_path / "home" / "secrets").mkdir(parents=True, mode=0o700)
+    settings = make_settings(tmp_path, fake_claude)
+    with TestClient(create_app(settings)) as c:
+        _login(c)
+        sid, _ = _finish_unwatched(c, tmp_path, fake_claude)
+    sessions = tmp_path / "home" / "secrets" / cl.SESSIONS_SUBDIR
+    (sessions / ("a" * 32)).symlink_to(tmp_path / "gone")  # listed, then gone
+    for name, meta in (("b" * 32, "{not json"), ("c" * 32, json.dumps({"started_at": "x"}))):
+        (sessions / name).mkdir(mode=0o700)
+        (sessions / name / "meta.json").write_text(meta, encoding="utf-8")
+    broker = cl.LoginBroker(tmp_path / "home" / "secrets", claude_binary=str(fake_claude))
+    assert [st.id for st in broker.done_sessions()] == [sid]
+    app = create_app(settings)
+    with TestClient(app) as c:  # the start records the finished one, and does not stop
+        (ev,) = _login_events(app)
+        assert ev.payload_json["session"] == sid
+        _login(c)
+        assert c.get(f"{API_PREFIX}/settings/secrets").status_code == 200
+
+
+def test_a_stored_sign_in_nobody_read_back_is_recorded_at_the_next_start(
+    tmp_path: Path, fake_claude: Path
+) -> None:
+    """…and a restart records it before any request, so a deployment that nobody opens
+    after the sign-in still has the event, with the helper's time, not the restart's."""
+    (tmp_path / "home" / "secrets").mkdir(parents=True, mode=0o700)
+    settings = make_settings(tmp_path, fake_claude)
+    with TestClient(create_app(settings)) as c:
+        _login(c)
+        admin_id = c.get(f"{API_PREFIX}/auth/me").json()["id"]
+        sid, stored_at = _finish_unwatched(c, tmp_path, fake_claude)
+        assert _login_events(c.app) == []
+    app = create_app(settings)
+    with TestClient(app):
+        (ev,) = _login_events(app)
+    assert ev.actor == admin_id and ev.payload_json["session"] == sid
+    assert ev.payload_json["stored_at"] == stored_at
 
 
 def test_login_routes_are_admin_only_and_cancel_works(client: TestClient) -> None:

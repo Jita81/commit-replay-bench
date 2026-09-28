@@ -28,7 +28,8 @@ Works with:   tests/fixtures/langs/gorepo_deps.py (the module that requires this
               tests/test_provision_go.py (fetches from it), src/crb/provision/go.py (the recipe
               that reads it), tests/test_provision.py (the go.sum lines)
 Tested by:    tests/test_provision_go.py
-Touch when:   a test needs another module or version in the mirror (add it to ``VERSIONS``).
+Touch when:   never for a new repository; a test needs another module or version in the mirror (add
+              it to ``VERSIONS``).
 """
 
 from __future__ import annotations

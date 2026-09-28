@@ -25,30 +25,41 @@ stream once the run is terminal; a client disconnect stops the poll loop.
 
 Navigation
 ----------
-What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per-task table;
-              its stored and streamed StepEvents.
+What it is:   The ``/runs`` API — create, list, inspect, cancel a run; a second approver's
+              route-gate override on a factory run; its per-task table; its stored and
+              streamed StepEvents.
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
               outage_stop, preflight, budget_profile, escalation, checks, learning) into a
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
-              presence only) a run whose builder auth has no credential; serves run views
-              with counts re-derived from the ledger when the worker wrote none; streams
-              events as SSE with resume-by-seq; cancellation is a flag the worker honours.
+              presence only) a run whose builder auth has no credential — through
+              ``submit_refusals``, the one gate every route that queues a run calls; serves
+              run views with counts re-derived from the ledger when the worker wrote none; streams
+              events as SSE with resume-by-seq; cancellation is a flag the worker honours;
+              the route gate's override is refused at enqueue and granted only by an approver
+              who did not queue the run, as an event (GOV-4, ADR-0003 amendment 2026-09-27);
+              and owns the out-of-band ``system`` event writers the other routes share
+              (``append_system_event``, and ``commit_audited``: an event and its change in
+              one commit, the trace's ``seq`` read under the events lock).
 How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
-              queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
+              queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``;
+              ``append_system_event`` allocates a trace's next ``seq`` under the events
+              write lock (``lock_event_writes``) inside the caller's transaction.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
 Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, RunFactoryOut —
               mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
-              the operator as actor), src/crb/server/worker.py (what a queued run becomes;
-              the counts shapes per kind), src/crb/store/models.py (Run, Grade, Event, User —
-              the override's display name resolved at read), docs/API.md#runs (the
-              ``counts`` shapes per kind, queue position, the factory posture),
+              the operator as actor), src/crb/store/events.py (``lock_event_writes`` — the
+              one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
+              queued run becomes; the counts shapes per kind), src/crb/store/models.py
+              (Run, Grade, Event, User — the override's display name resolved at read),
+              docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
+              factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py
-Touch when:   never for a new repository; a run parameter is added (schema field → ``params`` here →
-              the worker reads it → docs/API.md → the UI type); a field is added to ``RunOut`` (the
-              UI type first); a run kind is added (decide in ``_counts`` whether it is a build
-              kind).
+Touch when:   never for a new repository; a run parameter is added (schema field →
+              ``params`` here → the worker reads it → docs/API.md → the UI type); a field
+              is added to ``RunOut`` (the UI type first); a run kind is added (decide in
+              ``_counts`` whether it is a build kind).
 
 """
 
@@ -68,6 +79,7 @@ from typing import Any
 from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
@@ -78,7 +90,7 @@ from crb.builders.openai_client import credential_missing as openai_credential_m
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.observability.events import StepEvent, StepStatus
-from crb.server.auth import OperatorDep, ViewerDep, require_role_now
+from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
@@ -101,6 +113,7 @@ from crb.server.schemas import (
     StepEventOut,
 )
 from crb.server.secrets import secrets_dir_for
+from crb.store.events import lock_event_writes
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
@@ -249,7 +262,15 @@ def append_system_event(
     Not committed here: the caller commits it together with the state change it
     records, so an audit event and its cause are one transaction. The payload is
     redacted by :class:`StepEvent` at construction.
+
+    The ``seq`` is allocated under the ``events`` write lock
+    (:func:`crb.store.events.lock_event_writes`), held until the caller's transaction ends,
+    so a concurrent writer to the same trace — another request, the worker's
+    ``learning_tick`` — waits and takes the next ``seq`` instead of breaking
+    ``uq_events_trace_seq`` after the caller's side effect (EI-1, DL-080). The caller
+    should commit promptly: on SQLite the lock is the database's write lock.
     """
+    lock_event_writes(session)
     last = session.execute(
         select(func.max(Event.seq)).where(Event.trace_id == trace_id)
     ).scalar_one_or_none()
@@ -268,6 +289,45 @@ def append_system_event(
     )
     session.add(event_to_model(ev))
     return ev
+
+
+#: Attempts at one audited commit before a trace-``seq`` conflict is allowed to surface.
+AUDIT_ATTEMPTS = 3
+
+
+def commit_audited(
+    db: Session, write: Callable[[], None], *, before: Callable[[], None] | None = None
+) -> None:
+    """Apply ``write`` (a state change and its ``system`` event) and commit them together.
+
+    ``before`` takes the locks that rank ahead of the ``events`` write lock (the ``users``
+    lock, :data:`crb.store.events.TAKEN_BEFORE_EVENTS`) and runs first on EVERY attempt, so
+    a write that needs one takes it in the one order every writer uses: an organisation
+    sign-in that took ``users`` inside ``write`` held ``events`` first and deadlocked
+    against an admin act on PostgreSQL (P-227).
+
+    The ``events`` write lock (:func:`crb.store.events.lock_event_writes`) is taken BEFORE
+    ``write`` reads the trace's last ``seq``, so writers to one trace are serialised on
+    SQLite and PostgreSQL: a burst of refused sign-ins on the shared unknown-account trace
+    once ran out of the retries below and answered 500 (found by AUTH-1's regression
+    test). On another dialect two writers can still read the same ``seq``; the loser's
+    insert breaks ``uq_events_trace_seq``, which is a lost race, not a refusal, so the
+    transaction is rolled back and ``write`` runs again on fresh rows (DL-068). The break
+    can surface inside ``write`` too: a later query there (the next ``seq`` of the sign-in
+    trace, ADR-0028 §8) autoflushes the earlier insert, so both are guarded.
+    """
+    for attempt in range(AUDIT_ATTEMPTS):
+        if before is not None:
+            before()
+        lock_event_writes(db)
+        try:
+            write()
+            db.commit()
+            return
+        except IntegrityError:
+            db.rollback()
+            if attempt == AUDIT_ATTEMPTS - 1:
+                raise
 
 
 def _read_events_local(
@@ -667,6 +727,33 @@ def credential_refusal(run: Run, settings: Any) -> None:
             )
 
 
+def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
+    """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
+    route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
+    enqueued the plan's runs with no credential check, the class P-003 closed on
+    ``POST /runs``). ``tests/test_server_routes_runs.py`` fails when a function that
+    enqueues a run does not call this.
+
+    * 422 ``builder_credential_missing`` — a builder this run would call has no credential
+      (P-003; presence only);
+    * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
+      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
+    """
+    credential_refusal(run, settings)
+    if body.qualify_first is False:
+        repo_row = db.get(Repo, body.repo)
+        if repo_row is None:
+            raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+        refuse_unqualified(
+            db,
+            repo_row,
+            kind=body.kind,
+            task_ids=list(body.task_ids),
+            executor=deployment_executor(settings, body.executor),
+            image_ref=deployment_image(settings, repo_row),
+        )
+
+
 @router.post(
     "/runs",
     response_model=RunOut,
@@ -693,9 +780,22 @@ def create_run(
     if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
         named = sorted(k for k, v in factory_only.items() if v is not None)
         raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
+    if body.deliver_override:
+        # GOV-4 (governance review 2026-09-27): the override licenses a delivery the map
+        # refused, so — like a sign-off (ADR-0016) — it is never granted by the person who
+        # queues the run that produces the evidence. It is a second approver's act on the
+        # queued or running run; nothing is queued here.
+        require_role_now(operator, "approver")
+        raise ApiError(
+            409,
+            "same_actor",
+            "the route gate's override is a second approver's act: queue the run without "
+            "it, then another approver grants it with POST /runs/{id}/deliver-override",
+            detail={"grant": "POST /runs/{id}/deliver-override"},
+        )
     api = require_jobs()
     run = new_run(body, actor=operator.id)
-    credential_refusal(run, settings)
+    submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
         # evolutions chain, since an evolution registered in the same window changes what
@@ -716,30 +816,69 @@ def create_run(
             # G-904 — this run's test-author rung (or ``none``); the worker refuses one
             # that is also a rung on the ladder before anything is built
             params["test_author"] = body.test_author.strip()
-        if body.deliver_override:
-            # the route gate's override is an APPROVER's act, stamped with their identity
-            # (external review 2026-09-16 point 36 → DL-038)
-            require_role_now(operator, "approver")
-            params["deliver_override_by"] = operator.id
         run.params_json = params
-    if body.qualify_first is False:
-        # ADR-0019 §3: a build run with nothing qualified where it would be graded can only
-        # fail POSTURE_UNQUALIFIED on the worker — refuse it here, with the fix
-        repo_row = db.get(Repo, body.repo)
-        if repo_row is None:  # pragma: no cover — refused 404 above
-            raise ApiError(404, "not_found", f"no repo {body.repo!r}")
-        executor = deployment_executor(settings, body.executor)
-        refuse_unqualified(
-            db,
-            repo_row,
-            kind=body.kind,
-            task_ids=list(body.task_ids),
-            executor=executor,
-            image_ref=deployment_image(settings, repo_row),
-        )
     run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)
+
+
+@router.post(
+    "/runs/{run_id}/deliver-override",
+    response_model=RunOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
+    summary="A second approver overrides a factory run's route gate (GOV-4)",
+)
+def grant_deliver_override(run_id: str, approver: ApproverDep, db: DbDep) -> RunOut:
+    """The route gate's one-run override as a second approver's evented act (GOV-4,
+    ADR-0003 amendment 2026-09-27): on a queued or running factory run that delivers,
+    granted by an approver who is NOT the run's actor, named on the run
+    (``params.deliver_override_by``) and on a ``system/run.deliver_override`` event on the
+    run's trace, in one transaction. The worker reads it live at each item's gate; it never
+    lifts a false-Q1 cell (the honesty floor). 409 ``not_a_factory_run`` /
+    ``run_terminal`` / ``delivery_off`` / ``same_actor`` / ``override_already_granted``.
+
+    The check and the grant are one serialised step: the events write lock the grant's
+    event needs anyway is taken FIRST and the run re-read under it, so two approvers granting
+    at once cannot both pass ``override_already_granted`` (P-228)."""
+    lock_event_writes(db)
+    run = _get_run(db, run_id)
+    db.refresh(run)  # the row as it is under the lock, never an earlier read of it
+    params = dict(run.params_json or {})
+    if run.kind != KIND_FACTORY:
+        raise ApiError(409, "not_a_factory_run", "only a factory run has a route gate")
+    if run.status in TERMINAL_STATUSES:
+        raise ApiError(
+            409, "run_terminal", f"run is already {run.status}", detail={"status": run.status}
+        )
+    if not params.get("deliver"):
+        raise ApiError(
+            409, "delivery_off", "this run does not deliver: there is no route gate to override"
+        )
+    if approver.id == run.actor:
+        raise ApiError(
+            409,
+            "same_actor",
+            "you queued this run: its route gate is overridden by a second approver "
+            "(ADR-0016's two-person rule)",
+        )
+    if params.get("deliver_override_by"):
+        raise ApiError(
+            409,
+            "override_already_granted",
+            "the route gate's override is already granted for this run",
+            detail={"deliver_override_by": params["deliver_override_by"]},
+        )
+    run.params_json = {**params, "deliver_override_by": approver.id}
+    append_system_event(
+        db,
+        trace_id=run.id,
+        action="run.deliver_override",
+        repo=run.repo,
+        actor=approver.id,
+        payload={"run_actor": run.actor, "status_at_grant": run.status},
+    )
+    db.commit()
+    return run_out(db, _get_run(db, run_id))
 
 
 @router.get("/runs/{run_id}", response_model=RunOut, responses={401: _ERR, 404: _ERR})
@@ -977,5 +1116,6 @@ __all__ = [
     "run_out",
     "run_task_rows",
     "sse_frame",
+    "submit_refusals",
     "system_trace_id",
 ]

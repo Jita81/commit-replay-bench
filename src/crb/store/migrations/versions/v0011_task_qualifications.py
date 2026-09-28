@@ -27,8 +27,9 @@ Works with:   src/crb/store/models.py (``TaskQualification``; ``APPEND_ONLY_TABL
               src/crb/core/qualify.py (reads the record a row's ``body_json`` holds; the
               rule ``_legacy_fingerprint`` copies)
 Tested by:    tests/test_store_migrate.py, tests/test_store_qualifications.py
-Touch when:   never — a released revision is immutable. Wave 2 holds revisions 0009 and 0010;
-              at merge this revision's ``down_revision`` is re-pointed at the head it lands on.
+Touch when:   never for a new repository; never — a released revision is immutable. Wave 2 holds
+              revisions 0009 and 0010; at merge this revision's ``down_revision`` is re-pointed at
+              the head it lands on.
 """
 
 from __future__ import annotations

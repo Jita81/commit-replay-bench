@@ -20,7 +20,27 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   from another machine, through a forwarding proxy (the UI's Vite proxy now marks one) or naming
   another `Host` is answered as if it were off. The session is the one a password issues — the
   revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
-  sign-in is an `auth.dev_autologin` event, and every page shows a banner.
+  sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
+
+- **The security and governance review's findings closed: sign-in, evidence, store, delivery**
+  (the operator's internal review, streams A to D; [#63](https://github.com/Jita81/commit-replay-bench/pull/63)).
+  A login attempt counts before its password is checked, the identity provider never demotes
+  the last admin who can sign in, and sign-out, deactivation and every credential change are
+  events (DL-076, DL-077). Only rows this deployment measured license anything, and every chain
+  is verified on the server (DL-078, DL-079). A read-modify-write holds its table's one lock
+  from read to commit, and no statement the product can issue rewrites an append-only row
+  (DL-080, DL-081, DL-085). A route-gate override needs a second person and never delivers on
+  a false-Q1 cell; the licence is for the change delivered (DL-082 to DL-084).
+
+- **Wave 1 finished: accounts, the Learn page's writes, keyboard and wayfinding**
+  (north-star Wave 1, streams U, L, A1 and A2; [#65](https://github.com/Jita81/commit-replay-bench/pull/65)).
+  Settings › Users shows each account's kind, state and last sign-in; an admin sets a password,
+  turns an account off and on and signs it out everywhere; sign-ins and refused local
+  sign-ins are audited, and a password set rotates the session nonce (DL-068, DL-069). An
+  operator accepts a refusal line, registers strengthening items and queues a re-measurement
+  from Learn, each audited (DL-070, DL-071, DL-075). Under 640 px the navigation folds into a Menu, and the
+  walkthrough reaches every control by Tab (DL-072). The decision records open at
+  `/help/docs/ADR-nnnn`, and a recorded baseline read completes task 6 (DL-073, DL-074).
 
 - **The record corrects itself; costs carry their n; each stream measures its own flow**
   (north-star Waves 0 and 1, streams D, E and M;

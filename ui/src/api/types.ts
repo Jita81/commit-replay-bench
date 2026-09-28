@@ -315,9 +315,20 @@ export interface RepoSummary {
   github_full_name: string | null
 }
 
-/** `GET /repos/{name}` — repo + config. */
+/**
+ * The server's record that a person opened the baseline of a repository with rows
+ * (`POST /repos/{name}/baseline-read`, the `repo.baseline_read` event): the first read,
+ * who made it and when. Home task 6 "Read the baseline" completes on it (DL-074).
+ */
+export interface BaselineRead {
+  at: string
+  by: string
+}
+
+/** `GET /repos/{name}` — repo + config, and the first read of its baseline (`null` until one). */
 export interface RepoDetail extends RepoSummary {
   config: RepoConfig
+  baseline_read?: BaselineRead | null
 }
 
 /**
@@ -539,7 +550,7 @@ export interface RunCreateRequest {
    * `model` / `provider` / `name` (the recorded identity) and credential-shaped keys.
    */
   builder_config?: Record<string, unknown>
-  /** factory runs only — delivery is route-gated (ADR-0003 amendment 2026-09-16); `deliver_override` needs approver. */
+  /** factory runs only — delivery is route-gated (ADR-0003 amendment 2026-09-16); `deliver_override` is refused 409 `same_actor` at enqueue — a second approver grants it with `POST /runs/{id}/deliver-override` (amendment 2026-09-27). */
   /** Per-run raw-retention switches (both default off — ADR-0006). */
   retain?: { worktrees?: boolean; transcripts?: boolean }
   deliver?: boolean
@@ -1109,10 +1120,16 @@ export interface Signoff {
   revoked: boolean
   /** Live: not revoked, not superseded, the cell still false-Q1-free and the apparatus unchanged. */
   active: boolean
-  /** Made on an earlier apparatus than the one the deployment reads at now (ADR-0015): kept, verifying, lifting nothing until re-signed or revoked. */
+  /** Made on an earlier apparatus than the one the deployment reads at now, or carrying no apparatus stamp (ADR-0015): kept, verifying, lifting nothing until re-signed or revoked. */
   stale: boolean
+  /** Why `stale` (first match): `no_apparatus_stamp` — signed before the stamp existed, so it covers no rows (GOV-6); `apparatus_moved`; `checks_arm_moved`; `posture_moved`; `""` when not stale. */
+  stale_reason?: '' | 'no_apparatus_stamp' | 'apparatus_moved' | 'checks_arm_moved' | 'posture_moved'
   /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
   apparatus_current: string
+  /** This stored row no longer hashes to its own `row_hash` — altered under the append-only triggers (EI-6). */
+  tampered?: boolean
+  /** The whole sign-off chain verifies. `false` = some row was altered, removed or re-ordered: every record is served inactive and none lifts a cell (EI-6). */
+  chain_ok?: boolean
   /** The checks arm the evidence was signed on (ADR-0024) — `off` for a record from before the switchboard. A record signed on another arm than `checks_arm_current` is stale too. */
   checks_arm?: string
   /** The checks arm the repository's cells are read on now; `""` for a record not tied to one repository. */
@@ -1152,6 +1169,24 @@ export function signoffScopeMatches(scope: Record<string, string>, cell: Record<
 /** Who signed, as a person reads it: the resolved name, else the id the ledger holds. */
 export function approverName(s: Pick<Signoff, 'approver' | 'approver_name'>): string {
   return s.approver_name || s.approver
+}
+
+/**
+ * Why a stale sign-off is stale, in the words both screens that list one use (the Sign-off
+ * table's status pill and the Decisions page), so a reason explained on one is never "signed
+ * at apparatus ?" on the other (P-232). `current` stands in when the record names no current
+ * apparatus.
+ */
+export function signoffStaleWhy(
+  s: Pick<Signoff, 'stale_reason' | 'checks_arm' | 'checks_arm_current' | 'apparatus_current' | 'evidence'>,
+  current = '',
+): string {
+  const now = s.apparatus_current || current || '?'
+  if (s.stale_reason === 'no_apparatus_stamp') return `signed before the apparatus stamp, now reading at ${now}`
+  if (s.checks_arm && s.checks_arm_current && s.checks_arm !== s.checks_arm_current) {
+    return `signed on the ${s.checks_arm} checks arm, now reading the ${s.checks_arm_current} arm`
+  }
+  return `signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, now reading at ${now}`
 }
 
 /** `POST /signoffs` body (the older shape; the Sign-off screen's fuller request lives in ui/src/screens/Signoff/contract.ts). */

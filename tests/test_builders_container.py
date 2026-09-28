@@ -51,9 +51,9 @@ Works with:   src/crb/builders/container.py (under test), src/crb/builders/egres
               tests/test_builders_container_docker.py (the same contract against a daemon),
               docs/SECURITY.md (builder containment, §3.2)
 Tested by:    tests/test_builders_container.py
-Touch when:   a hardening flag, mount or environment rule of the builder container changes
-              (the argv case lists every one; update docs/SECURITY.md and the ADR); the export
-              gains a fix-up kind.
+Touch when:   never for a new repository; a hardening flag, mount or environment rule of the builder
+              container changes (the argv case lists every one; update docs/SECURITY.md and the
+              ADR); the export gains a fix-up kind.
 """
 
 from __future__ import annotations

@@ -145,6 +145,12 @@ GENESIS_HASH = "0" * 64
 
 #: ``provenance`` prefix of every row that was imported rather than measured here.
 IMPORTED_PROVENANCE_PREFIX = "imported:"
+#: ``provenance`` of a row this deployment's own instrument graded — the only rows a
+#: licensing read (a sign-off's evidence, the route that licenses delivery) may count.
+PROVENANCE_MEASURED = "measured"
+#: ``provenance`` ``POST /ledger/import`` stamps on a row whose source called it measured: it
+#: was measured somewhere else, and its source value is kept in the ``source_provenance`` label.
+PROVENANCE_IMPORTED_LEDGER = f"{IMPORTED_PROVENANCE_PREFIX}ledger"
 #: The apparatus stamps a census import carries (``crb.core.legacy.CENSUS_APPARATUS_VERSION``
 #: mirrors this — the core cannot import ``legacy``, which imports this module). Only
 #: rows with one of these may claim ``v3-legacy``, or ``v4`` without a ``2.x`` stamp.
@@ -947,7 +953,7 @@ def grade_row_from_result(
             ),
             **({LABEL_STOP_REASON: stop_reason} if stop_reason else {}),
             **posture_labels(result),
-            **_api_labels(result),
+            **api_labels(result),
         },
     )
 
@@ -968,7 +974,7 @@ def posture_labels(result: GradeResult) -> dict[str, str]:
     return out
 
 
-def _api_labels(result: GradeResult) -> dict[str, str]:
+def api_labels(result: GradeResult) -> dict[str, str]:
     """Belt 6's hashed labels — only when the belt was switched on for the grade."""
     run = result.api_run
     if run is None:
@@ -1395,6 +1401,14 @@ def rows_for_checks(rows: Iterable[GradeRow], arm: str) -> list[GradeRow]:
     if arm not in ARMS:
         raise ValueError(f"unknown checks arm {arm!r}; expected one of {ARMS}")
     return [r for r in rows if r.checks_arm == arm]
+
+
+def rows_measured_here(rows: Iterable[GradeRow]) -> list[GradeRow]:
+    """The rows this deployment measured (``provenance`` ``measured``). An imported row —
+    census or another ledger, whatever its source said — is a record of someone else's
+    measurement: it is shown when a reader asks for it and never counted by a read that
+    licenses anything (the sign-off's evidence, the route the delivery gate reads)."""
+    return [r for r in rows if r.provenance == PROVENANCE_MEASURED]
 
 
 #: The axes on which two rows of one class and size are NEVER pooled into one cell: a row of

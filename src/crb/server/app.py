@@ -24,7 +24,8 @@ Navigation
 What it is:   The FastAPI application factory — ``create_app`` and the pure-ASGI middleware
               stack, error envelope and router seam it assembles.
 What it does: Opens the store in the lifespan and refuses to start unless the append-only
-              triggers are provably live; seeds the bootstrap admin once; wraps every
+              triggers are provably live; seeds the bootstrap admin once; records any
+              Claude sign-in the helper finished while nothing read it back (EI-8); wraps every
               request in request-id, access-log + metrics, security headers, CSRF and
               domain-error middleware; converts every failure into the one error envelope;
               mounts each ``crb.server.routes.*`` router under ``/api/v1`` and the built UI
@@ -468,6 +469,26 @@ def register_routers(app: FastAPI, *, prefix: str = API_PREFIX) -> list[str]:
 # --- factory -----------------------------------------------------------------------
 
 
+def _record_stored_logins_at_start(factory: sessionmaker[Session], settings: Settings) -> None:
+    """EI-8: a Claude sign-in the helper finished while nothing read it back is recorded
+    before the first request — naming the admin who started it, with the helper's own
+    ``stored_at``. A failure here is logged, never fatal: the next read of the secrets list
+    or of a sign-in session records it instead."""
+    from sqlalchemy.exc import SQLAlchemyError  # noqa: PLC0415
+
+    from crb.server.claude_login import LoginError  # noqa: PLC0415
+    from crb.server.routes.admin import record_stored_logins  # noqa: PLC0415 — routes load late
+    from crb.server.secrets import get_login_broker  # noqa: PLC0415
+
+    try:
+        with factory() as db:
+            record_stored_logins(db, get_login_broker(settings))
+    except (OSError, ValueError, SQLAlchemyError, LoginError):
+        log.warning(
+            "finished Claude sign-ins not recorded at start; the next read will", exc_info=True
+        )
+
+
 def _lifespan_factory(
     settings: Settings, session_factory: sessionmaker[Session] | None
 ) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
@@ -497,6 +518,7 @@ def _lifespan_factory(
         # so a database that held nothing reads as this start being the install
         stamp_install(factory)
         bootstrap_admin_if_empty(factory, settings)
+        _record_stored_logins_at_start(factory, settings)
         # Mounted at startup (not in the factory) so routes a caller adds after
         # create_app() still take precedence over the catch-all SPA mount.
         if not getattr(app.state, "ui_mounted", False):

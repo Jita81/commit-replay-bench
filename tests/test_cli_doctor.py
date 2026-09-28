@@ -46,9 +46,9 @@ Works with:   src/crb/cli/commands/service.py (under test), src/crb/builders/cla
               with ``/health``), tests/test_builders_claude_code.py (the same sources at the
               builder), docs/OPERATOR.md#11-check-the-installation-crb-doctor
 Tested by:    tests/test_cli_doctor.py
-Touch when:   never for a new repository; a token source or auth mode is added (a status case
-              naming it); a doctor line is added (its ok, warn and fail cases with the fix
-              named).
+Touch when:   never for a new repository; a token source or auth mode is added (a status
+              case naming it); a doctor line is added (its ok, warn and fail cases with the
+              fix named).
 """
 
 from __future__ import annotations
@@ -635,7 +635,11 @@ class TestDoctorReport:
         assert rows["settings"][0] == "ok" and rows["home"][0] == "warn"  # dev, under tmp
         assert rows["dev_autologin"] == ("ok", "off")  # off unless CRB_AUTH__DEV_AUTOLOGIN
         assert rows["github_app"][0] == "skip"
-        assert rows["database"] == ("ok", "answers · triggers present; UPDATE on grades refused")
+        # a fresh store has no grades row: the line never claims an UPDATE it did not try
+        assert rows["database"] == (
+            "ok",
+            "answers · triggers present; no grades row to test the UPDATE on",
+        )
         assert rows["migrations"] == ("ok", f"database at {migrate.head_revision()} = code head")
         # no worker has ever checked in on this fresh store: /health's worker probe says so
         # (degraded, never down); doctor renders it as warn

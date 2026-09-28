@@ -77,7 +77,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `dev_autologin` | whether automatic sign-in is on (`CRB_AUTH__DEV_AUTOLOGIN`, [§9.1](#91-automatic-sign-in-on-a-development-stack)) and, if so, for which account | — (`warn` while it is on: a development stack only; `skip` when the settings cannot be read) |
 | `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
-| `database` | the store answers and is initialised, every append-only trigger is present and they fire (an UPDATE on `grades` is refused) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
+| `database` | the store answers and is initialised, every append-only trigger is live (present with the installer's own definition) and, once `grades` has a row, an UPDATE on it is refused (a fresh store says no UPDATE was tried) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
@@ -926,10 +926,26 @@ of the affected cells.
 
 ## 9. Users
 
-An admin manages accounts through the API (`/users`, [API.md](API.md#admin): create, role,
-password, active; the Settings screen lists accounts and changes roles), and — when no
-admin can sign in — with `crb users` on the API host. The host
-verbs need no login: access to the host and the database is the credential. They read the
+An admin manages accounts on the **Settings screen**, in the Users card: every account with
+its role, whether it is local or issued by your identity provider, whether it is active, and
+how long ago it last signed in. From that card an admin changes a role, turns an account off
+and on again, sets a new password (typed twice, never shown back), signs the account out
+everywhere, reads the account's own history (its changes and its sign-ins), and creates a
+local account. Anyone signed in changes their own password
+in the "Change my password" card on the same screen. The same acts are at the API (`/users`,
+[API.md](API.md#admin)) and — when no admin can sign in at all — in `crb users` on the API
+host.
+
+**Not on this screen, deliberately.** There is no email reset, no self-service unlock and no
+security questions: the second door is the host, not the person's inbox. An account that signs
+in through your identity provider has no password here — it is disabled and reset at the
+provider. The last active admin cannot be deactivated or demoted, so its own toggle and role
+select are disabled with the reason as their hint, rather than refused after the attempt. Nor
+can the last admin who can sign in: with `CRB_LOCAL_AUTH_ENABLED=false`, a local admin left
+active does not count, so the server refuses (`last_admin`) to take the only OIDC admin even
+while the screen, which does not know the sign-in settings, shows the controls enabled.
+
+The host verbs need no login: access to the host and the database is the credential. They read the
 database `crb serve` reads (`--database-url` → `CRB_DATABASE_URL` → `$CRB_HOME/crb.db`),
 so run them with the service's environment (the same `CRB_DATABASE_URL`; on a host, source
 the unit's `EnvironmentFile` first; in the container, `kubectl exec` into the API pod). A
@@ -941,7 +957,7 @@ crb users list                       # username, role, active, issuer, last logi
 crb users create <name> --role admin # password from a prompt or CRB_USERS_PASSWORD_FILE
 crb users set-password <name>        # its sessions end on their next request
 crb users deactivate <name>          # refused for the last active admin (last_admin)
-crb users activate <name>            # restores sessions issued before the deactivation
+crb users activate <name>            # can sign in again; old sessions stay ended
 ```
 
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
@@ -954,35 +970,61 @@ A password is never a command-line argument (shell history, `ps`): the verbs pro
 read the first line of the file `CRB_USERS_PASSWORD_FILE` names when there is no terminal
 (a deployment script; delete the file afterwards). Passwords are ≥ 12 characters and are
 stored as argon2id hashes only. An account that signs in through the organisation's
-identity provider has no local password; disable it there.
+identity provider has no local password: its password belongs to the provider. Turning it
+off here (the Users card's **Active** toggle, or `crb users deactivate`) refuses it on this
+deployment; disabling it at the provider stops it everywhere.
 
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
-`user.deactivated`, `user.sessions_revoked`, `user.role_overridden`) with the actor (the
-admin's user id, or `cli:<os user>`) and the target; never the password. Setting a password
-ends the account's sessions on their next request (the cookie is bound to the credential it
-was issued under —
+`user.deactivated`, `user.sessions_revoked`, `user.sessions_ended` (a sign-out),
+`user.role_overridden`, `user.role_override_refused`) with the actor (the
+admin's user id, or `cli:<os user>`) and the target; never the password. The History names
+an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
+too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
+is no account here is recorded without the name, and the server log writes it as
+`(not an account)`, so a password typed into the username box is stored in neither (DL-068). `GET /users/{id}/events`
+serves that trace, and the Users card's **History** button renders it under the account, so who
+reset or disabled an account is read in the product and not only in the database. Setting a
+password ends the account's sessions on their next request (it rotates the session nonce the
+cookie is bound to, DL-069 —
 [SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 
 **Signing out ends the session everywhere.** Signing out (`POST /auth/logout`, the
 **Sign out** button) ends every session of that account, on every device, not only the
 browser you clicked in. An admin can do the same for somebody else —
-`POST /users/{id}/sessions/revoke`, "sign out everywhere" — for a lost laptop or a
-leaver; it works for an identity-provider account too, which has no password here to
+the Users card's **Sign out everywhere** button (`POST /users/{id}/sessions/revoke`) — for
+a lost laptop or a leaver; it works for an identity-provider account too, which has no password here to
 change. The person can sign in again at once; deactivate the account as well to keep them
 out.
 
-Deactivating refuses every request while the account is inactive, but does not move the
-credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hours by
-default) restores the sessions issued before. To contain a suspected compromise, deactivate
-**and** sign the account out everywhere (or set a new password); either ends the sessions
-for good. The last active admin can never be deactivated, by either door.
+Deactivating refuses every request while the account is inactive and ends every session it
+held, on every device: it rotates the account's session nonce, as "sign out everywhere"
+does. Re-activating it brings none of them back, a stolen cookie included; the person signs
+in again. So deactivating alone contains a suspected compromise; set a new password as well
+when the password itself may be known. The last active admin can never be deactivated, by
+either door.
+
+**How long a recovery takes, and what it costs.** Neither door calls a model, so a recovery
+spends nothing. By the admin door — a wrong password on `/login`, which names who sets a new
+one; an admin sets it from the Users card; the old session is refused; the person signs in
+again — the machine-walked journey takes about a second
+**[measured — n = 2 walks, 658 ms and 1.13 s; method: `ui/e2e/walkthrough/13-recover-an-account.spec.ts`
+times the walk from the wrong password to the new sign-in (its `recovery-ms` annotation and
+log line) on a temporary tier-1 stack on the operator's Mac mini, 2026-09-26 and 2026-09-27;
+apparatus 2.3]**, and the spec fails if it ever takes 60 seconds. By the host door,
+`crb users set-password` itself takes about 2 seconds **[hypothesis — five runs by hand on
+2026-09-26 took 1.5 to 2.4 s, but no script in the repository reruns them (G-466)]**. A person
+adds the time to reach an admin or the API host and to read and type **[gap — nobody has
+timed a person doing it; G-466]**.
 
 **Roles from the identity provider.** The provider's claims set an account's role the first
 time it signs in. After that the role is yours to change on the Settings screen, and the
 next sign-in does not undo it. If your organisation manages roles in the provider instead,
 set `CRB_OIDC__ROLE_FROM_CLAIMS=always`: every sign-in then applies the claims, and each time
-that changes a role the account's trail records `user.role_overridden`
+that changes a role the account's trail records `user.role_overridden`. The claims never
+demote the last active admin — nor the last who can sign in, so a local admin left active
+with local sign-in off does not count — that sign-in keeps the admin role and records
+`user.role_override_refused` — fix the claims at the provider, or add a second admin
 ([DEPLOYMENT §2.1](DEPLOYMENT.md#21-environment-reference)).
 
 ### 9.1 Automatic sign-in on a development stack

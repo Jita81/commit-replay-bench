@@ -48,9 +48,9 @@ Works with:   src/crb/core/qualify.py (``qualify_task``, ``GoldWitness``),
               deploy/sandbox/Dockerfile.go (the shipped image), tests/conftest_langs.py (the
               image and the cache directory)
 Tested by:    tests/test_posture_docker.py
-Touch when:   the sealed posture's contract changes. The per-task module cache (stream D) is
-              proven end to end in tests/test_posture_e2e_docker.py; this suite keeps the
-              "nothing provisioned" and the baked-image shapes.
+Touch when:   never for a new repository; the sealed posture's contract changes. The per-task module
+              cache (stream D) is proven end to end in tests/test_posture_e2e_docker.py; this suite
+              keeps the "nothing provisioned" and the baked-image shapes.
 """
 
 from __future__ import annotations

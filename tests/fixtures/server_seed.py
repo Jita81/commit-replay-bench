@@ -47,10 +47,11 @@ Works with:   src/crb/store/ledger.py (the write path every row goes through),
 Tested by:    tests/test_server_routes_capability.py, tests/test_server_routes_runs.py,
               tests/test_server_routes_signoffs.py, tests/test_server_routes_ledger.py (every
               ``test_server_routes_*`` module)
-Touch when:   a route needs a run status, event kind or cell shape the seed lacks (add it here
-              and update every count the route tests assert — the seed's numbers are load-bearing:
-              Wilson lower ≈ 0.835 on the deliver cell, n = 4 on the thin one); a column is added
-              to ``GradeRow`` (``_result`` must still produce a pack whose grade matches).
+Touch when:   never for a new repository; a route needs a run status, event kind or cell shape the
+              seed lacks (add it here and update every count the route tests assert — the seed's
+              numbers are load-bearing: Wilson lower ≈ 0.835 on the deliver cell, n = 4 on the thin
+              one); a column is added to ``GradeRow`` (``_result`` must still produce a pack whose
+              grade matches).
 """
 
 from __future__ import annotations

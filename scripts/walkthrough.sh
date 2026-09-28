@@ -63,8 +63,9 @@
 #               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
 #               (the ``walkthrough`` job)
 # Tested by:    tests/test_walkthrough_script.py (the preflight: which checkout the stack
-#               imports), ui/e2e/walkthrough/01-login.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
-#               (the suite it drives; CI runs it end to end)
+#               imports; streams D and A1), tests/test_walkthrough_serves_this_tree.py (a foreign crb on the
+#               path is never served), ui/e2e/walkthrough/01-login.spec.ts,
+#               ui/e2e/walkthrough/05-replay-fake.spec.ts (the suite it drives; CI runs it end to end)
 # Touch when:   never for a new repository; a spec needs another ``CRB_E2E_*`` variable (export it
 #               in step 4 and document it in the README); the server or worker CLI flags change;
 #               never to inherit an existing home, database or port.
@@ -99,6 +100,12 @@ if [[ ! -x "$CRB" ]]; then
   echo "walkthrough: $CRB missing — install the [server] extra" >&2
   exit 2
 fi
+# The stack must run THIS checkout's code. A venv shared between worktrees has an editable
+# install pointing at one checkout, and without this the server, the worker and the fixture
+# would import that checkout's crb while the specs come from this one — a run can then pass
+# or fail on code that is not under test (P-168: a qualify run refused 422 by another
+# checkout's server). PYTHONPATH puts this checkout first; the check below proves it did.
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 if ! "$PY" -c "import crb.server.app" 2>/dev/null; then
   echo "walkthrough: the server layer is not installed in $PY (pip install -e '.[server,dev]')" >&2
   exit 2
@@ -141,7 +148,10 @@ then
 fi
 echo "walkthrough: crb imports from $ROOT/src" >&2
 if [[ "${CRB_E2E_PREFLIGHT_ONLY:-0}" == "1" ]]; then
-  exit 0   # tests/test_walkthrough_script.py: the preflight, and nothing created
+  # tests/test_walkthrough_script.py and tests/test_walkthrough_serves_this_tree.py: the
+  # preflight, and nothing created
+  echo "walkthrough: preflight passed — serving $(cd "$ROOT/src/crb" && pwd -P)"
+  exit 0
 fi
 command -v git >/dev/null || { echo "walkthrough: git is required" >&2; exit 2; }
 command -v npx >/dev/null || { echo "walkthrough: node/npx is required" >&2; exit 2; }
@@ -211,7 +221,7 @@ fi
 # it is running, while a `limit 3` mine (03) still returns in seconds.
 FIXTURE_SRC="$WORK/fixture-src"
 FIXTURE_BARE="$WORK/pyrepo.git"
-(cd "$ROOT" && PYTHONPATH="$ROOT/tests" "$PY" - "$FIXTURE_SRC" "${CRB_E2E_PAD:-40}" <<'PYEOF'
+(cd "$ROOT" && PYTHONPATH="$ROOT/tests:$PYTHONPATH" "$PY" - "$FIXTURE_SRC" "${CRB_E2E_PAD:-40}" <<'PYEOF'
 import sys
 from pathlib import Path
 from fixtures import pyrepo

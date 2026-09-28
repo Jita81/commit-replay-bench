@@ -11,7 +11,8 @@
  *               non-terminal; rows open the run page. `?new=<kind>` opens the run dialog
  *               pre-set to that kind (how "Start a replay run" links from empty states
  *               arrive here) only for a role that can start one; a viewer or approver
- *               reads who acts instead (J-FAC-12); operators get "Start run".
+ *               reads who acts instead (J-FAC-12); operators get "Start run". `&tasks=<sha,…>`
+ *               fills the dialog's task ids and `&from=learn` its loop-step line (G-352).
  * How:          `useRepoParam` + `useSearchParams` for the filters → `useRuns` → `DataTable`;
  *               `RunNewDialog` navigates to the new run on success.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -25,8 +26,8 @@
  *               kind; ?new= opens the dialog for an operator only), ui/e2e/walkthrough/03-mine.spec.ts (the Runs list shows the run, the
  *               progress bar reports the run's own counts), ui/e2e/walkthrough/06-cancel.spec.ts,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a run kind is added (src/crb/core/run.py, docs/API.md "Runs") — extend
- *               `RunKind` in ui/src/api/types.ts; never for a new repository.
+ * Touch when:   never for a new repository; a run kind is added (src/crb/core/run.py, docs/API.md
+ *               "Runs") — extend `RunKind` in ui/src/api/types.ts.
  */
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
@@ -76,6 +77,8 @@ export function RunsPage() {
   const kind = (params.get('kind') ?? '') as RunKind | ''
   const status = (params.get('status') ?? '') as RunStatus | ''
   const initialNew = params.get('new')
+  // a hand-off names the tasks too (Learn's re-qualify and re-score links, G-352)
+  const initialTasks = (params.get('tasks') ?? '').split(',').map((t) => t.trim()).filter(Boolean)
   const [starting, setStarting] = useState(initialNew !== null)
   const { can } = useAuth()
   const navigate = useNavigate()
@@ -181,10 +184,18 @@ export function RunsPage() {
         open={starting && can('operator')}
         onClose={() => {
           setStarting(false)
-          if (initialNew !== null) setFilter('new', '')
+          if (initialNew !== null || initialTasks.length) {
+            const next = new URLSearchParams(params)
+            next.delete('new')
+            next.delete('tasks')
+            next.delete('from')
+            setParams(next, { replace: true })
+          }
         }}
         repo={repo || undefined}
         initialKind={(initialNew as RunKind) || 'replay'}
+        initialTaskIds={initialTasks}
+        from={params.get('from') ?? undefined}
         onCreated={(run) => navigate(`/runs/${run.id}`)}
       />
     </>

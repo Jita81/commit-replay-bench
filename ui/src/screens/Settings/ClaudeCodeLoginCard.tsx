@@ -11,8 +11,8 @@
  *               only (`{name, present}`); admins can paste a token (a `type="password"`
  *               field, cleared the moment the server accepts it — the value is not kept in
  *               state), verify it (the probe's status, model, CLI version and duration) and
- *               remove it. A shape rejection or a rate limit renders as the envelope without
- *               echoing the token.
+ *               remove it — after a confirm step, so one click never deletes it. A shape
+ *               rejection or a rate limit renders as the envelope without echoing the token.
  * How:          `useSecrets` → `StatusLine`; the form calls `useSaveClaudeCodeToken`;
  *               `CHECK_DISPLAY` maps a `LoginCheck` status to tone / glyph / wording.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -25,8 +25,8 @@
  *               mode that consumes the stored token)
  * Tested by:    ui/src/screens/Settings/ClaudeCodeLoginCard.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a `LoginCheckStatus` is added on the server (src/crb/server/secrets.py) —
- *               add its `CHECK_DISPLAY` row; never for a new repository.
+ * Touch when:   never for a new repository; a `LoginCheckStatus` is added on the server
+ *               (src/crb/server/secrets.py) — add its `CHECK_DISPLAY` row.
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from '../../components/Button'
@@ -107,7 +107,7 @@ function StatusLine({ status }: { status: SecretListItem | undefined }) {
 function CheckResult({ check }: { check: LoginCheck }) {
   const d = CHECK_DISPLAY[check.status] ?? CHECK_DISPLAY.error
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-login-verify-result" data-status={check.status}>
+    <div role="status" className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-login-verify-result" data-status={check.status}>
       <Pill tone={d.tone} glyph={d.glyph} label={`Verify: ${d.label}`} hint="pill.settings.verify">
         {d.label}
       </Pill>
@@ -232,7 +232,7 @@ function SignInPanel({ onDone }: { onDone: () => void }) {
         </form>
       )}
       {s && LOGIN_TERMINAL.has(s.state) && (
-        <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-signin-result" data-state={s.state}>
+        <div role={s.state === 'failed' ? 'alert' : 'status'} className="flex flex-wrap items-center gap-2 text-xs" data-testid="claude-signin-result" data-state={s.state}>
           <Pill tone={s.state === 'done' ? 'green' : s.state === 'failed' ? 'red' : 'muted'} glyph={s.state === 'done' ? '✓' : s.state === 'failed' ? '✕' : '–'} label={`Sign-in ${s.state}`} hint="pill.settings.signin_state">
             {s.state === 'done' ? `signed in · token stored …${s.fingerprint}` : s.state}
           </Pill>
@@ -259,6 +259,7 @@ export function ClaudeCodeLoginCard() {
   const remove = useRemoveClaudeCodeToken()
   const verify = useVerifyClaudeCodeToken()
   const [token, setToken] = useState('')
+  const [asking, setAsking] = useState(false)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -327,9 +328,9 @@ export function ClaudeCodeLoginCard() {
                 variant="danger"
                 onClick={() => {
                   verify.reset()
-                  remove.mutate()
+                  setAsking(true)
                 }}
-                disabled={remove.isPending || !claudeCodeStatus(secrets.data)?.present}
+                disabled={remove.isPending || asking || !claudeCodeStatus(secrets.data)?.present}
                 data-testid="claude-login-remove"
                 hint="button.settings.remove_token"
               >
@@ -337,6 +338,26 @@ export function ClaudeCodeLoginCard() {
               </Button>
               <span className="text-xs text-on-surface-muted">Verify runs one no-tool Haiku turn through the builder&rsquo;s own environment (at most once every 10 s).</span>
             </div>
+            {asking && (
+              // one click asks; the second deletes (G-922)
+              <div role="group" aria-label="Confirm removing the token" className="flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-status-red/40 p-3 text-sm" data-testid="claude-login-remove-confirm">
+                <span>Remove the stored token? Runs in auth: cli mode will fail until a new one is stored.</span>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  hint="button.settings.remove_token_confirm"
+                  onClick={() => {
+                    setAsking(false)
+                    remove.mutate()
+                  }}
+                >
+                  Yes, remove it
+                </Button>
+                <Button size="sm" variant="ghost" hint="button.settings.remove_token_keep" onClick={() => setAsking(false)}>
+                  Keep it
+                </Button>
+              </div>
+            )}
             {verify.data && <CheckResult check={verify.data} />}
             {verify.isError && <ErrorState compact error={verify.error} />}
             {remove.isError && <ErrorState compact error={remove.error} />}
