@@ -263,15 +263,18 @@ the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
 `$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
 at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
 `--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
-pin Python as `name==version` in `requirements*.txt` or commit a `uv.lock` (or name the
-files in `runner_opts.deps_lock`, where a list of alternatives lets one repository's history
-move from one lock to another, and the uv groups to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+pin Python as `name==version` in `requirements*.txt`, or commit a `uv.lock`, `poetry.lock`
+or `pylock.toml` (each is read into the same pinned, hashed set; a requirements file wins
+when both are committed), or name the files in `runner_opts.deps_lock` (where a list of
+alternatives lets one repository's history move from one lock to another, and the uv groups
+to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
 package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
 version does not provision is refused with its `PROVISION_*` code and the fix
 ([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
 provisioning off, a repository that declares dependencies is refused `PROVISION_DISABLED`
 under docker before any spend. `crb deps ls | verify | gc` shows, re-proves and trims the
-sealed sets; the `provision` line of `crb doctor` says whether it can work on this host.
+sealed sets, and `crb deps verify --quarantine` moves a damaged set aside and revokes the
+qualifications that cite it, as a run does when it meets one (G-966); the `provision` line of `crb doctor` says whether it can work on this host.
 
 `crb repo setup <name>` (CLI) and the `setup` run kind (`POST /runs {"kind": "setup"}` —
 server) call the same runner method on the host (the local posture). Per language:
@@ -931,7 +934,7 @@ Posture panel lists each with how many tasks it keeps out.
 | `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
 | `POSTURE_DRIFT` | run | the image, toolchain, limits or runner environment changed after qualification: qualify again |
 | `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
-| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
+| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify --quarantine`, which moves any damaged set aside and revokes what cites it (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |
 | `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
 | `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the test is not deterministic in this posture |
@@ -1101,6 +1104,18 @@ apparatus 2.3]**, and the spec fails if it ever takes 60 seconds. By the host do
 2026-09-26 took 1.5 to 2.4 s, but no script in the repository reruns them (G-466)]**. A person
 adds the time to reach an admin or the API host and to read and type **[gap — nobody has
 timed a person doing it; G-466]**.
+
+**Going live leaves no local admin behind.** The *sign-in* line of the go-live checklist
+([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)) reads *proven* on the Deployment page only
+while the product itself can see all four parts: an account from your identity provider has
+signed in, `CRB_LOCAL_AUTH_ENABLED=false`, `CRB_BOOTSTRAP_ADMIN__*` is unset, and every active
+local admin has had a password set since it was created — by either door above — or has been
+deactivated. Until then the line says which part does not hold. The checklist's other acts,
+the ones only you can do on your own infrastructure, are recorded by an admin on this same
+screen under **Go-live attestations**
+([DEPLOYMENT §8.1](DEPLOYMENT.md#81-record-what-only-you-can-prove)); each record is a
+`golive.attested` event naming the admin, on the deployment's own `golive` trace, not on an
+account's History.
 
 **Roles from the identity provider.** The provider's claims set an account's role the first
 time it signs in. After that the role is yours to change on the Settings screen, and the

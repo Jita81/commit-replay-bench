@@ -29,6 +29,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HINTS } from '../help/hints'
 import { PosturePage } from '../screens/Posture/PosturePage'
+import { GOLIVE } from '../test/golive'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
 import { collectHints } from './Help'
 import { ConfirmationPanel, Details, NotificationBanner, SummaryList, Tag, TaskList } from './govuk'
@@ -121,10 +122,11 @@ describe('govuk patterns', () => {
 describe('PosturePage', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('renders the four groups from the API and never a secret', async () => {
+  it('renders the five groups from the API and never a secret', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
-      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1, belt_set: 'v5', signoff_policy: 'signoff-policy.v3', licence: 'Apache-2.0' },
+      'GET /golive': GOLIVE,
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} }, { name: 'toolchains', status: 'ok', detail: 'all present', data: {} }, { name: 'ledger', status: 'ok', detail: '592 rows, false_q1=0', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present; UPDATE on grades refused', data: {} }] },
       'GET /ledger/verify': { rows: 592, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
@@ -133,7 +135,10 @@ describe('PosturePage', () => {
     renderApp(<PosturePage />, { route: '/posture' })
     await waitFor(() => expect(screen.getByText('crb 2.0.0a1')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'About this deployment' })).toBeInTheDocument()
+    // the five groups, each a level-2 heading in the page's order (G-214: the title once said four)
+    for (const g of ['Build and apparatus', 'Identity and access', 'Execution and egress', 'Delivery', 'Data and audit']) expect(screen.getByRole('heading', { level: 2, name: g })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Build and apparatus' }).parentElement).toHaveTextContent(/2.2 · belt set .* v5 · routing routing.v1/)
+    expect(screen.getByRole('heading', { name: 'Build and apparatus' }).parentElement).toHaveTextContent('routing.v1 (routing) · signoff-policy.v3')
     expect(screen.getByText('Append-only, hash-chained · 592 rows · chain intact · false-Q1 0')).toBeInTheDocument()
     expect(screen.getByText(/GitHub App not configured — repositories connect by URL/)).toHaveTextContent('register the app once for this deployment')
     expect(screen.getAllByText('shown to admins').length).toBeGreaterThan(0)

@@ -32,6 +32,15 @@ knows about). Run `GET /health`: every probe must be `ok` except `sandbox` (whic
 up like one), who the approvers are, and whether builder transcripts are retained
 ([DATA-RETENTION.md](DATA-RETENTION.md): default zero raw retention).
 
+**Going live** is the [go-live checklist](DEPLOYMENT.md#8-go-live-checklist). Each line is
+marked *product proves* (the Deployment page runs the check) or *operator attests* (your own
+act on your own infrastructure — the egress test, the backup rehearsal, the digest check, the
+alert rules, the penetration test — which an admin records on Settings, with the day and what
+was done). **Not here:** connecting a repository (Step 1), recovering an account
+([OPERATOR §9](OPERATOR.md#9-users)) and measuring anything are other steps, so do not look
+for them on the Deployment page. Step 0 buys no attempts; how long it took on the one shape
+timed so far is in [DEPLOYMENT §8.1](DEPLOYMENT.md#81-record-what-only-you-can-prove).
+
 ## Sign in and find your way (everyone, once)
 
 Before anyone connects a repository, each person signs in and finds their way. The sign-in page

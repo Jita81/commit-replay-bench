@@ -10,7 +10,8 @@
  *               a screen passes no `eyebrow`, the eyebrow is `journeyEyebrow(pathname)` — the
  *               journey position derived from the route — or nothing on a non-journey route.
  *               A journey eyebrow is a `<Hint id="nav.journey_position">` trigger, so hover,
- *               focus or tap say what the position means.
+ *               focus or tap say what the position means; the go-live journey's eyebrow
+ *               (`deployEyebrow`, ui/src/lib/deployJourney.ts) is a `nav.deploy_position` one.
  * How:          A flex `<header>`; `useLocation` for the default eyebrow, nothing else stateful.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -26,6 +27,7 @@
  */
 import type { ReactNode } from 'react'
 import { useLocation } from 'react-router'
+import { DEPLOY_PREFIX } from '../lib/deployJourney'
 import { Hint } from './Hint'
 import { journeyEyebrow } from './Layout'
 
@@ -46,7 +48,18 @@ export function PageHeader({ eyebrow, title, purpose, actions }: PageHeaderProps
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0 space-y-1">
-        {line && (line.startsWith('Journey') ? <Hint as="div" id="nav.journey_position" className="label">{line}</Hint> : <div className="label">{line}</div>)}
+        {line &&
+          (line.startsWith('Journey') ? (
+            <Hint as="div" id="nav.journey_position" className="label">
+              {line}
+            </Hint>
+          ) : line.startsWith(DEPLOY_PREFIX) ? (
+            <Hint as="div" id="nav.deploy_position" className="label">
+              {line}
+            </Hint>
+          ) : (
+            <div className="label">{line}</div>
+          ))}
         <h1>{title}</h1>
         {purpose && <p className="max-w-3xl text-sm text-on-surface-muted">{purpose}</p>}
       </div>

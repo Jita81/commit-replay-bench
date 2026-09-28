@@ -115,7 +115,7 @@ export function AboutThisScreen() {
   // collected when the block opens, so the list is what the reader sees on the page now
   const onToggle = (open: boolean) => setElements(open ? collectHints(document) : null)
   return (
-    <section aria-labelledby="about-screen-summary" data-testid="about-this-screen" className="border-t border-border pt-6">
+    <section aria-labelledby="about-screen-summary" data-testid="about-this-screen" className="border-t border-border pt-6 print:hidden">
       <Details summary="About this screen" id="about-screen" onToggle={onToggle}>
         <h3 className="mb-1 mt-0 text-[16px]">What this screen is for</h3>
         <p className="mb-4 mt-0">{help.purpose}</p>

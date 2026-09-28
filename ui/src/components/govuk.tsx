@@ -156,8 +156,8 @@ export function SummaryList({ rows, label }: { rows: SummaryRow[]; label?: strin
         // (the link's focus opens it), a row without one is
         const cells = (
           <>
-            <dt className="text-[19px] font-bold leading-[1.47]">{r.key}</dt>
-            <dd className="m-0 text-[19px] leading-[1.47]">
+            <dt className="text-[19px] font-bold leading-[1.47] [overflow-wrap:anywhere]">{r.key}</dt>
+            <dd className="m-0 text-[19px] leading-[1.47] [overflow-wrap:anywhere]">
               {r.value}
               {r.note && <div className="text-[16px] leading-[1.5] text-on-surface-muted">{r.note}</div>}
             </dd>

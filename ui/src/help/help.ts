@@ -188,8 +188,8 @@ export const HELP: ScreenHelp[] = [
     route: '/posture',
     purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
     next: {
-      viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin.',
-      admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence.',
+      viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin. The page changes nothing: its one button prints it. It shows the go-live checklist’s state, line by line, but it is not the checklist and ticks nothing — an admin records the operator’s own acts on Settings.',
+      admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence. Record each go-live act only you can do on Settings, under Go-live attestations.',
     },
     numbers: 'Ledger rows, chain state and false-Q1 total come from the live verification; the belt set and policy names are the versions in force. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['apparatus', 'belt', 'false_q1', 'cell'],
@@ -197,6 +197,8 @@ export const HELP: ScreenHelp[] = [
       { to: 'SECURITY#2-trust-boundaries', label: 'Trust boundaries' },
       { to: 'DATA-RETENTION#2-retention-defaults-zero-raw-retention', label: 'Retention defaults' },
       { to: 'DEPLOYMENT', label: 'Deploying Commit Replay Bench' },
+      { to: 'DEPLOYMENT#8-go-live-checklist', label: 'The go-live checklist' },
+      { to: 'OPERATOR#9-users', label: 'Users, and what to do when nobody can sign in' },
     ],
   },
   {
@@ -344,7 +346,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The instrument’s health, the builder sign-in, the GitHub App, your own password and, for admins, the non-secret configuration and user accounts. Secrets are never returned by the API and never shown here.',
     next: {
       viewer: 'Read the health probes and change your own password; ask an admin for anything else.',
-      admin: 'Register the GitHub App, store the builder token, create an approver account. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. A probe that is not ok explains itself in its detail line.',
+      admin: 'Register the GitHub App, store the builder token, create an approver account. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. Under Go-live attestations, record each act only you can do, with the day and what was done. A probe that is not ok explains itself in its detail line.',
     },
     numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and deactivating an account ends every session it held, so reactivating it brings none of them back.',
     terms: ['apparatus', 'negative_controls'],
@@ -353,6 +355,8 @@ export const HELP: ScreenHelp[] = [
       { to: 'SECURITY#33-credentials', label: 'How credentials are held' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
       { to: 'OPERATOR#9-users', label: 'Users, and what to do when nobody can sign in' },
+      { to: 'DEPLOYMENT#8-go-live-checklist', label: 'The go-live checklist' },
+      { to: 'DEPLOYMENT#81-record-what-only-you-can-prove', label: 'Record what only you can prove' },
     ],
   },
   // The four shell screens (G-926): the sign-in page, the help pages and the catch-all carry an

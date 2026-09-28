@@ -285,4 +285,5 @@ by line from pins that are each matched again, so no option can reach pip from a
 reads the first one it carries, and a commit that carries none is refused `PROVISION_NO_LOCK`
 naming them all. A repository whose history moved from a requirements lock to `uv.lock`
 (click, in May 2025) is provisioned from one declaration. A plain entry is still one that
-every commit must carry. `poetry.lock`, `pylock.toml` and `Pipfile.lock` stay refused (G-951).
+every commit must carry. `poetry.lock` and `pylock.toml` are read since ADR-0031 (DL-109);
+`Pipfile.lock` stays refused.

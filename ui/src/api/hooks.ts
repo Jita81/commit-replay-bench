@@ -78,6 +78,7 @@ import type {
   FactoryCatalogue,
   FactoryTask,
   Flow,
+  GoLive,
   ForecastBuild,
   ForecastReadiness,
   GradeListParams,
@@ -140,6 +141,7 @@ export function currentData<T>(q: { data: T | undefined; isError: boolean }): T 
 export const keys = {
   health: ['health'] as const,
   version: ['version'] as const,
+  golive: ['golive'] as const,
   me: ['auth', 'me'] as const,
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
@@ -195,6 +197,39 @@ export function useHealth(): UseQueryResult<Health, ApiError> {
 /** `GET /version` — crb, apparatus and policy versions; never refetched (they change only on deploy). */
 export function useVersion(): UseQueryResult<Version, ApiError> {
   return useQuery({ queryKey: keys.version, queryFn: () => api<Version>('/version'), retry: false, staleTime: Infinity })
+}
+
+// ---------------------------------------------------------------------------
+// Go-live (ADR-0031)
+// ---------------------------------------------------------------------------
+
+/** `GET /golive` — every go-live line with its state now (any signed-in role). */
+export function useGoLive(): UseQueryResult<GoLive, ApiError> {
+  return useQuery({ queryKey: keys.golive, queryFn: () => api<GoLive>('/golive'), retry: false, staleTime: 30_000 })
+}
+
+/** `PUT /settings/attestations/{line}` (admin) — record that an operator act was done. */
+export function useAttest(): UseMutationResult<GoLive, ApiError, { line: string; statement: string; performed_on: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ line, statement, performed_on }) => api<GoLive>(`/settings/attestations/${enc(line)}`, { method: 'PUT', body: { statement, performed_on } }),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.golive, data)
+      void qc.invalidateQueries({ queryKey: ['flow'] })
+    },
+  })
+}
+
+/** `DELETE /settings/attestations/{line}` (admin) — withdraw the attestation in force. */
+export function useWithdrawAttestation(): UseMutationResult<GoLive, ApiError, { line: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ line }) => api<GoLive>(`/settings/attestations/${enc(line)}`, { method: 'DELETE' }),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.golive, data)
+      void qc.invalidateQueries({ queryKey: ['flow'] })
+    },
+  })
 }
 
 // ---------------------------------------------------------------------------

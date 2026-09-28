@@ -185,6 +185,51 @@ export interface Version {
   policy: string
   /** An organisation (OpenID Connect) sign-in is configured; unauthenticated, names nothing. */
   oidc_enabled: boolean
+  /** The belt set grade rows are written under now (G-212: read, never stated by the page). */
+  belt_set?: string
+  /** The sign-off policy the write boundary enforces now. */
+  signoff_policy?: string
+  /** The package's licence (pyproject.toml's `license`). */
+  licence?: string
+}
+
+// ---------------------------------------------------------------------------
+// Go-live (docs/DEPLOYMENT.md §8, ADR-0031)
+// ---------------------------------------------------------------------------
+
+/** Who recorded an operator act, the day it was done, when it was recorded, and what was done. */
+export interface Attestation {
+  by: string
+  actor: string
+  performed_on: string
+  recorded_at: string
+  statement: string
+}
+
+/** Who can make a go-live line true: the product by its own check, or the operator by an act. */
+export type GoLiveProves = 'product' | 'operator'
+/** proven — the product's check passed now; attested — an admin's record is in force; unproven — neither. */
+export type GoLiveState = 'proven' | 'attested' | 'unproven'
+
+export interface GoLiveLine {
+  id: string
+  title: string
+  proves: GoLiveProves
+  /** Where the state comes from, in words. */
+  source: string
+  /** The guide anchor, `DEPLOYMENT#8-go-live-checklist` style. */
+  doc: string
+  state: GoLiveState
+  /** Why the line reads as it does: what passed, what failed, or who recorded it. */
+  detail: string
+  attestation: Attestation | null
+}
+
+/** `GET /golive`. */
+export interface GoLive {
+  lines: GoLiveLine[]
+  counts: { lines: number; proven: number; attested: number; unproven: number }
+  checked_at: string
 }
 
 // ---------------------------------------------------------------------------

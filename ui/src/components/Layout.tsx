@@ -14,8 +14,10 @@
  *               fold behind one "Menu" disclosure (F26: `aria-expanded`, Escape closes it and
  *               returns focus to the button, an Escape spent by another layer such as the
  *               evidence drawer leaves it open, following a link closes it), so a phone's
- *               first screen is the page, not three rows of chrome; a health that is not OK
- *               stays on the closed Menu button as the probe's glyph and in its name. The
+ *               first screen is the page, not three rows of chrome; in print the header and the
+ *               skip link are left out (`print:hidden`, as the About block leaves itself out),
+ *               so a printed page is the page and the footer's versions (G-213); a health that
+ *               is not OK stays on the closed Menu button as the probe's glyph and in its name. The
  *               instrument row offers every role the pages its API lets that role read
  *               (G-914). `AboutThisScreen` is mounted once after the outlet so every screen
  *               carries its help with no wiring. The footer carries crb / apparatus /
@@ -214,10 +216,12 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-on-surface">
-      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface-container focus:px-3 focus:py-2">
+      {/* the shell is chrome, not the statement: a printed page (the Deployment page prints for a
+          review board, G-213) carries the page, the About-free body and the footer's versions */}
+      <a href="#main" className="print:hidden sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface-container focus:px-3 focus:py-2">
         Skip to content
       </a>
-      <header>
+      <header className="print:hidden" data-testid="shell-header">
         <div className="bg-primary text-on-primary">
           <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-2 gap-y-3 px-5 py-3 sm:gap-6 sm:py-4">
             <NavLink to="/home" className="flex items-center gap-2 text-on-primary no-underline sm:gap-3">

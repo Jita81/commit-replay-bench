@@ -420,6 +420,8 @@ class ProvisionSettings(BaseModel):
     max_bundle_mb: int = Field(default=2048, ge=1)
     max_total_gb: float = Field(default=20.0, gt=0)
     fetch_timeout_s: int = Field(default=900, ge=1)
+    #: The NAME of the worker variable holding a private mirror's ``user:password`` (G-950).
+    mirror_credential_env: str = ""
 
     @field_validator("extra_allow_hosts", mode="before")
     @classmethod
@@ -452,6 +454,7 @@ class ProvisionSettings(BaseModel):
             max_total_gb=self.max_total_gb,
             fetch_timeout_s=self.fetch_timeout_s,
             env=env,
+            mirror_credential_env=self.mirror_credential_env,
         )
 
 

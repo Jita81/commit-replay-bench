@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Go live on evidence: each checklist line proven, attested or unproven**
+  (north-star Wave 4, stream P; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-p)).
+  `GET /golive` reads the fourteen lines of DEPLOYMENT §8: five proven by the product's own
+  checks, nine the operator's acts that an admin records on Settings as dated
+  `golive.attested` events (ADR-0031, DL-108). `/posture` lists both, names every row's
+  source, prints for a review board and carries the go-live journey's eyebrow. A private
+  mirror's credential reaches the fetch alone; uv, poetry and pylock locks are provisioned;
+  a damaged sealed set is quarantined and what cites it revoked (DL-109, DL-110).
+
 - **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
   (north-star Wave 4, stream T; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-t4)).
   A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops

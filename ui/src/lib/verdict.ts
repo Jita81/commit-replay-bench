@@ -258,6 +258,8 @@ export const ACTION_HELP: Record<string, string> = {
   'provision.reuse': 'The task’s dependencies were already sealed in the store, so nothing was fetched.',
   'provision.seal': 'The fetched dependencies were sealed read-only under their digest; every test run of this task mounts exactly this set.',
   'provision.refused': 'The dependencies could not be provisioned; the payload names the code and the fix, and nothing was graded.',
+  'provision.quarantined': 'A sealed dependency set no longer matched its digest, so it was moved out of the store into quarantine and will never be mounted again; the next run fetches and seals it afresh.',
+  'provision.revoked': 'The qualifications that cited a damaged dependency set were revoked, so no task is graded on bytes that are gone; qualify the repository again to restore them.',
   // mine — turning commits into replayable tasks
   'mine.candidate': 'A commit is being examined as a possible task.',
   'mine.red': 'The commit’s test fails on the parent commit, so the task has a real failing test.',
@@ -383,6 +385,8 @@ export const ACTION_HELP: Record<string, string> = {
   // system — the account trail (the Users card's History on /settings)
   'user.created': 'An account was created, by an admin or on the API host.',
   'user.role_set': 'An account’s role was changed; the event says what it was before.',
+  'golive.attested': 'An admin recorded that an operator act on the go-live checklist was done: the day it was done and what was done. The product did not check it; the record says who did.',
+  'golive.withdrawn': 'An admin withdrew a go-live attestation; the line reads unproven again until someone records it anew.',
   'user.password_set': 'An account’s password was set — by an admin, by the person, or on the API host; every other session of the account ended. The password is never recorded.',
   'user.activated': 'An account was turned back on and can sign in again.',
   'user.deactivated': 'An account was turned off: it is refused on its very next request.',
