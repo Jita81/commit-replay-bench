@@ -653,9 +653,12 @@ export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
 ```
 
 - **What a row says.** The provider on every row, cell and label is the endpoint's own —
-  `cerebras` for a host in the `cerebras.ai` domain, `azure`, or otherwise the URL's host and
-  port (`gpu-box.internal:8080`) — so a self-hosted model is its own cell, never pooled with
-  Cerebras, even when its host name contains `cerebras` (a mirror). Write rungs as
+  `cerebras` for a host in the `cerebras.ai` domain, `azure` for an Azure endpoint in an Azure
+  domain (`azure.com`, `azure-api.net`, `azure.us`, `azure.cn`), or otherwise the URL's host
+  and port (`gpu-box.internal:8080`) — so a self-hosted model is its own cell, never pooled
+  with Cerebras, even when its host name contains `cerebras` (a mirror). A host with no dot
+  and no port (a compose or Kubernetes service called `cerebras`) is stamped `host:cerebras`:
+  a provider's name is never taken from a host outside that provider's domain. Write rungs as
   `openai_agent:qwen3@gpu-box.internal:8080` (the `@` form: a host carries a `:`) or leave the
   provider empty and it is filled in.
 - **Never put the key in the URL.** The URL is stamped on every row and the ledger is
@@ -664,9 +667,11 @@ export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
   refused by name, and the value is not repeated in the message. The key goes in the variable
   `CRB_OPENAI_KEY_ENV` names.
 - **What it refuses.** A rung that names a provider the endpoint is not
-  (`openai_agent:qwen3@cerebras` while the URL is your server) stops the attempt as
-  `builder unavailable: ProviderMismatch: …`, with the fix in the sentence, before any call is
-  made. A tuning value that is out of range or not a number stops it the same way and names
+  (`openai_agent:qwen3@cerebras` while the URL is your server) is refused when you submit the
+  run — 422 `builder_provider_mismatch`, with the fix in the sentence and nothing queued — and
+  a run already queued stops the attempt as `builder unavailable: ProviderMismatch: …` before
+  any call is made. The factory's test author (the run's `test_author`, or
+  `CRB_FACTORY__TEST_AUTHOR`) is checked the same way. A tuning value that is out of range or not a number stops it the same way and names
   the variable. A run's `builder_config` cannot get round this: the keys that name a
   builder's own seams (`model_fn`, `chat_fn`, `spawn`, `runner_factory`, `endpoint`,
   `executor`) are refused by `POST /runs` with a 422.
@@ -680,9 +685,9 @@ export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
   from the start, so four retries can cost five full generations.
 - **Proof.** The request lands on the configured URL, the row carries its host, a mismatched
   rung is refused and the timeout, reply length and retry count are the ones set **[measured —
-  n = 44 test cases in `tests/test_builders_endpoint.py`: 10 point a builder, the labeller or
+  n = 64 test cases in `tests/test_builders_endpoint.py`: 10 point a builder, the labeller or
   the test author at a fake OpenAI-compatible server on 127.0.0.1 and check where the request
-  landed, what it carried and the provider stamped; the other 34 check the settings'
+  landed, what it carried and the provider stamped; the other 54 check the settings'
   defaults and refusals, the provider rule, the seams a run request cannot set and a source
   ratchet, and the module's own count; no model called; each fix reverted in turn made them
   fail; apparatus 2.3]**.

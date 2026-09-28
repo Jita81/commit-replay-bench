@@ -426,7 +426,9 @@ class TestCreate:
             "builder": "editblock",
             "model": "gpt-oss-120b",
             "provider": "cerebras",
-            "ladder": ["r1", "r2", "editblock:claude-sonnet:anthropic"],
+            # a Claude rung: `editblock:…:anthropic` on the Cerebras endpoint could only fail
+            # and is refused at submit (P-976, TestProviderAtSubmit)
+            "ladder": ["r1", "r2", "claude_code:claude-sonnet-5:anthropic"],
             "task_ids": [task_id(1), task_id(2)],
             "limit": 2,
             "pool": "standard",
@@ -442,7 +444,7 @@ class TestCreate:
         assert run.repo == ALPHA and run.kind == "replay" and run.status == "queued"
         assert run.mode == "sighted" and run.builder == "editblock"
         assert run.model == "gpt-oss-120b" and run.provider == "cerebras"
-        assert run.ladder_json == ["r1", "r2", "editblock:claude-sonnet:anthropic"]
+        assert run.ladder_json == ["r1", "r2", "claude_code:claude-sonnet-5:anthropic"]
         assert run.params_json == {
             "task_ids": [task_id(1), task_id(2)],
             "limit": 2,
@@ -821,6 +823,97 @@ class TestCredentialPresence:
         login(env.client, "operator")
         r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
         assert r.status_code == 201, r.text
+
+
+# --- a rung naming a provider the endpoint is not is refused at submit (P-976) -------------
+
+
+_CLAUDE = {"builder": "claude_code", "model": "claude-sonnet-5"}
+
+
+class TestProviderAtSubmit:
+    """An OpenAI-compatible rung (or the factory's test author) that names a provider the
+    configured endpoint is not can only fail: the worker refuses it per task as ``builder
+    unavailable: ProviderMismatch``. It was queued anyway (201) — the class P-003 closed for
+    credentials. ``POST /runs`` now refuses it at submit, naming the rung and the provider
+    the endpoint is, and nothing is queued."""
+
+    def _post(self, env: Env, **body: Any) -> Any:
+        login(env.client, "operator")
+        return env.post("/runs", json={"repo": ALPHA, "kind": "blind", **body})
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"builder": "openai_agent", "model": "gpt-oss-120b", "provider": "anthropic"},
+            {"builder": "editblock", "model": "gpt-oss-120b", "provider": "azure"},
+            {
+                "builder": "openai_agent",
+                "model": "gpt-oss-120b",
+                "ladder": ["openai_agent:gpt-oss-120b@anthropic"],
+            },
+            {**_CLAUDE, "ladder": ["r1", "editblock:gpt-oss-120b@azure"]},
+            {
+                **_CLAUDE,
+                "ladder": ["r1", {"builder": "openai_agent", "model": "m", "provider": "x.y"}],
+            },
+        ],
+    )
+    def test_a_rung_naming_another_provider_is_refused_and_nothing_queued(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, body: dict[str, Any]
+    ) -> None:
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk-present")
+        r = self._post(env, **body)
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_provider_mismatch"
+        assert err["detail"]["endpoint_provider"] == "cerebras"
+        assert "@cerebras" in err["message"] and "nothing was queued" in err["message"]
+        assert "csk-present" not in r.text
+        assert jobs.enqueued == []
+
+    def test_the_endpoints_own_provider_or_none_is_accepted(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk-present")
+        for provider in ("cerebras", ""):
+            r = self._post(env, builder="openai_agent", model="gpt-oss-120b", provider=provider)
+            assert r.status_code == 201, r.text
+        # a Claude rung's provider is its own, not the OpenAI-compatible endpoint's
+        r = self._post(env, **_CLAUDE, provider="anthropic")
+        assert r.status_code == 201, r.text
+        # with a self-hosted endpoint configured, its own stamp is the one accepted
+        monkeypatch.setenv("CRB_OPENAI_BASE_URL", "http://cerebras/v1")
+        r = self._post(env, builder="openai_agent", model="q", provider="cerebras")
+        assert r.status_code == 422 and envelope(r)["detail"]["endpoint_provider"] == (
+            "host:cerebras"
+        )
+        r = self._post(
+            env, builder="openai_agent", model="q", ladder=["openai_agent:q@host:cerebras"]
+        )
+        assert r.status_code == 201, r.text
+
+    def test_a_test_author_naming_another_provider_is_refused_at_submit(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The factory's test author calls the configured endpoint too (product.truth.27):
+        the run's own ``test_author`` and the deployment's ``CRB_FACTORY__TEST_AUTHOR`` are
+        both checked before the run is queued."""
+        monkeypatch.setenv("CEREBRAS_API_KEY", "csk-present")
+        r = self._post(env, **_CLAUDE, kind="factory", test_author="editblock:m1@anthropic")
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "builder_provider_mismatch"
+        assert err["detail"]["rung"] == "editblock:m1@anthropic"
+        monkeypatch.setattr(env.settings.factory, "test_author", "editblock:m1@azure")
+        for blank in ({}, {"test_author": ""}):  # absent or blank = the deployment's author
+            r = self._post(env, **_CLAUDE, kind="factory", **blank)
+            assert r.status_code == 422 and envelope(r)["detail"]["rung"] == "editblock:m1@azure"
+        assert jobs.enqueued == []
+        # the run may decline the deployment's author, and then no author is checked (the
+        # run goes on to the next refusal: this seed has no backlog registered)
+        r = self._post(env, **_CLAUDE, kind="factory", test_author="none")
+        assert envelope(r)["code"] != "builder_provider_mismatch", r.text
 
 
 # --- budget + object rungs (C8) ------------------------------------------------------------

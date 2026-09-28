@@ -519,12 +519,63 @@ def test_a_base_url_without_a_scheme_is_refused_without_echoing_it() -> None:
         ("https://notcerebras.ai/v1", "notcerebras.ai"),
         ("http://GPU-Box.internal:8080/v1", "gpu-box.internal:8080"),
         ("http://[::1]:8080/v1", "[::1]:8080"),
+        # P-975: a host that IS a provider's bare name (a compose or Kubernetes service
+        # called `cerebras`) is stamped as a host, never as that provider
+        ("http://cerebras/v1", "host:cerebras"),
+        ("http://Azure/v1", "host:azure"),
+        ("http://anthropic/v1", "host:anthropic"),
+        ("http://openai/v1", "host:openai"),
     ],
 )
 def test_only_a_cerebras_ai_host_is_stamped_cerebras(url: str, provider: str) -> None:
     """A host that merely CONTAINS ``cerebras`` (a self-hosted mirror, a look-alike domain)
     is its own provider, so its rows never pool into Cerebras's cell."""
     assert oc.EndpointConfig.from_env({"CRB_OPENAI_BASE_URL": url}).provider == provider
+
+
+@pytest.mark.parametrize("host", ["cerebras", "azure", "anthropic", "openai", "llm", "localhost"])
+def test_no_host_is_ever_stamped_as_a_bare_name(host: str) -> None:
+    """P-975: every provider the product names without a host (``cerebras``, ``azure``,
+    ``anthropic`` …) is a bare name, so a stamp taken from a host must never be one — a host
+    with no dot and no port is stamped ``host:<name>``, whatever the name is."""
+    stamp = oc.EndpointConfig(base_url=f"http://{host}/v1").provider
+    assert stamp == f"host:{host}"
+    assert not re.fullmatch(r"[a-z0-9_-]+", stamp)
+
+
+@pytest.mark.parametrize("name", ["cerebras", "azure", "anthropic"])
+def test_a_rung_naming_a_provider_is_refused_on_a_host_of_that_name(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """P-975, reproduced through the real constructors: with ``CRB_OPENAI_BASE_URL`` at a
+    service called ``cerebras`` a ``@cerebras`` rung (builder or test author) was accepted
+    and its rows pooled into Cerebras's cell of the append-only ledger."""
+    monkeypatch.setenv("CRB_OPENAI_BASE_URL", f"http://{name}/v1")
+    with pytest.raises(oc.ProviderMismatch):
+        builder_for_rung(base.Rung("openai_agent", "qwen-local", name))
+    with pytest.raises(oc.ProviderMismatch):
+        builder_for_rung(base.Rung("editblock", "llama-local", name))
+    with pytest.raises(oc.ProviderMismatch):
+        author_from_label(f"editblock:llama-local@{name}")
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "provider"),
+    [
+        ("https://tenant.openai.azure.com", "azure"),
+        ("https://tenant.cognitiveservices.azure.com", "azure"),
+        ("https://gateway.azure-api.net", "azure"),
+        ("https://tenant.openai.azure.us", "azure"),
+        ("https://llm.corp.example", "llm.corp.example"),
+        ("https://openai.azure.com.attacker.example", "openai.azure.com.attacker.example"),
+        ("https://azure", "host:azure"),
+    ],
+)
+def test_only_an_azure_domain_host_is_stamped_azure(endpoint: str, provider: str) -> None:
+    """P-975: ``CRB_AZURE_ENDPOINT`` at any host was stamped ``azure``. Azure is stamped only
+    for a host in an Azure domain; any other host is its own provider, like any endpoint."""
+    az = oc.AzureConfig(endpoint=endpoint, api_version="2024-10-21", deployment="d")
+    assert oc.EndpointConfig(azure=az).provider == provider
 
 
 def test_a_cerebras_rung_is_refused_on_a_mirror_that_is_not_cerebras(

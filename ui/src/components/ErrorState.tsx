@@ -7,7 +7,8 @@
  * What it is:   The `ErrorState` alert every failed query or mutation renders through.
  * What it does: Shows the human message from the envelope under a heading chosen by code
  *               (`timeout`, `network`, `sandbox_unavailable`, `false_q1_refused`,
- *               `invalid_response`, `builder_credential_missing`) or by HTTP status
+ *               `invalid_response`, `builder_credential_missing`,
+ *               `builder_provider_mismatch`) or by HTTP status
  *               (401 / 403 / 404 / 409 / 5xx), the `HTTP <status> · <code>` line in small
  *               mono, the structured `detail` behind a
  *               collapsed disclosure, and an optional Retry. No stack traces, no raw JSON in
@@ -51,6 +52,8 @@ const CODE_TITLES: Record<string, string> = {
   invalid_response: 'Unexpected response from the server',
   // POST /runs: the chosen builder auth has no credential (docs/PREVENTION.md P-003)
   builder_credential_missing: 'No credential for this builder — nothing was queued',
+  // POST /runs: a rung names a provider the configured endpoint is not (docs/PREVENTION.md P-976)
+  builder_provider_mismatch: 'This rung names a provider the endpoint is not — nothing was queued',
 }
 
 /** A heading from the HTTP status when the code is not a reserved one. */

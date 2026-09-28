@@ -24,9 +24,10 @@ What it does: Builds a client for Cerebras / Azure OpenAI / any base URL from an
               ``EndpointConfig`` — the operator's (``from_env``: ``CRB_OPENAI_BASE_URL`` and
               the validated ``CRB_OPENAI_TIMEOUT_S`` / ``_MAX_TOKENS`` / ``_MAX_RETRIES``)
               unless a caller passes one; ``resolve_endpoint`` gives every builder that
-              endpoint and ITS provider (``host:port``; ``cerebras`` only for the
-              ``cerebras.ai`` domain), refusing a rung that names another and, through
-              ``url_refusal``, a URL that carries a key (P-968); refuses to
+              endpoint and ITS provider (a provider's name only for a host in its domain —
+              ``cerebras.ai``, ``AZURE_DOMAINS`` — else ``host_provider``: ``host:port``, and
+              ``host:<name>`` for a bare host, P-975), refusing a rung that names another
+              and, through ``url_refusal``, a URL that carries a key (P-968); refuses to
               start without the named credential, retries transient failures with jittered
               backoff, decodes tool calls tolerantly (bad JSON → ``parse_error``, not a
               crash) and meters every attempt.
@@ -70,6 +71,11 @@ from crb.builders.budget import CostMeter, Pricing, price_for
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 CEREBRAS_KEY_ENV = "CEREBRAS_API_KEY"
 AZURE_KEY_ENV = "AZURE_OPENAI_API_KEY"
+#: The domains whose hosts are stamped with a provider's name; any other host is stamped
+#: as itself (``host_provider``). Azure OpenAI's public and sovereign clouds and its API
+#: gateway; a private-link custom domain is its own provider, on nobody's word.
+CEREBRAS_DOMAIN = "cerebras.ai"
+AZURE_DOMAINS: tuple[str, ...] = ("azure.com", "azure-api.net", "azure.us", "azure.cn")
 
 RETRY_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504})
 
@@ -116,6 +122,19 @@ def url_refusal(url: str, *, https_only: bool = False) -> str:
             "row — put the key in the variable CRB_OPENAI_KEY_ENV (or CRB_AZURE_KEY_ENV) names"
         )
     return ""
+
+
+def host_provider(url: str) -> str:
+    """The provider stamp of a host that is in no provider's domain: its ``host[:port]``,
+    lower-cased, never the userinfo. Every provider the product names without a host
+    (``cerebras``, ``azure``, ``anthropic`` …) is a bare name, so a stamp taken from a host
+    is never one: a host with no dot and no port — a compose or Kubernetes service called
+    ``cerebras`` — is stamped ``host:<name>`` (P-975). ``host:`` cannot be a real host's
+    stamp, because a port that is not a number is refused at construction."""
+    stamp = urlsplit(url).netloc.rpartition("@")[2].lower()
+    if not any(mark in stamp for mark in ".:["):
+        return f"host:{stamp}"
+    return stamp
 
 
 class MissingCredential(RuntimeError):
@@ -508,17 +527,19 @@ class EndpointConfig:
 
     @property
     def provider(self) -> str:
-        """``azure`` | ``cerebras`` | the base URL's ``host[:port]`` — the ledger's provider
-        column. ``cerebras`` only for a host in the ``cerebras.ai`` domain: a mirror or a
-        look-alike whose name merely contains it is its own provider, never pooled into
-        Cerebras's cell. Never the URL's userinfo (refused at construction anyway)."""
+        """The ledger's provider column: ``cerebras`` | ``azure`` | the host's own stamp
+        (:func:`host_provider`). A provider's name is stamped only for a host in that
+        provider's domain (``cerebras.ai``; for an Azure endpoint, ``AZURE_DOMAINS``): a
+        mirror, a look-alike or a service that merely shares the name is its own provider,
+        never pooled into that provider's cell (P-971, P-975)."""
         if self.azure is not None:
-            return "azure"
-        parts = urlsplit(self.base_url)
-        host = (parts.hostname or "").lower()
-        if host == "cerebras.ai" or host.endswith(".cerebras.ai"):
-            return "cerebras"
-        return parts.netloc.rpartition("@")[2].lower()
+            url, domains, name = self.azure.endpoint, AZURE_DOMAINS, "azure"
+        else:
+            url, domains, name = self.base_url, (CEREBRAS_DOMAIN,), "cerebras"
+        host = (urlsplit(url).hostname or "").lower()
+        if any(host == d or host.endswith(f".{d}") for d in domains):
+            return name
+        return host_provider(url)
 
     def to_dict(self) -> dict[str, Any]:
         """The apparatus-stamp shape (the key's NAME, never its value)."""

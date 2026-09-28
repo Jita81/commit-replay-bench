@@ -30,7 +30,9 @@ What it is:   The ``/runs`` API — create, list, inspect, cancel a run; its per
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
               outage_stop, preflight, budget_profile, escalation, checks, learning) into a
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
-              presence only) a run whose builder auth has no credential — through
+              presence only) a run whose builder auth has no credential, and (422
+              ``builder_provider_mismatch``) one whose OpenAI-compatible rung or test author
+              names a provider the configured endpoint is not — through
               ``submit_refusals``, the one gate every route that queues a run calls; serves
               run views with counts re-derived from the ledger when the worker wrote none; streams
               events as SSE with resume-by-seq; cancellation is a flag the worker honours.
@@ -71,12 +73,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
+from crb.builders.adapter import parse_rung_label, rungs_from_entries
+from crb.builders.base import Rung
 from crb.builders.claude_code import credential_missing as claude_code_credential_missing
 from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
+from crb.builders.openai_client import ProviderMismatch, resolve_endpoint, resolved_endpoint
 from crb.builders.openai_client import credential_missing as openai_credential_missing
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
+from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
@@ -667,6 +673,74 @@ def credential_refusal(run: Run, settings: Any) -> None:
             )
 
 
+#: The builders that call the configured OpenAI-compatible endpoint, so a rung's provider
+#: must be that endpoint's — derived from the credential table, so a new OpenAI-compatible
+#: builder is checked for its provider as well as its key (P-976).
+ENDPOINT_BUILDERS: frozenset[str] = frozenset(
+    name for name, check in CREDENTIAL_CHECKS.items() if check is openai_credential_missing
+)
+
+
+def _provider_mismatch(rung: Rung, endpoint_provider: str) -> ApiError:
+    written = f"{rung.label}@{rung.provider}"
+    return ApiError(
+        422,
+        "builder_provider_mismatch",
+        f"rung {written!r} names provider {rung.provider!r}, but the OpenAI-compatible "
+        f"endpoint this deployment calls is {endpoint_provider!r}: every attempt would stop "
+        f"as ProviderMismatch — name it on the rung ({rung.label}@{endpoint_provider}), leave "
+        "the provider empty, or point CRB_OPENAI_BASE_URL at that provider — nothing was "
+        "queued",
+        detail={"rung": written, "provider": rung.provider, "endpoint_provider": endpoint_provider},
+    )
+
+
+def provider_refusal(run: Run, settings: Any, test_author: str | None = None) -> None:
+    """422 ``builder_provider_mismatch`` when a rung that calls the configured
+    OpenAI-compatible endpoint — on the ladder, or the factory's test author (the run's
+    ``test_author``, else the deployment's ``CRB_FACTORY__TEST_AUTHOR``) — names a provider
+    that endpoint is not. The worker refuses such a rung before any call
+    (``resolve_endpoint``), so the run could only fail; it is refused here instead, the
+    class P-003 closed for credentials (docs/PREVENTION.md P-976). The rungs are read by
+    ``rungs_from_entries`` and the author by ``author_from_label`` — the worker's own
+    readings — so the two never disagree. A ladder or label that does not parse is left to
+    the schema and the worker, which name it."""
+    if run.kind not in BUILD_KINDS:
+        return
+    params = dict(run.params_json or {})
+    try:
+        rungs = rungs_from_entries(
+            list(params.get("ladder") or run.ladder_json or []),
+            builder=run.builder or "",
+            model=run.model or "",
+            provider=str(run.provider or params.get("provider") or ""),
+        )
+    except ValueError:
+        rungs = []
+    for rung in rungs:
+        if rung.builder not in ENDPOINT_BUILDERS:
+            continue
+        try:
+            resolve_endpoint(None, rung.provider)
+        except ProviderMismatch:
+            raise _provider_mismatch(rung, resolved_endpoint().provider) from None
+        except ValueError:  # a misconfigured endpoint: credential_refusal names it
+            return
+    if run.kind != KIND_FACTORY:
+        return
+    # the worker's reading (``_test_author``): the run's label, else — when absent or
+    # blank — the deployment's
+    raw = (test_author or "").strip() or str(
+        getattr(getattr(settings, "factory", None), "test_author", "") or ""
+    )
+    try:
+        author_from_label(raw)
+    except ProviderMismatch:
+        raise _provider_mismatch(parse_rung_label(raw), resolved_endpoint().provider) from None
+    except ValueError:  # an unknown author rung: the worker names it with the ladder
+        return
+
+
 def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
     route that enqueues a run cannot skip one (docs/PREVENTION.md P-093: the Learn queue
@@ -676,10 +750,13 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
 
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
+    * 422 ``builder_provider_mismatch`` — a rung (or the factory's test author) names a
+      provider the configured OpenAI-compatible endpoint is not (P-976);
     * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
       where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker.
     """
     credential_refusal(run, settings)
+    provider_refusal(run, settings, body.test_author)
     if body.qualify_first is False:
         repo_row = db.get(Repo, body.repo)
         if repo_row is None:

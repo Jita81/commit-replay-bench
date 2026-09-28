@@ -185,7 +185,7 @@ from crb.builders.adapter import (
     build_fn_for,
     container_settings_from_env,
     ladder_labels,
-    parse_rung_label,
+    rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
@@ -403,28 +403,6 @@ def budget_tier(budget: Budget) -> str:
     if budget.max_cost_usd:
         tier += f"/usd={budget.max_cost_usd:g}"
     return tier
-
-
-def rung_from_object(entry: Mapping[str, Any], *, default_provider: str = "") -> Rung:
-    """An object rung ``{builder, model, provider?, budget?}`` → :class:`Rung` whose
-    ``config`` carries ONLY the budget fields the rung set. ``builder_for_rung`` strips
-    those before constructing the builder and :func:`budget_for_rung` overlays them on the
-    run's budget — so a rung's budget overrides the run's, field by field, and nothing else
-    on the rung reaches a builder constructor (the API refuses other keys; the worker
-    refuses them again here because ``ladder_json`` is a stored document, not a request)."""
-    unknown = set(entry) - {"builder", "model", "provider", "budget"}
-    if unknown:
-        raise ValueError(f"object rung carries unknown field(s) {sorted(unknown)}")
-    budget = dict(entry.get("budget") or {})
-    foreign = set(budget) - set(Budget.__dataclass_fields__)
-    if foreign:
-        raise ValueError(f"rung budget carries unknown field(s) {sorted(foreign)}")
-    return Rung(
-        builder=str(entry.get("builder") or ""),
-        model=str(entry.get("model") or ""),
-        provider=str(entry.get("provider") or "") or default_provider,
-        config=budget,
-    )
 
 
 def default_worker_id() -> str:
@@ -2013,40 +1991,19 @@ class Worker:
         * a ``builder:model[:provider]`` label: a rung as written;
         * an object rung ``{builder, model, provider?, budget?}``: a rung whose ``budget``
           fields override the run's ``params.budget`` for that rung only
-          (:func:`rung_from_object`; the same model at 25 → 50 → 100 tool calls is a
+          (:func:`crb.builders.adapter.rung_from_object`; the same model at 25 → 50 → 100 tool calls is a
           budget ladder).
 
         Every rung's effective budget is validated HERE, before any task runs, so a bad
         cap fails the run closed with its reason instead of erroring every attempt. The
         stored ``ladder_json`` stays what the operator declared."""
         run = ctx.run
-        entries: list[Any] = list(ctx.params.get("ladder") or run.ladder_json or [])
-        own = ""
-        if run.builder and run.model:
-            own = f"{run.builder}:{run.model}" + (f"@{run.provider}" if run.provider else "")
-        if not entries and own:
-            entries = [own]
-        if not entries:
-            raise ValueError("a replay run needs a ladder (rung labels) or builder + model")
-        provider = str(run.provider or ctx.params.get("provider") or "")
-        rungs: list[Rung] = []
-        for entry in entries:
-            if isinstance(entry, Mapping):
-                rungs.append(rung_from_object(entry, default_provider=provider))
-                continue
-            label = str(entry)
-            if not label.strip():
-                continue
-            if ":" not in label:
-                if not own:
-                    raise ValueError(
-                        "a replay run with bare rung labels (r1, r2 …) needs builder + model "
-                        "on the run"
-                    )
-                label = own
-            rungs.append(parse_rung_label(label, default_provider=provider))
-        if not rungs:
-            raise ValueError("a replay run needs at least one rung")
+        rungs = rungs_from_entries(
+            list(ctx.params.get("ladder") or run.ladder_json or []),
+            builder=run.builder or "",
+            model=run.model or "",
+            provider=str(run.provider or ctx.params.get("provider") or ""),
+        )
         ladder = EscalationLadder(tuple(rungs))
         try:
             base = self._budget(ctx)

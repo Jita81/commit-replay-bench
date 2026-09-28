@@ -16,7 +16,9 @@
  *               follow the labels with provider and typed caps only, and that an empty
  *               ladder or an incomplete rung blocks submit; and that a submit the server
  *               refuses for a builder with no credential (`builder_credential_missing`,
- *               docs/PREVENTION.md P-003) shows the refusal with its fix and creates nothing.
+ *               docs/PREVENTION.md P-003) or for a rung naming a provider the endpoint is not
+ *               (`builder_provider_mismatch`, P-976) shows the refusal with its fix and
+ *               creates nothing.
  * How:          `mockApi` records the POST body; `userEvent` drives the form; assertions on
  *               the body and the field errors.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -119,6 +121,37 @@ describe('RunNewDialog', () => {
     expect(within(alert).getByText('No credential for this builder — nothing was queued')).toBeInTheDocument()
     expect(within(alert).getByText(/needs ANTHROPIC_API_KEY/)).toBeInTheDocument()
     expect(within(alert).getByText(/builder_credential_missing/)).toBeInTheDocument()
+    expect(onCreated).not.toHaveBeenCalled()
+  })
+
+  it('a submit refused for a rung naming another provider shows the refusal and its fix, and nothing is created', async () => {
+    // P-976 (docs/PREVENTION.md): a rung naming a provider the configured endpoint is not
+    // could only fail on the worker; POST /runs now refuses it at submit
+    const user = userEvent.setup()
+    const onCreated = vi.fn()
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': REPOS,
+      'POST /runs': () =>
+        json(
+          {
+            error: {
+              code: 'builder_provider_mismatch',
+              message: "rung 'openai_agent:gpt-oss-120b@anthropic' names provider 'anthropic', but the OpenAI-compatible endpoint this deployment calls is 'cerebras' — nothing was queued",
+              detail: { rung: 'openai_agent:gpt-oss-120b@anthropic', provider: 'anthropic', endpoint_provider: 'cerebras' },
+            },
+          },
+          422,
+        ),
+    })
+    renderApp(<RunNewDialog open onClose={() => {}} repo="httpx" onCreated={onCreated} />)
+    await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'openai_agent')
+    await user.click(screen.getByRole('button', { name: 'Queue run' }))
+    const alert = await screen.findByRole('alert')
+    expect(
+      within(alert).getByText('This rung names a provider the endpoint is not — nothing was queued'),
+    ).toBeInTheDocument()
+    expect(within(alert).getByText(/endpoint this deployment calls is 'cerebras'/)).toBeInTheDocument()
     expect(onCreated).not.toHaveBeenCalled()
   })
 
