@@ -18,8 +18,8 @@ Works with:   src/crb/store/events.py (under test), src/crb/observability/events
               ``StepEvent`` envelope and ``Emitter``), src/crb/server/routes/runs.py (SSE reads
               the same table), tests/test_server_routes_runs.py
 Tested by:    tests/test_store_events.py
-Touch when:   a field is added to ``StepEvent`` (the round-trip case must list it); the read
-              limit or batching changes.
+Touch when:   never for a new repository; a field is added to ``StepEvent`` (the round-trip case
+              must list it); the read limit or batching changes.
 """
 
 from __future__ import annotations
@@ -233,8 +233,11 @@ def test_seq_collision_is_reallocated_under_the_lock_never_dropped(
             text(
                 "INSERT INTO events (event_id, trace_id, seq, timestamp, stage, action, status, "
                 "step_id, parent_step_id, actor, repo, task_id, input_ref, output_ref, "
-                "error_code, error_message, payload_json) VALUES ('x', 't', 3, 'ts', 'system', "
-                "'dup', 'ok', '', '', '', '', '', '', '', '', '', '{}')"
-            )
+                "error_code, error_message, payload_json, prev_hash, row_hash) VALUES ('x', "
+                "'t', 3, 'ts', 'system', 'dup', 'ok', '', '', '', '', '', '', '', '', '', '{}', "
+                ":prev, :row)"
+            ),
+            # well-formed chain columns (revision 0013's CHECK), so only the seq can refuse it
+            {"prev": "c" * 64, "row": "d" * 64},
         )
         s.commit()

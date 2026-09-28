@@ -1551,3 +1551,38 @@ class TestPostureClass:
         r = env.post("/signoffs", json=body)
         assert r.status_code == 422, r.text
         assert "posture class" in envelope(r)["message"]
+
+
+class TestSignoffMetric:
+    """G-924 (sign-off operations.12, on the journey and the page): the platform team sees
+    sign-offs created, refused and revoked as a metric, not only as stored events —
+    ``crb_signoffs_total{outcome}`` on the API's ``/metrics``, counted once per event."""
+
+    @pytest.fixture
+    def registry(self) -> Iterator[Any]:
+        from crb.observability import metrics
+
+        if not metrics.available():  # pragma: no cover — the [server] extra is installed
+            pytest.skip("prometheus_client not installed")
+        saved = metrics.snapshot_binding()
+        try:
+            yield metrics.fresh_registry()
+        finally:
+            metrics.restore_binding(saved)
+
+    def test_created_refused_and_revoked_are_counted(self, env: Env, registry: Any) -> None:
+        def count(outcome: str) -> float:
+            return registry.get_sample_value("crb_signoffs_total", {"outcome": outcome}) or 0.0
+
+        # the seeded cell is refused on its controls escape: one refusal, one event
+        assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 409
+        assert count("refused") == 1 and count("created") == 0
+        assert len(_events(env, "signoff.refused")) == 1
+        clear_policy(env)
+        sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
+        assert count("created") == 1
+        assert env.post(f"/signoffs/{sid}/revoke", json={"note": "re-examined"}).status_code == 200
+        assert count("revoked") == 1
+        # a refused revoke writes no event and counts nothing
+        assert env.post(f"/signoffs/{sid}/revoke", json={"note": "again"}).status_code == 409
+        assert (count("created"), count("refused"), count("revoked")) == (1, 1, 1)
