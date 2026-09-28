@@ -253,7 +253,7 @@ def write_pack(pack: EvidencePack, evidence_dir: Path) -> Path:
 
     The temporary name is the writer's own (``<hash>.json.<pid>.<8 hex>.tmp``, ADR-0025
     item 13): two processes writing one pack never share a file, and the rename of either
-    leaves the same bytes under the hash (P-055)."""
+    leaves the same bytes under the hash (P-122)."""
     evidence_dir.mkdir(parents=True, exist_ok=True)
     p = evidence_dir / f"{pack.pack_hash}.json"
     if not p.exists():
@@ -316,7 +316,7 @@ def run_task(
     task = ctx.spec(task)
     if is_v2_apparatus(_version.APPARATUS_VERSION) and not task.labels.get(LABEL_CHANGE_ID):
         # mined before the miner stamped it (G-954); a 2.4 replay row must carry it, and a
-        # row below 2.4 never does (DL-106 (2)), so it is computed only when it is written
+        # row below 2.4 never does (DL-094 (2)), so it is computed only when it is written
         task = task.with_(
             labels={**task.labels, LABEL_CHANGE_ID: change_identity(repo, task.task_id)}
         )

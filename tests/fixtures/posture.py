@@ -12,7 +12,7 @@ What it does: ``adhoc`` — an unwitnessed context from the task's discovery val
               deployment would accept: that is measured by ``qualify_task``.
               ``posture_row`` stamps the labels a row of the current apparatus carries;
               ``at_apparatus`` / ``dict_at_apparatus`` move a row to an older apparatus through
-              ``crb.core.ledger.labels_at_apparatus`` — never by hand (P-135).
+              ``crb.core.ledger.labels_at_apparatus`` — never by hand (P-309).
 How:          Thin wrappers over ``crb.core.qualify`` and ``crb.core.ledger``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md
@@ -329,7 +329,7 @@ def posture_row(**kw: Any) -> GradeRow:
 
 def at_apparatus(row: GradeRow, version: str, **changes: Any) -> GradeRow:
     """``row`` rewritten at apparatus ``version`` (with ``changes``), keeping only the labels
-    a row of that apparatus carries (:func:`crb.core.ledger.labels_at_apparatus`, P-135): a
+    a row of that apparatus carries (:func:`crb.core.ledger.labels_at_apparatus`, P-309): a
     test that moves a 2.4 row to an older apparatus goes through here, never by hand."""
     import dataclasses
 

@@ -152,7 +152,7 @@ LEFT_UNOBSERVED = "unobserved"
 REFUSAL_POOL_SEEN = "pool_seen"
 REFUSAL_BUDGET_SPENT = "budget_spent"
 REFUSAL_INVALID = "invalid_reading"
-#: A pool named as a list the pool rule does not give (DL-109, P-138).
+#: A pool named as a list the pool rule does not give (DL-097, P-312).
 REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
@@ -161,7 +161,7 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_NOT_BLIND,
 )
 
-# --- the pool rule (DL-109) --------------------------------------------------------------
+# --- the pool rule (DL-097) --------------------------------------------------------------
 #: Every qualified commit of the cell.
 POOL_RULE_ALL = "all-qualified"
 #: Every qualified commit of the cell authored at or after a date (``qualified-since:<iso>``).
@@ -440,10 +440,10 @@ class Reading:
 
 
 def pool_by_rule(authored: Mapping[str, str], *, since: str = "") -> tuple[list[str], str]:
-    """The frozen pool of a reading and the rule that chose it (ADR-0026 item 2, DL-109):
+    """The frozen pool of a reading and the rule that chose it (ADR-0026 item 2, DL-097):
     every qualified commit of the cell (``authored``: commit → its authored time), or every one
     authored at or after ``since`` — rules blind to any outcome. A hand-picked list is never a
-    pool: a list chosen after grading could hold only the commits that passed (P-138)."""
+    pool: a list chosen after grading could hold only the commits that passed (P-312)."""
     if not since.strip():
         return sorted(authored), POOL_RULE_ALL
     cut = _parse_ts(since)
@@ -727,7 +727,7 @@ def _counts_for(reading: Reading, arm: str, row: GradeRow) -> bool:
     """Is ``row`` one of the rows ``arm`` of ``reading`` may count (before first-attempt)?
     Its repository, cell, apparatus, class-set version, checks arm and context arm are the
     reading's; it is a rung ``r1`` attempt this deployment graded (never an imported row, whose
-    labels were set elsewhere — P-139); it was graded strictly AFTER the registration (whole
+    labels were set elsewhere — P-313); it was graded strictly AFTER the registration (whole
     seconds, so a row of the same second does not count); and it was graded in the sealed
     posture class the reading names — or, for ``S2``, on held-out acceptance tests."""
     if (
@@ -965,7 +965,7 @@ def outcomes_for_cell(
     posture_class: str,
 ) -> list[ReadingOutcome]:
     """Every reading registered on exactly this cell, apparatus, class-set version, checks arm
-    and posture class — every scope field a reading counts its rows on (P-137)."""
+    and posture class — every scope field a reading counts its rows on (P-311)."""
     want = canonical_cell_key(cell)
     return [
         evaluate(r, rows)

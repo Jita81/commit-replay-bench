@@ -718,7 +718,7 @@ def _fake_docker(dir_: Path, rc: int) -> str:
 @pytest.mark.parametrize("kind", ["local", "LOCAL"])
 def test_make_executor_local(kind: str) -> None:
     # "", "none" and "host" once meant local too: an empty setting ran tests on the host
-    # (P-053) — tests/test_execution_edges.py pins that they are refused
+    # (P-120) — tests/test_execution_edges.py pins that they are refused
     assert isinstance(make_executor(kind), LocalExecutor)
 
 

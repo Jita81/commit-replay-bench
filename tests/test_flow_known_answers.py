@@ -1,6 +1,6 @@
 """Every figure the flow reading serves, pinned to a known answer — so no fold can drift unseen.
 
-The class this gate closes (P-076): a flow figure was flipped ``met`` on tests that asserted
+The class this gate closes (P-143): a flow figure was flipped ``met`` on tests that asserted
 only its shape — ``n == 1``, ``median_s is not None``, ``"n ="`` somewhere in a tile — so a
 fold could time to the wrong end point (a cell's last row for its tenth, "now" for a
 signature), report 0 s, pair a stamp of another scope or another cell, or divide the wrong
@@ -18,8 +18,8 @@ the whole reading against a table of hand-computed answers. Two ratchets keep it
 Navigation
 ----------
 What it is:   The known-answer gate over ``crb.server.flow.build_flow`` — the prevention
-              artefact for "a flow figure evidenced without its value" (P-076) and for "a flow
-              pairing that pools what the map splits" recurring in a fold P-071 did not cover.
+              artefact for "a flow figure evidenced without its value" (P-143) and for "a flow
+              pairing that pools what the map splits" recurring in a fold P-138 did not cover.
 What it does: Builds one store with chosen stamps (install, health, registration, controls,
               runs, graded rows, deliver stamps in and out of scope, reviews, a recovery, a
               factory chain), folds it, and compares every served lead time and cost per unit
@@ -33,7 +33,7 @@ ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md
 Works with:   src/crb/server/flow.py (the folds under test), src/crb/core/flow.py (the
               arithmetic), src/crb/server/flow_record.py (the scoped deliver stamps),
               tests/fixtures/server_seed.py (the seed and users), tests/test_server_routes_flow.py
-              (the route-level cases), docs/PREVENTION.md (P-076, P-077)
+              (the route-level cases), docs/PREVENTION.md (P-143, P-144)
 Tested by:    tests/test_flow_known_answers.py
 Touch when:   a stream gains or changes a milestone pair or a cost per unit — add or change its
               row in ``KNOWN`` with the stamps that produce it, never loosen a comparison.

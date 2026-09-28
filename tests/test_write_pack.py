@@ -1,4 +1,4 @@
-"""Each writer of an evidence pack has its own temporary file (P-055; ADR-0025 item 13).
+"""Each writer of an evidence pack has its own temporary file (P-122; ADR-0025 item 13).
 
 ``write_pack`` wrote every pack through ``<hash>.json.tmp``, so two processes writing the same
 pack (a reclaimed run and its original worker; two runs of one task) raced on one temporary
@@ -15,7 +15,7 @@ How:          ``write_pack`` on a hand-built pack, observing ``Path.replace``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md; ADR-0025 item 13
 Works with:   src/crb/core/run.py (``write_pack``), src/crb/core/evidence.py (the pack),
-              docs/PREVENTION.md (P-055, the row this test closes)
+              docs/PREVENTION.md (P-122, the row this test closes)
 Tested by:    tests/test_write_pack.py
 Touch when:   the pack store changes how it writes.
 """

@@ -264,7 +264,7 @@ class PyRepo:
             baseline_failing=(TEST_SUBTRACT,),
             red_checked=True,
             gold_clean=True,
-            # the change identity the miner stamps (``crb.core.mine.change_identity``; DL-105)
+            # the change identity the miner stamps (``crb.core.mine.change_identity``; DL-093)
             labels={"change_id": change_identity(self.repo, self.feat_sha)},
         )
         return base.with_(**changes) if changes else base

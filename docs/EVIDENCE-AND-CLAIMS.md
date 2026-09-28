@@ -150,7 +150,7 @@ failure kind from write (`failure_kind`, empty on a clean row), why belt 5 holds
 (`lint_reason`) and, on a replay row, the change it observed (`change_id`); a row below 2.4
 carries none of these new labels and is read by the failure rule frozen at 2.3, whose code and
 markers are pinned by their hashes, and never re-derived under a later one (ADR-0025 item 6;
-DL-105; DL-106).
+DL-093; DL-094).
 
 ## 5. The legacy-belt caveat on the census ledger
 
@@ -305,7 +305,7 @@ the repository's `mining` configuration moves the window, the task target and th
 cap; the file caps are fixed per pool. It keeps a single commit per change — of two commits
 with the same patch (`git patch-id --stable`, a cherry-pick) the older, and never a revert,
 whose change is the commit it reverts — and never mines a change the store already holds,
-whichever of its commits the store holds, so a distinct commit is a distinct change (DL-105).
+whichever of its commits the store holds, so a distinct commit is a distinct change (DL-093).
 The pool therefore over-represents
 recent work and work that was tested at the time, and holds nothing older than the window
 **[hypothesis — that a recent, tested-commits-only pool is easier than the repository's other

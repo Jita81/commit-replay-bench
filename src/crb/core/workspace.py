@@ -40,7 +40,7 @@ pass (2026-09-14, finding 1) graded three such worktrees ``clean``. So:
   ``core.excludesFile`` names — anything else is reported as tamper. A violation is a
   disqualification, never a verdict.
 * **The harness never writes the clone's shared ``info/exclude``** (ADR-0025 item 13;
-  P-056). Its patterns (the ``node_modules`` link) go in a per-worktree excludes file
+  P-123). Its patterns (the ``node_modules`` link) go in a per-worktree excludes file
   (``<worktree gitdir>/crb-exclude``, named by ``core.excludesFile`` in the worktree's
   own ``config.worktree`` under ``extensions.worktreeConfig``, git 2.20 or later), so
   concurrent worktrees of one clone never race on one file. The shared file is read by
@@ -394,10 +394,10 @@ class Workspace:
         """The clone's shared ``info/exclude`` as the harness FIRST found it — captured once
         per clone (``info/crb-exclude-baseline``, beside the file it describes) and read by
         every later worktree, never re-captured. The shared file is never rewritten
-        (P-056), so a line a builder appends stays in it; judged against a per-worktree
+        (P-123), so a line a builder appends stays in it; judged against a per-worktree
         snapshot it would become part of the next trial's baseline and hide that trial's
         file unreported. Against the clone's baseline it is reported in every trial it
-        could affect until an operator removes it (P-125). Written through a temporary name
+        could affect until an operator removes it (P-299). Written through a temporary name
         and linked into place, so two first worktrees of one clone never read half a
         file."""
         base = self._exclude_path().with_name(CLONE_EXCLUDE_BASELINE_NAME)
@@ -448,7 +448,7 @@ class Workspace:
         harness symlink stays out of the builder's changes through
         :attr:`harness_files`. The exclude line keeps the builder's own ``git status``
         quiet about it. It goes in this worktree's OWN excludes file, never the clone's
-        shared ``info/exclude`` (P-056).
+        shared ``info/exclude`` (P-123).
         """
         path = self.own_exclude or self._exclude_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -461,7 +461,7 @@ class Workspace:
         there when the harness first used the clone (:meth:`_clone_exclude_baseline`; a
         builder's, this trial's or an earlier one's, ``[]`` when none). The shared
         file is READ, never rewritten (ADR-0025 item 13): the harness writes nothing to
-        it, so a rewrite could only race another worktree of the clone (P-056), and the
+        it, so a rewrite could only race another worktree of the clone (P-123), and the
         grader never reads it anyway (:meth:`touched_files`). Membership is by stripped
         line, not byte position. A workspace without a baseline (bound, not created)
         leaves it alone."""

@@ -133,7 +133,7 @@ class _Axis:
 
 def _axis(rows: Sequence[GradeRow]) -> _Axis:
     """Mean and spread over the eligible rows whose value is known: a cost is known per row
-    (``GradeRow.cost_known`` — a known ``$0`` prices at ``$0``, P-064); a latency when it
+    (``GradeRow.cost_known`` — a known ``$0`` prices at ``$0``, P-131); a latency when it
     is positive."""
     costs = [r.cost_usd for r in rows if r.eligible and r.cost_known]
     lats = [r.latency_s for r in rows if r.eligible and r.latency_s > 0]

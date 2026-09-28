@@ -4,7 +4,7 @@ ADR-0026 items 2 to 5: a cell is licensed only by a **reading** registered befor
 attempt — the cell, the hierarchy of context arms richest first, any descriptive arms, the look
 rule, the share of the cell's error budget it spends, the test author's model and the frozen
 pool of qualified commits with its SHA-256 — frozen by RULE (every qualified commit of the cell,
-or every one authored since a date), never by a hand-picked list (DL-109). ``POST /readings``
+or every one authored since a date), never by a hand-picked list (DL-097). ``POST /readings``
 (operator; CSRF-bound like every cookie-authenticated write) writes one ``reading.registered``
 event under the events store's write lock, so two registrations can never both spend the last
 of a cell's budget; it is refused ``409 pool_seen`` when a pool commit already has a graded row
@@ -133,7 +133,7 @@ def standard_for(
     proven standard. The factory's entry gate reads this (ADR-0026 item 8), naming the
     repository's own checks arm (``current_checks_arm``) and the deployment's posture class
     (``deployment_posture_class``): both are required, so a licence never crosses an arm or a
-    posture (P-137)."""
+    posture (P-311)."""
     with factory() as s:
         readings = load_readings(s, repo)
     rows = list(DbLedger(factory).rows(repo=repo))
@@ -188,7 +188,7 @@ def budget_by_cell(readings: Sequence[Reading]) -> list[dict[str, Any]]:
 class ReadingIn(BaseModel):
     """A registration: the full cell, the hierarchy (richest first) and the pool RULE — every
     qualified task of the cell's class, size and language, or every one authored at or after
-    ``since`` (DL-109). ``pool``, when given, must be that rule's own pool: a hand-picked list
+    ``since`` (DL-097). ``pool``, when given, must be that rule's own pool: a hand-picked list
     is refused ``pool_not_blind``."""
 
     repo: str = Field(min_length=1, max_length=64)

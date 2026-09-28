@@ -13,7 +13,7 @@ Navigation
 What it is:   ``crb reading register | list`` — the file workdir's twin of ``POST /readings``.
 What it does: Builds the full cell from its flags, freezes the pool by rule — every
               gold-checked task of the cell's class, size and language on file, or every one
-              authored since ``--since`` (never a list, DL-109) — refuses an unsealed posture
+              authored since ``--since`` (never a list, DL-097) — refuses an unsealed posture
               for a replayed arm, registers through ``crb.core.reading.register`` against the
               JSONL ledger and the readings already on file, and appends the record; lists the
               registered readings with their spend.
@@ -151,7 +151,7 @@ def cmd_register(args: argparse.Namespace) -> int:
         and t.gold_clean is True
         and (not t.language or t.language == args.language)
     }
-    try:  # the pool is frozen by rule, never by a list (DL-109, P-138)
+    try:  # the pool is frozen by rule, never by a list (DL-097, P-312)
         pool, pool_rule = pool_by_rule(
             {c: str(t.authored or "") for c, t in tasks.items()}, since=args.since
         )

@@ -64,7 +64,7 @@ How:          ``iter_candidates`` (git log + changed files + layout rules, one c
               ``mine`` drives the loop to ``target_count`` and emits ``mine.*`` events.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
-              docs/adr/0019-qualification-is-posture-relative.md; DL-105 (a distinct commit
+              docs/adr/0019-qualification-is-posture-relative.md; DL-093 (a distinct commit
               is a distinct change); ADR-0025 item 13 (the unattributed baseline, stream G)
 Works with:   src/crb/core/spec.py (RepoConfig layout rules, TaskSpec, size tiers, path
               class), src/crb/core/workspace.py (the worktree and overlays),
@@ -263,7 +263,7 @@ class ChangeIndex:
     def held(self, known: Iterable[str]) -> dict[str, str]:
         """change identity → the known (already mined) commit that holds it. A candidate
         with a held identity is the same change as a task the store already has, whichever
-        of the two the walk would otherwise keep (DL-105)."""
+        of the two the walk would otherwise keep (DL-093)."""
         out: dict[str, str] = {}
         for sha in sorted(known):
             out.setdefault(self.identity(sha), sha)
@@ -456,7 +456,7 @@ def qualify(
             return MineOutcome(sha, None, "baseline timeout", time.monotonic() - started)
         # the rule qualify_task applies (ADR-0019, one vocabulary): a baseline whose output
         # does not parse is refused unless the RED itself was a build failure that explains
-        # it — else the task would later fail belt 3 on the unparsed run (P-057)
+        # it — else the task would later fail belt 3 on the unparsed run (P-124)
         if base.parse_error and red.failing:
             reason = (
                 f"{QUAL_BASELINE_UNATTRIBUTED}: the belt scope failed at the parent without "

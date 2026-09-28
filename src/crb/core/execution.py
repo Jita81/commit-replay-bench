@@ -1285,7 +1285,7 @@ def make_executor(
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
 ) -> Executor:
     """``kind`` ∈ {"local", "docker"}, and nothing else: an empty setting is an error, never
-    the host (ADR-0025 item 13; P-053) — nor are ``none`` and ``host``, which once meant
+    the host (ADR-0025 item 13; P-120) — nor are ``none`` and ``host``, which once meant
     local. Docker without settings fails closed. ``on_kill_unconfirmed`` reaches the docker
     executor only (a local kill needs no daemon to confirm it)."""
     if executor_kind(kind) == "local":
@@ -1295,14 +1295,14 @@ def make_executor(
     return DockerExecutor(docker, cancel=cancel, on_kill_unconfirmed=on_kill_unconfirmed)
 
 
-#: The executor kinds, and nothing else (P-053).
+#: The executor kinds, and nothing else (P-120).
 EXECUTOR_KINDS: tuple[str, ...] = ("local", "docker")
 
 
 def executor_kind(kind: str) -> str:
     """``kind`` normalised to one of :data:`EXECUTOR_KINDS`, or ``ValueError`` naming the
     setting — the one check :func:`make_executor` and every caller that holds an executor
-    setting (the worker's own settings, P-126) apply, so an empty value is refused where
+    setting (the worker's own settings, P-300) apply, so an empty value is refused where
     it is read and never reaches a caller's default."""
     k = (kind or "").strip().lower()
     if k not in EXECUTOR_KINDS:

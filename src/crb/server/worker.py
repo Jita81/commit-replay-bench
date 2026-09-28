@@ -557,7 +557,7 @@ class WorkerSettings:
             raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
-        executor_kind(self.executor)  # P-126: an empty or unknown kind never starts a worker
+        executor_kind(self.executor)  # P-300: an empty or unknown kind never starts a worker
 
 
 # ---------------------------------------------------------------------------
@@ -1531,7 +1531,7 @@ class Worker:
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        # no default here: an empty kind reaches make_executor and is refused (P-126)
+        # no default here: an empty kind reaches make_executor and is refused (P-300)
         kind = str(ctx.params.get("executor") or self.settings.executor)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(

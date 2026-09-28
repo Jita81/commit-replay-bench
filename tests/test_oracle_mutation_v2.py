@@ -12,7 +12,7 @@ run whose output did not parse as kills (external assessment 2026-09-25, A6). v2
 * reads a score with more than half its planned mutants excluded as not scoreable.
 
 v2 is the scorer of apparatus 2.4 (ADR-0025 item 14): these tests set the stamp stream R's
-bump will set, and one test pins that below 2.4 the scorer is v1 as it stood (P-121).
+bump will set, and one test pins that below 2.4 the scorer is v1 as it stood (P-295).
 
 Navigation
 ----------
@@ -201,7 +201,7 @@ def test_a_timed_out_outcome_cannot_be_a_kill() -> None:
 def test_below_2_4_the_scorer_is_mutation_v1_as_it_stood(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """P-121: the scoring rule follows the apparatus, so a score stamped 2.3 is a v1 score —
+    """P-295: the scoring rule follows the apparatus, so a score stamped 2.3 is a v1 score —
     the stable prefix of the first file's earliest candidates, a timeout read as a kill, no
     sampler in the stamp — and never one of v2 under a 2.3 stamp."""
     monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.3")
@@ -233,7 +233,7 @@ def test_the_operator_set_hash_moves_with_the_scorer() -> None:
     [("2.3", ms.MUTATION_V2), ("2.0", ms.MUTATION_V2), ("2.4", ms.MUTATION_V1)],
 )
 def test_a_stamp_whose_rule_is_not_its_apparatus_rule_is_refused(apparatus: str, rule: str) -> None:
-    """P-127: the class P-121 named, closed where every score is stamped. A provenance that
+    """P-301: the class P-295 named, closed where every score is stamped. A provenance that
     names a rule other than its apparatus's cannot be built, whoever builds it — so a score
     stamped 2.3 is never a v2 score even if a caller asks for one."""
     with pytest.raises(ValueError, match="rule of apparatus"):

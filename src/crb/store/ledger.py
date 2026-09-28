@@ -213,7 +213,7 @@ class DbLedger:
     # --- import / export ------------------------------------------------------
     def import_rows(self, rows: Iterable[GradeRow]) -> int:
         """Re-chain foreign rows into this ledger: every row is stamped ``imported`` (history —
-        a reading never counts it, P-139), and its source hash, when it has one, is kept."""
+        a reading never counts it, P-313), and its source hash, when it has one, is kept."""
         prepared: list[GradeRow] = []
         for r in rows:
             labels = {**r.labels, LABEL_IMPORTED: "true"}

@@ -14,7 +14,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Routing reads one reading: apparatus 2.4, routing.v2 and the context standard**
   (north-star Wave 2, stream R; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-r);
-  ADR-0025 as ADR-0026 amends it; DL-107 to DL-109). Every 2.4 row stamps its context arm and
+  ADR-0025 as ADR-0026 amends it; DL-095 to DL-097). Every 2.4 row stamps its context arm and
   class-set version, never pooled. A cell delivers only on its standard arm, when a reading
   registered before its first attempt reaches a look of the look rule in the sealed posture,
   with a measured oracle and controls. A reading licenses only the checks arm and posture
@@ -23,7 +23,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **The grade says why, and a distinct commit is a distinct change**
   (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-g);
-  ADR-0025 items 5, 6, 7 and 13; DL-105, DL-106). Belt 5 records why it holds what it holds.
+  ADR-0025 items 5, 6, 7 and 13; DL-093, DL-094). Belt 5 records why it holds what it holds.
   From apparatus 2.4 every row carries its failure kind, belt 5's reason and its change, and
   the oracle scorer is `mutation.v2`; a row or score below 2.4 keeps the 2.3 rules and is
   refused if it carries a 2.4 label or rule. The miner counts each change once. The executor

@@ -21,7 +21,7 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               without one (the critical friend's #8 and #9 did); that the fence reader
               agrees with a CommonMark parser line for line; and that a registered promise
               is refused in the present tense until its criterion is met, on a fixture and
-              on the live pages (P-115).
+              on the live pages (P-227).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -620,7 +620,7 @@ PROMISE_ROW = "| product.claims.210 | CLAIMS | the quality table | `absent` | {S
 def test_a_capability_is_refused_on_a_page_until_the_criterion_that_builds_it_is_met(
     tree: Path,
 ) -> None:
-    """docs/PREVENTION.md P-115: README said the product and EVIDENCE-AND-CLAIMS name which
+    """docs/PREVENTION.md P-227: README said the product and EVIDENCE-AND-CLAIMS name which
     ISO/IEC 25010 characteristics its checks evidence, while product.claims.210 — the table
     that would name them — was unmet and G-674 said the product names no quality model. A
     registered promise is refused on every page the gate reads until its criterion is met."""
@@ -664,7 +664,7 @@ def test_the_live_pages_make_no_promise_ahead_of_its_criterion() -> None:
 
 def test_readme_carries_the_routing_bar_the_code_describes() -> None:
     """README's bar is ``RoutingPolicy.describe()``: the repository passes, and a copy whose
-    bar says anything else — one number moved — fails (docs/PREVENTION.md P-129)."""
+    bar says anything else — one number moved — fails (docs/PREVENTION.md P-303)."""
     assert cc.check_routing_bar(ROOT) == []
     text = (ROOT / "README.md").read_text(encoding="utf-8")
     assert cc.BAR_BEGIN in text and cc.BAR_END in text

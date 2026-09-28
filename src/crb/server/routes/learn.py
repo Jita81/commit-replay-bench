@@ -252,7 +252,7 @@ def derive_strengthen(
     # the repository's own checks arm: a cell never pools two arms (ADR-0024)
     every = list(DbLedger(factory).rows(repo=repo))
     rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
-    # the deployment's posture class: a reading licenses only the rows it counted on (P-137)
+    # the deployment's posture class: a reading licenses only the rows it counted on (P-311)
     rows = filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
     # one reading: the current apparatus and global class set, each cell on its standard arm
     # (ADR-0025 item 1, ADR-0026) — never two pooled
@@ -392,7 +392,7 @@ class RefusalAcceptIn(BaseModel):
     @classmethod
     def _note_is_one_line(cls, v: str) -> str:
         """The note becomes a provenance COMMENT in a line-oriented corpus file: a line break
-        would end the comment and write the rest as a corpus line nobody decided (P-094)."""
+        would end the comment and write the rest as a corpus line nobody decided (P-161)."""
         if has_line_break(v):
             raise ValueError("a note is one line: it is written into the corpus as a comment")
         return v
@@ -779,7 +779,7 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     cell = matches[0]
     api = require_jobs()
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
-    # whole or not at all (P-093 — the gate is the one POST /runs applies)
+    # whole or not at all (P-160 — the gate is the one POST /runs applies)
     runs = []
     for request in cell.requests:
         payload = {k: v for k, v in request.to_dict().items() if k != "note"}

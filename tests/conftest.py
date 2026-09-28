@@ -20,7 +20,7 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
               whether this machine has the ``claude`` CLI (P-037). ``_no_crb_env_leak`` puts
               every ``CRB_*`` variable back after each test, so no test (and no code under
-              test that writes one) hands a home or a setting to the next (P-128).
+              test that writes one) hands a home or a setting to the next (P-302).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -109,7 +109,7 @@ def _no_crb_env_leak() -> Iterator[None]:
     """Every test starts with the ``CRB_*`` environment the one before it started with: a
     variable a test (or the code it drives) sets, changes or deletes is put back after it.
     ``worker_main.settings_from_args`` sets ``CRB_HOME``; unguarded, one test's temporary
-    home reached every later test in the session (P-128)."""
+    home reached every later test in the session (P-302)."""
     yield from crb_env_restored()
 
 

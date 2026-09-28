@@ -850,7 +850,7 @@ def test_poison_hidden_in_info_exclude_is_disqualified(
     """Finding 1(a): ``echo conftest.py >> $(git rev-parse --git-path info/exclude)``
     graded CLEAN on 842875b. The pre-flight reports the line and disqualifies; and
     the poison is a touched file whatever the exclude file says. The clone's shared file
-    is left as found (ADR-0025 item 13: rewriting it raced every other worktree, P-056),
+    is left as found (ADR-0025 item 13: rewriting it raced every other worktree, P-123),
     so a second grade is disqualified by the same line — never a pass."""
     (trial.root / "conftest.py").write_text(_POISON, encoding="utf-8")
     _identity_edit(trial)

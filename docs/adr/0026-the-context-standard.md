@@ -1,7 +1,7 @@
 # ADR-0026 — The context standard: pre-registered context arms, a look rule with one error budget per cell, a leak guard, an entry gate, class sets held out by commit, and a library that reaches a brief only when measured
 
-**Status:** Proposed (DL-098; the values marked **[operator]** are proposals the operator fixes
-before stream R builds them; DL-099 records the library's scope)
+**Status:** Proposed (DL-086; the values marked **[operator]** are proposals the operator fixes
+before stream R builds them; DL-087 records the library's scope)
 **Date:** 2026-09-27
 **Apparatus impact:** none of its own. It rides ADR-0025's bump to **2.4**: every row of 2.4 or
 later stamps its context arm (`labels.context_arm`) and its class-set version
@@ -139,7 +139,7 @@ rule makes them prospective (item 10).
    outcome — every qualified commit of the cell, or every one authored at or after a date the
    operator names — and the rule is recorded with it; a hand-picked list is refused
    `pool_not_blind`, because a list chosen after grading could hold only the commits that
-   passed (DL-109). The **seeded order** is normative: commits are
+   passed (DL-097). The **seeded order** is normative: commits are
    read in ascending
    `sha256("crb.reading.v1|" + repo + "|" + canonical cell key + "|" + commit sha)`, one order
    per cell shared by every arm, so the arms are paired and no run incident can reorder a look.
@@ -147,7 +147,7 @@ rule makes them prospective (item 10).
    of its hierarchy at that apparatus, and `budget_spent` if the cell's budget cannot cover it.
    Within a reading a commit counts once, by its first observed attempt (ADR-0025 item 2) among
    rows this deployment graded after registration (an imported row is history and never counts,
-   DL-109), on the reading's checks arm, at rung `r1`: for a replayed arm, **in the sealed posture**
+   DL-097), on the reading's checks arm, at rung `r1`: for a replayed arm, **in the sealed posture**
    (the builder in the sealed container and the tests in the docker sandbox — ADR-0012,
    ADR-0019, ADR-0023); for `S2`, on factory rows whose held-out acceptance tests stayed outside
    the builder's tree until grading (item 8).
@@ -285,7 +285,7 @@ rule makes them prospective (item 10).
    the ticket carries it.** Readiness reads the cell's standard from the current signed map
    (`standard_for(repo, cell)` on the repository's checks arm and the deployment's posture
    class — a reading speaks only for a cell read on the checks arm and posture class it counted
-   its rows on, DL-109) and asks the ticket for exactly what that arm needs — for `S1`,
+   its rows on, DL-097) and asks the ticket for exactly what that arm needs — for `S1`,
    the structural slots the test author reads; for `S2`, a failing test a person attached — and
    the builder gets that arm's context and nothing it was not measured with (a person's test
    attached to a ticket in an `S1` cell is kept as a held-out acceptance test, never shown to the
@@ -370,7 +370,7 @@ rule makes them prospective (item 10).
      narrowed to the global vocabulary in the same way.
 
 10. **The context library: six kinds, one nomenclature, two people, measured before it reaches a
-    brief** (scope: DL-099).
+    brief** (scope: DL-087).
     - **Kinds and ids.** Every entry is a `component`, `work-type`, `decision`, `convention`,
       `pattern` or `standard`, with the id `<kind>/<slug>`. A work type is an organisation class:
       its definition, global parent, rule, example commits and test standard (the failing test a
@@ -594,7 +594,7 @@ The values marked **[operator]** above are proposals until the operator fixes th
 row here. A criterion or gap line of the definition of done that states one carries
 `ADR-0026 [operator]` and follows the operator's choice; `scripts/dod_check.py` refuses one that
 does not, refuses a marker this table does not register, and refuses the marker once this ADR
-is accepted (docs/PREVENTION.md P-117).
+is accepted (docs/PREVENTION.md P-229).
 
 | item | the proposal | the words a criterion states it in |
 |---|---|---|

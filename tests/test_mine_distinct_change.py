@@ -1,4 +1,4 @@
-"""A distinct commit is a distinct change (G-954; DL-105).
+"""A distinct commit is a distinct change (G-954; DL-093).
 
 The miner walks ``git log --no-merges``, which lists a cherry-pick beside its original and a
 revert beside the commit it reverts. The commit census of 2026-09-27 found both in click's
@@ -17,18 +17,18 @@ What it does: Pins that two cherry-picks of one change mine as one task (the old
               outside the walk is still never kept, that a change the store already holds is
               never mined again whichever of its commits the store holds (in the walk or
               outside it), that a replay of a task mined before the rule stamps the identity on
-              its 2.4 row, and that a row below 2.4 carries none (P-122, P-123).
+              its 2.4 row, and that a row below 2.4 carries none (P-296, P-297).
 How:          ``tests/fixtures/distinct_changes.py`` (pyrepo plus the two pairs, dated a day
               apart) through ``iter_candidates``, ``mine`` (no gold: RED and baseline only) and
               ``run_task`` with the gold patch.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0019-qualification-is-posture-relative.md; DL-105
+ADRs:         docs/adr/0019-qualification-is-posture-relative.md; DL-093
 Works with:   src/crb/core/mine.py (``ChangeIndex``, ``change_identity``, ``iter_candidates``),
               src/crb/core/run.py (stamps a missing identity), src/crb/core/ledger.py
               (``LABEL_CHANGE_ID``), tests/fixtures/distinct_changes.py (the two same-change
               pairs)
 Tested by:    tests/test_mine_distinct_change.py
-Touch when:   the rule for which commit of a change is kept changes (DL-105 first).
+Touch when:   the rule for which commit of a change is kept changes (DL-093 first).
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ def test_a_replay_row_below_2_4_carries_no_change_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The identity is a 2.4 label: a replay at 2.3 writes the row a 2.3 replay always
-    wrote, whether or not its task was mined with one (DL-106 (2))."""
+    wrote, whether or not its task was mined with one (DL-094 (2))."""
     monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.3")
     for task in (
         feat_task.with_(labels={}),

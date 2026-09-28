@@ -167,7 +167,7 @@ In **neither** mode does the builder see the regression belt or the grader. See
    window, the task target and the candidate cap; the file caps are fixed per pool). It keeps a
    single commit per change: of two commits with the same patch (a cherry-pick) the older, and
    never a revert, whose change is the commit it reverts, and it never mines a change it
-   already holds (DL-105). So the pool
+   already holds (DL-093). So the pool
    leaves out merge and root commits, anything older than that window, changes made without a
    test, and changes larger than the caps: a rate from it describes recent, tested, small work
    in that repository, not its history as a whole **[hypothesis — that this recency and

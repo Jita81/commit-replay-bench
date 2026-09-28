@@ -297,7 +297,7 @@ def test_qualify_without_gold_skips_a_baseline_whose_output_does_not_parse(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """P-057: a RED that names failing tests leaves nothing to explain an unparsed baseline,
+    """P-124: a RED that names failing tests leaves nothing to explain an unparsed baseline,
     so the candidate is refused with ``qualify_task``'s own words (one vocabulary with
     ADR-0019) — it once became a task that failed belt 3 on every trial."""
     real_run = runner.run

@@ -112,7 +112,7 @@ def test_register_refuses_what_the_rules_forbid(
         == 2
     )
     assert "sealed posture" in capsys.readouterr().err
-    # the pool is frozen by rule (DL-109): there is no list to name, only a date
+    # the pool is frozen by rule (DL-097): there is no list to name, only a date
     assert main([*_argv(wd), "--pool", "f" * 40]) == 2
     assert "--pool" in capsys.readouterr().err
     assert main([*_argv(wd), "--since", "last tuesday"]) == 2

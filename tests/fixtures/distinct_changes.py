@@ -13,13 +13,13 @@ same shapes on top of ``pyrepo`` with dates a day apart, so the walk order is de
 
 Navigation
 ----------
-What it is:   The fixture for ADR-less stream G work (DL-105): a distinct commit is a distinct
+What it is:   The fixture for ADR-less stream G work (DL-093): a distinct commit is a distinct
               change.
 What it does: Builds the pyrepo history plus a cherry-pick pair across a merge and a revert
               pair, each commit at a fixed author and committer date.
 How:          ``pyrepo.build`` then plain ``git`` with ``GIT_AUTHOR_DATE`` / ``GIT_COMMITTER_DATE``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the miner it feeds); DL-105
+ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the miner it feeds); DL-093
 Works with:   tests/fixtures/pyrepo.py (the base history), src/crb/core/mine.py (the walk it
               exercises), tests/test_mine_distinct_change.py (its consumer)
 Tested by:    tests/test_mine_distinct_change.py

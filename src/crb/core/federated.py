@@ -197,7 +197,7 @@ assert frozenset(ABSTRACT_ALLOWLIST) == _ABSTRACT_FIELDS, (
 def to_abstract_cell(stats: CellStats) -> AbstractCell:
     """Project :class:`CellStats` onto the allowlist. Key strings are redacted as
     defence in depth; an unmeasured axis becomes ``None``: a cost is unmeasured when no
-    eligible row's cost is known (``n_cost_known``; a known ``$0`` leaves as ``$0``, P-064),
+    eligible row's cost is known (``n_cost_known``; a known ``$0`` leaves as ``$0``, P-131),
     a latency when no row recorded a positive wall clock."""
     k = stats.cell
     return AbstractCell(

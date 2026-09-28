@@ -373,7 +373,7 @@ LABEL_BUILDER_EXECUTOR = "builder_executor"
 BUILDER_EXECUTOR_SEALED = "docker"
 #: Stamped ``true`` on every row the ledger IMPORTED (``DbLedger.import_rows``), with or without
 #: a source hash: an imported row is history — its labels were set elsewhere, so a reading
-#: never counts it as an attempt this deployment graded (ADR-0026 item 2, P-139).
+#: never counts it as an attempt this deployment graded (ADR-0026 item 2, P-313).
 LABEL_IMPORTED = "imported"
 #: The source ledger's own hash of an imported row, kept for traceability.
 LABEL_SOURCE_ROW_HASH = "source_row_hash"
@@ -633,8 +633,8 @@ def is_sealed_class(posture_class: str) -> bool:
     return posture_class.startswith("docker/") and posture_class.endswith("/sealed")
 
 
-#: The labels only apparatus 2.4 defines (DL-106 (2)): a row below 2.4 never carries one,
-#: whichever writer built it — refused by the row itself, at write and on read (P-127). A
+#: The labels only apparatus 2.4 defines (DL-094 (2)): a row below 2.4 never carries one,
+#: whichever writer built it — refused by the row itself, at write and on read (P-301). A
 #: writer that is handed one for an older apparatus writes the row as a 2.3 row always was.
 V2_ONLY_LABELS: frozenset[str] = frozenset(
     {LABEL_LINT_REASON, LABEL_CHANGE_ID, LABEL_CONTEXT_ARM, LABEL_TAXONOMY}
@@ -645,7 +645,7 @@ V2_KEPT_LABELS: frozenset[str] = V2_ONLY_LABELS | {LABEL_BUILDER_EXECUTOR}
 
 
 def labels_at_apparatus(labels: Mapping[str, str], apparatus_version: str) -> dict[str, str]:
-    """The labels a row of ``apparatus_version`` keeps (DL-106 (2), P-135): from 2.4 all of
+    """The labels a row of ``apparatus_version`` keeps (DL-094 (2), P-309): from 2.4 all of
     them; below 2.4 none of :data:`V2_KEPT_LABELS` — the row is written as a 2.3 row always
     was. THE one rule for every writer, and for every test that rewrites a row's apparatus."""
     if is_v2_apparatus(apparatus_version):
@@ -898,14 +898,14 @@ class GradeRow:
         pins its ``failure_kind`` and a ``lint_reason`` that agrees with belt 5, and a
         replay row names the change it observed and was gold-checked clean. Rows below 2.4
         are never re-interpreted, and never carry a label only 2.4 defines
-        (:data:`V2_ONLY_LABELS`, P-127)."""
+        (:data:`V2_ONLY_LABELS`, P-301)."""
         if not is_v2_apparatus(self.apparatus_version):
             leaked = [k for k in V2_ONLY_LABELS if k in self.labels]
             if leaked:
                 raise LedgerIntegrityError(
                     f"ledger refuses row {self.task_id[:10]} ({self.repo}) of "
                     f"{self.apparatus_version}: {leaked} are labels of apparatus 2.4, which no "
-                    "row below 2.4 carries (DL-106 (2))"
+                    "row below 2.4 carries (DL-094 (2))"
                 )
         if not self.carries_classification:
             return
@@ -1291,7 +1291,7 @@ def grade_row_from_result(
         provenance="measured",
         labels={
             "rung": trial,
-            # the change identity is a 2.4 label (DL-106 (2)): a mined task carries it at
+            # the change identity is a 2.4 label (DL-094 (2)): a mined task carries it at
             # any apparatus, but a row below 2.4 is written as a 2.3 row always was — as
             # are the builder executor, the context arm and the class-set version
             **labels_at_apparatus({k: str(v) for k, v in task.labels.items()}, apparatus),
@@ -1638,7 +1638,7 @@ class CellStats:
     checks_arm: str = ARM_OFF
     #: Eligible rows whose cost is KNOWN (``GradeRow.cost_known``) — the denominator of
     #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
-    #: known-ness from this count, never by comparing the mean with zero (P-064).
+    #: known-ness from this count, never by comparing the mean with zero (P-131).
     n_cost_known: int = 0
     # --- routing.v2 (ADR-0025 items 1 and 2 as ADR-0026 amends them) -------------------
     #: The one apparatus, context arm and class-set version every row of the cell carries

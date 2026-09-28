@@ -1,14 +1,14 @@
-"""The executor's edges (ADR-0025 item 13; P-053, P-054; G-971).
+"""The executor's edges (ADR-0025 item 13; P-120, P-121; G-971).
 
 * ``make_executor("")`` returned the LOCAL executor, so an empty executor setting ran a
-  repository's tests on the host instead of failing (P-053). Now ``local`` and ``docker``
+  repository's tests on the host instead of failing (P-120). Now ``local`` and ``docker``
   are the only kinds; ``""``, ``none`` and ``host`` raise ``ValueError`` naming the setting.
 * Every docker launch path read exit 125 as ``SandboxUnavailable``, so a suite that itself
-  exits 125 stopped the run as if the daemon had failed (P-054). Now 125 is a launch failure
+  exits 125 stopped the run as if the daemon had failed (P-121). Now 125 is a launch failure
   only when the docker CLI said so on stderr, or the run printed nothing; one table of
   docker output serves all three launch paths.
 * The worker read an empty executor setting as ``local`` on its own path
-  (``… or "local"``) before ``make_executor`` could refuse it (P-126). Now the worker's
+  (``… or "local"``) before ``make_executor`` could refuse it (P-300). Now the worker's
   settings refuse any kind but ``local`` and ``docker`` at start-up, and ``Worker._executor``
   has no default of its own.
 
@@ -29,8 +29,8 @@ ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md; ADR-0025 item 13 (str
               stream R commits)
 Works with:   src/crb/core/execution.py (under test), src/crb/server/worker.py and
               src/crb/server/worker_main.py (the worker's path into ``make_executor``),
-              tests/test_execution.py (the executor's own suite), docs/PREVENTION.md (P-053,
-              P-054 and P-126, the rows these tests close)
+              tests/test_execution.py (the executor's own suite), docs/PREVENTION.md (P-120,
+              P-121 and P-300, the rows these tests close)
 Tested by:    tests/test_execution_edges.py
 Touch when:   a docker release words its launch failures differently (add the captured line).
 """
@@ -180,7 +180,7 @@ def test_make_executor_local_is_local() -> None:
     assert isinstance(make_executor(" LOCAL "), ex.LocalExecutor)
 
 
-# --- the worker's path into make_executor (P-126: the fix reached the leaf, not its callers)
+# --- the worker's path into make_executor (P-300: the fix reached the leaf, not its callers)
 def _worker_args() -> Any:
     from crb.server import worker_main
 

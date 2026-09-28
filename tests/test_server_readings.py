@@ -12,9 +12,9 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               arms on the map and on ``/value`` with the playbook digests as provenance; refuses
               every pooled view with 422; carries the arm, builder and model in the CSV export;
               answers ``standard_for`` for the factory's gate; shows a reading licensing only
-              the checks arm and posture class it counted on (P-137), a pool picked on
-              outcomes refused ``pool_not_blind`` and a date cut accepted (P-138), imported
-              rows never counted (P-139), and an S3-only standard read as a ceiling.
+              the checks arm and posture class it counted on (P-311), a pool picked on
+              outcomes refused ``pool_not_blind`` and a date cut accepted (P-312), imported
+              rows never counted (P-313), and an S3-only standard read as a ceiling.
 How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
               controls report; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -226,7 +226,7 @@ def test_the_delivery_gate_reads_one_class_set_version(env: Env) -> None:
     ]
 
 
-# --- a reading licenses only the checks arm and posture class it counted on (P-137) ----------
+# --- a reading licenses only the checks arm and posture class it counted on (P-311) ----------
 
 
 def test_a_reading_on_the_off_checks_arm_never_licenses_the_fmt_arm(env: Env) -> None:
@@ -274,11 +274,11 @@ def test_a_reading_of_one_sealed_class_never_licenses_another(env: Env) -> None:
     assert standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=other) is None
 
 
-# --- the pool is frozen by rule, never picked on outcomes (P-138) ------------------------------
+# --- the pool is frozen by rule, never picked on outcomes (P-312) ------------------------------
 
 
 def test_a_pool_chosen_on_outcomes_is_refused(env: Env) -> None:
-    """ADR-0026 item 2 (DL-109): the pool is every qualified commit of the cell, or every one
+    """ADR-0026 item 2 (DL-097): the pool is every qualified commit of the cell, or every one
     authored since a date the operator names — never a list. Grading the commits under the
     descriptive ``A0`` arm first and registering only the ones that passed is refused
     ``pool_not_blind``; the rule's own pool is accepted and recorded."""
@@ -307,7 +307,7 @@ def test_a_pool_may_start_at_a_date_the_operator_names(env: Env) -> None:
     assert bad.status_code == 422 and bad.json()["error"]["code"] == "invalid_reading"
 
 
-# --- imported rows are history: a reading counts only what this deployment graded (P-139) -----
+# --- imported rows are history: a reading counts only what this deployment graded (P-313) -----
 
 
 def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env) -> None:

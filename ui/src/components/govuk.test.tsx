@@ -32,7 +32,7 @@ import { collectHints } from './Help'
 import { ConfirmationPanel, Details, NotificationBanner, SummaryList, TaskList } from './govuk'
 
 describe('govuk patterns', () => {
-  it('a task list status wraps at phone width instead of pushing the page sideways (P-133)', () => {
+  it('a task list status wraps at phone width instead of pushing the page sideways (P-307)', () => {
     render(
       <MemoryRouter>
         <TaskList completed={0} tasks={[{ num: 8, name: 'Deliver your first change', status: 'Backlog frozen — run the factory', tone: 'blue', to: '/factory' }]} />

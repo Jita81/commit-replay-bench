@@ -429,7 +429,7 @@ def test_touched_files_ignores_info_exclude_and_the_grader_reports_it(
     other worktree of the repo. The tree walk never reads the file; the pre-flight
     reports the builder's line on every grade — and, since ADR-0025 item 13, leaves the
     shared file as it found it: rewriting it raced every other worktree of the clone
-    (P-056)."""
+    (P-123)."""
     with Workspace.create(
         pyrepo.repo, pyrepo.feat_sha, tmp_path / "ws", config=pyrepo.config
     ) as ws:
@@ -497,7 +497,7 @@ def test_a_bound_workspace_leaves_the_exclude_file_alone_but_still_sees_the_file
 def test_concurrent_worktrees_of_one_clone_never_share_an_excludes_file(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """P-056 (ADR-0025 item 13): two JS trials of one repo each write ``/node_modules`` to
+    """P-123 (ADR-0025 item 13): two JS trials of one repo each write ``/node_modules`` to
     their OWN excludes file (``core.excludesFile`` per worktree); the clone's shared
     ``info/exclude`` is never written, so nothing is read-modified-written under another
     worktree, and a line the builder puts in its own file is removed and reported."""
@@ -535,7 +535,7 @@ def test_concurrent_worktrees_of_one_clone_never_share_an_excludes_file(
 def test_a_line_one_trial_left_in_the_shared_exclude_is_reported_in_every_later_trial(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
-    """P-125: the shared ``info/exclude`` is read, never rewritten, so a hiding line a
+    """P-299: the shared ``info/exclude`` is read, never rewritten, so a hiding line a
     builder appends stays in the file. It is judged against the clone's baseline, captured
     once by the harness, not against the file as it stood when each worktree was created —
     so the line is reported in every later trial it could affect, never absorbed."""

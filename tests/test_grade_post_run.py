@@ -12,7 +12,7 @@ What it is:   The test of the post-run diagnostic on a real grade.
 What it does: Pins that a file a test run writes is in ``touched_post_run`` and in the pack's
               grade, never among the builder's changed files, and that the grade stays clean;
               that a grade stopping after the tests ran (a RED target) still names it; and that
-              a grade stopping before any test ran names nothing (P-120).
+              a grade stopping before any test ran names nothing (P-294).
 How:          The pyrepo trial — with the gold, and without it (RED) — graded with a runner that
               writes an artefact into the tree before running the real tests.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules

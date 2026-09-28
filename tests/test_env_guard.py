@@ -1,4 +1,4 @@
-"""No test leaves a ``CRB_*`` variable in the process environment for the next one (P-128).
+"""No test leaves a ``CRB_*`` variable in the process environment for the next one (P-302).
 
 ``crb.server.worker_main.settings_from_args`` sets ``CRB_HOME`` in ``os.environ`` on purpose
 (builders read the secrets directory from the environment). A stream G test called it with a

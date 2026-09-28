@@ -1,6 +1,6 @@
 # ADR-0025 — routing.v2: a route reads one apparatus, counts each distinct change once by its first observed attempt, and never delivers on an unmeasured oracle or unmeasured controls
 
-**Status:** Accepted (the operator's standing direction of 2026-09-26, recorded as DL-107;
+**Status:** Accepted (the operator's standing direction of 2026-09-26, recorded as DL-095;
 north-star Wave 2, streams G, I, R and F)
 Amended by ADR-0026 (the context standard) before it was committed: items 2, 8, 9, 10, 12 and 15
 below are read as ADR-0026 item 6 rewrites them, and each carries a note saying how.
@@ -150,7 +150,7 @@ measure next. The core stays standard-library only (ADR-0008).
 
    **Distinct means distinct change.** The unit is the distinct CHANGE, counted once — the
    `change_id` stream G stamps on every 2.4 row (`git patch-id --stable`, a revert's that of
-   its original; DL-105) — never the commit id. The commit census found click `bug.fix` × S
+   its original; DL-093) — never the commit id. The commit census found click `bug.fix` × S
    holding two cherry-picks of one change with opposite outcomes: counted by commit they were
    two readings of one change. A row without a `change_id` (below 2.4) is its own change.
 
