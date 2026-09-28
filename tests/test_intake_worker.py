@@ -24,7 +24,8 @@ Works with:   src/crb/server/worker.py (``poll_intake`` / ``intake_due`` / ``int
               src/crb/server/intake.py (the flow it drives),
               src/crb/intake/fake.py (the board), tests/test_server_routes_intake.py
 Tested by:    tests/test_intake_worker.py
-Touch when:   the idle loop gains another periodic job — give it its own timer and test.
+Touch when:   never for a new repository; the idle loop gains another periodic job — give it its own
+              timer and test.
 """
 
 from __future__ import annotations

@@ -54,8 +54,9 @@ What it does: Verifies passwords in constant time (an unknown user pays for a ve
               sign-ins per ``(username, ip)`` and per ``ip``, seeds the
               bootstrap admin only while the users table is empty, and owns the account
               lifecycle primitives (``set_password``, ``set_user_active`` with the last-admin
-              guard) the admin routes and the ``crb users`` CLI share. Never logs or returns
-              a password or token.
+              guard, serialised by ``lock_users_table``, which fails closed when a
+              transaction is already open — P-430) the admin routes and the ``crb users``
+              CLI share. Never logs or returns a password or token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
               per cookie kind (``__Host-`` names when secure); ``credential_version`` = a
               SHA-256 prefix of the stored hash and the ``users.session_nonce``;
@@ -278,19 +279,43 @@ def count_users(db: Session) -> int:
     return int(db.execute(select(func.count(User.id))).scalar_one())
 
 
+#: ``Session.info`` key naming the transaction that took the users write lock, so taking it
+#: again inside that same transaction is a no-op rather than a refusal (P-430).
+_USERS_LOCK_HELD_BY = "crb.users_lock_held_by"
+
+
+class UsersLockNotHeld(RuntimeError):
+    """The users write lock could not be taken because a transaction was already open on the
+    session: the users write is refused rather than run unserialised (P-430)."""
+
+
 def lock_users_table(db: Session) -> None:
     """Serialise a read-then-write on ``users`` for the rest of this transaction: SQLite
     takes its write lock now (``BEGIN IMMEDIATE``), Postgres a transaction-scoped advisory
-    lock (id 7336 — one id per table, see ``crb.store.jobs``). Other dialects: no-op."""
+    lock (id 7336 — one id per table, see ``crb.store.jobs``). Other dialects: no-op.
+
+    pysqlite defers BEGIN until the first write, so the lock is taken after a caller's
+    reads; every caller (``set_role``, ``set_user_active`` from the route and from ``crb
+    users``) only reads before it. Fails closed (P-430, P-429's class): when a transaction
+    is already open, ``BEGIN IMMEDIATE`` cannot run and nothing proves this session holds
+    the write lock (a deferred ``BEGIN`` holds none), so :class:`UsersLockNotHeld` is raised
+    and nothing is written — unless this same transaction took the lock already, which
+    holds to its end (a commit or rollback ends that proof)."""
     dialect = db.get_bind().dialect.name
     if dialect == "sqlite":
-        # pysqlite defers BEGIN until the first write, so this is safe after the auth
-        # lookup's SELECTs; if a write already happened the write lock is already held.
+        held_by = db.info.get(_USERS_LOCK_HELD_BY)
+        if held_by is not None and held_by is db.get_transaction():
+            return
         try:
             db.execute(text("BEGIN IMMEDIATE"))
         except OperationalError as exc:
             if "within a transaction" not in str(exc):
                 raise
+            raise UsersLockNotHeld(
+                "the users write lock was not taken: a transaction was already open on this "
+                "session, so the users write would run unserialised — nothing was written"
+            ) from exc
+        db.info[_USERS_LOCK_HELD_BY] = db.get_transaction()
     elif dialect == "postgresql":
         db.execute(text("SELECT pg_advisory_xact_lock(7336)"))
 
@@ -337,8 +362,10 @@ def set_password(user: User, password: str) -> None:
     409 ``not_local`` for an OIDC account (its credential is the provider's, and a hash on
     it could never be used — ``find_local_user`` looks only under the local issuer);
     422 ``validation_error`` below ``MIN_PASSWORD_LENGTH``. The clear text is never stored,
-    logged or returned; the new hash re-salts, so :func:`credential_version` moves and the
-    account's existing sessions end (see :func:`current_user`).
+    logged or returned. The account's session nonce rotates with it (#52's revocation, the
+    same one logout and "sign out everywhere" use), so :func:`credential_version` moves and
+    every existing session ends on its next request (see :func:`current_user`) — by
+    construction, not because argon2 happens to re-salt the hash.
     """
     if not is_local_account(user):
         raise ApiError(
@@ -351,6 +378,7 @@ def set_password(user: User, password: str) -> None:
         user.password_hash = hash_password(password)
     except ValueError as exc:
         raise ApiError(422, "validation_error", str(exc), detail={"field": "password"}) from exc
+    rotate_session_nonce(user)
 
 
 def set_user_active(db: Session, user: User, active: bool) -> bool:
@@ -1037,6 +1065,7 @@ __all__ = [
     "OidcClient",
     "OidcState",
     "OperatorDep",
+    "UsersLockNotHeld",
     "ViewerDep",
     "authenticate_local",
     "bootstrap_admin_if_empty",

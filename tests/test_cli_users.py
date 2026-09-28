@@ -11,7 +11,8 @@ What it does: Pins that the verbs resolve the same database as ``crb serve`` (an
               taken username is refused before the prompt), the last-admin guard on
               ``deactivate``, the ≥ 12 character rule, unknown accounts, a database that is
               not the server's (refused by name, never created), and that every change is
-              one ``user.*`` event with actor ``cli:<os user>`` and never a password.
+              one ``user.*`` event with actor ``cli:<os user>`` and never a password, with
+              the account's API sign-ins between them on the same trail (DL-068).
 How:          ``crb migrate`` on a temp SQLite URL, ``main(argv)`` in-process with
               ``CRB_DATABASE_URL`` set and the password in a temp file; the API side is
               ``create_app`` over the same URL (no bootstrap admin) behind a ``TestClient``.
@@ -22,7 +23,8 @@ Works with:   src/crb/cli/commands/users.py (under test), src/crb/server/auth.py
               ``user_trace_id``), src/crb/store/db.py (``database_url`` resolution),
               docs/OPERATOR.md#9-users
 Tested by:    tests/test_cli_users.py
-Touch when:   a verb is added; the password source rule changes; the event shape changes.
+Touch when:   never for a new repository; a verb is added; the password source rule changes; the
+              event shape changes.
 """
 
 from __future__ import annotations
@@ -263,22 +265,31 @@ def test_lifecycle_end_to_end(
     assert rows["root"]["last_login"] != "" and rows["admin2"]["last_login"] == ""
     assert not any("password_hash" in r for r in rows.values())
 
-    # Every change is one event with the CLI actor and the target; never a password.
+    # Every change is one event with the CLI actor and the target; never a password. The
+    # account's sign-ins share its trail (DL-068): each attempt above, in order, between them.
     root = user_id(db_url, "root")
-    evs = events_for(db_url, root)
-    assert [e.action for e in evs] == [
-        "user.created",
-        "user.password_set",
-        "user.deactivated",
-        "user.activated",
+    trail = events_for(db_url, root)
+    assert [(e.action, e.payload_json.get("reason", "")) for e in trail] == [
+        ("user.created", ""),
+        ("user.login", ""),
+        ("user.password_set", ""),
+        ("user.login_failed", "invalid_credentials"),
+        ("user.login", ""),
+        ("user.deactivated", ""),
+        ("user.login_failed", "account_disabled"),
+        ("user.activated", ""),
+        ("user.login", ""),
     ]
-    assert [e.seq for e in evs] == [1, 2, 3, 4]
+    assert [e.seq for e in trail] == list(range(1, len(trail) + 1))
+    signins = [e for e in trail if e.action.startswith("user.login")]
+    assert [e.actor for e in signins] == [root, "anonymous", root, "anonymous", root]
+    evs = [e for e in trail if not e.action.startswith("user.login")]
     assert {e.actor for e in evs} == {f"cli:{getpass.getuser()}"}
     assert all(e.stage == "system" for e in evs)
     assert all(e.payload_json["target"] == root for e in evs)
     assert all(e.payload_json["username"] == "root" for e in evs)
     assert evs[1].payload_json["by"] == "cli"
-    for e in evs:
+    for e in trail:  # a refused sign-in stores nothing that was typed either
         blob = repr(e.payload_json)
         assert PW not in blob and PW2 not in blob and "argon2" not in blob
 

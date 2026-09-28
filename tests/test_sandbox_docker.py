@@ -50,8 +50,9 @@ Works with:   src/crb/core/execution.py (``DockerExecutor`` under test),
               walls on every shipped reference image), docs/SECURITY.md (sandboxed test
               execution, §3.1)
 Tested by:    tests/test_sandbox_docker.py
-Touch when:   a hardening flag is added (a wall test that proves it holds from INSIDE the
-              container, not only that the flag is on argv); the sandbox image changes.
+Touch when:   never for a new repository; a hardening flag is added (a wall test that proves it
+              holds from INSIDE the container, not only that the flag is on argv); the sandbox image
+              changes.
 """
 
 from __future__ import annotations

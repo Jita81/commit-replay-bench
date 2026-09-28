@@ -35,8 +35,8 @@ Works with:   src/crb/factory/loop.py (under test), src/crb/factory/readiness.py
               src/crb/factory/review.py (the steps it sequences), src/crb/factory/evidence.py
               (the factory evidence chain), tests/test_factory_build.py (the shared harness)
 Tested by:    tests/test_factory_loop.py
-Touch when:   a step is added to the loop (a stop-before case and an end-to-end case); the
-              rework budget rule changes.
+Touch when:   never for a new repository; a step is added to the loop (a stop-before case and an
+              end-to-end case); the rework budget rule changes.
 """
 
 from __future__ import annotations

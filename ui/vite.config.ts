@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { requireBundledDocs } from './plugins/requireBundledDocs'
 
 /**
  * Vite config for the crb UI.
@@ -23,6 +24,11 @@ import tailwindcss from '@tailwindcss/vite'
  *   passes it — an image context has no `.git` — else `git rev-parse HEAD`), so `/health` and
  *   `crb doctor` can say when the served bundle is not the served code
  *   (src/crb/observability/build_stamp.py; docs/PREVENTION.md P-002).
+ * - Docs in the build: `requireBundledDocs` (ui/plugins/requireBundledDocs.ts, tested by
+ *   running it) fails `vite build` when a guide `DOC_NAMES` lists,
+ *   or the decision records, are missing from `../docs` — the globs would otherwise resolve to
+ *   nothing and ship a Help that cannot open a single guide, which is what the image did while
+ *   `deploy/Dockerfile.dockerignore` dropped `docs` (docs/PREVENTION.md P-173).
  * - Test: vitest with jsdom; `src/test/setup.ts` installs jest-dom matchers; the per-test
  *   timeout is raised from vitest's 5 s default because the `ui-unit` CI job is blocking and
  *   runs on a slower shared runner than a developer's machine (see `test.testTimeout` below).
@@ -57,7 +63,7 @@ function buildStamp(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), buildStamp()],
+  plugins: [react(), tailwindcss(), buildStamp(), requireBundledDocs()],
   server: {
     port: 5173,
     // this project + the guides only, so `import.meta.glob('../../../docs/*.md')` resolves in
@@ -87,7 +93,8 @@ export default defineConfig({
     environment: 'jsdom',
     globals: false,
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // the build plugins' tests run in node (each file says so): they read and write the disk
+    include: ['src/**/*.test.{ts,tsx}', 'plugins/**/*.test.ts'],
     css: false,
     // vitest's default is 5 s, which is a per-test budget the suite's `userEvent` cases do not
     // meet on a loaded machine: typing into a controlled React form re-renders on every

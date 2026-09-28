@@ -4,14 +4,16 @@
  * Navigation
  * ----------
  * What it is:   The help registry's ratchet test.
- * What it does: Pins that (1) every path in the app's route table except `/login` and `*`
- *               has a `helpFor()` hit and the two help routes have none; (2) every
+ * What it does: Pins that (1) every path in the app's route table — `/login`, the help
+ *               pages and `*` included — has a `helpFor()` hit that is its OWN entry, and the
+ *               catch-all is declared once and last (G-926); (2) every
  *               `readMore.to` and every term's `readMore` names a bundled guide and, when it
  *               carries a slug, a heading in that file slugifies to it; (3) every `terms[]` id
  *               is in `TERMS`; (4) copy lint — purpose / next / numbers use "cell",
  *               "apparatus", "belt", "Wilson", "false-Q1" or "oracle" only when that term is
  *               in the screen's `terms[]`; every string is plain (no exclamation mark) and
- *               `next.viewer` always exists.
+ *               `next.viewer` always exists; (5) the /learn About block says the product
+ *               decides nothing on its own, in the words its DoD criteria cite.
  * How:          Reads `ui/src/App.tsx` and the eight guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -19,7 +21,8 @@
  * Works with:   ui/src/help/help.ts, ui/src/App.tsx (the route table it reads),
  *               ui/src/help/glossary.ts, ui/src/help/docs.ts (`slugify`, `isDocName`)
  * Tested by:    ui/src/help/help.test.ts
- * Touch when:   a screen is added — it needs a `HELP` entry before this passes.
+ * Touch when:   never for a new repository; a screen is added — it needs a `HELP` entry before this
+ *               passes.
  */
 import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'
@@ -79,18 +82,23 @@ const LINT: Array<[RegExp, TermId]> = [
 ]
 
 describe('HELP ratchet', () => {
-  it('every route in App.tsx except /login and * has an entry; the help routes have none', () => {
+  it('every route in App.tsx has an entry of its own — /login, the help pages and the catch-all included', () => {
     const paths = appRoutePaths()
     expect(paths.length).toBeGreaterThan(20)
     for (const p of paths) {
-      if (p === '/login' || p === '*') continue
-      if (p.startsWith('/help')) {
-        expect(helpFor(concrete(p)), p).toBeUndefined()
-        continue
-      }
-      expect(helpFor(concrete(p)), `no HELP entry matches ${p}`).toBeDefined()
+      // the catch-all answers for any address the table does not route
+      const pathname = p === '*' ? '/nowhere/at/all' : concrete(p)
+      // its OWN entry, never the catch-all's: a route that fell through to `*` would show the
+      // 404's help on a real screen, so "has an entry" alone would pass and prove nothing
+      expect(helpFor(pathname)?.route, `no HELP entry of its own for ${p}`).toBe(p)
     }
-    expect(helpFor('/nowhere')).toBeUndefined()
+  })
+
+  it('the catch-all is declared once and last, so it never answers for a routed screen', () => {
+    expect(HELP.filter((h) => h.route === '*')).toHaveLength(1)
+    expect(HELP.at(-1)?.route).toBe('*')
+    expect(helpFor('/nowhere')?.route).toBe('*')
+    expect(helpFor('/home')?.route).toBe('/home')
   })
 
   it('helpFor matches in declaration order and returns the most specific declared entry', () => {
@@ -119,6 +127,13 @@ describe('HELP ratchet', () => {
       for (const id of ids) expect(TERMS[id], `${h.route}: unknown term ${id}`).toBeDefined()
       expect(new Set(ids).size, `${h.route}: repeated term`).toBe(ids.length)
     }
+  })
+
+  it('the /learn About block names the register and the three reports and says the product decides nothing on its own', () => {
+    const learn = helpFor('/learn')!
+    expect(learn.purpose).toContain('the prevention register lists every bug class')
+    expect(learn.purpose).toMatch(/three reports list refusals .* weak oracles .* evidence that has gone stale/)
+    expect(learn.purpose).toContain('The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.')
   })
 
   it('copy lint: a term word appears only when the term is on the screen; plain English throughout', () => {

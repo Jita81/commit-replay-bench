@@ -39,8 +39,9 @@ Works with:   src/crb/core/runners/node_runners.py (under test), tests/fixtures/
               src/crb/core/workspace.py (the ``node_modules`` link), tests/test_node_eras.py
               (dependency eras on the same runners), docs/CONTRIBUTING.md (how to add a runner)
 Tested by:    tests/test_runners_node.py
-Touch when:   a fifth JavaScript runner is added (its flavour in the fixture, its cache, and
-              the ``tool`` parametrisation here); a reporter's output format changes.
+Touch when:   never for a new repository; a fifth JavaScript runner is added (its flavour in the
+              fixture, its cache, and the ``tool`` parametrisation here); a reporter's output format
+              changes.
 """
 
 from __future__ import annotations

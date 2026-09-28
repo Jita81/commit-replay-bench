@@ -20,8 +20,8 @@ Works with:   src/crb/server/routes/ledger.py (under test), src/crb/store/ledger
               import, export), src/crb/core/federated.py (the abstract allowlist),
               tests/fixtures/server_seed.py, docs/API.md (ledger)
 Tested by:    tests/test_server_routes_ledger.py
-Touch when:   an export format is added (a header / escaping case); a row field is added (the
-              CSV and abstract cases decide whether it is exported).
+Touch when:   never for a new repository; an export format is added (a header / escaping case); a
+              row field is added (the CSV and abstract cases decide whether it is exported).
 """
 
 from __future__ import annotations

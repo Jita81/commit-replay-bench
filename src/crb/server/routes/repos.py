@@ -28,7 +28,9 @@ What it does: Validates every config through ``RepoConfig.from_dict`` (an invali
               path is used — the profile walk here and the worker's ``_load_repo`` — and
               hands back the resolved path git then opens); serves the pool window (the
               mined tasks' date range and the share of the clone's non-merge history since
-              the oldest — the miner's recency bias, shown). Also the home of
+              the oldest — the miner's recency bias, shown); records a person's first read
+              of the baseline (``repo.baseline_read``) and serves the first one on the
+              detail as ``baseline_read`` — Home task 6 (DL-074). Also the home of
               ``get_repo_or_404`` and ``cached_profile`` that other route modules import.
 How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
               system trace; ``compute_profile`` walks the clone with ``profile_repo`` and
@@ -46,7 +48,8 @@ Works with:   src/crb/core/spec.py (``RepoConfig`` — the shape stored in ``con
               module preserves), src/crb/server/worker.py (``confined_clone_path`` at use),
               docs/OPERATOR.md#20-configuring-a-repository-from-the-ui,
               ui/src/screens/Repos
-Tested by:    tests/test_server_routes_repos.py, tests/test_server_routes_w3b.py,
+Tested by:    tests/test_server_routes_repos.py, tests/test_server_baseline_read.py,
+              tests/test_server_routes_w3b.py,
               tests/test_mcp_server.py (the MCP write tools ride these routes),
               tests/test_worker_clone.py (the rule at use, in the worker)
 Touch when:   THIS is the route a new repository goes through — but adding one is
@@ -64,8 +67,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Response, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from crb.core.capability import RepoChangeProfile, profile_repo
@@ -92,6 +96,8 @@ from crb.server.routes.runs import (
 )
 from crb.server.schemas import (
     TERMINAL_STATUSES,
+    BaselineRead,
+    BaselineReadOut,
     Page,
     PageDep,
     ProfileCell,
@@ -110,7 +116,7 @@ from crb.server.schemas import (
     TaskSpecOut,
 )
 from crb.server.settings import ROLE_RANK
-from crb.store.models import Event, Repo, Run, Task
+from crb.store.models import Event, Grade, Repo, Run, Task
 
 router = APIRouter(tags=["repos"])
 _ERR = {"model": ErrorEnvelope}
@@ -382,14 +388,38 @@ def repo_summary(session: Session, repo: Repo) -> RepoSummary:
     )
 
 
+#: The audit action a person's read of the baseline appends (DL-074).
+BASELINE_READ = "repo.baseline_read"
+
+
+#: Attempts at recording one baseline read before a ``seq`` conflict on the repository's
+#: trace is allowed to surface (P-421).
+_BASELINE_READ_ATTEMPTS = 3
+
+
+def _baseline_reads(session: Session, name: str, actor: str | None = None) -> Event | None:
+    """The first ``repo.baseline_read`` on the repository's trace — by ``actor`` when given."""
+    q = (
+        select(Event)
+        .where(Event.trace_id == system_trace_id("repo", name))
+        .where(Event.action == BASELINE_READ)
+    )
+    if actor is not None:
+        q = q.where(Event.actor == actor)
+    return session.execute(q.order_by(Event.seq).limit(1)).scalar_one_or_none()
+
+
 def repo_detail(session: Session, repo: Repo) -> RepoDetail:
-    """The summary plus the validated config and when the profile was last computed."""
+    """The summary plus the validated config, when the profile was last computed, and the first
+    recorded read of the baseline."""
     summary = repo_summary(session, repo)
     cached = dict(repo.config_json or {}).get(PROFILE_KEY) or {}
+    first = _baseline_reads(session, repo.name)
     return RepoDetail(
         **summary.model_dump(),
         config=_config_of(repo).to_dict(),
         profile_computed_at=str(cached.get("computed_at")) if cached else None,
+        baseline_read=BaselineRead(at=first.timestamp, by=first.actor) if first else None,
     )
 
 
@@ -525,6 +555,67 @@ def update_repo(
         )
     db.commit()
     return repo_detail(db, repo)
+
+
+@router.post(
+    "/repos/{name}/baseline-read",
+    response_model=BaselineReadOut,
+    status_code=status.HTTP_201_CREATED,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
+    summary="Record that this person read the repository's baseline (once per person)",
+)
+def record_baseline_read(
+    name: str, viewer: ViewerDep, db: DbDep, response: Response
+) -> BaselineReadOut:
+    """Append ``repo.baseline_read`` to the repository's audit trace the first time a person
+    reads its baseline; a later read by the same person writes nothing and answers the first.
+
+    The Baseline screen calls it once it shows the map of a repository with rows, so Home's
+    "Read the baseline" completes on a read the server recorded, not on a sign-off (G-165,
+    DL-074). A repository with no graded row has no baseline to read: 409 ``baseline_empty``.
+    A read that loses the trace's next ``seq`` to a concurrent write is retried, so the same
+    person's two concurrent reads answer 201 and 200, never a 500 (P-421).
+    """
+    get_repo_or_404(db, name)
+    rows = int(db.execute(select(func.count(Grade.seq)).where(Grade.repo == name)).scalar_one())
+    if rows == 0:
+        raise ApiError(
+            409,
+            "baseline_empty",
+            f"{name!r} has no graded row yet, so there is no baseline to read",
+            detail={"repo": name, "rows": 0},
+        )
+    # P-421: the repository's trace is shared by every person's read and every config
+    # change, so this read can lose the next ``seq`` to a concurrent write. A lost race is
+    # rolled back and the check runs again: the same person's concurrent read is then found
+    # and answered (200), anyone else's write only moves this read to the next ``seq``.
+    for attempt in range(_BASELINE_READ_ATTEMPTS):
+        prior = _baseline_reads(db, name, viewer.id)
+        if prior is not None:
+            response.status_code = status.HTTP_200_OK
+            return BaselineReadOut(
+                repo=name,
+                at=prior.timestamp,
+                by=prior.actor,
+                rows=int(dict(prior.payload_json or {}).get("rows", rows)),
+                recorded=False,
+            )
+        ev = append_system_event(
+            db,
+            trace_id=system_trace_id("repo", name),
+            action=BASELINE_READ,
+            repo=name,
+            actor=viewer.id,
+            payload={"rows": rows},
+        )
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            if attempt == _BASELINE_READ_ATTEMPTS - 1:
+                raise
+    return BaselineReadOut(repo=name, at=ev.timestamp, by=viewer.id, rows=rows, recorded=True)
 
 
 @router.get(

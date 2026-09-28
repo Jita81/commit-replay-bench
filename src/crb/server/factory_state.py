@@ -62,9 +62,9 @@ Works with:   src/crb/factory/backlog.py (Backlog/BacklogItem, the hash, ``evolv
               ``delivery_counts`` for the map's cells), src/crb/server/worker.py (the
               ``factory`` run kind; runs the sync first)
 Tested by:    tests/test_server_routes_factory.py, tests/test_factory_outcomes.py
-Touch when:   a new factory record kind needs serving (add it to task_views), a refusal is
-              recorded in a new shape (extend ``_refusal_of``), or the layout under
-              CRB_HOME changes (update docs/OPERATOR.md and the worker together).
+Touch when:   never for a new repository; a new factory record kind needs serving (add it to
+              task_views), a refusal is recorded in a new shape (extend ``_refusal_of``), or the
+              layout under CRB_HOME changes (update docs/OPERATOR.md and the worker together).
 """
 
 from __future__ import annotations

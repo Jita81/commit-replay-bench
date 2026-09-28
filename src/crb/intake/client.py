@@ -42,8 +42,8 @@ Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (the implementati
               src/crb/intake/feedback.py (renders the text ``comment`` posts under the
               marker), src/crb/server/intake.py (the service that calls the six verbs)
 Tested by:    tests/test_intake_client.py, tests/test_intake_adapters.py
-Touch when:   a seventh verb is genuinely needed — it widens what the product may do to
-              somebody's board, so it needs the ADR's non-goals revisited first.
+Touch when:   never for a new repository; a seventh verb is genuinely needed — it widens what the
+              product may do to somebody's board, so it needs the ADR's non-goals revisited first.
 """
 
 from __future__ import annotations

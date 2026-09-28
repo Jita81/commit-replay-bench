@@ -23,5 +23,11 @@ coverage.xml
 *.db-shm
 *.jsonl
 docs
+# ...except the Markdown the UI bundles at build time: the eight guides and the decision records
+# (ui/src/help/docs.ts, ui/src/help/adrs.ts). Without them the image's Help could open no
+# guide at all (docs/PREVENTION.md P-173); the runtime stage copies only ui/dist, so none of
+# these files is in the final image as a file. `vite build` refuses a context without them.
+!docs/*.md
+!docs/adr/*.md
 scripts
 data

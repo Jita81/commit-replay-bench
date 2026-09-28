@@ -925,10 +925,23 @@ of the affected cells.
 
 ## 9. Users
 
-An admin manages accounts through the API (`/users`, [API.md](API.md#admin): create, role,
-password, active; the Settings screen lists accounts and changes roles), and — when no
-admin can sign in — with `crb users` on the API host. The host
-verbs need no login: access to the host and the database is the credential. They read the
+An admin manages accounts on the **Settings screen**, in the Users card: every account with
+its role, whether it is local or issued by your identity provider, whether it is active, and
+how long ago it last signed in. From that card an admin changes a role, turns an account off
+and on again, sets a new password (typed twice, never shown back), signs the account out
+everywhere, reads the account's own history (its changes and its sign-ins), and creates a
+local account. Anyone signed in changes their own password
+in the "Change my password" card on the same screen. The same acts are at the API (`/users`,
+[API.md](API.md#admin)) and — when no admin can sign in at all — in `crb users` on the API
+host.
+
+**Not on this screen, deliberately.** There is no email reset, no self-service unlock and no
+security questions: the second door is the host, not the person's inbox. An account that signs
+in through your identity provider has no password here — it is disabled and reset at the
+provider. The last active admin cannot be deactivated or demoted, so its own toggle and role
+select are disabled with the reason as their hint, rather than refused after the attempt.
+
+The host verbs need no login: access to the host and the database is the credential. They read the
 database `crb serve` reads (`--database-url` → `CRB_DATABASE_URL` → `$CRB_HOME/crb.db`),
 so run them with the service's environment (the same `CRB_DATABASE_URL`; on a host, source
 the unit's `EnvironmentFile` first; in the container, `kubectl exec` into the API pod). A
@@ -953,21 +966,29 @@ A password is never a command-line argument (shell history, `ps`): the verbs pro
 read the first line of the file `CRB_USERS_PASSWORD_FILE` names when there is no terminal
 (a deployment script; delete the file afterwards). Passwords are ≥ 12 characters and are
 stored as argon2id hashes only. An account that signs in through the organisation's
-identity provider has no local password; disable it there.
+identity provider has no local password: its password belongs to the provider. Turning it
+off here (the Users card's **Active** toggle, or `crb users deactivate`) refuses it on this
+deployment; disabling it at the provider stops it everywhere.
 
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
 `user.deactivated`, `user.sessions_revoked`, `user.role_overridden`) with the actor (the
-admin's user id, or `cli:<os user>`) and the target; never the password. Setting a password
-ends the account's sessions on their next request (the cookie is bound to the credential it
-was issued under —
+admin's user id, or `cli:<os user>`) and the target; never the password. The History names
+an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
+too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
+is no account here is recorded without the name, and the server log writes it as
+`(not an account)`, so a password typed into the username box is stored in neither (DL-068). `GET /users/{id}/events`
+serves that trace, and the Users card's **History** button renders it under the account, so who
+reset or disabled an account is read in the product and not only in the database. Setting a
+password ends the account's sessions on their next request (it rotates the session nonce the
+cookie is bound to, DL-069 —
 [SECURITY.md §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 
 **Signing out ends the session everywhere.** Signing out (`POST /auth/logout`, the
 **Sign out** button) ends every session of that account, on every device, not only the
 browser you clicked in. An admin can do the same for somebody else —
-`POST /users/{id}/sessions/revoke`, "sign out everywhere" — for a lost laptop or a
-leaver; it works for an identity-provider account too, which has no password here to
+the Users card's **Sign out everywhere** button (`POST /users/{id}/sessions/revoke`) — for
+a lost laptop or a leaver; it works for an identity-provider account too, which has no password here to
 change. The person can sign in again at once; deactivate the account as well to keep them
 out.
 
@@ -976,6 +997,19 @@ credential: re-activating within the session lifetime (`CRB_SESSION_TTL`, 8 hour
 default) restores the sessions issued before. To contain a suspected compromise, deactivate
 **and** sign the account out everywhere (or set a new password); either ends the sessions
 for good. The last active admin can never be deactivated, by either door.
+
+**How long a recovery takes, and what it costs.** Neither door calls a model, so a recovery
+spends nothing. By the admin door — a wrong password on `/login`, which names who sets a new
+one; an admin sets it from the Users card; the old session is refused; the person signs in
+again — the machine-walked journey takes about a second
+**[measured — n = 2 walks, 658 ms and 1.13 s; method: `ui/e2e/walkthrough/13-recover-an-account.spec.ts`
+times the walk from the wrong password to the new sign-in (its `recovery-ms` annotation and
+log line) on a temporary tier-1 stack on the operator's Mac mini, 2026-09-26 and 2026-09-27;
+apparatus 2.3]**, and the spec fails if it ever takes 60 seconds. By the host door,
+`crb users set-password` itself takes about 2 seconds **[hypothesis — five runs by hand on
+2026-09-26 took 1.5 to 2.4 s, but no script in the repository reruns them (G-466)]**. A person
+adds the time to reach an admin or the API host and to read and type **[gap — nobody has
+timed a person doing it; G-466]**.
 
 **Roles from the identity provider.** The provider's claims set an account's role the first
 time it signs in. After that the role is yours to change on the Settings screen, and the

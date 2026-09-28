@@ -38,8 +38,9 @@ Works with:   src/crb/core/execution.py (under test), tests/test_sandbox_docker.
               executor against a real daemon), docs/SECURITY.md (the sandbox flags the argv test
               pins)
 Tested by:    tests/test_execution.py
-Touch when:   a hardening flag is added or removed (the argv test lists every one; update
-              docs/SECURITY.md with it); a new executor kind is registered in ``make_executor``.
+Touch when:   never for a new repository; a hardening flag is added or removed (the argv test lists
+              every one; update docs/SECURITY.md with it); a new executor kind is registered in
+              ``make_executor``.
 """
 
 from __future__ import annotations

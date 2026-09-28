@@ -206,9 +206,30 @@ class RepoSummary(BaseModel):
     github_full_name: str | None = None
 
 
+class BaselineRead(BaseModel):
+    """The first recorded read of a repository's baseline — the ``repo.baseline_read`` event
+    ``POST /repos/{name}/baseline-read`` appends. Home task 6 completes on it (DL-074)."""
+
+    at: str
+    by: str
+
+
+class BaselineReadOut(BaseModel):
+    """``POST /repos/{name}/baseline-read``: this person's read — ``recorded`` is ``False``
+    when they had read it before and nothing new was written."""
+
+    repo: str
+    at: str
+    by: str
+    rows: int
+    recorded: bool
+
+
 class RepoDetail(RepoSummary):
     config: dict[str, Any]
     profile_computed_at: str | None = None
+    #: the first person's read of the baseline, or ``None`` until someone has read it
+    baseline_read: BaselineRead | None = None
 
 
 class _RepoConfigFields(BaseModel):

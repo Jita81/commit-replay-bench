@@ -17,9 +17,11 @@
  *               ui/src/screens/Connect/GitHubConnectDialog.test.tsx (the configured / error cases),
  *               ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Settings/GitHubAppCard.test.tsx
- * Touch when:   the permissions delivery needs change (src/crb/server/routes/github.py `can_deliver`).
+ * Touch when:   never for a new repository; the permissions delivery needs change
+ *               (src/crb/server/routes/github.py `can_deliver`).
  */
 import { screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GitHubAppInfo, GitHubInstallation } from '../../api/types'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
@@ -73,5 +75,22 @@ describe('GitHubAppCard', () => {
     await waitFor(() => expect(screen.getByTestId('github-app-status')).toHaveTextContent('not configured'))
     expect(screen.getByRole('link', { name: 'Register the GitHub App' })).toHaveAttribute('href', '/help/docs/GITHUB-APP#2-register-the-app-once-per-deployment')
     expect(screen.queryByText('docs/GITHUB-APP.md')).toBeNull()
+  })
+
+  it('Sync installations says what it recorded (G-922)', async () => {
+    const { calls } = mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'operator' }, 'GET /github/app': APP, 'POST /github/installations/sync': [READ_ONLY, WRITER] })
+    renderApp(<GitHubAppCard />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sync installations' }))
+    const said = await screen.findByTestId('github-sync-said')
+    expect(said).toHaveAttribute('role', 'status')
+    expect(said).toHaveTextContent('Sync done: 2 installations recorded, 1 of them can deliver.')
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/github/installations/sync')).toBe(true)
+  })
+
+  it('a sync that finds one installation, or none, says so in the singular', async () => {
+    mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'operator' }, 'GET /github/app': APP, 'POST /github/installations/sync': [READ_ONLY] })
+    renderApp(<GitHubAppCard />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Sync installations' }))
+    expect(await screen.findByTestId('github-sync-said')).toHaveTextContent('Sync done: 1 installation recorded, none of them can deliver.')
   })
 })

@@ -24,7 +24,8 @@ ADRs:         none
 Works with:   src/crb/provision/fetch.py (under test), src/crb/builders/sidecar.py (the proxy),
               src/crb/provision/store.py (the stage), tests/conftest_langs.py (the daemon probe)
 Tested by:    tests/test_provision_fetch.py
-Touch when:   a flag on the fetch's ``docker run`` changes (a security decision: SECURITY §3.1.1).
+Touch when:   never for a new repository; a flag on the fetch's ``docker run`` changes (a security
+              decision: SECURITY §3.1.1).
 """
 
 from __future__ import annotations

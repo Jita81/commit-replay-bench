@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 1 finished: accounts, the Learn page's writes, keyboard and wayfinding**
+  (north-star Wave 1, streams U, L, A1 and A2; [#65](https://github.com/Jita81/commit-replay-bench/pull/65)).
+  Settings › Users shows each account's kind, state and last sign-in; an admin sets a password,
+  turns an account off and on and signs it out everywhere; sign-ins and refused local
+  sign-ins are audited, and a password set rotates the session nonce (DL-068, DL-069). An
+  operator accepts a refusal line, registers strengthening items and queues a re-measurement
+  from Learn, each audited (DL-070, DL-071, DL-075). Under 640 px the navigation folds into a Menu, and the
+  walkthrough reaches every control by Tab (DL-072). The decision records open at
+  `/help/docs/ADR-nnnn`, and a recorded baseline read completes task 6 (DL-073, DL-074).
+
 - **The record corrects itself; costs carry their n; each stream measures its own flow**
   (north-star Waves 0 and 1, streams D, E and M;
   [#64](https://github.com/Jita81/commit-replay-bench/pull/64)).

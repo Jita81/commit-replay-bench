@@ -17,13 +17,17 @@
  *               the *Signed by a second person* row is pending (○), not satisfied, until a row
  *               is named, because the attested row is judged only then; the action is
  *               disabled until the preview says `signable` AND the approver has named a
- *               row, ticked "I have read this accepted diff" and written a statement. Every
+ *               row, ticked "I have read this accepted diff" and written a statement; while
+ *               a newly named row's preview loads, the gate is pending and the action
+ *               disabled, never the previous row's verdict (P-169). Every
  *               recorded sign-off carries a `verifier_kind` tag next to the approver (local
  *               account / identity provider / service — delegated, not a person / kind not
  *               recorded) with its meaning on hover. A 409
  *               from the POST renders as a REFUSED gate with the clauses (the false-Q1 floor
  *               points at the ledger); a pre-policy record is listed honestly without a
- *               fabricated snapshot; an approver can revoke. A reader without the approver
+ *               fabricated snapshot; an approver can revoke — Revoke opens a confirmation that
+ *               takes focus (its reason field) and, left by Cancel, gives focus back to the
+ *               Revoke button that opened it (G-905). A reader without the approver
  *               role gets the gate, the evidence and the attestations and never the form —
  *               an inset says who can sign and that reading changes nothing. Reached without
  *               `?repo=`, the screen chooses the most recently updated repository itself;
@@ -66,7 +70,7 @@
  *               outright on any false-Q1 row
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
  */
-import { useEffect, useId, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useEvidence, useRevokeSignoff, useSignoffs } from '../../api/hooks'
 import { PatchView } from '../Runs/EvidenceDrawer'
@@ -268,6 +272,16 @@ export function SignoffPage() {
   // the attestation whose revocation is being confirmed, and the reason that will be recorded
   const [revoking, setRevoking] = useState<SignoffWithPolicy | null>(null)
   const [revokeReason, setRevokeReason] = useState('')
+  // the attestation whose Revoke button opened the confirmation: focus goes back there when it
+  // closes, so a keyboard person is not dropped at the top of the page (G-905)
+  const revokeOpener = useRef<string | null>(null)
+  useEffect(() => {
+    if (revoking !== null || revokeOpener.current === null) return
+    const id = revokeOpener.current
+    revokeOpener.current = null
+    // gone after a successful revoke: the row can no longer be revoked, and focus stays where the browser puts it
+    document.querySelector<HTMLElement>(`button[data-revoke-id="${id}"]`)?.focus()
+  }, [revoking])
   const readId = useId()
 
   const measured = useMemo(() => (map.data?.cells ?? []).filter((c) => c.route !== NOT_YET_MEASURED && c.n > 0), [map.data])
@@ -281,11 +295,16 @@ export function SignoffPage() {
     setRead(false)
   }, [cellKey])
 
+  // `previewData` may be the previous row's preview, kept as a placeholder while the named
+  // row's loads: it may keep the Accepted row select, its rows and the cell's evidence on
+  // screen (G-905), never a verdict. The gate, the refusals and `signable` read `current`,
+  // which is the preview of the form as it stands or nothing (P-169).
   const previewData = preview.data
+  const current = preview.isPlaceholderData ? undefined : preview.data
   const attested = read && rowHash.length > 0 && statement.trim().length > 0
-  const criteria = criteriaFor(previewData, cell !== null, attested)
-  const refusals = previewData?.refusals ?? []
-  const signable = Boolean(previewData?.signable) && attested
+  const criteria = criteriaFor(current, cell !== null, attested)
+  const refusals = current?.refusals ?? []
+  const signable = Boolean(current?.signable) && attested
   const previewFailed = preview.isError
 
   const refusal = useMemo(() => {
@@ -411,7 +430,7 @@ export function SignoffPage() {
         header: '',
         cell: (s) =>
           !s.revoked && can('approver') ? (
-            <Button size="sm" variant="danger" hint="button.signoff.revoke" onClick={() => { setRevoking(s); setRevokeReason(''); revoke.reset() }} disabled={revoke.isPending} aria-haspopup="dialog">
+            <Button size="sm" variant="danger" hint="button.signoff.revoke" onClick={() => { revokeOpener.current = s.id; setRevoking(s); setRevokeReason(''); revoke.reset() }} disabled={revoke.isPending} aria-haspopup="dialog" data-revoke-id={s.id}>
               Revoke
             </Button>
           ) : null,
@@ -649,7 +668,8 @@ export function SignoffPage() {
                   </p>
                 </WarningCallout>
                 <div className="max-w-[44em]">
-                  <TextArea label="Why are you revoking it?" hint="field.signoff.revoke_reason" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} description="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
+                  {/* the confirmation takes focus when it opens: its one field is where the keyboard person starts */}
+                  <TextArea autoFocus label="Why are you revoking it?" hint="field.signoff.revoke_reason" required rows={2} value={revokeReason} onChange={(e) => setRevokeReason(e.target.value)} description="Recorded verbatim on the revocation row, append-only. An auditor reads this next to the attestation it withdraws." data-testid="revoke-reason" />
                 </div>
                 {revoke.isError && (
                   <div className="mt-3">

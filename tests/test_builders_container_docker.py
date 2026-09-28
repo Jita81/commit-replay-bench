@@ -51,8 +51,9 @@ Works with:   src/crb/builders/container.py (under test), src/crb/builders/egres
               tests/fixtures/langs/pyrepo_min.py (the fixture), tests/conftest_langs.py (the
               image build and probes), tests/test_builders_container.py (the daemon-free half)
 Tested by:    tests/test_builders_container_docker.py
-Touch when:   the builder image or the sidecar changes (a from-inside case that proves the wall
-              holds, not only that the flag is set); the default allowlist changes.
+Touch when:   never for a new repository; the builder image or the sidecar changes (a from-inside
+              case that proves the wall holds, not only that the flag is set); the default allowlist
+              changes.
 """
 
 from __future__ import annotations

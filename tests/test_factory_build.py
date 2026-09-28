@@ -26,8 +26,8 @@ Works with:   src/crb/factory/build.py (under test), src/crb/factory/testfirst.p
               src/crb/core/ledger.py (``PROCESS_FACTORY`` rows), tests/test_factory_delivery.py,
               tests/test_factory_review.py and tests/test_factory_loop.py (import this harness)
 Tested by:    tests/test_factory_build.py
-Touch when:   the build step gains a stage (a harness method and a case); never so that a
-              factory row can be clean under a belt the replay row could not.
+Touch when:   never for a new repository; the build step gains a stage (a harness method and a
+              case); never so that a factory row can be clean under a belt the replay row could not.
 """
 
 from __future__ import annotations

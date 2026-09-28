@@ -32,7 +32,8 @@ Works with:   src/crb/server/routes/factory.py (the three routes under test),
               src/crb/intake/fake.py (the board they poll),
               tests/fixtures/server_seed.py (the stack), tests/test_intake_service.py
 Tested by:    tests/test_server_routes_intake.py
-Touch when:   a field is added to the intake response (docs/API.md first, then the UI type).
+Touch when:   never for a new repository; a field is added to the intake response (docs/API.md
+              first, then the UI type).
 """
 
 from __future__ import annotations

@@ -23,7 +23,7 @@ Works with:   src/crb/store/qualifications.py (the records), src/crb/server/rout
               src/crb/core/qualify.py (codes, fixes, deltas), src/crb/server/settings.py (the
               deployment's executor, image and provisioning)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_routes_repos.py
-Touch when:   the panel or the 409 needs another fact from the records.
+Touch when:   never for a new repository; the panel or the 409 needs another fact from the records.
 """
 
 from __future__ import annotations

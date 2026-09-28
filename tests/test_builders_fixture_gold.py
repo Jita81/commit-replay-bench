@@ -9,8 +9,10 @@ What it is:   The test-only ``fixture_gold`` builder's test suite — opt-in reg
 What it does: Pins that exactly one switch (``CRB_ENABLE_FIXTURE_BUILDER``) registers it and
               that without the switch it is absent, that its identity is forced (it can never
               masquerade as a real model), that it overlays only non-test files, that build then
-              grade is clean on all four belts, and that blind mode works without test paths —
-              the instrument check the browser walkthrough relies on.
+              grade is clean on all four belts, that blind mode works without test paths —
+              the instrument check the browser walkthrough relies on — and that an
+              ``attempt`` the real guard refuses is recorded as a protocol violation (never
+              run), while an allowed one records nothing.
 How:          Re-imports ``crb.builders`` under the switch; ``trial`` + ``feat_task`` from
               ``conftest.py``; the real ``grade``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -26,6 +28,7 @@ Touch when:   never for a new repository; only if the registry's opt-in mechanis
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -131,3 +134,101 @@ def test_blind_mode_works_without_test_paths(
         assert not ws.exists(pr.TEST_SUBTRACT)  # the oracle stays held out
     finally:
         ws.remove()
+
+
+# --- a refusal on purpose (G-913: the Learn walkthrough needs a real one) ----------------
+
+
+def test_an_attempted_command_the_guard_refuses_is_recorded_as_a_protocol_violation(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, trial: Workspace
+) -> None:
+    """``builder_config {"attempt": …}`` asks the REAL shell guard about one command, as a
+    builder's tool call would. A refusal is recorded exactly as the agentic builders record
+    one (``<reason> (attempted: <cmd>)``), so the row lands as ``protocol`` and the Learn
+    page's refusal triage reads it like any other — the command itself is never run."""
+    from crb.builders.adapter import attempt_error
+    from crb.core.learn import parse_violations
+
+    b = fg.FixtureGoldBuilder(attempt="git log -p")
+    assert b.describe()["attempt"] == "git log -p"
+    out = b.build(trial, _brief(feat_task, pyrepo.config), base.Budget())
+    assert out.violated and len(out.errors) == 1
+    assert out.errors[0].startswith("archaeology:")
+    assert out.errors[0].endswith("(attempted: git log -p)")
+    error = attempt_error(out)
+    assert error.startswith("protocol violation: archaeology:")
+    [violation] = parse_violations(error)
+    assert violation.prefix == "archaeology" and violation.command == "git log -p"
+    assert out.extra["attempt"] == "git log -p"
+    assert out.cost_usd == 0.0 and out.done is False  # still spends and claims nothing
+    # a refused attempt stops there, as a builder whose one move was refused would: no patch,
+    # so the grade is not clean and the row lands as `protocol` (a clean grade outranks it)
+    assert out.extra["files"] == [] and trial.read(pr.SRC) != pr.SRC_FEAT
+
+
+def test_an_attempted_command_the_guard_allows_records_nothing(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, trial: Workspace
+) -> None:
+    """An honest command is not a violation: the fixture only asks the guard, so an allowed
+    command leaves the build exactly as the plain fixture's (clean-gradeable, no errors)."""
+    out = fg.FixtureGoldBuilder(attempt="ls -la").build(
+        trial, _brief(feat_task, pyrepo.config), base.Budget()
+    )
+    assert out.errors == () and not out.violated
+    assert trial.read(pr.SRC) == pr.SRC_FEAT
+
+
+def test_the_attempted_shell_call_is_counted_in_tool_calls_like_the_event_it_emits(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, trial: Workspace
+) -> None:
+    """P-425: the attempt emits one ``build.tool`` event, so the outcome counts one tool call
+    for it — a refused attempt overlays no file, and its row must not say no tool was
+    called when the event trace says one was."""
+    for command, refused in (("git log -p", True), ("ls -la", False)):
+        events: list[tuple[str, dict[str, object]]] = []
+
+        def record(
+            action: str,
+            payload: Mapping[str, object],
+            sink: list[tuple[str, dict[str, object]]] = events,
+        ) -> None:
+            sink.append((action, dict(payload)))
+
+        out = fg.FixtureGoldBuilder(attempt=command).build(
+            trial, _brief(feat_task, pyrepo.config), base.Budget(), on_event=record
+        )
+        tools = [kw for action, kw in events if action == "build.tool"]
+        assert len(tools) == 1 and tools[0]["ok"] is (not refused)
+        assert out.tool_calls == len(tools) + len(out.extra["files"]), command
+    plain = fg.FixtureGoldBuilder().build(trial, _brief(feat_task, pyrepo.config), base.Budget())
+    assert plain.tool_calls == len(plain.extra["files"])
+
+
+def test_a_refused_attempt_grades_as_a_protocol_row_not_a_clean_one(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, trial: Workspace
+) -> None:
+    """Through the grader and the ledger's one failure rule: the refused attempt's grade is
+    not clean, so the row's kind is ``protocol``. The first walkthrough of the Learn spec
+    found the opposite — the gold was overlaid after the refusal, the grade came back clean
+    and a clean grade outranks the refusal — so no protocol row reached the report (P-159)."""
+    from crb.builders.adapter import attempt_error
+    from crb.core.ledger import FAILURE_PROTOCOL, derive_failure_kind
+
+    out = fg.FixtureGoldBuilder(attempt="git log -p").build(
+        trial, _brief(feat_task, pyrepo.config), base.Budget()
+    )
+    res = grade(
+        trial,
+        feat_task,
+        config=pyrepo.config,
+        runner=PytestRunner(pyrepo.config),
+        executor=LocalExecutor(),
+    )
+    assert not res.clean
+    kind = derive_failure_kind(
+        clean=res.clean,
+        disqualified=res.disqualified,
+        error=res.error,
+        builder_error=attempt_error(out),
+    )
+    assert kind == FAILURE_PROTOCOL

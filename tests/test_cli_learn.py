@@ -24,8 +24,8 @@ Works with:   src/crb/cli/commands/learn.py (under test), src/crb/core/learn.py 
               derivations), tests/test_learn.py (their own suite), tests/test_server_routes_learn.py
               (the same reports served), docs/LEARNING-LOOP.md (using it, §4)
 Tested by:    tests/test_cli_learn.py
-Touch when:   a server export shape changes (a loader case here — the CLI must read what the
-              API writes); a learn subcommand is added.
+Touch when:   never for a new repository; a server export shape changes (a loader case here — the
+              CLI must read what the API writes); a learn subcommand is added.
 """
 
 from __future__ import annotations

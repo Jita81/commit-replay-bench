@@ -10,15 +10,18 @@ appears in the table. A new action fails here until its row is written.
 Navigation
 ----------
 What it is:   The documentation ratchet for event action names.
-What it does: Extracts every action literal from the emit call sites in ``src/crb`` (emitter
+What it does: Extracts every action literal from the emit call sites in ``src/crb`` — a
+              literal or a module-level string constant passed in its place (P-174) — (emitter
               ``emit`` / ``error`` / ``timed``, the core's ``_emit(on_event, "…")`` helpers,
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
-              loop's ``self._emit("…", item_id)``, and the builders' ``builder.``-prefixed
-              forms) and asserts each is a code span in docs/API.md#event-vocabulary; also
-              asserts the table names no action the code no longer emits, and that every
-              documented action has its plain sentence in the UI's ``ACTION_HELP``
+              loop's ``self._emit("…", item_id)``, the account trail's
+              ``record_user_event(action=…)``, and the builders' ``builder.``-prefixed forms)
+              and asserts each is a code span in docs/API.md#event-vocabulary; also asserts
+              the table names no action the code no longer emits, that every documented
+              action has its plain sentence in the UI's ``ACTION_HELP``
               (ui/src/lib/verdict.ts) — so the Python half alone fails when a row is added
-              without the sentence the live log shows.
+              without the sentence the live log shows — and that any function forwarding an
+              ``action`` parameter to an emitter is itself walked (P-151).
 How:          ``ast`` over ``src/crb/**/*.py``; a regex over the vocabulary section of the doc.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
@@ -50,25 +53,56 @@ EMITTERS = {
     "cb",
     "append_event",
     "append_system_event",
+    # the account trail's writer (src/crb/server/routes/admin.py): it forwards ``action`` to
+    # ``append_system_event``, so its callers name the ``user.*`` actions (P-151)
+    "record_user_event",
+    # the Learn writes' one serialised step (src/crb/server/routes/learn.py): it forwards
+    # ``action`` to ``append_system_event``, so its callers name the ``learn.*`` actions (P-431)
+    "_learn_step",
 }
+#: Functions that forward an ``action`` parameter to an emitter but are only ever handed on
+#: as an ``on_event`` callback — their call sites are ``on_event("…")``, which the walker reads.
+CALLBACK_ONLY = {"on_skip", "_cb"}
 #: ``builder_on_event`` (src/crb/builders/adapter.py) prefixes every builder-level action.
 BUILDER_PREFIX = "builder."
 #: ``Emitter.timed`` emits these suffixes.
 TIMED_SUFFIXES = (".start", ".done", ".error")
 
 
-def _literals(node: ast.AST) -> list[str]:
+def _literals(node: ast.AST, consts: dict[str, str] | None = None) -> list[str]:
     """The string(s) an action expression can evaluate to (a constant, a prefixed constant,
-    or either branch of ``"a" if x else "b"``)."""
+    a module-level string constant named by ``consts``, or either branch of
+    ``"a" if x else "b"``)."""
     if isinstance(node, ast.IfExp):
-        return _literals(node.body) + _literals(node.orelse)
-    lit = _literal(node)
+        return _literals(node.body, consts) + _literals(node.orelse, consts)
+    lit = _literal(node, consts or {})
     return [lit] if lit is not None else []
 
 
-def _literal(node: ast.AST) -> str | None:
+def _module_constants(tree: ast.Module) -> dict[str, str]:
+    """``NAME = "a.b"`` / ``NAME: str = "a.b"`` at module level — a name an emit call may pass
+    as its action (P-174: such an action escaped the ratchet while it read literals only)."""
+    out: dict[str, str] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign):
+            targets, value = list(stmt.targets), stmt.value
+        elif isinstance(stmt, ast.AnnAssign):
+            targets, value = [stmt.target], stmt.value
+        else:
+            continue
+        if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
+            continue
+        for t in targets:
+            if isinstance(t, ast.Name):
+                out[t.id] = value.value
+    return out
+
+
+def _literal(node: ast.AST, consts: dict[str, str]) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
+    if isinstance(node, ast.Name) and node.id in consts:
+        return consts[node.id]
     # BUILDER_EVENT_PREFIX + "discard"
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = node.left, node.right
@@ -86,7 +120,9 @@ def _actions_in(path: Path) -> set[str]:
     """Every action literal an emit call in ``path`` can produce."""
     out: set[str] = set()
     in_builders = path.parent == SRC / "builders" and path.name != "adapter.py"
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    consts = _module_constants(tree)
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
@@ -103,7 +139,7 @@ def _actions_in(path: Path) -> set[str]:
             candidates.append(args[1])  # _emit(on_event, action, …)
         if name in {"_emit", "on_event", "cb"} and args:
             candidates.append(args[0])  # self._emit(action, item_id) / on_event(action, payload)
-        for lit in (x for c in candidates for x in _literals(c)):
+        for lit in (x for c in candidates for x in _literals(c, consts)):
             if "." not in lit:
                 continue
             if name == "timed":
@@ -159,6 +195,33 @@ def test_the_vocabulary_table_names_no_ghost_action() -> None:
     assert not ghosts, f"documented but never emitted: {sorted(ghosts)}"
 
 
+def test_every_function_that_forwards_an_action_is_walked() -> None:
+    """P-151: ``record_user_event(db, action=…)`` forwards its ``action`` to
+    ``append_system_event``, but the walker did not know its name, so every ``user.*`` action
+    was emitted with no row in the table and no test noticed. Any function that takes an
+    ``action`` parameter and hands it to an emitter is itself an emitter: it must be in
+    ``EMITTERS`` (or be a callback only, ``CALLBACK_ONLY``), or this fails."""
+    unwalked: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        for fn in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            params = {a.arg for a in [*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs]}
+            if "action" not in params or fn.name in EMITTERS | CALLBACK_ONLY:
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Call):
+                    continue
+                f = node.func
+                name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+                passed = [k.value for k in node.keywords if k.arg == "action"] + node.args[:2]
+                if name in EMITTERS and any(
+                    isinstance(v, ast.Name) and v.id == "action" for v in passed
+                ):
+                    unwalked.append(f"{path.relative_to(ROOT)}::{fn.name}")
+    assert not unwalked, f"add these to EMITTERS (their callers name actions): {unwalked}"
+
+
 def test_the_walker_sees_every_emit_shape() -> None:
     """The shapes the code uses, one example each, so a refactor of an emit helper that the
     walker no longer recognises fails here rather than silently shrinking the ratchet."""
@@ -173,6 +236,26 @@ def test_the_walker_sees_every_emit_shape() -> None:
     assert "builder.discard" in emitted  # emit(on_event, BUILDER_EVENT_PREFIX + "discard")
     assert "builder.build.turn" in emitted and "build.turn" in emitted  # a builder's own
     assert "grade.belt" in emitted  # core/grade.py on_event / _emit
+    assert "user.created" in emitted  # record_user_event(db, action="user.created", …)
+
+
+def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
+    """``action=SOME_CONSTANT`` is how a module names an action it also queries by; the walker
+    read literals only, so such an action escaped the table entirely (found 2026-09-26 while
+    adding ``repo.baseline_read``: the ratchet stayed green with no row — P-174)."""
+    src = tmp_path / "mod.py"
+    src.write_text(
+        'READ: str = "demo.read"\n'
+        'OTHER = "demo.other"\n'
+        "def f(db):\n"
+        "    append_system_event(db, trace_id='t', action=READ)\n"
+        "    emitter.emit('system', OTHER)\n"
+        "    local = 'demo.local'\n"
+        "    append_system_event(db, trace_id='t', action=local)\n",
+        encoding="utf-8",
+    )
+    # the two module constants resolve; a function-local variable is not a module constant
+    assert _actions_in(src) == {"demo.read", "demo.other"}
 
 
 #: The UI's one plain sentence per action (the live log's explanation).

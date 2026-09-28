@@ -28,8 +28,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/builders/budget.py
               tests/test_server_routes_runs.py (the API's half of the ladder), tests/test_worker.py
               (the harness)
 Tested by:    tests/test_worker_budget_ladder.py
-Touch when:   a budget cap is added (the tier string and the precedence case); the rung shape
-              accepted by ``POST /runs`` changes (mirror the route suite).
+Touch when:   never for a new repository; a budget cap is added (the tier string and the precedence
+              case); the rung shape accepted by ``POST /runs`` changes (mirror the route suite).
 """
 
 from __future__ import annotations

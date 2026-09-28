@@ -26,9 +26,10 @@ Works with:   src/crb/core/run.py (under test), src/crb/core/workspace.py
               scan), tests/test_builders_adapter.py (the full ``run`` end to end),
               tests/test_grade.py (the same findings at the grader)
 Tested by:    tests/test_run.py
-Touch when:   a new integrity violation is added to the workspace (mirror the case here so the
-              run path and the CLI stay in step); a new place creates a worktree a builder or a
-              grader runs in (it must take ``opaque_dest``, or the ratchet here fails).
+Touch when:   never for a new repository; a new integrity violation is added to the workspace
+              (mirror the case here so the run path and the CLI stay in step); a new place creates a
+              worktree a builder or a grader runs in (it must take ``opaque_dest``, or the ratchet
+              here fails).
 """
 
 from __future__ import annotations

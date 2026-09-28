@@ -26,7 +26,8 @@ Works with:   src/crb/server/intake.py (under test), src/crb/server/factory_stat
               ``FactoryHome`` it registers through), src/crb/intake/client.py (the fake's
               protocol), tests/fixtures/intake.py (the fake)
 Tested by:    tests/test_intake_service.py
-Touch when:   a step is added to the poll — pin its idempotency here before its behaviour.
+Touch when:   never for a new repository; a step is added to the poll — pin its idempotency here
+              before its behaviour.
 """
 
 from __future__ import annotations

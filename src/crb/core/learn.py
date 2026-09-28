@@ -31,7 +31,11 @@ moment it happened (§5 play 04 asks for a *person* to read refusals); a
 strengthening item pulled into a sprint by the product would spend a builder on an
 oracle nobody reviewed (§5 play 03); a re-measurement queued by the product would
 spend money without an operator's consent. Each derivation stops exactly where a
-decision needs a name attached.
+decision needs a name attached. **Where the name is attached is not this module's
+business**: a named person decides on the host (``crb learn refusals --apply``) or on the
+screen (the operator-gated ``POST /learn/{refusals/accept,strengthen/register,
+remeasure/queue}``, which record the decision with the signed-in operator's identity).
+Nothing here decides either way.
 
 Navigation
 ----------
@@ -43,8 +47,9 @@ What it does: Groups every ``protocol`` row's guard refusals by (reason, command
               turns every oracle-held cell into ``test.add`` backlog items with structural
               facts from the ledger; lists every cell with stale-apparatus evidence, the
               rows it needs to clear the rule's bars and the ``POST /runs`` bodies that
-              would renew it. Writes only what a named human decided (``apply_triage``)
-              and queues nothing.
+              would renew it. Writes only what a named human decided (``apply_triage``,
+              under a lock on the corpus directory; a supplied command only completes a
+              cut example) and queues nothing.
 How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason`` /
               ``normalise_command`` → ``RefusalGroup``) → a decisions file → ``apply_triage``
               (validate all, then append with provenance); ``strengthening_backlog`` (cells
@@ -67,16 +72,20 @@ Touch when:   never for a new repository; a new guard prefix, a new routing reas
               change to ``BacklogItem`` must be mirrored here (the core cannot import the
               builders or the factory — tests/test_learn.py pins the mirrors); the human
               steps are deliberate (docs/LEARNING-LOOP.md#3-what-still-needs-a-human-and-why-that-is-deliberate)
-              — do not add a path that accepts, builds or queues.
+              — nothing in this module may accept, build or queue on its own; the writes
+              belong to src/crb/server/routes/learn.py, behind a named person.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as _dt
+import fcntl
 import hashlib
 import json
+import os
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -292,9 +301,32 @@ def normalise_reason(reason: str) -> str:
     return " ".join(text.split())
 
 
+#: Every character ``str.splitlines`` ends a line at — the way the corpus files are read
+#: (``_existing_lines``, ``tests/test_builders_guard_corpus.py``). Free text written into a
+#: corpus file must carry none of them, or one decision writes lines nobody decided (P-161).
+LINE_BREAKS = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_LINE_BREAK_RE = re.compile("[" + re.escape("".join(sorted(LINE_BREAKS))) + "]")
+
+
+def has_line_break(text: str) -> bool:
+    """True when ``text`` would take more than one line of a corpus file."""
+    return _LINE_BREAK_RE.search(text) is not None
+
+
+def one_line(text: str) -> str:
+    """Free text as one line of a corpus-file comment: every line break (and a CRLF pair)
+    becomes one space, so a note or a name can never end the comment it is written into."""
+    return _LINE_BREAK_RE.sub(" ", text.replace("\r\n", "\n"))
+
+
 def encode_corpus_line(command: str) -> str:
-    """A command as one corpus line (``\\n`` for a newline; secrets redacted)."""
-    return redact(command.replace("\r\n", "\n")).replace("\n", "\\n").strip()
+    """A command as one corpus line (``\\n`` for a newline, a lone CR read as one; secrets
+    redacted). Any other line break is written as its escape (``\\x0b``, ``\\u2028``) —
+    the line stays one line and still says which character the command carried (P-161)."""
+    text = redact(command.replace("\r\n", "\n").replace("\r", "\n")).replace("\n", "\\n")
+    return _LINE_BREAK_RE.sub(
+        lambda m: m.group().encode("unicode_escape").decode("ascii"), text
+    ).strip()
 
 
 @dataclass(frozen=True)
@@ -408,8 +440,10 @@ class RefusalReport:
             "verdicts": list(VERDICTS),
             "groups": [g.to_dict() for g in self.groups],
             "note": (
-                "every verdict is 'unsure': the product never accepts a corpus line; "
-                "a human decides per group and `apply_triage` appends with provenance"
+                "every verdict is 'unsure': this derivation never decides; a NAMED person "
+                "does, and `apply_triage` appends their decision with provenance — from the "
+                "host (`crb learn refusals --apply`) or from the screen "
+                "(`POST /learn/refusals/accept`, recorded with the operator's identity)"
             ),
         }
 
@@ -596,8 +630,9 @@ def _provenance(group: RefusalGroup, *, verdict: str, who: str, date: str, note:
     """``# learned <date> from <repo>/<task> row <hash> (<verdict>→<who>) — <note>``."""
     where = ", ".join(group.tasks[:3]) + (" …" if len(group.tasks) > 3 else "")
     rows = ", ".join(h[:12] for h in group.rows[:3]) + (" …" if len(group.rows) > 3 else "")
-    tail = f" — {note}" if note else ""
-    return f"# learned {date} from {where} row {rows} ({verdict}→{who}){tail}"
+    tail = f" — {one_line(note)}" if note else ""
+    # the name and the note are free text inside a one-line comment (P-161)
+    return f"# learned {date} from {where} row {rows} ({verdict}→{one_line(who)}){tail}"
 
 
 def apply_triage(
@@ -621,6 +656,71 @@ def apply_triage(
         raise LearnError("apply_triage needs decided_by")
     day = date or _dt.datetime.now(tz=_dt.UTC).date().isoformat()
     base = Path(corpus_dir)
+    # what needs no file is refused before anything is touched, the directory included
+    for d in decisions:
+        g = report.get(d.group_id)
+        if g is None:
+            raise LearnError(f"decision {d.group_id}: no such group in the report")
+        if d.verdict != VERDICT_UNSURE:
+            _command_for(d, g)
+    # the read, the other-corpus check and the append are one step: two deciders at once
+    # (the HTTP write runs in a thread pool) must never both pass the check and put one
+    # command in both corpora
+    with _corpus_lock(base):
+        return _apply_locked(decisions, report, base=base, who=who, day=day)
+
+
+@contextlib.contextmanager
+def _corpus_lock(base: Path) -> Iterator[None]:
+    """An exclusive lock on the corpus directory for the length of one ``apply_triage``
+    (``flock`` on the directory itself, so no lock file is left among the corpus files).
+    Creating the directory is the only write it makes before a decision is validated."""
+    base.mkdir(parents=True, exist_ok=True)
+    fd = os.open(base, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # closing the descriptor releases the lock
+
+
+def _command_for(d: RefusalDecision, g: RefusalGroup) -> str:
+    """The corpus line a decision writes: the report's candidate, or — only for a class
+    whose every recorded example was cut — the person's completion of that example. A
+    ``command`` for a whole class, or one that does not continue a recorded cut example, is
+    a different line from the one the rows refused, and is refused (a line nobody saw
+    refused must never sit under the provenance of real rows)."""
+    if not d.command:
+        if g.truncated:
+            raise LearnError(
+                f"decision {d.group_id}: every recorded example was truncated by the "
+                "recorder's cap; supply the full 'command'"
+            )
+        return g.candidate_honest
+    if not g.truncated:
+        raise LearnError(
+            f"decision {d.group_id}: 'command' completes a class whose recorded examples were "
+            "all truncated; this class is not truncated, so its line is the report's own"
+        )
+    cmd = encode_corpus_line(d.command)
+    if not any(cmd.startswith(e) for e in g.examples if e):
+        raise LearnError(
+            f"decision {d.group_id}: 'command' must continue a recorded cut example "
+            f"({', '.join(repr(e) for e in g.examples)}); it completes that line, never "
+            "replaces it"
+        )
+    return cmd
+
+
+def _apply_locked(
+    decisions: Sequence[RefusalDecision],
+    report: RefusalReport,
+    *,
+    base: Path,
+    who: str,
+    day: str,
+) -> TriageApplied:
+    """:func:`apply_triage`'s body, run under :func:`_corpus_lock`."""
     honest_path = base / CORPUS_HONEST_FILE
     refused_path = base / CORPUS_REFUSED_FILE
     honest_have = _existing_lines(honest_path)
@@ -635,14 +735,9 @@ def apply_triage(
         if d.verdict == VERDICT_UNSURE:
             unsure.append(d.group_id)
             continue
-        cmd = encode_corpus_line(d.command) if d.command else g.candidate_honest
+        cmd = _command_for(d, g)
         if not cmd:
             raise LearnError(f"decision {d.group_id}: no command to append (supply 'command')")
-        if g.truncated and not d.command:
-            raise LearnError(
-                f"decision {d.group_id}: every recorded example was truncated by the "
-                "recorder's cap; supply the full 'command'"
-            )
         other = refused_have if d.verdict == VERDICT_HONEST else honest_have
         if cmd in other:
             raise LearnError(
@@ -847,6 +942,13 @@ def load_oracle_scores(obj: Any) -> list[OracleTaskScore]:
     return out
 
 
+def strength_by_task(scores: Iterable[OracleTaskScore]) -> dict[str, float | None]:
+    """Each task's latest oracle strength (a later score of the same task wins; ``None`` =
+    unscoreable) — the reduction ``GET /oracle/{repo}`` serves and the capability map routes
+    under, so a strengthen report built from an export routes as the map does (P-426)."""
+    return {s.task_id: s.strength for s in scores}
+
+
 def _task_in_cell(cell: CapabilityCell, score: OracleTaskScore) -> bool:
     """A scored task belongs to a cell when every PROJECTED field the score carries
     (class, size) matches; fields the score cannot carry (model, builder …) are
@@ -922,8 +1024,11 @@ class StrengthenBacklog:
             "cells_without_scores": list(self.cells_without_scores),
             "items": [i.to_dict() for i in self.items],
             "note": (
-                "items are proposals in the frozen-backlog shape; a human pulls one into a "
-                "sprint (freeze) — the product never registers or builds them"
+                "items are proposals in the frozen-backlog shape; this derivation registers "
+                "and builds nothing. A NAMED person pulls one into a sprint — "
+                "`POST /learn/strengthen/register` registers the ones they choose (an "
+                "evolution supersedes; the frozen record never mutates) and a factory run, "
+                "queued separately, is what builds one"
             ),
         }
 
@@ -1047,6 +1152,96 @@ def _item_for_cell(cell: CapabilityCell, *, threshold: float, registered: str) -
     )
 
 
+def _item_for_rescored_cell(
+    cell: CapabilityCell,
+    scores: Sequence[OracleTaskScore],
+    *,
+    threshold: float,
+    registered: str,
+) -> StrengthenItem:
+    """The one item an ``oracle_weak`` cell gets when every task scored in it is now strong
+    (P-426): the route was read under an older strength than the oracle ledger's latest
+    scores, so the work is to re-measure the cell under them — never a negative control,
+    which did not hold this cell."""
+    assert cell.stats is not None
+    label = cell.label
+    routed = _fmt_strength(cell.stats.oracle_strength_mean)
+    scored = min((s.strength for s in scores if s.strength is not None), default=None)
+    lowest = _fmt_strength(scored)
+    return StrengthenItem(
+        id=f"{STRENGTHEN_ID_PREFIX}{_short_hash(cell.key.label, 'rescored')}",
+        title=f"re-measure cell {label} under its tasks' latest oracle scores",
+        description=(
+            f"every task scored in cell {label} now kills its mutants (lowest latest score "
+            f"{lowest} vs threshold {threshold:.2f}), but the cell routes {cell.route} "
+            f"({cell.reason_code}) under the oracle strength its rows carry ({routed}). "
+            "The tests were strengthened after those rows were graded: re-measure the cell so "
+            "its route reads the new scores."
+        ),
+        acceptance_criteria=(
+            "the cell's tasks are graded again on the current target tests",
+            f"the mean oracle strength the cell's route reads is >= {threshold:.2f}",
+        ),
+        structural_facts=(
+            f"subject_under_test: the target tests of every task in cell {label}",
+            "behaviour_asserted: the latest oracle scores reach the cell's route",
+        ),
+        labels={
+            "source": "crb.core.learn",
+            "cell": label,
+            "reason_code": cell.reason_code,
+            "route": cell.route,
+            "oracle_strength": routed,
+            "threshold": f"{threshold:.2f}",
+            "slots": "structural",
+            "n": str(cell.n),
+        },
+        registered=registered,
+    )
+
+
+def _item_for_held_strong_cell(
+    cell: CapabilityCell, *, threshold: float, registered: str
+) -> StrengthenItem:
+    """The one item a held cell gets when every scored task in it is strong: the routing
+    rule holds it for its negative controls (an escape, or too few constructible), so the
+    test work is to make the target tests refuse the cheat a control got through."""
+    assert cell.stats is not None
+    label = cell.label
+    strength = _fmt_strength(cell.stats.oracle_strength_mean)
+    return StrengthenItem(
+        id=f"{STRENGTHEN_ID_PREFIX}{_short_hash(cell.key.label, 'controls')}",
+        title=f"strengthen the target tests for cell {label}",
+        description=(
+            f"every scored task in cell {label} kills its mutants (mean oracle strength "
+            f"{strength} vs threshold {threshold:.2f}), but the cell routes {cell.route} "
+            f"({cell.reason_code}): {cell.reason}. A negative control the grader should refuse "
+            "graded clean, so the target tests cannot tell an implementation from that cheat; "
+            "the controls run on the repository lists which control escaped on which task."
+        ),
+        acceptance_criteria=(
+            "a controls run on the repository reports 0 escapes for the tasks in the cell",
+            f"mean oracle strength for the cell stays >= {threshold:.2f}",
+            "only test files change (belt 1: the oracle is edited by a human, on purpose)",
+        ),
+        structural_facts=(
+            f"subject_under_test: the target tests of every task in cell {label}",
+            "behaviour_asserted: the target tests fail on the negative control that escaped",
+        ),
+        labels={
+            "source": "crb.core.learn",
+            "cell": label,
+            "reason_code": cell.reason_code,
+            "route": cell.route,
+            "oracle_strength": strength,
+            "threshold": f"{threshold:.2f}",
+            "slots": "structural",
+            "n": str(cell.n),
+        },
+        registered=registered,
+    )
+
+
 def strengthening_backlog(
     cmap: CapabilityMap,
     oracle_scores: Iterable[OracleTaskScore | Mapping[str, Any]] = (),
@@ -1062,7 +1257,8 @@ def strengthening_backlog(
     :data:`STRENGTHEN_REASONS`. For each, one item per scored task that belongs to
     the cell AND is weak (strength < ``policy.min_oracle_strength``, or unscoreable,
     or has escaped mutants); a held cell with no per-task score gets ONE cell-level
-    item so the flag is never dropped silently. ``since`` keeps only cells that
+    item, and so does a held cell whose scored tasks are all strong (the controls hold it),
+    so the flag is never dropped silently. ``since`` keeps only cells that
     carry evidence stamped with an apparatus ≥ ``since`` (and scores likewise, when
     stamped). ``generated_at`` is the ``registered`` stamp of every item — pass a
     fixed value for a byte-identical backlog. Item ids are ``sha(cell, repo, task)``
@@ -1112,6 +1308,17 @@ def strengthening_backlog(
                     registered=when,
                 )
             )
+        if not weak:
+            # every scored task kills its mutants, yet the cell is held: the flag still becomes
+            # ONE item, chosen by WHY it is held (P-426). A controls hold is work on the
+            # control; an oracle hold means the route still reads an older strength than the
+            # scores, so the work is to re-measure the cell under them
+            if cell.reason_code == REASON_ORACLE_WEAK:
+                items.append(
+                    _item_for_rescored_cell(cell, matched, threshold=threshold, registered=when)
+                )
+            else:
+                items.append(_item_for_held_strong_cell(cell, threshold=threshold, registered=when))
     items.sort(key=lambda i: (i.labels.get("cell", ""), i.labels.get("repo", ""), i.id))
     return StrengthenBacklog(
         items=tuple(items),
@@ -1262,7 +1469,8 @@ class RemeasurePlan:
             },
             "note": (
                 "requests are POST /runs bodies for an operator to queue; nothing here "
-                "was sent. One entry per (cell, mode) — sighted and blind are never pooled. "
+                "was sent (POST /learn/remeasure/queue sends one cell's, on an operator's "
+                "instruction and with their identity on the runs). One entry per (cell, mode) — sighted and blind are never pooled. "
                 "Costs are that cell's own mean row cost x rows needed x attempts per row "
                 "(1 sighted; the ladder's rungs blind) — an estimate, unknown where no row "
                 "recorded a cost. tasks_stale / tasks_current say how many DISTINCT commits "
@@ -1527,6 +1735,7 @@ __all__ = [
     "CORPUS_REFUSED_PREFIXES",
     "DECISIONS_SCHEMA",
     "GUARD_PREFIXES",
+    "LINE_BREAKS",
     "REFUSALS_SCHEMA",
     "REMEASURE_SCHEMA",
     "STRENGTHEN_REASONS",
@@ -1551,16 +1760,19 @@ __all__ = [
     "apply_triage",
     "dumps",
     "encode_corpus_line",
+    "has_line_break",
     "load_decisions",
     "load_oracle_scores",
     "normalise_command",
     "normalise_reason",
+    "one_line",
     "parse_violations",
     "remeasure_plan",
     "render_refusals",
     "render_remeasure",
     "render_strengthen",
     "row_violation_text",
+    "strength_by_task",
     "strengthening_backlog",
     "triage_refusals",
 ]

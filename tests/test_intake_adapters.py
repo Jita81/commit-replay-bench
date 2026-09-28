@@ -28,8 +28,8 @@ Works with:   src/crb/intake/ado.py and src/crb/intake/jira.py (under test),
               src/crb/intake/http.py (the status → reason table),
               src/crb/intake/client.py (the protocol both must satisfy)
 Tested by:    tests/test_intake_adapters.py
-Touch when:   a tracker changes an api-version or a route — change it here first and watch
-              this suite fail, never the other way round.
+Touch when:   never for a new repository; a tracker changes an api-version or a route — change it
+              here first and watch this suite fail, never the other way round.
 """
 
 from __future__ import annotations

@@ -23,7 +23,7 @@ Works with:   tests/fixtures/langs/pyrepo_deps.py and tests/fixtures/langs/noder
               tests/test_provision_node.py (the fetches), src/crb/provision/python.py and
               src/crb/provision/node.py (the recipes that read them)
 Tested by:    tests/test_provision_python.py, tests/test_provision_node.py
-Touch when:   a provisioning test needs another package or version.
+Touch when:   never for a new repository; a provisioning test needs another package or version.
 """
 
 from __future__ import annotations

@@ -25,7 +25,7 @@ Works with:   src/crb/provision/go.py and src/crb/provision/__init__.py (under t
               tests/fixtures/goproxy.py (the mirror), tests/fixtures/langs/gorepo_deps.py (the
               D4 repository), tests/conftest_langs.py (the shipped image)
 Tested by:    tests/test_provision_go.py
-Touch when:   the Go recipe's plan, environment or refusals change.
+Touch when:   never for a new repository; the Go recipe's plan, environment or refusals change.
 """
 
 from __future__ import annotations

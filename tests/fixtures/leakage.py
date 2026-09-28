@@ -34,8 +34,9 @@ Works with:   src/crb/core/workspace.py (``opaque_dest`` — the names under tes
               the transcript file)
 Tested by:    tests/test_run.py, tests/test_builders_guard_corpus.py, tests/test_mine.py,
               tests/test_oracle_controls.py
-Touch when:   a new place a builder can read (a new environment variable, a prompt field, a
-              mounted path) is added — add it to the texts the tests scan.
+Touch when:   never for a new repository; a new place a builder can read (a new environment
+              variable, a prompt field, a mounted path) is added — add it to the texts the tests
+              scan.
 """
 
 from __future__ import annotations

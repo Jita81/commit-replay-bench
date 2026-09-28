@@ -416,6 +416,15 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   per process, so **production must also limit `POST /api/v1/auth/login` per client address
   at the reverse proxy**, which sees every replica ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
   [measured] `tests/test_server_auth.py::TestLoginRateLimitPerIp`
+- Every sign-in is an audit event on the account's own trail: `user.login` (local or
+  organisation) and `user.login_failed` (actor `anonymous`, with the reason). A refused name
+  that is no local account is recorded without the name and logged as `(not an account)`, so a
+  password typed into the username box is stored in neither the audit table nor the server
+  log, and a refusal writes on both paths so its cost does not say
+  whether an account exists (DL-068). A failed organisation sign-in returns to `/login` with
+  a code from a closed list; the provider's own words stay in the server log.
+  `tests/test_server_auth.py::TestSignInIsAudited`,
+  `tests/test_server_auth.py::TestOidcFailureReturnsToLogin`
 - Where a registered repository may live: a `clone_path` must resolve inside
   `$CRB_HOME/repos`, where the worker clones. A path elsewhere on the host is an admin's
   decision and is recorded (`repo.clone_path.outside_home`); anyone else — including a model

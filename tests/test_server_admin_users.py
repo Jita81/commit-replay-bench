@@ -15,12 +15,17 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               again after reactivation) and the last active admin cannot be deactivated
               (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
               ``last_login``, that every change lands as one event with actor and target
-              and never a password, and that those events are ordinary ``events`` rows —
-              trigger-protected, not hash-chained (the chain is the ledger's).
+              and never a password, that those events are ordinary ``events`` rows —
+              trigger-protected, not hash-chained (the chain is the ledger's) — and that a
+              password set by any door rotates the session nonce, so the old sessions end
+              even when the stored hash does not move (#52's revocation, P-149), and that
+              the users lock serialises two concurrent last-admin deactivations and refuses
+              rather than run unlocked when a transaction is already open (P-430).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the
-              account's ``users:<id>`` trace.
+              account's ``users:<id>`` trace; the lock cases drive two sessions (one on a
+              thread) or open a deferred ``BEGIN`` before the lock.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
 ADRs:         none
 Works with:   src/crb/server/routes/admin.py (under test), src/crb/server/auth.py
@@ -28,12 +33,14 @@ Works with:   src/crb/server/routes/admin.py (under test), src/crb/server/auth.p
               binding in ``current_user``), src/crb/server/routes/auth.py (login issues the
               bound cookie), src/crb/store/models.py (``User``, ``Event``), docs/API.md#admin
 Tested by:    tests/test_server_admin_users.py
-Touch when:   a lifecycle route or a ``user.*`` event is added; the session binding changes.
+Touch when:   never for a new repository; a lifecycle route or a ``user.*`` event is added; the
+              session binding changes.
 """
 
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -41,7 +48,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from crb.server.app import API_PREFIX, create_app
 from crb.server.auth import (
@@ -49,6 +56,7 @@ from crb.server.auth import (
     SESSION_COOKIE,
     count_active_admins,
     create_local_user,
+    lock_users_table,
     new_user_id,
     set_user_active,
 )
@@ -429,6 +437,89 @@ class TestActive:
             assert count_active_admins(s) == 1 and s.get(User, x).role == "admin"
             assert s.get(User, z).active is True
 
+    def test_a_transaction_already_open_makes_the_users_lock_refuse(
+        self, client: TestClient, app: Any
+    ) -> None:
+        """P-430: the users lock fails closed. A deferred ``BEGIN`` holds no write lock, so
+        when one is already open ``BEGIN IMMEDIATE`` cannot run and nothing proves the
+        session is serialised: the lock must raise, never return as if it held it. Taking
+        it again in the transaction that took it is not that case (the write lock lasts to
+        the transaction's end), and that proof ends with the transaction."""
+        del client  # started: the lifespan binds the session factory
+        with app.state.session_factory() as s:
+            lock_users_table(s)
+            lock_users_table(s)  # the same transaction already holds the write lock
+            s.commit()
+            s.execute(text("BEGIN"))  # a transaction, but no write lock
+            with pytest.raises(RuntimeError, match="already open"):
+                lock_users_table(s)
+
+    def test_a_transaction_already_open_refuses_a_deactivation_rather_than_run_unlocked(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P-430 at the route: a deferred ``BEGIN`` opened before the users lock (here after
+        the target's read) makes ``PUT /users/{id}/active`` refuse with nothing written,
+        not deactivate the account with its last-admin guard unserialised."""
+        login(client)
+        x = create(client, "xx", "operator")
+        real_get_user = admin_routes._get_user
+
+        def get_then_begin(db: Any, user_id: str) -> Any:
+            user = real_get_user(db, user_id)
+            db.execute(text("BEGIN"))  # a transaction, but no write lock
+            return user
+
+        monkeypatch.setattr(admin_routes, "_get_user", get_then_begin)
+        try:
+            r = client.put(f"{API_PREFIX}/users/{x}/active", json={"active": False})
+        except RuntimeError as exc:
+            assert "already open" in str(exc)
+            r = None
+        assert r is None or r.status_code == 500, r.text
+        with app.state.session_factory() as s:
+            assert s.get(User, x).active is True
+        assert [e.action for e in events_for(app, x)] == ["user.created"]  # nothing written
+
+    def test_the_lock_serialises_two_concurrent_last_admin_deactivations(
+        self, client: TestClient, app: Any
+    ) -> None:
+        """Two admins, two sessions, each deactivating the other admin. Without the lock
+        each would count "2 admins" and together leave none. Under it the second waits for
+        the first to commit, re-reads, counts 1 and is refused 409 ``last_admin``."""
+        del client  # started: the lifespan binds the session factory
+        with app.state.session_factory() as s:
+            y = create_local_user(s, username="yy", password=USER_PW, role="admin").id
+            root = s.execute(select(User).where(User.subject == "local:root")).scalar_one().id
+            s.commit()
+        a, b = app.state.session_factory(), app.state.session_factory()
+        started, outcome = threading.Event(), {}
+
+        def second() -> None:
+            started.set()
+            try:
+                outcome["changed"] = set_user_active(b, b.get(User, y), False)
+            except ApiError as exc:
+                outcome["refused"] = exc.code
+            finally:
+                b.rollback()
+
+        try:
+            assert set_user_active(a, a.get(User, root), False) is True  # a holds the lock
+            t = threading.Thread(target=second)
+            t.start()
+            started.wait(5)
+            t.join(0.5)
+            assert t.is_alive(), outcome  # b is waiting for a's write lock, not counting
+            a.commit()
+            t.join(10)
+            assert not t.is_alive()
+        finally:
+            a.close()
+            b.close()
+        assert outcome == {"refused": "last_admin"}
+        with app.state.session_factory() as s:
+            assert count_active_admins(s) == 1 and s.get(User, y).active is True
+
 
 # --- list rows --------------------------------------------------------------------------------
 
@@ -467,7 +558,12 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
     )
     assert r.status_code == 200
 
-    evs = events_for(app, uid)
+    # the account's CHANGES; its sign-ins (user.login*) are on the same trail, pinned in
+    # tests/test_server_auth.py::TestSignInIsAudited
+    trail = events_for(app, uid)
+    # one trace, no gaps: the sign-ins take their seq on the same trail as the changes
+    assert [e.seq for e in trail] == list(range(1, len(trail) + 1))
+    evs = [e for e in trail if not e.action.startswith("user.login")]
     assert [e.action for e in evs] == [
         "user.created",
         "user.password_set",
@@ -476,7 +572,6 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
         "user.role_set",
         "user.password_set",
     ]
-    assert [e.seq for e in evs] == [1, 2, 3, 4, 5, 6]
     assert all(e.stage == "system" for e in evs)
     assert [e.actor for e in evs] == [root, root, root, root, root, uid]
     assert all(e.payload_json["target"] == uid for e in evs)
@@ -490,7 +585,7 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
     login(client, "root", ROOT_PW)
     r = client.put(f"{API_PREFIX}/users/{root}/active", json={"active": False})
     assert r.status_code == 409
-    assert events_for(app, root) == []
+    assert [e.action for e in events_for(app, root)] == ["user.login", "user.login"]
 
 
 def test_account_events_use_the_unchained_events_table(client: TestClient, app: Any) -> None:
@@ -507,3 +602,140 @@ def test_account_events_use_the_unchained_events_table(client: TestClient, app: 
         assert col not in Event.__table__.columns, f"events.{col} exists: update F51 + docs"
         assert not hasattr(ev, col)
         assert col in Grade.__table__.columns and col in Signoff.__table__.columns
+
+
+# --- the account's audit trail is served ----------------------------------------------------
+
+
+class TestAccountEventsRoute:
+    """``GET /users/{id}/events`` — the other half of the audit: the ``user.*`` events are
+    written by every lifecycle route and, until now, nothing served them (G-464)."""
+
+    def test_serves_the_accounts_own_events_newest_first(
+        self, client: TestClient, app: Any
+    ) -> None:
+        login(client)
+        uid = create(client, "gina", "viewer")
+        client.put(f"{API_PREFIX}/users/{uid}/role", json={"role": "operator"})
+        client.put(f"{API_PREFIX}/users/{uid}/password", json={"password": NEW_PW})
+        client.put(f"{API_PREFIX}/users/{uid}/active", json={"active": False})
+        r = client.get(f"{API_PREFIX}/users/{uid}/events")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["total"] == 4
+        actions = [e["action"] for e in body["items"]]
+        assert actions == [
+            "user.deactivated",
+            "user.password_set",
+            "user.role_set",
+            "user.created",
+        ]
+        # served as written: actor and target, never a password
+        assert all(e["actor"] for e in body["items"])
+        assert all(e["payload"]["target"] == uid for e in body["items"])
+        assert NEW_PW not in r.text and USER_PW not in r.text
+
+    def test_only_that_accounts_events_and_an_unknown_id_is_404(
+        self, client: TestClient, app: Any
+    ) -> None:
+        login(client)
+        one = create(client, "hank")
+        two = create(client, "iris")
+        r = client.get(f"{API_PREFIX}/users/{one}/events")
+        assert r.status_code == 200 and r.json()["total"] == 1
+        assert {e["payload"]["username"] for e in r.json()["items"]} == {"hank"}
+        assert two not in r.text
+        r = client.get(f"{API_PREFIX}/users/nobody/events")
+        assert r.status_code == 404 and err(r)["code"] == "not_found"
+
+    @pytest.mark.parametrize("role", ["viewer", "operator", "approver"])
+    def test_below_admin_is_refused(self, client: TestClient, role: str) -> None:
+        login(client)
+        target = create(client, "target")
+        create(client, "reader", role)
+        login(client, "reader", USER_PW)
+        r = client.get(f"{API_PREFIX}/users/{target}/events")
+        assert r.status_code == 403 and err(r)["code"] == "forbidden"
+
+    def test_api_md_lists_the_route(self) -> None:
+        text = Path("docs/API.md").read_text(encoding="utf-8")
+        assert "`/users/{id}/events`" in text
+
+
+# --- a password set ends sessions through the session nonce (#52), not only the re-salt -----
+
+
+def _freeze_hash(monkeypatch: pytest.MonkeyPatch, app: Any, username: str) -> str:
+    """From now on every new hash is the one ``username`` already has, so a password set can
+    only end sessions by rotating the nonce. Returns the account id."""
+    import crb.server.auth as auth_mod
+
+    with app.state.session_factory() as s:
+        user = s.execute(select(User).where(User.subject == f"local:{username}")).scalar_one()
+        frozen, uid = user.password_hash, user.id
+    monkeypatch.setattr(auth_mod, "hash_password", lambda _password: frozen)
+    return str(uid)
+
+
+def _nonce_and_hash(app: Any, uid: str) -> tuple[str, str]:
+    with app.state.session_factory() as s:
+        user = s.get(User, uid)
+        assert user is not None
+        return str(user.session_nonce or ""), str(user.password_hash)
+
+
+class TestPasswordSetRotatesTheSessionNonce:
+    """#52 made a session revocable by binding it to ``credential_version`` = the password
+    hash AND ``users.session_nonce``. A password set used to end sessions only because argon2
+    re-salts the hash; these pin that it goes through #52's own mechanism — the nonce
+    rotates — so the old sessions end even when the stored hash does not move."""
+
+    def test_an_admin_set_password_ends_the_targets_sessions(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        admin, target = client, other_client(client)
+        login(admin)
+        create(admin, "nora", "operator")
+        login(target, "nora", USER_PW)
+        uid = _freeze_hash(monkeypatch, app, "nora")
+        nonce_before, hash_before = _nonce_and_hash(app, uid)
+        r = admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": NEW_PW})
+        assert r.status_code == 200, r.text
+        nonce_after, hash_after = _nonce_and_hash(app, uid)
+        assert hash_after == hash_before  # the re-salt moved nothing here
+        assert nonce_after and nonce_after != nonce_before
+        r = target.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+    def test_a_self_change_keeps_this_browser_and_ends_the_other(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        here, elsewhere = client, other_client(client)
+        login(here)
+        login(elsewhere)
+        uid = _freeze_hash(monkeypatch, app, "root")
+        nonce_before, _ = _nonce_and_hash(app, uid)
+        r = here.put(
+            f"{API_PREFIX}/users/me/password",
+            json={"current_password": ROOT_PW, "new_password": NEW_PW},
+        )
+        assert r.status_code == 200, r.text
+        assert _nonce_and_hash(app, uid)[0] != nonce_before
+        here.headers["X-CSRF-Token"] = here.cookies[CSRF_COOKIE]
+        assert here.get(f"{API_PREFIX}/auth/me").status_code == 200
+        r = elsewhere.get(f"{API_PREFIX}/auth/me")
+        assert r.status_code == 401 and err(r)["code"] == "session_revoked"
+
+    def test_the_host_verb_uses_the_same_primitive(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``crb users set-password`` calls :func:`set_password`, so it rotates the nonce too."""
+        from crb.server.auth import set_password
+
+        uid = _freeze_hash(monkeypatch, app, "root")
+        with app.state.session_factory() as s:
+            user = s.get(User, uid)
+            assert user is not None
+            nonce = user.session_nonce
+            set_password(user, NEW_PW)
+            assert user.session_nonce and user.session_nonce != nonce

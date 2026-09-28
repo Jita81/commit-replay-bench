@@ -42,8 +42,9 @@ Works with:   src/crb/core/execution.py (``posture_facts`` — the executor's ha
               disagree), src/crb/server/worker.py (resolves the live posture before a run),
               src/crb/core/version.py (the apparatus version a posture carries)
 Tested by:    tests/test_posture.py, tests/test_grade.py, tests/test_worker.py
-Touch when:   a fact that can change a test's outcome is found outside this record (add the
-              field, prove the id moves with it, and say so in ADR-0019's successor).
+Touch when:   never for a new repository; a fact that can change a test's outcome is found outside
+              this record (add the field, prove the id moves with it, and say so in ADR-0019's
+              successor).
 """
 
 from __future__ import annotations

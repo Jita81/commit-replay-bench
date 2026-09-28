@@ -23,7 +23,6 @@ src/crb/server/worker.py#b3156f75fbed
 src/crb/server/worker.py#d4c88bbcfaaa
 tests/fixtures/pyrepo.py#6a9c8e7bfb13
 tests/test_deploy_health_probes.py#005251726312
-tests/test_factory_author.py#8ebc528e734f
 tests/test_factory_outcomes.py#74a4714b1734
 tests/test_server_routes_repos.py#0e2f54fd4abc
 tests/test_server_routes_signoffs.py#c047cf2db085
@@ -36,7 +35,6 @@ ui/src/components/Button.tsx#b58bd24bc387
 ui/src/components/Button.tsx#b5cb995e4ac3
 ui/src/components/CiBar.tsx#af8df9bd0116
 ui/src/components/GateBanner.tsx#569371a3da89
-ui/src/components/Layout.tsx#2276304efac2
 ui/src/components/LiveLog.tsx#930dd80f8eb7
 ui/src/components/PageHeader.tsx#df1c1f65365c
 ui/src/components/Provenance.tsx#af4d1ef7db7e
@@ -62,7 +60,6 @@ ui/src/screens/Factory/FactoryPage.test.tsx#b659d879333a
 ui/src/screens/Factory/FactoryPage.test.tsx#ba00bd3059ff
 ui/src/screens/Factory/FactoryPage.tsx#13c71871cb7c
 ui/src/screens/Factory/FactoryPage.tsx#a9f57cf478b2
-ui/src/screens/Help/DocPage.tsx#21d441b1fab7
 ui/src/screens/Oracle/OraclePage.tsx#569371a3da89
 ui/src/screens/Posture/PosturePage.tsx#b2944462cbeb
 ui/src/screens/Repos/ListEditors.tsx#7249ed9e8cad
@@ -80,7 +77,6 @@ ui/src/screens/Runs/RunsPage.tsx#82efca604ded
 ui/src/screens/Runs/contract.ts#f426196ad6e0
 ui/src/screens/Runs/telemetry.ts#1de53e96bc91
 ui/src/screens/Runs/telemetry.ts#b1056a3f5425
-ui/src/screens/Settings/GitHubAppCard.test.tsx#cbb445f85a50
 ui/src/screens/Settings/GitHubAppCard.tsx#ae2dc528ca4f
 ui/src/screens/Settings/SettingsPage.test.tsx#bb4c380ff276
 ui/src/screens/Signoff/SignoffPage.tsx#569371a3da89

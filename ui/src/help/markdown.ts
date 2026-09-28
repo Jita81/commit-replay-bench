@@ -1,13 +1,15 @@
 /**
  * A subset markdown renderer for the bundled guides — React elements, never raw HTML.
  *
- * Supported: headings h1–h4 (deeper ones render as h4) with GitHub slug ids, paragraphs,
+ * Supported: headings h1–h4 (deeper ones render as h4; one level lower each under a page
+ * title, `headingOffset`) with GitHub slug ids, paragraphs,
  * bullet and numbered lists (nested by indentation), fenced code, tables, blockquotes,
  * horizontal rules, links, emphasis, strong and inline code. Anything else — an HTML tag,
  * an image, a footnote — is shown as the text it is. Links: another bundled guide becomes an
- * in-app link to /help/docs/…; an in-page `#anchor` stays; `http(s)` gets
- * `rel="noopener noreferrer"`; any other relative path (an ADR, a source file) renders as
- * text because the UI has no target for it.
+ * in-app link to /help/docs/…, and so does a bundled decision record (`adr/0015-….md` from a
+ * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-073); an
+ * in-page `#anchor` stays; `http(s)` gets `rel="noopener noreferrer"`; any other relative
+ * path (a source file) renders as text because the UI has no target for it.
  *
  * Navigation
  * ----------
@@ -26,14 +28,16 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Help/DocPage.tsx (the only caller), ui/src/help/docs.ts
- *               (`slugify`, `isDocName`, `docHref` for the link rewrite), ui/src/help/help.ts
+ *               (`slugify`, `isDocName`, `docHref` for the link rewrite), ui/src/help/adrs.ts
+ *               (`isAdrName`, `adrHref` for a decision record's link), ui/src/help/help.ts
  *               (the `readMore` anchors whose slugs the headings rendered here must satisfy)
  * Tested by:    ui/src/help/markdown.test.tsx
- * Touch when:   a guide uses a construct this does not render (add it here with a test);
- *               never for a new repository.
+ * Touch when:   never for a new repository; a guide uses a construct this does not render (add it
+ *               here with a test).
  */
 import { createElement, Fragment, type ReactNode } from 'react'
 import { Link } from 'react-router'
+import { adrHref, isAdrName } from './adrs'
 import { docHref, isDocName, slugify } from './docs'
 
 export type Block =
@@ -261,13 +265,19 @@ function renderLink(label: string, href: string, key: string): ReactNode {
   const children = renderInline(label, `${key}.`)
   if (/^https?:\/\//i.test(href)) return createElement('a', { key, href, rel: 'noopener noreferrer' }, ...children)
   if (href.startsWith('#')) return createElement('a', { key, href }, ...children)
-  const doc = /^(?:\.\/)?([A-Za-z0-9-]+)\.md(#[^#]*)?$/.exec(href)
+  // `../` is how a decision record (docs/adr) links a guide one directory up
+  const doc = /^(?:\.\.?\/)?([A-Za-z0-9-]+)\.md(#[^#]*)?$/.exec(href)
   if (doc && isDocName(doc[1]!)) {
     const slug = doc[2] ? doc[2].slice(1) : ''
     const to = docHref(slug ? `${doc[1]}#${slug}` : doc[1]!)
     return createElement(Link, { key, to }, ...children)
   }
-  // an ADR, a source path, an image: the UI has no target, so the label is shown as text
+  // a bundled decision record: `adr/0015-….md` from a guide, `0015-….md` from a sibling record
+  const adr = /^(?:\.\/)?(?:adr\/)?(\d{4})-[A-Za-z0-9-]+\.md(#[^#]*)?$/.exec(href)
+  if (adr && isAdrName(`ADR-${adr[1]}`)) {
+    return createElement(Link, { key, to: `${adrHref(adr[1]!)}${adr[2] ?? ''}` }, ...children)
+  }
+  // a source path, an image: the UI has no target, so the label is shown as text
   return createElement(Fragment, { key }, ...children)
 }
 
@@ -285,12 +295,12 @@ class Slugs {
   }
 }
 
-function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string): ReactNode[] {
+function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string, offset: number): ReactNode[] {
   return blocks.map((b, i) => {
     const key = `${keyPrefix}${i}`
     switch (b.kind) {
       case 'heading': {
-        const level = Math.min(b.level, 4)
+        const level = Math.min(b.level, 4) + offset
         return createElement(`h${level}`, { key, id: slugs.next(b.text) }, ...renderInline(b.text, `${key}.`))
       }
       case 'paragraph':
@@ -325,14 +335,18 @@ function renderBlocks(blocks: Block[], slugs: Slugs, keyPrefix: string): ReactNo
           b.ordered ? 'ol' : 'ul',
           { key },
           ...b.items.map((it, j) =>
-            createElement('li', { key: j }, ...renderInline(it.text, `${key}.${j}.`), ...(it.children ? renderBlocks(it.children, slugs, `${key}.${j}.c`) : [])),
+            createElement('li', { key: j }, ...renderInline(it.text, `${key}.${j}.`), ...(it.children ? renderBlocks(it.children, slugs, `${key}.${j}.c`, offset) : [])),
           ),
         )
     }
   })
 }
 
-/** The guide as React elements; heading ids are unique within one call. */
-export function renderMarkdown(src: string): ReactNode {
-  return createElement(Fragment, {}, ...renderBlocks(parseMarkdown(src), new Slugs(), 'b'))
+/**
+ * The guide as React elements; heading ids are unique within one call. `headingOffset` moves
+ * every heading down that many levels, for a page that already has its own h1 (DocPage passes
+ * 1, so the page keeps one h1 and the file's `#` title reads as an h2). The ids do not change.
+ */
+export function renderMarkdown(src: string, { headingOffset = 0 }: { headingOffset?: 0 | 1 } = {}): ReactNode {
+  return createElement(Fragment, {}, ...renderBlocks(parseMarkdown(src), new Slugs(), 'b', headingOffset))
 }

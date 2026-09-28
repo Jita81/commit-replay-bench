@@ -24,7 +24,7 @@ Works with:   src/crb/provision/python.py (under test), src/crb/core/runners/pyt
               (the binding), tests/fixtures/pkgmirror.py (the wheels),
               tests/fixtures/langs/pyrepo_deps.py (the repository)
 Tested by:    tests/test_provision_python.py
-Touch when:   the Python recipe's plans, refusals or binding change.
+Touch when:   never for a new repository; the Python recipe's plans, refusals or binding change.
 """
 
 from __future__ import annotations

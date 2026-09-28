@@ -16,7 +16,7 @@
  * ADRs:         docs/adr/0010-polyglot-negative-controls.md
  * Works with:   ui/src/screens/Oracle/OraclePage.tsx (the code under test), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Oracle/OraclePage.test.tsx
- * Touch when:   a band, gate or empty state is added.
+ * Touch when:   never for a new repository; a band, gate or empty state is added.
  */
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -85,5 +85,29 @@ describe('OraclePage', () => {
     mockApi({ 'GET /auth/me': VIEWER, 'GET /repos': { items: [], total: 0, limit: 50, offset: 0 } })
     renderApp(<OraclePage />, { route: '/oracle' })
     expect(await screen.findByRole('link', { name: 'Connect a repository' })).toHaveAttribute('href', '/connect')
+  })
+  it('a controls escape links to the strengthen report on Learn, for the repository (G-348, G-432)', async () => {
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /oracle/alpha': SCORED,
+      'GET /oracle/alpha/controls': { repo: 'alpha', run_id: 'r1', passed: true, n_rows: 7, n_tasks: 1, violations: 0, escapes: 1, not_constructible: 1, skipped: 0, rows: [], verdict: { state: 'escapes', measured: true, passed: false, constructible: 6, total: 7, share: 0.86, escapes: 1, complete: true, run_id: 'r1' } },
+    })
+    renderApp(<OraclePage />, { route: '/oracle?repo=alpha' })
+    const link = await screen.findByRole('link', { name: 'Strengthen the tests on Learn' })
+    expect(link.closest('p')).toHaveTextContent('Learning loop, step 2 of 6')
+    expect(link).toHaveAttribute('href', '/learn?repo=alpha#strengthen')
+  })
+
+  it('a clean controls report sends nobody to Learn', async () => {
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /oracle/alpha': SCORED,
+      'GET /oracle/alpha/controls': { repo: 'alpha', run_id: 'r1', passed: true, n_rows: 7, n_tasks: 1, violations: 0, escapes: 0, not_constructible: 1, skipped: 0, rows: [], verdict: { state: 'passed', measured: true, passed: true, constructible: 6, total: 7, share: 0.86, escapes: 0, complete: true, run_id: 'r1' } },
+    })
+    renderApp(<OraclePage />, { route: '/oracle?repo=alpha' })
+    await screen.findByText('Negative-control rows')
+    expect(screen.queryByRole('link', { name: 'Strengthen the tests on Learn' })).toBeNull()
   })
 })

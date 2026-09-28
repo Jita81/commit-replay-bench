@@ -10,14 +10,20 @@
  *               instrument health pill from `GET /health`, the user chip showing the
  *               principal's ROLE (so a viewer knows why a button is missing; the display name
  *               only from `sm` up), theme cycling, Help as a compact "?" icon (the footer
- *               carries the words) and sign-out — sized so the cluster is one row at 375 px
- *               and "Sign out" never becomes a third header row. `AboutThisScreen` is mounted
- *               once after the outlet so every
- *               screen carries its help with no wiring. The footer carries crb / apparatus /
+ *               carries the words) and sign-out. Below 640 px the cluster and both nav rows
+ *               fold behind one "Menu" disclosure (F26: `aria-expanded`, Escape closes it and
+ *               returns focus to the button, an Escape spent by another layer such as the
+ *               evidence drawer leaves it open, following a link closes it), so a phone's
+ *               first screen is the page, not three rows of chrome; a health that is not OK
+ *               stays on the closed Menu button as the probe's glyph and in its name. The
+ *               instrument row offers every role the pages its API lets that role read
+ *               (G-914). `AboutThisScreen` is mounted once after the outlet so every screen
+ *               carries its help with no wiring. The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
  *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
- *               the four steps so no screen hand-types its position. Every element of the
+ *               the four steps (and places /repos and /repos/:name in step 1, G-301) so no
+ *               screen hand-types its position. Every element of the
  *               chrome — each nav entry (`nav.*`), the health pill, the role chip, Help, the
  *               theme toggle, Sign out, the stop-condition banner, the footer's version line
  *               and links — is a `<Hint>` trigger, so the shell explains itself on hover,
@@ -35,15 +41,18 @@
  *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
  *               ui/src/lib/verdict.ts (`probeDisplay` for the health pill)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (every element of the
- *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the eyebrow, Help, the About
- *               block), ui/e2e/smoke.spec.ts (the shell renders the nav),
+ *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the
+ *               eyebrow, Help, the About block, the Menu, the instrument row by role),
+ *               ui/e2e/smoke.spec.ts (the shell renders the nav),
+ *               ui/e2e/walkthrough/11-screens.spec.ts (the Menu at 375 px on every route),
  *               ui/e2e/walkthrough/01-login.spec.ts
  *               (the role chip reads the bootstrap admin's role), ui/src/test/utils.tsx
  *               (`renderApp` mounts the shell for every screen test)
- * Touch when:   a screen is added — add its `NAV` entry here and its route in ui/src/App.tsx;
- *               never for a new repository.
+ * Touch when:   never for a new repository; a screen is added — add its `NAV` entry here and its
+ *               route in ui/src/App.tsx.
  */
-import { NavLink, Outlet, matchPath, useNavigate } from 'react-router'
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { useAuth } from '../lib/auth'
 import { useTheme } from '../lib/theme'
@@ -62,9 +71,9 @@ export const BRAND = 'Commit Replay Bench'
  * The primary nav is the JOURNEY — connect a repository, earn its baseline, decide what is
  * waiting on a person, run the factory (DL-044: the factory and the self-improvement loop
  * are the product; the rest is the on-ramp that earns their baseline). Every role sees the
- * journey. The INSTRUMENT row beneath it is the operator's tooling — runs, the map grid,
- * routes, the oracle, the learning loop — plus the ledger for every role (an auditor's
- * screen) and Settings for admins. Nothing is removed from the URL space: the repositories
+ * journey. The INSTRUMENT row beneath it is the evidence behind the journey — the map grid,
+ * routes, the oracle, the learning loop and the ledger for every role (their APIs are all
+ * `viewer`), Runs for operators (where a run is started) and Settings for admins. Nothing is removed from the URL space: the repositories
  * list, the sign-off form and the map grid stay routable, reached from the journey (the
  * Connection page lists repositories; Decisions and the map link to the sign-off form).
  */
@@ -91,6 +100,9 @@ export const JOURNEY_STEPS: readonly { label: string; to: string }[] = [
 /** Route pattern → the step it belongs to (index into `JOURNEY_STEPS`) and its own sub-label. */
 const STEP_OF: Array<{ pattern: string; step: number; sub?: string }> = [
   { pattern: '/connect/*', step: 0 },
+  // Repos and the repository page are where step 1's "Confirm its shape" happens (Home task 3
+  // and the walk's Configuration button land there), so they say so, not "Instrument" (G-301)
+  { pattern: '/repos/*', step: 0, sub: 'shape' },
   { pattern: '/results', step: 1 },
   { pattern: '/decisions', step: 2 },
   { pattern: '/signoff', step: 2, sub: 'sign-off' },
@@ -118,16 +130,73 @@ export function journeyEyebrow(pathname: string, sub?: string): string {
 
 const INSTRUMENT: Array<{ to: string; label: string; role: 'viewer' | 'operator' | 'admin'; hint: HintId }> = [
   { to: '/runs', label: 'Runs', role: 'operator', hint: 'nav.runs' },
-  { to: '/capability', label: 'Map grid', role: 'operator', hint: 'nav.capability' },
-  { to: '/routing', label: 'Routes', role: 'operator', hint: 'nav.routing' },
-  { to: '/oracle', label: 'Oracle', role: 'operator', hint: 'nav.oracle' },
-  { to: '/learn', label: 'Learn', role: 'operator', hint: 'nav.learn' },
+  // the four reads below are `viewer` at the API and their routes are unguarded, so a viewer
+  // (the governance reader) gets the same doors an operator does (G-914): an entry whose role
+  // is stricter than its route and API only hides a page someone is allowed to read
+  { to: '/capability', label: 'Map grid', role: 'viewer', hint: 'nav.capability' },
+  { to: '/routing', label: 'Routes', role: 'viewer', hint: 'nav.routing' },
+  { to: '/oracle', label: 'Oracle', role: 'viewer', hint: 'nav.oracle' },
+  { to: '/learn', label: 'Learn', role: 'viewer', hint: 'nav.learn' },
   { to: '/ledger', label: 'Ledger', role: 'viewer', hint: 'nav.ledger' },
   { to: '/settings', label: 'Settings', role: 'admin', hint: 'nav.settings' },
 ]
 
 /** Sun / moon / half-disc for the theme toggle; the glyph is decorative, the `aria-label` carries the state. */
 const THEME_GLYPH = { light: '☀', dark: '☾', system: '◐' } as const
+
+/**
+ * The ids of the three blocks the phone "Menu" discloses (F26): the chrome cluster (health
+ * pill, role chip, Help, theme, Sign out) and the two nav rows. From `sm` (640 px) up they
+ * are always shown and the Menu button is not rendered visible; below it they are shown
+ * only while the menu is open. One button controls all three, so `aria-controls` lists them.
+ */
+export const SHELL_MENU_IDS = ['shell-menu-actions', 'shell-nav-primary', 'shell-nav-instrument'] as const
+/** The Menu button's DOM id: Escape returns focus here. */
+export const SHELL_MENU_BUTTON_ID = 'shell-menu-button'
+
+/**
+ * The phone menu's open state, closed by every navigation — a link inside it, Back, Forward
+ * (P-423) — so the next screen, and a screen returned to, starts with the navigation folded
+ * away, without an effect that resets state after render. Escape closes it and puts focus back on the button
+ * — unless the Escape was already spent closing a hint bubble (`Hint` default-prevents it and
+ * stops it in the capture phase), or focus is in another layer such as the evidence drawer
+ * (whose own Escape closes it), so one press closes the innermost thing, as in a dialog.
+ */
+/** Focus is on the Menu button, inside one of the blocks it discloses, or on no element at all. */
+function focusIsOnTheMenu(): boolean {
+  const a = document.activeElement
+  if (a === null || a === document.body) return true
+  return [SHELL_MENU_BUTTON_ID, ...SHELL_MENU_IDS].some((id) => document.getElementById(id)?.contains(a))
+}
+
+function useShellMenu(): { open: boolean; toggle: () => void } {
+  // keyed to the history ENTRY, not the address: Back to the address the menu was opened
+  // on is another navigation, so the menu must not reopen by itself (P-423). Any move —
+  // a link, Back, Forward, or a link to the page already shown — ends the open state,
+  // adjusted during render so no effect resets it a frame late.
+  const { key } = useLocation()
+  const [openAt, setOpenAt] = useState<string | null>(null)
+  const [seen, setSeen] = useState(key)
+  if (seen !== key) {
+    setSeen(key)
+    if (openAt !== null) setOpenAt(null)
+  }
+  const open = openAt !== null && openAt === key
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      // an Escape pressed while focus is in another layer (the evidence drawer, a native
+      // dialog) belongs to that layer: it closes it, and the menu stays open underneath
+      if (!focusIsOnTheMenu()) return
+      setOpenAt(null)
+      document.getElementById(SHELL_MENU_BUTTON_ID)?.focus()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open])
+  return { open, toggle: () => setOpenAt(open ? null : key) }
+}
 
 /**
  * The app shell: brand, top nav (one brand name in chrome — law 9), health
@@ -144,6 +213,12 @@ export function Layout() {
   const health = useHealth()
   const version = useVersion()
   const h = health.data ? probeDisplay(health.data.status) : null
+  // the health pill folds into the menu below 640 px: anything but OK stays on the closed
+  // Menu button as the probe's glyph and in its name, so a phone still sees a degraded instrument
+  const unwell = h !== null && health.data?.status !== 'ok'
+  const menu = useShellMenu()
+  // below sm the three blocks show only while the menu is open; from sm up, always
+  const folded = menu.open ? '' : 'max-sm:hidden'
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-on-surface">
@@ -152,13 +227,35 @@ export function Layout() {
       </a>
       <header>
         <div className="bg-primary text-on-primary">
-          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-6 px-5 py-4">
-            <NavLink to="/home" className="flex items-center gap-3 text-on-primary no-underline">
-              <span className="block rounded-[2px] bg-on-primary px-2.5 pb-[7px] pt-[9px] text-[22px] font-bold leading-none tracking-[-.02em] text-primary">crb</span>
-              <span className="text-[22px] font-bold leading-none">{BRAND}</span>
+          <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-2 gap-y-3 px-5 py-3 sm:gap-6 sm:py-4">
+            <NavLink to="/home" className="flex items-center gap-2 text-on-primary no-underline sm:gap-3">
+              <span className="block rounded-[2px] bg-on-primary px-2 pb-[6px] pt-[8px] text-[17px] font-bold leading-none tracking-[-.02em] text-primary sm:px-2.5 sm:pb-[7px] sm:pt-[9px] sm:text-[22px]">crb</span>
+              <span className="text-[17px] font-bold leading-none sm:text-[22px]">{BRAND}</span>
             </NavLink>
-            {/* the gaps and the role pill are tighter below sm so pill · role · help · theme · sign out is ONE row at 375 px */}
-            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2.5 gap-y-2 text-[16px] sm:gap-x-4">
+            {/* F26: below 640 px the journey and instrument rows and this cluster fold behind one
+                "Menu" disclosure, so a phone's first screen is the page, not three rows of chrome */}
+            {/* on the header's own blue, like the nav links (hover darkens, never lightens): a
+                ghost button's light hover fill put blue text on light blue (axe, 2.29:1) */}
+            <Hint
+              as="button"
+              id="button.shell.menu"
+              elementId={SHELL_MENU_BUTTON_ID}
+              type="button"
+              className="ml-auto inline-flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-[var(--radius-control)] border border-on-primary bg-transparent px-2.5 text-[14px] font-semibold text-on-primary hover:bg-[#002265] sm:hidden"
+              aria-expanded={menu.open}
+              // the visible word "Menu" starts the name (WCAG 2.5.3); the health follows it only while the pill is folded away
+              aria-label={unwell && !menu.open ? `Menu, instrument health: ${h.label}` : undefined}
+              aria-controls={SHELL_MENU_IDS.join(' ')}
+              onClick={menu.toggle}
+              data-testid="shell-menu-button"
+            >
+              <span aria-hidden>{menu.open ? '✕' : unwell ? h.glyph : '☰'}</span> Menu
+            </Hint>
+            {/* the gaps and the role pill are tighter below sm; on a phone this cluster is the menu's first row */}
+            <div
+              id={SHELL_MENU_IDS[0]}
+              className={`${folded} flex basis-full flex-wrap items-center gap-x-2.5 gap-y-2 text-[16px] sm:ml-auto sm:basis-auto sm:justify-end sm:gap-x-4`}
+            >
               {h && (
                 <Pill tone={h.tone} glyph={h.glyph} size="xs" label={`Instrument health: ${h.label}`} hint="pill.shell.health">
                   {h.label}
@@ -204,8 +301,8 @@ export function Layout() {
             </div>
           </div>
         </div>
-        <nav aria-label="Primary" className="bg-primary-deep">
-          <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap px-5 p-0">
+        <nav aria-label="Primary" id={SHELL_MENU_IDS[1]} className={`${folded} bg-primary-deep`}>
+          <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap px-5 p-0 max-sm:flex-col">
             {JOURNEY.map((n) => (
               <li key={n.to}>
                 <Hint
@@ -225,7 +322,7 @@ export function Layout() {
             ))}
           </ul>
         </nav>
-        <nav aria-label="Instrument" className="border-b border-border bg-surface-high">
+        <nav aria-label="Instrument" id={SHELL_MENU_IDS[2]} className={`${folded} border-b border-border bg-surface-high`}>
           <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap items-center gap-1 px-5 py-1 p-0">
             <li className="pr-2 text-[11px] font-bold uppercase tracking-[.08em] text-on-surface-muted" aria-hidden>
               {instrument.length > 1 ? 'Instrument' : 'Record'}

@@ -12,7 +12,7 @@ ADRs:         none
 Works with:   src/crb/cli/commands/deps.py (under test), src/crb/provision/store.py (the store),
               src/crb/core/deps.py (the refusal codes and fixes the commands print)
 Tested by:    tests/test_cli_deps.py
-Touch when:   a ``crb deps`` subcommand is added or its output changes.
+Touch when:   never for a new repository; a ``crb deps`` subcommand is added or its output changes.
 """
 
 from __future__ import annotations

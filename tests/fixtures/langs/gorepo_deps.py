@@ -36,8 +36,9 @@ Works with:   tests/fixtures/goproxy.py (the mirror the dependency comes from),
               tests/fixtures/langs/__init__.py (the two-commit shape), tests/test_provision_go.py
               (fetches its dependencies), tests/test_sandbox_images_docker.py (the D5 regression)
 Tested by:    tests/test_provision_go.py, tests/test_sandbox_images_docker.py
-Touch when:   a provisioning test needs another dependency shape (a local replace, a vendor
-              tree) — add a variant builder rather than changing these two commits.
+Touch when:   never for a new repository; a provisioning test needs another dependency shape (a
+              local replace, a vendor tree) — add a variant builder rather than changing these two
+              commits.
 """
 
 from __future__ import annotations

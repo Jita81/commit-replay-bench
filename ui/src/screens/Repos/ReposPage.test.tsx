@@ -47,6 +47,12 @@ function setup(me: Principal, items: RepoSummary[]) {
 describe('ReposPage', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('carries the journey eyebrow of step 1 — Repos is where the shape is confirmed (G-301)', async () => {
+    setup(OPERATOR, [MEASURED])
+    await screen.findByRole('table', { name: 'Repositories under measurement' })
+    expect(screen.getByText('Journey · 1 of 4 · Connection · shape')).toBeInTheDocument()
+  })
+
   it('each row shows the served name, runner, probe state and counts', async () => {
     setup(OPERATOR, [MEASURED, UNPROBED])
     const table = await screen.findByRole('table', { name: 'Repositories under measurement' })
