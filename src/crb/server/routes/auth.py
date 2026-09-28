@@ -23,9 +23,10 @@ How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local
               cookies; ``OidcState.fresh`` → provider URL → cookie; callback: cookie →
               ``exchange`` → ``map_role`` → ``upsert_oidc_user`` → cookies → redirect.
 Layer:        server — docs/ARCHITECTURE.md#71-security
-ADRs:         none
+ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md (§8, every sign-in)
 Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
-              (``record_user_event`` — the account trail), src/crb/server/app.py
+              (``record_user_event`` — the account trail; ``record_sign_in`` — every
+              sign-in, ADR-0028 §8), src/crb/server/app.py
               (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
               src/crb/server/settings.py (``OidcSettings``, ``local_auth_enabled``),
               ui/src/api/client.ts (the UI's login and CSRF echo), docs/API.md#auth
@@ -71,7 +72,7 @@ from crb.server.auth import (
     upsert_oidc_user,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
-from crb.server.routes.admin import record_user_event
+from crb.server.routes.admin import record_sign_in, record_user_event
 from crb.server.settings import Settings
 from crb.store.models import User
 
@@ -135,7 +136,7 @@ def login(
     limiter.reset(body.username, ip)
     user.last_login = _now()
     # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
-    record_user_event(db, action="user.signed_in", actor=user.id, target=user, by="local")
+    record_sign_in(db, user=user, by="local")
     db.commit()
     request.state.user_id = user.id
     cv = credential_version(user)
@@ -312,7 +313,7 @@ def oidc_callback(
             issuer=issuer,
         )
     user.last_login = _now()
-    record_user_event(db, action="user.signed_in", actor=user.id, target=user, by="oidc")
+    record_sign_in(db, user=user, by="oidc")
     db.commit()
     request.state.user_id = user.id
     response = RedirectResponse(pending.next_path, status_code=status.HTTP_302_FOUND)

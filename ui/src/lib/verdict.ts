@@ -363,6 +363,7 @@ export const ACTION_HELP: Record<string, string> = {
   'cell.routed_deliver': 'A cell first routed deliver after this run — the moment the decision’s clock starts.',
   'deployment.installed': 'The deployment’s install was recorded — dated only when the database held nothing before.',
   'deployment.first_healthy': 'The deployment read green on /health for the first time.',
+  'user.signed_in': 'Someone signed in; recorded for every sign-in so an account recovery is timed to the first one after a password reset.',
   'review.corrected': 'A review whose stored mergeable answer contradicted its own words was corrected by a new record; the original is kept.',
   // legacy — the CLI's ledger import, never on a run's live log
   'legacy.tasks': 'A legacy task file was read for import; the payload counts the tasks.',

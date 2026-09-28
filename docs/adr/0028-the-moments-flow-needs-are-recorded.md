@@ -66,8 +66,9 @@ and dating an install from the oldest row in the database dates an upgrade as an
 8. **Every sign-in is recorded** (amended 2026-09-28, DL-220). `User.last_login` keeps only
    the latest sign-in, so a recovery timed against it was timed to the latest sign-in, not
    the first after the reset, and two resets of one account shared one sign-in. Every
-   successful sign-in, local or OIDC, now writes `user.signed_in` on the account's trace (a
-   refused one writes nothing, and no event carries a password). A reset by an admin is
+   successful sign-in, local or OIDC, now writes `user.signed_in` on a sign-in trace of its
+   own, apart from the account's change trail, since a sign-in changes nothing about the
+   account (a refused one writes nothing, and no event carries a password). A reset by an admin is
    paired with the account's first `user.signed_in` after it and before the account's next
    password change. A reset older than the deployment's first recorded sign-in is counted
    and never timed: a sign-in nothing recorded may have come first.
