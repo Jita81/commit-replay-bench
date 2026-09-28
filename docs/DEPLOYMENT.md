@@ -338,8 +338,9 @@ platform allows a second role, split them:
 - the **owner** runs `crb migrate` (the migration job) and owns every table and the
   `crb_append_only()` function;
 - the **application** role — the one in the API's and the worker's `CRB_DATABASE_URL` — is
-  granted `SELECT, INSERT` on the append-only tables and `SELECT, INSERT, UPDATE, DELETE` on
-  the rest, and `USAGE, SELECT` on the sequences:
+  granted `SELECT, INSERT` on the append-only tables, `SELECT, INSERT, UPDATE, DELETE` on
+  the rest, only `SELECT` on `alembic_version` (only the owner migrates, so only the owner
+  records the schema's version), and `USAGE, SELECT` on the sequences:
 
 ```sql
 -- as the owner, after `crb migrate` has created the schema
@@ -349,9 +350,20 @@ GRANT USAGE ON SCHEMA public TO crb_app;
 GRANT SELECT, INSERT ON grades, events, signoffs, evidence, reviews, task_qualifications
   TO crb_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON repos, runs, tasks, users, workers,
-  github_installations, alembic_version TO crb_app;
+  github_installations TO crb_app;
+GRANT SELECT ON alembic_version TO crb_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crb_app;
+-- tables and sequences the owner creates later (a release that adds a table)
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES TO crb_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO crb_app;
 ```
+
+The default grants apply to what the owner creates, so run them as the owner. A table a
+later release adds gets the narrower grant, `SELECT, INSERT`, so a new table is never
+rewritable by the application before someone has decided it may be. When a release adds a
+table the application must update or delete, its upgrade notes name it: grant `UPDATE,
+DELETE` on that table as the owner before you restart the API and the worker, or those
+writes are refused with `permission denied`.
 
 (`SELECT tablename FROM pg_tables WHERE schemaname = 'public'` lists every table; the
 append-only ones are `APPEND_ONLY_TABLES` in `src/crb/store/models.py`.) The API and the
