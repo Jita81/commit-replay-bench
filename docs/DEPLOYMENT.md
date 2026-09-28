@@ -25,7 +25,7 @@ Contents: [1 Shapes](#1-deployment-shapes) ·
 | **Single host, Docker Compose** | pilots, one team, one VM in the tenant | [deploy/README.md](../deploy/README.md) |
 | **Kubernetes, Helm** | shared platform, AKS/EKS/on-prem, managed PostgreSQL | §3 of this page; [deploy/helm/crb](../deploy/helm/crb/README.md) |
 
-The two container shapes run the same image and the same four things: PostgreSQL, a one-shot **migrate** step,
+Both container shapes run the same image and the same four things: PostgreSQL, a one-shot **migrate** step,
 the **api** (HTTP + UI) and the **worker** (queue consumer that mines, builds, grades and
 appends to the ledger). Both enforce the same invariants: the append-only tables carry DB
 triggers, every verdict is hash-chained, the sandbox fails closed, and the only permitted
@@ -36,12 +36,14 @@ come from, and two flows that are off by default: the tracker the intake watches
 (`CRB_INTAKE__TRACKER`) and, with dependency provisioning on (`CRB_PROVISION__ENABLED=true`,
 §3.4), the fetch sidecar to your package mirror or registry —
 which receives only the package names and versions the task's lockfiles pin
-([SECURITY.md](SECURITY.md) has the complete table, with what each flow sends).
+([SECURITY.md](SECURITY.md) has the complete table, with what each flow sends) **[hypothesis — the design SECURITY.md's egress table and the chart's network policies record; a packet capture of a running deployment against that table would confirm it]**.
 
 ### 1.1 Single host without containers (evaluation)
 
 The shape every walkthrough, the first factory run (B-1b) and the development stack use:
-one directory, one SQLite file, two processes. It is for evaluation — the local executor
+one directory, one SQLite file, two processes **[measured — n = 2 processes; method: the
+commands in the block below, which the development stack runs, one serving the API and the
+other the queue; apparatus n/a]**. It is for evaluation — the local executor
 does not isolate test runs and SQLite is not the production store (§2.1) — but it holds
 sign-offs and ledger rows like any other, so it deserves a fixed address.
 
@@ -112,10 +114,12 @@ server and never appear in logs or `/settings`.
 | `CRB_OIDC__ROLE_FROM_CLAIMS` | | `first_login` (default): the claims set a role on the account's first sign-in and an admin's later change stands; `always`: the provider decides at every sign-in (removing someone from the admin group demotes them next time), each change recorded as `user.role_overridden`, but never a demotion of the last active admin — or of the last who can sign in (a local admin does not count once `CRB_LOCAL_AUTH_ENABLED=false`) — which keeps its role and records `user.role_override_refused` ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)) |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
 | `CRB_INTAKE__TRACKER`, `__URL`, `__PROJECT`, `__COLUMN`, `__AREA_PATH`, `__JQL`, `__EMAIL`, `__POINTS_FIELD`, `__ACCEPTANCE_FIELD`, `__POLL_S`, `__MAX_PER_POLL`, `__POLL_BUDGET_S`, `__OUTCOME_MAP`, `__REQUIRE_APPROVAL`, `__APPROVE_AUTHORS` | for *work arriving from a board* | the tracker this deployment takes work from (ADR-0017); set on the **API and the worker** so one environment configures both. `TRACKER` is `none` (the default — nothing is read anywhere), `ado` or `jira`; `URL` must be `https://`; `POLL_S` defaults to 300; `MAX_PER_POLL` (200) bounds one pass — a longer column is not read at all, it stops with `column_too_large` — and `POLL_BUDGET_S` (60) is how long one pass may take before it stops early and serves what it read; `OUTCOME_MAP` is JSON (`{"merged": "Done"}`) and is **empty by default**, so no ticket is ever moved. `REQUIRE_APPROVAL` is **`true` by default** (ADR-0022): a ready ticket waits on the Intake screen until an operator registers it; `APPROVE_AUTHORS` is a JSON list of tracker authors (the ticket's creator) whose tickets skip that act, **empty by default**. The credential is NOT an environment variable: an admin stores it at `PUT /settings/secrets/tracker-token`. Whether a given repository's listener is on is per repository, **default off**, and an operator's to switch |
-| `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default in `prod`, fail-closed) or `local` (development; the worker's default in `dev`). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent). `local` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` (below) |
-| `CRB_BUILDER__EXECUTOR` | api, worker | where the builder runs: `docker` — the sealed container of ADR-0012 (an exported checkout that cannot contain the gold commit, one allowlisting egress sidecar) — or `host` (development). Empty means the env's default: `docker` in `prod`, `host` in `dev`. Compose and Helm pass one value to both the API and the worker (empty by default), so `/health` describes the builds the worker runs. `host` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` (below). Factory builds are not covered: they always run on the host (below) |
+| `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default in `prod`, fail-closed) or `local` (development; the worker's default in `dev`). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent). `local` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` is set with `CRB_ALLOW_UNSEALED_PROD_BY` and `CRB_ALLOW_UNSEALED_PROD_REASON` (below) |
+| `CRB_BUILDER__EXECUTOR` | api, worker | where the builder runs: `docker` — the sealed container of ADR-0012 (an exported checkout that cannot contain the gold commit, one allowlisting egress sidecar) — or `host` (development). Empty means the env's default: `docker` in `prod`, `host` in `dev`. Compose and Helm pass one value to both the API and the worker (empty by default), so `/health` describes the builds the worker runs. `host` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` is set with `CRB_ALLOW_UNSEALED_PROD_BY` and `CRB_ALLOW_UNSEALED_PROD_REASON` (below). Factory builds are not covered: they always run on the host (below) |
 | `CRB_BUILDER__IMAGE` | worker | the builder image (`deploy/Dockerfile.builder`), in the daemon's store. An explicit `CRB_BUILDER__EXECUTOR=docker` without it fails at start-up; the `prod` default without it fails each build closed (`sandbox unavailable`), never on the host |
-| `CRB_ALLOW_UNSEALED_PROD` | api, worker | `1` lets `prod` start with the host builder or the local test executor — **for an evaluation you have decided not to count as evidence**. Without it both processes refuse to start and say which setting is unsealed. With it the API logs a warning, `/health` and `/settings` report `posture.unsealed_prod_override: true`, the Posture page says so to every viewer, and the worker stamps `unsealed_prod_override` into every run's apparatus and every evidence pack (ADR-0023). Without it a `prod` worker also refuses a run that asks for the local executor in its own parameters, and refuses every **factory** run: a factory build hands the builder a host worktree and no container, so it is never sealed (`posture.factory_builds: refused`). With it a factory run builds on the host and its apparatus carries the override (`run_kind: factory`) |
+| `CRB_ALLOW_UNSEALED_PROD` | api, worker | `1` lets `prod` start with the host builder or the local test executor — **for an evaluation you have decided not to count as evidence**. Without it both processes refuse to start and say which setting is unsealed. In `prod` it must name who set it and why (`CRB_ALLOW_UNSEALED_PROD_BY`, `CRB_ALLOW_UNSEALED_PROD_REASON`, below), or neither process starts. With it the API logs a warning, `/health` and `/settings` report `posture.unsealed_prod_override: true`, the Posture page says so to every viewer, and the worker stamps `unsealed_prod_override` into every run's apparatus and every evidence pack (ADR-0023). Without it a `prod` worker also refuses a run that asks for the local executor in its own parameters, and refuses every **factory** run: a factory build hands the builder a host worktree and no container, so it is never sealed (`posture.factory_builds: refused`). With it a factory run builds on the host and its apparatus carries the override (`run_kind: factory`) |
+| `CRB_ALLOW_UNSEALED_PROD_BY` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: the username of the admin who decided to run unsealed (a local username, the identity provider's subject or the account's email). At every start each process checks it names exactly one active admin — otherwise it refuses to start and writes nothing (the worker exits 2) — and writes one `posture.unsealed_override` event on the audit trail whose actor is that admin, with the reason, the process, the host and the posture it admits ([API.md § Event vocabulary](API.md#event-vocabulary); ADR-0023 as amended). The worker stamps the name beside the override (`unsealed_prod_override.acknowledged_by`) on every run that does not run sealed: every run of a worker whose defaults are unsealed, a run that asks for the local executor in its own parameters, and every factory run. Name a person with an admin account: a deployment whose only admin is the bootstrap account names that account |
+| `CRB_ALLOW_UNSEALED_PROD_REASON` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: why, in the admin's words — written into the same event |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
 | `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
 | `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
@@ -135,9 +139,10 @@ server and never appear in logs or `/settings`.
 | `CRB_PROVISION__PROXY_IMAGE` / `__EGRESS_NETWORK` | worker | the image the fetch's allowlisting proxy sidecar runs on (needs `python3`; default the builder's proxy image) and the docker network it reaches the registry on (default `bridge`) |
 | `CRB_PROVISION__CA_BUNDLE` | worker | a CA bundle for a TLS-intercepting mirror, mounted read-only into the fetch |
 | `CRB_PROVISION__MAX_BUNDLE_MB` / `__MAX_TOTAL_GB` / `__FETCH_TIMEOUT_S` | worker | one set's size cap (`PROVISION_TOO_LARGE`, default 2048), the store's cap for `crb deps gc` (default 20) and a fetch's wall clock (default 900 s) |
-| `CRB_FACTORY__TEST_AUTHOR` | api, worker | the factory's test-author rung — `builder:model[:provider]`, the same spelling as a build rung, or empty / `none` (the default) for no author. With no author, an item nobody wrote a failing test for stops `no_oracle`; with one, that rung writes the test. **The author rung and the build rung are never the same rung**: a label that is also on a run's ladder is refused before anything is built. A run may override it (`POST /runs {test_author}`) |
+| `CRB_FACTORY__TEST_AUTHOR` | api, worker | the factory's test-author rung — `builder:model[:provider]`, the same spelling as a build rung, or empty / `none` (the default) for no author. With no author, an item nobody wrote a failing test for stops `no_oracle`; with one, that rung writes the test. **The author rung and the build rung are never the same rung**: a label that is also on a run's ladder is refused before anything is built. A run may override it (`POST /runs {test_author}`). The author calls the same OpenAI-compatible endpoint as the builders (`CRB_OPENAI_BASE_URL` below) and stamps its provider; an author rung naming a different provider is refused before any call (OPERATOR §10) |
 | `CRB_RETENTION__TRANSCRIPTS_DAYS` | | 0 = keep no builder transcripts (default) |
-| `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | OpenAI-compatible endpoint (vLLM, Cerebras, …) |
+| `CRB_OPENAI_BASE_URL`, `CRB_OPENAI_KEY_ENV` + the named key var | builder | the OpenAI-compatible endpoint (vLLM, llama-server, Cerebras, …) that **every** OpenAI-compatible builder calls — `editblock`, `openai_agent`, the intent labeller and the factory's test author — defaulting to Cerebras (`https://api.cerebras.ai/v1`, key in `CEREBRAS_API_KEY`) when unset. The provider a row is stamped with is the endpoint's own: `cerebras` for a host in the `cerebras.ai` domain, `azure` for an Azure endpoint in an Azure domain (`azure.com`, `azure-api.net`, `azure.us`, `azure.cn`), otherwise the URL's host and port (`gpu-box.internal:8080`) — and a host with no dot and no port is stamped `host:<name>`, so a service called `cerebras` is never stamped `cerebras`. A URL carrying a user name or key before the host, a query string or a fragment is refused by name, because the URL is stamped on every row — the key goes in the variable `CRB_OPENAI_KEY_ENV` names. A rung that names a different provider (`openai_agent:qwen@cerebras` while the URL is your server) is refused when the run is submitted (422 `builder_provider_mismatch`, nothing queued) and again before anything is built, so a self-hosted model's results never land in another provider's cell; name the host (`@gpu-box.internal:8080`) or leave the provider empty **[measured — n = 64 test cases in `tests/test_builders_endpoint.py`: 10 point a builder, the labeller or the test author at a fake OpenAI-compatible server on 127.0.0.1 and assert the request lands there and the row (or the authored test's record) carries its host; the other 54 check the settings, the provider rule and the refusals; each fix was reverted in turn and the tests failed; apparatus 2.3]**. Until 2026-09-25 (`product.truth.26` in docs/dod/product.md) the two builders ignored this variable and called Cerebras, and stamped `cerebras` on every row |
+| `CRB_OPENAI_TIMEOUT_S` / `CRB_OPENAI_MAX_TOKENS` / `CRB_OPENAI_MAX_RETRIES` | builder | per-call timeout in seconds (default `120`, 1–3600), the completion's `max_tokens` (default `4000`, 1–200000; while it is unset the intent labeller keeps its own cap of `400`) and how many times a timed-out or 429/5xx call is retried (default `4`, 0–10). A value out of range or not a number stops the builder with an error that names the variable — never silently clamped. A self-hosted model is slower than a hosted one: at 15 tokens a second a 4,000-token reply needs about 270 s **[hypothesis — arithmetic from a stated generation rate, not measured on a model]**, so raise the timeout above that and set retries to `0` or `1`, because every retry regenerates the whole reply |
 | `CRB_AZURE_ENDPOINT`, `CRB_AZURE_DEPLOYMENT`, `CRB_AZURE_API_VERSION`, `CRB_AZURE_KEY_ENV` + `AZURE_OPENAI_API_KEY` | builder | Azure OpenAI in-tenant (setting the endpoint selects Azure) |
 | `ANTHROPIC_API_KEY` | builder | Claude Code builder in its production `api_key` auth mode (`claude -p --bare`) |
 | `CRB_CLAUDE_CODE_AUTH` | builder | default auth mode for `claude_code` rungs when the run's `builder_config` does not set `auth`: `api_key` (default) or `cli` — **developer/evaluation only**: the worker's user's own `claude login` (subscription) is the credential, `--bare` is dropped and the target repository's `CLAUDE.md` is auto-discovered (see SECURITY.md) |
@@ -278,6 +283,15 @@ Make such a rule preferred, or use a ReadWriteMany claim. A worker on the dedica
 the api with it (the example in §3.1), or the store moves to a ReadWriteMany claim on a file system that keeps POSIX
 permissions (the store refuses a directory that its group can read).
 The claim has no `keep` policy, so a stored credential does not outlive the release.
+The kept patches, the evidence packs and the retained transcripts live in `evidenceStore`:
+one claim that the worker, which writes them at grade time, and the API, which serves them
+at `/grades/{row_hash}/patch` and `/grades/{row_hash}/transcript`, both mount at
+`$CRB_HOME/evidence` and `$CRB_HOME/transcripts` (P-045). It follows the secrets store's
+placement rule: a ReadWriteOnce claim pins both pods to one node, and only ReadWriteMany
+claims for both stores lift the pin (`evidenceStore.existingClaim`,
+`evidenceStore.accessMode: ReadWriteMany`). Unlike the secrets store it carries
+`helm.sh/resource-policy: keep`: the kept patches are the product's retained output, so
+delete the claim explicitly.
 The chart also refuses an `api.podLabels`, `worker.podLabels`, `api.podAnnotations` or
 `worker.podAnnotations` key that it sets itself (the pin's `crb.dev/secrets-store` label,
 the selector labels, `checksum/config`): the pod would carry the key twice.
@@ -428,13 +442,18 @@ run replaces this with a measured figure]**.
 
 Every check `.github/workflows/ci.yml` reports blocks a merge to `main` only while its name is
 on the branch's required-status-checks list, which is a repository setting, not a workflow
-file. The list names every job's check but the parts an aggregator stands for (below) —
+file. The list names every job's check the workflow had when it was last read, but the parts an aggregator stands for (below) —
 `sandbox-images`, which has no `continue-on-error` and fails on any skipped smoke test exactly
 as `container` does, and `sbom` among them — and is strict (a branch must be up to date)
 **[measured 2026-09-27 — n = 16 required checks against the 16 gating check names the
-workflow renders, method: `scripts/check_branch_protection.py` against
+workflow rendered then, method: `scripts/check_branch_protection.py` against
 `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
-apparatus 2.3; the same list was read on 2026-09-26]**.
+apparatus 2.3; the same list was read on 2026-09-26]**. The `fresh-clone` job, which runs
+every gate on a fresh clone from `uv.lock` as root with no docker daemon (G-664), came later
+and is not on the list: an administrator adds its check name with the call below. Until then
+the saved reading (`tests/fixtures/branch_protection_main.json`) names it under
+`awaiting_protection` with that step, and the daily comparison against the live setting fails
+(DL-101).
 
 `scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
 that no job reports (every pull request would wait on it for ever), a job that no required
@@ -485,13 +504,13 @@ aggregators — each a job that `needs` its parts and runs `if: always()`: the w
 parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough story and its screens
 shards) and the aggregator passes only when every part passed (a failed, cancelled or skipped
 part fails it), the suite's parts together ran every test exactly once, and the union's
-coverage is at least 70 % (P-051, P-053). Never add a part to the list — its name changes
+coverage is at least 70 % (P-051, P-053) **[measured — n = 3 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes
 whenever the job is split differently, and the aggregator's does not;
 `scripts/check_branch_protection.py` refuses a part on the list.
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under
-(it blocked PR #48 until the two job names were shortened). Keep every `name:` in
+(it blocked PR #48 until its long job names were shortened). Keep every `name:` in
 `.github/workflows/ci.yml` under 100 characters.
 
 ## 4. Azure
@@ -535,7 +554,8 @@ Set `serviceAccount.annotations: {azure.workload.identity/client-id: <uami>}` an
   private endpoint in the AKS VNet, `sslmode=require`; its NIC IP goes in
   `networkPolicy.postgres.cidrs` — the chart REFUSES to render an external-postgres
   release without it (under default deny every pod would lose its database silently).
-  Enable PITR (7–35 days) — this is the ledger's backup.
+  Enable PITR (7–35 days) — this is the ledger's backup. **[hypothesis — the range is
+  Azure's published retention for point-in-time restore; this product has not checked it]**
 * **Azure OpenAI**: private endpoint + `privatelink.openai.azure.com` DNS zone; public
   network access disabled; NIC IP in `networkPolicy.modelEndpoint.cidrs`. Content
   filtering/abuse monitoring settings are your data-protection decision — record it in the
@@ -560,8 +580,11 @@ bound (2 CPU / 2 GB per sandbox by default): size the pool for the concurrency y
 
 State: the database (everything that matters, including the append-only `grades` /
 `events` / `signoffs` / `evidence` tables), the worker's work volume (`worker.workDir`;
-reproducible from the repositories, convenient to keep) and the secrets store
-(`secretsStore`: the stored Claude Code login and the tracker token, §3.2).
+reproducible from the repositories, convenient to keep), the evidence store
+(`evidenceStore`: the kept patches and the retained transcripts the API serves, §3.2; back
+it up with the database — a row whose patch is gone can no longer be re-read or reviewed)
+and the secrets store (`secretsStore`: the stored Claude Code login and the tracker token,
+§3.2).
 
 * **Secrets store**: choose one of two, and write the choice down.
   * Back the claim up with a volume snapshot (or a copy of `/srv/crb-secrets/store`) held
@@ -589,12 +612,12 @@ There is one restore order for each choice. In both, ledger verify and the healt
 come after the pods start.
 
 Restore order when the secrets store is restored: database (on an *empty* target) → work
-volume → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
+volume → evidence store → secrets store → `migrate` (no-op at head; it re-asserts the triggers) → start the
 api and the worker → ledger verify → the `migrations` and `append_only` probes on
 `/api/v1/health`.
 
 Restore order when the credentials are supplied again: database (on an *empty* target) →
-work volume → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
+work volume → evidence store → `migrate` (no-op at head; it re-asserts the triggers) → start the api alone
 (`worker.replicaCount: 0`) → supply the credentials again through Settings → start the
 worker (`worker.replicaCount` back to its value) → ledger verify → the `migrations` and
 `append_only` probes on `/api/v1/health`.
@@ -696,13 +719,40 @@ On PostgreSQL the same statements with `DROP TRIGGER events_no_update ON events`
 crb_append_only()`. Record the ids you moved in your change log; then re-run `migrate
 upgrade`. (The dev stack that produced the NHS measurement needed exactly three such
 moves on 2026-09-16 — three `run.cancel_requested` notes that had collided with the
-worker's next event.)
+worker's next event **[hypothesis — as recorded when that stack was upgraded; its rows are
+not in this repository, so the count cannot be re-derived here]**.)
 
 **Upgrading to revision `0009`** (`users.session_nonce`): additive; every account keeps
 its sessions. On a deployment whose cookies are `Secure` (the default outside
 `CRB_ENV=dev`) the cookies are renamed `__Host-crb_session` / `__Host-crb_csrf`, so
 everybody signs in once more after the upgrade. From this release, signing out ends the
 account's sessions on every device.
+
+**Upgrading to revision `0013`** (the audit trail's hash chain, ADR-0029): the revision
+chains every event already stored, then makes the database refuse any event that does not
+carry the chain — the two chain columns have no default and must each hold a SHA-256 **[measured — n = 1 revision; method: `tests/test_store_migrate.py::test_0013_refuses_a_row_from_the_release_before_it_and_keeps_recording` on SQLite and PostgreSQL; apparatus n/a, a property of the product's own code, not a graded row]**. The
+release before it does not write the chain, so while its API and worker pods still run
+(the `pre-upgrade` hook migrates before any pod is replaced; compose's `run --rm migrate`
+runs before `up -d`) every event they try to write is refused, one at a time: a sign-in
+answers 500, a run's steps are dropped from its log. Nothing already chained is harmed and
+the new release writes normally. To avoid that window, scale the API and the worker to 0
+before the upgrade (`kubectl -n crb scale deploy --replicas=0 -l
+'app.kubernetes.io/instance=crb,app.kubernetes.io/component in (api,worker)'`, or
+`docker compose stop api worker`); `helm upgrade` then starts them on the new release. A
+`helm rollback` across `0013` leaves the previous release refused on every event, since
+the schema is not downgraded: do not roll back across it — restore the pre-upgrade dump
+instead.
+
+**Upgrading to the chart with the evidence store** (`evidenceStore`, P-045): before it, the
+worker kept its kept patches, evidence packs and transcripts on its own work claim, at
+`$CRB_HOME/evidence` and `$CRB_HOME/transcripts`. The new chart mounts the evidence claim
+over those two paths, which would hide what the worker kept **[measured — n = 2 paths; method: the chart's worker template, pinned by `tests/test_deploy_evidence_store.py`; apparatus n/a, a property of the product's own code, not a graded row]**. So when `worker.workDir.type`
+is `pvc`, the worker pod runs an init container, `evidence-carry`, before the worker starts:
+it copies both directories from the work claim into the evidence claim once, then leaves a
+marker (`.carried-from-work`) so later starts copy nothing. Nothing is deleted from the work
+claim; once `/grades/{row_hash}/patch` serves a patch written before the upgrade, you may
+remove the old directories from it. With `workDir.type: emptyDir` the worker kept nothing
+across restarts, and no carry runs (`tests/test_deploy_evidence_store.py`).
 
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
@@ -720,7 +770,10 @@ names and versions the lockfiles pin. Sandboxes run with `--network=none`; a `fi
 mirror makes the fetch network-less too. To operate fully inside the tenant:
 
 1. point the builder at an in-tenant endpoint — Azure OpenAI with a private endpoint (§4.3)
-   or a self-hosted OpenAI-compatible server (`CRB_OPENAI_BASE_URL=https://vllm.internal/v1`);
+   or a self-hosted OpenAI-compatible server (`CRB_OPENAI_BASE_URL=https://vllm.internal/v1`,
+   with `CRB_OPENAI_TIMEOUT_S` raised to the model's generation time — §2.1). Every
+   OpenAI-compatible builder and the labeller call that URL, and their rows carry its host
+   as the provider;
 2. mirror the images (crb, sandbox, the three dependency fetch images, `docker:dind`,
    `postgres`) into your registry, and the package registries your repositories use into a
    mirror (or a `file://` directory) that `CRB_PROVISION__*` points at;
@@ -736,9 +789,9 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
       [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
-      line. `append_only` proves every trigger live and, once `grades` has a row, an
-      UPDATE refused (on an empty ledger no write is tried, and its `ok` detail says
-      so), `ledger` reads `false_q1=0`, `builders`
+      line. `append_only` proves every trigger live on every append-only table and an
+      UPDATE and a DELETE refused, in the trigger's own words, on each table that holds a row
+      (on an empty table no write is tried), `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host).
 - [ ] `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
@@ -747,8 +800,15 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
 - [ ] On PostgreSQL, the API and the worker connect as a role that does not own the ledger
       tables (§3.3) — or the reason your platform cannot is written down.
-- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
-      (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
+- [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0` with `events.chain_ok:
+      true` (the audit trail's own chain, ADR-0029), and both heads it serves —
+      `head_row_hash` (the grade ledger's last `row_hash`) and `events.head_row_hash` — are
+      recorded out of band: in the change record for go-live, and after that from the
+      `ledger heads at worker start` line every worker start writes to the log store (§9.4).
+      To check a store later, a recorded head must still be the `row_hash` of a row in the
+      same chain (`GET /api/v1/ledger/export` for grades; `crb ledger verify --store --json`
+      on the API host prints both heads) and the chain must verify: a store cut at its end
+      or replaced wholesale fails this, though its own walk reads intact.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
       bootstrap admin password has been rotated (`PUT /users/{id}/password`, or
       `crb users set-password <admin>` on the API host) or the account deactivated
@@ -771,23 +831,27 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 - [ ] The reverse proxy limits `POST /api/v1/auth/login` per client address (for example
       ingress-nginx `nginx.ingress.kubernetes.io/limit-rpm: "20"` on a path-scoped ingress,
       or `limit_req` on `/api/v1/auth/login`). This is required: the product's own limiter
-      (five failures a minute per username and address, twenty per address) lives in the
+      (five failures a minute per username and address, twenty per address **[measured —
+      n = 2 limits; method: the defaults of the sign-in rate limiter in the server's
+      authentication module, read at this commit; apparatus n/a]**) lives in the
       memory of one API process, so it does not see the other replicas or survive a restart
       ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 
 ## 9. Observability
 
-Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, seven
+Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, eleven
 probes), **events** (the run's audit trail, streamed as SSE and stored in the `events`
-table). Logs are JSON and redacted. Nothing here leaves the tenant.
+table) **[measured — n = 11 probes and 2 expositions; method: the probes the readiness
+route runs, counted in its code and held there by `tests/test_health_probe_docs.py`, and one
+exposition per process that records metrics; apparatus n/a]**. Logs are JSON and redacted. Nothing here leaves the tenant.
 
 ### 9.1 Metrics — which process carries which series
 
 The Prometheus registry is process-wide, so a series lives in the process that records it.
-The api records the HTTP series and the ledger gauges; **the worker records everything
-else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464). A deployment
-that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows` and the HTTP
-series — every cost, run, belt and delivery counter reads as absent. Scrape both:
+The api records the HTTP series, the ledger gauges and the sign-off counter; **the worker
+records everything else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464). A deployment
+that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows`,
+`crb_signoffs_total` and the HTTP series — every cost, run, belt and delivery counter reads as absent. Scrape both:
 
 | Shape | api | worker |
 |---|---|---|
@@ -796,7 +860,10 @@ series — every cost, run, belt and delivery counter reads as absent. Scrape bo
 | one process (`crb serve` + `crb worker` on a host) | `/api/v1/metrics` | `127.0.0.1:9464/metrics` — loopback by default; a Prometheus on another host needs `CRB_METRICS_HOST=<the interface it may reach>` (or `0.0.0.0` behind a host firewall) — the series name repositories, builders, per-repository cost and installation ids |
 
 The table is checked against the code by `tests/test_observability_metrics.py`: a metric
-the module defines that is not here, or is here under other labels, fails the suite.
+the module defines that is not here, or is here under other labels, fails the suite. A
+series whose process is `worker` is served by the worker only: the api's exposition leaves
+it out, so an alert on its absence (the no-worker rule below) fires when no worker is
+scraped, and that suite fails if the api serves one.
 
 | name | type | labels | process | meaning |
 |---|---|---|---|---|
@@ -809,6 +876,7 @@ the module defines that is not here, or is here under other labels, fails the su
 | `crb_build_latency_seconds` | histogram | `builder` | worker | wall-clock seconds for one builder attempt |
 | `crb_sandbox_unavailable_total` | counter | — | worker | runs that stopped because the sandbox failed closed (ADR-0005) |
 | `crb_deliveries_total` | counter | `repo, outcome` | worker | factory deliveries: `opened` (branch pushed, PR opened), `withheld` (the route gate refused), `failed` (the push or the PR call errored). Metered from the run's own `delivery.*` events |
+| `crb_signoffs_total` | counter | `outcome` | api | sign-off decisions the API committed: `created` (an attestation written), `refused` (the policy refused it — the 409 an approver sees), `revoked` (a revocation row appended). One count per `signoff.*` event, taken after the event is committed, so the counter and the audit trail agree; a refused revoke (already revoked, unknown id) writes no event and counts nothing |
 | `crb_github_tokens_minted_total` | counter | `installation` | worker | GitHub App installation tokens actually minted (a cache hit does not count). The label is the installation id; the token is never a label, never logged |
 | `crb_queue_depth` | gauge | — | worker | queued runs, as the worker last saw them on check-in (every `heartbeat_s`) |
 | `crb_false_q1_total` | gauge | — | api (recounted on every scrape and every `/health`) and worker (after every run) | clean ledger rows with a failed belt. **Must be 0** — a stop condition ([OPERATOR §8](OPERATOR.md#8-stop-conditions)) |
@@ -816,16 +884,23 @@ the module defines that is not here, or is here under other labels, fails the su
 | `crb_http_requests_total` | counter | `method, route, status` | api | requests by route template (never a raw id) |
 | `crb_http_request_duration_seconds` | histogram | `method, route` | api | request latency |
 
-Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds.
+Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds **[measured — n = 10
+buckets; method: the bucket bounds every histogram is built with in the metrics module,
+read at this commit; apparatus n/a]**.
 
 ### 9.2 Alert rules
 
-Four rules cover the operating posture. Expressions assume both targets are scraped.
+These rules cover the operating posture; expressions assume both targets are scraped. The
+chart ships them as a `PrometheusRule` (`prometheusRule.enabled`, off by default; its
+`labels` are what your Prometheus's `ruleSelector` matches), with these expressions word for
+word — `tests/test_deploy_alert_rules.py` fails when the chart and this table disagree — so
+no deployment retypes them. The render refuses the rules while `worker.metrics.port` is 0:
+three of them read series only the worker serves.
 
 | Alert | Expression | Meaning and action |
 |---|---|---|
-| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down` |
-| **No worker** | `/health` probe `worker` is not `ok` (`crb_http_*` cannot see it; probe `/api/v1/health` with a blackbox exporter, or alert on `crb_queue_depth > 0` with no fresh worker scrape for 3 × `heartbeat_s`) | queued runs will not start: no worker has checked in, one stopped checking in (the probe names it and its age), or a running run's heartbeat is stale |
+| **False-Q1** | `max(crb_false_q1_total) > 0` | the honesty floor is breached — stop delivery, [OPERATOR §8](OPERATOR.md#8-stop-conditions). `/health` is also `down`. Critical, fires at once |
+| **No worker** | `absent_over_time(crb_queue_depth[5m])` | no worker's exposition has been scraped for 5 minutes (`prometheusRule.noWorkerFor`; keep it several scrape intervals long), so queued runs will not start. A worker that is up but stopped checking in, or a running run whose heartbeat is stale, still serves the series: the `/health` probe `worker` names those (probe `/api/v1/health` with a blackbox exporter to alert on them too) |
 | **Sandbox failing closed** | `increase(crb_sandbox_unavailable_total[15m]) > 0` | the docker daemon, image or mounts are wrong on the worker host ([OPERATOR §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)); no test ran on the host as a fallback |
 | **Deliveries failing** | `increase(crb_deliveries_total{outcome="failed"}[1h]) > 0` | the push or the pull-request call errored — the GitHub App's installation, permissions or the repository's default branch |
 
@@ -842,21 +917,29 @@ empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_on
 `sandbox` (skipped for `CRB_ROLE=api`), `provision` (dependency provisioning, ADR-0019;
 skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders`,
 `worker`, `intake` and `build` (the served commits agree) — each documented in
-[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
+[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface) **[measured — n = 11
+probes; method: the probes the readiness route runs, counted in its code and held there by
+`tests/test_health_probe_docs.py`; apparatus n/a]**.
 `GET /api/v1/health/live` is the liveness probe: the process and its database, nothing else.
 
 The `worker` probe reads the `workers` table: every worker upserts its row every
 `heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
 so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
-UI reads the same probe: the Deployment page lists the workers with their last check-in. Two
-probes raise a banner. The shell raises the red "Delivery halted" banner above every screen,
+UI reads the same probe: the Deployment page lists the workers with their last check-in. The
+`ledger` and `sandbox` probes raise a banner **[measured — n = 2, the two named; method: every
+UI reader of a probe classified in `tests/test_health_probe_docs.py`'s `BANNERS`; apparatus
+n/a, a property of the product's own code, not a graded row]**. The shell raises the red "Delivery halted" banner above every screen,
 Home included, while the `ledger` probe reports a false-Q1 row; Home adds its own banner when
 the `sandbox` probe says the sandbox cannot run. Any other probe that is not `ok` shows only as
 the one-word pill in the header, so read `/health` itself when that pill is not `ok`.
 
 ### 9.4 Logs
 
-Both processes log one JSON object per line (`CRB_LOG_FORMAT=json`, the default): `ts`,
+Every worker start writes one `ledger heads at worker start` line with the grade ledger's and
+the audit trail's head `row_hash` and row counts (as `grades_head`, `grades_rows`,
+`events_head`, `events_rows` in the JSON form) — the copy of both heads the log store keeps
+outside the database (§8). Both processes log one JSON object per line
+(`CRB_LOG_FORMAT=json`, the default): `ts`,
 `level`, `logger`, `msg`, any structured extras, and `exc` for a traceback. Every record —
 message, `%`-arguments, extras and the traceback — passes the same redaction as evidence
 packs before a handler sees it (`src/crb/core/redact.py`; the commitment is
@@ -865,17 +948,30 @@ the Azure Monitor agent, `docker compose logs`); nothing else is written to disk
 per-run JSONL event copy under `<CRB_HOME>/events/<run_id>.jsonl` and the worker's reaper
 queue `<CRB_HOME>/unconfirmed-containers.json` — the names of builder containers whose
 `docker kill` the daemon never confirmed, retried every poll until reaped or given up on
-after 20 passes ([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is non-empty the
+after 20 passes **[measured — n = 20 passes; method: the bound on reap passes, one per
+worker poll, in the worker's reaper module, read at this commit; apparatus n/a]**
+([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is non-empty the
 `/health` worker probe reads `degraded`.
 
 ### 9.5 Events
 
-Every step of a run is a `StepEvent` in the `events` table (append-only, hash-ordered by
-`seq`), streamed live as SSE from `GET /runs/{id}/events` and paged from
+Every step of a run is a `StepEvent` in the `events` table (append-only, ordered by `seq`
+within a trace, and hash-chained over the whole table in id order — ADR-0029; `/ledger/verify`
+walks the chain), streamed live as SSE from `GET /runs/{id}/events` and paged from
 `GET /runs/{id}/events/log`. The complete vocabulary — stage, action, status, payload keys,
 emitter, consumer — is [API.md § Event vocabulary](API.md#event-vocabulary), kept in step
 with the code by `tests/test_event_vocabulary.py`. Retention: the table is append-only and
 is never pruned by crb; size it with the ledger (a replay writes roughly 10–30 events per
-task). The JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be
-rotated freely.
+task **[hypothesis — an estimate from the development stack's runs, not counted over a stated
+number of tasks; a count of events per task over one sweep would confirm or replace it]**).
+`GET /ledger/verify` — read each time a person opens the Ledger or the Posture page —
+re-hashes only the events written since its last full walk, and walks the whole table again
+at most five minutes after the last full walk, when anything it walked has changed, after a
+break, or when an operator asks with `?full=true`; each answer says which walk it was
+(`events.walk`) and when the last full walk ran (`events.full_walk_at`). A full walk still
+slows as the table grows [hypothesis — two readings on SQLite over 100,000 events: 1.6 s and
+2.7 s a walk; time `crb ledger verify --store`, which always walks in full, on your own
+store to know yours] (ADR-0029, Consequences). The
+JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be rotated
+freely.
 

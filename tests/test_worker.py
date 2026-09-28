@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -86,6 +87,7 @@ from crb.core.workspace import Workspace
 from crb.observability.events import JsonlSink, StepStatus
 from crb.server import worker as worker_mod
 from crb.server import worker_main
+from crb.server.reaper import ContainerReaper
 from crb.server.worker import Worker, WorkerSettings, docker_settings_for, stage_for
 from crb.store import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, read_events
@@ -508,18 +510,15 @@ class UnconfirmedSession:
         return [UnconfirmedKill(container=self.container, bound_s=10.0)]
 
 
-def _scripted_docker(dir_: Path, *, gone: bool, delay_s: float = 0.0) -> str:
+def _scripted_docker(dir_: Path, *, gone: bool) -> str:
     """A ``docker`` for the reaper: ``inspect`` answers "No such container" (gone) or
-    Running=true (never lets go); ``rm -f`` succeeds or fails with it. ``delay_s`` makes
-    every call sleep first — a daemon that is slow to answer."""
+    Running=true (never lets go); ``rm -f`` succeeds or fails with it. A daemon that is slow
+    to answer is ``_SlowDaemon``, in process (P-014)."""
     dir_.mkdir(parents=True, exist_ok=True)
     script = dir_ / "docker"
     inspect = 'echo "Error: No such container: $4" >&2; exit 1' if gone else "echo true"
     rm = ":" if gone else "exit 1"
-    delay = f"sleep {delay_s:g}; " if delay_s else ""
-    script.write_text(
-        f'#!/bin/sh\n{delay}case "$1" in\n  inspect) {inspect} ;;\n  rm) {rm} ;;\nesac\n'
-    )
+    script.write_text(f'#!/bin/sh\ncase "$1" in\n  inspect) {inspect} ;;\n  rm) {rm} ;;\nesac\n')
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     return str(script)
 
@@ -676,22 +675,47 @@ def test_reaper_runs_from_the_polling_loop(
     ]
 
 
+class _SlowDaemon:
+    """A daemon that takes ``delay_s`` to answer anything, in process: each question sleeps
+    the smaller of the delay and the call's timeout, then answers "still running" or times
+    out. No process is spawned, so a loaded machine cannot turn spawn latency into a red
+    build (docs/PREVENTION.md P-014); the delay dwarfs the budget, so the bound still
+    discriminates."""
+
+    def __init__(self, delay_s: float) -> None:
+        self.delay_s = delay_s
+
+    def stopped(self, docker: str, name: str, *, timeout_s: float) -> bool | None:
+        time.sleep(min(self.delay_s, timeout_s))
+        return None if self.delay_s > timeout_s else False
+
+    def runner(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        timeout = float(kw["timeout"])
+        time.sleep(min(self.delay_s, timeout))
+        if self.delay_s > timeout:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return subprocess.CompletedProcess(argv, 1, "", "refused")
+
+
 def test_reap_pass_is_budgeted_so_the_check_in_still_lands(h: Harness, tmp_path: Path) -> None:
-    """A daemon that answers nothing (every call sleeps past the budget) with two
+    """A daemon that answers nothing inside the budget (every call takes 10 s) with two
     containers queued: a pass ends within ``heartbeat_s / 2`` — the entry it ran out on
     counts one attempt with the reason, the entry it never reached is untouched — and the
     polling loop's check-in row is never older than the worker's liveness bound
     (``3 × heartbeat_s``) while passes are running."""
-    heartbeat_s = 1.0
+    heartbeat_s = 2.0
     _realistic_heartbeat(h, heartbeat_s)
     assert h.worker.reap_budget_s == heartbeat_s / 2
-    h.worker.reaper.docker = _scripted_docker(tmp_path / "slow", gone=False, delay_s=3.0)
+    daemon = _SlowDaemon(delay_s=10.0)
+    h.worker.reaper = ContainerReaper(
+        h.worker.reaper.path, runner=daemon.runner, stopped=daemon.stopped
+    )
     h.worker.reaper.add("crb-build-slow-1", run_id="r1", task_id="t1")
     h.worker.reaper.add("crb-build-slow-2", run_id="r2", task_id="t2")
     t0 = time.monotonic()
     assert h.worker.reap() == 0
     elapsed = time.monotonic() - t0
-    assert elapsed < heartbeat_s, elapsed  # the budget, not 3 s × (inspect + rm + inspect)
+    assert elapsed < 5.0, elapsed  # the 1 s budget, not 10 s x (inspect + rm + inspect)
     first, second = h.worker.reaper.pending()
     assert first.attempts == 1 and "pass budget exhausted" in first.last_error
     assert second.attempts == 0 and second.last_error == ""
@@ -2134,7 +2158,12 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
     _multiply_backlog(h)
     _sealed_sandbox_stand_in(h, monkeypatch)
     h.worker.settings = replace(
-        h.settings, env="prod", executor="docker", builder_executor="docker", unsealed_override={}
+        h.settings,
+        env="prod",
+        executor="docker",
+        builder_executor="docker",
+        unsealed_override={},
+        unsealed_override_ack={"by": "root", "reason": "evaluation"},
     )
     h.enqueue("factory", ladder_json=["fake:m0"])
     done = h.run_one()
@@ -2142,6 +2171,36 @@ def test_a_prod_worker_under_the_override_stamps_every_factory_run(
     stamp = done.apparatus_json["unsealed_prod_override"]
     assert stamp["builder_executor"] == "host" and stamp["run_kind"] == "factory"
     assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
+    # G-663: the admin who set the override is named beside it on every run it admits
+    assert stamp["acknowledged_by"] == "root"
+
+
+def test_a_sealed_prod_worker_under_the_override_stamps_a_run_that_asks_for_local(
+    h: Harness,
+) -> None:
+    """P-256: a worker whose defaults are sealed (docker and docker) but that starts under
+    the override admits a run asking for the local executor in its own parameters. That run
+    executes unsealed, so its apparatus must carry the override and the name of the admin
+    who set it — the worker-wide stamp is empty because the DEFAULTS are sealed."""
+    h.worker.settings = replace(
+        h.settings,
+        env="prod",
+        executor="docker",
+        builder_executor="docker",
+        refuse_unsealed=False,
+        unsealed_override={},
+        unsealed_override_ack={"by": "root", "reason": "evaluation"},
+    )
+    h.enqueue("probe", params_json={"executor": "local"})
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    stamp = done.apparatus_json["unsealed_prod_override"]
+    assert stamp["sandbox_executor"] == "local" and stamp["acknowledged_by"] == "root"
+    assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
+    # a run that keeps the sealed default stamps nothing: it ran sealed
+    h.enqueue("probe")
+    sealed = h.run_one()
+    assert "unsealed_prod_override" not in (sealed.apparatus_json or {})
 
 
 def test_a_dev_worker_stamps_no_override_on_a_factory_run(

@@ -6,8 +6,9 @@ What it is:   Unit tests for the claims gate (every public claim carries a permi
 What it does: Pins that a tagged claim passes and an untagged one fails; that a ``[measured]``
               tag without an ``n``, without an apparatus version or without a method fails;
               that a list item is covered by the paragraph that introduces the list; that the
-              allowlist is honoured (a file off it is never read) and that the shipped
-              allowlist is the real repository's, and is the count the definition of done
+              allowlist is honoured (a file off it is never read), that a glob on it reads
+              every page it matches, and that the shipped allowlist reads README, every
+              guide, review and definition-of-done page and is the count the claims policy
               states (G-929); that the documented exemptions — headings,
               table rows, fenced code, a lead-in ending in a colon, a confidence level, a
               year, a leading-zero identifier — are not claims; that a count written without
@@ -18,8 +19,21 @@ What it does: Pins that a tagged claim passes and an untagged one fails; that a 
               they are unquantified, keep their ``[aspiration]`` tags; that every numbered
               action in a review's Actions table has a record in docs/DECISION-LOG.md that
               names the review, the action and its state — so an action cannot disappear
-              without one (the critical friend's #8 and #9 did); and that the fence reader
-              agrees with a CommonMark parser line for line.
+              without one (the critical friend's #8 and #9 did); that the fence reader
+              agrees with a CommonMark parser line for line; and that a registered promise
+              is refused in the present tense until its criterion is met, on a fixture and
+              on the live pages (P-235); that a sentence claiming ISO conformity is refused
+              on README, a guide and the factory's pull-request body template while one that
+              only names a standard passes (ADR-0026 item 11), whatever incidental negation,
+              refusal in another clause or "never" heading surrounds it
+              (``CONFORMITY_EVASIONS``, P-245), in every shape a page renders and on a
+              guide the UI does not bundle, and in the constants, helpers and interpolated
+              values the pull-request body uses (P-246); that a percentage written in words
+              is a claim (P-247); that a number after ``§``, ``#`` or an id prefix is an
+              identifier, not a count; that every exemption still refuses the evasions in
+              ``EVASIONS`` and the naming nouns are pinned (P-240); and that a ``[measured]``
+              tag whose rows are not in this repository is refused (DL-088, P-241), and a
+              README one names its rows in any rendered shape (P-246).
 How:          Writes small Markdown files under ``tmp_path``, points the module's ``ROOT`` at
               it with ``monkeypatch``, and calls ``check_tree`` / ``main([...])`` in process.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -28,7 +42,7 @@ Works with:   scripts/claims_check.py (the code under test), markdown-it-py (the
               reference the fence reader is compared with), docs/EVIDENCE-AND-CLAIMS.md
               (the claim-tag rule these tests enforce a shape for), .github/workflows/ci.yml
               (the claims job that runs --check), docs/CONTRIBUTING.md (the DL-053 rules),
-              docs/dod/product.md (G-929 states the gated-page count)
+              docs/EVIDENCE-AND-CLAIMS.md §1 (states the gated-entry count)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; a tag is added to the policy, the heuristic changes, or a
               file joins the allowlist (add the case here in the same change).
@@ -154,11 +168,20 @@ def test_a_missing_allowlisted_file_is_itself_a_finding(tree: Path) -> None:
         "Each rate carries a 95% confidence interval.\n",  # the level, written the other way
         "Each rate carries a 95% CI.\n",  # and abbreviated
         "Each rate is quoted at a confidence of 95%.\n",  # the percentage IS the confidence
+        "Each share carries its bounds (Wilson 95 %).\n",  # "Wilson 95%" names the interval
         "Rule DL-0052 covers stopped items.\n",  # a leading zero is an identifier, not 52
         "The June 2026 v1 contents are tagged and frozen.\n",  # a year is not a count
         "Exactly one process reaches the model endpoint.\n",  # "one" never counts a plural
         "The package version is one number in three files.\n",  # a structural noun
         "The fixture repository carries `12 tasks` in it.\n",  # inline code is stripped
+        # a section, a pull request or a gap is named by its number, not counted by it
+        "The table is in EVIDENCE-AND-CLAIMS §9 carries it.\n",
+        "PR #48 reviews closed the finding.\n",
+        "G-674 entries name the gap.\n",
+        # a number after a naming noun is which one, not how many
+        "Belt 3 subtracts the in-posture baseline.\n",
+        "Stage 3 mines tasks and Wave 2 closes gaps.\n",
+        "ADR-0026 item 11 names characteristics.\n",
     ],
 )
 def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None:
@@ -182,6 +205,10 @@ def test_prose_that_makes_no_claim_is_not_flagged(tree: Path, body: str) -> None
         # exemption used to swallow it because the "interval|level" half was optional
         "There is 65% confidence that the builder can deliver.\n",
         "The reviewer had 80% confidence in the verdict.\n",
+        # a percentage written in words is a percentage (P-247)
+        "Ninety percent of delivered patches are mergeable.\n",
+        "95 percent of delivered patches are mergeable.\n",
+        "95 per cent of delivered patches are mergeable.\n",
     ],
 )
 def test_a_quantified_assertion_in_prose_is_a_claim(tree: Path, body: str) -> None:
@@ -210,20 +237,25 @@ def test_check_exits_non_zero_and_the_default_report_exits_zero(
     assert cc.main(["--root", str(tree), "--allow", "README.md"]) == 0
     assert "1 claim" in capsys.readouterr().out
 
-    _write(tree, "README.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
-    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 0
+    # (README's own [measured] tags must also name their rows — tested below — so the
+    # passing case is a guide's page)
+    _write(tree, "docs/PAGE.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
+    assert cc.main(["--check", "--root", str(tree), "--allow", "docs/PAGE.md"]) == 0
 
 
 def test_the_repository_itself_passes_the_gate() -> None:
-    """The allowlist is not aspirational: every file on it is clean on this tree."""
+    """The allowlist is not aspirational: every file on it is clean on this tree, and every
+    glob on it matches at least one page."""
     assert cc.check_tree(ROOT, cc.ALLOWLIST) == []
-    assert all((ROOT / rel).exists() for rel in cc.ALLOWLIST)
+    pages, empty = cc.expand(ROOT, cc.ALLOWLIST)
+    assert empty == [] and all((ROOT / rel).is_file() for rel in pages)
 
 
 def test_the_allowlist_only_grows() -> None:
     """A page that has been cleaned never leaves the gate. CONTRIBUTING joined when PR #51's
     review found a verdict claim there that the evidence did not support."""
-    assert {"README.md", "docs/RELEASING.md", "docs/CONTRIBUTING.md"} <= set(cc.ALLOWLIST)
+    pages, _ = cc.expand(ROOT, cc.ALLOWLIST)
+    assert {"README.md", "docs/RELEASING.md", "docs/CONTRIBUTING.md"} <= set(pages)
 
 
 DL053_RULES = (
@@ -600,13 +632,599 @@ def test_two_reviews_with_one_stem_are_a_finding(tree: Path) -> None:
 
 
 def test_the_measured_count_of_gated_pages_is_the_allowlist() -> None:
-    """The definition of done states how many pages the gate reads as a [measured] count
-    (G-929). Adding a page to ALLOWLIST without updating that count made the record wrong the
-    moment it merged (found 2026-09-25 while gating the value baseline); the count is now
-    held to the list."""
-    text = (ROOT / "docs" / "dod" / "product.md").read_text(encoding="utf-8")
+    """The claims policy states how many entries the gate reads as a [measured] count.
+    Adding a page to ALLOWLIST without updating that count made the record wrong the moment it
+    merged (found 2026-09-25 while gating the value baseline); the count is held to the list.
+    The count lived in G-929's line until the gate read every guide, review and
+    definition-of-done page and G-929 closed; it lives in EVIDENCE-AND-CLAIMS §1 now."""
+    text = (ROOT / "docs" / "EVIDENCE-AND-CLAIMS.md").read_text(encoding="utf-8")
     m = re.search(r"n = (\d+) entries on `ALLOWLIST`", text)
-    assert m, "docs/dod/product.md no longer states the gated-page count (G-929)"
+    assert m, "EVIDENCE-AND-CLAIMS no longer states the gated-entry count"
     assert int(m.group(1)) == len(cc.ALLOWLIST)
-    for rel in cc.ALLOWLIST:
-        assert f"`{rel}`" in text, f"G-929 does not name {rel}"
+
+
+def test_every_guide_review_and_dod_page_is_on_the_gate() -> None:
+    """product.claims.21 (G-929): README, every guide directly under docs/, every review and
+    every definition-of-done page are read — only the generated pages are left to their own
+    generators. Dropping a folder from ALLOWLIST, or a page appearing that no entry reads,
+    fails here."""
+    pages, empty = cc.expand(ROOT, cc.ALLOWLIST)
+    assert empty == []
+    public = {"README.md"}
+    for pattern in ("docs/*.md", "docs/reviews/**/*.md", "docs/dod/**/*.md"):
+        public |= {p.relative_to(ROOT).as_posix() for p in ROOT.glob(pattern) if p.is_file()}
+    public -= set(cc.UNGATED)
+    assert public - set(pages) == set(), "public pages the claims gate does not read"
+    assert set(cc.UNGATED) == {"docs/CODE-MAP.md", "docs/dod/GAP-ANALYSIS.md"}
+
+
+PROMISE_ROW = "| product.claims.210 | CLAIMS | the quality table | `absent` | {STATE} | G-674 |\n"
+
+
+def test_a_capability_is_refused_on_a_page_until_the_criterion_that_builds_it_is_met(
+    tree: Path,
+) -> None:
+    """docs/PREVENTION.md P-235: README said the product and EVIDENCE-AND-CLAIMS name which
+    ISO/IEC 25010 characteristics its checks evidence, while product.claims.210 — the table
+    that would name them — was unmet and G-674 said the product names no quality model. A
+    registered promise is refused on every page the gate reads until its criterion is met."""
+    (tree / "docs/dod").mkdir()
+    product = tree / "docs/dod/product.md"
+    product.write_text(PROMISE_ROW.replace("{STATE}", "unmet"), encoding="utf-8")
+    ahead = (
+        "# t\n\n- **Not a standards authority.** Its checks evidence only some of ISO/IEC "
+        "25010's characteristics; the product and EVIDENCE-AND-CLAIMS name which, and never "
+        "claim more.\n"
+    )
+    _write(tree, "README.md", ahead)
+    findings = cc.check_promises(tree, ("README.md",))
+    assert len(findings) == 1
+    assert "product.claims.210" in findings[0].reason and findings[0].line == 3
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 1
+    honest = (
+        "# t\n\n- **Not a standards authority.** Its checks evidence parts of only some of "
+        "ISO/IEC 25010's characteristics; ADR-0026 item 11 proposes which, and the product "
+        "will name them (G-674).\n"
+    )
+    _write(tree, "README.md", honest)
+    assert cc.check_promises(tree, ("README.md",)) == []
+    # once the table ships, the present tense is true and the sentence may say so
+    _write(tree, "README.md", ahead)
+    product.write_text(PROMISE_ROW.replace("{STATE}", "met"), encoding="utf-8")
+    assert cc.check_promises(tree, ("README.md",)) == []
+    # a promise whose criterion no longer exists is itself a finding: it would gate nothing
+    product.write_text("", encoding="utf-8")
+    assert any("no criterion" in f.reason for f in cc.check_promises(tree, ("README.md",)))
+
+
+def test_the_live_pages_make_no_promise_ahead_of_its_criterion() -> None:
+    """The live pages the promise rule reads (the allowlist and EVIDENCE-AND-CLAIMS)."""
+    assert cc.check_promises(ROOT, cc.PROMISE_PAGES) == []
+    assert "docs/EVIDENCE-AND-CLAIMS.md" in cc.PROMISE_PAGES
+
+
+# ─── the quality baseline is named, never claimed (G-674, product.claims.210) ─────────────
+
+DOCS_TS = (
+    "/** The guides the UI bundles. */\n"
+    "export const DOC_NAMES = ['OPERATOR', 'SECURITY'] as const\n"
+)
+PR_BODY_PY = '''\
+def pr_body(item, build):
+    """The pull request's description."""
+    lines = [
+        f"## crb factory: backlog item `{item}`",
+        "This targets a NEW branch. A human reviews and merges.",
+        {planted!r},
+    ]
+    return "\\n".join(lines)
+'''
+
+
+def _conformity_tree(tree: Path, *, readme: str, guide: str, planted: str) -> None:
+    (tree / "ui/src/help").mkdir(parents=True)
+    (tree / "src/crb/factory").mkdir(parents=True)
+    _write(tree, "ui/src/help/docs.ts", DOCS_TS)
+    _write(tree, "README.md", f"# t\n\n{readme}\n")
+    _write(tree, "docs/OPERATOR.md", f"# Operator\n\n{guide}\n")
+    _write(tree, "docs/SECURITY.md", "# Security\n\nNothing to see.\n")
+    _write(tree, "src/crb/factory/delivery.py", PR_BODY_PY.replace("{planted!r}", repr(planted)))
+
+
+def test_the_claims_gate_refuses_a_conformity_claim_in_readme_a_guide_and_the_pr_body_template(
+    tree: Path,
+) -> None:
+    """ADR-0026 item 11: the product names ISO/IEC 25010 and never claims it. A sentence that
+    says code conforms to, complies with or is certified against an ISO standard is refused
+    on README, on the guides (every guide the UI bundles, read from ``DOC_NAMES`` so a new
+    one is read the day it is bundled, and every other page under docs/) and in the
+    factory's pull-request body template."""
+    _conformity_tree(
+        tree,
+        readme="Code the factory delivers conforms to ISO/IEC 25010.",
+        guide="A clean row is ISO 25010 compliant, so a reviewer can skip the read.",
+        planted="This change is certified against ISO/IEC 5055.",
+    )
+    findings = cc.check_conformity(tree)
+    assert [(f.path, f.line) for f in findings] == [
+        ("README.md", 3),
+        ("docs/OPERATOR.md", 3),
+        ("src/crb/factory/delivery.py", 6),
+    ]
+    assert all("conformity" in f.reason for f in findings)
+    assert cc.main(["--check", "--root", str(tree)]) == 1
+    # the bundled guide that makes no such claim passes
+    assert not any(f.path == "docs/SECURITY.md" for f in findings)
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "The belts evidence parts of two of ISO/IEC 25010's characteristics.",
+        "The product names which ISO/IEC 25010 characteristics its checks evidence.",
+        "It never certifies that code conforms to ISO/IEC 25010 or any other standard.",
+        "Passing these checks does not mean the code complies with ISO/IEC 5055.",
+        "The gate refuses a sentence that says code conforms to an ISO standard.",
+        "The mesh sandbox presents the era's server certificate over TLS.",
+    ],
+)
+def test_a_sentence_that_names_iso_without_claiming_conformity_passes(
+    tree: Path, sentence: str
+) -> None:
+    _conformity_tree(tree, readme=sentence, guide=sentence, planted=sentence)
+    assert cc.check_conformity(tree) == []
+
+
+def test_a_forbidden_claim_listed_under_what_must_never_be_said_is_not_made(tree: Path) -> None:
+    """EVIDENCE-AND-CLAIMS §7 lists what must never be said; naming the forbidden sentence
+    there is the opposite of saying it."""
+    guide = (
+        "## 7. What must never be said\n\n"
+        "- That code conforms to ISO/IEC 25010 because the checks mapped to it pass.\n\n"
+        "## 8. Next\n\nCode that passes conforms to ISO/IEC 25010."
+    )
+    _conformity_tree(tree, readme="Nothing.", guide=guide, planted="Nothing.")
+    assert [(f.path, f.line) for f in cc.check_conformity(tree)] == [("docs/OPERATOR.md", 9)]
+
+
+def test_the_live_readme_guides_and_pr_body_make_no_conformity_claim() -> None:
+    assert cc.check_conformity(ROOT) == []
+    guides = cc.bundled_guides(ROOT)
+    assert "docs/EVIDENCE-AND-CLAIMS.md" in guides and "docs/OPERATOR.md" in guides
+
+
+def test_a_missing_bundled_guide_list_or_pr_body_is_itself_a_finding(tree: Path) -> None:
+    """The rule reads the guides' names from the UI and the template from the factory; if
+    either moves, the rule would silently read nothing, so the move is a finding."""
+    _write(tree, "README.md", "# t\n\nNothing.\n")
+    reasons = [f.reason for f in cc.check_conformity(tree)]
+    assert any("bundled guides" in r for r in reasons)
+    assert any("pull-request body" in r for r in reasons)
+
+
+# ─── a README [measured] tag names the rows it rests on (G-660, product.claims.201) ───────
+
+ROWS_TAG = (
+    "[measured — n = 13 jobs; method: a count of the job keys in the workflow file; "
+    "rows: data/c1/; apparatus 2.3]"
+)
+
+
+def _campaign(tree: Path, files: dict[str, str], *, manifest: bool = True) -> Path:
+    import hashlib
+
+    d = tree / "data" / "c1"
+    d.mkdir(parents=True)
+    for rel, body in files.items():
+        (d / rel).write_text(body, encoding="utf-8")
+    if manifest:
+        lines = [
+            f"{hashlib.sha256((d / rel).read_bytes()).hexdigest()}  ./{rel}"
+            for rel in sorted(files)
+        ]
+        (d / "MANIFEST.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return d
+
+
+def test_a_readme_measured_tag_must_name_rows_the_repository_carries(tree: Path) -> None:
+    """G-660: a README [measured] tag says where its rows are (``rows: data/<campaign>/``),
+    and those rows are in the repository with a checksum manifest that verifies, so a reader
+    can re-derive the claim (tests/test_measured_claims.py does). A tag that names no rows,
+    rows that are absent, rows with no manifest, or rows that no longer match it, fail."""
+
+    def reasons() -> list[str]:
+        return [f.reason for f in cc.check_rows(tree)]
+
+    _write(tree, "README.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
+    assert ["names no rows" in r for r in reasons()] == [True]
+
+    _write(tree, "README.md", f"# t\n\nCI runs eleven jobs. {ROWS_TAG}\n")
+    assert ["does not carry" in r for r in reasons()] == [True]
+
+    d = _campaign(tree, {"rows.jsonl": '{"clean": true}\n'}, manifest=False)
+    assert ["no checksum manifest" in r for r in reasons()] == [True]
+
+    import shutil
+
+    shutil.rmtree(d)
+    d = _campaign(tree, {"rows.jsonl": '{"clean": true}\n', "README.md": "# c1\n"})
+    assert reasons() == []
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 0
+
+    (d / "rows.jsonl").write_text('{"clean": false}\n', encoding="utf-8")
+    assert ["do not verify" in r and "rows.jsonl" in r for r in reasons()] == [True]
+
+    (d / "rows.jsonl").write_text('{"clean": true}\n', encoding="utf-8")
+    (d / "extra.jsonl").write_text("{}\n", encoding="utf-8")
+    assert ["do not verify" in r and "extra.jsonl" in r for r in reasons()] == [True]
+
+
+@pytest.mark.parametrize("shape", ["heading", "table row", "checklist item"])
+def test_a_readme_measured_tag_in_any_rendered_shape_needs_rows(tree: Path, shape: str) -> None:
+    """A results table is the natural place for a measured number, so a [measured] tag in
+    a table cell, a heading or a checklist item names its rows like any other (P-246)."""
+    claim = f"bug.fix XS was 99% clean {MEASURED}"
+    _write(tree, "README.md", "# t\n\n" + RENDERED_SHAPES[shape].format(s=claim))
+    assert ["names no rows" in f.reason for f in cc.check_rows(tree)] == [True], shape
+    assert cc.main(["--check", "--root", str(tree), "--allow", "README.md"]) == 1
+
+
+def test_only_readme_measured_tags_need_a_rows_locator(tree: Path) -> None:
+    _write(tree, "docs/PAGE.md", f"# t\n\nCI runs eleven jobs. {MEASURED}\n")
+    _write(tree, "README.md", "# t\n\nNothing measured here.\n")
+    assert cc.check_rows(tree) == []
+
+
+def test_the_vendored_campaigns_verify_against_their_manifests() -> None:
+    campaigns = sorted(p for p in (ROOT / "data").iterdir() if p.is_dir())
+    assert campaigns, "no campaign is vendored under data/"
+    for d in campaigns:
+        rel = d.relative_to(ROOT).as_posix()
+        assert cc.verify_manifest(ROOT, rel) == [], rel
+
+
+# ─── the gate reads what a reader reads as prose (G-929) ──────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # an HTML comment is not rendered, even when it spans blank lines (a Navigation header)
+        "<!--\nNavigation\n\nWhat it does: counts eleven jobs.\n\nTested by: x\n-->\n\nProse.\n",
+        # front matter is metadata, not prose
+        "---\nid: dod.page.x\nname: The walk — six stages for one repository\n---\n\n# x\n",
+        # a contents line links to headings, and a heading is not a claim
+        "Contents: [1 Install](#1-install) · [2 Configure eleven repositories](#2-configure)\n",
+    ],
+)
+def test_what_a_reader_never_reads_as_prose_is_not_a_claim(tree: Path, body: str) -> None:
+    _write(tree, "README.md", body)
+    assert cc.check_tree(tree, ("README.md",)) == []
+
+
+def test_a_link_elsewhere_keeps_its_words(tree: Path) -> None:
+    """Only a link to a heading on the same page drops its text: a link to another page
+    reads as the words it shows."""
+    _write(tree, "README.md", "# t\n\nSee [eleven jobs](docs/CI.md) for the list.\n")
+    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+
+
+def test_a_gap_register_line_is_its_own_gap_tag(tree: Path) -> None:
+    """A definition-of-done gap line — ``- **G-nnn** — what is missing · what closes it`` under
+    ``## Gaps`` — is a [gap] by its form: it names what is absent and what would close it,
+    which is exactly what the tag must cite. A sentence that only mentions a gap id is not
+    one, and the same line anywhere else is prose (P-240)."""
+    (tree / "docs" / "dod").mkdir()
+    page = "docs/dod/x.md"
+    _write(
+        tree,
+        page,
+        "# t\n\n## Gaps\n\n- **G-214** — the walkthrough asserts two of the 24 rows · assert "
+        "them all · ui\n",
+    )
+    assert cc.check_tree(tree, (page,)) == []
+    _write(tree, page, "# t\n\n## Gaps\n\n- The walkthrough asserts two of the 24 rows (G-214).\n")
+    assert [f.reason for f in cc.check_tree(tree, (page,))] == ["no claim tag"]
+    # a [measured] figure inside a gap line still owes its evidence
+    _write(
+        tree,
+        page,
+        "# t\n\n## Gaps\n\n- **G-009** — covers five pages **[measured]** · add · docs\n",
+    )
+    assert [f.reason for f in cc.check_tree(tree, (page,))] == [
+        "[measured] without n",
+        "[measured] without a method",
+        "[measured] without an apparatus version",
+    ]
+
+
+def test_an_allowlist_glob_reads_every_page_it_matches_and_no_generated_one(tree: Path) -> None:
+    """A folder joins the gate as a glob, so a page added to it later is read the day it
+    lands; a generated page it would match is read by its own generator's --check instead."""
+    (tree / "docs" / "dod").mkdir()
+    _write(tree, "docs/A.md", "# a\n\nThe gate found 12 defects.\n")
+    _write(tree, "docs/dod/B.md", "# b\n\nThe gate found 13 defects.\n")
+    _write(tree, "docs/dod/GAP-ANALYSIS.md", "# g\n\n576 criteria are met.\n")
+    pages, empty = cc.expand(tree, ("docs/*.md", "docs/dod/**/*.md", "docs/none/*.md"))
+    assert pages == ["docs/A.md", "docs/dod/B.md"] and empty == ["docs/none/*.md"]
+    findings = cc.check_tree(tree, ("docs/*.md", "docs/dod/**/*.md", "docs/none/*.md"))
+    assert [(f.path, f.reason) for f in findings] == [
+        ("docs/none/*.md", "on the allowlist but matches nothing"),
+        ("docs/A.md", "no claim tag"),
+        ("docs/dod/B.md", "no claim tag"),
+    ]
+
+
+def test_a_sentence_listed_as_what_must_never_be_said_is_not_a_claim(tree: Path) -> None:
+    """EVIDENCE-AND-CLAIMS §7 quotes the sentences nobody may say ("Delivers unseen software
+    correctly 97.5% of the time"). Quoting a forbidden claim in order to forbid it is not
+    making it; the same sentence under any other heading is."""
+    forbidden = "- Delivers unseen software correctly 97.5% of the time.\n"
+    _write(tree, "README.md", f"# t\n\n## 7. What must never be said\n\n{forbidden}")
+    assert cc.check_tree(tree, ("README.md",)) == []
+    _write(tree, "README.md", f"# t\n\n## 7. What we found\n\n{forbidden}")
+    assert [f.reason for f in cc.check_tree(tree, ("README.md",))] == ["no claim tag"]
+
+
+# ─── every exemption stays as narrow as the case it was written for (P-240) ───────────────
+
+#: Sentences the gate must refuse on README, however the exemptions grow. Each one got
+#: through an exemption that was wider than its case (the stream C verifiers, 2026-09-27).
+#: The list only grows: a new exemption is written with its refused cases here first.
+EVASIONS: tuple[tuple[str, str], ...] = (
+    # a naming noun that is also a verb or a plural-capable noun is not "which one"
+    ("README.md", "Its patches pass 1,040 tests on the first attempt.\n"),
+    ("README.md", "The builder can round 12 estimates up to the next whole minute.\n"),
+    ("README.md", "The reviewers question 12 findings in every report.\n"),
+    ("README.md", "Every audit row 12 defects deep was triaged.\n"),
+    ("README.md", "The team began finding 40 defects a week.\n"),
+    ("README.md", "The printer will line 30 labels up on the tray.\n"),
+    ("README.md", "The operator will action 12 tickets a day.\n"),
+    # a naming noun used as a verb, after a subject or a modal, counts what follows
+    ("README.md", "The worker can batch 40 jobs at a time.\n"),
+    ("README.md", "The release team will stage 12 releases this year.\n"),
+    ("README.md", "Reviewers table 3 motions at every meeting.\n"),
+    # a plural noun followed by a function word that ends in "s" is still counted
+    ("README.md", "The team shipped 12 releases this year.\n"),
+    # text after an HTML comment on the same line is rendered
+    ("README.md", "<!-- nav --> The factory merges 95% of its pull requests unaided.\n"),
+    ("README.md", "<!--\nNavigation\n--> The factory merges 95% of its pull requests unaided.\n"),
+    # a link to a heading is only skipped on a contents line
+    (
+        "README.md",
+        "The factory merges [97% of its pull requests unaided](#what-has-been-measured).\n",
+    ),
+    # a gap line is its own tag only under a definition-of-done page's "## Gaps"
+    ("README.md", "- **G-999** — the factory merges 99% of its pull requests unaided.\n"),
+    ("docs/dod/x.md", "- **G-999** — the factory merges 99% of its pull requests unaided.\n"),
+    ("docs/dod/x.md", "## Notes\n\n- **F42** — the factory merges 99% of its pull requests.\n"),
+    # a contents line drops only its links to headings; a link to another page is read
+    ("README.md", "Contents: [1 Install](#1-install) · [The gate found 12 defects](docs/X.md)\n"),
+)
+
+
+@pytest.mark.parametrize(("rel", "body"), EVASIONS)
+def test_the_gate_still_refuses_every_known_evasion(tree: Path, rel: str, body: str) -> None:
+    (tree / "docs" / "dod").mkdir(exist_ok=True)
+    _write(tree, rel, f"# t\n\n{body}")
+    assert [f.reason for f in cc.check_tree(tree, (rel,))] == ["no claim tag"]
+
+
+def test_the_naming_nouns_are_pinned() -> None:
+    """A naming noun exempts the count after it on every gated page, README included, so the
+    list cannot grow unseen: a word that is mostly a verb ("pass 45 tests") or a gerund
+    ("finding 40 defects") is not on it, and one that can be a verb exempts only where it
+    reads as a noun ("the worker can batch 40 jobs" is a count). Adding one means adding
+    its refused case to ``EVASIONS`` and its word here in the same change."""
+    assert set(cc.NAMING_NOUNS) == {
+        "belt", "step", "stage", "wave", "item", "rank", "phase", "rung", "tier", "level",
+        "section", "table", "figure", "chapter", "appendix", "arm", "column", "page",
+        "version", "mutation", "migration", "revision", "criterion", "slice", "batch",
+    }  # fmt: skip
+
+
+def test_a_gap_line_is_its_own_tag_only_where_dod_check_reads_gaps(tree: Path) -> None:
+    """``dod_check`` reads a gap line only under ``## Gaps`` on a definition-of-done page or
+    in the prevention register, in the grammar ``- **G-nnn** — …``; there, and only there,
+    the line is its own ``[gap]`` tag."""
+    (tree / "docs" / "dod").mkdir()
+    gaps = "## Gaps\n\n- **G-999** — the walkthrough asserts two of the 24 rows · assert · ui\n"
+    _write(tree, "docs/dod/x.md", f"# x\n\n{gaps}")
+    _write(tree, "docs/PREVENTION.md", f"# p\n\n{gaps}")
+    assert cc.check_tree(tree, ("docs/dod/x.md", "docs/PREVENTION.md")) == []
+
+
+# ─── a [measured] tag is what its rows re-derive (DL-088, P-241) ──────────────────────────
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "[measured — n = 161 rows; method: the controls of §2 on the operator's stack, whose "
+        "rows are not in this repository; apparatus 2.0]",
+        "[measured, n = 11, single run; method: the latest sighted attempt per task on the "
+        "operator's stack, rows not in this repository; apparatus 2.1]",
+        "[measured, n = 16, single run; method: the replay rows of §2 the harness let the "
+        "builder attempt, on the operator's stack; apparatus 2.0]",
+    ],
+)
+def test_a_measured_tag_whose_rows_are_not_in_the_repository_is_refused(
+    tree: Path, tag: str
+) -> None:
+    """DL-088: a reading whose rows are not vendored is a ``[hypothesis]`` with that reason;
+    a ``[measured]`` tag that says its own rows are not here contradicts itself."""
+    _write(tree, "README.md", f"# t\n\nThe floor held across 161 negative-control rows. {tag}\n")
+    reasons = [f.reason for f in cc.check_tree(tree, ("README.md",))]
+    assert len(reasons) == 1 and "not in this repository" in reasons[0]
+    hyp = "[hypothesis — as measured on the operator's stack; its rows are not in this repository]"
+    _write(tree, "README.md", f"# t\n\nThe floor held across 161 negative-control rows. {hyp}\n")
+    assert cc.check_tree(tree, ("README.md",)) == []
+
+
+# ─── the conformity rule refuses the claim whatever else the sentence says (P-240) ─────────
+
+
+#: Sentences that claim conformity and that the rule must refuse, however its denials grow.
+#: Each got past a denial wider than its case (P-240, P-245). The list only grows: a new
+#: denial is written with its refused cases here first. The ones with a clause break pin the
+#: break: remove it and the negation or refusal before it would deny the claim after it.
+CONFORMITY_EVASIONS: tuple[str, ...] = (
+    "The change conforms to ISO/IEC 25010 and needs no further review.",
+    "Every clean row is certified against ISO/IEC 25010, not just tested.",
+    "Every change the factory delivers conforms to ISO/IEC 25010 with no exceptions.",
+    "Delivered code is ISO/IEC 25010 compliant, not merely aligned.",
+    "The factory's code complies with ISO 9001 without any manual review.",
+    "It is not certified by an auditor, but it conforms to ISO/IEC 25010.",
+    # a negation that governs another word than the conformity verb denies nothing
+    "Without exception the code conforms to ISO/IEC 25010.",
+    "No doubt the code conforms to ISO/IEC 25010.",
+    "No, the code conforms to ISO/IEC 25010.",
+    "The code never fails to conform to ISO/IEC 25010.",
+    "The factory's code not only conforms to ISO/IEC 25010 but is fast.",
+    "The code is not just tested: it conforms to ISO/IEC 25010.",
+    # a refusal refuses only a saying in its own clause
+    "Having refused shortcuts, the factory delivers code that conforms to ISO/IEC 25010.",
+    "We refused to cut corners, so every change conforms to ISO/IEC 25010.",
+    "We refused to cut corners so every change conforms to ISO/IEC 25010.",
+    # the clause break pins: a negated or refused verb before it reaches nothing after it
+    "It is not certified by an auditor, and it conforms to ISO/IEC 25010.",
+    "The gate refused a sentence last week; this one says the code conforms to ISO/IEC 25010.",
+    "Nobody refuses the claim: the code conforms to ISO/IEC 25010.",
+    # the standard however it is written
+    "The code conforms to ISO25010.",
+    "The code is certified against iso/iec 25010.",
+)
+
+
+@pytest.mark.parametrize("sentence", CONFORMITY_EVASIONS)
+def test_an_incidental_negation_does_not_hide_a_conformity_claim(tree: Path, sentence: str) -> None:
+    _conformity_tree(tree, readme=sentence, guide="Nothing.", planted="Nothing.")
+    assert [f.path for f in cc.check_conformity(tree)] == ["README.md"]
+
+
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        # a denial reaches every conformity word coordinated with the one it governs
+        "The gate refuses any sentence that says code conforms to, complies with or is "
+        "certified against an ISO standard.",
+        "The code does not conform to, or comply with, ISO/IEC 25010.",
+        "That does not make the code ISO/IEC 25010 compliant.",
+        "The factory's code isn't certified against ISO/IEC 25010.",
+        "A clean row cannot be certified against ISO 9001.",
+    ],
+)
+def test_a_denial_reaches_the_conformity_words_it_governs(tree: Path, sentence: str) -> None:
+    _conformity_tree(tree, readme=sentence, guide=sentence, planted=sentence)
+    assert cc.check_conformity(tree) == []
+
+
+#: Every shape a page renders that a reader reads: the conformity rule reads each, not only
+#: the paragraphs and list items the claim-tag heuristic counts (P-246).
+RENDERED_SHAPES: dict[str, str] = {
+    "paragraph": "{s}\n",
+    "list item": "- {s}\n",
+    "heading": "## {s}\n",
+    "table row": "| row | text |\n|---|---|\n| x | {s} |\n",
+    "checklist item": "- [x] {s}\n",
+    "blockquote": "> {s}\n",
+    "after a comment": "<!-- nav --> {s}\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(RENDERED_SHAPES))
+def test_a_conformity_claim_is_refused_in_every_shape_a_page_renders(
+    tree: Path, shape: str
+) -> None:
+    claim = "Delivered code conforms to ISO/IEC 25010"
+    body = RENDERED_SHAPES[shape].format(s=claim)
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    _write(tree, "README.md", f"# t\n\n{body}")
+    assert [f.path for f in cc.check_conformity(tree)] == ["README.md"], shape
+    assert cc.main(["--check", "--root", str(tree)]) == 1
+
+
+def test_a_guide_the_ui_does_not_bundle_is_read_too(tree: Path) -> None:
+    """The rule reads every page directly under docs/, not only the bundled guides."""
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    _write(tree, "docs/ARCHITECTURE.md", "# A\n\nThe code conforms to ISO/IEC 25010.\n")
+    assert "docs/ARCHITECTURE.md" not in (cc.bundled_guides(tree) or ())
+    assert [f.path for f in cc.check_conformity(tree)] == ["docs/ARCHITECTURE.md"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # a name imported from the product: the standard it holds is read
+        "from crb.core.quality_model import STANDARD\n\n"
+        "def pr_body(item, build):\n"
+        '    return f"This change conforms to {STANDARD}."\n',
+        "import crb.core.quality_model as qm\n\n"
+        "def pr_body(item, build):\n"
+        '    return f"This change conforms to {qm.STANDARD}."\n',
+        # a value the rule cannot resolve is read as a standard beside a conformity word
+        'def pr_body(item, build):\n    return f"This change conforms to {build.standard}."\n',
+        "def pr_body(item, build):\n"
+        '    return "This change conforms to {}.".format(build.standard)\n',
+        'def pr_body(item, build):\n    return "This change conforms to " + build.standard + "."\n',
+    ],
+)
+def test_the_pr_body_rule_reads_what_an_interpolation_puts_in_the_sentence(
+    tree: Path, source: str
+) -> None:
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    (tree / "src/crb/core").mkdir(parents=True)
+    _write(tree, "src/crb/core/quality_model.py", 'STANDARD = "ISO/IEC 25010:2023"\n')
+    _write(tree, "src/crb/factory/delivery.py", source)
+    found = [f.path for f in cc.check_conformity(tree)]
+    assert found == ["src/crb/factory/delivery.py"]
+
+
+def test_an_interpolation_beside_no_conformity_word_passes(tree: Path) -> None:
+    source = (
+        "from crb.core.quality_model import STANDARD\n\n"
+        "def pr_body(item, build):\n"
+        '    return f"Item {item}: the checks evidence parts of {STANDARD}."\n'
+    )
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    (tree / "src/crb/core").mkdir(parents=True)
+    _write(tree, "src/crb/core/quality_model.py", 'STANDARD = "ISO/IEC 25010:2023"\n')
+    _write(tree, "src/crb/factory/delivery.py", source)
+    assert cc.check_conformity(tree) == []
+
+
+def test_a_section_headed_never_is_still_read_unless_it_lists_forbidden_sayings(
+    tree: Path,
+) -> None:
+    """Only a section that lists what must never be said quotes a claim to forbid it; a
+    heading that merely contains "never" (EVIDENCE-AND-CLAIMS §9, "named, never claimed")
+    is read like any other."""
+    guide = (
+        "## 9. The quality baseline — named, never claimed\n\n"
+        "Code that passes the belts conforms to ISO/IEC 25010.\n\n"
+        "## Never ship an unreviewed change\n\n"
+        "Every change we deliver conforms to ISO/IEC 25010.\n"
+    )
+    _conformity_tree(tree, readme="Nothing.", guide=guide, planted="Nothing.")
+    assert [(f.path, f.line) for f in cc.check_conformity(tree)] == [
+        ("docs/OPERATOR.md", 5),
+        ("docs/OPERATOR.md", 9),
+    ]
+
+
+def test_the_pr_body_rule_reads_the_constants_and_helpers_the_body_uses(tree: Path) -> None:
+    """The pull-request body is what ``pr_body`` emits: a module constant it reads and a
+    helper it calls are part of the template."""
+    source = (
+        '_FOOTER = "The delivered code conforms to ISO/IEC 25010."\n\n'
+        "def _trailer():\n"
+        '    return "Every change is certified against ISO 9001."\n\n'
+        "def pr_body(item, build):\n"
+        '    return "\\n".join([f"## item {item}", _FOOTER, _trailer()])\n\n'
+        "def rework_comment(item):\n"
+        '    return "rework"\n'
+    )
+    _conformity_tree(tree, readme="Nothing.", guide="Nothing.", planted="Nothing.")
+    _write(tree, "src/crb/factory/delivery.py", source)
+    found = [(f.path, f.line) for f in cc.check_conformity(tree)]
+    assert found == [("src/crb/factory/delivery.py", 1), ("src/crb/factory/delivery.py", 4)]

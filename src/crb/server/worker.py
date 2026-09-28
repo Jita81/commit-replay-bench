@@ -114,7 +114,9 @@ What it does: Polls the job queue, claims one run, dispatches by kind (setup, pr
               grade rows through the append-only ledger with the run's labels stamped,
               records the apparatus, and marks the run succeeded / failed / cancelled
               honestly (all-attempts-errored is a failure; a provider outage streak stops
-              the run; a harness error on one mined candidate skips it). Fetches and
+              the run; so does a spend cap, before an attempt or item that could pass it —
+              src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
+              skips it). Fetches and
               fast-forwards the clone's default branch before a factory run (refusing the
               run when it cannot) and syncs delivered pull requests' outcomes first. Checks in to the
               ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
@@ -185,7 +187,7 @@ from crb.builders.adapter import (
     build_fn_for,
     container_settings_from_env,
     ladder_labels,
-    parse_rung_label,
+    rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
@@ -306,9 +308,17 @@ from crb.server.settings import (
     IntakeSettings,
 )
 from crb.server.spend import SpendHooks, build_spend_hooks, pack_turns
+from crb.server.spend_cap import (
+    AUTHOR_ATTEMPT,
+    STOP_SPEND_CAP,
+    Halt,
+    Spend,
+    SpendCap,
+    item_reserve,
+)
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
-from crb.store.events import DbEventSink, last_seq
+from crb.store.events import DbEventSink, events_of_action, last_seq
 from crb.store.jobs import (
     KIND_BLIND,
     KIND_CONTROLS,
@@ -412,28 +422,6 @@ def budget_tier(budget: Budget) -> str:
     if budget.max_cost_usd:
         tier += f"/usd={budget.max_cost_usd:g}"
     return tier
-
-
-def rung_from_object(entry: Mapping[str, Any], *, default_provider: str = "") -> Rung:
-    """An object rung ``{builder, model, provider?, budget?}`` → :class:`Rung` whose
-    ``config`` carries ONLY the budget fields the rung set. ``builder_for_rung`` strips
-    those before constructing the builder and :func:`budget_for_rung` overlays them on the
-    run's budget — so a rung's budget overrides the run's, field by field, and nothing else
-    on the rung reaches a builder constructor (the API refuses other keys; the worker
-    refuses them again here because ``ladder_json`` is a stored document, not a request)."""
-    unknown = set(entry) - {"builder", "model", "provider", "budget"}
-    if unknown:
-        raise ValueError(f"object rung carries unknown field(s) {sorted(unknown)}")
-    budget = dict(entry.get("budget") or {})
-    foreign = set(budget) - set(Budget.__dataclass_fields__)
-    if foreign:
-        raise ValueError(f"rung budget carries unknown field(s) {sorted(foreign)}")
-    return Rung(
-        builder=str(entry.get("builder") or ""),
-        model=str(entry.get("model") or ""),
-        provider=str(entry.get("provider") or "") or default_provider,
-        config=budget,
-    )
 
 
 def default_worker_id() -> str:
@@ -545,6 +533,11 @@ class WorkerSettings:
     #: ADR-0023: a prod worker running unsealed under the override — stamped into every
     #: run's apparatus and every pack; empty when sealed or in dev.
     unsealed_override: Mapping[str, Any] = field(default_factory=dict)
+    #: G-663: ``{"by", "reason"}`` when this prod worker starts under the override — the
+    #: admin who set it and why. ``announce_start`` writes them into an audit event (and
+    #: refuses the start for a name that is not an active admin); every factory run's stamp
+    #: carries the name. Empty when the override is not set or in dev.
+    unsealed_override_ack: Mapping[str, str] = field(default_factory=dict)
     #: ``CRB_ENV`` as the entrypoint read it. A factory build is never sealed (its builder is
     #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
     #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
@@ -1574,12 +1567,16 @@ class Worker:
             ctx._runner.env_dir = self.env_dir(ctx.run.repo)
         return ctx._runner
 
+    def _executor_kind(self, ctx: RunContext) -> str:
+        """The executor this run asks for: its own ``params.executor``, else the worker's."""
+        return str(ctx.params.get("executor") or self.settings.executor or "local")
+
     def _executor(self, ctx: RunContext) -> Executor:
         """The run's executor. Docker is fail-closed: no image / no daemon → the
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        kind = str(ctx.params.get("executor") or self.settings.executor or "local")
+        kind = self._executor_kind(ctx)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
                 f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
@@ -1673,7 +1670,7 @@ class Worker:
             "runner": self._runner(ctx).name,
             "executor": self._executor(ctx).describe(),
             "worker": self.worker_id,
-            **self._override_stamp(),
+            **self._override_stamp(ctx),
             **extra,
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
@@ -1684,6 +1681,7 @@ class Worker:
         on a worker whose replay posture is sealed and stamps nothing else."""
         if self.settings.env != "prod":
             return {}
+        ack = dict(self.settings.unsealed_override_ack)
         stamp = {
             "env": "prod",
             "sandbox_executor": self.settings.executor,
@@ -1692,13 +1690,28 @@ class Worker:
             "run_kind": "factory",
             "override": ALLOW_UNSEALED_PROD_ENV,
             "adr": "0023",
+            **({"acknowledged_by": ack["by"]} if ack.get("by") else {}),
         }
         return {"unsealed_prod_override": stamp}
 
-    def _override_stamp(self) -> dict[str, Any]:
+    def _override_stamp(self, ctx: RunContext) -> dict[str, Any]:
         """ADR-0023: a prod worker running unsealed under the override says so on every
-        apparatus it writes (and so in every pack); nothing when sealed or in dev."""
+        apparatus it writes (and so in every pack); nothing when sealed or in dev. A worker
+        whose DEFAULTS are sealed stamps a run that asks for another executor in its own
+        parameters (only the override admits one), naming who set the override (P-256)."""
         o = dict(self.settings.unsealed_override)
+        if not o and self.settings.env == "prod":
+            kind = self._executor_kind(ctx)
+            if kind != "docker":
+                ack = dict(self.settings.unsealed_override_ack)
+                o = {
+                    "env": "prod",
+                    "sandbox_executor": kind,
+                    "builder_executor": self.settings.builder_executor,
+                    "override": ALLOW_UNSEALED_PROD_ENV,
+                    "adr": "0023",
+                    "acknowledged_by": ack.get("by", ""),
+                }
         return {"unsealed_prod_override": o} if o else {}
 
     def _progress(self, ctx: RunContext, done: int, total: int) -> None:
@@ -2064,40 +2077,19 @@ class Worker:
         * a ``builder:model[:provider]`` label: a rung as written;
         * an object rung ``{builder, model, provider?, budget?}``: a rung whose ``budget``
           fields override the run's ``params.budget`` for that rung only
-          (:func:`rung_from_object`; the same model at 25 → 50 → 100 tool calls is a
+          (:func:`crb.builders.adapter.rung_from_object`; the same model at 25 → 50 → 100 tool calls is a
           budget ladder).
 
         Every rung's effective budget is validated HERE, before any task runs, so a bad
         cap fails the run closed with its reason instead of erroring every attempt. The
         stored ``ladder_json`` stays what the operator declared."""
         run = ctx.run
-        entries: list[Any] = list(ctx.params.get("ladder") or run.ladder_json or [])
-        own = ""
-        if run.builder and run.model:
-            own = f"{run.builder}:{run.model}" + (f"@{run.provider}" if run.provider else "")
-        if not entries and own:
-            entries = [own]
-        if not entries:
-            raise ValueError("a replay run needs a ladder (rung labels) or builder + model")
-        provider = str(run.provider or ctx.params.get("provider") or "")
-        rungs: list[Rung] = []
-        for entry in entries:
-            if isinstance(entry, Mapping):
-                rungs.append(rung_from_object(entry, default_provider=provider))
-                continue
-            label = str(entry)
-            if not label.strip():
-                continue
-            if ":" not in label:
-                if not own:
-                    raise ValueError(
-                        "a replay run with bare rung labels (r1, r2 …) needs builder + model "
-                        "on the run"
-                    )
-                label = own
-            rungs.append(parse_rung_label(label, default_provider=provider))
-        if not rungs:
-            raise ValueError("a replay run needs at least one rung")
+        rungs = rungs_from_entries(
+            list(ctx.params.get("ladder") or run.ladder_json or []),
+            builder=run.builder or "",
+            model=run.model or "",
+            provider=str(run.provider or ctx.params.get("provider") or ""),
+        )
         ladder = EscalationLadder(tuple(rungs))
         try:
             base = self._budget(ctx)
@@ -2221,6 +2213,18 @@ class Worker:
             repo_spend=learning.config_section(K_SECTION, ctx.config.spend),
             checks_arm=checks.arm,
         )
+        # F5b — the run's own spend cap, asked before every attempt (``RunSpec.admit``)
+        cap = SpendCap.from_params(p)
+        halted: list[Halt] = []
+
+        def admit(task: TaskSpec, rung_index: int) -> str:
+            assert cap is not None
+            attempt_cap = budget_for_rung(ladder.rungs[rung_index - 1], budget).max_cost_usd
+            halt = cap.check(Spend.of_rows(self.ledger.rows(run_id=run.id)), reserve=attempt_cap)
+            if halt is not None:
+                halted.append(halt)
+            return halt.reason if halt is not None else ""
+
         spec = RunSpec(
             run_id=run.id,
             config=ctx.config,
@@ -2244,7 +2248,7 @@ class Worker:
             on_environment=gate.on_environment,
             extra={
                 "worker": self.worker_id,
-                **self._override_stamp(),
+                **self._override_stamp(ctx),
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
                 "learning": learning.apparatus(),
@@ -2270,6 +2274,7 @@ class Worker:
             if self.settings.store_patches
             else None,
             escalation_gate=spend.escalation_gate,
+            admit=admit if cap is not None else None,
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         build_fn = build_fn_for(
@@ -2357,6 +2362,13 @@ class Worker:
         self._progress(ctx, summary.tasks, total)
         self._ledger_health()
         self._learning_tick(run.repo)
+        if cap is not None and not halted and not self._cancelled(ctx):
+            # the last attempt had no cost cap of its own and may have passed the run's
+            over = cap.passed(Spend.of_rows(self.ledger.rows(run_id=run.id)))
+            if over is not None:
+                halted.append(over)
+        if halted and not self._cancelled(ctx):
+            return self._spend_cap_stop(ctx, counts, halted[-1])
         if tripped() and not self._cancelled(ctx):
             reason = (
                 f"provider outage: {streak['n']} consecutive attempts refused; "
@@ -2776,11 +2788,55 @@ class Worker:
             return out
 
         loop.run_item = run_item  # type: ignore[method-assign]
+        # F5b — the run's spend cap, asked before every item: an item may take every rung,
+        # once more per rework, so it is reserved at all of them (``item_reserve``)
+        cap = SpendCap.from_params(p)
+        halted: list[Halt] = []
+        # the test author's model calls are the run's spend too, though they write no row:
+        # the ones a first claim made are on its events, this claim's on the author
+        authored_before = (
+            [
+                {
+                    **e.payload,
+                    "action": e.action,
+                    "cost_usd": e.cost_usd if e.cost_usd is not None else e.payload.get("cost_usd"),
+                }
+                for e in events_of_action(self.factory, run.id, AUTHOR_ATTEMPT)
+            ]
+            if cap is not None
+            else []
+        )
+
+        def spent_now() -> Spend:
+            calls = list(getattr(test_author, "calls", ()) or ())
+            return Spend.of_rows(self.ledger.rows(run_id=run.id)).with_authoring(
+                [*authored_before, *calls]
+            )
+
+        def stop() -> bool:
+            if self._cancelled(ctx):
+                return True
+            if cap is None:
+                return False
+            spent = spent_now()
+            reserve, attempts = item_reserve(
+                [budget_for_rung(r, budget).max_cost_usd for r in ladder.rungs],
+                spent,
+                max_rework=int(p.get("max_rework", 1)),
+                author_attempts=int(getattr(test_author, "attempts", 1) or 0)
+                if test_author is not None
+                else 0,
+            )
+            halt = cap.check(spent, reserve=reserve, unit="item", attempts=attempts)
+            if halt is not None:
+                halted.append(halt)
+            return halt is not None
+
         outcomes = loop.run_backlog(
             backlog,
             authored=home.authored(),
             expected_hash=backlog.backlog_hash,
-            stop=lambda: self._cancelled(ctx),
+            stop=stop,
         )
         counts["outcomes"] = [o.to_dict() for o in outcomes]
         ctx.counts.clear()
@@ -2788,6 +2844,12 @@ class Worker:
         self._ledger_health()
         if self._cancelled(ctx):
             return STATUS_CANCELLED, counts, ""
+        if not halted and cap is not None:
+            over = cap.passed(spent_now(), unit="item")  # the last item had no cap of its own
+            if over is not None:
+                halted.append(over)
+        if halted:
+            return self._spend_cap_stop(ctx, counts, halted[-1])
         return STATUS_SUCCEEDED, counts, ""
 
     def _deliver_override(self, run_id: str) -> str:
@@ -2817,6 +2879,20 @@ class Worker:
                 return ""
         return who
 
+    def _spend_cap_stop(
+        self, ctx: RunContext, counts: dict[str, Any], halt: Halt
+    ) -> tuple[str, dict[str, Any], str]:
+        """F5b — the run stopped itself before an attempt or item that could pass its cap:
+        ``failed`` with the reason, ``stopped_code: spend_cap`` and a ``run.spend_cap``
+        event carrying the cap, what was spent and the reserve that did not fit."""
+        counts["stopped_reason"] = halt.reason
+        counts["stopped_code"] = STOP_SPEND_CAP
+        ctx.counts.update(counts)
+        ctx.emit(
+            "system", "run.spend_cap", status=StepStatus.SKIPPED, reason=halt.reason, **halt.payload
+        )
+        return STATUS_FAILED, counts, halt.reason
+
     def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
         """The run's test author, or ``None`` when this deployment has none.
 
@@ -2835,9 +2911,12 @@ class Worker:
         raw = str(ctx.params.get("test_author", "") or "").strip()
         if not raw:
             raw = self.settings.factory.test_author.strip()
-        default_provider = str(ctx.run.provider or ctx.params.get("provider") or "")
+        # no provider is inherited from the run: the run's belongs to its build ladder (a
+        # Claude ladder's is `anthropic`), while the author calls the configured
+        # OpenAI-compatible endpoint and stamps ITS provider; only a provider the author's
+        # own label names is checked against that endpoint (G-611)
         try:
-            author = author_from_label(raw, default_provider=default_provider)
+            author = author_from_label(raw)
         except ValueError as exc:
             raise ValueError(
                 f"test author {raw!r} cannot be used: {exc} "

@@ -126,6 +126,22 @@ secretsStore:
   accessMode: ReadWriteOnce
 
 # ---------------------------------------------------------------------------------------
+# The evidence store ($CRB_HOME/evidence and $CRB_HOME/transcripts): the kept patches, the
+# evidence packs and the retained transcripts. The worker WRITES them at grade time; the api
+# SERVES them (/grades/{row_hash}/patch and /transcript). Both pods mount this ONE claim —
+# an api emptyDir there could never find what the worker kept (docs/PREVENTION.md P-045).
+evidenceStore:
+  # A claim you manage (e.g. ReadWriteMany on Azure Files, EFS or NFS). Empty = the chart
+  # makes <release>-crb-evidence, which `helm uninstall` keeps (delete it explicitly).
+  existingClaim: ""
+  size: 10Gi
+  storageClassName: ""
+  # The same placement rule as secretsStore: ReadWriteOnce pins the api and the worker to
+  # one node (and refuses a placement the api cannot follow); ReadWriteMany on BOTH stores
+  # lifts the pin (docs/DEPLOYMENT.md §3.2).
+  accessMode: ReadWriteOnce
+
+# ---------------------------------------------------------------------------------------
 postgresql:
   # external: CRB_DATABASE_URL in the existing Secret points at a managed server
   #           (Azure Database for PostgreSQL Flexible Server with a private endpoint, …).
@@ -181,7 +197,10 @@ worker:
   # commit and one allowlisting egress sidecar; the worker needs a daemon, sandbox.mode
   # below, and the builder image pre-pulled — without `image` a build fails CLOSED, never on
   # the host), host in dev. An explicit `docker` needs `image` (the API refuses to start
-  # without it). host is refused in prod unless CRB_ALLOW_UNSEALED_PROD=1 (ADR-0023).
+  # without it). host is refused in prod unless config.CRB_ALLOW_UNSEALED_PROD: "1" is set
+  # with config.CRB_ALLOW_UNSEALED_PROD_BY (an active admin's username) and
+  # config.CRB_ALLOW_UNSEALED_PROD_REASON (why) — without both, neither the API nor the worker
+  # starts (ADR-0023; docs/DEPLOYMENT.md §2.1).
   builder:
     executor: ""
     image: ""
@@ -325,3 +344,15 @@ serviceMonitor:
   labels: {}
   worker:
     enabled: false
+
+# DEPLOYMENT §9.2's four alert rules as a PrometheusRule (needs the Prometheus Operator's
+# CRD). Off by default. `labels` are what your Prometheus's ruleSelector matches (for
+# example `release: kube-prometheus-stack`). Scrape both the api and the worker
+# (serviceMonitor.enabled and serviceMonitor.worker.enabled, or your own scrape config):
+# three rules read the worker's series, so the render refuses the rules while
+# worker.metrics.port is 0. `noWorkerFor` is how long no worker exposition may be missing
+# before CrbNoWorker fires — keep it several scrape intervals long.
+prometheusRule:
+  enabled: false
+  labels: {}
+  noWorkerFor: 5m
