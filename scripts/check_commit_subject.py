@@ -8,11 +8,14 @@ characters and read as descriptions ("the work arrives from the board …"). Thi
 
     python scripts/check_commit_subject.py --range BASE..HEAD           # report
     python scripts/check_commit_subject.py --range BASE..HEAD --check   # CI: exit 1 on a finding
-    python scripts/check_commit_subject.py --title "docs: add x" --check
+    python scripts/check_commit_subject.py --title "docs: add x" --pr-number 66 --check
 
 ``--range`` reads every non-merge commit in the range (a merge commit made by "Update branch"
 is not the author's subject); ``--title`` checks a pull request title, because a squash merge
-turns it into the commit subject on ``main``.
+turns it into the commit subject on ``main`` — and GitHub appends `` (#<number>)`` to it, so
+the title is measured with that suffix: ``--pr-number`` gives the real one, and without it the
+gate reserves room for the longest it expects (P-500: three titles that fitted on their own
+landed on ``main`` at 73, 75 and 73 characters).
 
 **The imperative heuristic, honestly.** English has no reliable marker for the imperative, so
 the gate refuses the four shapes that are reliably *not* imperative: a first word that is an
@@ -33,7 +36,8 @@ What it does: Checks each subject against Conventional Commits (a known type, an
               line, and the imperative heuristic; reports each defect with its reason;
               ``--check`` exits non-zero on any finding.
 How:          ``git log --no-merges --format=%H%x00%s`` over ``--range`` (in ``--repo``) plus
-              the optional ``--title`` → ``check_subject`` on each → one line per finding.
+              the optional ``--title`` with its squash suffix (``--pr-number``, else the
+              widest expected) → ``check_subject`` on each → one line per finding.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/CONTRIBUTING.md (the commit convention it enforces),
@@ -70,6 +74,17 @@ TYPES: tuple[str, ...] = (
     "revert",
 )
 MAX_LEN = 72
+
+#: The suffix a squash merge appends to the title; reserved at this width when the number is
+#: not given, so an unknown number never lets a title through that its real one would not.
+SQUASH_SUFFIX_UNKNOWN = " (#9999)"
+
+
+def squash_subject(title: str, pr_number: int | None) -> str:
+    """The subject a squash merge of ``title`` writes on ``main``: GitHub appends
+    `` (#<number>)``."""
+    return f"{title} (#{pr_number})" if pr_number is not None else title + SQUASH_SUFFIX_UNKNOWN
+
 
 _SHAPE_RE = re.compile(
     r"^(?P<type>[a-z]+)(?:\((?P<scope>[^()\s]+)\))?(?P<bang>!)?: (?P<desc>\S.*)$"
@@ -157,6 +172,12 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     ap.add_argument("--range", dest="rev_range", default=None, help="a git range, BASE..HEAD")
     ap.add_argument("--title", default=None, help="a pull request title (the squash subject)")
+    ap.add_argument(
+        "--pr-number",
+        type=int,
+        default=None,
+        help="the pull request's number, for the ' (#n)' a squash merge appends to --title",
+    )
     ap.add_argument("--repo", default=str(ROOT), help="the repository --range is read from")
     ap.add_argument("--check", action="store_true", help="exit non-zero on any finding (CI)")
     args = ap.parse_args(argv)
@@ -164,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.rev_range:
         items.extend(subjects_in_range(Path(args.repo), args.rev_range))
     if args.title is not None:
-        items.append(("title", args.title))
+        items.append(
+            ("title, as the squash merge writes it", squash_subject(args.title, args.pr_number))
+        )
     stream = sys.stderr if args.check else sys.stdout
     findings = 0
     for where, subject in items:
