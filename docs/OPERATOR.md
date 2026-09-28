@@ -1255,9 +1255,10 @@ what people know about it that a test cannot say, in one vocabulary: its **compo
 **patterns** that recur and its **standards**. Each entry has the id `<kind>/<slug>`, a
 statement of at most 400 characters and where it came from — a file at a commit, the graded
 rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-099). Graded rows
-must be rows of this repository's ledger. A file's path, commit and digest are as the proposer
-gave them: the product reads the file only at the repository's head, after each mine, and
-marks the entry stale when it differs. No field of an entry may carry a credential — the
+must be rows of this repository's ledger. A file's path, commit and digest are read from the
+clone when a miner proposes the entry, and are as the person gave them when a person does; the
+product then reads the file at the repository's head after each mine, and marks the entry stale
+when it differs. No field of an entry may carry a credential — the
 library is append-only, so a secret written to it could never be removed.
 
 **Two people sign every entry.** An operator proposes an entry and becomes its sponsor; an
@@ -1269,6 +1270,31 @@ names the version the approver read: a changed entry is a new version and needs 
 signature. For an entry learned from graded rows, an approver who produced one of those rows —
 as the row's actor or the person who queued its run — cannot sign it either (`same_actor`).
 On Decisions, an entry you sponsored reads "waits for another approver", with no Sign.
+
+**Proposals from the repository's files.** *Propose from the files* on the library page (or
+`POST /library/{repo}/mine`, operator) runs the **miners** over the repository's clone at one
+commit — a sha, branch or tag, or its head when you leave it empty — pinned to the full sha
+before anything is read. Each miner reads one kind of file the repository already holds and
+proposes entries from it, citing the file and the commit, with no model call:
+
+| miner | reads | proposes |
+|---|---|---|
+| `adrs` | architecture decision records (`docs/adr/NNNN-*.md` and the like) | a **decision** per record in force, stating the first paragraph of its decision; a superseded, rejected or proposed record is noted, not proposed |
+| `owners` | `CODEOWNERS` and the directory layout | a **component** per part of the system, with the owners `CODEOWNERS` names (an email address is counted, never copied) |
+| `lint` | lint and formatter configurations (`pyproject.toml` tables, `ruff.toml`, `.eslintrc*`, `.golangci.yml`, `go.mod` …) | a **convention** per tool, naming belt 5's check (`repo_lint_clean`) where crb runs the tool, and advisory where it does not |
+| `tests` | the test files and the runner's configuration | a **standard** per language: a change leads to a failing test, where the tests live, how they are named and run, with examples, scoped to the work types whose commits changed such tests |
+| `change-profile` | the mined commits and the graded rows | a **work-type** candidate per global class and part of the system it changes, with its counts, citing the graded rows — a candidate with no graded rows is noted with its counts, not proposed |
+
+`CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING` are read as data: only a command of a known tool,
+with no shell operator in it, reaches a proposal, inside a fixed sentence — never their prose.
+**No miner signs anything.** Every proposal is `proposed` under `mined:<miner>@<version>` and
+waits in Decisions for a person to **Sponsor** it; a different approver then signs it. The same
+commit proposes nothing new, and a later one proposes an entry again only when the file it cites
+has changed. A miner never replaces an entry a person wrote, revoked or retired. The run is one
+`library.mined` event naming you, the commit and the counts, and each proposal a
+`library.proposed` event naming its miner. `crb library mine <repo>` prints what a run would
+propose from a workdir repository and writes nothing. A team adds its own miner through the
+registry in `src/crb/core/miners.py` (`register_miner`, and the contract in that module).
 
 **Nothing is edited.** A revocation (the entry was wrong) and a retirement (it no longer
 holds) are appended with a reason and kept as history. An entry read from a file goes

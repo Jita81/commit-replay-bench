@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The library's miners: proposals from a repository's own files, never signed**
+  (north-star Wave 4, stream M; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-m)).
+  *Propose from the files* and `POST /library/{repo}/mine` run five miners over the clone at a
+  pinned commit, at no model cost: decision records, code owners and layout, lint settings,
+  tests, and the change profile. Each proposal cites its file and commit, is recorded under
+  `mined:<miner>@<version>` and waits for a person to sponsor it. Guidance files are read as
+  data. The same commit proposes nothing new. Teams add miners through a registry
+  (DL-132, G-677).
+
 - **The context library: two people sign what a repository's people know, and each work type has a page**
   (north-star Wave 4, stream L; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-l)).
   Entries of six kinds, with an id `<kind>/<slug>` and their provenance, are proposed by a
