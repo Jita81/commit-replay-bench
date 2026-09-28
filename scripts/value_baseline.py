@@ -141,7 +141,7 @@ def _psv_row(d: dict[str, str]) -> ValueRow:
         mode=d["mode"],
         clean=clean,
         failure_kind=kind,
-        # an empty cost column is no price, never a known $0 (DL-067; P-185)
+        # an empty cost column is no price, never a known $0 (DL-066; P-185)
         cost_usd=float((d.get("cost") or "").strip() or 0),
         cost_known=bool((d.get("cost") or "").strip()),
         apparatus_version=d["apparatus"],

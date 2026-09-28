@@ -17,7 +17,7 @@
  *               The locations are parameters with this repository's paths as defaults, so the
  *               tests run it against temporary trees.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-074)
+ * ADRs:         none (DL-073)
  * Works with:   ui/vite.config.ts (runs it), ui/src/help/docs.ts (`DOC_NAMES`, read as text),
  *               ui/src/help/adrs.ts (the records' glob), deploy/Dockerfile.dockerignore (the
  *               context it guards), deploy/Dockerfile (the image's `npm run build`)

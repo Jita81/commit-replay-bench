@@ -1,6 +1,6 @@
 """No walkthrough spec that runs before 06b opens a Baseline — the order 06b stands on.
 
-Spec 06b (stream A2, DL-075) proves the transition of Home's task 6: it finds "Read the
+Spec 06b (stream A2, DL-074) proves the transition of Home's task 6: it finds "Read the
 baseline" Incomplete, opens the Baseline screen, which records the read, and finds it
 Completed. That holds only while no earlier spec has opened a Baseline: the screen records a
 read on every first visit. Stream M, built in parallel, added a Baseline check to spec 05, so

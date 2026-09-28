@@ -12,7 +12,7 @@ How:          One table per wave; its `gaps` column holds gap ids and nothing el
               artefacts' git history shows they were gaps; every gap the order of work ranks
               must sit in some table here, and no heading quotes a rank (P-189).
 Layer:        docs — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         none (DL-064 records the rule the checker enforces on this file)
+ADRs:         none (DL-063 records the rule the checker enforces on this file)
 Works with:   docs/dod/GAP-ANALYSIS.md (the order of work this batches), docs/dod/STANDARD.md
               (§6: the next feature is the top of the gap analysis), scripts/dod_check.py
               (refuses a wave item that is not a gap id), docs/PREVENTION.md (P-118, the class
@@ -82,7 +82,7 @@ D1, the checker, closes in the same change the register rows that name it (P-118
 drifts from the order of work", and P-127, "the generated file vouches for itself"), so it
 carries no gap id: `dod_check.py` refuses a gap line no criterion cites, a wave item here that
 is not a gap id, and a gap among the first 25 of the order of work that no wave names; and it
-keeps a closed gap nameable only while the history vouches for it (DL-064, DL-065).
+keeps a closed gap nameable only while the history vouches for it (DL-063, DL-064).
 
 Outside the waves, and not DoD work: carrying the four commits that exist only on the
 integration tree (`770adbb`, `79f4597`, `27f2171`, `8d15f12`) to `main` in one pull request

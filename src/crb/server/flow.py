@@ -30,7 +30,7 @@ spend, which the parts add up to. The sums use the product's one spend rule
 (``crb.core.flow.spend_of_rows``), which the value scorecard also uses. A cost per unit is the
 price of the rows that bought the unit (a cell's first ten rows; the factory's rows per merged
 pull request) and is withheld with the reason while any of them is unpriced, never divided
-over a floor (DL-067).
+over a floor (DL-066).
 
 **Who reads what.** Every figure is a viewer's except the platform stream's account counts
 and its recovery lead time, which are an admin's (ADR-0028 §7): anyone else reads the lead time

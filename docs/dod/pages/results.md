@@ -34,7 +34,7 @@ the page says so. No act is taken here; every act is a link to the page that rec
 No economics tile reads an unknown cost or latency as zero, and none pools apparatus versions,
 posture classes or checks arms.
 Opening the map of a repository with rows records, once per person, that its baseline was read
-(`repo.baseline_read`, DL-075) — the one thing the page writes; it changes no number and is
+(`repo.baseline_read`, DL-074) — the one thing the page writes; it changes no number and is
 what Home's task 6 reads.
 
 ## Definition of done

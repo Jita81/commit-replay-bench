@@ -104,7 +104,7 @@ export interface Review {
   verdict: Verdict
   findings: Finding[]
   mergeable: boolean | null
-  /** The reviewer's own minutes on this review; null when not stated (DL-068). */
+  /** The reviewer's own minutes on this review; null when not stated (DL-067). */
   minutes?: number | null
   statement: string
   patch_sha256_reviewed: string

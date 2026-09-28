@@ -312,7 +312,7 @@ export interface RepoSummary {
 /**
  * The server's record that a person opened the baseline of a repository with rows
  * (`POST /repos/{name}/baseline-read`, the `repo.baseline_read` event): the first read,
- * who made it and when. Home task 6 "Read the baseline" completes on it (DL-075).
+ * who made it and when. Home task 6 "Read the baseline" completes on it (DL-074).
  */
 export interface BaselineRead {
   at: string

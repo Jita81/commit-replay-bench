@@ -2,7 +2,7 @@
 
 Home task 6 is called "Read the baseline", and until this record it could complete only on an
 active sign-off, so a baseline read and not signed never completed and the tag contradicted the
-task's own name (G-165). The decision (DL-075): the Baseline screen tells the server when a
+task's own name (G-165). The decision (DL-074): the Baseline screen tells the server when a
 person has the map of a repository with rows in front of them; the server appends one
 ``repo.baseline_read`` event per person per repository on the repository's audit trace; and
 ``GET /repos/{name}`` serves the first such read as ``baseline_read: {at, by}``, which is what
@@ -22,14 +22,14 @@ What it does: Pins that a viewer may record a read (the least role that can open
 How:          ``make_env`` over the seed (``alpha`` has graded rows, ``beta`` has none);
               ``login`` switches the person.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         none (DL-075)
+ADRs:         none (DL-074)
 Works with:   src/crb/server/routes/repos.py (the route and ``repo_detail``),
               src/crb/server/schemas.py (``BaselineRead``), tests/fixtures/server_seed.py
               (``alpha`` has graded rows, ``beta`` none), docs/API.md (the route row and
               the event vocabulary), ui/src/screens/Home/HomePage.tsx (task 6 reads the
               field)
 Tested by:    tests/test_server_baseline_read.py
-Touch when:   never for a new repository; what counts as "read the baseline" changes — change DL-075
+Touch when:   never for a new repository; what counts as "read the baseline" changes — change DL-074
               first.
 """
 

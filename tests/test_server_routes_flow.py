@@ -496,7 +496,7 @@ class TestConnectAndProve:
 class TestDecideAndLicense:
     def test_the_decisions_start_and_its_cost_are_not_invented(self, env: Env) -> None:
         s = stream(reading(env), "decide-and-license")
-        # both halves are recorded now (ADR-0028, DL-068): nothing is served as missing,
+        # both halves are recorded now (ADR-0028, DL-067): nothing is served as missing,
         # and with nothing recorded yet each reads unmeasured with its reason, never zero
         assert s["not_captured"] == []
         lt = lead(s, "routed_deliver_to_signed")

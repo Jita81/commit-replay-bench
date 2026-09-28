@@ -79,7 +79,7 @@ class ReviewCreateRequest(BaseModel):
     loaded — it must equal the row's pack ``diff_sha256`` (422 ``review_refused`` /
     ``patch_hash_mismatch``). ``not_reviewed: true`` records that the reviewer looked
     and could not review: no findings, no ``mergeable``, no hash. ``minutes`` is the
-    reviewer's own time on the review, optional, 1 to 480 (DL-068)."""
+    reviewer's own time on the review, optional, 1 to 480 (DL-067)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -87,7 +87,7 @@ class ReviewCreateRequest(BaseModel):
     statement: str = Field(min_length=1, max_length=8000)
     findings: list[FindingIn] = Field(default_factory=list, max_length=200)
     mergeable: bool | None = None
-    #: How long the review took, in whole minutes, as the reviewer states it (DL-068):
+    #: How long the review took, in whole minutes, as the reviewer states it (DL-067):
     #: optional, never guessed from timestamps, and at most a working day.
     minutes: int | None = Field(default=None, ge=1, le=MAX_REVIEW_MINUTES, strict=True)
     patch_sha256: str = Field(default="", max_length=_SHA256_LEN)
@@ -143,7 +143,7 @@ class ReviewOut(BaseModel):
     verdict: str
     findings: list[FindingOut]
     mergeable: bool | None
-    #: The reviewer's own minutes on this review; ``null`` when not stated (DL-068).
+    #: The reviewer's own minutes on this review; ``null`` when not stated (DL-067).
     minutes: int | None = None
     statement: str
     patch_sha256_reviewed: str

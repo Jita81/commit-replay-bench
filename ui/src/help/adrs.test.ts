@@ -14,7 +14,7 @@
  * How:          `import.meta.glob(..., { eager: true, query: '?raw' })` over docs/adr — the
  *               same files the lazy glob in adrs.ts bundles.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-074)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/help/adrs.ts (the list under test), docs/adr/*.md (the records it
  *               must match), ui/src/screens/Help/HelpPage.tsx (the list it renders),
  *               ui/src/help/docs.test.ts (the guides' twin test)

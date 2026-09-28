@@ -22,7 +22,7 @@
  * How:          `useParams` → `isDocName` / `isAdrName` → `loadDoc` / `loadAdr` in an effect
  *               keyed on the name and a retry counter → `renderMarkdown`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-074)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/help/docs.ts (`loadDoc`, `DOC_TITLES`), ui/src/help/adrs.ts (`loadAdr`,
  *               the record titles), ui/src/help/markdown.ts (the renderer),
  *               ui/src/screens/Help/HelpPage.tsx (the index this returns to),

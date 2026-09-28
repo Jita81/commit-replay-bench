@@ -30,7 +30,7 @@ What it does: Validates every config through ``RepoConfig.from_dict`` (an invali
               mined tasks' date range and the share of the clone's non-merge history since
               the oldest — the miner's recency bias, shown); records a person's first read
               of the baseline (``repo.baseline_read``) and serves the first one on the
-              detail as ``baseline_read`` — Home task 6 (DL-075). Also the home of
+              detail as ``baseline_read`` — Home task 6 (DL-074). Also the home of
               ``get_repo_or_404`` and ``cached_profile`` that other route modules import.
 How:          ``_validated_config`` → ``Repo`` row + ``append_system_event`` on the repo's
               system trace; ``compute_profile`` walks the clone with ``profile_repo`` and
@@ -387,7 +387,7 @@ def repo_summary(session: Session, repo: Repo) -> RepoSummary:
     )
 
 
-#: The audit action a person's read of the baseline appends (DL-075).
+#: The audit action a person's read of the baseline appends (DL-074).
 BASELINE_READ = "repo.baseline_read"
 
 
@@ -566,7 +566,7 @@ def record_baseline_read(
 
     The Baseline screen calls it once it shows the map of a repository with rows, so Home's
     "Read the baseline" completes on a read the server recorded, not on a sign-off (G-165,
-    DL-075). A repository with no graded row has no baseline to read: 409 ``baseline_empty``.
+    DL-074). A repository with no graded row has no baseline to read: 409 ``baseline_empty``.
     """
     get_repo_or_404(db, name)
     rows = int(db.execute(select(func.count(Grade.seq)).where(Grade.repo == name)).scalar_one())

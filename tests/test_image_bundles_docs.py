@@ -33,7 +33,7 @@ How:          A regex per ignore pattern (``**`` → any depth, ``*`` / ``?`` �
               segment), evaluated against the path and each of its parent directories, last
               match wins — the rule moby's ``patternmatcher`` implements.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
-ADRs:         none (DL-074)
+ADRs:         none (DL-073)
 Works with:   deploy/Dockerfile.dockerignore (the rule under test), deploy/Dockerfile (the UI
               build stage copies the whole context), ui/plugins/requireBundledDocs.ts (the build
               gate, tested by ui/plugins/requireBundledDocs.test.ts),

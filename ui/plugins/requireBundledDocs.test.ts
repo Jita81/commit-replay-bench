@@ -16,7 +16,7 @@
  * How:          `mkdtempSync` trees; `buildStart` called with a `this` whose `error` throws, as
  *               Rollup's does; the config imported and its plugins' names read.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-074)
+ * ADRs:         none (DL-073)
  * Works with:   ui/plugins/requireBundledDocs.ts, ui/vite.config.ts, ui/src/help/docs.ts
  *               (`DOC_NAMES`), deploy/Dockerfile.dockerignore (the context the refusal guards),
  *               tests/test_image_bundles_docs.py (the ignore file's half), docs/PREVENTION.md P-173

@@ -7,7 +7,7 @@
  * horizontal rules, links, emphasis, strong and inline code. Anything else — an HTML tag,
  * an image, a footnote — is shown as the text it is. Links: another bundled guide becomes an
  * in-app link to /help/docs/…, and so does a bundled decision record (`adr/0015-….md` from a
- * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-074); an
+ * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-073); an
  * in-page `#anchor` stays; `http(s)` gets `rel="noopener noreferrer"`; any other relative
  * path (a source file) renders as text because the UI has no target for it.
  *

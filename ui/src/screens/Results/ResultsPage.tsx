@@ -223,7 +223,7 @@ export function ResultsPage() {
   // ratchet in the page's test refuses any `<query>.data` read (PR #54 review)
   const mapData = currentData(map)
   // a person with the map of a repository with rows in front of them has read its baseline:
-  // the server records it once per person, and Home's task 6 completes on it (DL-075)
+  // the server records it once per person, and Home's task 6 completes on it (DL-074)
   useRecordBaselineRead(repo, (mapData?.summary.n_total ?? 0) > 0)
   const controlsData = currentData(controls)
   const oracleData = currentData(oracle)

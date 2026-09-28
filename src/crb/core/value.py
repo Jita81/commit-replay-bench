@@ -30,7 +30,7 @@ What is measured, and the rule for each
   multiplies the two Wilson bounds (conservative; spend treated as known). The ledger records
   dollars; pounds use a fixed, stated conversion (:data:`DEFAULT_USD_PER_GBP`, a parameter).
   Money is summed by THE spend rule, ``crb.core.flow.spend_of_rows`` (the flow reading's too,
-  DL-067): a row whose cost is not a measurement is counted apart, never as $0, and while a
+  DL-066): a row whose cost is not a measurement is counted apart, never as $0, and while a
   blind attempt in scope is unpriced the per-pound figures are withheld with the reason —
   a figure per pound over a floor would overstate.
 * **Process loss** — rows and pounds lost to ``budget`` / ``protocol`` / ``harness`` /

@@ -17,7 +17,7 @@
  *               never kept locally: the GitHub App info, the repositories, the chosen
  *               repository's stages (`stagesFor`), the server's record that a person read the
  *               baseline (`baseline_read`) or a sign-off the API flags `active` and not
- *               `stale` (task 6 — a stale one lifts nothing, so completes nothing; DL-075),
+ *               `stale` (task 6 — a stale one lifts nothing, so completes nothing; DL-074),
  *               the users list (task 7) and the active factory run (task 8: "Backlog frozen —
  *               run the factory" until a run exists, then "In progress — item k of n") decide
  *               them. A read that fails is never read as absence (G-164): one error envelope
@@ -32,7 +32,7 @@
  *               (sponsor, auditor) and an approver get the same list read as a progress
  *               report — "Where this deployment is" — not as their to-do list: an approver
  *               outranks an operator but works none of the tasks, so the operators' view is
- *               gated on operator or admin (G-911, DL-075); a measurement in flight
+ *               gated on operator or admin (G-911, DL-074); a measurement in flight
  *               reads "In progress", and the baseline opens as soon as any row exists.
  *               Every element a reader meets — the kicker, the sandbox banner's lead line,
  *               the "n of 8" summary, each task's status tag and Continue — is a hint
@@ -47,7 +47,7 @@
  *               query's error state (the App's and the runs' included) feeds the one
  *               `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-042, DL-044, DL-075)
+ * ADRs:         none (DL-042, DL-044, DL-074)
  * Works with:   ui/src/components/govuk.tsx (TaskList, NotificationBanner, InsetText),
  *               ui/src/components/ErrorState.tsx (the failed reads, with Retry),
  *               ui/src/help/hints.ts (the `task.home.*` copy; the trigger is `Hint`),
@@ -215,14 +215,14 @@ export function HomePage() {
   const measuring = measureStage === 'running'
   // the baseline is readable from the first row, whether or not a run is still adding to it;
   // it counts as read once the server has recorded a person reading it (`baseline_read`, the
-  // `repo.baseline_read` event the Baseline screen writes — DL-075), or once someone has acted
+  // `repo.baseline_read` event the Baseline screen writes — DL-074), or once someone has acted
   // on it — a sign-off the API itself calls active: a stale one (the apparatus moved on,
   // ADR-0015) lifts nothing, so it completes nothing
   const anyRows = (map.data?.summary.n_total ?? 0) > 0
   const baselineActed = Boolean(repo.data?.baseline_read) || (signoffs.data?.items ?? []).some((s) => s.active && !s.stale)
   // the operators' view is for the roles that work the tasks: an operator and an admin. An
   // approver outranks an operator (ROLE_ORDER) but works none of the eight tasks, so they read
-  // the progress report their About block describes (G-911, DL-075)
+  // the progress report their About block describes (G-911, DL-074)
   const operator = can('operator') && me?.role !== 'approver'
   const approverKnown = users.data ? users.data.items.some((u) => u.role === 'approver' || u.role === 'admin') : me?.role === 'approver' || me?.role === 'admin' ? true : undefined
 

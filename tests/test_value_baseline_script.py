@@ -118,7 +118,7 @@ def test_the_failure_kind_is_the_products_rule_not_the_exports(
 
 
 def test_an_empty_cost_is_unpriced_never_a_known_zero(vb: ModuleType, tmp_path: Path) -> None:
-    """DL-067: a row whose cost is not a measurement is counted apart, never as $0. The
+    """DL-066: a row whose cost is not a measurement is counted apart, never as $0. The
     pipe-separated reader turned an empty ``cost`` column into a KNOWN $0, so the baseline
     this script regenerates would have summed it as priced and served per-pound figures that
     must be withheld. ``ValueRow.cost_known`` has no default, so no adapter can claim a price

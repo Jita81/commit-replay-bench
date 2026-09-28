@@ -3,7 +3,7 @@
 Navigation
 ----------
 What it is:   Revision 0012: ``reviews.minutes`` (``INTEGER NULL``) — how long a review took,
-              in whole minutes, as the reviewer stated it (DL-068, G-557).
+              in whole minutes, as the reviewer stated it (DL-067, G-557).
 What it does: Lets the decide stream show the reviewer minutes each decision cost, from a
               figure the reviewer gave rather than one derived from timestamps. Every existing
               review reads ``NULL`` (not stated), and a record that states nothing hashes

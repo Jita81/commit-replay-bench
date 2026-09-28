@@ -195,7 +195,7 @@ class TestPerUnit:
 
     def test_a_floor_is_never_divided(self) -> None:
         # one row reported no price: the sum is a floor, and a cost per unit over it would
-        # understate — the value scorecard's per-pound rule (DL-067), in one place
+        # understate — the value scorecard's per-pound rule (DL-066), in one place
         assert per_unit(Spend(usd=1.0, rows_priced=3, rows_unpriced=1), 4) is None
 
     def test_says_why_a_cost_per_unit_is_withheld(self) -> None:

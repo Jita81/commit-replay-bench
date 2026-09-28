@@ -31,7 +31,7 @@
  *               use support.ts's signed-in fixture); `field` / `env` from
  *               support.ts; the guides' first headings read from docs/ with Node's `fs`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         none (DL-074)
+ * ADRs:         none (DL-073)
  * Works with:   ui/src/screens/Home/HomePage.tsx (the task list), ui/src/screens/Help/HelpPage.tsx
  *               and DocPage.tsx (the glossary, the guides and the records), ui/src/help/help.ts
  *               (the About blocks it asserts), ui/src/screens/Login/LoginPage.tsx (the About
