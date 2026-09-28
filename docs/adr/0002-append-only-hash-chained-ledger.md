@@ -36,6 +36,18 @@ measurement]`. Convention is not evidence.
 5. The database store (P4) holds the same rows with the same chain; `grades`, `events` and
    `signoffs` tables have DB triggers that forbid `UPDATE` and `DELETE`. Revocation of a
    sign-off is a **new row** referencing the revoked one.
+   *Amendment (2026-09-27, DL-081):* the triggers must also hold against the statements
+   that do not look like an `UPDATE` or a `DELETE` — every SQLite connection the product
+   opens turns `PRAGMA recursive_triggers` on, so `REPLACE`'s implicit delete meets the
+   delete trigger, and PostgreSQL gets a statement-level `BEFORE TRUNCATE` trigger on every
+   append-only table. `/health` counts a trigger only when it is live (on its own table,
+   with the installer's whole definition, and on PostgreSQL enabled and calling an
+   unaltered function), and the installer re-creates only what is not live, so the API and
+   the worker can run as a PostgreSQL role that does not own the tables and therefore
+   cannot disable, drop or neuter them (docs/DEPLOYMENT.md §3.3). What the triggers cannot
+   stop is DDL, on the tables or on their triggers — retyping a column with `USING`,
+   dropping a column or the table rewrites or removes rows with no trigger firing — and
+   only the owner can issue it.
 6. JSONL is the portable interchange: the store imports the census `grades.jsonl` (1,071
    rows, stamped `provenance="imported:…"`, `belt_set="v3-legacy"` where belt 4 is absent)
    and exports rows verbatim. **Only the complete ledger verifies standalone from

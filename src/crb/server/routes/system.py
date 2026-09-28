@@ -12,8 +12,12 @@ store-level checks:
   the detail where applicable (an empty store has none). A ``create_all`` store whose
   schema equals the head (a ``crb serve`` without ``crb migrate``) is ``degraded``, not
   down: complete, but unstamped until ``crb migrate`` runs.
-* ``append_only`` — the ledger triggers exist AND an ``UPDATE`` on ``grades`` is refused
-  (:func:`crb.store.ledger.assert_append_only`). Missing triggers = ``down``.
+* ``append_only`` — every expected ledger trigger is LIVE (on its own table with the
+  installer's whole definition; on PostgreSQL enabled and calling ``crb_append_only`` —
+  :func:`crb.store.db.expected_triggers`) AND an ``UPDATE`` on ``grades`` is refused, on
+  SQLite a ``REPLACE`` too (:func:`crb.store.ledger.assert_append_only`; on an empty
+  ``grades`` table none is tried and the detail says so). A missing, moved, disabled or
+  ``WHEN``-neutered trigger = ``down``, named in ``data.missing``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``; and
   the sign-off and review chains walked from their stored columns — a break = ``down``.
@@ -98,7 +102,8 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               ``failure_detail`` and ``aggregate``), src/crb/observability/build_stamp.py
               (the ``build`` probe and the ``served`` block),
               src/crb/store/migrate.py (``head_status_on`` — the one head check; the ledger
-              probe calls ``assert_append_only`` in src/crb/store/ledger.py),
+              probe calls ``assert_append_only`` in src/crb/store/ledger.py; the
+              ``append_only`` probe counts ``expected_triggers`` from src/crb/store/db.py),
               src/crb/cli/commands/service.py (``crb doctor`` renders ``migrations_result``
               and ``probe_worker``), src/crb/observability/metrics.py
               (the gauges and the registry — the API's series only; the worker serves its
@@ -123,7 +128,7 @@ import datetime as _dt
 import os
 import threading
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -147,10 +152,10 @@ from crb.server.routes.reviews import verify_reviews
 from crb.server.routes.signoffs import verify_signoffs
 from crb.server.secrets import SecretsFile
 from crb.server.settings import Settings
+from crb.store.db import expected_triggers, live_triggers
 from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import (
-    APPEND_ONLY_TABLES,
     LEASE_ROW_PREFIX,
     Grade,
     Repo,
@@ -264,41 +269,40 @@ def probe_migrations(factory: sessionmaker[Session], *, request_id: str = "") ->
     return probes.run_probe("migrations", _read, request_id=request_id)
 
 
-def _count_triggers(s: Session) -> int:
-    """How many of the expected ``<table>_no_update`` / ``_no_delete`` triggers exist."""
-    dialect = s.get_bind().dialect.name
-    names = [f"{t}_{kind}" for t in APPEND_ONLY_TABLES for kind in ("no_update", "no_delete")]
-    rows: Iterable[str]
-    if dialect == "sqlite":
-        rows = s.execute(text("SELECT name FROM sqlite_master WHERE type = 'trigger'")).scalars()
-    elif dialect == "postgresql":
-        rows = s.execute(text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")).scalars()
-    else:  # pragma: no cover — unsupported by policy
-        return 0
-    present: set[str] = set(rows)
-    return sum(1 for n in names if n in present)
-
-
 def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
-    """``append_only``: every trigger present AND an UPDATE on ``grades`` refused —
-    counting alone would pass a trigger that exists but does not fire. An accepted UPDATE
-    is ``down`` in the ledger's own words (:class:`LedgerIntegrityError` names no
-    secret); a read that raises is ``down`` with the fixed ``failure_detail``."""
-    expected = 2 * len(APPEND_ONLY_TABLES)
+    """``append_only``: every expected trigger LIVE (present on its own table with the
+    installer's whole definition, enabled, and calling the append-only function) AND an
+    UPDATE on ``grades`` refused (on SQLite a ``REPLACE`` too) — counting names alone passed a
+    trigger that exists but does not fire. On an empty ``grades`` table no write is tried and
+    the ``ok`` detail says so ("no grades row to test the UPDATE on").
+    An accepted write is ``down`` in the ledger's own words (:class:`LedgerIntegrityError`
+    names no secret); a read that raises is ``down`` with the fixed ``failure_detail``. A
+    ``down`` names the missing triggers in ``data.missing``."""
 
     def _read() -> ProbeResult:
         with factory() as s:
-            found = _count_triggers(s)
-        data = {"triggers": found, "expected": expected}
+            names = [n for _, n in expected_triggers(s.get_bind().dialect.name)]
+            live = live_triggers(s.connection())
+        expected = len(names)
+        missing = sorted(n for n in names if n not in live)
+        data: dict[str, Any] = {"triggers": expected - len(missing), "expected": expected}
+        if missing:
+            data["missing"] = missing
         try:
-            assert_append_only(factory)
+            tried = assert_append_only(factory)
         except LedgerIntegrityError as exc:
             return ProbeResult("append_only", DOWN, str(exc), data)
-        if found < expected:
+        if missing:
             return ProbeResult(
-                "append_only", DOWN, f"{found}/{expected} append-only triggers present", data
+                "append_only",
+                DOWN,
+                f"{expected - len(missing)}/{expected} append-only triggers present",
+                data,
             )
-        return ProbeResult("append_only", OK, "triggers present; UPDATE on grades refused", data)
+        # never claim an UPDATE that was not tried: an empty grades table has no row to try
+        # it on, and the live-trigger count above is then the whole proof
+        refused = "UPDATE on grades refused" if tried else "no grades row to test the UPDATE on"
+        return ProbeResult("append_only", OK, f"triggers present; {refused}", data)
 
     return probes.run_probe("append_only", _read, request_id=request_id)
 

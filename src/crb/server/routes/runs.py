@@ -38,21 +38,25 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               (``append_system_event``, and ``commit_audited``: an event and its change in
               one commit, the trace's ``seq`` read under the events lock).
 How:          FastAPI handlers over ``JobQueue`` (queue writes) and read-only SQLAlchemy
-              queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``.
+              queries; ``run_out`` is the one place a ``Run`` row becomes a ``RunOut``;
+              ``append_system_event`` allocates a trace's next ``seq`` under the events
+              write lock (``lock_event_writes``) inside the caller's transaction.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0006-zero-raw-retention-and-evidence-packs.md
 Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, RunFactoryOut —
               mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
-              the operator as actor), src/crb/server/worker.py (what a queued run becomes;
-              the counts shapes per kind), src/crb/store/models.py (Run, Grade, Event, User —
-              the override's display name resolved at read), docs/API.md#runs (the
-              ``counts`` shapes per kind, queue position, the factory posture),
+              the operator as actor), src/crb/store/events.py (``lock_event_writes`` — the
+              one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
+              queued run becomes; the counts shapes per kind), src/crb/store/models.py
+              (Run, Grade, Event, User — the override's display name resolved at read),
+              docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
+              factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py
-Touch when:   never for a new repository; a run parameter is added (schema field → ``params`` here →
-              the worker reads it → docs/API.md → the UI type); a field is added to ``RunOut`` (the
-              UI type first); a run kind is added (decide in ``_counts`` whether it is a build
-              kind).
+Touch when:   never for a new repository; a run parameter is added (schema field →
+              ``params`` here → the worker reads it → docs/API.md → the UI type); a field
+              is added to ``RunOut`` (the UI type first); a run kind is added (decide in
+              ``_counts`` whether it is a build kind).
 
 """
 
@@ -106,7 +110,7 @@ from crb.server.schemas import (
     StepEventOut,
 )
 from crb.server.secrets import secrets_dir_for
-from crb.store.events import lock_event_seq
+from crb.store.events import lock_event_writes
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
@@ -255,7 +259,15 @@ def append_system_event(
     Not committed here: the caller commits it together with the state change it
     records, so an audit event and its cause are one transaction. The payload is
     redacted by :class:`StepEvent` at construction.
+
+    The ``seq`` is allocated under the ``events`` write lock
+    (:func:`crb.store.events.lock_event_writes`), held until the caller's transaction ends,
+    so a concurrent writer to the same trace — another request, the worker's
+    ``learning_tick`` — waits and takes the next ``seq`` instead of breaking
+    ``uq_events_trace_seq`` after the caller's side effect (EI-1, DL-080). The caller
+    should commit promptly: on SQLite the lock is the database's write lock.
     """
+    lock_event_writes(session)
     last = session.execute(
         select(func.max(Event.seq)).where(Event.trace_id == trace_id)
     ).scalar_one_or_none()
@@ -283,7 +295,7 @@ AUDIT_ATTEMPTS = 3
 def commit_audited(db: Session, write: Callable[[], None]) -> None:
     """Apply ``write`` (a state change and its ``system`` event) and commit them together.
 
-    The ``events`` write lock (:func:`crb.store.events.lock_event_seq`) is taken BEFORE
+    The ``events`` write lock (:func:`crb.store.events.lock_event_writes`) is taken BEFORE
     ``write`` reads the trace's last ``seq``, so writers to one trace are serialised on
     SQLite and PostgreSQL: a burst of refused sign-ins on the shared unknown-account trace
     once ran out of the retries below and answered 500 (found by AUTH-1's regression
@@ -292,7 +304,7 @@ def commit_audited(db: Session, write: Callable[[], None]) -> None:
     transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
     """
     for attempt in range(AUDIT_ATTEMPTS):
-        lock_event_seq(db)
+        lock_event_writes(db)
         write()
         try:
             db.commit()

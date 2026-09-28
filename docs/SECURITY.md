@@ -562,8 +562,22 @@ a ticket or a shell history again (review 2026-09-13, action #9).
 ### 3.5 Evidence integrity — `crb.core.ledger`, `crb.store`
 
 - Grade rows, events and sign-offs are **append-only**: database triggers refuse `UPDATE`
-  and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); `/health` proves the
-  triggers are live on every call (`assert_append_only`). [measured] `tests/test_store_*.py`
+  and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); SQLite's `REPLACE`
+  meets the delete trigger because every product connection turns `recursive_triggers` on,
+  and PostgreSQL's `TRUNCATE` meets a statement-level trigger (DL-081). `/health` proves the
+  triggers are live on every call: each expected trigger on its own table with the
+  installer's whole definition (a `WHEN` that never holds is not live) and, on PostgreSQL,
+  enabled and calling an unaltered function, plus a refused `UPDATE` (and on SQLite a
+  refused `REPLACE`) once `grades` has a row — on an empty ledger the detail says no write
+  was tried (`probe_append_only`, `assert_append_only`). What remains is DDL, on the
+  tables or on their triggers, which only the tables' owner can issue: a trigger dropped,
+  disabled or neutered, or a table altered so rows change with no trigger firing
+  (`ALTER TABLE … ALTER COLUMN … TYPE … USING`, `DROP COLUMN`, `DROP TABLE`; `verify`
+  catches a rewrite that was not re-hashed). On PostgreSQL run the
+  API and the worker as a role that does not own the tables
+  ([DEPLOYMENT §3.3](DEPLOYMENT.md#33-postgresql)) — the shipped chart and compose do not
+  split the roles yet [gap] G-709 (docs/PREVENTION.md P-210). [measured]
+  `tests/test_store_db.py`, on SQLite and PostgreSQL
 - Every grade row carries `prev_hash` and `row_hash` (SHA-256 over canonical JSON); the chain
   verifies end to end (`crb ledger verify`, `GET /ledger/verify`); an exported JSONL verifies
   standalone without the database. [measured] 1,071-row census: chain verifies; a single
@@ -607,7 +621,7 @@ subject to a retention window.
 | T7c | The verify button is used to burn subscription quota | API | 3.3.1 one probe per 10 s per deployment, one no-tool Haiku turn, admin-only |
 | T7d | API-host compromise | secrets file | token compromise: rotate (`claude setup-token`, paste, revoke the old one) — see 3.3.1 |
 | T7e | The `claude setup-token` CLI reads the API's own secrets from its environment | API host | 3.3.1 allowlisted environment and a throwaway `CLAUDE_CONFIG_DIR` |
-| T8 | An insider edits a past verdict | ledger | 3.5 triggers + hash chain + `/health` proof |
+| T8 | An insider edits a past verdict | ledger | 3.5 triggers (UPDATE, DELETE, REPLACE, TRUNCATE) + hash chain + `/health` proof of live triggers; the application role does not own the tables where the platform allows (DEPLOYMENT §3.3) |
 | T9 | A false pass is recorded because a runner could not attribute a failure | grade | fail-closed parse rule (`unattributed failure` ⇒ belt 3 false), harness errors ⇒ not clean |
 | T10 | A green with no real change is credited (build-cache ghost) | grade | belt 4 `source_changed` |
 | T11 | Session hijack / CSRF / privilege escalation | API | 3.3 `__Host-` cookies, session-bound CSRF, revocable sessions (logout, sign out everywhere), 3.4 RBAC, first-login OIDC roles |

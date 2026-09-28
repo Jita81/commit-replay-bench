@@ -77,8 +77,9 @@ Works with:   src/crb/intake/client.py (the six verbs and the stop reasons),
               it; the Register act), src/crb/store/models.py (``WorkerRow`` — the lease row)
 Tested by:    tests/test_intake_service.py, tests/test_server_routes_intake.py,
               tests/test_intake_worker.py
-Touch when:   never for a new repository; a fifth label or a new stop reason appears (publish it in
-              docs/API.md first); never to widen what is written to a ticket without the ADR.
+Touch when:   never for a new repository (a board is linked in the repository's config); a
+              fifth label or a new stop reason appears (publish it in docs/API.md first);
+              never to widen what is written to a ticket without the ADR.
 """
 
 from __future__ import annotations
@@ -897,12 +898,15 @@ class FencedTracker:
 
 def _register(home: FactoryHome, item: BacklogItem, *, actor: str) -> str:
     """Register through exactly the path the API uses: freeze the first item, evolve the
-    rest. Returns the word for what happened (``frozen`` / ``evolved``)."""
-    if home.load_backlog() is None:
-        home.register_backlog([item], actor=actor)
-        return "frozen"
-    home.register_evolution(item, actor=actor)
-    return "evolved"
+    rest. Returns the word for what happened (``frozen`` / ``evolved``). The decision and the
+    write hold one registration lock, so two tickets on an empty backlog cannot both freeze
+    (EI-7)."""
+    with home.registration():
+        if home.load_backlog() is None:
+            home.register_backlog([item], actor=actor)
+            return "frozen"
+        home.register_evolution(item, actor=actor)
+        return "evolved"
 
 
 def poll_repository(

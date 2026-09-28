@@ -10,15 +10,17 @@ What it does: Pins that the register is viewer-readable and 404s an unknown repo
               evolving the rest, superseding itself as ``-v2`` — and is refused while a factory
               run holds the backlog; that a product-scoped item never reaches a customer's
               backlog; that a link is prospective; that a tick is idempotent; that the events
-              store round-trips and refuses a forged record; and that a concurrent append
-              re-chains rather than forking the chain.
+              store round-trips and refuses a forged record; that a concurrent append
+              re-chains rather than forking the chain; and that two registrations at once on
+              an empty backlog keep both items (EI-7, P-213).
 How:          ``make_env`` over the seed; rows appended through ``DbLedger``; the chain read
               back through ``EventsPreventionStore``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md
 Works with:   src/crb/server/routes/prevention.py (under test), src/crb/server/prevention_state.py
               (the store and the tick), src/crb/core/prevention.py (the records),
-              tests/fixtures/server_seed.py (the seeded store and the four roles)
+              tests/fixtures/server_seed.py (the seeded store and the four roles),
+              tests/fixtures/concurrency.py (the staged race)
 Tested by:    tests/test_server_routes_prevention.py
 Touch when:   never for a new repository; a route or a record kind of the loop is added.
 """
@@ -45,6 +47,7 @@ from crb.server.prevention_state import (
 from crb.server.routes.runs import append_system_event
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
+from fixtures.concurrency import at_once, pause_after
 from fixtures.posture import with_posture_labels
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env, user_id
 
@@ -432,3 +435,40 @@ def test_the_seq_check_reads_the_whole_trace_so_another_action_never_forks_or_bl
     recs = _records(env)
     assert [x.row_hash for x in recs][-1] == written[0].row_hash
     assert recs[1].prev_hash == recs[0].row_hash
+
+
+def test_two_prevention_registrations_on_an_empty_backlog_keep_both_items(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-7, the prevention route: two filed items registered at once on a repository with no
+    backlog both loaded none and both FROZE, so the second freeze replaced the first — both
+    answered 201 ``frozen`` and the chain recorded both as registered while only one was on
+    the backlog. The route's load, orphan check and freeze-or-evolve now hold the backlog's
+    registration lock: one freezes, the other evolves onto it, and both are on the backlog
+    the chain names."""
+    _seed(
+        env,
+        _proposal("prevent-aaaaaaaaaaaa", "infra"),
+        _proposal("prevent-bbbbbbbbbbbb", "operator", i=2),
+    )
+    pause_after(monkeypatch, FactoryHome, "load_backlog")
+
+    def register(item_id: str) -> Any:
+        return lambda: env.post(f"/learn/items/{item_id}/register?repo={ALPHA}")
+
+    results = at_once(register("prevent-aaaaaaaaaaaa"), register("prevent-bbbbbbbbbbbb"))
+    assert [getattr(r, "status_code", type(r).__name__) for r in results] == [201, 201], [
+        getattr(r, "text", r) for r in results
+    ]
+    assert sorted(r.json()["how"] for r in results) == ["evolved", "frozen"]
+    active = FactoryHome(env.settings.home, ALPHA).load_backlog()
+    assert active is not None
+    assert {i.id for i in active.all_items()} == {"prevent-aaaaaaaaaaaa", "prevent-bbbbbbbbbbbb"}
+    registered = [x for x in _records(env) if x.kind == "registered"]
+    assert sorted(str(x.payload["registered_id"]) for x in registered) == [
+        "prevent-aaaaaaaaaaaa",
+        "prevent-bbbbbbbbbbbb",
+    ]
+    # the evolution's record names the backlog both items are on
+    evolved = next(x for x in registered if x.payload["how"] == "evolved")
+    assert evolved.payload["evolutions_hash"] == active.evolutions_hash
