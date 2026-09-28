@@ -53,6 +53,8 @@ from crb.store.ledger import _to_model
 from crb.store.models import (
     APPEND_ONLY_TABLES,
     Base,
+    ClassLabelRow,
+    ClassSetActRow,
     Event,
     EvidencePackRow,
     LibraryActRow,
@@ -139,6 +141,31 @@ def _one_row(table: str) -> object:
             prev_hash=GENESIS_HASH,
             row_hash="e" * 64,
         )
+    if table == "class_set_acts":
+        return ClassSetActRow(
+            act_id="k" * 32,
+            schema="crb.class_set.v1",
+            org="acme",
+            version_id="acme/classes@v1",
+            digest="d" * 64,
+            act="propose",
+            actor="operator@example.org",
+            body_json={"version": {}},
+            created="2026-09-28T12:00:00+00:00",
+            prev_hash=GENESIS_HASH,
+            row_hash="f" * 64,
+        )
+    if table == "class_labels":
+        return ClassLabelRow(
+            label_id="m" * 32,
+            taxonomy="acme/classes@v1",
+            repo="r",
+            task_id="x" * 40,
+            capability_class="parser-fix",
+            source="person",
+            labeller="operator@example.org",
+            created="2026-09-28T12:00:00+00:00",
+        )
     raise AssertionError(table)
 
 
@@ -151,7 +178,15 @@ def _pk(table: str) -> str:
         "reviews": "seq",
         "task_qualifications": "seq",
         "library_acts": "seq",
+        "class_set_acts": "seq",
+        "class_labels": "seq",
     }[table]
+
+
+def _col(table: str) -> str:
+    """The text column a tampering UPDATE rewrites: the repository, or — for the class sets'
+    acts, which belong to an organisation — the organisation."""
+    return "org" if table == "class_set_acts" else "repo"
 
 
 def _count(b: Backend, table: str) -> int:
@@ -302,10 +337,12 @@ def test_append_only_table_refuses_update(backend: Backend, table: str) -> None:
         s.add(_one_row(table))
         s.commit()
     with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
-        c.execute(text(f"UPDATE {table} SET repo = 'tampered'"))
+        c.execute(text(f"UPDATE {table} SET {_col(table)} = 'tampered'"))
     with backend.engine.connect() as c:
         assert (
-            c.execute(text(f"SELECT COUNT(*) FROM {table} WHERE repo = 'tampered'")).scalar_one()
+            c.execute(
+                text(f"SELECT COUNT(*) FROM {table} WHERE {_col(table)} = 'tampered'")
+            ).scalar_one()
             == 0
         )
     assert _count(backend, table) == 1
@@ -387,7 +424,7 @@ def test_replace_cannot_rewrite_an_append_only_row(backend: Backend, table: str,
         del verb  # one statement stands for both spellings
         stmt = (
             f"INSERT INTO {table} SELECT * FROM {table} "
-            f"ON CONFLICT ({_pk(table)}) DO UPDATE SET repo = 'tampered'"
+            f"ON CONFLICT ({_pk(table)}) DO UPDATE SET {_col(table)} = 'tampered'"
         )
     else:
         stmt = f"{verb} {table} SELECT * FROM {table}"
@@ -395,7 +432,9 @@ def test_replace_cannot_rewrite_an_append_only_row(backend: Backend, table: str,
         c.execute(text(stmt))
     with backend.engine.connect() as c:
         assert (
-            c.execute(text(f"SELECT COUNT(*) FROM {table} WHERE repo = 'tampered'")).scalar_one()
+            c.execute(
+                text(f"SELECT COUNT(*) FROM {table} WHERE {_col(table)} = 'tampered'")
+            ).scalar_one()
             == 0
         )
     assert _count(backend, table) == 1

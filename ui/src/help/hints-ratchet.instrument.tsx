@@ -6,8 +6,8 @@
  * ----------
  * What it is:   `INSTRUMENT_SCREENS`: the `SCREENS` entries (route, path, element, api, roles)
  *               for /factory, /posture, /repos, /repos/:name, /runs, /runs/:id,
- *               /tasks/:repo/:taskId, /library/:repo, /capability, /routing, /oracle, /learn,
- *               /ledger and /settings, spread into the ratchet's table.
+ *               /tasks/:repo/:taskId, /library/:repo, /classes, /capability, /routing, /oracle,
+ *               /learn, /ledger and /settings, spread into the ratchet's table.
  * What it does: Keeps each screen's fixtures beside the others of its stream rather than in
  *               the ratchet file, so the ratchet stays the mechanism and this file the data.
  *               Every fixture is a populated state (rows, cells, tiles), never an empty or
@@ -38,6 +38,8 @@ import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
 import { LibraryPage } from '../screens/Library/LibraryPage'
+import { ClassesPage } from '../screens/Classes/ClassesPage'
+import { CLASSES_API } from '../screens/Classes/classes.fixture'
 import { LIBRARY_API } from '../screens/Library/library.fixture'
 import { REGISTER } from '../screens/Learn/register.fixture'
 import { LedgerPage } from '../screens/Ledger/LedgerPage'
@@ -663,6 +665,15 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     element: <LibraryPage />,
     api: LIBRARY_API,
     // a viewer reads; an operator also sees Sponsor and the proposal form; an approver Sign and the withdraw form
+    roles: ['viewer', 'operator', 'approver'],
+  },
+  '/classes': {
+    route: '/classes?org=acme&v=1&class=parser-fix',
+    path: '/classes',
+    element: <ClassesPage />,
+    api: CLASSES_API,
+    // a viewer reads the version, its report and a class's page; an operator also labels and
+    // proposes; an approver signs and revokes
     roles: ['viewer', 'operator', 'approver'],
   },
   '/tasks/:repo/:taskId': {

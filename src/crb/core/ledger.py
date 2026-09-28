@@ -1226,6 +1226,7 @@ def grade_row_from_result(
     builder_error: str = "",
     apparatus_version: str = "",
     context_arm: str = "",
+    taxonomy: str = "",
 ) -> GradeRow:
     """Reduce a :class:`GradeResult` + its evidence-pack hash to the ledger row.
 
@@ -1252,6 +1253,9 @@ def grade_row_from_result(
     given. ``context_arm`` is the brief composer's statement of the arm it built (a
     ``context_arm`` label among ``labels`` says the same); without either the arm is decided
     from the mode and whether the run's loop reached the brief (the ``learn`` label).
+    ``taxonomy`` is the class-set version the run classifies under (ADR-0026 item 9: an
+    organisation's ``<org>/classes@vN``); empty is the global vocabulary. It is stamped inside
+    the row hash at write; a later relabel writes the label table and never this row.
     """
     b = builder or BuilderRef(mode=result.mode)
     apparatus = apparatus_version or _version.APPARATUS_VERSION
@@ -1270,6 +1274,7 @@ def grade_row_from_result(
         process_step=process_step,
         loop=loop_on(given),
         context_arm=context_arm or str(given.get(LABEL_CONTEXT_ARM, "")),
+        taxonomy=taxonomy or GLOBAL_CLASS_SET,
     )
     cost_known = derive_cost_known(
         cost_usd=b.cost_usd,

@@ -346,6 +346,18 @@ export const HELP: ScreenHelp[] = [
     readMore: [{ to: 'OPERATOR#14-the-context-library', label: 'The context library' }],
   },
   {
+    route: '/classes',
+    purpose: 'Your organisation’s own classes of work, each a child of one global class, with one rule that reads only what a ticket carries. A version routes nothing until people have labelled a sample, its validity report passes and an approver other than its sponsor has signed it.',
+    next: {
+      viewer: 'Open a version to read its classes, its validity report and how its commits were held out, then read a class’s page.',
+      operator: 'Propose a version and you become its sponsor. Label derivation commits blind; the report compares the rule with your labels.',
+      approver: 'Read the report and sign a version someone else proposed; you cannot sign one you proposed. Revoke with a reason and it routes nothing.',
+    },
+    numbers: 'Agreement is Cohen’s κ between the rule and people’s labels on derivation commits. Each check of the validity report shows the threshold in force beside it: how many labelled commits the sample needs, and how many confirmation commits a class and size cell needs before a reading registered after the signature can license it.',
+    terms: ['cell', 'signoff'],
+    readMore: [{ to: 'OPERATOR#15-your-organisations-classes', label: 'Your organisation’s classes' }],
+  },
+  {
     route: '/tasks/:repo/:taskId',
     purpose: 'One replayable commit: its specification (the failing test, the source files, the belt scope) and every graded trial against it.',
     next: {

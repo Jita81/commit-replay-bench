@@ -2439,3 +2439,169 @@ export interface LibraryProposeRequest {
   check?: string
   parent_class?: string
 }
+
+// ─── /classes — an organisation's own classes of work (ADR-0026 item 9) ──────────────────
+
+/** What puts a ticket in a class — ticket-time fields only. */
+export interface ClassRuleWire {
+  words: string[]
+  work_item_types: string[]
+  components: string[]
+  labels: string[]
+}
+
+/** One class of an organisation's set (`crb.core.class_sets.OrgClass.to_dict()`). */
+export interface OrgClassWire {
+  slug: string
+  title: string
+  definition: string
+  parent: string
+  rule: ClassRuleWire
+  entry_id: string
+  entry_repo: string
+}
+
+export type ClassSetStatus = 'proposed' | 'signed' | 'revoked'
+
+/** Whether a version routes, the reason code and the reason in words. */
+export interface ClassSetRoute {
+  routes: boolean
+  code: string
+  words: string
+}
+
+/** A version as `GET /classes` and the acts serve it. */
+export interface ClassSetVersionSummary {
+  version_id: string
+  org: string
+  n: number
+  digest: string
+  version: {
+    org: string
+    n: number
+    classes: OrgClassWire[]
+    repos: string[]
+    proposed_by: string
+    derivation_share: number
+    split_seed: string
+    based_on: string
+  }
+  status: ClassSetStatus
+  sponsor: string
+  sponsor_name: string
+  proposed_at: string
+  approver: string
+  approver_name: string
+  signed_at: string
+  revoked: { actor: string; reason: string; at: string } | null
+  route: ClassSetRoute
+  passes?: boolean
+}
+
+export interface ClassSetThresholds {
+  coverage_min: number
+  kappa_min: number
+  sample_min: number
+  per_class_min: number
+  measurable_min: number
+  override_rate_max: number
+  derivation_share: number
+  split_seed: string
+}
+
+/** `GET /classes`. */
+export interface ClassSetIndex {
+  orgs: Array<{ org: string; versions: ClassSetVersionSummary[] }>
+  repos: string[]
+  thresholds: ClassSetThresholds
+}
+
+/** One line of the validity report. */
+export interface ClassSetMeasure {
+  name: 'coverage' | 'agreement' | 'stability' | 'ticket_consistency' | 'size_agreement' | 'measurability' | 'override_rate'
+  value: number | null
+  threshold: string
+  n: number
+  state: 'pass' | 'fail' | 'not_applicable'
+  words: string
+  detail: Record<string, unknown>
+}
+
+/** `GET /classes/{org}/v/{n}`. */
+export interface ClassSetVersionDetail extends ClassSetVersionSummary {
+  report: {
+    version_id: string
+    passes: boolean
+    size_from_points: boolean
+    measures: ClassSetMeasure[]
+    routable_cells: Array<{ class: string; size: string }>
+    commits: number
+    derivation: number
+    confirmation: number
+  }
+  split: Array<{ repo: string; derivation: number; confirmation: number }>
+  class_counts: Array<{ class: string; derivation: number; confirmation: number }>
+  thresholds: ClassSetThresholds
+}
+
+/** `GET /classes/{org}/v/{n}/classes/{slug}` — the page per class. */
+export interface ClassPage {
+  org: string
+  version_id: string
+  status: ClassSetStatus
+  route: ClassSetRoute
+  slug: string
+  title: string
+  definition: string
+  parent: string
+  rule: ClassRuleWire
+  rule_words: string
+  entry_id: string
+  entry_repo: string
+  examples: Array<{ repo: string; sha: string; subject: string; size: string; proxy: boolean }>
+  ticket_slots: Array<{ name: string; question: string; kind: string }>
+  signed_slots: string[]
+  context: Array<{
+    repo: string
+    entry_id: string
+    title: string
+    statement: string
+    sponsor: string
+    sponsor_name: string
+    approver: string
+    approver_name: string
+    signed_at: string
+    effect: string
+  }>
+  library: Array<{ repo: string; work_type: string }>
+  sizes: Array<{
+    repo: string
+    size: string
+    confirmation: number
+    standard: { arm: string; reading_id: string; signed: boolean; ceiling: boolean } | null
+    next: string
+  }>
+}
+
+/** `GET /classes/{org}/v/{n}/label-queue` — derivation commits, blind to the rule and to others. */
+export interface ClassLabelQueue {
+  version_id: string
+  classes: Array<{ slug: string; title: string; definition: string }>
+  items: Array<{
+    repo: string
+    task_id: string
+    message: string
+    ticket: { text: string; work_item_type: string; component: string; labels: string[]; points: number | null; source: string } | null
+    diff: { source_files: number; test_files: number; churn: number }
+    my_label: string
+  }>
+  labelled_by_me: number
+  sample_min: number
+  per_class_min: number
+}
+
+/** `POST /classes/{org}/versions`. */
+export interface ClassSetProposal {
+  repos: string[]
+  classes: Array<{ slug: string; title: string; definition: string; parent: string; rule: Partial<ClassRuleWire> }>
+}

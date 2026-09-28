@@ -1502,3 +1502,64 @@ with nothing read. How long a person takes to write and check an entry has not b
 **No entry reaches a builder's brief in this release.** An entry reaches a brief only inside a
 context arm whose effect was measured against the same arm without it, and the switch for that
 is off. Until then every entry's measured effect reads `unmeasured`.
+
+## 15. Your organisation's classes
+
+The global classes (`bug.fix`, `feature.add` and the rest) are one vocabulary for every
+repository. Your organisation's work is not shaped like everyone else's, so **Classes of work**
+(`/classes`, from any repository's context library) lets it describe its own: a **class set**,
+named `<organisation>/classes@v<N>`, each of whose classes is a child of one global class — its
+**parent** (ADR-0026 item 9). The cell key keeps the parent, so nothing shared outside the
+organisation changes; your class splits a global cell into its own cells.
+
+**One rule, read from the ticket.** A class's rule reads only what a ticket carries: the words
+of its text, its work-item type, its component or area (one of the organisation's components,
+named by signed `component` entries in the repositories' libraries), its labels and its points.
+At intake it reads the ticket; at replay it reads the commit's linked ticket as it stood before
+the change, or else the commit's message, marked as standing in for a ticket. Changed files,
+line counts and churn never decide a class. A person may write `crb:class=<slug>` on a ticket
+to say otherwise; every such override is counted, and too many fail the rule. No reader of a
+tracker's history is bound yet, so today every replayed commit reads its message
+**[gap — G-761]**.
+
+**Commits are held out before any class is proposed.** Each repository's commits are split by a
+seeded hash of the commit into a **derivation** set and a **confirmation** set; the share and the
+seed are recorded on the version. Proposing, labelling and checking use derivation commits only;
+a version licenses a cell only on confirmation commits, through a reading registered after it
+was signed (`POST /readings` with the version as `taxonomy` and the class as `org_class`) — and
+only commits no arm of that reading has graded at the apparatus.
+
+**What a version needs before it routes.** An operator proposes the version and becomes its
+**sponsor**; every commit is read by the rule into the label table (no graded row is touched).
+People label derivation commits on the **labelling screen** — the commit's message, its linked
+ticket and a summary of what changed, never the rule's answer, another person's label or an
+outcome. The **validity report** then compares the rule with those labels and counts the rest,
+against the thresholds ADR-0026 proposes for the operator to fix:
+
+| check | passes when |
+|---|---|
+| coverage | this share of commits falls in a named class: 90% |
+| agreement | Cohen's κ between the rule and people's labels reaches 0.6, over a sample of 50 derivation commits with 5 in each class |
+| stability | the rule repeats its own labels 90% of the time (a fixed rule always does) |
+| ticket consistency | once 20 commits link a ticket, ticket and message give the same class 80% of the time |
+| points against churn | on 20 pointed tickets, the points name the churn tier 80% of the time and a smaller tier at most 10% — this decides only whether points size a ticket |
+| cells with enough commits | a class and size cell has 20 qualified confirmation commits; the version routes only such cells |
+| override rate | at most 20% of classified tickets carry `crb:class=` (the product's proposal; ADR-0026 names the check without a number) |
+
+A different **approver** then signs the version; the sponsor never can (`409
+class_set_refused`, `same_person`). **A version routes nothing** — the intake keeps the global
+classes, the factory's entry gate finds no proven standard in its cells, a run cannot stamp its
+rows with it and no reading of its classes can be registered — while it is unsigned, revoked or
+failing its report.
+
+**A page per class** says what the work is in your words, example derivation commits, the rule in
+words, what a ticket in it must carry, the signed context its builder would get (from each
+repository's library page for it) and what is proven for each size — or "No proven standard"
+and the reading that would prove it.
+
+**Version N+1 is a library act.** A team adds a class by signing a `work-type` entry in a
+repository's library and then proposing the next version from the library
+(`POST /classes/{org}/versions/from-library`, naming the new class's rule): the new version
+keeps the previous one's classes and adds each signed work type that is not yet a class. It is
+still proposed by one person and signed by another. Adding a global class still changes the
+instrument and bumps the apparatus; an organisation's classes never do.

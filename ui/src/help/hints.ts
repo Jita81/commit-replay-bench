@@ -534,6 +534,121 @@ export const HINTS = {
   'button.library.mine':
     'Read the repository’s own files at that commit — its decision records, code owners and layout, lint and formatter settings, tests and change history — and propose entries from them. No model is called. Nothing is signed: each proposal waits for a person to sponsor it and a different approver to sign it. The same commit, with the same graded rows, proposes nothing new.',
 
+  'link.library.classes':
+    'Your organisation’s own classes of work: the kinds of change it makes, each a child of one global class, proposed by one person and signed by another.',
+
+  // ── /classes (screens/Classes/ClassesPage.tsx) — an organisation’s classes, ADR-0026 item 9
+  'link.classes.back':
+    'Back to Decisions, where everything that waits on a person is listed.',
+  'stat.classes.count':
+    'How many class-set versions exist, and how many route. A version routes only when a second person has signed it and its validity report passes.',
+  'col.classes.version':
+    'The version’s name: the organisation, then classes@v and its number. A new number is a new version; nothing is ever edited.',
+  'col.classes.status':
+    'Proposed until an approver who is not its sponsor signs it; revoked when an approver withdraws it with a reason.',
+  'tag.classes.status':
+    'Where the version stands: proposed, signed by a second person, or revoked. Only a signed version whose report passes routes.',
+  'col.classes.sponsor':
+    'The person who proposed the version and so put it forward. They can never also sign it.',
+  'col.classes.approver':
+    'The approver who signed the version. It is always a different person from its sponsor.',
+  'col.classes.routes':
+    'Whether tickets and readings may use this version. It routes nothing while it is unsigned, revoked or failing its validity report.',
+  'tag.classes.routes':
+    'Routes means two people signed it and its validity report passes. Routes nothing means tickets are read by the global classes and no reading can license its classes.',
+  'col.classes.open':
+    'Open the version to read its classes, its validity report and how its commits were held out.',
+  'button.classes.open':
+    'Show this version’s classes, report and split below, and its labelling screen when you can label.',
+  'col.classes.class':
+    'The class’s short name, used on tickets as crb:class= and on every screen that names it.',
+  'col.classes.definition':
+    'What the work in this class is, in the organisation’s own words. Read its page for the whole description.',
+  'col.classes.parent':
+    'The global class this one refines. The cell key keeps the parent, so the class splits a global cell and never changes what is shared outside the organisation.',
+  'col.classes.derivation_n':
+    'How many derivation commits the rule puts in this class. Only these are labelled, shown as examples and used to judge the rule.',
+  'col.classes.confirmation_n':
+    'How many confirmation commits the rule puts in this class. Only these can license it, through a reading registered after the version was signed.',
+  'col.classes.page':
+    'Each class has a page that says what it is, what a ticket in it must carry and what is proven for each size.',
+  'button.classes.page':
+    'Open the page for this class below: what the work is, examples, what a ticket carries, the context and what is proven.',
+  'col.classes.measure':
+    'One check of the validity report. Every check but the points check must pass before the version routes.',
+  'col.classes.result':
+    'The check’s result: a share of commits, κ for agreement with a person, or the number of cells with enough confirmation commits.',
+  'col.classes.n':
+    'How many commits, labels or tickets the result was read over. A small number is why a check fails even when the result looks good.',
+  'col.classes.state':
+    'Pass, fail, or not applicable when the check has too few linked tickets to apply.',
+  'tag.classes.measure_state':
+    'Whether this check meets the threshold the architecture decision sets. Not applicable counts as passing; a failing check stops the version routing.',
+  'col.classes.words':
+    'What the result means, in words, with the counts behind it.',
+  'col.classes.threshold':
+    'The bar the check must clear. The values are proposals the operator fixes; the page shows the ones in force.',
+  'col.classes.repo':
+    'A repository whose commits this version describes.',
+  'col.classes.derivation':
+    'Commits held for deriving the classes: about one in three, chosen by a seeded hash before any class was proposed.',
+  'col.classes.confirmation':
+    'Commits held for licensing: the rest. A commit used to derive or check a class never licenses it.',
+  'button.classes.sign':
+    'Sign the version you read. The signature names its exact content, so a changed version needs a new signature.',
+  'button.classes.sign_own':
+    'You proposed this version, so you cannot sign it. A different approver must.',
+  'field.classes.reason':
+    'Why the version is being withdrawn. The reason is kept on the record next to your name.',
+  'button.classes.revoke':
+    'Withdraw the version. It routes nothing from now on; the record keeps it and the reason.',
+  'col.classes.size_repo':
+    'The repository this size’s cell is read in. A reading speaks for one repository.',
+  'col.classes.size':
+    'The size tier of the change, from the churn of the merged commit at replay.',
+  'col.classes.size_confirmation':
+    'Qualified confirmation commits of this class and size. A first look needs 20 of them, in a reading registered after the version was signed.',
+  'col.classes.standard':
+    'The least context a registered reading proved for this class and size, or no proven standard. A ceiling admits calibration builds only.',
+  'col.classes.next':
+    'What would prove this cell: the reading to register and how many confirmation commits it has, or the reading that proved it.',
+  'col.classes.entry':
+    'A signed library entry scoped to this class or its parent, as kind/slug.',
+  'col.classes.statement':
+    'What the entry says, as two people signed it.',
+  'col.classes.people':
+    'The person who put the entry forward and the different person who signed it.',
+  'col.classes.effect':
+    'Whether giving a builder this entry changed its pass rate. It reads unmeasured until an arm is read with and without it.',
+  'row.classes.definition':
+    'What the work in this class is, in the organisation’s words, and the global class it refines.',
+  'row.classes.rule':
+    'The one rule that puts a ticket in this class. It reads only what a ticket carries, and the same rule reads a replayed commit’s ticket or message.',
+  'row.classes.examples':
+    'Derivation commits the rule puts in this class. Confirmation commits are never shown, because they are kept for the licence.',
+  'row.classes.ticket':
+    'The questions a ticket in this class must answer before it enters manufacturing: the readiness slots of its parent, and any the signed work type adds.',
+  'row.classes.context':
+    'The signed project knowledge for this kind of work, from each repository’s library. It reaches a builder only once an arm has measured it.',
+  'row.classes.label_message':
+    'The commit’s message, as it was written. It may name the fix, which is why a linked ticket is preferred when there is one.',
+  'row.classes.label_ticket':
+    'The ticket the commit links, as it stood before the change was made, or a note that the message stands in for one.',
+  'row.classes.label_diff':
+    'How many source and test files changed, and how many lines. It helps you read the commit; the rule never reads it.',
+  'field.classes.label':
+    'The class you read this commit as. Choose none of these when no class fits; that is an answer too.',
+  'button.classes.label':
+    'Save your label. It is recorded under your name, and no one else’s label is shown to you.',
+  'field.classes.org':
+    'The organisation whose classes these are. Its versions are numbered in order from 1.',
+  'field.classes.repos':
+    'The repositories whose commits the version describes, separated by commas.',
+  'field.classes.lines':
+    'One class per line: its short name, its global parent, a title, what it is, and the words a ticket in it uses, separated by semicolons.',
+  'button.classes.propose':
+    'Record the version with you as its sponsor and read every commit by its rule. Nothing routes until a different approver signs it and its report passes.',
+
   // ── /decisions (screens/Decisions/DecisionsPage.tsx)
   'stat.decisions.apparatus':
     'The apparatus version every decision below is read under. A sign-off made under an earlier version is listed as stale.',
@@ -2069,6 +2184,8 @@ export const MIN_HINTS: Record<string, number> = {
   '/decisions': 6,
   // a signed entry, an unsigned one and a work type with slots, sizes and the quality table
   '/library/:repo': 30,
+  // a signed version with its report and split, a class's page and the labelling screen
+  '/classes': 40,
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 16,
