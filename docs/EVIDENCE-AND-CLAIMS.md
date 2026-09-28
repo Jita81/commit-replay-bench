@@ -85,7 +85,7 @@ The product shows, for every cell and every aggregate:
 | the conditioning list | **Axes** a cell may be projected on: `process_step`, `capability_class`, `size`, `language`, `builder`, `model`, `provider` (`crb.core.ledger.CellKey`). **Filters**: repository, mode (sighted/blind), apparatus version. **Stamps** on every row: belt set, runner + services, executor posture, corpus provenance, routing policy version **and thresholds**, oracle strength. **Absent**: a context condition (the brief is fixed per mode); process is a builder suffix (`+preflight`), not an axis. | A number is conditional on all of these; what is absent cannot be claimed to have been controlled. |
 | `false_q1` | Read-time re-derivation. | Must display 0; anything else is a stop condition. |
 | `disqualified`, `errors` | Counts. | A harness bug shows here, never as a higher pass rate. |
-| `cost_usd_mean`, `latency_s_mean` | Means over trials that recorded them. | Economics travel with quality. |
+| `cost_usd_mean`, `latency_s_mean` and `economics` | Means over the trials that recorded them — a cost is known per row (`GradeRow.cost_known`: a reported `$0` is `$0`, an unknown cost is left out, never read as `$0`); a latency is known when it is positive. `economics` (`crb.core.economics`) serves the known counts as the denominators and a Student-t 95 % interval on the known rows (`n − 1` df; cost per clean attempt: the delta-method ratio-estimator t interval), lower bound floored at 0; fewer than two known rows serve no interval and say why; `economics` refuses rows from more than one apparatus version, posture class (ADR-0019) or checks arm (ADR-0024): it keeps the counts, withholds every figure and names what the rows span. **The flat `cost_usd_mean` and `latency_s_mean` do not refuse**: they follow the map's own filters, so a map read with `posture=all` or `apparatus=all` averages them across classes or versions, and the Pareto frontier and best config the forecast and coverage read are built from them **[gap]** (G-990). The spend estimates on Measure and Factory read `economics`, never the flat means. | Economics travel with quality, with their own `n` and interval. |
 | `oracle_strength_mean` or "not measured" | Hygiene-adjusted mutant kill-rate (P2). | A verdict from a weak oracle certifies less. |
 | `apparatus_versions` | The set of `apparatus_version` values in the cell. | Mixed versions are visible, not blended (§4). |
 | `mode`, `builder`, `model`, `provider` | Cell key. | A sighted rate is not a blind rate; builder A's rate is not builder B's. |
@@ -302,7 +302,9 @@ that what was recorded is true. Evidence ranks, weakest first:
 - **Any throughput headline** (changes or stories per hour) derived from this benchmark.
   The only rate-of-work numbers it licenses are verified changes per unit time and human
   hours per verified change, each with `n`, mode, builder and apparatus — and the ledger
-  records neither human hours nor merge outcomes yet (DL-038, backlog B-9).
+  records no human hours, and merge outcomes only for the pull requests the factory opened
+  (`delivery.merged` / `delivery.closed` on the factory evidence chain, B-9), never for the
+  attempts it measures; those outcomes are not yet joined to the replay rows (DL-038).
 - That mutation strength measures specification completeness or production safety. It
   measures whether the **target tests** notice crude faults on the changed lines: a suite can
   be strong on what it asserts and silent on what it never mentions (cobra #1559,

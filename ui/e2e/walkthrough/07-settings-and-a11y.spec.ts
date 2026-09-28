@@ -21,8 +21,8 @@
  *               page; and that axe (WCAG 2.1 AA) finds 0 violations on Repos, Runs, a run
  *               detail with real rows, Capability, Ledger and Sign-off — against the live
  *               data the earlier specs produced.
- * How:          `AxeBuilder` with the WCAG tags per screen; the fake token is shape-valid and
- *               deliberately not real.
+ * How:          axe with the WCAG tags per screen, once transitions settle (ui/e2e/axe.ts);
+ *               the fake token is shape-valid and deliberately not real.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Settings/SettingsPage.tsx and
@@ -33,25 +33,18 @@
  * Touch when:   never for a new repository (it sweeps the product's own screens); a screen is
  *               added (add it to the axe sweep) or the settings fields change.
  */
-import AxeBuilder from '@axe-core/playwright'
+import { axeViolations } from '../axe'
 import type { Page } from '@playwright/test'
 import { env, expect, primary, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
-const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 //: Shape-valid (prefix, length, alphabet) and deliberately not a real token.
 const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 
 async function axeClean(page: Page, where: string): Promise<void> {
-  // let every CSS transition in flight finish first: axe samples the blended colour of a
-  // half-done one as a contrast failure. /connect/:repo flips its "baseline" button from
-  // outlined to filled (`transition-colors`) when its last query settles, and on a fast
-  // machine axe read it mid-flip (#c0c3c5 on #488ccc, 2:1) — two runs of two on a laptop,
-  // never on the hosted runner. The spec asserts the settled screen, not the animation.
-  await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))))
-  const results = await new AxeBuilder({ page }).withTags(TAGS).analyze()
-  expect(results.violations, `${where}: ${JSON.stringify(results.violations, null, 2)}`).toEqual([])
+  const violations = await axeViolations(page)
+  expect(violations, `${where}: ${JSON.stringify(violations, null, 2)}`).toEqual([])
 }
 
 test.describe('07 settings + accessibility', () => {
@@ -187,6 +180,8 @@ test.describe('07 settings + accessibility', () => {
     // each wait is for API-backed content, not the heading: the loaded screen is what axe reads
     await page.goto(`/connect/${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('stage-measure')).toBeVisible()
+    // the connect stream's own flow reading is API-backed content on this screen too
+    await expect(page.locator('#flow-connect-and-prove')).toBeVisible()
     await axeClean(page, `/connect/${t.name}`)
     await page.goto(`/connect/${encodeURIComponent(t.name)}/measure`)
     await expect(page.getByTestId('before-you-start')).toContainText(/attempts/)
