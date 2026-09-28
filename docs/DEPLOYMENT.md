@@ -906,8 +906,10 @@ probes; method: the probes the readiness route runs, counted in its code and hel
 The `worker` probe reads the `workers` table: every worker upserts its row every
 `heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
 so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
-UI reads the same probe: the Deployment page lists the workers with their last check-in. Two
-probes raise a banner **[measured — n = 2 probes; method: every UI reader of a probe classified in `tests/test_health_probe_docs.py`'s `BANNERS`; apparatus n/a, a property of the product's own code, not a graded row]**. The shell raises the red "Delivery halted" banner above every screen,
+UI reads the same probe: the Deployment page lists the workers with their last check-in. The
+`ledger` and `sandbox` probes raise a banner **[measured — n = 2, the two named; method: every
+UI reader of a probe classified in `tests/test_health_probe_docs.py`'s `BANNERS`; apparatus
+n/a, a property of the product's own code, not a graded row]**. The shell raises the red "Delivery halted" banner above every screen,
 Home included, while the `ledger` probe reports a false-Q1 row; Home adds its own banner when
 the `sandbox` probe says the sandbox cannot run. Any other probe that is not `ok` shows only as
 the one-word pill in the header, so read `/health` itself when that pill is not `ok`.

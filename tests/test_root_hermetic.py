@@ -84,8 +84,11 @@ def dac_refusals(source: str) -> list[str]:
     root."""
     out: list[str] = []
     for fn in _functions(ast.parse(source)):
-        if _mentions(fn, "geteuid"):
-            continue  # root-aware: it decides what root may assert
+        if _mentions(fn, "geteuid") or _mentions(fn, "permissions_bind"):
+            # root-aware: it decides what root may assert — ``permissions_bind()``
+            # (tests/fixtures/tmptree.py) asks the kernel itself, the form feat/ns1's
+            # tests/test_tmp_tree_hygiene.py requires for the same class (P-318)
+            continue
         for w in (n for n in ast.walk(fn) if isinstance(n, ast.With | ast.AsyncWith)):
             if not any(_expects_refusal(i) for i in w.items):
                 continue
@@ -157,6 +160,12 @@ def test_root_aware(tmp_path):
             (tmp_path / "x").chmod(0o777)
 
 
+def test_bound_by_permissions(tmp_path):
+    if permissions_bind():
+        with pytest.raises(PermissionError):
+            (tmp_path / "x").write_bytes(b"tampered")
+
+
 def test_policy_refusal():
     with pytest.raises(PermissionError, match="secrets"):
         load_secrets()
@@ -173,6 +182,7 @@ def test_fixed_user(tmp_path):
 
 def test_the_ratchets_see_the_shapes_they_name() -> None:
     """The pre-fix shapes of the two tests the root run found are caught; a root-aware
-    probe, a refusal the product raises itself and a fixed uid are not."""
+    probe (``geteuid`` or feat/ns1's ``permissions_bind``), a refusal the product raises
+    itself and a fixed uid are not."""
     assert dac_refusals(_PLANTED) == ["test_seal_probe", "test_open_probe"]
     assert host_uid_users(_PLANTED) == ["test_fetch_user"]
