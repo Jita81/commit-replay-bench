@@ -20,8 +20,9 @@ What it does: Pins that every route is 401 anonymous and admin-only, that a view
               seconds, and refuses an insecure file; that every store and removal of the
               Claude Code and tracker tokens is one event naming the admin, never the value,
               and a refused store none (EI-8), and that no credential changes when its event
-              cannot be written (P-440); and that every admin write records who made it or is
-              named exempt with the reason.
+              cannot be written, the file operation coming after the event (P-440, P-443);
+              and that every admin write records who made it or is named exempt with the
+              reason.
 How:          A fake ``claude`` first on PATH that records what it was run with; a temp
               ``CRB_HOME``; ambient ``CRB_*`` cleared.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
@@ -595,6 +596,99 @@ def test_a_removal_retried_after_a_lost_race_still_records_that_the_token_existe
     assert [e.payload_json["existed"] for e in removed] == [True]
 
 
+def test_a_removal_whose_commit_lost_the_race_still_records_that_the_token_existed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the file removed last (P-443), a race lost while recording the event is lost
+    before the file goes; one lost at the commit is lost after it, so the re-run finds the
+    token gone. Whether it existed is read on the first run only, so the one event still
+    says ``existed: true``."""
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session as OrmSession
+
+    from crb.server.secrets import SecretsFile
+
+    state = {"removed": False, "lost": False}
+    real_delete = SecretsFile.delete
+    real_commit = OrmSession.commit
+
+    def delete(self: SecretsFile, name: str) -> Any:
+        state["removed"] = True
+        return real_delete(self, name)
+
+    def commit(self: OrmSession) -> None:
+        if state["removed"] and not state["lost"]:
+            state["lost"] = True
+            raise IntegrityError("INSERT INTO events", {}, Exception("uq_events_trace_seq"))
+        real_commit(self)
+
+    login(client)
+    assert client.put(PATH_, json={"token": GOOD}).status_code == 200
+    monkeypatch.setattr(SecretsFile, "delete", delete)
+    monkeypatch.setattr(OrmSession, "commit", commit)
+    r = client.delete(PATH_)
+    monkeypatch.undo()
+    assert state["lost"] is True
+    assert r.status_code == 200 and r.json()["present"] is False
+    removed = [e for e in _secret_events(client) if e.action == "settings.secret_deleted"]
+    assert [e.payload_json["existed"] for e in removed] == [True]
+
+
+@pytest.mark.parametrize(
+    ("path", "name", "old", "new"),
+    [
+        (PATH_, NAME, GOOD, "sk-ant-oat01-" + "N" * 70 + "-NEWV"),
+        (TRACKER_PATH, "tracker_token", TRACKER_VALUE, "another-tracker-token-NEWV"),
+    ],
+)
+def test_a_credential_is_not_changed_when_recording_its_event_fails(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    name: str,
+    old: str,
+    new: str,
+) -> None:
+    """The adversarial check of the P-440 fix: the lock came first, but the file was still
+    written before the event was recorded, so a database error while reading the trace's
+    ``seq`` or inserting the event (not a lost race, so not retried) answered 500 with the
+    token changed or gone and no event (EI-8). The event is now recorded and flushed first;
+    the file operation is the last step before the commit (P-443)."""
+    from sqlalchemy.exc import OperationalError
+
+    import crb.server.routes.admin as admin_routes
+
+    with TestClient(create_app(settings), raise_server_exceptions=False) as c:
+        login(c)
+        assert c.put(path, json={"token": old}).status_code == 200
+        before = [e.id for e in _secret_events(c)]
+
+        def failed(*_args: Any, **_kwargs: Any) -> None:
+            raise OperationalError("INSERT INTO events", {}, Exception("disk I/O error"))
+
+        monkeypatch.setattr(admin_routes, "append_system_event", failed)
+        assert c.put(path, json={"token": new}).status_code == 500
+        assert c.delete(path).status_code == 500
+        monkeypatch.undo()
+        items = c.get(f"{API_PREFIX}/settings/secrets").json()["items"]
+        item = next(i for i in items if i["name"] == name)
+        assert item["present"] is True and item["fingerprint"] == old[-4:]
+        assert [e.id for e in _secret_events(c)] == before
+
+
+def test_a_stored_token_s_event_carries_the_fingerprint_it_was_stored_with(
+    client: TestClient,
+) -> None:
+    """The event is now written before the file, so its fingerprint is worked out from the
+    cleaned value, not read back from the stored file; the two must agree, including for a
+    value sent with surrounding spaces (P-443)."""
+    login(client)
+    r = client.put(PATH_, json={"token": f"  {GOOD}\n"})
+    assert r.status_code == 200 and r.json()["fingerprint"] == GOOD[-4:]
+    stored = [e for e in _secret_events(client) if e.action == "settings.secret_set"]
+    assert [e.payload_json["fingerprint"] for e in stored] == [GOOD[-4:]]
+
+
 #: Admin writes that change no account and no credential, by name, with the reason.
 _UNRECORDED_WRITES = {
     "verify_claude_code_token": "a probe of the stored token; it changes nothing",
@@ -690,3 +784,69 @@ def test_every_credential_change_happens_inside_its_audited_write() -> None:
     text = src.read_text(encoding="utf-8")
     assert "secrets.set(" in text and "secrets.delete(" in text  # the calls are still here
     assert _credential_changes_outside_the_audited_write(text) == []
+
+
+def _file_operations_not_last_in_the_audited_write(source: str) -> list[str]:
+    """Every ``secrets.set`` / ``secrets.delete`` call inside a nested function handed to
+    ``commit_audited`` that is not preceded, in that function, by both the
+    ``_record_secret_change`` call and a ``db.flush()``, as ``"<function>:<line>"``."""
+    import ast
+
+    tree = ast.parse(source)
+    found: list[str] = []
+    for fn in tree.body:
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        audited = {
+            a.id
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "commit_audited"
+            for a in n.args
+            if isinstance(a, ast.Name)
+        }
+        for inner in ast.walk(fn):
+            if not (isinstance(inner, ast.FunctionDef) and inner.name in audited):
+                continue
+            calls = [n for n in ast.walk(inner) if isinstance(n, ast.Call)]
+            recorded = [
+                n.lineno for n in calls if getattr(n.func, "id", "") == "_record_secret_change"
+            ]
+            flushed = [
+                n.lineno
+                for n in calls
+                if isinstance(n.func, ast.Attribute)
+                and n.func.attr == "flush"
+                and getattr(n.func.value, "id", "") == "db"
+            ]
+            for n in calls:
+                if (
+                    isinstance(n.func, ast.Attribute)
+                    and n.func.attr in {"set", "delete"}
+                    and getattr(n.func.value, "id", "") == "secrets"
+                    and not (
+                        any(line < n.lineno for line in recorded)
+                        and any(line < n.lineno for line in flushed)
+                    )
+                ):
+                    found.append(f"{fn.name}:{n.lineno}")
+    return found
+
+
+def test_a_credential_file_operation_is_the_last_step_before_the_commit() -> None:
+    """Prevention (P-443): P-440 moved the file operation inside the audited write but left
+    it ahead of the event, so a database error while recording the event still left the
+    credential changed with no event. In every audited write in routes/admin.py the
+    ``secrets.set`` / ``secrets.delete`` call comes after the event is recorded and flushed.
+    The checker is shown the P-440 shape first, so it cannot pass by finding nothing."""
+    p440_shape = (
+        "def put(db, secrets):\n"
+        "    def write():\n"
+        "        secrets.set('n', 'v')\n"
+        "        _record_secret_change(db)\n"
+        "    commit_audited(db, write)\n"
+    )
+    assert _file_operations_not_last_in_the_audited_write(p440_shape) == ["put:3"]
+    src = Path(__file__).resolve().parents[1] / "src" / "crb" / "server" / "routes" / "admin.py"
+    text = src.read_text(encoding="utf-8")
+    assert "secrets.set(" in text and "secrets.delete(" in text  # the calls are still here
+    assert _file_operations_not_last_in_the_audited_write(text) == []

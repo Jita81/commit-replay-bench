@@ -644,28 +644,30 @@ def _stored(
     """Store ``token`` as ``secret`` and record it, answering its status; 422
     ``invalid_token`` on a bad shape, 409 ``secrets_insecure`` when the directory is refused.
 
-    The file is written INSIDE the audited write, after the ``events`` lock and just before
-    the commit (P-440): writing it first let a refused lock or a failed commit answer 500
-    with the token already replaced and no event (EI-8). A file cannot join the transaction,
-    so a crash, or a commit that fails after the write, can still leave the change
-    unrecorded; a lost ``seq`` race writes the same value again, which is safe."""
+    Inside the audited write, the event is recorded and flushed FIRST, with the fingerprint
+    worked out from the value, and the file is written last, so only the commit follows
+    it (P-440, P-443): writing it before the lock, or before the event, let a refused lock
+    or a database error while recording answer 500 with the token already replaced and no
+    event (EI-8). A file cannot join the transaction, so a crash, or a commit that fails
+    after the write, can still leave the change unrecorded; a lost ``seq`` race writes the
+    same value again, which is safe."""
     out: dict[str, Any] = {}
 
     def write() -> None:
+        try:
+            fp = secrets.fingerprint_of(secret, token)
+        except ValueError as exc:
+            raise ApiError(422, "invalid_token", str(exc)) from None
+        _record_secret_change(
+            db, removed=False, actor=actor, secret=secret, fingerprint=fp, via="api"
+        )
+        db.flush()
         try:
             out["status"] = secrets.set(secret, token, set_by=set_by)
         except ValueError as exc:
             raise ApiError(422, "invalid_token", str(exc)) from None
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
-        _record_secret_change(
-            db,
-            removed=False,
-            actor=actor,
-            secret=secret,
-            fingerprint=out["status"].fingerprint,
-            via="api",
-        )
 
     commit_audited(db, write)
     return _status_out(out["status"])
@@ -675,21 +677,26 @@ def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatus
     """Remove ``secret``, record the removal (with whether anything was there) and answer
     the now-absent status; 409 ``secrets_insecure`` when the directory is refused.
 
-    Removed inside the audited write, as :func:`_stored` stores (P-440). A lost ``seq``
-    race runs ``write`` again and the removal is safe to repeat, but the second run finds
-    nothing, so whether the secret existed is read on the first run only."""
+    Removed inside the audited write after its event is recorded and flushed, as
+    :func:`_stored` stores (P-440, P-443). A lost ``seq`` race runs ``write`` again and the
+    removal is safe to repeat, but a run after the file went finds nothing, so whether the
+    secret existed is read on the first run only."""
     out: dict[str, Any] = {}
 
     def write() -> None:
         try:
             if "existed" not in out:
                 out["existed"] = bool(secrets.status(secret).present)
-            out["status"] = secrets.delete(secret)
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
         _record_secret_change(
             db, removed=True, actor=actor, secret=secret, existed=out["existed"], via="api"
         )
+        db.flush()
+        try:
+            out["status"] = secrets.delete(secret)
+        except SecretsInsecure as exc:
+            raise ApiError(409, "secrets_insecure", str(exc)) from None
 
     commit_audited(db, write)
     return _status_out(out["status"])
