@@ -308,13 +308,13 @@ is an apparatus bump with an ADR, and every row measured before it expires
 | before sign-off | the same on the sealed posture; a human review | the review is recorded as a review row |
 | always | `GET /health`, `crb ledger verify` | every probe `ok`; the chain verifies |
 
-How long the step 3 runs take: a mine run 5 to 13 s, an oracle run 2 to 3 s and a controls
-run 7 to 21 s [measured — n = 2 local runs of each, the second on a heavily loaded machine, so
-read the range, not a point; the tier-1 walkthrough's fixture repository, the oracle and
+How long the step 3 runs take: a mine run 5 to 13 s, an oracle run 1 to 3 s and a controls
+run 7 to 21 s [measured — n = 3 local runs of each, the later two on a heavily loaded machine,
+so read the range, not a point; the tier-1 walkthrough's fixture repository, the oracle and
 controls runs limited to one task; method: each run's `finished − started` from
-`GET /runs/{id}`, the stamps `GET /flow` also folds; apparatus 2.4; two local runs of
-`scripts/walkthrough.sh` on 2026-09-28, branch `feat/ns6-lrn` on base `847f25dd` — not yet a
-CI run, which G-430 names]. A real repository takes longer: the oracle mutates every
+`GET /runs/{id}`, the stamps `GET /flow` also folds; apparatus 2.4; three local runs of
+`scripts/walkthrough.sh` on 2026-09-28 and 2026-09-29, branch `feat/ns6-lrn` on base
+`847f25dd` — not yet a CI run, which G-430 names]. A real repository takes longer: the oracle mutates every
 task it scores and the controls grade seven cheats per task, so the time grows with the tasks
 and the length of the test suite. The walk's *How this flows* panel shows
 this repository's own median for each run, with its n.
