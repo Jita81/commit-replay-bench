@@ -678,8 +678,11 @@ def render_prevention(rows: list[Prevention], gaps: dict[str, str]) -> list[str]
         "## Our own bugs — the prevention register",
         "",
         f"**{len(rows)} registered · {len(closed)} closed ({by_level or 'none'}) · "
-        f"{len(pending)} pending.** A defect is closed only with the artefact that fails if its "
-        "class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.",
+        f"{len(pending)} pending.** [measured — n = {len(rows)} rows of the `## Register` table "
+        "in `docs/PREVENTION.md`, counted by status and level; method: `scripts/dod_check.py` "
+        "over that file at this commit; apparatus n/a, a count of the register] A defect is "
+        "closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` "
+        "§7); the register is `docs/PREVENTION.md`.",
         "",
     ]
     if pending:
