@@ -16,10 +16,9 @@ the credential version); the response to a self-change carries a fresh cookie so
 person is not logged out of the browser they changed it in. "Sign out everywhere"
 (``POST /users/{id}/sessions/revoke``) rotates the account's session nonce, which ends
 every session it holds — the one way to end an OIDC account's sessions, which has no
-password here. Deactivation refuses the account's requests while it is inactive; it does
-not move the credential version, so re-activating within the session lifetime restores
-the sessions issued before — to contain a compromised account, sign it out everywhere as
-well. The same primitives serve the ``crb users`` CLI on the host.
+password here. Deactivation refuses the account's requests while it is inactive and
+rotates the same nonce, so its sessions end for good: re-activating it brings none back
+(AUTH-3). The same primitives serve the ``crb users`` CLI on the host.
 
 Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value is
 accepted on ``PUT`` and written owner-only to disk; every response — including the
@@ -37,13 +36,19 @@ What it is:   The admin route module — ``/users`` (list, create, role, passwor
               sign out everywhere, self password, the account's events), ``/settings`` and
               ``/settings/secrets``.
 What it does: Lists and creates local accounts, changes roles and the active flag without
-              ever orphaning the last active admin (409 ``last_admin``), sets a password as
+              ever orphaning the last active admin, or the last one who can sign in by this
+              deployment's paths (409 ``last_admin``), sets a password as
               an admin or as oneself (current password required; 409 ``not_local`` for an
               OIDC account), records every account change as a ``system`` event with actor
               and target, serves each account's own ``user.*`` trail newest first
               (``GET /users/{id}/events``), serves the redacted settings view with the
               builders' configured flags, and stores / removes / verifies the Claude Code
-              login token while answering only statuses (never a value).
+              login token and the tracker token while answering only statuses (never a
+              value) — every store and removal, and every token the sign-in helper stored,
+              one ``settings.secret_set`` / ``settings.secret_deleted`` event naming the
+              admin (EI-8; a helper-stored token is recorded by the next read of the secrets
+              list or of a sign-in, with the helper's ``stored_at``); a write that records
+              nothing is named in the test that says why.
 How:          Every handler takes ``AdminDep`` (the secrets status list takes ``ViewerDep``
               because a status is non-secret, and projects a viewer's copy down to
               presence; the self password change ``CurrentUser``); the lifecycle handlers call
@@ -53,7 +58,7 @@ How:          Every handler takes ``AdminDep`` (the secrets status list takes ``
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         none
 Works with:   src/crb/server/auth.py (``create_local_user``, ``set_password``,
-              ``set_user_active``, ``count_active_admins``, ``credential_version``),
+              ``set_user_active``, ``would_orphan_admins``, ``credential_version``),
               src/crb/server/routes/runs.py (``append_system_event`` / ``system_trace_id`` —
               the account audit trail), src/crb/cli/commands/users.py (the break-glass CLI
               over the same primitives and events), src/crb/server/secrets.py
@@ -88,25 +93,34 @@ from crb.server.auth import (
     LOCAL_ISSUER,
     AdminDep,
     CurrentUser,
+    LoginRateLimited,
     LoginRateLimiter,
+    SignInPaths,
     ViewerDep,
     clear_auth_cookies,
-    count_active_admins,
     create_local_user,
     credential_version,
     is_local_account,
     lock_users_table,
+    rate_limited_error,
     rotate_session_nonce,
+    set_account_active,
     set_csrf_cookie,
     set_password,
     set_session_cookie,
     set_user_active,
     validate_role,
     verify_password,
+    would_orphan_admins,
 )
-from crb.server.claude_login import LoginError
+from crb.server.claude_login import STATE_DONE, LoginError
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep, client_ip
-from crb.server.routes.runs import append_system_event, event_to_dict, system_trace_id
+from crb.server.routes.runs import (
+    append_system_event,
+    commit_audited,
+    event_to_dict,
+    system_trace_id,
+)
 from crb.server.schemas import Page, PageDep, StepEventOut
 from crb.server.secrets import (
     CLAUDE_CODE_TOKEN_MAX_LEN,
@@ -354,7 +368,9 @@ def create_user(body: CreateUserRequest, admin: AdminDep, db: DbDep) -> UserOut:
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Change a user's role (and optionally active flag); never orphans the last admin",
 )
-def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> UserOut:
+def set_role(
+    user_id: str, body: RoleChange, admin: AdminDep, db: DbDep, settings: SettingsDep
+) -> UserOut:
     """Change role and/or active flag; refuses the change that would leave no admin."""
     validate_role(body.role)
     # Count and update in one serialised transaction: two concurrent demotions of the two
@@ -363,8 +379,8 @@ def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> User
     lock_users_table(db)
     user = _get_user(db, user_id)
     new_active = user.active if body.active is None else body.active
-    loses_admin = user.role == "admin" and user.active and (body.role != "admin" or not new_active)
-    if loses_admin and count_active_admins(db) <= 1:
+    sign_in = SignInPaths.of(settings)
+    if would_orphan_admins(db, user, role=body.role, active=new_active, sign_in=sign_in):
         raise ApiError(
             409,
             "last_admin",
@@ -373,7 +389,7 @@ def set_role(user_id: str, body: RoleChange, admin: AdminDep, db: DbDep) -> User
         )
     was_role, was_active = user.role, user.active
     user.role = body.role
-    user.active = new_active
+    set_account_active(user, new_active)  # turning it off ends its sessions (AUTH-3)
     if user.role != was_role:
         record_user_event(
             db, action="user.role_set", actor=admin.id, target=user, from_role=was_role
@@ -419,20 +435,14 @@ def change_own_password(  # noqa: PLR0917 — FastAPI injects each dependency by
     limiter: LoginRateLimiter = request.app.state.login_limiter
     ip = client_ip(request, settings)
     username = _username(user)
-    retry = limiter.retry_after(username, ip)
-    if retry is not None:
-        wait = math.ceil(retry)
-        raise ApiError(
-            429,
-            "rate_limited",
-            "too many failed attempts; try again later",
-            detail={"retry_after_s": wait},
-            headers={"Retry-After": str(wait)},
-        )
+    # reserved before the verify, as the login does (AUTH-1): a burst cannot outrun it
+    try:
+        slot = limiter.acquire(username, ip)
+    except LoginRateLimited as exc:
+        raise rate_limited_error(exc, "too many failed attempts; try again later") from None
     if not verify_password(user.password_hash, body.current_password):
-        limiter.record_failure(username, ip)
         raise ApiError(401, "invalid_credentials", "current password is incorrect")
-    limiter.reset(username, ip)
+    limiter.succeed(slot)
     set_password(user, body.new_password)
     record_user_event(db, action="user.password_set", actor=me.id, target=user, by="self")
     db.commit()
@@ -498,14 +508,16 @@ def revoke_user_sessions(
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
     summary="Activate or deactivate a user; never deactivates the last active admin",
 )
-def set_active(user_id: str, body: ActiveChange, admin: AdminDep, db: DbDep) -> UserOut:
-    """Deactivating refuses every request of the account while it is inactive (re-activating
-    within the session lifetime restores sessions issued before; a password set ends them
-    for good); 409 ``last_admin`` when it would leave no active admin. Idempotent. The
+def set_active(
+    user_id: str, body: ActiveChange, admin: AdminDep, db: DbDep, settings: SettingsDep
+) -> UserOut:
+    """Deactivating refuses every request of the account while it is inactive and ends every
+    session it held for good (re-activating brings none back, AUTH-3); 409 ``last_admin``
+    when it would leave no active admin, or none who can sign in. Idempotent. The
     idempotency and last-admin decisions are ``set_user_active``'s, taken under the users
     lock on a re-read row — the ``user`` loaded here is only the handle."""
     user = _get_user(db, user_id)
-    if not set_user_active(db, user, body.active):
+    if not set_user_active(db, user, body.active, sign_in=SignInPaths.of(settings)):
         db.rollback()  # nothing to write: release the users lock now, not at teardown
         return _user_out(user)
     record_user_event(
@@ -587,17 +599,120 @@ def _status_out(status: Any) -> SecretStatusOut:
     return SecretStatusOut(**status.to_dict())
 
 
+#: The ``system`` trace every change to a deployment credential lands on (EI-8).
+SECRETS_TRACE = system_trace_id("settings", "secrets")
+
+
+def _record_secret_change(
+    db: Session, *, removed: bool, actor: str, secret: str, **payload: Any
+) -> None:
+    """One ``settings.secret_set`` / ``settings.secret_deleted`` event on
+    :data:`SECRETS_TRACE`, in the caller's transaction: the actor is the account that made
+    the change, the payload names the secret and at most its four-character fingerprint —
+    never a value (EI-8: the only provenance was ``set_by``, which a removal wipes)."""
+    append_system_event(
+        db,
+        trace_id=SECRETS_TRACE,
+        action="settings.secret_deleted" if removed else "settings.secret_set",
+        actor=actor,
+        payload={"secret": secret, **payload},
+    )
+
+
+def _stored(db: Session, actor: str, secret: str, stored: Any) -> SecretStatusOut:
+    """Record a store the API made and answer its status."""
+    commit_audited(
+        db,
+        lambda: _record_secret_change(
+            db,
+            removed=False,
+            actor=actor,
+            secret=secret,
+            fingerprint=stored.fingerprint,
+            via="api",
+        ),
+    )
+    return _status_out(stored)
+
+
+def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatusOut:
+    """Remove ``secret``, record the removal (with whether anything was there) and answer
+    the now-absent status; 409 ``secrets_insecure`` when the directory is refused."""
+    try:
+        existed = bool(secrets.status(secret).present)
+        gone = secrets.delete(secret)
+    except SecretsInsecure as exc:
+        raise ApiError(409, "secrets_insecure", str(exc)) from None
+    commit_audited(
+        db,
+        lambda: _record_secret_change(
+            db, removed=True, actor=actor, secret=secret, existed=existed, via="api"
+        ),
+    )
+    return _status_out(gone)
+
+
+def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> None:
+    """The sign-in helper stores the Claude token with no database, so the API writes the
+    event when it next sees the session ``done`` — once per session, decided under the
+    events lock — with the account that started the sign-in as actor and the helper's own
+    ``stored_at``, so a late record still says when the token was stored. ``observer``
+    names the actor only for an older session that did not record who started it, and only
+    when the reader is an admin; otherwise (``""``) such a session waits for an admin read."""
+    if st.state != STATE_DONE:
+        return
+    actor = str(broker.meta(st.id).get("started_by_id") or observer)
+    if not actor:
+        return
+
+    def write() -> None:
+        seen: list[Any] = list(
+            db.execute(
+                select(Event.payload_json).where(
+                    Event.trace_id == SECRETS_TRACE, Event.action == "settings.secret_set"
+                )
+            ).scalars()
+        )
+        if any(isinstance(p, dict) and p.get("session") == st.id for p in seen):
+            return
+        stamp = {"stored_at": st.stored_at} if st.stored_at else {}
+        _record_secret_change(
+            db,
+            removed=False,
+            actor=actor,
+            secret=CLI_TOKEN_SECRET,
+            fingerprint=st.fingerprint,
+            via="login",
+            session=st.id,
+            **stamp,
+        )
+
+    commit_audited(db, write)
+
+
+def record_stored_logins(db: Session, broker: Any, observer: str = "") -> None:
+    """Record every sign-in the helper finished that no read has recorded yet (EI-8): the
+    secrets list, a new sign-in and the API's start call this, so an admin who pasted the
+    code and closed the tab still leaves the event."""
+    for done in broker.done_sessions():
+        _record_login_stored(db, broker, done, observer)
+
+
 @router.get(
     "/settings/secrets",
     response_model=SecretsStatusList,
     responses={401: _ERR},
     summary="Statuses of the operator-supplied secrets (never values); any signed-in role",
 )
-def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
+def list_secrets(
+    user: ViewerDep, secrets: SecretsDep, broker: LoginBrokerDep, db: DbDep
+) -> SecretsStatusList:
     """Readable by every role: a status is non-secret by construction (presence, at most
     four trailing characters, who set it when) and an operator needs it to know whether
     an ``auth: cli`` run can authenticate. A viewer gets presence only — exactly ``{name,
-    present}`` per item — and only admins learn the directory path."""
+    present}`` per item — and only admins learn the directory path. A token the sign-in
+    helper stored that nothing has recorded yet is recorded here first (EI-8)."""
+    record_stored_logins(db, broker, user.id if user.role == "admin" else "")
     statuses = secrets.statuses()
     items: list[SecretStatusOut] | list[SecretPresenceOut]
     if user.role == "viewer":
@@ -617,16 +732,17 @@ def list_secrets(user: ViewerDep, secrets: SecretsDep) -> SecretsStatusList:
     summary="Store the Claude Code login token (claude setup-token) owner-only on the API host",
 )
 def put_claude_code_token(
-    body: ClaudeCodeTokenIn, admin: AdminDep, secrets: SecretsDep
+    body: ClaudeCodeTokenIn, admin: AdminDep, secrets: SecretsDep, db: DbDep
 ) -> SecretStatusOut:
-    """Store the token; the response is its status, never the value."""
+    """Store the token; the response is its status, never the value. Recorded as
+    ``settings.secret_set`` naming the admin (EI-8)."""
     try:
         stored = secrets.set(CLI_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id)
     except ValueError as exc:
         raise ApiError(422, "invalid_token", str(exc)) from None
     except SecretsInsecure as exc:
         raise ApiError(409, "secrets_insecure", str(exc)) from None
-    return _status_out(stored)
+    return _stored(db, admin.id, CLI_TOKEN_SECRET, stored)
 
 
 @router.delete(
@@ -635,13 +751,10 @@ def put_claude_code_token(
     responses={401: _ERR, 403: _ERR, 409: _ERR},
     summary="Remove the stored Claude Code login token",
 )
-def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep) -> SecretStatusOut:
-    """Remove the stored token (idempotent)."""
-    del admin
-    try:
-        return _status_out(secrets.delete(CLI_TOKEN_SECRET))
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
+def delete_claude_code_token(admin: AdminDep, secrets: SecretsDep, db: DbDep) -> SecretStatusOut:
+    """Remove the stored token (idempotent); recorded as ``settings.secret_deleted`` naming
+    the admin, every time (EI-8)."""
+    return _removed(db, admin.id, secrets, CLI_TOKEN_SECRET)
 
 
 _TRACKER_TOKEN_PATH = "/settings/secrets/tracker-token"  # noqa: S105 — a URL path
@@ -654,11 +767,12 @@ _TRACKER_TOKEN_PATH = "/settings/secrets/tracker-token"  # noqa: S105 — a URL 
     summary="Store the tracker token the intake listener polls with (ADO PAT or Jira API token)",
 )
 def put_tracker_token(
-    body: TrackerTokenIn, admin: AdminDep, secrets: SecretsDep
+    body: TrackerTokenIn, admin: AdminDep, secrets: SecretsDep, db: DbDep
 ) -> SecretStatusOut:
     """Store the credential owner-only on the API host; the response is its status — the
     fingerprint and who set it when — never the value. One credential per deployment: the
-    listener on every repository polls with it (ADR-0017)."""
+    listener on every repository polls with it (ADR-0017). Recorded as
+    ``settings.secret_set`` naming the admin (EI-8)."""
     try:
         stored = secrets.set(
             TRACKER_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id
@@ -667,7 +781,7 @@ def put_tracker_token(
         raise ApiError(422, "invalid_token", str(exc)) from None
     except SecretsInsecure as exc:
         raise ApiError(409, "secrets_insecure", str(exc)) from None
-    return _status_out(stored)
+    return _stored(db, admin.id, TRACKER_TOKEN_SECRET, stored)
 
 
 @router.delete(
@@ -676,14 +790,11 @@ def put_tracker_token(
     responses={401: _ERR, 403: _ERR, 409: _ERR},
     summary="Remove the stored tracker token (every listener then stops with no_secret)",
 )
-def delete_tracker_token(admin: AdminDep, secrets: SecretsDep) -> SecretStatusOut:
+def delete_tracker_token(admin: AdminDep, secrets: SecretsDep, db: DbDep) -> SecretStatusOut:
     """Remove the credential (idempotent). Nothing is polled afterwards: every listener
-    stops with ``no_secret`` and says so on the Intake screen."""
-    del admin
-    try:
-        return _status_out(secrets.delete(TRACKER_TOKEN_SECRET))
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
+    stops with ``no_secret`` and says so on the Intake screen. Recorded as
+    ``settings.secret_deleted`` naming the admin, every time (EI-8)."""
+    return _removed(db, admin.id, secrets, TRACKER_TOKEN_SECRET)
 
 
 _LOGIN_PATH = _CLAUDE_TOKEN_PATH + "/login"
@@ -713,13 +824,17 @@ def _login_error(exc: LoginError) -> ApiError:
     responses={401: _ERR, 403: _ERR, 409: _ERR, 503: _ERR},
     summary="Start a Claude sign-in: runs `claude setup-token` on the API host and returns the URL to open",
 )
-def start_claude_login(admin: AdminDep, broker: LoginBrokerDep) -> LoginSessionOut:
+def start_claude_login(admin: AdminDep, broker: LoginBrokerDep, db: DbDep) -> LoginSessionOut:
     """The front end opens ``url`` in a new tab; the person approves on Anthropic's page
     and pastes the code it shows into ``POST …/login/{id}/code``. The minted token goes
     straight into the owner-only secrets store on the API host — it is never returned."""
     try:
+        # a finished sign-in nobody read back is recorded before the sweep can remove it
+        record_stored_logins(db, broker, admin.id)
         broker.sweep()
-        return _session_out(broker.start(started_by=admin.display_name or admin.id))
+        return _session_out(
+            broker.start(started_by=admin.display_name or admin.id, started_by_id=admin.id)
+        )
     except LoginError as exc:
         raise _login_error(exc) from None
 
@@ -730,12 +845,15 @@ def start_claude_login(admin: AdminDep, broker: LoginBrokerDep) -> LoginSessionO
     responses={401: _ERR, 403: _ERR, 404: _ERR},
     summary="The sign-in session's state (poll while `exchanging`)",
 )
-def get_claude_login(session_id: str, admin: AdminDep, broker: LoginBrokerDep) -> LoginSessionOut:
-    del admin
+def get_claude_login(
+    session_id: str, admin: AdminDep, broker: LoginBrokerDep, db: DbDep
+) -> LoginSessionOut:
     try:
-        return _session_out(broker.state(session_id))
+        st = broker.state(session_id)
+        _record_login_stored(db, broker, st, admin.id)
     except LoginError as exc:
         raise _login_error(exc) from None
+    return _session_out(st)
 
 
 @router.post(
@@ -745,13 +863,14 @@ def get_claude_login(session_id: str, admin: AdminDep, broker: LoginBrokerDep) -
     summary="Deliver the code Anthropic showed; the helper exchanges it and stores the token",
 )
 def submit_claude_login_code(
-    session_id: str, body: LoginCodeIn, admin: AdminDep, broker: LoginBrokerDep
+    session_id: str, body: LoginCodeIn, admin: AdminDep, broker: LoginBrokerDep, db: DbDep
 ) -> LoginSessionOut:
-    del admin
     try:
-        return _session_out(broker.submit_code(session_id, body.code))
+        st = broker.submit_code(session_id, body.code)
+        _record_login_stored(db, broker, st, admin.id)
     except LoginError as exc:
         raise _login_error(exc) from None
+    return _session_out(st)
 
 
 @router.delete(

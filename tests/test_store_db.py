@@ -11,7 +11,8 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               model table and is idempotent (as is installing the triggers alone), that foreign
               keys are enforced, that ``session_scope`` commits and rolls back, and that every
               append-only table refuses UPDATE and DELETE while still accepting INSERT — and that
-              the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable.
+              the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable; and that
+              the events ``seq`` lock holds a second writer until the first commits (P-196).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -27,6 +28,7 @@ Touch when:   never for a new repository; a table is added (decide whether it is
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -205,6 +207,55 @@ def test_session_scope_commits_and_rolls_back(backend: Backend) -> None:
         s.add(Repo(name="b", language="python", runner="pytest", config_json={}))
         raise RuntimeError("boom")
     assert _count(backend, "repos") == 1
+
+
+def test_the_events_seq_lock_holds_a_second_writer_until_the_first_commits(
+    backend: Backend,
+) -> None:
+    """``lock_event_seq`` (P-196): a writer that reads a trace's last ``seq`` itself — the
+    server's audited commit — takes the events lock first, so a second writer to the same
+    trace reads only after the first committed, on both dialects (SQLite's write lock,
+    PostgreSQL's advisory lock), and neither insert breaks ``uq_events_trace_seq``. The
+    first writer holds its lock across a barrier the second cannot reach while held."""
+    import threading
+
+    from sqlalchemy import func, select
+
+    from crb.server.routes.runs import append_system_event
+    from crb.store.events import lock_event_seq
+
+    store_db.init_db(backend.engine)
+    held = threading.Barrier(2, timeout=1.5)
+    seen: dict[str, int] = {}
+    errors: list[BaseException] = []
+
+    def writer(name: str) -> None:
+        try:
+            with backend.factory() as s:
+                lock_event_seq(s)
+                lock_event_seq(s)  # re-entrant: a second call in one transaction is a no-op
+                seen[name] = int(
+                    s.execute(
+                        select(func.coalesce(func.max(Event.seq), 0)).where(
+                            Event.trace_id == "t-lock"
+                        )
+                    ).scalar_one()
+                )
+                with contextlib.suppress(threading.BrokenBarrierError):
+                    held.wait()
+                append_system_event(s, trace_id="t-lock", action="user.login_failed")
+                s.commit()
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert sorted(seen.values()) == [0, 1]  # the second read saw the first commit
+    assert _count(backend, "events") == 2
 
 
 # ---------------------------------------------------------------------------
