@@ -26,7 +26,7 @@ Works with:   src/crb/core/qualify.py (``qualify_task``, ``context_for``, ``Gold
               provider the bindings come from), src/crb/server/worker.py (the caller:
               replay, blind, oracle, controls), src/crb/core/run.py (``RunSpec.context_for``
               consumes the contexts)
-Tested by:    tests/test_worker.py, tests/test_run.py
+Tested by:    tests/test_worker_posture.py, tests/test_worker.py, tests/test_run.py
 Touch when:   never for a new repository; a run kind starts grading (give it the gate); a
               posture-level stop is added (its code in ``crb.core.qualify`` and ADR-0019's table
               first).
