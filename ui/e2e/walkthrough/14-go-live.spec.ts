@@ -145,7 +145,7 @@ test.describe('14 go live', () => {
     await expect(section.getByTestId('golive-ledger-verified')).toContainText('Proven')
     await expect(section.getByRole('img', { name: /^The health check is green: / })).toHaveAccessibleName(health.status === 'ok' ? /Proven$/ : /Unproven$/)
     if (!health.posture.sealed) await expect(section.getByTestId('golive-sealed-posture')).toContainText(/Unproven.*tests run \S+, the builder runs \S+/)
-    await expect(section.getByRole('heading', { name: 'Acts this product does not perform' })).toBeVisible()
+    await expect(section.getByRole('heading', { name: 'Acts the operator attests' })).toBeVisible()
     for (const act of ['penetration test', 'egress test', 'restore has been rehearsed', 'alert fires', 'released digest']) await expect(section).toContainText(new RegExp(act, 'i'))
 
     // a rerun against a stack the last run left attested: withdraw first, so the walk starts unproven

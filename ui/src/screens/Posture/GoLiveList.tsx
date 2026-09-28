@@ -4,8 +4,10 @@
  * Navigation
  * ----------
  * What it is:   The "Go live" section of /posture: the lines of DEPLOYMENT §8 as `GET /golive`
- *               reads them, in two lists — the checks this product runs, and the acts it does
- *               not perform, which an admin records.
+ *               reads them, in two lists — the checks this product runs, and the acts the
+ *               operator attests (most performed on their own infrastructure; two are this
+ *               product's own host commands whose result the server cannot read), which an
+ *               admin records.
  * What it does: Shows each line's state (proven, attested, unproven) as a pill with its words,
  *               the reason under it, where the state comes from, and for an attested line who
  *               recorded it, the day it was done and what was done; counts the lines that stand;
@@ -99,10 +101,10 @@ export function GoLiveList({ admin }: { admin: boolean }) {
               <h3 className="mb-2 text-[19px] font-bold">Checks this product runs</h3>
               <SummaryList rows={product.map((l) => row(l, admin))} label="Go-live lines the product proves" />
               <h3 className="mb-2 mt-6 text-[19px] font-bold" id="posture-not-performed">
-                Acts this product does not perform
+                Acts the operator attests
               </h3>
-              <p className="m-0 mb-2 text-[16px] leading-[1.5] text-on-surface-muted">
-                The product cannot see these. Each is the operator’s own act on their own infrastructure; it reads unproven until an admin records it, with the day and what was done.
+              <p className="m-0 mb-2 text-[16px] leading-[1.5] text-on-surface-muted" data-testid="golive-operator-acts">
+                The product cannot see whether these were done. Most are acts on the operator’s own infrastructure that this product does not perform; two, <code>crb doctor</code> and <code>crb repo probe</code>, are this product’s own commands, which the operator runs on each host where the server cannot read their result. Each reads unproven until an admin records it, with the day and what was done.
               </p>
               <SummaryList rows={operator.map((l) => row(l, admin))} label="Go-live acts the operator attests" />
             </>

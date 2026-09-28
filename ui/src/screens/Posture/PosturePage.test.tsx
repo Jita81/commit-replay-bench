@@ -26,7 +26,7 @@
  * Touch when:   never for a new repository; a row, the go-live section or the print changes.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -77,6 +77,30 @@ describe('PosturePage — sources, go-live and print', () => {
     await waitFor(() => expect(screen.getAllByText('the version could not be read').length).toBeGreaterThan(2))
   })
 
+  it('reads the belt set, the sign-off policy and the licence from /version, never from a literal (P-160)', async () => {
+    // values no literal in the page could match: a row that prints its own words fails here
+    mockApi(base('viewer', { 'GET /version': { ...VERSION, belt_set: 'v9-test', signoff_policy: 'signoff-policy.test', licence: 'TEST-1.0' } }))
+    renderApp(<PosturePage />, { route: '/posture' })
+    await waitFor(() => expect(screen.getByText('crb 2.0.0a1')).toBeInTheDocument())
+    const row = (hint: string) => document.querySelector(`[data-hint="${hint}"]`) as HTMLElement
+    expect(row('summary.posture.apparatus')).toHaveTextContent(/belt set\W*v9-test/)
+    expect(row('summary.posture.apparatus')).not.toHaveTextContent(/belt set\W*v5/)
+    expect(row('summary.posture.policies')).toHaveTextContent('routing.v1 (routing) · signoff-policy.test')
+    expect(row('summary.posture.policies')).not.toHaveTextContent('signoff-policy.v3')
+    expect(row('summary.posture.licence')).toHaveTextContent('TEST-1.0')
+    expect(row('summary.posture.licence')).not.toHaveTextContent('Apache-2.0')
+    // and when /version fails, each of those rows says so rather than printing a value
+    cleanup()
+    vi.unstubAllGlobals()
+    mockApi(base('viewer', { 'GET /version': () => envelope(503, 'unavailable', 'down') }))
+    renderApp(<PosturePage />, { route: '/posture' })
+    await waitFor(() => expect(row('summary.posture.licence')).toHaveTextContent('the version could not be read'))
+    for (const hint of ['summary.posture.version', 'summary.posture.apparatus', 'summary.posture.policies', 'summary.posture.licence']) {
+      expect(row(hint), hint).toHaveTextContent('the version could not be read')
+      expect(row(hint), hint).not.toHaveTextContent(/Apache-2\.0|signoff-policy\.v3|belt set\W*v5/)
+    }
+  })
+
   it('shows each go-live line as proven, attested or unproven, and apart from its own checks the acts it does not perform (G-317, G-583)', async () => {
     mockApi(base('viewer'))
     renderApp(<PosturePage />, { route: '/posture' })
@@ -91,7 +115,9 @@ describe('PosturePage — sources, go-live and print', () => {
     const operator = section.querySelector('dl[aria-label="Go-live acts the operator attests"]') as HTMLElement
     expect(within(product).queryByText(/penetration test/)).toBeNull()
     expect(within(operator).getByText('A penetration test of this deployment has been done and its findings handled')).toBeInTheDocument()
-    expect(within(section).getByRole('heading', { name: 'Acts this product does not perform' })).toBeInTheDocument()
+    expect(within(section).getByRole('heading', { name: 'Acts the operator attests' })).toBeInTheDocument()
+    // two of the acts are the product's own commands, and the words say so
+    expect(within(section).getByTestId('golive-operator-acts')).toHaveTextContent('crb doctor and crb repo probe, are this product’s own commands, which the operator runs on each host')
     expect(within(section).getByRole('link', { name: 'the go-live checklist (DEPLOYMENT §8)' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#8-go-live-checklist')
     // a viewer is not offered Settings; an admin is, on the operator's lines only
     expect(within(section).queryByRole('link', { name: 'Record or withdraw on Settings' })).toBeNull()

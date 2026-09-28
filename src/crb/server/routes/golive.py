@@ -18,7 +18,9 @@ What it does: Reads ``/health`` (the same deep probe, with this request's id), t
               empty statement or an act dated in the future (422 ``invalid_attestation``)
               and a withdrawal with nothing in force (409 ``not_attested``).
 How:          ``read_golive`` → ``collect_health`` + ``verify_ledger`` + ``oidc_client`` →
-              :func:`crb.server.golive.evaluate`; the writes call ``golive.attest`` /
+              :func:`crb.server.golive.evaluate` (local admins named to an admin only), and
+              keeps the reading's counts on the app; ``golive_counts`` serves ``/flow`` from
+              a reading at most a minute old; the writes call ``golive.attest`` /
               ``golive.withdraw`` and commit, then serve the fresh reading.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
@@ -35,6 +37,7 @@ Touch when:   never for a new repository; a new go-live line is added in
 from __future__ import annotations
 
 import datetime as _dt
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
@@ -54,7 +57,7 @@ from crb.server.deps import (
 )
 from crb.server.routes.ledger import verify_ledger
 from crb.server.routes.system import UI_DIST_UNKNOWN, collect_health
-from crb.server.settings import Settings
+from crb.server.settings import ROLE_RANK, Settings
 
 router = APIRouter(tags=["golive"])
 _ERR = {"model": ErrorEnvelope}
@@ -111,13 +114,21 @@ class AttestIn(BaseModel):
     performed_on: _dt.date
 
 
+#: How long a reading serves ``/flow``'s counts before it is taken again (seconds).
+FLOW_READING_TTL_S = 60.0
+
+
 def read_golive(
     request: Request,
     session: Session,
     factory: sessionmaker[Session],
     settings: Settings,
+    *,
+    names: bool = False,
 ) -> golive.GoLiveReading:
-    """The reading now, from the same probes ``/health`` and ``/ledger/verify`` serve."""
+    """The reading now, from the same probes ``/health`` and ``/ledger/verify`` serve.
+    ``names`` lets an admin read local admins' login names. Every reading taken here is
+    kept on the app for :func:`golive_counts`."""
     state = request.app.state
     mounted = state.ui_dist if getattr(state, "ui_mounted", False) else UI_DIST_UNKNOWN
     health = collect_health(factory, settings, request_id=request_id(request), ui_dist=mounted)
@@ -125,13 +136,37 @@ def read_golive(
         ledger: dict[str, Any] | None = verify_ledger(session).model_dump()
     except Exception:
         ledger = None
-    return golive.evaluate(
+    reading = golive.evaluate(
         session,
         settings,
         health=health,
         ledger=ledger,
         oidc_enabled=getattr(state, "oidc_client", None) is not None,
+        names=names,
     )
+    state.golive_reading = (time.monotonic(), reading.counts())
+    return reading
+
+
+def golive_counts(
+    request: Request,
+    session: Session,
+    factory: sessionmaker[Session],
+    settings: Settings,
+) -> dict[str, int]:
+    """The lines by state for the platform stream's ``/flow`` counts: the reading this
+    process took in the last :data:`FLOW_READING_TTL_S` seconds (a ``/golive`` read, an
+    attestation or a withdrawal each take one), else a fresh one. ``/flow`` feeds a panel on
+    five screens; the deep ``/health`` probes and the ledger's chain walk run at most once a
+    minute for it, never once per read."""
+    kept = getattr(request.app.state, "golive_reading", None)
+    if kept is not None and time.monotonic() - kept[0] < FLOW_READING_TTL_S:
+        return dict(kept[1])
+    return read_golive(request, session, factory, settings).counts()
+
+
+def _is_admin(principal: Principal) -> bool:
+    return ROLE_RANK.get(principal.role, -1) >= ROLE_RANK["admin"]
 
 
 def _who(principal: Principal) -> str:
@@ -155,9 +190,9 @@ def get_golive(
     factory: SessionFactoryDep,
     settings: SettingsDep,
 ) -> GoLiveOut:
-    """Every line of DEPLOYMENT §8, its state now and where that state comes from."""
-    del viewer
-    return _out(read_golive(request, db, factory, settings))
+    """Every line of DEPLOYMENT §8, its state now and where that state comes from. Only an
+    admin reads local admins' login names in the sign-in line; anyone else reads how many."""
+    return _out(read_golive(request, db, factory, settings, names=_is_admin(viewer)))
 
 
 @router.put(
@@ -198,7 +233,7 @@ def put_attestation(
     except ValueError as exc:
         raise ApiError(422, "invalid_attestation", str(exc)) from exc
     db.commit()
-    return _out(read_golive(request, db, factory, settings))
+    return _out(read_golive(request, db, factory, settings, names=True))
 
 
 @router.delete(
@@ -224,7 +259,7 @@ def delete_attestation(
     except golive.NotAttested as exc:
         raise ApiError(409, "not_attested", f"{line!r} has no attestation in force") from exc
     db.commit()
-    return _out(read_golive(request, db, factory, settings))
+    return _out(read_golive(request, db, factory, settings, names=True))
 
 
-__all__ = ["AttestIn", "GoLiveOut", "read_golive", "router"]
+__all__ = ["FLOW_READING_TTL_S", "AttestIn", "GoLiveOut", "golive_counts", "read_golive", "router"]

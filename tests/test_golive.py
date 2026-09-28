@@ -9,7 +9,11 @@ What it does: Pins that every line of docs/DEPLOYMENT.md §8 is in ``LINES`` wit
               line only when the facts hold and names what failed otherwise; that an operator
               line reads attested only after a recorded attestation (who, the day it was done,
               the day it was recorded, what was done), unproven again after a withdrawal, and
-              never for a product line, an empty statement or an act dated tomorrow; and the
+              never for a product line, an empty statement or an act dated outside its
+              bounds (after the day after UTC's today, before the withdrawal it follows or an
+              observed install); that a product line is proven only by what was measured (a
+              repository in its latest docker posture, the worker's stamp on its last run),
+              never by a setting; that only an admin's reading names local admins; and the
               counts the platform stream serves.
 How:          ``init_db`` on the parametrised backend; ``Settings`` built in-process; a health
               body and a ledger body passed as the routes pass them.
@@ -31,12 +35,15 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
+from crb.core.qualify import Qualification
 from crb.server import golive
+from crb.server.flow_record import record_install
 from crb.server.routes.admin import user_trace_id
 from crb.server.routes.runs import append_system_event
 from crb.server.settings import Settings
+from crb.store import qualifications as sq
 from crb.store.db import init_db
-from crb.store.models import Repo, TaskQualification, User
+from crb.store.models import Repo, Run, User
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests.conftest_store import Backend, backend, pg_schema
@@ -54,7 +61,13 @@ GREEN_HEALTH: dict[str, Any] = {
         {"name": "sandbox", "status": "skipped", "detail": "", "data": {}},
         {"name": "provision", "status": "skipped", "detail": "", "data": {}},
     ],
-    "posture": {"sealed": True, "sandbox_executor": "docker", "builder_executor": "docker"},
+    "posture": {
+        "env": "prod",
+        "sealed": True,
+        "sandbox_executor": "docker",
+        "builder_executor": "docker",
+        "factory_builds": "refused",
+    },
 }
 LEDGER_OK: dict[str, Any] = {
     "ok": True,
@@ -116,21 +129,43 @@ def seed_production_sign_in(backend: Backend) -> None:
 
 
 def seed_sealed_repo(
-    backend: Backend, *, executor: str = "docker", state: str = "qualified"
+    backend: Backend,
+    *,
+    executor: str = "docker",
+    state: str = "qualified",
+    posture: str = "1",
+    qid: str = "q-1",
+    repo: bool = True,
 ) -> None:
     with backend.factory() as s:
-        s.add(Repo(name="calc", language="go", runner="go", config_json={"language": "go"}))
-        s.add(
-            TaskQualification(
-                qualification_id="q-1",
+        if repo:
+            s.add(Repo(name="calc", language="go", runner="go", config_json={"language": "go"}))
+            s.commit()
+        sq.append(
+            s,
+            Qualification(
+                qualification_id=qid,
                 repo="calc",
                 task_id="a" * 40,
-                posture_id="pst_" + "1" * 24,
-                posture_class=f"{executor}/copy/sealed",
-                executor=executor,
+                posture_id="pst_" + posture * 24,
+                posture={"executor": executor, "posture_class": f"{executor}/copy/sealed"},
                 state=state,
                 code="" if state == "qualified" else "QUAL_ENV_UNLOADABLE",
-                body_json={},
+            ),
+        )
+
+
+def seed_stamped_run(backend: Backend, *, executor: str = "docker", **extra: Any) -> None:
+    """A run the worker stamped: where its tests ran, and any unsealed override it carried."""
+    with backend.factory() as s:
+        if s.get(Repo, "calc") is None:
+            s.add(Repo(name="calc", language="go", runner="go", config_json={"language": "go"}))
+        s.add(
+            Run(
+                id="r" * 32,
+                repo="calc",
+                kind="replay",
+                apparatus_json={"executor": {"executor": executor}, **extra},
             )
         )
         s.commit()
@@ -175,6 +210,7 @@ def test_a_production_deployment_proves_all_five_product_lines(
     init_db(backend.engine)
     seed_production_sign_in(backend)
     seed_sealed_repo(backend)
+    seed_stamped_run(backend)
     st = settings(tmp_path, local_auth_enabled=False)
     got = states(read(backend, st))
     assert [k for k, v in got.items() if v == golive.PROVEN] == [
@@ -214,6 +250,18 @@ def test_a_broken_chain_or_an_unread_ledger_is_unproven(backend: Backend, tmp_pa
     r = read(backend, settings(tmp_path), ledger=None)
     assert states(r)["ledger-verified"] == golive.UNPROVEN
     assert "could not be read" in detail(r, "ledger-verified")
+    # the honesty floor: an intact chain with a false-Q1 on it is not a verified ledger
+    fq1 = {
+        **LEDGER_OK,
+        "ok": False,
+        "chain_ok": True,
+        "broken_at": None,
+        "false_q1_total": 1,
+        "detail": "",
+    }
+    r = read(backend, settings(tmp_path), ledger=fq1)
+    assert states(r)["ledger-verified"] == golive.UNPROVEN
+    assert "false-Q1 = 1" in detail(r, "ledger-verified")
 
 
 def test_sign_in_names_every_part_that_does_not_hold(backend: Backend, tmp_path: Path) -> None:
@@ -224,7 +272,7 @@ def test_sign_in_names_every_part_that_does_not_hold(backend: Backend, tmp_path:
     st = settings(
         tmp_path, bootstrap_admin={"username": "root", "password": "correct-horse-battery"}
     )
-    r = read(backend, st, oidc_enabled=False)
+    r = read(backend, st, oidc_enabled=False, names=True)
     why = detail(r, "sign-in")
     assert states(r)["sign-in"] == golive.UNPROVEN
     for part in (
@@ -238,6 +286,29 @@ def test_sign_in_names_every_part_that_does_not_hold(backend: Backend, tmp_path:
     assert "no organisation account has signed in yet" in detail(
         read(backend, st, oidc_enabled=True), "sign-in"
     )
+    # an organisation account that exists but has never signed in is no live proof either
+    with backend.factory() as s:
+        s.add(User(id="o" * 32, subject="sub-2", issuer="https://idp", role="viewer"))
+        s.commit()
+    assert "no organisation account has signed in yet" in detail(
+        read(backend, st, oidc_enabled=True), "sign-in"
+    )
+
+
+def test_only_an_admin_reading_is_told_the_local_admins_by_name(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """The lowest role reads how many local admins are stale, never their login names:
+    ``GET /users`` refuses it those names, so the go-live reading must not hand them over."""
+    init_db(backend.engine)
+    with backend.factory() as s:
+        s.add(User(id="r" * 32, subject="local:root", issuer="local", role="admin"))
+        s.commit()
+    hidden = detail(read(backend, settings(tmp_path)), "sign-in")
+    assert "root" not in hidden
+    assert "1 active local admin has never had its password set since it was created" in hidden
+    shown = detail(read(backend, settings(tmp_path), names=True), "sign-in")
+    assert "never had its password set since it was created: root" in shown
 
 
 def test_repos_must_each_qualify_in_a_docker_posture(backend: Backend, tmp_path: Path) -> None:
@@ -261,6 +332,20 @@ def test_repos_must_each_qualify_in_a_docker_posture(backend: Backend, tmp_path:
     )
 
 
+def test_a_task_qualified_only_in_an_older_posture_does_not_prove_the_repository(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """The posture moved (a new image, say) and nothing qualifies in it yet: the gate refuses
+    every task (ADR-0019), so the line cannot read proven on the old posture's record."""
+    init_db(backend.engine)
+    seed_sealed_repo(backend, posture="1", qid="q-1")
+    assert states(read(backend, settings(tmp_path)))["repos-qualified"] == golive.PROVEN
+    seed_sealed_repo(backend, posture="2", qid="q-2", state="unqualified", repo=False)
+    r = read(backend, settings(tmp_path))
+    assert states(r)["repos-qualified"] == golive.UNPROVEN
+    assert "calc (no task qualified in pst_2222" in detail(r, "repos-qualified")
+
+
 def test_an_unsealed_posture_is_unproven_with_both_executors(
     backend: Backend, tmp_path: Path
 ) -> None:
@@ -271,7 +356,35 @@ def test_an_unsealed_posture_is_unproven_with_both_executors(
     }
     r = read(backend, settings(tmp_path), health=health)
     assert states(r)["sealed-posture"] == golive.UNPROVEN
-    assert detail(r, "sealed-posture") == "tests run local, the builder runs host"
+    assert detail(r, "sealed-posture").startswith("tests run local, the builder runs host")
+
+
+def test_the_sealed_posture_is_measured_not_only_configured(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """A configuration that says docker is not a measurement: the line needs the worker's own
+    stamp on a run, and a factory build on the host is the builder unsealed (ADR-0023)."""
+    init_db(backend.engine)
+    # configured sealed, but no run has recorded where it ran
+    r = read(backend, settings(tmp_path))
+    assert states(r)["sealed-posture"] == golive.UNPROVEN
+    assert "no run has recorded where it ran yet" in detail(r, "sealed-posture")
+    seed_stamped_run(backend)
+    assert states(read(backend, settings(tmp_path)))["sealed-posture"] == golive.PROVEN
+    # factory builds run the builder on the host: the builder is not sealed
+    host = {**GREEN_HEALTH, "posture": {**GREEN_HEALTH["posture"], "factory_builds": "host"}}
+    r = read(backend, settings(tmp_path), health=host)
+    assert states(r)["sealed-posture"] == golive.UNPROVEN
+    assert "a factory build runs its builder on the host" in detail(r, "sealed-posture")
+
+
+def test_a_run_stamped_unsealed_leaves_the_sealed_posture_unproven(
+    backend: Backend, tmp_path: Path
+) -> None:
+    init_db(backend.engine)
+    seed_stamped_run(backend, executor="local", unsealed_prod_override={"builder_executor": "host"})
+    why = detail(read(backend, settings(tmp_path)), "sealed-posture")
+    assert "ran its tests local" in why and "under the unsealed override" in why
 
 
 # --- the attestation record -------------------------------------------------------------
@@ -339,10 +452,79 @@ def test_nothing_ticks_a_line_by_belief(backend: Backend) -> None:
                 actor="a",
                 by="A",
                 statement="ran it",
-                performed_on=TODAY + _dt.timedelta(days=1),
+                performed_on=TODAY + _dt.timedelta(days=2),
                 today=TODAY,
             )
         assert golive.attestations(s) == {}
+
+
+def test_the_day_east_of_utc_is_not_the_future(backend: Backend) -> None:
+    """An admin in Sydney at 08:00 on the 28th records an act done that morning: in UTC it is
+    still the 27th. No place on Earth is more than a day ahead of UTC, so the 28th is today
+    somewhere and is accepted; the 29th is the future everywhere."""
+    init_db(backend.engine)
+    with backend.factory() as s:
+        golive.attest(
+            s,
+            "doctor",
+            actor="a",
+            by="A",
+            statement="both hosts ok",
+            performed_on=TODAY + _dt.timedelta(days=1),
+            today=TODAY,
+        )
+        s.commit()
+        assert golive.attestations(s)["doctor"].performed_on == "2026-09-28"
+
+
+def test_an_act_cannot_be_dated_before_the_withdrawal_it_follows_or_the_install(
+    backend: Backend,
+) -> None:
+    """A restore rehearsed on 1 September, withdrawn when a later restore failed, cannot be
+    re-attested on the same 1 September rehearsal; nor can any act predate the deployment."""
+    init_db(backend.engine)
+    first = _dt.date(2026, 9, 1)
+    with backend.factory() as s:
+        golive.attest(
+            s,
+            "backups-pitr",
+            actor="a",
+            by="A",
+            statement="restore rehearsed; chain verified",
+            performed_on=first,
+            today=TODAY,
+        )
+        golive.withdraw(s, "backups-pitr", actor="a", by="A")
+        s.commit()
+        with pytest.raises(ValueError, match="withdrawn on"):
+            golive.attest(
+                s,
+                "backups-pitr",
+                actor="a",
+                by="A",
+                statement="restore rehearsed; chain verified",
+                performed_on=first,
+            )
+        # a fresh rehearsal after the withdrawal is accepted
+        golive.attest(
+            s,
+            "backups-pitr",
+            actor="a",
+            by="A",
+            statement="restore rehearsed again; chain verified",
+            performed_on=_dt.datetime.now(_dt.UTC).date(),
+        )
+        record_install(s, fresh=True)
+        s.commit()
+        with pytest.raises(ValueError, match="installed on"):
+            golive.attest(
+                s,
+                "doctor",
+                actor="a",
+                by="A",
+                statement="ran it",
+                performed_on=_dt.date(1900, 1, 1),
+            )
 
 
 def test_the_counts_add_up_to_the_lines(backend: Backend, tmp_path: Path) -> None:

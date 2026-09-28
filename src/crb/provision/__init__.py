@@ -22,12 +22,13 @@ Navigation
 ----------
 What it is:   The dependency providers — host-env, disabled and sealed — and the factory that
               picks one for the deployment's posture.
-What it does: Resolves a task's dependencies from its parent's and gold's lockfiles (git
-              objects only), reusing a sealed set or fetching and sealing one, and binds each
-              role's set; refuses with the ``PROVISION_*`` code when it cannot, before any
-              builder exists; verifies a sealed set on demand, and moves one that failed its
-              digest to quarantine with a ``provision.quarantined`` event, naming its key on
-              the ``BUNDLE_INTEGRITY`` refusal so the gate revokes what cites it (G-966).
+What it does: Resolves a task's dependencies from its parent's and gold's lockfiles (git objects
+              only), reusing a sealed set (re-hashed once per provider first; a damaged one is
+              quarantined and sealed afresh) or fetching and sealing one, and binds each role's set;
+              refuses with the ``PROVISION_*`` code when it cannot, before any builder exists;
+              verifies a sealed set on demand, and moves one that failed its digest to quarantine
+              with a ``provision.quarantined`` event, naming its key on the ``BUNDLE_INTEGRITY``
+              refusal so the gate revokes what cites it (G-966).
 How:          ``LockInputs.from_git`` (parent, gold) → per language: ``bundle_key`` /
               ``go_keys`` → ``BundleStore.get`` or ``run_fetch`` + ``seal`` → ``store.mount`` →
               ``DepsBinding`` per role → ``TaskDeps`` with the ``ClosureSelector``.
@@ -200,6 +201,9 @@ class SealedProvider:
         self._image_ids: dict[str, str] = {}
         self._lock = threading.Lock()
         self._call = threading.local()  # the event sink of the resolve on this thread
+        # keys this provider re-hashed whole on reuse: once per provider, since the grade
+        # path's ``verify`` re-hashes every set before each task's build anyway
+        self._whole: set[str] = set()
 
     def mode(self, config: RepoConfig, executor_name: str) -> str:
         return self.deps_mode
@@ -260,11 +264,30 @@ class SealedProvider:
                 ) from exc
 
     def seal_or_reuse(self, lang: str, key: str, build: Callable[[Path], dict[str, Any]]) -> Sealed:
-        """A store hit, or ``build(stage)`` (which fetches into the stage and returns the
-        manifest fields) and a seal. One fetch at a time in this process."""
+        """A whole store hit, or ``build(stage)`` (which fetches into the stage and returns
+        the manifest fields) and a seal. One fetch at a time in this process. A hit is
+        re-hashed first (once per provider): one that fails its digest is moved to quarantine
+        (``provision.quarantined``) and fetched and sealed afresh, so the resolve path —
+        qualification included — never mounts a damaged set (G-966)."""
         on_event = self._events()
         with self._lock:
             hit = self.store.get(lang, key)
+            if hit is not None and key not in self._whole:
+                try:
+                    self.store.verify(key, lang)
+                    self._whole.add(key)
+                except ProvisionRefused as exc:
+                    if exc.code != BUNDLE_INTEGRITY:
+                        raise
+                    where = self.store.quarantine(key, exc.message)
+                    _emit(
+                        on_event,
+                        "provision.quarantined",
+                        key=key,
+                        reason=exc.message,
+                        quarantine=where.name,
+                    )
+                    hit = None
             if hit is not None:
                 _emit(on_event, "provision.reuse", lang=lang, key=key, digest=hit.digest)
                 return hit

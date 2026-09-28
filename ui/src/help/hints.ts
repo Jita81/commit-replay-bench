@@ -1741,7 +1741,7 @@ export const HINTS = {
   'field.settings.attest_line':
     'The go-live line you are recording. Only the acts the product cannot see are listed; the lines it proves by its own check cannot be attested.',
   'field.settings.attest_day':
-    'The day the act was done, not today unless it was. It cannot be in the future.',
+    'The day the act was done on your own calendar, not today unless it was. It cannot be in the future, or before the last withdrawal of this line: withdrawn evidence cannot come back.',
   'field.settings.attest_statement':
     'What was done and where its evidence is kept, in up to 500 characters — for example the ticket that holds the test output. A reviewer reads these words.',
   'button.settings.attest':

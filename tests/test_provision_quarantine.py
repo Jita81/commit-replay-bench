@@ -10,10 +10,12 @@ What it does: Pins that ``BundleStore.quarantine`` moves the set out of the stor
               why and when; that ``SealedProvider.verify`` on a changed byte quarantines the
               set, emits ``provision.quarantined`` and raises ``BUNDLE_INTEGRITY`` naming the
               key; that ``revoke_citing`` appends a ``revoked`` record for every qualification
-              in force whose bindings cite the key and leaves the others alone; that the
-              posture gate, given the refusal, revokes in the store and in its own view and
-              says how many; and that the next seal of the same key succeeds — the product
-              recovers, nobody deletes a directory by hand.
+              in force whose bindings cite the key and leaves the others alone; that a run's
+              ``context_for`` on a damaged set refuses, quarantines and revokes in the store
+              and in the gate's own view, saying how many; that a resolve re-hashes a store
+              hit and quarantines and reseals a damaged one rather than reuse it; and that the
+              next seal of the same key succeeds — the product recovers, nobody deletes a
+              directory by hand.
 How:          A temp ``BundleStore`` filled through ``stage`` / ``seal``; SQLite ``init_db`` for
               the qualification store; the gate built with its store and stand-ins for the
               collaborators ``revoke_citing`` does not touch.
@@ -36,6 +38,7 @@ from sqlalchemy.orm import sessionmaker
 
 from crb.core.deps import BUNDLE_INTEGRITY, DepsBinding, ProvisionRefused, TaskDeps
 from crb.core.qualify import STATE_QUALIFIED, Qualification
+from crb.core.spec import TaskSpec
 from crb.provision import SealedProvider
 from crb.provision.config import ProvisionConfig
 from crb.provision.store import QUARANTINE, BundleStore
@@ -143,7 +146,9 @@ def test_revoke_citing_revokes_only_what_cites_the_key(tmp_path: Path) -> None:
         assert sq.revoke_citing(s, [KEY], BUNDLE_INTEGRITY, "worker", "again") == []
 
 
-def test_the_gate_revokes_in_the_store_and_in_its_own_view(tmp_path: Path) -> None:
+def test_revoke_citing_revokes_in_the_store_and_in_the_gates_own_view(tmp_path: Path) -> None:
+    """The seam alone, called directly: the run's path to it is pinned by
+    ``test_a_run_that_meets_a_damaged_set_stops_quarantines_it_and_revokes_what_cites_it``."""
     factory = _factory(tmp_path)
     with factory() as s:
         sq.append(s, _q("a" * 40, KEY))
@@ -171,6 +176,103 @@ def test_the_gate_revokes_in_the_store_and_in_its_own_view(tmp_path: Path) -> No
     assert events == [("provision.revoked", {"keys": [KEY], "revoked": 1})]
     with factory() as s:
         assert sq.latest(s, "calc", "a" * 40, P1).state == "revoked"  # type: ignore[union-attr]
+
+
+def test_a_run_that_meets_a_damaged_set_stops_quarantines_it_and_revokes_what_cites_it(
+    tmp_path: Path,
+) -> None:
+    """``recovery.23``, through the run's own path: the gate's ``context_for`` verifies the
+    task's sealed set before any builder call, and on a changed byte it refuses
+    ``BUNDLE_INTEGRITY``, the set is in quarantine, the store's record reads revoked and
+    ``provision.revoked`` is emitted — nobody calls the revocation by hand."""
+    factory = _factory(tmp_path)
+    task_id = "a" * 40
+    with factory() as s:
+        sq.append(s, _q(task_id, KEY))
+        sq.append(s, _q("b" * 40, OTHER))
+    store = BundleStore(tmp_path / "deps")
+    _damage(_seal(store))
+    events: list[tuple[str, dict[str, Any]]] = []
+    sink = lambda a, p: events.append((a, dict(p)))  # noqa: E731
+    provider = SealedProvider(
+        ProvisionConfig(enabled=True, store=store.root, env="dev"),
+        store=store,
+        docker="docker",
+        on_event=sink,
+    )
+    stand_in: Any = object()
+    gate = PostureGate(
+        repo=stand_in,
+        config=stand_in,
+        runner=stand_in,
+        executor=stand_in,
+        scratch=tmp_path,
+        provider=provider,
+        posture=stand_in,
+        run_id="r1",
+        on_event=sink,
+        session_factory=factory,
+        actor="worker",
+    )
+    gate.qualifications[task_id] = _q(task_id, KEY)
+    gate.qualifications["b" * 40] = _q("b" * 40, OTHER)
+    gate._deps[task_id] = _deps()  # the task's bindings, as ``deps_for`` resolves them
+    task = TaskSpec(
+        task_id=task_id,
+        repo="calc",
+        subject="a change",
+        authored="2026-09-01T00:00:00+00:00",
+        test_files=("x_test.py",),
+        src_files=("x.py",),
+        target_tests=("x_test.py",),
+        belt_scope=(),
+    )
+    with pytest.raises(ProvisionRefused) as ei:
+        gate.context_for(task)
+    assert ei.value.code == BUNDLE_INTEGRITY and ei.value.keys == (KEY,)
+    assert store.find(KEY) is None and len(store.quarantined()) == 1
+    assert [a for a, _ in events] == ["provision.quarantined", "provision.revoked"]
+    assert events[1][1] == {"keys": [KEY], "revoked": 1}
+    assert not gate.qualifications[task_id].is_qualified
+    assert gate.qualifications["b" * 40].is_qualified
+    with factory() as s:
+        cut = sq.latest(s, "calc", task_id, P1)
+        kept = sq.latest(s, "calc", "b" * 40, P1)
+        assert cut is not None and (cut.state, cut.code) == ("revoked", BUNDLE_INTEGRITY)
+        assert kept is not None and kept.state == STATE_QUALIFIED
+
+
+def test_a_resolve_that_meets_a_damaged_set_quarantines_it_and_seals_it_afresh(
+    tmp_path: Path,
+) -> None:
+    """The resolve path (``qualify`` and ``crb repo qualify``) never reuses a damaged set: a
+    store hit is re-hashed, and one that fails its digest is moved to quarantine and fetched
+    and sealed again — so an unloadable parent is not recorded unqualified on bad bytes."""
+    store = BundleStore(tmp_path / "deps")
+    _damage(_seal(store))
+    events: list[tuple[str, dict[str, Any]]] = []
+    provider = SealedProvider(
+        ProvisionConfig(enabled=True, store=store.root, env="dev"),
+        store=store,
+        docker="docker",
+        on_event=lambda a, p: events.append((a, dict(p))),
+    )
+    built: list[Path] = []
+
+    def build(stage: Path) -> dict[str, Any]:
+        built.append(stage)
+        (stage / "out" / "site").mkdir(parents=True)
+        (stage / "out" / "site" / "x.py").write_bytes(b"x = 1\n")
+        return {}
+
+    sealed = provider.seal_or_reuse("python", KEY, build)
+    assert len(built) == 1
+    assert [a for a, _ in events] == ["provision.quarantined", "provision.seal"]
+    assert len(store.quarantined()) == 1 and store.verify(KEY).digest == sealed.digest
+    # a whole set is reused as before, with no fetch
+    events.clear()
+    assert provider.seal_or_reuse("python", KEY, build).digest == sealed.digest
+    assert len(built) == 1 and [a for a, _ in events] == ["provision.reuse"]
 
 
 def test_crb_deps_verify_quarantine_moves_the_set_and_revokes_in_the_database(

@@ -685,8 +685,10 @@ backup rehearsal, the digest check, the alert rules and the penetration test are
       repository: the `provision` line of `crb doctor` on the worker host is `ok` (store
       visible to the daemon, fetch images present, egress network present), and each
       repository with dependencies qualifies in the sealed posture before its first replay.
-      The product proves it while every connected repository has a task qualified in a
-      docker posture and the `provision` probe is not `down`.
+      The product proves it while every connected repository has a task qualified in the
+      posture now in force — its latest docker posture, the one the gate grades in; a task
+      qualified only in an older posture (before a new image, say) does not count — and the
+      `provision` probe is not `down`.
 - [ ] **`backups-pitr`** · operator attests — Backups: PITR enabled; a restore has been rehearsed and verified against the chain.
 - [ ] **`false-q1-alert`** · operator attests — `false_q1 == 0` and `crb_false_q1_total == 0` on the dashboards, with an alert on any
       non-zero value ([OPERATOR.md §8](OPERATOR.md#8-stop-conditions)). The zero itself is
@@ -698,8 +700,14 @@ backup rehearsal, the digest check, the alert rules and the penetration test are
       memory of one API process, so it does not see the other replicas or survive a restart
       ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 - [ ] **`sealed-posture`** · product proves — Tests and the builder both run sealed in docker
-      (`CRB_SANDBOX__EXECUTOR=docker`, `CRB_BUILDER__EXECUTOR=docker`; §3.4 and ADR-0023):
-      the `posture` of `GET /api/v1/health` reads `sealed: true`.
+      (`CRB_SANDBOX__EXECUTOR=docker`, `CRB_BUILDER__EXECUTOR=docker`; §3.4 and ADR-0023).
+      The settings alone prove nothing, so the product needs all three: the `posture` of
+      `GET /api/v1/health` reads `sealed: true` with `factory_builds: refused` (a factory
+      build runs its builder on the host, so a deployment that allows them is not sealed);
+      and the last run the worker stamped ran its tests in docker with no unsealed override.
+      A production worker whose builder is not docker starts only under
+      `CRB_ALLOW_UNSEALED_PROD` and then stamps that on every run, so the stamp's absence is
+      the builder measured. Until a run has been stamped the line reads unproven.
 - [ ] **`penetration-test`** · operator attests — A penetration test of this deployment has been done and its findings handled
       ([SECURITY §5](SECURITY.md#5-what-this-document-does-not-claim) says what the
       documentation does not claim in its place).
@@ -712,8 +720,13 @@ you have done, write what was done and where its evidence is kept (for example "
 done, and choose *Record attestation*. The Deployment page then shows the line as attested,
 with your name, that day and your words. *Withdraw* ends an attestation that no longer holds
 (a new image, a restore that failed); the line reads unproven again and the withdrawal is
-itself on record. Only an admin can record or withdraw, and the day of an act cannot be in
-the future.
+itself on record. Only an admin can record or withdraw. The day of an act is your own
+calendar day: it can be the day after the server's UTC day (east of UTC your morning is
+still yesterday in UTC) but no later; and it cannot be more than a day before the
+withdrawal it follows (the evidence that was withdrawn cannot come back) or before the day
+the product saw this deployment installed, when it saw that — each bound gives a day's
+slack, because your calendar and the server's differ by up to a day. Only an admin reads local admins' login
+names on the sign-in line; everyone else reads how many.
 
 **Time and money.** Nothing on this checklist starts a run, so Step 0 buys no attempts: it
 spends £0 of model money. The one model call on the way is *Verify* on a stored Claude Code

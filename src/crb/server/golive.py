@@ -29,9 +29,12 @@ What it does: Defines the fourteen lines of DEPLOYMENT §8 (id, title, who prove
               source of its state, its guide anchor); evaluates each product line from facts
               the caller passes in (the health body, the ledger verification, the settings,
               whether an organisation sign-in is configured) and from the users,
-              qualifications and events tables; reads the attestation in force per operator
-              line; writes ``golive.attested`` / ``golive.withdrawn`` events; counts the
-              lines by state for the platform stream's own numbers.
+              qualifications (each repository's latest docker posture), runs (the worker's
+              own stamp of where it ran) and events tables — never from a setting alone;
+              names stale local admins only to an admin; reads the attestation in force per
+              operator line; writes ``golive.attested`` / ``golive.withdrawn`` events, the
+              day of the act bounded on both sides with a day's slack; counts the lines by
+              state for the platform stream's own numbers.
 How:          ``LINES`` → ``evaluate(session, settings, health, ledger, oidc_enabled)`` →
               ``GoLiveReading`` (``to_dict``); ``attest`` / ``withdraw`` validate the line
               and append one event with ``append_system_event`` (the caller commits).
@@ -66,10 +69,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from crb.server.flow_record import MOMENT_OBSERVED, install_moments
 from crb.server.routes.admin import user_trace_id
 from crb.server.routes.runs import append_system_event, system_trace_id
-from crb.server.settings import Settings
-from crb.store.models import Event, Repo, TaskQualification, User
+from crb.server.settings import SEALED_EXECUTOR, Settings
+from crb.store import qualifications as store_q
+from crb.store.models import Event, Repo, Run, User
 
 PROVEN = "proven"
 ATTESTED = "attested"
@@ -157,7 +162,8 @@ LINES: tuple[Line, ...] = (
         "repos-qualified",
         "Every connected repository qualifies in the sealed posture, and provisioning is not down",
         BY_PRODUCT,
-        "the qualification records and the provision probe of GET /health",
+        "the qualification records in each repository's latest docker posture and the "
+        "provision probe of GET /health",
         "DEPLOYMENT#34-the-workers-sandbox--choose-deliberately",
     ),
     Line(
@@ -185,7 +191,8 @@ LINES: tuple[Line, ...] = (
         "sealed-posture",
         "Tests and the builder both run sealed in docker",
         BY_PRODUCT,
-        "the posture of GET /health (ADR-0023)",
+        "the posture of GET /health and where the worker stamped its last run as running "
+        "(ADR-0023)",
         "DEPLOYMENT#34-the-workers-sandbox--choose-deliberately",
     ),
     Line(
@@ -322,7 +329,7 @@ def attest(
 ) -> None:
     """Append one ``golive.attested`` event (the caller commits). Raises
     :class:`UnknownLine`, :class:`ProvenByProduct`, or ``ValueError`` for an empty statement
-    or an act dated in the future."""
+    or an act dated outside the bounds :func:`_check_day` sets."""
     line = _line(line_id)
     if line.proves != BY_OPERATOR:
         raise ProvenByProduct(line_id)
@@ -331,8 +338,7 @@ def attest(
         raise ValueError("say what was done: the statement is empty")
     if len(text) > STATEMENT_MAX:
         raise ValueError(f"the statement is longer than {STATEMENT_MAX} characters")
-    if performed_on > (today or _dt.datetime.now(_dt.UTC).date()):
-        raise ValueError("the act cannot be dated in the future")
+    _check_day(session, line.id, performed_on, today or _dt.datetime.now(_dt.UTC).date())
     append_system_event(
         session,
         trace_id=TRACE_ID,
@@ -345,6 +351,50 @@ def attest(
             "statement": text,
         },
     )
+
+
+#: No place is more than a day ahead of or behind UTC, so a calendar day the admin reads on
+#: their own clock is within one day of the UTC day the server reads.
+_ONE_DAY = _dt.timedelta(days=1)
+
+
+def _day_of(timestamp: str) -> _dt.date | None:
+    try:
+        return _dt.datetime.fromisoformat(timestamp).date()
+    except ValueError:
+        return None
+
+
+def _check_day(session: Session, line_id: str, day: _dt.date, today: _dt.date) -> None:
+    """The day of an act is a calendar day on the admin's clock, compared with days on the
+    server's (UTC), so each bound gives one day's slack. Refused: a day after tomorrow in UTC
+    (the future everywhere); a day more than one before the withdrawal the attestation
+    follows (the act it withdrew cannot come back on the same evidence); a day more than one
+    before the deployment was installed, when the install was observed (an act on a
+    deployment cannot predate it)."""
+    if day > today + _ONE_DAY:
+        raise ValueError("the act cannot be dated in the future")
+    withdrawn = session.execute(
+        select(Event.timestamp, Event.payload_json)
+        .where(Event.trace_id == TRACE_ID, Event.action == WITHDRAWN_ACTION)
+        .order_by(Event.seq.desc())
+    ).all()
+    last = next(
+        (ts for ts, payload in withdrawn if dict(payload or {}).get("line") == line_id), None
+    )
+    when = _day_of(last) if last else None
+    if when is not None and day < when - _ONE_DAY:
+        raise ValueError(
+            f"the last attestation of {line_id!r} was withdrawn on {when.isoformat()}; an act "
+            "dated before that cannot stand in for it — record the act done since"
+        )
+    installed_at, moment, _ = install_moments(session)
+    installed = _day_of(installed_at) if installed_at and moment == MOMENT_OBSERVED else None
+    if installed is not None and day < installed - _ONE_DAY:
+        raise ValueError(
+            f"this deployment was installed on {installed.isoformat()}; an act on it cannot "
+            "be dated before that"
+        )
 
 
 def withdraw(session: Session, line_id: str, *, actor: str, by: str) -> None:
@@ -400,7 +450,9 @@ def _password_rotated(session: Session, user: User) -> bool:
     return ev is not None
 
 
-def _check_sign_in(session: Session, settings: Settings, *, oidc_enabled: bool) -> tuple[bool, str]:
+def _check_sign_in(
+    session: Session, settings: Settings, *, oidc_enabled: bool, names: bool
+) -> tuple[bool, str]:
     users = list(session.execute(select(User)).scalars())
     missing: list[str] = []
     if not oidc_enabled:
@@ -419,10 +471,17 @@ def _check_sign_in(session: Session, settings: Settings, *, oidc_enabled: bool) 
         and u.role == "admin"
         and not _password_rotated(session, u)
     )
-    if stale:
+    if stale and names:
         missing.append(
             "an active local admin has never had its password set since it was created: "
             + ", ".join(stale)
+        )
+    elif stale:
+        # the login names are half a credential: only an admin reads them (GET /users)
+        missing.append(
+            f"{len(stale)} active local admin{'' if len(stale) == 1 else 's'} "
+            f"{'has' if len(stale) == 1 else 'have'} never had its password set since it was "
+            "created (an admin reads which on this page or on Settings)"
         )
     if missing:
         return False, "; ".join(missing)
@@ -433,6 +492,9 @@ def _check_sign_in(session: Session, settings: Settings, *, oidc_enabled: bool) 
 
 
 def _check_repos(session: Session, health: Mapping[str, Any]) -> tuple[bool, str]:
+    """Each connected repository, read in its latest docker posture — the posture the gate
+    grades in until a newer one is recorded. A task qualified in an older posture never
+    satisfies the gate in this one (ADR-0019), so it never proves the line either."""
     provision = next(
         (
             p
@@ -444,13 +506,15 @@ def _check_repos(session: Session, health: Mapping[str, Any]) -> tuple[bool, str
     repos = sorted(r.name for r in session.execute(select(Repo)).scalars())
     if not repos:
         return False, "no repository is connected yet"
-    latest: dict[tuple[str, str, str], TaskQualification] = {}
-    for row in session.execute(select(TaskQualification).order_by(TaskQualification.seq)).scalars():
-        latest[(row.repo, row.task_id, row.posture_id)] = row
-    sealed = {
-        row.repo for row in latest.values() if row.state == "qualified" and row.executor == "docker"
-    }
-    missing = [r for r in repos if r not in sealed]
+    missing: list[str] = []
+    for repo in repos:
+        posture = store_q.latest_posture_for(session, repo, executor=SEALED_EXECUTOR)
+        if not posture:
+            missing.append(f"{repo} (no task qualified in a docker posture)")
+        elif not any(
+            q.is_qualified for q in store_q.latest_by_task(session, repo, posture).values()
+        ):
+            missing.append(f"{repo} (no task qualified in {posture}, its latest docker posture)")
     problems: list[str] = []
     if provision is not None and provision.get("status") == "down":
         problems.append(f"provisioning is down: {provision.get('detail')}")
@@ -461,18 +525,71 @@ def _check_repos(session: Session, health: Mapping[str, Any]) -> tuple[bool, str
         )
     if problems:
         return False, "; ".join(problems)
-    return True, f"{len(repos)} of {len(repos)} repositories qualify in the sealed posture"
+    return True, (
+        f"{len(repos)} of {len(repos)} repositories have a task qualified in their latest "
+        "docker posture"
+    )
 
 
-def _check_sealed(health: Mapping[str, Any]) -> tuple[bool, str]:
+#: How many recent runs are read for the worker's own stamp of where it ran.
+_STAMPED_RUNS = 50
+
+
+def _last_stamped_run(session: Session) -> Run | None:
+    """The latest run whose apparatus the worker stamped with its executor."""
+    rows = session.execute(
+        select(Run).order_by(Run.created.desc(), Run.id.desc()).limit(_STAMPED_RUNS)
+    ).scalars()
+    return next(
+        (r for r in rows if isinstance(dict(r.apparatus_json or {}).get("executor"), Mapping)),
+        None,
+    )
+
+
+def _check_sealed(session: Session, health: Mapping[str, Any]) -> tuple[bool, str]:
+    """Configured sealed is not measured sealed. The line needs all three: this deployment's
+    settings say docker for both; no factory build runs its builder on the host
+    (``factory_builds`` ``refused`` — ADR-0023); and the last run the worker stamped ran its
+    tests in docker and carries no unsealed override. A production worker whose builder is
+    not docker starts only under the override and then stamps it on every run, so the stamp's
+    absence there is the builder measured."""
     posture = health.get("posture")
     if not isinstance(posture, Mapping):
         return False, "the posture could not be read"
-    if posture.get("sealed"):
-        return True, "tests and the builder run in docker"
-    return False, (
-        f"tests run {posture.get('sandbox_executor')}, the builder runs "
-        f"{posture.get('builder_executor')}"
+    problems: list[str] = []
+    if not posture.get("sealed"):
+        problems.append(
+            f"tests run {posture.get('sandbox_executor')}, the builder runs "
+            f"{posture.get('builder_executor')}"
+        )
+    factory = posture.get("factory_builds")
+    if factory == "host":
+        problems.append("a factory build runs its builder on the host, in no container (ADR-0023)")
+    elif factory != "refused":
+        problems.append("where a factory build runs is not reported")
+    run = _last_stamped_run(session)
+    if run is None:
+        problems.append(
+            "no run has recorded where it ran yet: the settings alone are not a measurement"
+        )
+    else:
+        apparatus = dict(run.apparatus_json or {})
+        ran = str(dict(apparatus.get("executor") or {}).get("executor") or "")
+        if ran != SEALED_EXECUTOR:
+            problems.append(
+                f"the last run the worker stamped ({run.id[:8]}) ran its tests "
+                f"{ran or 'somewhere it did not record'}"
+            )
+        if apparatus.get("unsealed_prod_override"):
+            problems.append(
+                f"the last run the worker stamped ({run.id[:8]}) ran under the unsealed "
+                "override: its builder ran on the host"
+            )
+    if problems:
+        return False, "; ".join(problems)
+    return True, (
+        "configured in docker for both, factory builds refused, and the last run the worker "
+        f"stamped ({run.id[:8] if run else ''}) ran its tests in docker with no unsealed override"
     )
 
 
@@ -483,15 +600,19 @@ def evaluate(
     health: Mapping[str, Any],
     ledger: Mapping[str, Any] | None,
     oidc_enabled: bool,
+    names: bool = False,
 ) -> GoLiveReading:
     """Every line's state now. ``health`` is the ``/health`` body, ``ledger`` the
-    ``/ledger/verify`` body (``None`` when it could not be read)."""
+    ``/ledger/verify`` body (``None`` when it could not be read). ``names`` is whether the
+    reader may see local admins' login names (an admin): anyone else reads how many."""
     checks = {
         "health-green": lambda: _check_health(health),
         "ledger-verified": lambda: _check_ledger(ledger),
-        "sign-in": lambda: _check_sign_in(session, settings, oidc_enabled=oidc_enabled),
+        "sign-in": lambda: _check_sign_in(
+            session, settings, oidc_enabled=oidc_enabled, names=names
+        ),
         "repos-qualified": lambda: _check_repos(session, health),
-        "sealed-posture": lambda: _check_sealed(health),
+        "sealed-posture": lambda: _check_sealed(session, health),
     }
     records = attestations(session)
     out: list[LineState] = []

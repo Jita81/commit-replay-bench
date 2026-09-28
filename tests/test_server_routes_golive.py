@@ -6,11 +6,15 @@ What it is:   The route tests of the go-live checklist and its attestation recor
 What it does: Pins that every signed-in role reads every line with its state and source and
               that nobody signed out does; that only an admin records or withdraws an
               attestation, each as one ``golive.*`` event naming the admin and never
-              anything else; the refusals (404 ``unknown_line``, 409 ``proven_by_product``,
-              409 ``not_attested``, 422 on an empty statement or a future day); that
+              anything else (an operator, approver or viewer DELETE is refused and writes
+              nothing); that only an admin reads local admins' login names; that the day
+              after the UTC day is accepted; the refusals (404 ``unknown_line``, 409
+              ``proven_by_product``, 409 ``not_attested``, 422 on an empty statement or a
+              future day); that
               ``/version`` serves the belt set, the sign-off policy and the licence the
               Deployment page shows, with the licence pinned to pyproject.toml; and that the
-              platform stream's ``/flow`` counts the lines the way ``/golive`` reads them.
+              platform stream's ``/flow`` counts the lines the way ``/golive`` reads them, from
+              a reading at most a minute old, never running the deep probes on every read.
 How:          ``create_app`` over a temp SQLite store with the bootstrap admin; accounts of
               each role created through ``POST /users``; events read from the table.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -228,3 +232,93 @@ def test_the_platform_stream_counts_the_lines_as_golive_reads_them(client: TestC
     assert {k: platform["counts"][f"golive_{k}"] for k in want} == want
     assert want["attested"] == 1
     assert platform["not_captured"] == []
+
+
+def test_below_admin_nobody_withdraws_an_attestation(client: TestClient) -> None:
+    """``settings.actions.15``: the API refuses both writes below admin — the withdrawal too,
+    which would otherwise let an operator turn an attested line back to unproven."""
+    login(client)
+    body = {"statement": "egress to 1.1.1.1 from worker-0 timed out", "performed_on": YESTERDAY}
+    assert (
+        client.put(f"{API_PREFIX}/settings/attestations/egress-denied", json=body).status_code
+        == 200
+    )
+    for role in ("operator", "approver", "viewer"):
+        create(client, f"{role}-w", role)
+    for role in ("operator", "approver", "viewer"):
+        login(client, f"{role}-w", USER_PW)
+        r = client.delete(f"{API_PREFIX}/settings/attestations/egress-denied")
+        assert r.status_code == 403, (role, r.text)
+    assert [e.action for e in golive_events(client)] == ["golive.attested"]
+    login(client)
+    assert line(client.get(f"{API_PREFIX}/golive").json(), "egress-denied")["state"] == "attested"
+
+
+def test_a_viewer_is_told_how_many_local_admins_are_stale_never_their_names(
+    client: TestClient,
+) -> None:
+    login(client)
+    create(client, "vic", "viewer")
+    admin_detail = line(client.get(f"{API_PREFIX}/golive").json(), "sign-in")["detail"]
+    assert "never had its password set since it was created: root" in admin_detail
+    login(client, "vic", USER_PW)
+    assert client.get(f"{API_PREFIX}/users").status_code == 403
+    seen = line(client.get(f"{API_PREFIX}/golive").json(), "sign-in")["detail"]
+    assert "root" not in seen
+    assert "1 active local admin has never had its password set" in seen
+
+
+def test_the_day_after_the_utc_day_is_accepted_and_the_one_after_refused(
+    client: TestClient,
+) -> None:
+    """East of UTC the admin's today is the server's tomorrow; the form defaults to it."""
+    login(client)
+    today = _dt.datetime.now(_dt.UTC).date()
+    ahead = (today + _dt.timedelta(days=1)).isoformat()
+    r = client.put(
+        f"{API_PREFIX}/settings/attestations/doctor",
+        json={"statement": "both hosts ok", "performed_on": ahead},
+    )
+    assert r.status_code == 200, r.text
+    assert line(r.json(), "doctor")["attestation"]["performed_on"] == ahead
+
+
+def test_the_flow_reading_does_not_run_the_deep_probes_on_every_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``/flow`` feeds a panel on five screens; its go-live counts reuse a reading taken in
+    the last minute rather than walking the ledger and probing docker on every read."""
+    from crb.server.routes import golive as golive_routes
+
+    calls = {"health": 0, "ledger": 0}
+    real_health, real_ledger = golive_routes.collect_health, golive_routes.verify_ledger
+
+    def health(*a: Any, **kw: Any) -> Any:
+        calls["health"] += 1
+        return real_health(*a, **kw)
+
+    def ledger(*a: Any, **kw: Any) -> Any:
+        calls["ledger"] += 1
+        return real_ledger(*a, **kw)
+
+    monkeypatch.setattr(golive_routes, "collect_health", health)
+    monkeypatch.setattr(golive_routes, "verify_ledger", ledger)
+    login(client)
+    with client.app.state.session_factory() as s:  # type: ignore[attr-defined]
+        s.add(Repo(name="calc", language="go", runner="go", config_json={"language": "go"}))
+        s.commit()
+    for _ in range(3):
+        assert client.get(f"{API_PREFIX}/flow", params={"repo": "calc"}).status_code == 200
+    assert calls == {"health": 1, "ledger": 1}
+    # an attestation is in the next /flow reading at once: the write refreshes the reading
+    client.put(
+        f"{API_PREFIX}/settings/attestations/doctor",
+        json={"statement": "both hosts ok", "performed_on": YESTERDAY},
+    )
+    r = client.get(f"{API_PREFIX}/flow", params={"repo": "calc"})
+    platform = next(s for s in r.json()["streams"] if s["stream"] == "run-the-platform")
+    assert platform["counts"]["golive_attested"] == 1
+    assert calls == {"health": 2, "ledger": 2}
+    # /golive itself is always read afresh: "proven" is a check run for that request
+    client.get(f"{API_PREFIX}/golive")
+    assert calls == {"health": 3, "ledger": 3}

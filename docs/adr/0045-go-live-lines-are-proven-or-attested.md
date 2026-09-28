@@ -54,14 +54,32 @@ Three operating gaps kept the sealed posture from going live without a person's 
      in, which is the live proof that OIDC works; local sign-in is off; no bootstrap admin
      is configured; and every active local admin has had a password set since it was
      created;
-   - `repos-qualified` needs every connected repository to have a task qualified in a
-     docker posture, and the `provision` probe not to be `down`;
-   - `sealed-posture` reads `/health`'s posture.
+   - `repos-qualified` needs every connected repository to have a task qualified in the
+     posture now in force — its latest docker posture, the one the gate grades in — and the
+     `provision` probe not to be `down`. A task qualified only in an older posture never
+     satisfies the gate in this one (ADR-0019), so it never proves the line either;
+   - `sealed-posture` needs all three: `/health`'s posture reads sealed; factory builds are
+     `refused` (a factory build runs its builder on the host); and the last run the worker
+     stamped ran its tests in docker with no `unsealed_prod_override`. A production worker
+     whose builder is not docker starts only under the override and then stamps it on every
+     run, so the stamp's absence there is the builder measured. What the deployment was told
+     is never, on its own, a proof.
 
-   A failed read is the line's reason, never a 500.
+   A failed read is the line's reason, never a 500. The reading names local admins who have
+   never had a password set only to an admin (the login names are half a credential, and
+   `GET /users` withholds them below admin); anyone else reads how many. `/flow`'s
+   platform-stream counts reuse a reading this process took in the last minute (every
+   `/golive` read, attestation and withdrawal takes one), so the panel on five screens does
+   not run the deep probes and the ledger's chain walk on every read; `/golive` itself is
+   always read afresh.
 3. **An attestation is an operator act recorded through the product, and it cannot stand in
    for a check.** `PUT /settings/attestations/{line}` (admin) takes what was done (1 to 500
-   characters) and the day it was done (never in the future). It writes one
+   characters) and the day it was done. The day is the admin's own calendar day, compared
+   with the server's UTC days, so each bound gives a day's slack: no later than the day
+   after UTC's today (no place is further ahead); not more than a day before the withdrawal
+   the attestation follows (withdrawn evidence cannot come back); and not before an install
+   the product observed (`deployment.installed` with moment `observed`; an upgraded
+   deployment, whose install moment is unknown, has only the withdrawal bound). It writes one
    `golive.attested` event on the `golive` system trace, naming the admin as its actor.
    `DELETE` writes `golive.withdrawn`, and the line reads unproven again. Events are
    append-only, so an attestation is never edited. The product refuses:
@@ -94,8 +112,11 @@ Three operating gaps kept the sealed posture from going live without a person's 
    gate then revokes every qualification in force whose `deps.keys` cites it: one new
    `revoked` row each, coded `BUNDLE_INTEGRITY` (`provision.revoked`). The key is then a
    miss, so the next run that needs it fetches and seals it afresh. The damaged bytes are
-   kept for whoever investigates and are never mounted again. Between runs,
-   `crb deps verify --quarantine` does the same. Nothing is deleted by hand.
+   kept for whoever investigates and are never mounted again. The resolve path (a
+   qualification included) re-hashes a store hit once per provider before reusing it; a
+   hit that fails is quarantined the same way and fetched and sealed afresh, so a damaged
+   set is never mounted to qualify a task. Between runs, `crb deps verify --quarantine`
+   does the same. Nothing is deleted by hand.
 
 ## Consequences
 
@@ -112,6 +133,8 @@ Three operating gaps kept the sealed posture from going live without a person's 
 **What becomes harder.**
 - Adding a line to DEPLOYMENT §8 now means adding it to `LINES` in the same change. The
   guide-and-code test makes this impossible to forget.
+- A new deployment's `sealed-posture` line reads unproven until the worker has stamped a
+  run, even when every setting is right: a configuration is not a measurement.
 - An attestation is a claim by a named person, not a verification. The page says so in the
   pill's hint and in the Claims line of `golive.py`, and a board must read it as such.
 - A structured lock's markers are joined from its edges. A lock that uses a construct the
@@ -119,6 +142,8 @@ Three operating gaps kept the sealed posture from going live without a person's 
 
 **What we must never do.**
 - Let an attestation stand in for a line the product proves, or write one on anyone's behalf.
+- Prove a line from what the deployment was told (a setting echoed back) or from a record
+  the gate would not accept (a qualification in another posture).
 - Edit or delete an attestation event; withdraw it with a new event instead.
 - Put a mirror credential's value on a command line, in a setting, in a view or in a log,
   or give it to a test container or a builder.
