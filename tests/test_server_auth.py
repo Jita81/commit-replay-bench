@@ -1287,6 +1287,9 @@ def test_the_recovery_hints_state_the_numbers_the_server_enforces() -> None:
         "field.settings.my_new_password",
     ):
         assert floor in _hint(key), key
+    # the /settings About block states the same floor (the help ratchet exempts it as a server
+    # constant, not a policy value, on the strength of this pin)
+    assert floor in Path("ui/src/help/help.ts").read_text(encoding="utf-8")
 
     limiter = LoginRateLimiter()
     words = {5: "Five", 3: "Three", 10: "Ten"}
