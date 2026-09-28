@@ -148,6 +148,7 @@ function RunsLoginLine() {
                 login={login}
                 canVerify={can('operator')}
                 verifying={verify.isPending && verify.variables?.auth === login.auth}
+                busy={verify.isPending}
                 onVerify={() => verify.mutate({ builder: login.builder, auth: login.auth })}
                 error={verify.isError && verify.variables?.auth === login.auth ? verify.error : null}
               />
@@ -160,7 +161,9 @@ function RunsLoginLine() {
 }
 
 /** One auth mode's line: its state, its age and why, and (operators) its own Verify. */
-function RunsLoginMode({ login, canVerify, verifying, onVerify, error }: { login: BuilderLoginState; canVerify: boolean; verifying: boolean; onVerify: () => void; error: unknown }) {
+/** `verifying` = THIS mode's request is in flight (its label); `busy` = any mode's is — the
+ * server's verify limiter is deployment-wide, so every Verify waits for it (P-732). */
+function RunsLoginMode({ login, canVerify, verifying, busy, onVerify, error }: { login: BuilderLoginState; canVerify: boolean; verifying: boolean; busy: boolean; onVerify: () => void; error: unknown }) {
   const d = RUNS_LOGIN_DISPLAY[login.state] ?? RUNS_LOGIN_DISPLAY.unverified
   return (
     <div className="space-y-2" data-testid="claude-runs-login" data-state={login.state} data-auth={login.auth}>
@@ -183,7 +186,7 @@ function RunsLoginMode({ login, canVerify, verifying, onVerify, error }: { login
       </p>
       {canVerify && (
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outlined" size="sm" onClick={onVerify} disabled={verifying} data-testid="claude-runs-login-verify" hint="button.settings.verify_builder_login">
+          <Button variant="outlined" size="sm" onClick={onVerify} disabled={busy} data-testid="claude-runs-login-verify" hint="button.settings.verify_builder_login">
             {verifying ? 'Verifying…' : `Verify the ${login.auth} login`}
           </Button>
           {error !== null && <ErrorState compact error={error} />}

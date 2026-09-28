@@ -377,6 +377,28 @@ describe('ClaudeCodeLoginCard — the login runs use (pilot D1)', () => {
     expect(post.url).toContain('auth=cli')
   })
 
+  it('while one mode verifies, every mode’s Verify is disabled — the limiter is deployment-wide (P-732)', async () => {
+    // a second Verify pressed on another mode inside the window met the server's 429
+    const user = userEvent.setup()
+    const API_KEY_DEFAULT = { ...INVALID_LOGIN, auth: 'api_key', state: 'unverified', status: '', detail: '', source: 'env', age_s: null, checked_at: null, reason: 'never verified', present: true, default: true }
+    const CLI_INVALID = { ...INVALID_LOGIN, present: true, default: false }
+    let settle: (r: Response) => void = () => {}
+    setup(OPERATOR, {
+      'GET /settings/secrets': VIEWER_LIST,
+      'GET /builders/logins': { items: [API_KEY_DEFAULT, CLI_INVALID] },
+      'POST /builders/claude_code/login/verify': () => new Promise<Response>((resolve) => { settle = resolve }),
+    })
+    const [apiKey, cli] = await screen.findAllByTestId('claude-runs-login')
+    await user.click(within(cli!).getByTestId('claude-runs-login-verify'))
+    await waitFor(() => expect(within(cli!).getByTestId('claude-runs-login-verify')).toHaveTextContent('Verifying…'))
+    expect(within(cli!).getByTestId('claude-runs-login-verify')).toBeDisabled()
+    // the other mode keeps its own label, and cannot be pressed until the request settles
+    expect(within(apiKey!).getByTestId('claude-runs-login-verify')).toHaveTextContent('Verify the api_key login')
+    expect(within(apiKey!).getByTestId('claude-runs-login-verify')).toBeDisabled()
+    settle(json({ ...CLI_INVALID, state: 'verified', status: 'ok' }))
+    await waitFor(() => expect(within(apiKey!).getByTestId('claude-runs-login-verify')).toBeEnabled())
+  })
+
   it('a viewer is served presence and state only, and the line reads without the operator fields', async () => {
     const PRESENCE = { builder: 'claude_code', auth: 'cli', state: 'invalid', status: 'invalid', present: true, default: true, checked_at: '2026-09-27T15:47:02+00:00', age_s: 42, ttl_s: 600, reason: '' }
     setup(VIEWER, { 'GET /settings/secrets': VIEWER_LIST, 'GET /builders/logins': { items: [PRESENCE] } })
