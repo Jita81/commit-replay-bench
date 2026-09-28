@@ -158,3 +158,26 @@ toolchains (all four node runners).
 - **Counting `not_constructible` rows toward the gate.** Out of scope here; workstream A2
   withholds `deliver` while controls fail or are majority `not_constructible`, which is the
   routing-side half of this fix.
+
+## Amendment — a gold witness beside every catch (`controls.v3`, 2026-09-28, G-952)
+
+**Context.** Each task's `gold` row proves the posture could grade the commit's own change at
+the start of the task, and the run's canary proves it for the first task. Nothing proved it
+beside each later control. A sealed posture that stops building part-way — a dependency
+source that goes away, an image that loses a toolchain — makes every later control grade red,
+and a red `noop`, `stub`, cheat or poison reads "caught". The gate would pass on an
+environment that could not build.
+
+**Decision.** Every row that reads as caught (every control but `gold` whose verdict is `ok`)
+is witnessed: the commit's own change is graded again in a fresh tree, with the same runner,
+executor and grade context, beside it. The catch stands only when that witness grades
+`clean`; any other witness (red, regressed, an error) turns the row into a `VIOLATION` whose
+note names the witness — an instrument failure, never a finding about the tests. A sandbox
+that is gone still stops the run. Each row carries `witness`; the report counts `witnessed`
+and `witness_failures`. `CONTROLS_VERSION` is `controls.v3`. No ledger row changes, so the
+apparatus version does not move.
+
+**Consequences.** A controls run grades up to twice as many trees (still no model, still £0).
+A bad gold now fails every catch on its task as well as its own row, which is what it means:
+nothing about that task is evidence. A report from `controls.v2` carries no witness; the
+Oracle screen shows a dash for it rather than inventing one.

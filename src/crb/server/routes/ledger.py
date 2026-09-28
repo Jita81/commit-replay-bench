@@ -24,8 +24,10 @@ What it does: ``verify`` walks the stored rows recomputing every hash from the c
               tampered or false-Q1 row is REPORTED, never hidden behind an exception) and
               re-counts false-Q1 in SQL; ``export`` streams rows verbatim as JSONL (verifies
               standalone when unfiltered) or formula-safe CSV; ``export/abstract`` emits
-              only the allowlisted cell fields; ``import`` re-chains foreign rows, skips
-              ones already held, and refuses census rows (they need tasks and configs).
+              only the allowlisted cell fields; every export first commits one
+              ``ledger.exported`` event naming who took it, the format and the filter;
+              ``import`` re-chains foreign rows, skips ones already held, and refuses
+              census rows (they need tasks and configs).
 How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` (belt-set
               aware, as ``GradeRow.body`` is) → the ``LedgerVerifyOut``; export = generator
               → ``StreamingResponse``; import = ``parse_import`` → dedupe → ``import_rows``.
@@ -37,6 +39,8 @@ Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this mus
               src/crb/core/federated.py (``export_abstract`` and its allowlist),
               src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
               src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
+              src/crb/server/routes/runs.py (``append_system_event`` — the export's audit
+              event), docs/DATA-RETENTION.md (§4, who read the rows),
               src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``),
               docs/REPRODUCING-THE-CENSUS.md (the verify procedure end to end)
 Tested by:    tests/test_server_routes_ledger.py
@@ -62,6 +66,7 @@ from typing import Any
 from fastapi import APIRouter, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import canonical_json, sha256_text
@@ -78,6 +83,7 @@ from crb.core.redact import redact
 from crb.server.auth import AdminDep, OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.grades import ROW_FIELDS, grade_to_dict
+from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.routes.signoffs import FALSE_Q1_PREDICATE
 from crb.server.schemas import LedgerImportOut, LedgerVerifyOut
 from crb.store.ledger import DbLedger
@@ -251,6 +257,36 @@ def _csv(factory: sessionmaker[Session], repo: str | None) -> Iterator[bytes]:
         yield buf.getvalue().encode("utf-8")
 
 
+#: The audit action every ledger export writes (G-184; docs/DATA-RETENTION.md §4).
+LEDGER_EXPORTED = "ledger.exported"
+#: The one trace every export event lands on, so "who took the ledger" is one read.
+EXPORT_TRACE = system_trace_id("ledger", "exports")
+_EXPORT_RECORD_TRIES = 3
+
+
+def record_export(db: Session, *, actor: str, fmt: str, repo: str | None) -> None:
+    """Commit one ``ledger.exported`` event naming who took the export, in what format and
+    with what filter, BEFORE the first byte streams: an export that cannot be recorded is not
+    served. Two exports at the same moment race for the trace's next ``seq`` (unique); the
+    loser re-reads it and tries again."""
+    for attempt in range(_EXPORT_RECORD_TRIES):
+        append_system_event(
+            db,
+            trace_id=EXPORT_TRACE,
+            action=LEDGER_EXPORTED,
+            repo=repo or "",
+            actor=actor,
+            payload={"format": fmt, "filter": {"repo": repo} if repo else {}, "at": _now()},
+        )
+        try:
+            db.commit()
+            return
+        except IntegrityError:
+            db.rollback()
+            if attempt == _EXPORT_RECORD_TRIES - 1:
+                raise
+
+
 @router.get(
     "/ledger/export",
     responses={401: _ERR, 422: _ERR},
@@ -259,15 +295,16 @@ def _csv(factory: sessionmaker[Session], repo: str | None) -> Iterator[bytes]:
 )
 def ledger_export(
     viewer: ViewerDep,
+    db: DbDep,
     factory: SessionFactoryDep,
     format: str = Query(default="jsonl", max_length=8),  # API.md names it `format`
     repo: str | None = Query(default=None, max_length=64),
 ) -> StreamingResponse:
-    del viewer
     if format not in FORMATS:
         raise ApiError(
             422, "validation_error", f"format must be one of {FORMATS}", detail={"format": format}
         )
+    record_export(db, actor=viewer.id, fmt=format, repo=repo)
     suffix = f"-{repo}" if repo else ""
     if format == "csv":
         body, media = _csv(factory, repo), "text/csv; charset=utf-8"
@@ -286,9 +323,11 @@ def ledger_export(
     summary="Abstract cells only (allowlisted fields; no repo, no ids, no code) — operator",
     response_class=StreamingResponse,
 )
-def ledger_export_abstract(operator: OperatorDep, factory: SessionFactoryDep) -> StreamingResponse:
-    del operator
-    cells = export_abstract(DbLedger(factory).rows())
+def ledger_export_abstract(
+    operator: OperatorDep, db: DbDep, factory: SessionFactoryDep
+) -> StreamingResponse:
+    cells = export_abstract(DbLedger(factory).rows())  # a refused export (409) is not recorded
+    record_export(db, actor=operator.id, fmt="abstract", repo=None)
 
     def _body() -> Iterator[bytes]:
         for c in cells:
@@ -429,9 +468,12 @@ def _existing(db: Session, column: Any, values: list[str]) -> set[str]:
 
 __all__ = [
     "EXPORT_BATCH",
+    "EXPORT_TRACE",
     "FORMATS",
+    "LEDGER_EXPORTED",
     "MAX_IMPORT_BYTES",
     "parse_import",
+    "record_export",
     "router",
     "row_hash_from_stored",
     "verify_ledger",

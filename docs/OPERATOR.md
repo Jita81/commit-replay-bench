@@ -881,7 +881,12 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - attempts recorded `harness` with `error: environment: …` — the humans' own change failed
   the same scope in the same posture, so the posture moved under its qualification (a run
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
-  before the next replay — §7a).
+  before the next replay — §7a);
+- a controls report with `witness_failures > 0` — a control read as caught, but the commit's
+  own change graded beside it in the same posture was not clean, so the environment could not
+  build or grade at that moment and the catch proves nothing. Each such row is a `VIOLATION`;
+  fix the posture (qualify again, check the sandbox image and the dependency source) and
+  re-run the controls.
 
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in

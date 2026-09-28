@@ -2864,6 +2864,8 @@ class Worker:
             "escapes": len(report.escapes),
             "not_constructible": len(report.not_constructible),
             "skipped": len(report.skipped),
+            "witnessed": len(report.witnessed),
+            "witness_failures": len(report.witness_failures),
             "passed": report.passed,
             "complete": not cancelled,
         }
