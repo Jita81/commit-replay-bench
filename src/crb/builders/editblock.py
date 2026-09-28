@@ -59,6 +59,7 @@ from crb.builders.base import (
     GuardRefused,
     TestFileGuard,
     emit,
+    model_error_text,
 )
 from crb.builders.budget import BudgetTracker, CostMeter, price_for
 from crb.builders.openai_client import (
@@ -428,7 +429,7 @@ class EditBlockBuilder:
         try:
             chat = self._chat()
         except Exception as exc:  # missing extra / credential — a recorded non-pass
-            errors.append(f"model_error: {type(exc).__name__}: {exc}")
+            errors.append(model_error_text(exc))
             return finish(done=False, summary="", stop=STOP_MODEL_ERROR, attempts=0)
 
         chosen = candidate_source_files(
@@ -456,7 +457,7 @@ class EditBlockBuilder:
             try:
                 reply = chat(messages)
             except Exception as exc:
-                errors.append(f"model_error: {type(exc).__name__}: {exc}")
+                errors.append(model_error_text(exc))
                 return finish(done=False, summary="", stop=STOP_MODEL_ERROR, attempts=attempt)
             text = reply.text if isinstance(reply, ChatReply) else str(reply)
             if isinstance(reply, ChatReply):

@@ -52,6 +52,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from crb.builders.base import MissingCredentialError
 from crb.builders.budget import CostMeter, Pricing, price_for
 
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
@@ -61,8 +62,9 @@ AZURE_KEY_ENV = "AZURE_OPENAI_API_KEY"
 RETRY_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504})
 
 
-class MissingCredential(RuntimeError):
-    """The named environment variable is not set. Fail closed before any call."""
+class MissingCredential(MissingCredentialError):
+    """The named environment variable is not set. Fail closed before any call (recorded as a
+    credential fault — ``crb.builders.base.model_error_text``)."""
 
 
 class ModelCallError(RuntimeError):

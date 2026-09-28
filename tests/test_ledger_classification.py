@@ -137,11 +137,18 @@ def test_the_2_4_only_labels_are_the_labels_the_helper_adds_from_2_4() -> None:
     """The list the refusal reads is the list the helper writes: every label the helper adds
     at 2.4 that it does not write at 2.3 is in ``V2_ONLY_LABELS`` — except ``failure_kind``,
     which a row below 2.4 has always carried when it was not clean."""
-    res = _result(lint_status=lint_mod.LINT_NONE_DETECTED)
-    kw: dict[str, Any] = {"error": "", "change_id": CHANGE}
-    added = set(lg.row_labels_at_write(res, apparatus_version=V2, **kw)) - set(
-        lg.row_labels_at_write(res, apparatus_version="2.3", **kw)
-    )
+    added: set[str] = set()
+    red = g.Belts(True, None, None, None)
+    for res, error in (
+        (_result(lint_status=lint_mod.LINT_NONE_DETECTED), ""),
+        # an outage row: the helper adds its cause from 2.4 (pilot D1), so the refusal must
+        # name that label too
+        (_result(clean=False, belts=red, lint_status=lint_mod.LINT_NOT_REACHED), AUTH_401),
+    ):
+        kw: dict[str, Any] = {"error": error, "change_id": CHANGE}
+        added |= set(lg.row_labels_at_write(res, apparatus_version=V2, **kw)) - set(
+            lg.row_labels_at_write(res, apparatus_version="2.3", **kw)
+        )
     assert added - {lg.LABEL_FAILURE_KIND} == set(lg.V2_ONLY_LABELS)
 
 
@@ -347,3 +354,78 @@ def test_the_ledger_refuses_an_outage_cause_that_does_not_fit_its_row() -> None:
 def test_the_outage_cause_rule(error: str, cause: str) -> None:
     kind = lg.derive_failure_kind(clean=False, disqualified=False, error=error)
     assert lg.derive_outage_cause(kind, error) == cause
+
+
+def test_every_auth_marker_is_one_the_failure_rule_reads_as_an_outage() -> None:
+    """A cause is read only on an ``outage`` row, so an auth marker the failure rule never
+    reads as an outage on its own is dead: a refused credential phrased that way would read
+    ``harness`` (against autonomy) with no cause at all. Every auth marker is itself a live
+    outage marker (Q1's review: three of six were not)."""
+    for marker in lg.AUTH_ERROR_MARKERS:
+        text = f"model_error: provider said {marker}"
+        assert lg.derive_failure_kind(clean=False, disqualified=False, error=text) == (
+            lg.FAILURE_OUTAGE
+        ), marker
+        assert marker in lg.OUTAGE_ERROR_MARKERS, marker
+
+
+class _SdkError(Exception):
+    """An OpenAI-compatible SDK error: the HTTP status on the exception (``status_code``)."""
+
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _credential_refusals() -> list[BaseException]:
+    """The real shapes a refused key reaches an OpenAI-compatible builder in (openai_agent,
+    editblock — the Cerebras route): wrapped by the client's retry, raised by the SDK, a 403,
+    and a key the worker does not have at all."""
+    from crb.builders.openai_client import MissingCredential, ModelCallError
+
+    return [
+        ModelCallError(
+            "model call failed after 1 attempt(s): AuthenticationError: Error code: 401 - "
+            "{'message': 'Wrong API Key', 'type': 'invalid_request_error'}",
+            status=401,
+        ),
+        _SdkError(
+            "Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-...'}}", 401
+        ),
+        _SdkError("Error code: 403 - {'error': {'message': 'Permission denied'}}", 403),
+        MissingCredential("CEREBRAS_API_KEY is not set"),
+    ]
+
+
+@pytest.mark.parametrize("exc", _credential_refusals(), ids=["wrapped", "sdk", "403", "missing"])
+def test_a_builder_names_a_refused_credential_in_the_words_the_ledger_reads(
+    exc: BaseException,
+) -> None:
+    """Q1's review: an OpenAI-compatible builder wrote a refused key as
+    ``model_error: ModelCallError: … Error code: 401 …``, which the failure rule read
+    ``harness`` — against autonomy and inside ``n`` — with no cause, so a local credential
+    fault on the Cerebras route was blamed on the harness and the login was never recorded
+    invalid. Every builder now writes a refused or absent credential through ONE function in
+    the ledger's own words: ``outage``, cause ``auth``."""
+    from crb.builders.base import model_error_text
+
+    text = model_error_text(exc)
+    kind = lg.derive_failure_kind(clean=False, disqualified=False, error=text)
+    assert kind == lg.FAILURE_OUTAGE, text
+    assert lg.derive_outage_cause(kind, text) == lg.OUTAGE_CAUSE_AUTH, text
+    assert type(exc).__name__ in text  # the builder's own words are kept after the marker
+
+
+def test_a_builder_error_that_is_not_a_credential_keeps_its_own_words() -> None:
+    from crb.builders.base import model_error_text
+    from crb.builders.openai_client import ModelCallError
+
+    boom = ModelCallError(
+        "model call failed after 5 attempt(s): InternalServerError: 500", status=500
+    )
+    assert model_error_text(boom) == f"model_error: ModelCallError: {boom}"
+    assert (
+        lg.derive_failure_kind(clean=False, disqualified=False, error=model_error_text(boom))
+        == lg.FAILURE_HARNESS
+    )
+    assert model_error_text(ValueError("bad reply")) == "model_error: ValueError: bad reply"

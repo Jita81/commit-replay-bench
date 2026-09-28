@@ -310,11 +310,13 @@ def test_a_docstring_or_comment_edit_leaves_the_source_pin_alone() -> None:
     assert _source_digest([edited, *live[1:]]) == _source_digest(live)
 
 
-#: The outage-cause rule (pilot D1, P-205): its code and the constants it reads — written when
-#: the rule was added, for the 2.4 rows that carry its label, and never edited. A change to the
-#: rule or its markers moves an ``outage_cause`` already pinned in the chain, so it is an
-#: apparatus bump with the old rule frozen beside the new one, like the failure rule's.
-OUTAGE_CAUSE_SOURCE_SHA256 = "b199fb590cdecfa336c8664cdbf267465a85831b9bcff7ec3bfa5cc30ceb25d7"
+#: The outage-cause rule (pilot D1, P-205): its code and the constants it reads, for the 2.4
+#: rows that carry its label. Set once more before any row carried the label (Q1's review
+#: pruned the auth markers the failure rule could never reach — DL-142 (4)); from the first
+#: 2.4 row on it is never edited. A change to the rule or its markers moves an
+#: ``outage_cause`` already pinned in the chain, so it is then an apparatus bump with the old
+#: rule frozen beside the new one, like the failure rule's.
+OUTAGE_CAUSE_SOURCE_SHA256 = "9db880f1bc7a56459307e5cbc578229f62efb399d71e2ba0fac37175a621d66b"
 
 
 def _outage_cause_digest(source: str) -> str:

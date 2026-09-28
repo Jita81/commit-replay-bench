@@ -303,17 +303,17 @@ OUTAGE_CAUSE_AUTH = "auth"
 #: Every other provider refusal: a usage limit, a quota, a 429, an overload, a 5xx.
 OUTAGE_CAUSE_PROVIDER = "provider"
 OUTAGE_CAUSES: tuple[str, ...] = (OUTAGE_CAUSE_AUTH, OUTAGE_CAUSE_PROVIDER)
-#: The builders' own words for a refused credential (``crb.builders.claude_code`` writes
-#: ``authentication failed (HTTP 401)``). Matched case-insensitively on an outage row only;
-#: ``tests/test_failure_rule_golden.py`` pins this list and the rule's code.
-AUTH_ERROR_MARKERS: tuple[str, ...] = (
-    "authentication failed",
-    "oauth access token is invalid",
-    "invalid x-api-key",
-    "invalid api key",
-    "http 401",
-    "http 403",
-)
+#: The words EVERY builder writes for a credential the provider refused (HTTP 401/403) or
+#: that the worker does not have: ``crb.builders.base.model_error_text`` and
+#: ``crb.builders.claude_code`` write ``model_error: authentication failed (…)`` with this
+#: constant, so a refused login reads ``outage``, cause ``auth``, whichever builder met it.
+AUTH_REFUSED = "authentication failed"
+#: The markers of a refused credential. Matched case-insensitively on an outage row only, so
+#: each must itself be a live outage marker (``OUTAGE_ERROR_MARKERS``) — a marker the failure
+#: rule never reads as an outage is dead (``tests/test_ledger_classification.py``). The
+#: builders write :data:`AUTH_REFUSED`; the CLI's own ``OAuth access token is invalid`` is the
+#: other. ``tests/test_failure_rule_golden.py`` pins this list and the rule's code.
+AUTH_ERROR_MARKERS: tuple[str, ...] = (AUTH_REFUSED, "oauth access token is invalid")
 
 
 def derive_outage_cause(kind: str, error: str) -> str:
@@ -383,7 +383,7 @@ LABEL_LINT_REASON = "lint_reason"
 LABEL_CHANGE_ID = "change_id"
 #: The labels only apparatus 2.4 defines (DL-106 (2)): a row below 2.4 never carries one,
 #: whichever writer built it — refused by the row itself, at write and on read (P-127).
-V2_ONLY_LABELS: tuple[str, ...] = (LABEL_LINT_REASON, LABEL_CHANGE_ID)
+V2_ONLY_LABELS: tuple[str, ...] = (LABEL_LINT_REASON, LABEL_CHANGE_ID, LABEL_OUTAGE_CAUSE)
 #: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE

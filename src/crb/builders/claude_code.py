@@ -127,6 +127,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from crb.builders.base import (
+    CREDENTIAL_REFUSED_STATUSES,
     STOP_DONE,
     STOP_MAX_COST,
     STOP_MAX_TURNS,
@@ -142,6 +143,7 @@ from crb.builders.base import (
 )
 from crb.builders.budget import CostMeter, price_for
 from crb.core.execution import SandboxUnavailable
+from crb.core.ledger import AUTH_REFUSED
 from crb.core.redact import redact_and_cap
 from crb.core.secrets_file import SecretsError, SecretsInsecure, SecretsStore, fingerprint
 from crb.core.workspace import Workspace
@@ -552,7 +554,7 @@ class StreamStats:
             code = int(status) if isinstance(status, int) and not isinstance(status, bool) else 0
             self.api_retries.append(code)
             summary.update({"subtype": "api_retry", "error_status": code})
-            if code in {401, 403}:
+            if code in CREDENTIAL_REFUSED_STATUSES:
                 self.auth_failed = True
         elif kind == "assistant":
             self.assistant_messages += 1
@@ -974,7 +976,7 @@ class ClaudeCodeBuilder:
                         else f"check {API_KEY_ENV}"
                     )
                     errors.append(
-                        f"model_error: authentication failed (HTTP {stats.api_retries[-1]}) — {hint}"
+                        f"model_error: {AUTH_REFUSED} (HTTP {stats.api_retries[-1]}) — {hint}"
                     )
                     handle.kill()
                     break
@@ -1001,13 +1003,17 @@ class ClaudeCodeBuilder:
         if stats.result is None and not timed_out and not stats.auth_failed:
             errors.append("model_error: no result event in stream")
         elif stats.result is not None and stats.result.get("is_error"):
-            errors.append(
-                "model_error: "
-                + redact_and_cap(
-                    f"{stats.result.get('subtype', '')}: {stats.result.get('result', '')}",
-                    max_chars=500,
-                )
+            said = redact_and_cap(
+                f"{stats.result.get('subtype', '')}: {stats.result.get('result', '')}",
+                max_chars=500,
             )
+            api_status = stats.result.get("api_error_status")
+            if api_status in CREDENTIAL_REFUSED_STATUSES:
+                # the API refused the login without a retry first ("Invalid API key · Please
+                # run /login"): named as verify_login names it, so the row reads outage, cause
+                # auth, and the worker records the login invalid (Q1's review)
+                said = f"{AUTH_REFUSED} (HTTP {api_status}) — {said}"
+            errors.append(f"model_error: {said}")
         if stats.parse_errors:
             errors.append(f"stream: {stats.parse_errors} unparseable line(s)")
         done, summary = stats.claim()
@@ -1299,7 +1305,7 @@ def verify_login(
             return finish(VERIFY_ERROR, f"{type(exc).__name__}: {exc}")
     if stats.auth_failed:
         code = stats.api_retries[-1] if stats.api_retries else 401
-        return finish(VERIFY_INVALID, f"authentication failed (HTTP {code})")
+        return finish(VERIFY_INVALID, f"{AUTH_REFUSED} (HTTP {code})")
     if handle.timed_out:
         return finish(VERIFY_TIMEOUT, f"no result within {timeout_s}s")
     result = stats.result or {}
@@ -1307,8 +1313,8 @@ def verify_login(
         if not result.get("is_error"):
             return finish(VERIFY_OK, str(result.get("result", "") or "").strip()[:80] or "ok")
         api_status = result.get("api_error_status")
-        if api_status in {401, 403}:
-            return finish(VERIFY_INVALID, f"authentication failed (HTTP {api_status})")
+        if api_status in CREDENTIAL_REFUSED_STATUSES:
+            return finish(VERIFY_INVALID, f"{AUTH_REFUSED} (HTTP {api_status})")
         return finish(VERIFY_ERROR, str(result.get("result", "") or "error"))
     return finish(
         VERIFY_ERROR,

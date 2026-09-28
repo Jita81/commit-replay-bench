@@ -1075,3 +1075,41 @@ def test_login_resolution_names_where_a_build_would_take_its_login(
     assert source == cc.TOKEN_SOURCE_ENV and len(fp) == 4
     monkeypatch.delenv("ANTHROPIC_API_KEY")
     assert cc.login_resolution(cc.AUTH_API_KEY) == (cc.TOKEN_SOURCE_NONE, "")
+
+
+def test_a_result_the_api_refused_names_the_refused_login_in_the_ledger_words(
+    tmp_path: Path,
+) -> None:
+    """Q1's review: the CLI can end a build with a result it marks ``is_error`` and
+    ``api_error_status`` 401 (``Invalid API key · Please run /login``) without retrying first.
+    ``verify_login`` reads that as a refused login; the build wrote it as a bare
+    ``model_error: success: Invalid API key …``, which the failure rule read ``harness`` —
+    so the login was never recorded invalid and the row counted against autonomy. The build
+    now names it as the verify does: ``authentication failed (HTTP 401)``."""
+    from crb.core import ledger as lg
+
+    for status in (401, 403):
+        _fx, _ws, out = _setup(
+            tmp_path / str(status),
+            FakeSpawn(
+                [
+                    json.dumps(
+                        {
+                            "type": "result",
+                            "subtype": "success",
+                            "is_error": True,
+                            "api_error_status": status,
+                            "result": "Invalid API key · Please run /login",
+                            "num_turns": 1,
+                            "total_cost_usd": 0,
+                            "usage": {},
+                        }
+                    )
+                ]
+            ),
+        )
+        (err,) = [e for e in out.errors if e.startswith("model_error")]
+        assert f"authentication failed (HTTP {status})" in err and "Invalid API key" in err
+        kind = lg.derive_failure_kind(clean=False, disqualified=False, error=err)
+        assert kind == lg.FAILURE_OUTAGE
+        assert lg.derive_outage_cause(kind, err) == lg.OUTAGE_CAUSE_AUTH
