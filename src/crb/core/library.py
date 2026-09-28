@@ -21,15 +21,18 @@ a new signature brings it back. The state of an entry is the fold of its acts
 **An entry never reaches a builder's brief from here.** Showing, signing and the page per
 work type use an entry as soon as it is signed. A brief uses it only inside a context arm
 whose effect was measured (ADR-0026 items 1 and 10, ``+library@<version>``), which is
-Wave 5's and off by default. No brief composer imports this module: the import-linter
-contract "library entries never reach a brief" in ``pyproject.toml`` refuses it, and
-``tests/test_library.py`` holds the contract and the composed brief to that.
+Wave 5's and off by default. No builder, factory, intake or brief-running core module imports
+this module: the import-linter contract "library entries never reach a brief" in
+``pyproject.toml`` refuses it. The worker composes a replay's brief and imports the library for
+freshness alone — ``tests/test_library.py`` holds it to its freshness read, and
+``tests/test_worker.py`` holds the brief a replay builds to none of a signed entry's words.
 
 A ``standard`` entry names the ISO/IEC 25010:2023 characteristic it refines and the
 repository's check that evidences it. Without a check the repository runs, it is
-*advisory* and counts as no evidence (:func:`evidence_of`). Values that belong in a test,
-code and secrets are not entries: a statement that carries a code fence or a credential
-shape is refused.
+*advisory* and counts as no evidence (:func:`evidence_of`) — it counts only when the product's
+quality table counts that check for that characteristic. Values that belong in a test, code
+and secrets are not entries: a statement that carries a code fence is refused, and so is any
+field of an entry or any act that carries a credential shape (:func:`carries_credential`).
 
 Navigation
 ----------
@@ -40,8 +43,9 @@ What it is:   The library's record (``LibraryEntry``, ``Provenance``), its acts
 What it does: Validates an entry (kind, slug, statement of at most 400 characters, scope,
               provenance, proposer, the characteristic and check of a standard, the parent
               class of a work type); checks each act against the entry's state and refuses
-              the ones the rule forbids (the approver is the sponsor, a miner or a model
-              acting as a person, a signature on another version); chains and verifies the
+              the ones the rule forbids (the approver is the sponsor or produced the graded
+              rows cited, a miner or a model acting as a person, a signature on another
+              version, a credential anywhere in the act); chains and verifies the
               acts; folds them into each entry's status; names the entries whose source file
               changed; and builds what ``/library/:repo`` shows for one work type.
 How:          Frozen dataclasses; the version is sha256 of the canonical content; each act's
@@ -183,6 +187,11 @@ REFUSAL_NOT_FROM_A_FILE = "not_from_a_file"
 REFUSAL_NOT_CHANGED = "file_unchanged"
 REFUSAL_REASON_MISSING = "reason_missing"
 REFUSAL_READING_MISSING = "reading_missing"
+REFUSAL_READING_INVALID = "reading_invalid"
+REFUSAL_CREDENTIAL = "credential"
+REFUSAL_PRODUCERS_UNRESOLVED = "producers_unresolved"
+REFUSAL_ROWS_UNKNOWN = "rows_unknown"
+REFUSAL_SAME_ACTOR = "same_actor"
 
 
 class LibraryRefused(ValueError):
@@ -204,6 +213,21 @@ def _is_process_proposer(proposer: str) -> bool:
     for prefix in (PROPOSER_MINED, PROPOSER_DRAFTED):
         if proposer.startswith(prefix) and proposer[len(prefix) :].strip():
             return True
+    return False
+
+
+def carries_credential(value: Any) -> bool:
+    """True when any string in ``value`` — nested in mappings, lists and tuples — carries a
+    credential shape :func:`~crb.core.redact.redact` would replace. The library's acts are
+    append-only and hash-chained, so a credential written once could never be removed:
+    every field of an entry and every body of an act is held to this, not only the
+    statement (P-182)."""
+    if isinstance(value, str):
+        return redact(value) != value
+    if isinstance(value, Mapping):
+        return any(carries_credential(k) or carries_credential(v) for k, v in value.items())
+    if isinstance(value, (list, tuple)):
+        return any(carries_credential(v) for v in value)
     return False
 
 
@@ -302,7 +326,9 @@ class Provenance:
     def label(self) -> str:
         """The provenance as a person reads it."""
         if self.kind == PROVENANCE_FILE:
-            return f"{self.path} at {self.commit[:12]}"
+            # the proposer's path, commit and digest: the product reads the file only at the
+            # repository's head, after each mine (G-735)
+            return f"{self.path} at {self.commit[:12]}, as proposed"
         if self.kind == PROVENANCE_ROWS:
             return f"{len(self.rows)} graded row{'s' if len(self.rows) != 1 else ''}"
         return "written by a person"
@@ -373,6 +399,11 @@ class LibraryEntry:
         )
         object.__setattr__(self, "slots", _tuple(self.slots, "slots", _SLOT_RE, MAX_SLOTS))
         self._validate_kind_fields()
+        for name, value in self.content().items():
+            if carries_credential(value):
+                raise ValueError(
+                    f"an entry carries no credential ({name}): secrets are never entries"
+                )
 
     def _validate_kind_fields(self) -> None:
         if self.kind in (KIND_STANDARD, KIND_CONVENTION):
@@ -392,6 +423,11 @@ class LibraryEntry:
         if self.kind == KIND_WORK_TYPE:
             if not is_known_class(self.parent_class):
                 raise ValueError("a work type names its global parent class")
+            if is_known_class(self.slug) or self.slug in CLASS_DEFINITIONS:
+                raise ValueError(
+                    f"a work type is named apart from the global classes: {self.slug} is a "
+                    "global class and already has its page"
+                )
         elif self.parent_class or self.examples or self.slots:
             raise ValueError("only a work type names a parent class, example commits or slots")
 
@@ -442,13 +478,35 @@ class LibraryEntry:
         )
 
 
-def evidence_of(entry: LibraryEntry, runnable_checks: Iterable[str]) -> str:
-    """``check`` when a standard or convention names a check the repository runs, else
-    ``advisory`` — shown and signed, counted as no evidence (ADR-0026 item 10)."""
+#: ``(characteristic, check)`` pairs: the product's quality table counts the check as
+#: evidence of part of the characteristic, and the repository switches the check on.
+EvidencePairs = frozenset[tuple[str, str]]
+
+
+def evidence_pairs(quality: Sequence[Mapping[str, Any]] | None) -> EvidencePairs:
+    """The pairs :func:`quality_rows` counts and the repository runs; empty when the
+    product's ISO/IEC 25010 table is not on the build — then no entry is evidenced."""
+    return frozenset(
+        (str(row["characteristic"]), str(c["check"]))
+        for row in quality or ()
+        for c in row.get("checks") or ()
+        if c.get("on")
+    )
+
+
+def evidence_of(entry: LibraryEntry, counted: Iterable[tuple[str, str]]) -> str:
+    """``check`` when a standard or convention names a characteristic and a check that the
+    product's quality table counts as evidence of that characteristic and the repository
+    runs (``counted``, from :func:`evidence_pairs`); else ``advisory`` — shown and signed,
+    counted as no evidence (ADR-0026 item 10). A check that evidences another
+    characteristic is no evidence of this one: ``target_green`` says nothing of Security."""
     if entry.kind not in (KIND_STANDARD, KIND_CONVENTION):
         return ""
+    pair = (entry.characteristic, entry.check)
     return (
-        EVIDENCE_CHECK if entry.check and entry.check in set(runnable_checks) else EVIDENCE_ADVISORY
+        EVIDENCE_CHECK
+        if entry.characteristic and entry.check and pair in set(counted)
+        else EVIDENCE_ADVISORY
     )
 
 
@@ -620,6 +678,36 @@ def _need_version(state: EntryState, act: LibraryAct) -> None:
         )
 
 
+def _need_independent_of_rows(state: EntryState, act: LibraryAct) -> None:
+    """Ground 1 of the cell sign-off's two-person rule (``same_actor_refusal``, DESIGN
+    §9.3), for an entry learned from graded rows: the caller resolves the cited rows in the
+    grade ledger and names, in the sign act, the ones it did not find (``rows_missing``)
+    and the actors of the rows and of the runs that produced them (``row_actors``). The
+    signature is refused when the caller resolved nothing, when a cited row does not
+    exist, or when the approver produced one of them."""
+    actors = act.body.get("row_actors")
+    missing = act.body.get("rows_missing")
+    if not isinstance(actors, list) or not isinstance(missing, list):
+        raise LibraryRefused(
+            f"{state.entry_id} was learned from graded rows: a signature names who produced "
+            "them, read from the grade ledger",
+            code=REFUSAL_PRODUCERS_UNRESOLVED,
+        )
+    if missing:
+        raise LibraryRefused(
+            f"{state.entry_id} cites {len(missing)} graded row"
+            f"{'s' if len(missing) != 1 else ''} this repository does not hold",
+            code=REFUSAL_ROWS_UNKNOWN,
+        )
+    if act.actor in {str(a) for a in actors if is_person(str(a))}:
+        raise LibraryRefused(
+            f"{act.actor} produced graded rows {state.entry_id} was learned from: the person "
+            "who produced the evidence cannot sign it — a second approver must sign "
+            "(cannot be relaxed)",
+            code=REFUSAL_SAME_ACTOR,
+        )
+
+
 def _apply_propose(state: EntryState | None, act: LibraryAct) -> EntryState:
     entry = LibraryEntry.from_dict(act.body.get("entry") or {})
     if entry.entry_id != act.entry_id or entry.repo != act.repo or entry.version != act.version:
@@ -661,6 +749,12 @@ def apply(state: EntryState | None, act: LibraryAct) -> EntryState:
     ``revoke`` is a person's, with a reason. Revoked and retired entries take no act but a
     new proposal.
     """
+    if carries_credential(act.hashed()):
+        raise LibraryRefused(
+            "an act carries no credential: the library is append-only, and a secret written "
+            "to it could never be removed",
+            code=REFUSAL_CREDENTIAL,
+        )
     if act.act == ACT_PROPOSE:
         return _apply_propose(state, act)
     if state is None:
@@ -702,6 +796,8 @@ def apply(state: EntryState | None, act: LibraryAct) -> EntryState:
                 "(the two-person rule, ADR-0026 item 10; cannot be relaxed)",
                 code=REFUSAL_SAME_PERSON,
             )
+        if state.entry.provenance.kind == PROVENANCE_ROWS:
+            _need_independent_of_rows(state, act)
         # a re-signature of a stale entry acknowledges the file as it now reads at head
         ack = (state.stale or {}).get("digest", "") or state.acknowledged_digest
         return replace(
@@ -720,6 +816,12 @@ def apply(state: EntryState | None, act: LibraryAct) -> EntryState:
                 f"{state.entry_id} was not read from a file", code=REFUSAL_NOT_FROM_A_FILE
             )
         digest = str(act.body.get("digest", ""))
+        head = str(act.body.get("head_commit", ""))
+        if (digest and not _HASH_RE.match(digest)) or (head and not _SHA_RE.match(head)):
+            raise LibraryRefused(
+                "a staleness names the head commit and the sha256 of the file there",
+                code=REFUSAL_READING_INVALID,
+            )
         if digest in _signed_against(state) or (
             state.status == STATUS_STALE and state.stale and state.stale.get("digest") == digest
         ):
@@ -753,7 +855,7 @@ def apply(state: EntryState | None, act: LibraryAct) -> EntryState:
     by = str(act.body.get("by", RETIRED_BY_PERSON))
     reading = str(act.body.get("reading_id", "")).strip()
     if by == RETIRED_BY_MEASUREMENT:
-        if is_person(act.actor) or not reading:
+        if act.actor != ACTOR_MEASUREMENT or not reading:
             raise LibraryRefused(
                 "a retirement by measurement is the arm reader's, and names the reading",
                 code=REFUSAL_READING_MISSING,
@@ -937,7 +1039,7 @@ def _in_scope(state: EntryState, work_type: str, parent: str) -> bool:
     return work_type in e.work_types or (bool(parent) and parent in e.work_types)
 
 
-def _context_row(state: EntryState, runnable: set[str]) -> dict[str, Any]:
+def _context_row(state: EntryState, counted: EvidencePairs) -> dict[str, Any]:
     e = state.entry
     return {
         "entry_id": state.entry_id,
@@ -953,7 +1055,7 @@ def _context_row(state: EntryState, runnable: set[str]) -> dict[str, Any]:
         "effect": state.effect,
         "characteristic": e.characteristic,
         "check": e.check,
-        "evidence": evidence_of(e, runnable),
+        "evidence": evidence_of(e, counted),
     }
 
 
@@ -1018,8 +1120,9 @@ def work_type_page(
                 "next": "" if std is not None else next_measurement(n_tasks),
             }
         )
+    counted = evidence_pairs(quality)
     context = [
-        _context_row(s, runnable)
+        _context_row(s, counted)
         for s in signed_context(states.values())
         if _in_scope(s, slug, parent)
     ]
@@ -1090,6 +1193,7 @@ __all__ = [
     "STATUSES",
     "UNMEASURED",
     "EntryState",
+    "EvidencePairs",
     "LibraryAct",
     "LibraryEntry",
     "LibraryRefused",
@@ -1097,8 +1201,10 @@ __all__ = [
     "Provenance",
     "StandardReader",
     "apply",
+    "carries_credential",
     "entry_id_of",
     "evidence_of",
+    "evidence_pairs",
     "files_cited",
     "fold",
     "is_person",

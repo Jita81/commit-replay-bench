@@ -23,9 +23,12 @@ What it is:   The ``/library`` route module: the index (``GET /library/{repo}``)
               work type, the five acts over HTTP (propose, sponsor, sign, revoke, retire), the
               freshness reading that makes an entry stale, and the chain's verification.
 What it does: Gates each act by role — an operator proposes and sponsors, an approver signs,
-              revokes and retires — and hands it to the core's rule; serves each entry with
-              its sponsor's and approver's names, its evidence for a standard (``check`` or
-              ``advisory``) and its effect (``unmeasured``); builds the work-type page from
+              revokes and retires — and hands it to the core's rule; resolves a rows
+              provenance in the grade ledger (422 for an unknown row; at signing, who produced
+              the rows, for the two-person rule); serves each entry with its sponsor's and
+              approver's names, its evidence for a standard (``check`` only for a pair the
+              quality table counts and the repository runs, else ``advisory``) and its effect
+              (``unmeasured``); builds the work-type page from
               the library, the mined tasks, the readiness catalogue, the repository's
               switched-on checks, the proven standard per size (stream R's reader, a seam) and
               the ISO/IEC 25010 table (stream C's ``crb.core.quality_model``, a seam).
@@ -39,7 +42,8 @@ Works with:   src/crb/core/library.py (the record, the rule, the page as data),
               request and response bodies), src/crb/factory/readiness.py (``slots_for`` — what
               a ticket must carry today), src/crb/core/checks.py and src/crb/core/lint.py (the
               switched-on checks), docs/API.md#library (the contract these routes serve),
-              ui/src/screens/Library/LibraryPage.tsx (the page that calls them)
+              ui/src/screens/Library/LibraryPage.tsx (the page that calls them),
+              src/crb/store/models.py (``Grade``, ``Run`` — who produced a cited row)
 Tested by:    tests/test_server_routes_library.py
 Touch when:   never for a new repository; a new act is added in src/crb/core/library.py first,
               then here with its event row in docs/API.md#event-vocabulary.
@@ -66,15 +70,18 @@ from crb.core.library import (
     ISO_25010_CHARACTERISTICS,
     KINDS,
     PROVENANCE_PERSON,
+    PROVENANCE_ROWS,
     RETIRED_BY_PERSON,
     STATEMENT_MAX,
     EntryState,
+    EvidencePairs,
     LibraryEntry,
     LibraryRefused,
     Provenance,
     StandardReader,
     entry_id_of,
     evidence_of,
+    evidence_pairs,
     quality_rows,
     standard_for,
     work_type_page,
@@ -102,7 +109,7 @@ from crb.server.schemas_library import (
     WorkTypePageOut,
 )
 from crb.store.library import DbLibraryLedger, new_act
-from crb.store.models import Task, User
+from crb.store.models import Grade, Run, Task, User
 
 router = APIRouter(tags=["library"])
 _ERR = {"model": ErrorEnvelope}
@@ -120,13 +127,20 @@ REVIEW_CHECKS: tuple[str, ...] = ("defect", "regression", "style", "api_change")
 STANDARD_READER: list[StandardReader] = [standard_for]
 
 
+QUALITY_MODULE = "crb.core.quality_model"
+
+
 def quality_model() -> Sequence[Any] | None:
     """SEAM (stream C): ``crb.core.quality_model.QUALITY_MODEL`` — the ISO/IEC 25010:2023
     characteristic-to-check table — or ``None`` on a build without it, when the page says
     the table is not served rather than supplying one of its own."""
     try:
-        module = importlib.import_module("crb.core.quality_model")
-    except ModuleNotFoundError:
+        module = importlib.import_module(QUALITY_MODULE)
+    except ModuleNotFoundError as exc:
+        # only the table's own absence is "not served"; a table that fails to import one of
+        # its dependencies is a broken build, never an empty section
+        if exc.name != QUALITY_MODULE:
+            raise
         return None
     model = getattr(module, "QUALITY_MODEL", None)
     return tuple(model) if model is not None else None
@@ -176,14 +190,39 @@ def switched_on_checks(config: RepoConfig | None) -> list[str]:
     return on
 
 
-def _entry_out(s: EntryState, names: dict[str, str], runnable: Sequence[str]) -> EntryOut:
+def counted_evidence(config: RepoConfig | None) -> EvidencePairs:
+    """The ``(characteristic, check)`` pairs the product's quality table counts and this
+    repository switches on — empty while the table is not on the build."""
+    return evidence_pairs(quality_rows(quality_model(), switched_on_checks(config)))
+
+
+def _entry_out(s: EntryState, names: dict[str, str], counted: EvidencePairs) -> EntryOut:
     d = s.to_dict()
     return EntryOut(
         **d,
         sponsor_name=names.get(s.sponsor, ""),
         approver_name=names.get(s.approver, ""),
-        evidence=evidence_of(s.entry, runnable),
+        evidence=evidence_of(s.entry, counted),
     )
+
+
+def row_producers(db: Session, repo: str, rows: Sequence[str]) -> tuple[list[str], list[str]]:
+    """``(actors, missing)`` of graded rows ``rows`` of ``repo``: the actor of each row and
+    of the run that produced it, and the row hashes the grade ledger does not hold."""
+    if not rows:
+        return [], []
+    found = db.execute(
+        select(Grade.row_hash, Grade.actor, Grade.run_id).where(
+            Grade.repo == repo, Grade.row_hash.in_(set(rows))
+        )
+    ).all()
+    missing = sorted(set(rows) - {h for h, _a, _r in found})
+    run_ids = {r for _h, _a, r in found if r}
+    run_actors = (
+        db.execute(select(Run.actor).where(Run.id.in_(run_ids))).scalars().all() if run_ids else []
+    )
+    actors = sorted({a for _h, a, _r in found if a} | {a for a in run_actors if a})
+    return actors, missing
 
 
 def _states(factory: Any, repo: str) -> dict[str, EntryState]:
@@ -260,13 +299,13 @@ def library_index(
 ) -> LibraryIndexOut:
     row = get_repo_or_404(db, repo)
     states = _states(factory, repo)
-    runnable = switched_on_checks(_config(row))
+    counted = counted_evidence(_config(row))
     names = _names(db, [x for s in states.values() for x in (s.sponsor, s.approver)])
     order = {k: i for i, k in enumerate(KINDS)}
     entries = sorted(states.values(), key=lambda s: (order[s.entry.kind], s.entry.slug))
     return LibraryIndexOut(
         repo=repo,
-        entries=[_entry_out(s, names, runnable) for s in entries],
+        entries=[_entry_out(s, names, counted) for s in entries],
         work_types=[WorkTypeOut(**w) for w in work_types_of(states, _tasks(db, repo))],
         kinds=list(KINDS),
         characteristics=list(ISO_25010_CHARACTERISTICS),
@@ -373,6 +412,20 @@ def propose_entry(
 ) -> EntryOut:
     row = get_repo_or_404(db, repo)
     entry = _entry_from(repo, body, operator)
+    _actors, missing = row_producers(db, repo, entry.provenance.rows)
+    if missing:
+        n = len(missing)
+        msg = (
+            f"a rows provenance names graded rows of this repository: {n} graded "
+            f"row{'s' if n != 1 else ''} not found in {repo}'s ledger"
+        )
+        raise ApiError(
+            422,
+            "validation_error",
+            msg,
+            detail={"errors": [{"loc": ["body", "provenance", "rows"], "msg": msg,
+                                "type": "value_error"}]},
+        )  # fmt: skip
     act = new_act(
         repo,
         entry.entry_id,
@@ -396,7 +449,7 @@ def propose_entry(
         payload={"entry_id": entry.entry_id, "version": entry.version, "act_id": chained.act_id},
     )
     db.commit()
-    return _entry_out(state, _names(db, [state.sponsor]), switched_on_checks(_config(row)))
+    return _entry_out(state, _names(db, [state.sponsor]), counted_evidence(_config(row)))
 
 
 def _act(
@@ -430,7 +483,7 @@ def _act(
 def _out(db: Session, repo: str, state: EntryState) -> EntryOut:
     row = get_repo_or_404(db, repo)
     return _entry_out(
-        state, _names(db, [state.sponsor, state.approver]), switched_on_checks(_config(row))
+        state, _names(db, [state.sponsor, state.approver]), counted_evidence(_config(row))
     )
 
 
@@ -489,6 +542,14 @@ def sign_entry(
     db: DbDep,
     factory: SessionFactoryDep,
 ) -> EntryOut:
+    get_repo_or_404(db, repo)
+    sign_body: dict[str, Any] = {}
+    if kind in KINDS:
+        prov = _current(factory, repo, kind, slug).entry.provenance
+        if prov.kind == PROVENANCE_ROWS:
+            # ground 1 of the two-person rule: who produced the rows the entry was learned from
+            actors, missing = row_producers(db, repo, prov.rows)
+            sign_body = {"row_actors": actors, "rows_missing": missing}
     chained, state = _act(
         db,
         factory,
@@ -498,7 +559,7 @@ def sign_entry(
         act=ACT_SIGN,
         who=approver,
         version=body.version,
-        body={},
+        body=sign_body,
     )
     append_system_event(
         db,

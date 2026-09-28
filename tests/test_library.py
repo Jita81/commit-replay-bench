@@ -9,16 +9,20 @@ What it does: Pins the six kinds and the ``<kind>/<slug>`` id, the 400-character
               provenance, a standard's ISO/IEC 25010 characteristic and its check (advisory
               without one), the sponsor-and-approver rule (the approver is never the sponsor;
               a miner or a model is never a person), revocation and retirement by appending,
-              staleness when the source file changes, a tampered chain, and that nothing that
-              composes a brief can import the library.
-How:          Pure core calls over constructed entries and acts; the brief guard reads
-              ``pyproject.toml``'s import-linter contract and walks the brief composers' ASTs.
+              staleness when the source file changes, a tampered chain, no credential in any
+              field or act, evidence only from a check the quality table counts for the
+              characteristic named, the rows-provenance two-person rule, and that nothing that
+              composes a brief can import the library — the worker, which composes one and
+              must import it, uses it only in its freshness read.
+How:          Pure core calls over constructed entries and acts; the brief guards read
+              ``pyproject.toml``'s import-linter contract and walk the brief composers', the
+              worker's and the store's ASTs.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (item 10)
 Works with:   src/crb/core/library.py (the record, the rule and the page under test),
               pyproject.toml (the contract "library entries never reach a brief"),
-              src/crb/builders/base.py (``BuildBrief`` — no field an entry could reach),
-              tests/test_worker.py (a replay's briefs carry no signed entry's words)
+              src/crb/server/worker.py (the one module that composes a brief and imports the
+              library), tests/test_worker.py (a replay's briefs carry no signed entry's words)
 Tested by:    this file
 Touch when:   never for a new repository; the record, a kind, an act or the rule changes in
               ADR-0026 item 10 first.
@@ -28,6 +32,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import re
 import tomllib
 from dataclasses import replace
 from pathlib import Path
@@ -59,6 +64,7 @@ from crb.core.library import (
     ProvenStandard,
     apply,
     evidence_of,
+    evidence_pairs,
     fold,
     is_person,
     quality_rows,
@@ -148,7 +154,9 @@ def test_a_statement_is_at_most_400_characters_and_carries_no_code_or_secret() -
 
 def test_provenance_is_a_file_at_a_commit_graded_rows_or_a_person() -> None:
     f = Provenance(kind="file", path="docs/adr/0001.md", commit=COMMIT, digest=DIGEST)
-    assert f.label() == f"docs/adr/0001.md at {COMMIT[:12]}"
+    # the path, commit and digest are the proposer's: the product reads the file only at the
+    # repository's head, after each mine, where a file that differs makes the entry stale
+    assert f.label() == f"docs/adr/0001.md at {COMMIT[:12]}, as proposed"
     assert Provenance(kind="rows", rows=(DIGEST,)).label() == "1 graded row"
     with pytest.raises(ValueError, match="sha256"):
         Provenance(kind="file", path="a.md", commit=COMMIT)
@@ -175,16 +183,17 @@ def test_proposed_by_is_a_person_a_miner_or_a_model_and_the_two_are_never_people
 
 def test_a_standard_names_its_iso_25010_characteristic_and_is_advisory_without_a_check() -> None:
     std = entry(kind="standard", slug="no-panics", characteristic="Reliability", check="go-vet")
-    assert evidence_of(std, ["go-vet", "target_green"]) == "check"
-    assert evidence_of(std, ["target_green"]) == "advisory"  # the repository never runs it
-    assert evidence_of(replace(std, check=""), ["go-vet"]) == "advisory"
+    counted = evidence_pairs(_table(("Reliability", "go-vet")))
+    assert evidence_of(std, counted) == "check"
+    assert evidence_of(std, evidence_pairs(_table(("Reliability", "x")))) == "advisory"
+    assert evidence_of(replace(std, check=""), counted) == "advisory"
     with pytest.raises(ValueError, match="characteristic it refines"):
         entry(kind="standard", slug="s")
     with pytest.raises(ValueError, match="nine"):
         entry(kind="standard", slug="s", characteristic="Beauty")
     with pytest.raises(ValueError, match="only a standard or a convention"):
         entry(kind="decision", slug="d", check="go-vet")
-    assert evidence_of(entry(kind="decision", slug="d"), ["x"]) == ""
+    assert evidence_of(entry(kind="decision", slug="d"), counted) == ""
 
 
 def test_the_iso_vocabulary_is_the_nine_characteristics_of_the_quality_table() -> None:
@@ -382,6 +391,109 @@ def test_only_signed_fresh_entries_are_signed_context() -> None:
     assert [s.entry_id for s in signed_context(states)] == ["convention/a2"]
 
 
+# --- what the rule refuses beyond the two people (the verifiers of feat/ns4-l, 2026-09-28) -
+
+TOKEN = "ghp_" + "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"
+_FILE = Provenance(kind="file", path="cfg/lint.yml", commit=COMMIT, digest=DIGEST)
+#: Every field of an entry a person types, with a value carrying a credential that the
+#: field's own shape accepts. A field added to ``LibraryEntry`` must be listed here.
+CREDENTIAL_CARRIERS: dict[str, dict[str, object]] = {
+    "slug": {"slug": TOKEN},
+    "title": {"title": f"Use {TOKEN}"},
+    "statement": {"statement": f"Deploy with {TOKEN}"},
+    "provenance.path": {
+        "provenance": replace(_FILE, path=f"cfg/{TOKEN}.yml"),
+        "proposed_by": "mined:lint@1",
+    },
+    "components": {"components": (TOKEN,)},
+    "work_types": {"work_types": (TOKEN,)},
+    "check": {"check": TOKEN},
+    "slots": {"kind": "work-type", "slug": "wt", "parent_class": "bug.fix", "work_types": (),
+              "slots": (TOKEN,)},
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("field_name", sorted(CREDENTIAL_CARRIERS))
+def test_no_field_of_an_entry_carries_a_credential(field_name: str) -> None:
+    # P-182: the credential check read the statement and the title alone, so a token in the
+    # path, the check or a scope entered the append-only chain, where nothing can remove it
+    with pytest.raises(ValueError, match="credential"):
+        entry(**CREDENTIAL_CARRIERS[field_name])
+
+
+def test_every_typed_field_of_an_entry_is_held_to_the_credential_rule() -> None:
+    typed = set(LibraryEntry.__dataclass_fields__) - {
+        "repo", "kind", "provenance", "proposed_by", "characteristic", "parent_class", "examples",
+    }  # fmt: skip
+    # repo and proposed_by come from the server; kind, characteristic and parent_class are
+    # closed vocabularies; examples are hex commit ids
+    assert typed | {"provenance.path"} == set(CREDENTIAL_CARRIERS)
+
+
+def test_an_act_whose_body_carries_a_credential_is_refused() -> None:
+    e = _from_file()
+    proposed = run(act(e, ACT_PROPOSE, "mined:lint@1"), act(e, ACT_SPONSOR, ADA))
+    with pytest.raises(LibraryRefused) as cred:
+        apply(proposed, act(e, ACT_STALE, ADA, head_commit=TOKEN, digest=NEW_DIGEST))
+    assert cred.value.code == "credential"
+    with pytest.raises(LibraryRefused) as bad:
+        apply(proposed, act(e, ACT_STALE, ADA, head_commit="2" * 40, digest="not-a-digest"))
+    assert bad.value.code == "reading_invalid"
+
+
+def _table(*pairs: tuple[str, str]) -> list[dict[str, object]]:
+    by: dict[str, list[dict[str, object]]] = {}
+    for characteristic, check in pairs:
+        by.setdefault(characteristic, []).append({"check": check, "on": True})
+    return [{"characteristic": c, "checks": v} for c, v in by.items()]
+
+
+def test_a_standard_is_evidenced_only_by_a_check_the_table_counts_for_its_characteristic() -> None:
+    sec = entry(kind="standard", slug="sec", characteristic="Security", check="target_green")
+    table = evidence_pairs(_table(("Functional suitability", "target_green")))
+    assert evidence_of(sec, table) == "advisory"  # target_green says nothing of Security
+    fn = replace(sec, characteristic="Functional suitability")
+    assert evidence_of(fn, table) == "check"
+    assert evidence_of(fn, evidence_pairs(None)) == "advisory"  # no table, no evidence
+    off = [{"characteristic": "Functional suitability",
+            "checks": [{"check": "target_green", "on": False}]}]  # fmt: skip
+    assert evidence_of(fn, evidence_pairs(off)) == "advisory"  # the repository never runs it
+
+
+def test_a_work_type_is_never_named_after_a_global_class() -> None:
+    with pytest.raises(ValueError, match="global class"):
+        entry(kind="work-type", slug="bug.fix", parent_class="bug.fix", work_types=())
+
+
+@pytest.mark.parametrize("actor", ["mined:v1", "drafted:gpt", "system:library-freshness", ""])
+def test_only_the_arm_reader_retires_by_measurement(actor: str) -> None:
+    e = entry()
+    signed = run(act(e, ACT_PROPOSE, ADA), act(e, ACT_SIGN, BEN))
+    body = {"by": "measurement", "reason": "the pairs favour the arm without it"}
+    with pytest.raises(LibraryRefused) as exc:
+        apply(signed, act(e, ACT_RETIRE, actor, reading_id="r1", **body))
+    assert exc.value.code == "reading_missing"
+
+
+ROW = "f" * 64
+
+
+def test_a_signature_on_graded_rows_names_who_produced_them_and_never_is_one_of_them() -> None:
+    e = entry(provenance=Provenance(kind="rows", rows=(ROW,)))
+    proposed = run(act(e, ACT_PROPOSE, ADA))
+    with pytest.raises(LibraryRefused) as unresolved:
+        apply(proposed, act(e, ACT_SIGN, BEN))
+    assert unresolved.value.code == "producers_unresolved"
+    with pytest.raises(LibraryRefused) as missing:
+        apply(proposed, act(e, ACT_SIGN, BEN, row_actors=[], rows_missing=[ROW]))
+    assert missing.value.code == "rows_unknown"
+    with pytest.raises(LibraryRefused) as produced:
+        apply(proposed, act(e, ACT_SIGN, BEN, row_actors=[BEN, "system"], rows_missing=[]))
+    assert produced.value.code == "same_actor" and "produced" in str(produced.value)
+    signed = apply(proposed, act(e, ACT_SIGN, BEN, row_actors=[ADA, "system"], rows_missing=[]))
+    assert signed.status == STATUS_SIGNED
+
+
 # --- the chain -----------------------------------------------------------------------------
 
 
@@ -452,19 +564,52 @@ def test_no_entry_reaches_a_builders_brief_nothing_that_composes_one_imports_the
     assert not guard.get("allow_indirect_imports", False)
 
 
-def test_a_signed_entrys_statement_is_absent_from_the_brief_a_build_composes() -> None:
-    """The behaviour, not only the imports: a brief composed for a replay carries no field
-    for library entries and none of a signed entry's words."""
-    from crb.builders.base import BuildBrief
+#: The names the worker takes from the library. Only its freshness read may use them: the
+#: brief a replay builds is composed in the same module, so an import contract cannot keep
+#: an entry out of it (the verifiers of ``feat/ns4-l``, 2026-09-28).
+WORKER_LIBRARY_NAMES = {"DbLibraryLedger", "files_cited", "ACTOR_FRESHNESS"}
+#: Where the library's table may be named: its ledger, the model, and its migration.
+LIBRARY_TABLE_OWNERS = {
+    "src/crb/store/library.py",
+    "src/crb/store/models.py",
+    "src/crb/store/migrate.py",
+    "src/crb/store/migrations/versions/v0043_library_acts.py",
+}
 
-    e = entry(statement="Always call Validate before Save; the library says so.")
-    signed = run(act(e, ACT_PROPOSE, ADA), act(e, ACT_SIGN, BEN))
-    assert signed.usable
-    assert not {f for f in BuildBrief.__dataclass_fields__ if "library" in f}
-    brief = BuildBrief(
-        subject="fix: validate", message="fix: validate", repo="alpha", language="go"
-    )
-    assert e.statement not in repr(brief)
+
+def test_the_worker_reads_the_library_only_to_mark_entries_stale() -> None:
+    """The worker composes a replay's brief and imports the library for freshness, so the
+    import contract cannot hold it. Every name it takes from the library is used inside
+    ``_library_freshness`` alone; ``tests/test_worker.py`` holds the brief itself."""
+    tree = ast.parse((ROOT / "src" / "crb" / "server" / "worker.py").read_text(encoding="utf-8"))
+    imported = {
+        a.asname or a.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and n.module in LIBRARY_MODULES
+        for a in n.names
+    }
+    assert imported == WORKER_LIBRARY_NAMES, "a new library name in the worker needs this guard"
+    uses: dict[str, set[str]] = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for n in ast.walk(fn):
+                if isinstance(n, ast.Name) and n.id in imported:
+                    uses.setdefault(fn.name, set()).add(n.id)
+    assert set(uses) == {"_library_freshness"}, uses
+
+
+def test_the_library_table_is_read_only_through_its_ledger() -> None:
+    """Nothing but the ledger, the model and the migration names ``LibraryActRow`` or the
+    ``library_acts`` table, so every read of an entry goes through the rule's fold."""
+    offenders = []
+    for p in (ROOT / "src" / "crb").rglob("*.py"):
+        rel = str(p.relative_to(ROOT))
+        if rel in LIBRARY_TABLE_OWNERS:
+            continue
+        text = p.read_text(encoding="utf-8")
+        if "LibraryActRow" in text or re.search(r"[\"']library_acts[\"']", text):
+            offenders.append(rel)
+    assert offenders == []
 
 
 # --- the page per work type ----------------------------------------------------------------

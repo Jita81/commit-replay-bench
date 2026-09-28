@@ -22,7 +22,7 @@ Touch when:   never for a new repository; a field of the record changes in
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -85,8 +85,10 @@ class FreshnessRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    head_commit: str = Field(min_length=7, max_length=40)
-    digests: dict[str, str] = Field(default_factory=dict, max_length=500)
+    head_commit: str = Field(min_length=7, max_length=40, pattern=r"^[0-9a-fA-F]{7,40}$")
+    digests: dict[str, Annotated[str, Field(pattern=r"^([0-9a-fA-F]{64})?$")]] = Field(
+        default_factory=dict, max_length=500
+    )
 
 
 class EntryOut(BaseModel):

@@ -6,8 +6,11 @@ What it is:   Route tests of ``crb.server.routes.library`` on the seeded test ap
 What it does: Walks an entry from proposal (an operator, who becomes its sponsor) to signature
               (an approver who is not the sponsor), and pins the refusals: the sponsor
               signing their own entry (409 ``same_person``), a signature on a version that
-              is no longer current, an invalid statement (422); the role gates of every act;
-              the event each act writes with its actor and target; staleness from a changed
+              is no longer current, an invalid statement (422), a credential in any field
+              (422, nothing written), rows the ledger does not hold (422) and an approver who
+              produced the cited rows (409 ``same_actor``); the role gate of every route of the
+              router; every ``library.*`` event the routes write, with its actor and target;
+              409 ``library_integrity`` when the acts no longer fold; staleness from a changed
               file; revocation and retirement by appending; the page per work type — its
               definition, what a ticket must carry, the signed context with sponsor, signer
               and ``unmeasured`` effect, "no proven standard" per size with the next
@@ -28,17 +31,21 @@ Touch when:   never for a new repository; a route, a field or an act of ``/libra
 
 from __future__ import annotations
 
+import ast
+import importlib
 import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.routing import APIRoute
 from sqlalchemy import select
 
-from crb.core.library import ProvenStandard
+from crb.core.library import LibraryAct, LibraryEntry, Provenance, ProvenStandard
 from crb.server.routes import library as library_routes
-from crb.store.models import Event
+from crb.store.library import DbLibraryLedger, new_act
+from crb.store.models import Event, Grade, LibraryActRow, Run
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, logout, make_env, user_id
 
 ENTRY = {
@@ -147,25 +154,218 @@ def test_an_invalid_entry_is_a_422_that_names_the_rule(env: Env) -> None:
     assert env.post("/library/nope/entries", json=ENTRY).status_code == 404
 
 
+def _library_routes() -> list[APIRoute]:
+    return [r for r in library_routes.router.routes if isinstance(r, APIRoute)]
+
+
+def _template(method: str, path: str) -> tuple[str, str]:
+    """The route a request reaches, matched in the router's own order."""
+    for r in _library_routes():
+        if method in r.methods and r.path_regex.match(path):
+            return method, r.path
+    raise AssertionError(f"no library route serves {method} {path}")
+
+
 def test_every_act_is_gated_by_role(env: Env) -> None:
+    """Each route's role gate, and — P-183 — every route of the router is probed: the retire
+    route's gate once went untested because this list was typed by hand."""
+    probed: set[tuple[str, str]] = set()
+
+    def probe(method: str, path: str, *, min_role: str, json: Any = None) -> None:
+        assert_rbac(env, method, path, min_role=min_role, json=json)
+        probed.add(_template(method, path))
+
     proposed = _propose(env)
+    _propose(env, slug="to-retire")
     base = f"/library/{ALPHA}/entries/convention/errors-wrap"
-    assert_rbac(env, "GET", f"/library/{ALPHA}", min_role="viewer")
-    assert_rbac(env, "GET", f"/library/{ALPHA}/work-types/bug.fix", min_role="viewer")
-    assert_rbac(env, "GET", "/library/verify", min_role="viewer")
-    assert_rbac(env, "POST", f"/library/{ALPHA}/entries", min_role="operator", json=ENTRY)
-    assert_rbac(env, "POST", f"{base}/sponsor", min_role="operator", json={"version": "0" * 64})
-    assert_rbac(
-        env, "POST", f"{base}/sign", min_role="approver", json={"version": proposed["version"]}
+    probe("GET", f"/library/{ALPHA}", min_role="viewer")
+    probe("GET", f"/library/{ALPHA}/work-types/bug.fix", min_role="viewer")
+    probe("GET", "/library/verify", min_role="viewer")
+    probe("POST", f"/library/{ALPHA}/entries", min_role="operator", json=ENTRY)
+    probe("POST", f"{base}/sponsor", min_role="operator", json={"version": "0" * 64})
+    probe("POST", f"{base}/sign", min_role="approver", json={"version": proposed["version"]})
+    probe("POST", f"{base}/revoke", min_role="approver", json={"reason": "x"})
+    probe(
+        "POST",
+        f"/library/{ALPHA}/entries/convention/to-retire/retire",
+        min_role="approver",
+        json={"reason": "x"},
     )
-    assert_rbac(env, "POST", f"{base}/revoke", min_role="approver", json={"reason": "x"})
-    assert_rbac(
-        env,
+    probe(
         "POST",
         f"/library/{ALPHA}/freshness",
         min_role="operator",
         json={"head_commit": "1" * 40, "digests": {}},
     )
+    assert probed == {(m, r.path) for r in _library_routes() for m in r.methods}
+
+
+def _mined(env: Env, slug: str = "adr-0001") -> tuple[LibraryEntry, str]:
+    prov = Provenance(kind="file", path="docs/adr/0001.md", commit="1" * 40, digest="d" * 64)
+    e = LibraryEntry(
+        repo=ALPHA, kind="decision", slug=slug, title="Record decisions",
+        statement="Every architectural decision is an ADR under docs/adr.",
+        provenance=prov, proposed_by="mined:adr@1",
+    )  # fmt: skip
+    DbLibraryLedger(env.factory).append(
+        new_act(ALPHA, e.entry_id, e.version, "propose", "mined:adr@1", body={"entry": e.content()})
+    )
+    return e, e.version
+
+
+def test_an_operator_sponsors_a_mined_proposal_and_a_second_person_signs_it(env: Env) -> None:
+    e, version = _mined(env)
+    r = env.post(f"/library/{ALPHA}/entries/decision/adr-0001/sponsor", json={"version": version})
+    assert r.status_code == 200, r.text
+    assert (r.json()["sponsor"], r.json()["sponsor_name"]) == (user_id("op1"), "op1")
+    [ev] = [x for x in _events(env) if x.action == "library.sponsored"]
+    assert (ev.actor, ev.payload_json["entry_id"]) == (user_id("op1"), e.entry_id)
+    _as(env, "approver")
+    r = env.post(f"/library/{ALPHA}/entries/decision/adr-0001/sign", json={"version": version})
+    assert r.status_code == 200 and r.json()["status"] == "signed"
+
+
+def test_every_act_writes_its_event_naming_the_actor_and_the_entry(env: Env) -> None:
+    """P-183: every ``library.*`` event the routes write is produced here, by the act that
+    writes it, naming the actor and the entry — a renamed or dropped event fails."""
+    tree = ast.parse(Path(library_routes.__file__).read_text(encoding="utf-8"))
+    written = {
+        n.value
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+        and n.value.startswith("library.") and n.value.count(".") == 1
+    }  # fmt: skip
+    _e, version = _mined(env)
+    _mined(env, slug="adr-0002")
+    env.post(f"/library/{ALPHA}/entries/decision/adr-0001/sponsor", json={"version": version})
+    prov = {"kind": "file", "path": ".golangci.yml", "commit": "1" * 40, "digest": "d" * 64}
+    lint = _propose(env, slug="lint", provenance=prov)
+    _propose(env, slug="gone")
+    _as(env, "approver")
+    base = f"/library/{ALPHA}/entries"
+    env.post(f"{base}/convention/lint/sign", json={"version": lint["version"]})
+    env.post(f"{base}/decision/adr-0001/sign", json={"version": "0" * 64})  # refused
+    env.post(f"{base}/convention/gone/revoke", json={"reason": "wrong"})
+    env.post(f"{base}/decision/adr-0002/retire", json={"reason": "superseded"})
+    env.post(f"/library/{ALPHA}/freshness",
+             json={"head_commit": "2" * 40, "digests": {".golangci.yml": "e" * 64}})  # fmt: skip
+    events = _events(env)
+    assert {e.action for e in events} == written, written
+    for ev in events:
+        assert ev.actor and ev.payload_json["entry_id"], ev.action
+
+
+def test_acts_that_no_longer_fold_answer_409_library_integrity(env: Env) -> None:
+    proposed = _propose(env)
+    forged = LibraryAct(
+        act_id="f" * 32,
+        repo=ALPHA,
+        entry_id="convention/errors-wrap",
+        version=proposed["version"],
+        act="sign",
+        actor=user_id("op1"),
+        created="2026-09-28T10:00:00+00:00",
+    ).chained(DbLibraryLedger(env.factory).acts()[-1].row_hash)  # the sponsor signs: refused
+    with env.factory() as s:
+        s.add(LibraryActRow(
+            act_id=forged.act_id, schema=forged.schema, repo=forged.repo,
+            entry_id=forged.entry_id, version=forged.version, act=forged.act,
+            actor=forged.actor, body_json={}, created=forged.created,
+            prev_hash=forged.prev_hash, row_hash=forged.row_hash,
+        ))  # fmt: skip
+        s.commit()
+    assert env.get("/library/verify").json()["ok"] is True  # the chain holds; the rule does not
+    for path in (f"/library/{ALPHA}", f"/library/{ALPHA}/work-types/bug.fix"):
+        r = env.get(path)
+        assert r.status_code == 409, (path, r.text)
+        assert envelope(r)["code"] == "library_integrity"
+
+
+TOKEN = "ghp_" + "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"provenance": {"kind": "file", "path": f"cfg/{TOKEN}.yml", "commit": "1" * 40,
+                        "digest": "d" * 64}},
+        {"check": TOKEN},
+        {"components": [TOKEN]},
+        {"work_types": [TOKEN]},
+    ],
+)  # fmt: skip
+def test_a_credential_in_any_field_is_refused_and_nothing_is_written(
+    env: Env, over: dict[str, Any]
+) -> None:
+    r = env.post(f"/library/{ALPHA}/entries", json={**ENTRY, **over})
+    assert r.status_code == 422, r.text
+    assert TOKEN not in r.text and "credential" in envelope(r)["message"]
+    assert env.get(f"/library/{ALPHA}").json()["entries"] == []
+
+
+def test_a_freshness_reading_names_hex_commits_and_digests(env: Env) -> None:
+    for body in (
+        {"head_commit": TOKEN[:40], "digests": {}},
+        {"head_commit": "2" * 40, "digests": {"a.yml": TOKEN}},
+    ):
+        r = env.post(f"/library/{ALPHA}/freshness", json=body)
+        assert r.status_code == 422, r.text
+        assert TOKEN not in r.text
+
+
+def _alpha_rows(env: Env) -> list[Grade]:
+    with env.factory() as s:
+        return list(s.execute(select(Grade).where(Grade.repo == ALPHA).order_by(Grade.seq))
+                    .scalars().all())  # fmt: skip
+
+
+def test_rows_provenance_names_graded_rows_of_this_repository(env: Env) -> None:
+    r = env.post(
+        f"/library/{ALPHA}/entries",
+        json={**ENTRY, "provenance": {"kind": "rows", "rows": ["f" * 64, "e" * 64]}},
+    )
+    assert r.status_code == 422 and "2 graded rows" in envelope(r)["message"]
+    row = _alpha_rows(env)[0]
+    ok = _propose(env, provenance={"kind": "rows", "rows": [row.row_hash]})
+    assert ok["entry"]["provenance"]["rows"] == [row.row_hash]
+
+
+def test_an_approver_who_produced_the_cited_rows_cannot_sign_the_entry(env: Env) -> None:
+    row = _alpha_rows(env)[0]
+    with env.factory() as s:
+        run = s.get(Run, row.run_id)
+        assert run is not None
+        run.actor = user_id("appr1")  # the approver queued the run that graded the row
+        s.commit()
+    proposed = _propose(env, provenance={"kind": "rows", "rows": [row.row_hash]})
+    _as(env, "approver")
+    base = f"/library/{ALPHA}/entries/convention/errors-wrap"
+    r = env.post(f"{base}/sign", json={"version": proposed["version"]})
+    assert r.status_code == 409 and envelope(r)["detail"]["code"] == "same_actor"
+    _as(env, "admin")
+    r = env.post(f"{base}/sign", json={"version": proposed["version"]})
+    assert r.status_code == 200, r.text
+
+
+def test_the_quality_table_seam_raises_when_the_table_fails_to_import_a_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = importlib.import_module
+
+    def broken(name: str, *a: Any, **k: Any) -> Any:
+        if name == "crb.core.quality_model":
+            raise ModuleNotFoundError("No module named 'yaml'", name="yaml")
+        return real(name, *a, **k)
+
+    monkeypatch.setattr(library_routes.importlib, "import_module", broken)
+    with pytest.raises(ModuleNotFoundError):
+        library_routes.quality_model()
+
+    def absent(name: str, *a: Any, **k: Any) -> Any:
+        raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+
+    monkeypatch.setattr(library_routes.importlib, "import_module", absent)
+    assert library_routes.quality_model() is None
 
 
 def test_revocation_and_retirement_are_appended_with_their_reasons(env: Env) -> None:
