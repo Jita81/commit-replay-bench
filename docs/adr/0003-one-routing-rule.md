@@ -1,6 +1,6 @@
 # ADR-0003 — One routing rule
 
-**Status:** Accepted · **Amended 2026-09-13** (controls gate), **2026-09-16** (the rule gates the factory), **2026-09-19** (the gate reads the pre-run map; a rework updates its pull request) — §"Amendment" below · **Superseded in part by [ADR-0021](0021-factory-review-before-delivery.md)** (2026-09-25: the review precedes delivery; a rework no longer re-delivers inside a run)
+**Status:** Accepted · **Amended 2026-09-13** (controls gate), **2026-09-16** (the rule gates the factory), **2026-09-19** (the gate reads the pre-run map; a rework updates its pull request) — §"Amendment" below · **Superseded in part by [ADR-0021](0021-factory-review-before-delivery.md)** (2026-09-25: the review precedes delivery; a rework no longer re-delivers inside a run) · **Superseded in part by [ADR-0026](0026-the-context-standard.md)** (2026-09-27: a cell with no proven standard stops a ticket before any spend; `deliver_override` lifts only a missing sign-off)
 **Date:** 2026-09-13
 **Apparatus impact:** defines `routing.POLICY_VERSION = "routing.v1"` (stamped on every `RouteDecision`) and, from the amendment, `routing.CONTROLS_POLICY_VERSION = "controls-gate.v1"` (stamped as `controls_policy` on every decision that evaluated a controls verdict)
 
