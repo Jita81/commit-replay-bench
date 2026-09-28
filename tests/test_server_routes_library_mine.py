@@ -10,7 +10,8 @@ What it does: Pins that a run pins the commit it names, appends each proposal un
               ``library.proposed`` event naming its miner; that the same sha proposes nothing
               and writes nothing new; that the change profile cites the seeded graded rows;
               that a mined proposal still needs one person to adopt it and another to sign it;
-              and the refusals — an unknown miner, a commit the clone lacks, no clone.
+              that a credential a refused draft carried is neither stored nor echoed; and the
+              refusals — an unknown miner, a commit the clone lacks, no clone.
 How:          ``tests/fixtures/miner_repo.py`` builds the clone under ``<home>/repos/alpha``;
               ``fixtures.server_seed.make_env`` seeds the store with it as ``alpha``'s clone.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -77,7 +78,7 @@ def test_a_run_pins_its_commit_and_proposes_under_each_miner_unsigned(
     assert r.status_code == 200, r.text
     run = r.json()
     assert run["commit"] == clone.sha and run["reaches_briefs"] is False
-    assert run["miners"] == ["adrs@1", "owners@1", "lint@1", "tests@1", "change-profile@1"]
+    assert run["miners"] == ["adrs@1", "owners@1", "lint@2", "tests@1", "change-profile@1"]
     got = {e["entry_id"]: e for e in run["proposed"]}
     assert run["counts"]["proposed"] == len(got) > 0
     adr = got["decision/adr-0001-use-go-modules-for-every-command"]
@@ -103,10 +104,10 @@ def test_the_run_is_an_event_naming_the_operator_and_each_proposal_its_miner(
     [mined] = _events(env, "library.mined")
     assert mined.actor == user_id("op1") and mined.repo == ALPHA
     assert mined.payload_json["commit"] == clone.sha
-    assert mined.payload_json["miners"] == ["lint@1"]
+    assert mined.payload_json["miners"] == ["lint@2"]
     assert mined.payload_json["proposed"] == [e["entry_id"] for e in run["proposed"]]
     proposed = _events(env, "library.proposed")
-    assert {e.actor for e in proposed} == {"mined:lint@1"}
+    assert {e.actor for e in proposed} == {"mined:lint@2"}
     assert {e.payload_json["run_by"] for e in proposed} == {user_id("op1")}
     assert {e.payload_json["commit"] for e in proposed} == {clone.sha}
 
@@ -166,6 +167,23 @@ def test_an_unknown_miner_or_a_commit_the_clone_lacks_is_refused_and_writes_noth
     r = env.post(f"/library/{ALPHA}/mine", json={"commit": "--upload-pack=x"})
     assert r.status_code == 422  # never an option to git
     assert _acts(env) == 0 and _events(env, "library.mined") == []
+
+
+def test_a_credential_in_a_refused_draft_is_neither_stored_nor_echoed(
+    env: Env, clone: MinerRepo
+) -> None:
+    key = "sk-proj-abcdefghijklmnopqrstuvwx1234"
+    commit(clone.path, {f"docs/adr/0009-rotate-{key}.md": f"# 9. Rotate {key}\n\n"
+                        "Status: accepted\n\n## Decision\n\nRotate it.\n"}, "adr 9")  # fmt: skip
+    r = env.post(f"/library/{ALPHA}/mine", json={"miners": ["adrs"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["counts"]["refused"] == 1
+    assert key not in r.text
+    [mined] = _events(env, "library.mined")
+    assert key not in str(mined.payload_json)
+    with env.factory() as s:
+        bodies = [str(b) for b in s.execute(select(LibraryActRow.body_json)).scalars()]
+    assert all(key not in b for b in bodies)
 
 
 def test_a_repository_with_no_clone_cannot_be_mined(tmp_path: Path) -> None:

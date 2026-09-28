@@ -12,7 +12,9 @@ honours :class:`Miner` and calling :func:`register_miner`. The contract, which
 :func:`run_miners` enforces on every draft whatever the miner does:
 
 1. A miner has a ``name`` (a slug), a ``version`` (digits; bumped whenever its output for the
-   same source changes), the ``kinds`` it proposes and ``reads`` — what it reads, in words.
+   same source changes — the new output is proposed as a new version, and the same output
+   under a new version is not), the ``kinds`` it proposes and ``reads`` — what it reads, in
+   words.
 2. ``mine(source)`` reads only the :class:`MineSource` it is given: the file names and bytes of
    the repository at the pinned commit, the mined tasks and the graded rows. It yields
    :class:`Draft` objects (a proposal) and :class:`Note` objects (a finding it could not
@@ -29,17 +31,29 @@ honours :class:`Miner` and calling :func:`register_miner`. The contract, which
 5. A draft of a kind the miner did not declare is refused; two drafts of one entry id keep the
    first (registry order); a miner that raises is recorded as failed and the others run.
 
-**Idempotent at a pinned sha.** The same sha proposes nothing new: a draft whose source (the
-file and its digest, or the rows) is the one the standing version was proposed from is
-``unchanged``. A miner never replaces an entry a person wrote, one a person revoked or retired,
-or one a person has adopted while its source is unchanged (``held``); a changed source is a new
-version, which needs its two people again.
+**Idempotent by reading.** The same commit, with the same graded rows, proposes nothing new: a
+draft that cites the source the standing version cites (the file and its digest, or the rows)
+and says the same of it is ``unchanged``, whatever commit or miner version read it (a drafted
+statement is not compared: a model's words are not the miner's). A later commit, a newly graded
+row or a new miner version proposes an entry again only when the source it cites has changed or
+the miner now reads it differently — a statement may rest on files besides the one it cites (a
+test standard names its runner's configuration and cites an example test), so the reading, not
+only the cited file, is compared. That is a new version, which needs its two people again. A
+miner never replaces an entry a person wrote, revoked or retired (``held``); an entry a person
+adopted stays ``unchanged`` while the miner reads it the same.
 
 **Guidance files are data.** ``CLAUDE.md``, ``AGENTS.md`` and ``CONTRIBUTING`` are read only
-for the commands they tell a contributor to run, and only a command of a known tool, in a shape
-that carries no shell operator, reaches a proposal — inside a fixed sentence. No other word of
-them reaches an entry, and no entry reaches a builder's brief outside a measured arm (the import
-contract "library entries never reach a brief" names this module).
+for the commands they tell a contributor to run, and only a command of a known tool whose every
+argument is a flag or a path the repository holds — no shell operator, no URL, no other word —
+reaches a proposal, inside a fixed sentence. No other word of them reaches an entry, and no
+entry reaches a builder's brief outside a measured arm (the import contract "library entries
+never reach a brief" names this module).
+
+**Belt 5 is read, not copied.** A convention names ``repo_lint_clean`` only for a tool
+:func:`crb.core.lint.belt5_evidence` finds — the detectors belt 5's own plans call — so the
+check a signed convention names is the check that runs (P-191). A run's outcomes, notes and
+files read are redacted when they are made: a refused draft never echoes the credential that
+refused it (P-192).
 
 **Drafting is recorded.** A model may reword a statement (the ``Drafter`` seam, off by default:
 no model is called unless an operator passes one). The proposal is then recorded as
@@ -53,21 +67,25 @@ What it is:   The miner registry (``Miner``, ``register_miner``), the source a m
               that turns their drafts into library proposals (``run_miners`` → ``MineRun``).
 What it does: Reads a repository at a pinned commit; proposes decisions from ADRs, components
               from CODEOWNERS and the directory layout, conventions with their check from
-              lint and formatter configurations (and the commands guidance files name), a
+              lint and formatter configurations — ``repo_lint_clean`` exactly where belt 5's
+              own detectors find the tool — (and the commands guidance files name), a
               test standard per language from the test layout, and work-type candidates with
               their counts from the change profile; stamps provenance and the proposer; holds
               each draft to the record's rules; and says, per draft, whether it is proposed,
               unchanged, held, refused or only noted.
 How:          ``git ls-tree -r`` and ``git cat-file blob`` at the pinned sha through
-              ``GitRepo`` (no checkout); each miner is a pure function of the source; the
-              runner validates, stamps, compares with the entry's standing state and returns
-              the proposals for the caller to append; standard library only (ADR-0008).
+              ``GitRepo`` (no checkout); each miner is a pure function of the source; the lint
+              miner reads the tree through ``crb.core.lint.belt5_evidence``; the runner
+              validates, stamps, compares with the entry's standing state (its source and its
+              reading) and returns the proposals for the caller to append; standard library
+              only (ADR-0008).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (item 10),
               docs/adr/0008-stdlib-core-and-downward-layers.md
 Works with:   src/crb/core/library.py (the record every proposal is and the state it is
               compared with), src/crb/core/git.py (``GitRepo`` — the pinned tree),
               src/crb/core/taxonomy.py (a work type's global parent),
+              src/crb/core/lint.py (``belt5_evidence`` — which tools belt 5 runs),
               src/crb/server/routes/library.py (``POST /library/{repo}/mine`` — appends the
               proposals and events the run), src/crb/cli/commands/library.py (``crb library
               mine`` — the same run over the workdir, printed)
@@ -76,8 +94,9 @@ Tested by:    tests/test_miners.py, tests/test_server_routes_library_mine.py,
 Touch when:   never for a new repository — a repository's ADRs, owners, configurations and
               tests are read as they are; a miner is added through ``register_miner`` and
               the contract above (with a test like tests/test_miners.py's added miner); a
-              miner's output changes → bump its ``version``; a new source kind a miner may
-              cite is a change to ADR-0026 item 10 first.
+              miner's output changes → bump its ``version``; belt 5's detection changes → in
+              crb/core/lint.py, never here (tests/test_miners.py's belt-5 table must hold); a
+              new source kind a miner may cite is a change to ADR-0026 item 10 first.
 Claims:       A mined proposal is a reading of a file, not a fact about the code: it counts
               for nothing until two people sign it, and its effect on a builder is
               ``unmeasured`` (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
@@ -112,6 +131,7 @@ from crb.core.library import (
     Provenance,
     is_person,
 )
+from crb.core.lint import BELT5_HOST_ONLY, BELT5_RUNNERS, belt5_evidence
 from crb.core.redact import redact
 from crb.core.taxonomy import CLASS_DEFINITIONS
 
@@ -721,34 +741,36 @@ class _Tool:
     tool: str
     role: str  # "linter" | "formatter" | "type checker"
     command: str
-    belt5: bool  # crb's belt 5 runs it where the repository configures it
 
 
+#: What a convention says of each tool. Whether crb runs it is never kept here: belt 5's own
+#: detectors say (``crb.core.lint.belt5_evidence``).
 _TOOLS: dict[str, _Tool] = {
     t.tool: t
     for t in (
-        _Tool("ruff", "linter", "ruff check", True),
-        _Tool("ruff-format", "formatter", "ruff format --check", True),
-        _Tool("black", "formatter", "black --check", True),
-        _Tool("isort", "formatter", "isort --check-only", False),
-        _Tool("flake8", "linter", "flake8", False),
-        _Tool("pylint", "linter", "pylint", False),
-        _Tool("mypy", "type checker", "mypy", False),
-        _Tool("eslint", "linter", "eslint", True),
-        _Tool("prettier", "formatter", "prettier --check", True),
-        _Tool("stylelint", "linter", "stylelint", True),
-        _Tool("biome", "linter", "biome check", False),
-        _Tool("tsc", "type checker", "tsc --noEmit", True),
-        _Tool("gofmt", "formatter", "gofmt -l", True),
-        _Tool("golangci-lint", "linter", "golangci-lint run", False),
-        _Tool("cargo-fmt", "formatter", "cargo fmt --check", True),
-        _Tool("clippy", "linter", "cargo clippy", True),
-        _Tool("spotless", "formatter", "mvn spotless:check", True),
-        _Tool("checkstyle", "linter", "mvn checkstyle:check", True),
-        _Tool("rubocop", "linter", "rubocop", False),
-        _Tool("clang-format", "formatter", "clang-format --dry-run", False),
-        _Tool("editorconfig", "formatter", "an EditorConfig checker", False),
-        _Tool("pre-commit", "linter", "pre-commit run --all-files", False),
+        _Tool("ruff", "linter", "ruff check"),
+        _Tool("ruff-format", "formatter", "ruff format --check"),
+        _Tool("black", "formatter", "black --check"),
+        _Tool("isort", "formatter", "isort --check-only"),
+        _Tool("flake8", "linter", "flake8"),
+        _Tool("pylint", "linter", "pylint"),
+        _Tool("mypy", "type checker", "mypy"),
+        _Tool("eslint", "linter", "eslint"),
+        _Tool("prettier", "formatter", "prettier --check"),
+        _Tool("stylelint", "linter", "stylelint"),
+        _Tool("standard", "linter", "standard"),
+        _Tool("biome", "linter", "biome check"),
+        _Tool("tsc", "type checker", "tsc --noEmit"),
+        _Tool("gofmt", "formatter", "gofmt -l"),
+        _Tool("golangci-lint", "linter", "golangci-lint run"),
+        _Tool("cargo-fmt", "formatter", "cargo fmt --check"),
+        _Tool("clippy", "linter", "cargo clippy"),
+        _Tool("spotless", "formatter", "mvn spotless:check"),
+        _Tool("checkstyle", "linter", "mvn checkstyle:check"),
+        _Tool("rubocop", "linter", "rubocop"),
+        _Tool("clang-format", "formatter", "clang-format --dry-run"),
+        _Tool("editorconfig", "formatter", "an EditorConfig checker"),
+        _Tool("pre-commit", "linter", "pre-commit run --all-files"),
     )
 }
 
@@ -778,8 +800,38 @@ def _precommit_hook(text: str | None, hook: str) -> bool:
     )
 
 
+class _TreeFiles:
+    """A :class:`MineSource` as :class:`crb.core.lint.ConfigFiles`: belt 5's own detectors
+    read the tree at the pinned commit."""
+
+    def __init__(self, source: MineSource) -> None:
+        self._source = source
+
+    def is_file(self, path: str) -> bool:
+        return self._source.has(path)
+
+    def text(self, path: str, limit: int = 1_000_000) -> str:
+        data = self._source.blob(path)
+        if data is None or len(data) > limit:
+            return ""
+        return data.decode("utf-8", errors="ignore")
+
+    def files_under(self, directory: str) -> list[str]:
+        prefix = directory.rstrip("/") + "/"
+        return [
+            f for f in self._source.files if f.startswith(prefix) and "/" not in f[len(prefix) :]
+        ]
+
+
+def belt5_tools(source: MineSource) -> dict[str, str]:
+    """tool → the file that is its evidence, for every tool belt 5 runs on this tree
+    (:func:`crb.core.lint.belt5_evidence` over the pinned commit)."""
+    return belt5_evidence(_TreeFiles(source))
+
+
 def detect_tools(source: MineSource) -> dict[str, str]:
-    """tool → the file at the commit that configures it (the first found, in a fixed order)."""
+    """tool → the file at the commit that configures it (the first found, in a fixed order).
+    A configuration is not a check: :func:`belt5_tools` says which of these belt 5 runs."""
     found: dict[str, str] = {}
 
     def first(tool: str, *paths: str) -> None:
@@ -857,12 +909,23 @@ GUIDANCE_FILES: tuple[str, ...] = (
 #: A command as a guidance file may name one: words, flags and paths — never a shell
 #: operator, a quote, a substitution or a redirection.
 _COMMAND_RE = re.compile(r"^[a-z][a-z0-9._-]*( [A-Za-z0-9._/:=@+,-]+){0,6}$")
+#: An argument after the tool's leading words: a flag (``-x``, ``--x``, ``--x=value``) …
+_FLAG_RE = re.compile(r"^--?[A-Za-z0-9][A-Za-z0-9_-]*(=[A-Za-z0-9._/,@+-]+)?$")
+#: … or a path (its first part must be a file or directory the repository holds).
+_PATH_RE = re.compile(r"^[A-Za-z0-9._/*-]+$")
+#: The paths every tool understands without the repository holding them.
+_ANY_TREE = frozenset({".", "./...", "..."})
 _RUNNERS = ("npx ", "python -m ", "python3 -m ", "uv run ", "poetry run ", "pipx run ")
 #: The leading words of a command → the tool it runs (only these reach a proposal).
 _COMMAND_TOOLS: tuple[tuple[str, str], ...] = (
     ("ruff format", "ruff-format"),
     ("ruff check", "ruff"),
     ("ruff", "ruff"),
+    ("golangci-lint run", "golangci-lint"),
+    ("pre-commit run", "pre-commit"),
+    ("biome check", "biome"),
+    ("biome lint", "biome"),
+    ("biome format", "biome"),
     ("black", "black"),
     ("isort", "isort"),
     ("flake8", "flake8"),
@@ -884,10 +947,26 @@ _COMMAND_TOOLS: tuple[tuple[str, str], ...] = (
 _CODE_SPAN_RE = re.compile(r"`([^`\n]{1,120})`")
 
 
-def guidance_commands(text: str) -> list[tuple[str, str]]:
+def _is_argument(token: str, top: frozenset[str]) -> bool:
+    """A flag, or a path whose first part the repository holds (``src``, ``src/``,
+    ``./tests/unit``) or ``.`` — never a word of prose, never a URL."""
+    if "://" in token:
+        return False
+    if _FLAG_RE.match(token) or token in _ANY_TREE:
+        return True
+    if not _PATH_RE.match(token):
+        return False
+    first = token.removeprefix("./").split("/", 1)[0]
+    return first in top
+
+
+def guidance_commands(text: str, *, tree: Iterable[str] = ()) -> list[tuple[str, str]]:
     """``(tool, command)`` for each command of a known tool the text names — in a code span
-    or a fenced line — in the order found, first per tool. Anything else is dropped: prose,
-    instructions, URLs and any command carrying a shell operator never leave this function."""
+    or a fenced line — in the order found, first per tool. After the tool's leading words,
+    every argument is a flag or a path whose first part is a file or directory of ``tree``
+    (the repository's files) — or the command is dropped whole. Prose, instructions, URLs and
+    any command carrying a shell operator never leave this function (P-193)."""
+    top = frozenset(p.split("/", 1)[0] for p in tree)
     candidates: list[str] = [m.group(1) for m in _CODE_SPAN_RE.finditer(text)]
     fenced = False
     for raw in text.splitlines():
@@ -909,7 +988,8 @@ def guidance_commands(text: str) -> list[tuple[str, str]]:
                 break
         for lead, tool in _COMMAND_TOOLS:
             if bare == lead or bare.startswith(lead + " "):
-                out.setdefault(tool, cmd)
+                if all(_is_argument(t, top) for t in bare[len(lead) :].split()):
+                    out.setdefault(tool, cmd)
                 break
     return list(out.items())
 
@@ -920,25 +1000,37 @@ class LintMiner:
     contributor to run."""
 
     name = "lint"
-    version = "1"
+    version = "2"
     kinds: tuple[str, ...] = (KIND_CONVENTION,)
     reads = (
         "lint and formatter configurations (pyproject.toml tables, ruff.toml, .eslintrc*, "
         ".prettierrc*, .golangci.yml, go.mod, rustfmt.toml, pom.xml plugins, "
-        ".pre-commit-config.yaml …) and, as data only, the commands CLAUDE.md, AGENTS.md "
-        "and CONTRIBUTING name"
+        ".pre-commit-config.yaml …) through belt 5's own detectors and, as data only, the "
+        "commands CLAUDE.md, AGENTS.md and CONTRIBUTING name"
     )
 
     def mine(self, source: MineSource) -> Iterator[Finding]:
+        runs = belt5_tools(source)
         found = detect_tools(source)
+        found.update(runs)  # belt 5's evidence is the file a checked convention cites
         for tool, path in found.items():
             t = _TOOLS[tool]
-            runs = (
-                f"crb's belt 5 ({CHECK_LINT}) runs it on a change when it finds this "
-                "configuration and the tool is installed."
-                if t.belt5
-                else "crb does not run it, so it is advisory until a finish-gate command names it."
-            )
+            if tool in runs:
+                host = " on the host (not in a sandbox)" if tool in BELT5_HOST_ONLY else ""
+                said = (
+                    f"crb's belt 5 ({CHECK_LINT}) runs it on a change{host} when the "
+                    f"repository is replayed by crb's {BELT5_RUNNERS[tool]} runner and the "
+                    "tool is installed."
+                )
+            elif tool in BELT5_RUNNERS:
+                said = (
+                    "crb's belt 5 does not run it for this configuration, so it is advisory "
+                    "until a finish-gate command names it."
+                )
+            else:
+                said = (
+                    "crb does not run it, so it is advisory until a finish-gate command names it."
+                )
             where = (
                 f"The repository is a Go module ({path}), and gofmt is the formatter every Go "
                 "toolchain ships"
@@ -949,10 +1041,10 @@ class LintMiner:
                 kind=KIND_CONVENTION,
                 slug=slugify(tool),
                 title=fit(f"Code passes {tool}", TITLE_MAX),
-                statement=fit(f"{where}: `{t.command}` accepts every changed file. {runs}"),
+                statement=fit(f"{where}: `{t.command}` accepts every changed file. {said}"),
                 path=path,
                 characteristic=MAINTAINABILITY,
-                check=CHECK_LINT if t.belt5 else "",
+                check=CHECK_LINT if tool in runs else "",
             )
         documented: set[str] = set()
         for path in GUIDANCE_FILES:
@@ -961,7 +1053,7 @@ class LintMiner:
             text = source.text(path)
             if text is None:
                 continue
-            for tool, command in guidance_commands(text):
+            for tool, command in guidance_commands(text, tree=source.files):
                 if tool in found or tool in documented:
                     continue
                 documented.add(tool)
@@ -1183,6 +1275,13 @@ class Outcome:
     version: str = ""
     counts: Mapping[str, int] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # redacted when made: a refused draft's subject may carry the credential that
+        # refused it, and a run's report reaches the API, the CLI and the page (P-192)
+        object.__setattr__(self, "subject", redact(str(self.subject)))
+        object.__setattr__(self, "reason", redact(str(self.reason)))
+        object.__setattr__(self, "counts", {redact(str(k)): v for k, v in self.counts.items()})
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "miner": self.miner,
@@ -1216,6 +1315,10 @@ class MineRun:
     outcomes: tuple[Outcome, ...]
     files_read: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        # a file's name may carry a credential too (P-192)
+        object.__setattr__(self, "files_read", tuple(redact(p) for p in self.files_read))
+
     def counts(self) -> dict[str, int]:
         c = Counter(o.outcome for o in self.outcomes)
         return {k: c.get(k, 0) for k in OUTCOMES}
@@ -1247,9 +1350,21 @@ def _source_of(e: LibraryEntry) -> tuple[str, str, str, tuple[str, ...]]:
     return (p.kind, p.path, p.digest, tuple(p.rows))
 
 
+def _reading_of(e: LibraryEntry, *, statement: bool) -> dict[str, Any]:
+    """What the entry says of its source: its content without the commit that read it or
+    the proposer (a miner's version, or a drafter) — and without the statement when a
+    model drafted the standing one."""
+    content = e.content()
+    content.pop("proposed_by", None)
+    content["provenance"] = {k: v for k, v in content["provenance"].items() if k != "commit"}
+    if not statement:
+        content.pop("statement", None)
+    return content
+
+
 def standing(new: LibraryEntry, state: EntryState | None) -> tuple[str, str]:
     """``(outcome, reason)`` for a mined entry against the entry's standing state: the
-    idempotency rule of the module docstring."""
+    idempotency rule of the module docstring — by source and by reading."""
     if state is None:
         return OUTCOME_PROPOSED, ""
     old = state.entry
@@ -1257,9 +1372,16 @@ def standing(new: LibraryEntry, state: EntryState | None) -> tuple[str, str]:
         return OUTCOME_HELD, "a person wrote this entry; a miner never replaces it"
     if state.status in FINAL_STATUSES:
         return OUTCOME_HELD, f"a person {state.status} this entry; only a person proposes it again"
-    if _source_of(old) == _source_of(new):
-        return OUTCOME_UNCHANGED, "its source is unchanged since it was proposed"
-    return OUTCOME_PROPOSED, ""
+    if _source_of(old) != _source_of(new):
+        return OUTCOME_PROPOSED, "its source has changed: a new version, which needs its two people"
+    drafted = old.proposed_by.startswith(PROPOSER_DRAFTED)
+    if _reading_of(old, statement=not drafted) == _reading_of(new, statement=not drafted):
+        return OUTCOME_UNCHANGED, "its source and the miner's reading of it are unchanged"
+    return (
+        OUTCOME_PROPOSED,
+        "the miner reads it differently from the same source: a new version, which needs its "
+        "two people",
+    )
 
 
 def _entry_of(source: MineSource, miner: Miner, d: Draft) -> LibraryEntry:
@@ -1417,6 +1539,7 @@ __all__ = [
     "OwnersMiner",
     "Proposal",
     "TestLayoutMiner",
+    "belt5_tools",
     "component_of",
     "component_roots",
     "describe_miners",

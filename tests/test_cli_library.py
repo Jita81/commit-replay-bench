@@ -7,7 +7,8 @@ What it is:   CLI tests of ``crb library miners`` and ``crb library mine`` over 
 What it does: Pins that ``miners`` lists the registry; that ``mine`` pins the commit, prints
               every proposal with its miner, file and commit and says nothing was written; that
               ``--miner`` narrows the run; and that an unknown miner, a commit the clone lacks
-              and an option passed as a commit exit 2.
+              and an option passed as a commit exit 2; and that no output echoes a credential
+              a refused draft carried.
 How:          ``crb.cli.main.main([...])`` in-process with ``--workdir`` under ``tmp_path``;
               ``tests/fixtures/miner_repo.py`` builds the clone.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -26,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from crb.cli.main import main
-from fixtures.miner_repo import MinerRepo, make_miner_repo
+from fixtures.miner_repo import MinerRepo, commit, make_miner_repo
 
 
 @pytest.fixture
@@ -81,3 +82,18 @@ def test_mine_refuses_what_it_cannot_run(
     capsys.readouterr()
     assert main(["library", "mine", "acme", *argv, "--workdir", str(wd)]) == 2
     assert says in capsys.readouterr().err
+
+
+def test_mine_never_prints_a_credential_a_refused_draft_carried(
+    added: tuple[MinerRepo, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    fx, wd = added
+    key = "sk-proj-abcdefghijklmnopqrstuvwx1234"
+    commit(fx.path, {f"docs/adr/0009-rotate-{key}.md": f"# 9. Rotate {key}\n\n"
+                     "Status: accepted\n\n## Decision\n\nRotate it.\n"}, "adr 9")  # fmt: skip
+    capsys.readouterr()
+    for extra in (["--json"], []):
+        argv = ["library", "mine", "acme", "--miner", "adrs", *extra, "--workdir", str(wd)]
+        assert main(argv) == 0
+        out = capsys.readouterr()
+        assert key not in out.out and key not in out.err
