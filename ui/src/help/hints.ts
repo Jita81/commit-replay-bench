@@ -1502,7 +1502,7 @@ export const HINTS = {
   'field.learn.note':
     'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next. It stays one line: a line break would end the comment.',
   'field.learn.command':
-    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line.',
+    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line. The field starts with the cut example as recorded: add the rest after it.',
   'field.learn.prefix':
     'Which guard family to file the refusal under. The refused corpus takes archaeology and network lines only; an attempt to tamper with the tests is judged elsewhere.',
   'button.learn.accept_refusal':

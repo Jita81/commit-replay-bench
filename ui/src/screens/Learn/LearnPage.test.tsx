@@ -410,6 +410,29 @@ describe('LearnPage', () => {
     expect(done.textContent).not.toContain('The plan estimated')
   })
 
+  it('a cut class opens with its recorded example in the full-command field, so the person types only the tail (P-424)', async () => {
+    const cut = 'NODE_ENV=test /opt/homebrew/bin/node --test --test-reporter-destinat'
+    const truncated: RefusalGroup = { ...GROUP, examples: [cut], truncated: true, candidate_honest: cut, candidate_refused: `${cut}\tarchaeology:` }
+    const { calls } = mockApi(
+      operatorApi({
+        'GET /learn/refusals': { ...REFUSALS, groups: [truncated] },
+        'POST /learn/refusals/accept': { repo: 'alpha', group_id: 'g1', verdict: 'honest', decided_by: 'root', honest_added: [`${cut}ion=out.xml`], refused_added: [], skipped: [], already_present: false, corpus_dir: '/c', honest_path: '/c/shell_corpus.txt', refused_path: '/c/shell_corpus_refused.txt' },
+      }),
+    )
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Decide' }))
+    // the server takes a command only when it continues a recorded cut example byte for
+    // byte, so the field starts from that example rather than empty
+    const field = screen.getByLabelText(/The full command/) as HTMLInputElement
+    expect(field.value).toBe(cut)
+    expect(screen.getByText(/Complete the command after the cut example/)).toBeInTheDocument()
+    await userEvent.type(field, 'ion=out.xml')
+    await userEvent.click(screen.getByRole('button', { name: 'Record this decision' }))
+    await screen.findByText(/Recorded as honest by root/)
+    const posted = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init!.body)) as { command: string }
+    expect(posted.command).toBe(`${cut}ion=out.xml`)
+  })
+
   it('the note is one line: the Why field takes no line break, because it is written as a corpus comment (P-161)', async () => {
     const { calls } = mockApi(operatorApi({ 'POST /learn/refusals/accept': { repo: 'alpha', group_id: 'g1', verdict: 'honest', decided_by: 'root', honest_added: ['curl https://x'], refused_added: [], skipped: [], already_present: false, corpus_dir: '/c', honest_path: '/c/shell_corpus.txt', refused_path: '/c/shell_corpus_refused.txt' } }))
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
