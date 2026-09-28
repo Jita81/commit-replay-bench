@@ -221,7 +221,9 @@ def test_readme_says_the_loop_proposes_while_learn_has_no_actuator() -> None:
 
 # ─── E4: the changelog grows by one paragraph per pull request ───────────────────────────
 
-PR_LINK = "https://github.com/Jita81/commit-replay-bench/pull"
+#: A pull request's own page, ``pull/<digits>`` — never ``pull/new/<branch>``, GitHub's create
+#: form, which never becomes the pull request's page (docs/PREVENTION.md P-191).
+PR_LINK = re.compile(r"https://github\.com/Jita81/commit-replay-bench/pull/\d+\)")
 MAX_WORDS = 120
 
 
@@ -235,7 +237,8 @@ def test_unreleased_is_one_paragraph_per_pull_request() -> None:
     for entry in entries:
         assert entry.startswith("- "), entry[:80]
         assert "\n- " not in entry and "\n  - " not in entry, f"nested list: {entry[:80]}"
-        assert PR_LINK in entry, f"no pull request link: {entry[:80]}"
+        assert PR_LINK.search(entry), f"no pull request link: {entry[:80]}"
+        assert "/pull/new/" not in entry, f"a create-form link: {entry[:80]}"
         words = len(entry.split())
         assert words <= MAX_WORDS, f"{words} words: {entry[:80]}"
 

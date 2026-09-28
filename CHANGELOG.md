@@ -14,7 +14,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **The record corrects itself; costs carry their n; each stream measures its own flow**
   (north-star Waves 0 and 1, streams D, E and M;
-  [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1-a)).
+  [#64](https://github.com/Jita81/commit-replay-bench/pull/64)).
   `scripts/dod_check.py` refuses a gap line no criterion cites, a plan item that is not a gap
   and a ranked gap in no plan table (DL-063, DL-064); `scripts/check_branch_protection.py`
   compares the required checks with the CI jobs. Cost and latency are means with n, an interval
