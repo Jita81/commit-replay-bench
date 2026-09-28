@@ -25,7 +25,8 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               (a cell whose builder has no credential is refused whole — P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
               two requests at once, a lost ``seq`` race or a failed insert (P-420), and refuses
-              rather than run unlocked when a transaction is already open (P-429); that every
+              rather than run unlocked when a transaction is already open (P-429), as every
+              lock helper in ``src/crb`` must (P-430); that every
               write on the ``learn:<repo>`` trace survives a lost ``seq`` race with its side
               effect written once, and appends only through the one retrying step (P-431);
               that Learn and the map agree on why a cell is held (P-426); that a
@@ -964,8 +965,10 @@ def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unloc
 
 
 #: Lock helpers that still carry on after ``BEGIN IMMEDIATE`` failed inside an open
-#: transaction, each with the gap that makes it fail closed. Only removed, never added to.
-_LOCKS_THAT_CARRY_ON = {"server/auth.py::lock_users_table": "G-246"}
+#: transaction, each with the gap that makes it fail closed. Only removed, never added to:
+#: empty since ``lock_users_table`` failed closed (G-246, P-430), so the ratchet has no
+#: exception.
+_LOCKS_THAT_CARRY_ON: dict[str, str] = {}
 
 
 def test_no_lock_helper_carries_on_after_a_failed_begin_immediate() -> None:

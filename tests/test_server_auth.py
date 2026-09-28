@@ -648,7 +648,8 @@ class TestEverySignInIsRecorded:
     """``User.last_login`` keeps only the latest sign-in, so a recovery timed against it
     (``GET /flow``, run-the-platform) was timed to the latest sign-in, not the first after
     the reset. Every successful sign-in, local or OIDC, now writes ``user.signed_in``; a
-    refused one writes nothing (ADR-0028 §8)."""
+    refused one writes no ``user.signed_in`` (DL-068's ``user.login_failed`` only; ADR-0028
+    §8)."""
 
     def test_a_local_sign_in_writes_one_event_and_a_refused_one_none(
         self, settings: Settings
