@@ -69,7 +69,7 @@ experiment. So a run cap must not be kept by quietly shrinking each attempt.
   above the dearest attempt the run had seen — the whole first attempt, since nothing is
   known before it — and then ends `failed` saying so. Set a cost cap per attempt to narrow
   it. A cap the run cannot pass needs every model call bounded before it is made; until
-  then `factory.actions.8` stays partial on G-963.
+  then `factory.actions.8` stays partial on G-938.
 - We must never keep the run cap by changing an attempt's own caps mid-run. The row's
   `budget_tier` would then describe an experiment that did not run.
 

@@ -208,7 +208,7 @@ re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read m
 | LIB · the context library · new, after S | G-673, G-677, G-675, G-676 | the entry record and its two-person sign-off ledger; the miner registry and its miners over a pinned commit; entry sets registered as arms and kept or retired by the look rule and the harm clause, the brief switch off by default; `/library/:repo` with one page per work type |
 | CLS · the organisation's classes · new, after S | G-672 | class-set versions per organisation with the global classes as parents; the derivation and confirmation split by commit; one rule over ticket-time fields at replay and at intake, with the linked-ticket reader; the validity report with its size-agreement clause; the two-person sign-off; the class set as a DL-044 seam |
 | FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling |
-| CL · claims on the decision records · new | G-945, G-946 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
+| CL · claims on the decision records · new | G-936, G-937 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
 
 **Done when:** an invited approver can accept, sign in and sign a cell on the walkthrough stack;
 the factory refuses an unsigned cell by default; `/posture` shows each go-live line's state;
@@ -263,7 +263,7 @@ These are not wave items; each unblocks the work named beside it.
 | doors and wayfinding | G-907, G-977, G-236, G-444, G-253, G-260, G-293, G-366, G-228, G-396, G-979 |
 | proof through each journey's own doors | G-428, G-300, G-380, G-399, G-446, G-109, G-119, G-125, G-133, G-238, G-256, G-268, G-183 |
 | time, cost and non-goals in words | G-302, G-401, G-430, G-447, G-978, G-908, G-382, G-402, G-429, G-140, G-185, G-207, G-262, G-263, G-269 |
-| what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-963, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
+| what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-938, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
 | what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
 | the product | F43, G-604, F21, G-600 |
 

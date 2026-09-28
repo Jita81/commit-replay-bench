@@ -23,11 +23,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **A run cannot start on a dead login; a worker whose metrics port is taken keeps running and says so; the migrations probe tells the truth**
   (north-star Wave 2, stream Q1; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
-  pilot D1, D5, D7; DL-233, DL-234; P-435 to P-445). A run
+  pilot D1, D5, D7; DL-233, DL-234; P-435 to P-439, P-444, P-445 and P-458 to P-461). A run
   on a login that failed its check is refused at submit, or failed at claim. `/health` and Settings show each auth mode's login state, never calling a
   model; viewers see presence only. Every builder names a refused key alike, so from
   apparatus 2.4 an outage says "your login" apart from "the provider".
   `CRB_METRICS_PORT=auto` picks a free port. A store at head is compared with the models.
+  A run refused as unqualified is refused before its login is verified, so it spends no
+  verify (P-462).
 
 - **A host tool can no longer change a verdict, and a failure nothing names fails belt 3**
   (north-star Wave 2, stream Q2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);

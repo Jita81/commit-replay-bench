@@ -53,7 +53,7 @@ thereby tagged the sentence around it.
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
 - any file not on ``ALLOWLIST``: the decision records under ``docs/adr/`` and CHANGELOG are
-  ungated (G-945), and the generated CODE-MAP and GAP-ANALYSIS are left to their generators'
+  ungated (G-936), and the generated CODE-MAP and GAP-ANALYSIS are left to their generators'
   own ``--check`` (``UNGATED``).
 
 **A review's actions are records, not prose.** A review under ``docs/reviews/`` that ends in
@@ -191,7 +191,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 #: The pages this gate reads: README, every guide under docs/, every review and every
 #: definition-of-done page (a glob reads a page added later the day it lands). It only grows
-#: (see the module docstring). The decision records and CHANGELOG are not on it yet (G-945).
+#: (see the module docstring). The decision records and CHANGELOG are not on it yet (G-936).
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/*.md",

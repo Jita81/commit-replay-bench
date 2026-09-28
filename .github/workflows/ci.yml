@@ -223,7 +223,7 @@ jobs:
       - name: Install the CommonMark parser the fence reader uses (dev extra, from uv.lock)
         run: uv sync -q --locked --python 3.12 --extra dev --no-install-project
       # The pages covered are scripts/claims_check.py's ALLOWLIST; the decision records
-      # and CHANGELOG are not on it yet (G-945). README's [measured] numbers are re-derived
+      # and CHANGELOG are not on it yet (G-936). README's [measured] numbers are re-derived
       # by tests/test_measured_claims.py, which runs in the test job, not here.
       - name: Every claim on a covered page carries what its tag requires
         run: .venv/bin/python scripts/claims_check.py --check
