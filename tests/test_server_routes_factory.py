@@ -1361,7 +1361,7 @@ def test_every_freeze_or_evolve_decision_holds_the_registration_lock() -> None:
     # every caller that decides was found, and every exemption still names a real one
     assert {
         ("intake.py", "_register"),
-        ("routes/learn.py", "register_strengthening"),
+        ("routes/learn.py", "_register_items"),
         ("routes/prevention.py", "learn_register_item"),
     } <= seen
     assert set(_UNLOCKED_LOAD_EXEMPT) <= seen

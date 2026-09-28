@@ -55,10 +55,11 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
-              ``FactoryHome.registration``) / ``new_run`` + ``stage_queued``, each with an
-              ``append_system_event`` on the repo's ``learn:<repo>`` trace in the same
-              transaction; the queue's in-flight guard is read under the events write lock
-              (``lock_event_writes``), so the check and the act are one step.
+              ``FactoryHome.registration``) / ``new_run`` + ``stage_queued``, each inside
+              ``_learn_step``: the lock (which fails closed), the side effect once, and the
+              event on the repo's ``learn:<repo>`` trace, retried on a lost ``seq`` race
+              (P-420, P-429, P-431); the queue's in-flight guard is read under the events
+              write lock too (``lock_event_writes``), so the check and the act are one step.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` — the same
@@ -86,14 +87,15 @@ Touch when:   never for a new repository; adding a derivation means a function i
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from crb.core.capability import PROJECTIONS, build_capability_map
@@ -104,6 +106,7 @@ from crb.core.learn import (
     RemeasurePlan,
     StrengthenBacklog,
     StrengthenItem,
+    TriageApplied,
     apply_triage,
     has_line_break,
     load_oracle_scores,
@@ -286,9 +289,85 @@ def derive_remeasure(
     )
 
 
-#: Attempts at the queue's one transaction before a ``seq`` conflict on the shared
-#: ``learn:<repo>`` trace is answered 409 (P-420).
+#: Attempts at a Learn write's one serialised step before a ``seq`` conflict on the shared
+#: ``learn:<repo>`` trace is answered 409 (P-420, P-431).
 _QUEUE_ATTEMPTS = 3
+
+
+class LearnLockNotHeld(RuntimeError):
+    """The Learn write lock could not be taken because a transaction was already open on
+    the session: the write is refused rather than run unserialised (P-429)."""
+
+
+def _lock_learn_trace(db: Session) -> None:
+    """Serialise a Learn write's check, side effect and event for the rest of this
+    transaction (P-420, P-431): SQLite takes its write lock now (``BEGIN IMMEDIATE`` —
+    pysqlite defers BEGIN until the first write, so this is safe after the route's reads),
+    PostgreSQL a transaction-scoped advisory lock (id 7337 — one id per purpose, see
+    ``crb.store.jobs``). A rollback or commit releases it.
+
+    Fails closed (P-429): when a transaction is already open, ``BEGIN IMMEDIATE`` cannot
+    run and nothing proves this session holds the write lock (a deferred ``BEGIN`` holds
+    none), so :class:`LearnLockNotHeld` is raised and nothing is written."""
+    dialect = db.get_bind().dialect.name
+    if dialect == "sqlite":
+        try:
+            db.execute(text("BEGIN IMMEDIATE"))
+        except OperationalError as exc:
+            if "within a transaction" not in str(exc):
+                raise
+            raise LearnLockNotHeld(
+                "the Learn write lock was not taken: a transaction was already open on this "
+                "session, so the write would run unserialised — nothing was written"
+            ) from exc
+    elif dialect == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(7337)"))
+
+
+def _learn_step(
+    db: Session,
+    repo: str,
+    *,
+    action: str,
+    actor: str,
+    stage: Callable[[], dict[str, Any]],
+    exhausted: Callable[[], ApiError],
+) -> dict[str, Any]:
+    """The ONE way an event reaches the shared ``learn:<repo>`` trace from a Learn write:
+    take the lock, ``stage`` the write (its check and its side effect; it returns the
+    event's payload), append the event and commit — as one serialised step (P-420, P-431).
+
+    Every Learn write appends on the same trace, and ``append_system_event`` reads the last
+    ``seq`` before it inserts the next, so a write can lose that race and its commit is
+    refused by the unique index. The step is then rolled back and taken again, up to
+    :data:`_QUEUE_ATTEMPTS` times, and ``exhausted()`` is raised after the last. ``stage``
+    runs on every attempt: a write whose side effect lives outside the database (a corpus
+    line, a backlog file) memoises it, so a retry re-appends the event and never repeats
+    the file write; a write whose side effect is in the transaction (the queued runs)
+    stages it again. An error ``stage`` raises rolls the attempt back and propagates."""
+    for _attempt in range(_QUEUE_ATTEMPTS):
+        _lock_learn_trace(db)
+        try:
+            payload = stage()
+        except BaseException:
+            db.rollback()
+            raise
+        append_system_event(
+            db,
+            trace_id=learn_trace_id(repo),
+            action=action,
+            repo=repo,
+            actor=actor,
+            payload=payload,
+        )
+        try:
+            db.commit()
+            return payload
+        except IntegrityError:
+            # another Learn write took this ``seq`` on the shared trace: nothing of this
+            # attempt's transaction was written, so it is taken again on fresh rows
+            db.rollback()
+    raise exhausted() from None
 
 
 def in_flight_runs(db: Session, repo: str, *, cell: str, mode: str, apparatus: str) -> list[str]:
@@ -531,6 +610,85 @@ def _latest_in_lineage(backlog: Backlog, item_id: str) -> str:
     return current
 
 
+_How = Literal["frozen", "evolved"]
+
+
+def _plan_registration(
+    home: FactoryHome, items: list[BacklogItem]
+) -> list[tuple[BacklogItem, _How]]:
+    """Try every item on the backlog IN MEMORY, in order, before any is written (P-432):
+    freeze the first when there is none, evolve the rest, and give an id already on the
+    record a NEW id superseding the latest of its lineage. The record's own rules run on
+    each step (:meth:`Backlog.freeze`, :meth:`Backlog.evolve`), so an item the record would
+    refuse is refused here — **409 ``register_refused``** with nothing registered — and a
+    refusal can never leave the items before it on the backlog with no Learn event."""
+    planned: list[tuple[BacklogItem, _How]] = []
+    trying = items[0].id if items else ""
+    try:
+        current = home.load_backlog()
+        for item in items:
+            trying = item.id
+            if current is None:
+                current = Backlog(items=(item,), repo=home.repo).freeze()
+                planned.append((item, "frozen"))
+                continue
+            to_register = item
+            if current.get(item.id) is not None:
+                to_register = replace(
+                    item,
+                    id=_next_item_id(item.id, [i.id for i in current.all_items()]),
+                    supersedes=_latest_in_lineage(current, item.id),
+                )
+            current = current.evolve(to_register)
+            planned.append((to_register, "evolved"))
+    except (BacklogError, ValueError) as exc:
+        raise ApiError(
+            409,
+            "register_refused",
+            f"item {trying!r} would not be accepted by the backlog record: {exc} — nothing "
+            "was registered",
+            detail={"registered": []},
+        ) from exc
+    return planned
+
+
+def _register_items(
+    home: FactoryHome,
+    planned: list[tuple[BacklogItem, _How]],
+    registered: list[RegisteredItemOut],
+    *,
+    actor: str,
+) -> tuple[Backlog | None, dict[str, str] | None]:
+    """Write the items :func:`_plan_registration` tried, in order, appending each to
+    ``registered`` as it lands. Returns the backlog after the last write and, when the
+    record refused an item part way, ``{item_id, reason}`` for it: the trial passed, and the
+    caller holds the registration lock (EI-7) from the trial to here, so only a write the
+    record itself refuses, or a path outside that lock, can refuse an item part way. The
+    caller records what landed on the Learn trace before it answers 409 (P-432). A freeze
+    never replaces a backlog another path froze in the meantime. The lock is re-entrant, so
+    taking it here again costs nothing under the caller's and keeps every load and write of
+    this function inside it."""
+    backlog: Backlog | None = None
+    with home.registration():
+        for item, how in planned:
+            try:
+                if how == "frozen":
+                    if home.load_backlog() is not None:
+                        raise BacklogError(
+                            "another path froze a backlog for this repository after this "
+                            "request read the record"
+                        )
+                    backlog = home.register_backlog([item], actor=actor)
+                else:
+                    backlog = home.register_evolution(item, actor=actor)
+            except (BacklogError, ValueError, LookupError) as exc:
+                return backlog, {"item_id": item.id, "reason": str(exc)}
+            registered.append(
+                RegisteredItemOut(item_id=item.id, supersedes=item.supersedes, how=how)
+            )
+    return backlog, None
+
+
 @router.post(
     "/learn/refusals/accept",
     response_model=RefusalAcceptOut,
@@ -559,7 +717,11 @@ def accept_refusal(  # noqa: PLR0917 — FastAPI dependencies + body + query
 
     The file is appended BEFORE the event is recorded, and ``apply_triage`` is idempotent,
     so a crash between the two leaves a written line that the next attempt reports as
-    ``already_present`` — never an event claiming a line nothing wrote.
+    ``already_present`` — never an event claiming a line nothing wrote. The append and its
+    event are one serialised step (:func:`_learn_step`, P-431): a lost race for the trace's
+    next ``seq`` records the event again without appending the line again, and **409
+    ``learn_concurrent_write``** (``detail.lines``) says what was written when other Learn
+    writes won that race three times.
     """
     get_repo_or_404(db, repo)
     report = derive_refusals(factory, repo)
@@ -587,28 +749,31 @@ def accept_refusal(  # noqa: PLR0917 — FastAPI dependencies + body + query
     # the person (their display name) and the EVENT carries the account id as its actor —
     # the pair is what makes a line attributable without putting an id in somebody's diff.
     decider = (operator.display_name or operator.id).strip()
-    try:
-        applied = apply_triage([decision], report, corpus_dir=directory, decided_by=decider)
-    except LearnError as exc:
-        raise ApiError(
-            422, "refusal_refused", str(exc), detail={"group_id": body.group_id}
-        ) from exc
-    except OSError as exc:
-        raise ApiError(
-            409,
-            "corpus_not_writable",
-            f"the guard corpus at {directory} could not be written ({exc.strerror or exc}); "
-            "set CRB_LEARN_CORPUS_DIR to a directory this deployment may append to",
-        ) from exc
-    lines = [*applied.honest_added, *applied.refused_added]
-    already = not lines and bool(applied.skipped)
-    append_system_event(
-        db,
-        trace_id=learn_trace_id(repo),
-        action="learn.refusal.accepted",  # a literal on purpose: see the constants above
-        repo=repo,
-        actor=operator.id,
-        payload={
+    written: list[TriageApplied] = []
+
+    def stage() -> dict[str, Any]:
+        # the corpus line is appended ONCE, under the lock; a retry after a lost ``seq``
+        # race records the same decision again and never re-appends the line (P-431)
+        if not written:
+            try:
+                written.append(
+                    apply_triage([decision], report, corpus_dir=directory, decided_by=decider)
+                )
+            except LearnError as exc:
+                raise ApiError(
+                    422, "refusal_refused", str(exc), detail={"group_id": body.group_id}
+                ) from exc
+            except OSError as exc:
+                raise ApiError(
+                    409,
+                    "corpus_not_writable",
+                    f"the guard corpus at {directory} could not be written "
+                    f"({exc.strerror or exc}); set CRB_LEARN_CORPUS_DIR to a directory this "
+                    "deployment may append to",
+                ) from exc
+        done = written[0]
+        lines = [*done.honest_added, *done.refused_added]
+        return {
             "group_id": body.group_id,
             "verdict": body.verdict,
             "decided_by": decider,
@@ -618,11 +783,27 @@ def accept_refusal(  # noqa: PLR0917 — FastAPI dependencies + body + query
             "shape": group.shape,
             "rows": group.n,
             "lines": lines,
-            "already_present": already,
+            "already_present": not lines and bool(done.skipped),
             "corpus_dir": str(directory),
-        },
+        }
+
+    payload = _learn_step(
+        db,
+        repo,
+        action="learn.refusal.accepted",  # a literal on purpose: see the constants above
+        actor=operator.id,
+        stage=stage,
+        exhausted=lambda: ApiError(
+            409,
+            "learn_concurrent_write",
+            "other Learn writes kept moving this repository's trace through "
+            f"{_QUEUE_ATTEMPTS} attempts: the line was appended to the corpus but the "
+            "decision was not recorded — decide again to record it",
+            detail={"lines": [*written[0].honest_added, *written[0].refused_added]},
+        ),
     )
-    db.commit()
+    applied = written[0]
+    already = bool(payload["already_present"])
     return RefusalAcceptOut(
         repo=repo,
         group_id=body.group_id,
@@ -667,10 +848,22 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
 
     **409 ``factory_run_active``** while a run is queued or running (the backlog it
     verifies against cannot change under it), **422** for an unknown id or an item that
-    would not pass the Definition of Ready.
+    would not pass the Definition of Ready. The registration and its event are one
+    serialised step (:func:`_learn_step`, P-431): a lost race for the trace's next ``seq``
+    records the event again without registering again, and **409
+    ``learn_concurrent_write``** (``detail.registered``) names what landed when other Learn
+    writes won that race three times.
+
+    **409 ``register_refused``** (``detail.registered``) when the backlog record refuses an
+    item (P-432). Every item is tried on the record in memory before any is written, so a
+    refusal there registers nothing (``registered`` is empty). The trial and the writes are
+    one step under the registration lock (EI-7), so only the record refusing a write itself
+    can refuse an item part way:
+    the items before it are then on the backlog, and the ``learn.strengthen.registered``
+    event names exactly those, with ``refused`` ``{item_id, reason}``, before the 409.
     """
     get_repo_or_404(db, repo)
-    _refuse_if_run_active(db, repo)
+    _refuse_if_run_active(db, repo)  # early, before the derivation; again under the lock
     derived = derive_strengthen(db, factory, repo, by=body.by, since=body.since)
     by_id = {i.id: i for i in derived.items}
     chosen = list(dict.fromkeys(body.item_ids))  # the caller's order, each id once
@@ -688,56 +881,67 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     items = [_backlog_item(by_id[i]) for i in chosen]
     home = FactoryHome(settings.home, repo)
     registered: list[RegisteredItemOut] = []
-    # one locked read-modify-write from the first load to the last pointer write (EI-7): a
-    # second registration waits, then sees this one's freeze and evolves onto it — never a
-    # second freeze that replaces the first, never an evolution the pointer drops
-    with home.registration():
-        for item in items:
-            active = home.load_backlog()
-            try:
-                if active is None:
-                    home.register_backlog([item], actor=operator.id)
-                    registered.append(
-                        RegisteredItemOut(item_id=item.id, supersedes="", how="frozen")
-                    )
-                    continue
-                to_register = item
-                if active.get(item.id) is not None:
-                    to_register = replace(
-                        item,
-                        id=_next_item_id(item.id, [i.id for i in active.all_items()]),
-                        supersedes=_latest_in_lineage(active, item.id),
-                    )
-                home.register_evolution(to_register, actor=operator.id)
-            except (BacklogError, ValueError) as exc:
-                raise ApiError(
-                    409,
-                    "register_refused",
-                    f"item {item.id!r} was not registered: {exc}",
-                    detail={"registered": [r.item_id for r in registered]},
-                ) from exc
-            registered.append(
-                RegisteredItemOut(
-                    item_id=to_register.id, supersedes=to_register.supersedes, how="evolved"
-                )
+    done: list[tuple[Backlog | None, dict[str, str] | None]] = []
+
+    def stage() -> dict[str, Any]:
+        # the backlog is frozen or evolved ONCE, under the lock; a retry after a lost
+        # ``seq`` race records the same registration again and never registers a second
+        # item superseding the first (P-431). Every item is tried in memory first, so the
+        # record refuses before anything is written (P-432)
+        if not done:
+            _refuse_if_run_active(db, repo)
+            # one locked read-modify-write from the trial's load to the last pointer write
+            # (EI-7): a second registration waits, then sees this one's freeze and evolves
+            # onto it — never a second freeze that replaces the first
+            with home.registration():
+                planned = _plan_registration(home, items)
+                done.append(_register_items(home, planned, registered, actor=operator.id))
+        backlog, refused = done[0]
+        if backlog is None:  # the record refused the first write: nothing landed
+            assert refused is not None
+            raise ApiError(
+                409,
+                "register_refused",
+                f"item {refused['item_id']!r} was not registered: {refused['reason']} — "
+                "nothing was registered",
+                detail={"registered": []},
             )
-        final = home.load_backlog()
-    assert final is not None  # something was registered above, or a 409 was raised
-    append_system_event(
-        db,
-        trace_id=learn_trace_id(repo),
-        action="learn.strengthen.registered",  # a literal on purpose: see the constants above
-        repo=repo,
-        actor=operator.id,
-        payload={
+        payload: dict[str, Any] = {
             "projection": body.by,
             "since": body.since,
             "items": [r.model_dump() for r in registered],
-            "backlog_hash": final.backlog_hash,
-            "evolutions_hash": final.evolutions_hash,
-        },
+            "backlog_hash": backlog.backlog_hash,
+            "evolutions_hash": backlog.evolutions_hash,
+        }
+        if refused is not None:
+            payload["refused"] = refused
+        return payload
+
+    _learn_step(
+        db,
+        repo,
+        action="learn.strengthen.registered",  # a literal on purpose: see the constants above
+        actor=operator.id,
+        stage=stage,
+        exhausted=lambda: ApiError(
+            409,
+            "learn_concurrent_write",
+            "other Learn writes kept moving this repository's trace through "
+            f"{_QUEUE_ATTEMPTS} attempts: the items are on the backlog but the registration "
+            "was not recorded on the Learn trace — the backlog's own chain records them",
+            detail={"registered": [r.item_id for r in registered]},
+        ),
     )
-    db.commit()
+    final, refused = done[0]
+    assert final is not None  # a write that landed nothing raised inside the step
+    if refused is not None:
+        raise ApiError(
+            409,
+            "register_refused",
+            f"item {refused['item_id']!r} was not registered: {refused['reason']} — the "
+            "items before it are on the backlog and recorded on the Learn trace",
+            detail={"registered": [r.item_id for r in registered]},
+        )
     return StrengthenRegisterOut(
         repo=repo,
         registered=registered,
@@ -778,11 +982,13 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     queue of this cell (same mode and apparatus) put on the queue has not finished, naming
     those runs — the plan is derived from graded rows only, so without this a double click
     or a second operator would spend the estimate twice. The guard, the runs and the
-    ``learn.remeasure.queued`` event that names them are one transaction under the events
-    write lock (EI-1, P-420): a simultaneous second request waits, then is refused, and a
-    failed insert or a lost ``seq`` race leaves no run on the queue that no event names;
-    **409 ``remeasure_concurrent_write``** when other Learn writes won that race three
-    times, with nothing queued; **503 ``queue_unavailable``** when this server has no queue.
+    ``learn.remeasure.queued`` event that names them are one locked transaction under the
+    events write lock too (EI-1, P-420): two concurrent queues cannot both pass the check,
+    and a failed insert or a lost ``seq`` race leaves no run on the queue that no event
+    names, and a transaction already open when the lock is taken refuses the queue rather
+    than run it unlocked (P-429); **409 ``remeasure_concurrent_write``** when other Learn
+    writes won that race three times, with nothing queued; **503 ``queue_unavailable``**
+    when this server has no queue.
     """
     get_repo_or_404(db, repo)
     if body.apparatus != APPARATUS_VERSION:
@@ -831,19 +1037,24 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             ) from exc
         submit_refusals(db, settings, validated, new_run(validated, actor=operator.id))
         validated_runs.append(validated)
-    # The guard, the runs and their event are ONE transaction under the events write lock
-    # (EI-1, DL-080, P-420): a second request for the same cell waits here and then reads
-    # the first one's event, so it is refused — the check can no longer race the act. The
-    # runs are staged on the request's own session, committed with the event, so a lost
-    # ``seq`` race or a failed insert rolls every run back with it, and a retry never finds
-    # runs on the queue that no event names.
-    for attempt in range(_QUEUE_ATTEMPTS):
+
+    # P-420: the guard, the runs and the event that names them are ONE serialised
+    # transaction (EI-1, DL-080). The lock makes a concurrent queue of any cell wait for this
+    # one to commit (so it sees these runs and is refused); the runs are staged on the
+    # request's own session (``stage_queued``), in the same transaction as the event, so a
+    # lost ``seq`` race or a failed insert rolls every run back with it, and a retry never
+    # finds runs on the queue that no event names.
+    def stage() -> dict[str, Any]:
+        # the check and the runs are staged again on every attempt: they are in the
+        # transaction, so a lost race rolled them back with the event; each run meets the
+        # submit gate again under the lock, where nothing can change before it is staged.
+        # The guard is read under the events write lock as well (EI-1): a second request
+        # waits here and then reads the first one's event, so it is refused
         lock_event_writes(db)
         in_flight = in_flight_runs(
             db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
         )
         if in_flight:
-            db.rollback()
             raise ApiError(
                 409,
                 "remeasure_already_queued",
@@ -851,38 +1062,35 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
                 "not finished — nothing was queued; the plan is re-read once they have graded",
                 detail={"run_ids": in_flight},
             )
-        runs = [stage_queued(db, new_run(v, actor=operator.id)) for v in validated_runs]
-        run_ids = [run.id for run in runs]
-        append_system_event(
-            db,
-            trace_id=learn_trace_id(repo),
-            action="learn.remeasure.queued",  # a literal on purpose: see the constants above
-            repo=repo,
-            actor=operator.id,
-            payload={
-                "cell": cell.cell.label,
-                "mode": cell.mode,
-                "apparatus": body.apparatus,
-                "run_ids": run_ids,
-                "n_needed": cell.n_needed,
-                "est_cost_usd": round(cell.est_cost_usd, 4),
-                "cost_known": cell.cost_known,
-            },
-        )
-        try:
-            db.commit()
-            break
-        except IntegrityError:
-            # another Learn write took this ``seq`` on the shared trace: nothing of this
-            # attempt was written, so it is taken again on fresh rows
-            db.rollback()
-            if attempt == _QUEUE_ATTEMPTS - 1:
-                raise ApiError(
-                    409,
-                    "remeasure_concurrent_write",
-                    "other Learn writes kept moving this repository's trace through "
-                    f"{_QUEUE_ATTEMPTS} attempts — nothing was queued; retry",
-                ) from None
+        runs = []
+        for v in validated_runs:
+            run = new_run(v, actor=operator.id)
+            submit_refusals(db, settings, v, run)
+            runs.append(stage_queued(db, run))
+        return {
+            "cell": cell.cell.label,
+            "mode": cell.mode,
+            "apparatus": body.apparatus,
+            "run_ids": [run.id for run in runs],
+            "n_needed": cell.n_needed,
+            "est_cost_usd": round(cell.est_cost_usd, 4),
+            "cost_known": cell.cost_known,
+        }
+
+    payload = _learn_step(
+        db,
+        repo,
+        action="learn.remeasure.queued",  # a literal on purpose: see the constants above
+        actor=operator.id,
+        stage=stage,
+        exhausted=lambda: ApiError(
+            409,
+            "remeasure_concurrent_write",
+            "other Learn writes kept moving this repository's trace through "
+            f"{_QUEUE_ATTEMPTS} attempts — nothing was queued; retry",
+        ),
+    )
+    run_ids = list(payload["run_ids"])
     return RemeasureQueueOut(
         repo=repo,
         cell=cell.cell.label,

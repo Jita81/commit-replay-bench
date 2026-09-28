@@ -115,8 +115,9 @@ supplying anything (the review's play-01 finding: structure helps, values leak).
 escaped mutants are listed *when the oracle run recorded them* (`CommitOracleScore.outcomes`
 or the report's `escaped_mutants`); otherwise the item carries the count and says so. A held
 cell with no per-task score gets one cell-level item, and so does a held cell whose scored
-tasks are all strong — the controls hold it, so the item names the escaped control as the test
-work — so a flag is never dropped silently.
+tasks are all strong, chosen by the hold's reason: a controls hold names the escaped control as
+the test work, and an `oracle_weak` hold names the re-measurement that lets the scores reach the
+route — so a flag is never dropped silently.
 
 Item ids are `sha(cell, repo, task)` — a re-run produces the same backlog; `--since <apparatus>`
 keeps only cells and scores stamped at or after that version. `--out backlog.json` writes an

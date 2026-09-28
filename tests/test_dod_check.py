@@ -750,6 +750,12 @@ def test_the_register_must_exist_and_its_counts_reach_the_gap_analysis(
     out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
     assert "## Our own bugs — the prevention register" in out
     assert "**2 registered · 1 closed (gate 1) · 1 pending.**" in out
+    # the totals are a count the reader can re-derive: tagged with n, method and apparatus
+    assert (
+        "[measured — n = 2 rows of the `## Register` table in `docs/PREVENTION.md`, counted by "
+        "status and level; method: `scripts/dod_check.py` over that file at this commit; "
+        "apparatus n/a, a count of the register]" in out
+    )
     assert (
         "| P-002 | Patches thrown away | construction | G-701 | clean patches are not kept" in out
     )

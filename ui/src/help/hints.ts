@@ -1540,7 +1540,6 @@ export const HINTS = {
   'link.learn.queued_runs':
     'The runs page for this repository, where the runs just queued report their progress.',
 
-  // ── /ledger (screens/Ledger/LedgerPage.tsx)
   // the loop's hand-offs and position (G-172, G-348, G-352)
   'col.learn_strengthen.remeasure':
     'Opens a run for this item’s task once the tests are stronger: re-qualify it, re-score its oracle, or re-run the negative controls. Only an operator sees this column.',
@@ -1570,6 +1569,8 @@ export const HINTS = {
     'The Learn page’s strengthening report for this repository: the finding on this stage is closed by stronger tests, and that report names the work and re-runs the oracle and the controls.',
   'link.factory.learn':
     'The Learn page’s strengthening report for this repository: an item stopped for a weak test is closed by stronger tests, and that report names the work.',
+
+  // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':
     'Download the rows (filtered to the repository if one is chosen) as JSON lines, the form the chain verifies.',
   'button.ledger.export_csv':

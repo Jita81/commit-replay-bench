@@ -273,6 +273,35 @@ def test_the_events_seq_lock_holds_a_second_writer_until_the_first_commits(
     assert _count(backend, "events") == 2
 
 
+def test_the_events_lock_is_held_even_inside_a_transaction_already_open(
+    backend: Backend,
+) -> None:
+    """P-429's rule for the events lock: ``BEGIN IMMEDIATE`` cannot run inside an open
+    transaction, and a caller's deferred ``BEGIN`` holds no write lock, so the helper takes
+    it explicitly (a zero-row write) instead of swallowing the refused ``BEGIN IMMEDIATE``.
+    After it returns, a second connection must not be able to take SQLite's write lock.
+    PostgreSQL's advisory lock has no such case (the concurrency test above covers it)."""
+    import sqlite3
+
+    from crb.store.events import lock_event_writes
+
+    if backend.dialect != "sqlite":
+        pytest.skip("SQLite's BEGIN IMMEDIATE only; PostgreSQL takes an advisory lock")
+    store_db.init_db(backend.engine)
+    database = backend.engine.url.database
+    assert database
+    with backend.factory() as s:
+        s.execute(text("BEGIN"))  # a transaction, but no write lock
+        lock_event_writes(s)
+        other = sqlite3.connect(database, timeout=0)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                other.execute("BEGIN IMMEDIATE")
+        finally:
+            other.close()
+        s.rollback()
+
+
 # ---------------------------------------------------------------------------
 # append-only triggers — one test per table, UPDATE and DELETE each
 # ---------------------------------------------------------------------------
