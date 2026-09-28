@@ -3,7 +3,7 @@
 Navigation
 ----------
 What it is:   Two ratchets over tests/ for the class that turned the ``fresh-clone`` job red
-              before its first run (P-118): a test that holds as a developer and fails as
+              before its first run (P-250): a test that holds as a developer and fails as
               uid 0, which is how that job runs the suite (``product.evidence.205``).
 What it does: Fails when a test expects ``PermissionError`` (or ``OSError``) from a write,
               chmod, unlink or open inside ``pytest.raises`` without asking ``geteuid()``

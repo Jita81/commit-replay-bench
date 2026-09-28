@@ -1,6 +1,6 @@
-# ADR-0043 — A run keeps the spend cap it declares, and stops before the work that could pass it
+# ADR-0030 — A run keeps the spend cap it declares, and stops before the work that could pass it
 
-**Status:** Proposed (DL-114; north-star Wave 2, stream H — F5b)
+**Status:** Proposed (DL-102; north-star Wave 2, stream H — F5b)
 **Date:** 2026-09-27
 **Apparatus impact:** none. No belt, size, class, route or threshold changes meaning. An
 attempt the cap refuses is never started, so it writes no row; the rows a capped run writes
@@ -56,9 +56,9 @@ experiment. So a run cap must not be kept by quietly shrinking each attempt.
    the reason and a link to the run. The Factory page and the run form take a cap that is
    blank unless the operator types one. Each cap is a text field read as typed: text that
    is not an amount is refused, never read as no cap (a number input reports text it cannot
-   parse as blank, P-133). The Measure page always sends a cap, so when the model has no
+   parse as blank, P-265). The Measure page always sends a cap, so when the model has no
    known price it names the two ways forward it can reach: an admin prices the model, or
-   the full run form runs without a cap (P-134).
+   the full run form runs without a cap (P-266).
 
 ## Consequences
 

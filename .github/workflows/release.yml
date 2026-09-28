@@ -85,7 +85,7 @@ jobs:
         run: |
           uv venv -q .smoke --python 3.12
           # the wheel's dependencies from uv.lock by version and hash, then the wheel with
-          # nothing resolved: a fresh resolution would smoke-test versions no gate ran (P-130)
+          # nothing resolved: a fresh resolution would smoke-test versions no gate ran (P-262)
           uv export -q --locked --no-default-groups --no-emit-project -o smoke-requirements.txt
           uv pip install -q --require-hashes -r smoke-requirements.txt --python .smoke/bin/python
           uv pip install -q --no-deps dist/*.whl --python .smoke/bin/python

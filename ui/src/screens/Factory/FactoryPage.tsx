@@ -371,7 +371,7 @@ function statusLabel(t: FactoryTask): string {
  * J-FAC-2 — the repository's own measured cost per attempt, when it has one: the map's
  * economics fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0),
  * that count as n, and the apparatus. The same reading as Measure's; `null` when nothing
- * is measured, nothing is known or the server refused the pool (P-064).
+ * is measured, nothing is known or the server refused the pool (P-131).
  */
 export function estimateFromMap(map: CapabilityMap | undefined): MeasuredCost | null {
   return measuredCostPerAttempt(map?.economics)
@@ -667,9 +667,9 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const [ownBuilder, setOwnBuilder] = useState('')
   const [ownModel, setOwnModel] = useState('')
   // F5b — the run's own spend cap (blank = none): the worker stops the run before an item
-  // that could take its spend past it — a guard, not a guarantee (ADR-0043 §3)
+  // that could take its spend past it — a guard, not a guarantee (ADR-0030 §3)
   const [capText, setCapText] = useState('')
-  // read as typed (P-133): text the browser could not parse is refused, never "no cap"
+  // read as typed (P-265): text the browser could not parse is refused, never "no cap"
   const capRead = readAmount(capText, { min: 0, above: true })
   const cap = capRead.kind === 'ok' ? capRead.value : 0
   const capSet = capRead.kind === 'ok'

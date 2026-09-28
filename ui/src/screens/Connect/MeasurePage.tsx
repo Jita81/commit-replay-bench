@@ -37,7 +37,7 @@
  *               (ui/src/lib/builder.ts) for the builder the deployment can run,
  *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain,
  *               max_cost_usd}`, the cap's text read by `readAmount` (ui/src/lib/amount.ts,
- *               P-133); a 422 `spend_cap_unpriced` gets this page's own way forward; on
+ *               P-265); a 422 `spend_cap_unpriced` gets this page's own way forward; on
  *               success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -135,7 +135,7 @@ export function MeasurePage() {
 
   // the repository's own measured cost per attempt, when it has one: the map's economics
   // fold (F35) — its mean over the attempts with a KNOWN cost (a known $0 is $0), that
-  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-064)
+  // count as n, and the apparatus; never the cells' flat means filtered by > 0 (P-131)
   const measured = useMemo(() => measuredCostPerAttempt(map.data?.economics), [map.data])
   const measuredMean = measured?.mean ?? null
   const gold = repo.data?.task_counts.gold_clean ?? 0
@@ -148,12 +148,12 @@ export function MeasurePage() {
   // estimate, rounded up to the dollar, and follows it until the operator types another
   const [capDraft, setCapDraft] = useState<string | null>(null)
   const capText = capDraft ?? String(Math.max(1, Math.ceil(hi)))
-  // read as typed (P-133): text the browser could not parse is refused, never sent; the page
+  // read as typed (P-265): text the browser could not parse is refused, never sent; the page
   // always sends a cap, so blank is refused too
   const capRead = readAmount(capText, { min: 0, above: true })
   const cap = capRead.kind === 'ok' ? capRead.value : 0
   const capOk = capRead.kind === 'ok'
-  // a cap cannot be kept on a model with no known price (ADR-0043 §6): the API says so as
+  // a cap cannot be kept on a model with no known price (ADR-0030 §6): the API says so as
   // 422 spend_cap_unpriced, whose own way forward ("run without a cap") this page cannot
   // take, so the page names the two it can reach
   const unpriced = create.error instanceof ApiError && create.error.code === 'spend_cap_unpriced' ? unpricedModels(create.error.detail) : null

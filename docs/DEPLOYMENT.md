@@ -379,7 +379,7 @@ every gate on a fresh clone from `uv.lock` as root with no docker daemon (G-664)
 and is not on the list: an administrator adds its check name with the call below. Until then
 the saved reading (`tests/fixtures/branch_protection_main.json`) names it under
 `awaiting_protection` with that step, and the daily comparison against the live setting fails
-(DL-113).
+(DL-101).
 
 `scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
 that no job reports (every pull request would wait on it for ever), a job that no required

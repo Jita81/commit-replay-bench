@@ -3,7 +3,7 @@
 ``docker run --rm`` removes a container in the daemon AFTER the kill or the exit returns,
 and a session's teardown removes its sidecar and network the same way, so a test that
 asserts ``docker ps -a`` is empty the instant a kill, an ``rm`` or a cancel returns races
-the daemon and fails CI for no fault in the code (docs/PREVENTION.md P-052: PRs #49 and
+the daemon and fails CI for no fault in the code (docs/PREVENTION.md P-119: PRs #49 and
 #53). #59 gave the two kill tests of tests/test_sandbox_docker.py a bounded wait and #60
 fixed that wait's last query; this module is that wait, once, for every such site, and
 ``tests/test_docker_wait.py`` refuses a docker state read anywhere else in the tests.
@@ -26,7 +26,7 @@ Works with:   tests/test_sandbox_docker.py (the kill and leak probes that wait t
               tests/test_builders_container_docker.py (the session teardown's container and
               network checks), tests/test_provision_fetch.py (the fetch container after a
               kill), tests/test_docker_wait.py (its tests and the ratchet), docs/PREVENTION.md
-              (P-052, the class it closes)
+              (P-119, the class it closes)
 Tested by:    tests/test_docker_wait.py
 Touch when:   a test needs to know whether docker still lists a container or a network:
               call :func:`gone` or :func:`network_gone`, never ``docker ps`` directly.

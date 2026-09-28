@@ -34,7 +34,7 @@ What it does: Pins that the executor is hardened, that ``qualify`` and ``grade``
               the host worktree is byte-identical after a sandboxed run, and that a cancel /
               the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
               container (``kill_confirmed`` True, nothing reported, gone from ``docker ps``
-              within tests/docker_wait.py's bounded wait, P-052).
+              within tests/docker_wait.py's bounded wait, P-119).
               Never falls back to in-process execution — that is ``SandboxUnavailable``'s job.
 How:          ``crb-test-py:local`` built once per session from an inline Dockerfile
               (``python:3.12-slim`` + pytest), or the present image ``CRB_TEST_SANDBOX_IMAGE``
@@ -376,7 +376,7 @@ def test_cancel_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
     # --rm removal runs in the daemon after the kill returns: a bounded wait, never an
-    # instant read (docs/PREVENTION.md P-052)
+    # instant read (docs/PREVENTION.md P-119)
     assert docker_wait.gone(r.container), f"container {r.container} still listed: leaked"
 
 
@@ -394,7 +394,7 @@ def test_wall_clock_kills_the_container_and_the_daemon_confirms_it(trial):
     assert r.kill_confirmed is True and r.container.startswith("crb-")
     assert reports == [] and ex.unconfirmed_kills == []
     # --rm removal runs in the daemon after the kill returns: a bounded wait, never an
-    # instant read (docs/PREVENTION.md P-052)
+    # instant read (docs/PREVENTION.md P-119)
     assert docker_wait.gone(r.container), f"container {r.container} still listed: leaked"
 
 

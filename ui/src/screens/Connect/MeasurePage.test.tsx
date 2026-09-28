@@ -18,7 +18,7 @@
  *               field, row and the button carry a hint, with the attempts radio opening on hover;
  *               and that the estimate reads the map's economics fold, so a known $0 is quoted as
  *               $0.00 over the attempts with a known cost, never dropped for the planning range
- *               (P-064).
+ *               (P-131).
  * How:          `mockApi` + `renderApp` with `path` for `useParams`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -85,7 +85,7 @@ describe('MeasurePage', () => {
     expect(box).toHaveTextContent('the operator’s own CLI login (development and evaluation only)')
   })
 
-  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-064)', async () => {
+  it('quotes a known $0 as $0.00 over the attempts with a known cost, never the planning range (P-131)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': REPO,
@@ -177,7 +177,7 @@ describe('MeasurePage', () => {
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(9.5)
   })
 
-  it('a spend cap the browser could not read as a number is refused, never sent (P-133)', async () => {
+  it('a spend cap the browser could not read as a number is refused, never sent (P-265)', async () => {
     const { calls } = mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/cobra': REPO,

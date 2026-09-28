@@ -3,7 +3,7 @@
  *
  * Navigation
  * ----------
- * What it is:   The tests of ui/src/lib/amount.ts and a source-level ratchet (P-133) over
+ * What it is:   The tests of ui/src/lib/amount.ts and a source-level ratchet (P-265) over
  *               `ui/src`: no screen or component renders an `<input type="number">`.
  * What it does: Pins that `readAmount` takes plain digits only (a decimal where the field
  *               allows one), refuses an exponent, a sign, a unit or a value below the field's
@@ -15,11 +15,11 @@
  *               is on screen; the negative control shows the ratchet fails on the defect.
  * How:          Plain calls; the sources as text through Vite's `import.meta.glob(…, '?raw')`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0043-a-run-keeps-its-spend-cap.md
+ * ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
  * Works with:   ui/src/lib/amount.ts (under test), ui/src/screens/Runs/RunNewDialog.tsx (the
  *               run form's caps, limit and timeout), ui/src/screens/Factory/FactoryPage.tsx
  *               (the factory's spend cap), ui/src/screens/Connect/MeasurePage.tsx (the
- *               measurement's spend cap), docs/PREVENTION.md (row P-133)
+ *               measurement's spend cap), docs/PREVENTION.md (row P-265)
  * Tested by:    itself (the negative control below)
  * Touch when:   a field takes a number: read it with `readAmount`, never `type="number"`.
  */
@@ -60,7 +60,7 @@ describe('readAmount', () => {
   })
 })
 
-describe('no number input (P-133)', () => {
+describe('no number input (P-265)', () => {
   it('finds the sources', () => {
     expect(Object.keys(SOURCES).length).toBeGreaterThan(50)
   })

@@ -11,11 +11,11 @@
  *               value below the floor. Fields are `type="text"` with `inputMode`, never
  *               `type="number"`: a number input whose text the browser cannot parse (`1e`,
  *               `1e400`) reports '' while the text stays on screen, so a typed spend cap read
- *               as "no cap" (the verifiers of `feat/ns2-h`, docs/PREVENTION.md P-133). This
+ *               as "no cap" (the verifiers of `feat/ns2-h`, docs/PREVENTION.md P-265). This
  *               is also the GOV.UK Design System's advice for numbers.
  * How:          One regular expression per rule, then `Number` on text it has accepted.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0043-a-run-keeps-its-spend-cap.md
+ * ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
  * Works with:   ui/src/screens/Runs/RunNewDialog.tsx (the run form's caps, limit and
  *               timeout), ui/src/screens/Factory/FactoryPage.tsx (the factory's spend cap),
  *               ui/src/screens/Connect/MeasurePage.tsx (the measurement's spend cap)

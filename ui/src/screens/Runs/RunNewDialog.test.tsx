@@ -257,7 +257,7 @@ describe('RunNewDialog', () => {
     expect(screen.getByRole('button', { name: 'Queue run' })).toBeEnabled()
   })
 
-  it('a number the browser could not read is refused, never read as blank: the cap, a budget cap, the limit (P-133)', async () => {
+  it('a number the browser could not read is refused, never read as blank: the cap, a budget cap, the limit (P-265)', async () => {
     const user = userEvent.setup()
     const { calls } = setup()
     await user.type(screen.getByPlaceholderText('editblock · openai_agent · claude_code'), 'claude_code')

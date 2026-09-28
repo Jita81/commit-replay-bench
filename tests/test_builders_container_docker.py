@@ -321,7 +321,7 @@ def test_scripted_builder_in_container_grades_clean(
     # the sealed checkout and the containers are gone
     assert not list((sandbox_root / "scratch").glob("*-sealed"))
     for prefix in ("crb-build-", "crb-proxy-"):
-        # --rm removal runs in the daemon after the session exits: a bounded wait (P-052)
+        # --rm removal runs in the daemon after the session exits: a bounded wait (P-119)
         assert docker_wait.gone(f"{prefix}{task.short_id}"), f"{prefix} container leaked"
 
 

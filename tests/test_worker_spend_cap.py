@@ -381,7 +381,7 @@ def test_a_rung_is_priced_when_its_model_has_a_known_price_or_it_is_the_fixture(
 
 
 #: Every module that opens a model chat (``make_chat``), and how that call's cost reaches a
-#: run's spend cap. A call site added without a way in is spend the cap cannot see (P-120).
+#: run's spend cap. A call site added without a way in is spend the cap cannot see (P-252).
 METERED = {
     "src/crb/builders/editblock.py": "a build attempt: BuildOutcome.cost_usd on its row",
     "src/crb/builders/openai_agent.py": "a build attempt: BuildOutcome.cost_usd on its row",

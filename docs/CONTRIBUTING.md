@@ -187,7 +187,7 @@ workstream where possible. **Branch protection on `main` requires the CI jobs gr
 the branch up to date before a merge** (every job in `.github/workflows/ci.yml`: lint,
 types, layers, code-map, dod, claims, both pytest matrices, PostgreSQL, security, sbom,
 container, sandbox-images, walkthrough, ui-unit and ui-smoke — all but `fresh-clone`, which
-waits for an administrator to add it, DL-113;
+waits for an administrator to add it, DL-101;
 `scripts/check_branch_protection.py` compares the setting with the workflow — commands you can run
 locally: the five in [The gates](#the-gates), exactly as written there, and
 `python scripts/code_map.py --check`, `python scripts/dod_check.py --check`,

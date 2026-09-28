@@ -21,7 +21,7 @@
  * How:          Local state per field; `parseBuilderConfig` validates the JSON with the
  *               server's rules; every numeric field is text read by `readAmount`
  *               (ui/src/lib/amount.ts), so text the browser could not parse is an error,
- *               never a blank (P-133); `valid` gates the submit; `rungToEntry` and
+ *               never a blank (P-265); `valid` gates the submit; `rungToEntry` and
  *               `budgetFromDraft` emit only what was set; on 201 the caller navigates to the
  *               run.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -249,7 +249,7 @@ export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'r
     .map((s) => s.trim())
     .filter(Boolean)
   const ladderEmpty = needsBuilder && labels.length === 0 && rungs.length === 0
-  // P-133: every numeric field is text read by `readAmount` — what is on screen is what is
+  // P-265: every numeric field is text read by `readAmount` — what is on screen is what is
   // checked, so a cap the browser could not parse is refused, never sent as no cap
   const cap = readAmount(spendCap, SPEND_CAP_RULE)
   const spendCapOk = cap.kind !== 'bad'

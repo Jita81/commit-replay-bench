@@ -16,7 +16,7 @@ setting that is not strict (a branch may merge while behind ``main``); and a job
 characters or more (GitHub cuts a check name at 100, so no run can satisfy it). A saved
 reading may list a job added before the administrator could require it, under
 ``awaiting_protection`` with the step that remains and the open gap in docs/dod that names
-the job; the live setting never does (DL-113, P-129).
+the job; the live setting never does (DL-101, P-261).
 
 Navigation
 ----------
@@ -184,9 +184,9 @@ def compare_reading(
     note. The entry is an error once the setting requires the job (read it again and drop the
     entry), when no job reports it, when it names no step, and unless its step names a gap
     that is open in docs/dod (``gaps``: :func:`open_gaps`, read only when an entry needs it)
-    and whose text names the job — so a job cannot be parked there by review alone (P-129).
+    and whose text names the job — so a job cannot be parked there by review alone (P-261).
     The live setting never carries the key, so the scheduled comparison stays red until the
-    administrator acts (DL-113)."""
+    administrator acts (DL-101)."""
     required = [str(c) for c in reading.get("contexts", [])]
     awaiting = {str(k): str(v) for k, v in dict(reading.get(AWAITING_KEY) or {}).items()}
     errors = compare(

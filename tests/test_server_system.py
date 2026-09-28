@@ -216,7 +216,7 @@ class TestHealth:
         assert "crb_false_q1_total 1.0" in m
         assert "crb_ledger_rows 3.0" in m
         # the API serves no worker-only series: CrbNoWorker reads crb_queue_depth's absence
-        # (docs/DEPLOYMENT.md §9.2, P-128)
+        # (docs/DEPLOYMENT.md §9.2, P-260)
         assert "crb_queue_depth" not in m and "crb_sandbox_unavailable" not in m
 
     def test_worker_probe_flags_stale_heartbeat(

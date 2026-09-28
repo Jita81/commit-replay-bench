@@ -58,7 +58,7 @@ page may state in the present tense only once the criterion that builds them is 
 ``docs/dod/``: a matching sentence on a ``PROMISE_PAGES`` page (the allowlist and
 EVIDENCE-AND-CLAIMS) is refused until then, and a promise whose criterion no longer exists is
 refused too. The README once said the product names which ISO/IEC 25010 characteristics its
-checks evidence while the criterion that builds that table was unmet (P-115). It holds only
+checks evidence while the criterion that builds that table was unmet (P-227). It holds only
 the promises registered here; an unregistered capability sentence still needs a reader
 (G-935).
 
@@ -76,7 +76,7 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               in a review's Actions table that has no stated record in the decision log,
               and every record whose review no longer lists the action or is no longer on
               disk; reports a registered promise stated in the present tense before its
-              criterion is met (P-115); --check exits non-zero.
+              criterion is met (P-227); --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
@@ -124,7 +124,7 @@ ALLOWLIST: tuple[str, ...] = (
     "docs/reviews/2026-09-25-value-baseline.md",
 )
 
-#: The pages the promise rule reads: the allowlist and the claims policy itself (P-115).
+#: The pages the promise rule reads: the allowlist and the claims policy itself (P-227).
 PROMISE_PAGES: tuple[str, ...] = (*ALLOWLIST, "docs/EVIDENCE-AND-CLAIMS.md")
 #: Where the definition of done's criteria live — a promise's criterion is read from there.
 DOD_DIR = "docs/dod"
@@ -139,7 +139,7 @@ class Promise:
     says: str
 
 
-#: Registered promises (P-115). A sentence on a ``PROMISE_PAGES`` page that matches
+#: Registered promises (P-227). A sentence on a ``PROMISE_PAGES`` page that matches
 #: ``pattern`` is refused while ``criterion`` is not ``met`` in docs/dod/. A future tense
 #: ("will name") is not the present one, so the page may say what is coming and cite its gap.
 _NAMING = r"(?<!will )\b(?:names?|maps?|lists?|shows?)\s+(?:which|each|the)\b"
@@ -537,7 +537,7 @@ def criterion_states(root: Path) -> dict[str, str]:
 
 def check_promises(root: Path, pages: tuple[str, ...]) -> list[Finding]:
     """A registered capability stated in the present tense before its criterion is met
-    (P-115): the README said the product names which ISO/IEC 25010 characteristics its checks
+    (P-227): the README said the product names which ISO/IEC 25010 characteristics its checks
     evidence while the criterion that builds that table was unmet."""
     findings: list[Finding] = []
     if not (root / DOD_DIR).is_dir():

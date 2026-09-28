@@ -17,7 +17,7 @@ What it does: Pins ``record_grade`` (outcome mapping; a belt ``False`` is a fail
               check-in, ``start_worker_exposition`` honouring enabled/port, the ``_Noop``
               fallback, that every metric in the module is in docs/DEPLOYMENT.md's table
               with the same labels (the documentation ratchet), and that the API's exposition
-              serves none of the table's worker-only series (``WORKER_SERIES``, P-128).
+              serves none of the table's worker-only series (``WORKER_SERIES``, P-260).
 How:          ``metrics.fresh_registry()`` per test; the worker ``Harness`` from
               tests/test_worker.py for the end-to-end counters; ``GitHubApp.installation_token``
               monkeypatched to a scripted token sequence.
@@ -332,7 +332,7 @@ def test_the_api_serves_no_series_the_table_calls_worker_only() -> None:
     """The table's ``process`` column is the contract an alert is written against: a series
     only the worker records is served only by the worker, so a rule that reads its absence
     (CrbNoWorker) can fire. The module's :data:`metrics.WORKER_SERIES` is the table's
-    worker-only rows, and the API's exposition omits every one (P-128)."""
+    worker-only rows, and the API's exposition omits every one (P-260)."""
     text = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
     worker_only = {
         m.group(1)

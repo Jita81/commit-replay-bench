@@ -11,7 +11,7 @@ What it does: Pins the list shape and order, filters and pagination, the queue l
               adapter; a ``claude_code`` auth with no credential refused at submit (422
               ``builder_credential_missing``, presence only, nothing queued — docs/PREVENTION.md
               P-003), and every server function that enqueues a run passing ``submit_refusals``
-              (P-093, an AST ratchet); the budget ladder (forwarded only as set, object rungs stored
+              (P-160, an AST ratchet); the budget ladder (forwarded only as set, object rungs stored
               as sent, mixed ladders, bounds and rung shape 422, repeated rungs refused unless the
               budget differs, ``labels.budget_tier`` on task rows); cancel RBAC / queue call /
               terminal 409 / 404; the task table and error rows; the paginated, redacted event log;
@@ -708,7 +708,7 @@ class TestCredentialPresence:
         assert all(why.strip() for why in CREDENTIAL_EXEMPT.values())
 
     def test_every_function_that_enqueues_a_run_passes_the_submit_gate(self) -> None:
-        """P-093, the route half of P-003's class: a second route that queues runs (Learn's
+        """P-160, the route half of P-003's class: a second route that queues runs (Learn's
         re-measurement queue) enqueued them with no credential check, so a cell whose builder
         had no key was queued to fail at $0. Every function in the server that calls
         ``.enqueue(`` must call ``submit_refusals`` — the one gate ``POST /runs`` applies — or

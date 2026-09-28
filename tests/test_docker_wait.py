@@ -12,7 +12,7 @@ What it does: Pins #60's semantics — a failed query fails the check, every que
               shell string, held in a variable or not — and any ``docker inspect`` of a
               container after a ``kill``, ``rm`` or ``stop`` in the same function, either
               one reached directly or through a same-module helper, proving on planted
-              source that it catches each shape (docs/PREVENTION.md P-052, P-123, P-132).
+              source that it catches each shape (docs/PREVENTION.md P-119, P-255, P-264).
 How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an ``ast`` walk
               for the ratchet: a call whose argv is ``[<docker>, "ps", …]``,
               ``[<docker>, "network", "ls", …]`` or ``_docker("ps", …)``, a name read as the
@@ -21,7 +21,7 @@ How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   tests/docker_wait.py (under test), tests/test_sandbox_docker.py (the real leak
-              probe against a daemon), docs/PREVENTION.md (P-052, the row this ratchet
+              probe against a daemon), docs/PREVENTION.md (P-119, the row this ratchet
               closes)
 Tested by:    tests/test_docker_wait.py
 Touch when:   a test needs another docker listing: add it to tests/docker_wait.py and teach
@@ -204,7 +204,7 @@ _Fn = ast.FunctionDef | ast.AsyncFunctionDef
 
 def _bound(nodes: list[ast.AST]) -> _Bindings:
     """Names bound to a list, tuple or string literal among ``nodes``, with the line of each
-    binding — so ``argv = ["docker", "ps"]; run(argv)`` reads as the literal (P-132)."""
+    binding — so ``argv = ["docker", "ps"]; run(argv)`` reads as the literal (P-264)."""
     out: _Bindings = {}
     for n in nodes:
         if isinstance(n, ast.Assign):
@@ -303,7 +303,7 @@ def test_no_test_reads_a_docker_listing_except_through_the_bounded_wait() -> Non
         found += docker_listing_reads(path.read_text(encoding="utf-8"), rel)
     assert found == [], (
         "an instant docker listing races the daemon's own --rm removal (docs/PREVENTION.md "
-        f"P-052); use tests/docker_wait.py's gone() or network_gone(): {found}"
+        f"P-119); use tests/docker_wait.py's gone() or network_gone(): {found}"
     )
 
 
@@ -351,7 +351,7 @@ def test_i(name):
 def test_ratchet_sees_an_argv_held_in_a_variable() -> None:
     """``argv = ["docker", "ps", …]; subprocess.run(argv)`` is the same listing: a name
     bound to a list or tuple literal earlier in the function (or the module) is read as
-    that literal (P-132)."""
+    that literal (P-264)."""
     planted = """
 import subprocess
 ARGV = ("docker", "network", "ls", "-q")
@@ -380,7 +380,7 @@ def test_d():
 def test_ratchet_sees_an_inspect_after_a_kill_in_a_helper() -> None:
     """A ``docker inspect`` (or a kill) moved into a same-module helper is the same race:
     a call to a function whose body inspects, after a call that changes a container's state
-    — directly or through another helper — is flagged at the call (P-132)."""
+    — directly or through another helper — is flagged at the call (P-264)."""
     planted = """
 import subprocess
 def _state(name):

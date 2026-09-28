@@ -115,7 +115,7 @@ What it does: Polls the job queue, claims one run, dispatches by kind (setup, pr
               records the apparatus, and marks the run succeeded / failed / cancelled
               honestly (all-attempts-errored is a failure; a provider outage streak stops
               the run; so does a spend cap, before an attempt or item that could pass it —
-              src/crb/server/spend_cap.py, ADR-0043; a harness error on one mined candidate
+              src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
               skips it). Fetches and
               fast-forwards the clone's default branch before a factory run (refusing the
               run when it cannot) and syncs delivered pull requests' outcomes first. Checks in to the

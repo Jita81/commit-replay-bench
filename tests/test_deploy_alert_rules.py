@@ -16,7 +16,7 @@ What it does: Renders the chart with and without ``prometheusRule.enabled`` and 
               operator's labels reach the resource; that a worker with its metrics port
               off is refused, since three of the four rules read the worker's series; and
               that the no-worker rule reads a series the API's exposition never serves, so it
-              can fire while the API is scraped (P-128).
+              can fire while the API is scraped (P-260).
 How:          ``helm template`` through tests/test_deploy_secrets_store.py's strict loader;
               the guide's table read with a regular expression; the API's exposition from
               ``metrics.render_api``.
@@ -117,7 +117,7 @@ def test_the_no_worker_rule_reads_a_series_the_api_never_serves() -> None:
     """``absent_over_time`` fires only while NO scraped target serves the series. The API's
     ``/metrics`` once served ``crb_queue_depth 0.0`` (an unlabelled gauge in the shared
     registry), and DEPLOYMENT §9.2 has both targets scraped, so with no worker at all the
-    critical alert stayed silent — G-602's class, an alert that can never fire (P-128). The
+    critical alert stayed silent — G-602's class, an alert that can never fire (P-260). The
     API's exposition is ``metrics.render_api()`` (tests/test_server_system.py pins that the
     route serves it); the worker's is the whole registry, which must carry the series."""
     rule = _rules(_render(*ENABLED))["CrbNoWorker"]

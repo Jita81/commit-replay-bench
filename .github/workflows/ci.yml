@@ -14,7 +14,7 @@
 #   test      pytest with coverage >= 70 on Python 3.12 and 3.13 (ubuntu)
 #   fresh-clone  every gate above plus the UI's, on a clone made by root, installed from
 #             uv.lock, with the runner's docker daemon stopped (product.evidence.205, G-664).
-#             Not on main's required-checks list until an administrator adds it (DL-113)
+#             Not on main's required-checks list until an administrator adds it (DL-101)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
@@ -161,7 +161,7 @@ jobs:
         with:
           persist-credentials: false
           # the artefacts' history vouches for each retired gap id, and the base branch's
-          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-060)
+          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-127)
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:

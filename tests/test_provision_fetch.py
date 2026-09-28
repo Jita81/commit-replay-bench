@@ -247,7 +247,7 @@ def test_a_denied_host_is_named_in_the_refusal(scratch: Path) -> None:
         run_fetch(plan, stage, config=cfg)
     assert ei.value.code == "PROVISION_FETCH_FAILED"
     assert "the proxy denied denied.invalid:443" in ei.value.message
-    # the sidecar is gone (a bounded wait: its --rm removal finishes in the daemon, P-052)
+    # the sidecar is gone (a bounded wait: its --rm removal finishes in the daemon, P-119)
     assert docker_wait.gone("crb-fproxy-")
 
 

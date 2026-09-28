@@ -278,7 +278,7 @@ describe('estimateFromMap — the repository’s measured mean per attempt (J-FA
     expect(estimateFromMap({ ...MAP, cells: [], economics: econ(0, 0, null, NONE_KNOWN) } as never)).toBeNull()
   })
 
-  it('a known $0 is a measured $0 over the attempts with a known cost, never dropped (P-064)', () => {
+  it('a known $0 is a measured $0 over the attempts with a known cost, never dropped (P-131)', () => {
     // 40 attempts, 36 with a known cost, every known cost $0: the flat cell mean reads 0
     const zero = { ...MAP, cells: [{ ...MAP.cells[0]!, cost_usd_mean: 0 }], economics: econ(40, 36, 0) }
     expect(estimateFromMap(zero as never)).toEqual({ mean: 0, n: 36, apparatus: '2.2' })
@@ -415,7 +415,7 @@ describe('FactoryPage — the shipped contract', () => {
     await userEvent.clear(field)
     await userEvent.type(field, '2.5')
     expect(box).toHaveTextContent('$2.50 for the whole run: before each item the run counts what it has spent plus what the item could cost at every rung and every rework, and stops if the sum would pass $2.50')
-    // a guard, not a guarantee (ADR-0043 §3): the page says so where it names the cap
+    // a guard, not a guarantee (ADR-0030 §3): the page says so where it names the cap
     expect(box).toHaveTextContent('so a run can pass its cap by up to one item; it then stops and says so')
     expect(field.closest('[data-hint]')).toHaveAttribute('data-hint', 'field.factory.spend_cap')
     await userEvent.click(screen.getByRole('button', { name: 'Run the factory — estimated $0.27 to $0.41, stops at $2.50' }))
@@ -423,7 +423,7 @@ describe('FactoryPage — the shipped contract', () => {
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body)).max_cost_usd).toBe(2.5)
   })
 
-  it('a spend cap the browser could not read as a number is refused, never sent as no cap (P-133)', async () => {
+  it('a spend cap the browser could not read as a number is refused, never sent as no cap (P-265)', async () => {
     const { calls } = mockApi(base({ 'POST /runs': () => json({ id: 'e'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued' }, 201) }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     const box = await screen.findByTestId('before-you-start')
