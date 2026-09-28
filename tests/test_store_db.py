@@ -23,8 +23,8 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               trace's ``seq`` until it commits (EI-1) and the events write lock holds a second
               writer until the first commits (P-196), and that the ``users`` lock is never
               taken after the ``events`` lock, so an organisation sign-in and an admin act at
-              once never deadlock (P-227), and that the decisions clock joins a concurrent first stamp
-              in both dialects (P-357).
+              once never deadlock (P-227), and that the decisions clock joins a concurrent
+              first stamp in both dialects (P-357).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
