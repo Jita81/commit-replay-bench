@@ -21,7 +21,7 @@ How:          ``JsonlLedger`` reads; ``crb.core.legacy`` importers; ``group_by_c
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0007-abstract-cell-export-only.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``JsonlLedger``, ``cell_stats``, ``false_q1_total``),
               src/crb/core/legacy.py (the census importers and their provenance stamp),
               src/crb/server/routes/ledger.py (the HTTP twin over the database),
@@ -360,7 +360,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 def _verify_store(args: argparse.Namespace) -> int:
     """The database twin of ``verify`` (the same walk ``GET /ledger/verify`` serves): the
-    ``grades`` chain and false-Q1 over its rows, the ``events`` chain (ADR-0041), and the
+    ``grades`` chain and false-Q1 over its rows, the ``events`` chain (ADR-0029), and the
     head ``row_hash`` of each — the values docs/DEPLOYMENT.md §8 records outside the store.
     Exit 1 when either chain is broken or false-Q1 is not 0."""
     from crb.store.db import database_url, make_engine, make_session_factory  # noqa: PLC0415

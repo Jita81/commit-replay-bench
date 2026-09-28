@@ -564,7 +564,7 @@ def create_app(
     app.state.engine = None
     app.state.started_at = 0.0
     app.state.login_limiter = LoginRateLimiter()
-    # the audit trail's walk for /ledger/verify: new events only between full walks (P-126)
+    # the audit trail's walk for /ledger/verify: new events only between full walks (P-249)
     app.state.events_verifier = EventChainVerifier()
     # An injected client (tests) wins; else a real one only when OIDC is configured.
     if oidc_client is not None:

@@ -400,7 +400,7 @@ redaction as evidence packs (message, arguments, extras and tracebacks). `/healt
 the readiness probes the `GET /health` row of [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface)
 lists, one per dependency (the `worker` probe reads the `workers` table every worker upserts
 each `heartbeat_s`, idle or not), and `/health/live` one (`db`); the list is named here only
-by reference, because a copy of it drifted (docs/PREVENTION.md P-059).
+by reference, because a copy of it drifted (docs/PREVENTION.md P-126).
 
 ### 7.3 Data model (store, P4)
 
@@ -410,7 +410,7 @@ ADR-0002) is the ledger's: `grades`, `signoffs`, `reviews` and the factory evide
 it; `events` — the audit trail, where every system event (`repo.created`,
 `run.cancel_requested`, `user.*`, `signoff.*`, `posture.unsealed_override`) is one envelope
 row — carries its own chain over the whole table in id order, set in each writer's flush
-(ADR-0041), so `/ledger/verify` and `crb ledger verify --store` can prove it was not altered.
+(ADR-0029), so `/ledger/verify` and `crb ledger verify --store` can prove it was not altered.
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -419,7 +419,7 @@ row — carries its own chain over the whole table in id order, set in each writ
 | `tasks` | `task_id` (sha), `repo`, `subject`, `authored`, `pool`, `size`, `capability_class` (resolved), `language`, `test_files`, `src_files`, `target_tests`, `belt_scope`, `baseline_failing`, `red_checked`, `gold_clean`, `gold_note`; in `spec_json` also `path_class`, `intent` (label or null), `class_source` | `TaskSpec.to_dict()` shape (§7.5). A `label` run rewrites `spec_json` + the `capability_class` column via the same upsert as `mine`. |
 | `attempts` | `id`, `run_id`, `task_id`, `builder`, `mode`, `turns`, `tokens_in/out`, `cost_usd`, `latency_s`, `transcript_ref` (opt-in) | `BuilderRef` shape. |
 | `grades` **(append-only)** | `row_id`, `repo`, `task_id`, `clean`, four belts, `disqualified`, `dq_reason`, `error`, `evidence_pack_hash`, `apparatus_version`, `belt_set ∈ v5\|v4\|v3-legacy`, `provenance`, cell fields, cost/latency, `actor`, `created`, `prev_hash`, `row_hash` | `GradeRow` — same invariants as the JSONL ledger, checked by a DB constraint **and** in Python before write. |
-| `events` **(append-only)** | `StepEvent` envelope columns, `prev_hash`, `row_hash` | SSE reads from here. Trigger-protected and hash-chained in id order (ADR-0041, revision 0031); a unique `prev_hash` means the chain cannot fork. |
+| `events` **(append-only)** | `StepEvent` envelope columns, `prev_hash`, `row_hash` | SSE reads from here. Trigger-protected and hash-chained in id order (ADR-0029, revision 0013); a unique `prev_hash` means the chain cannot fork. |
 | `oracle_scores` | `task_id`, `mutants`, `killed`, `invalid`, `equivalent`, `strength`, `budget`, `apparatus_version` | Hygiene-adjusted mutation strength (P2). |
 | `signoffs` **(append-only)** | `cell`, `route`, `actor`, `reason`, `revoked_by` | 409 on any false-Q1 in the cell; revocation is a new row. |
 | `factory_backlog` / `factory_tasks` / `factory_evidence` | frozen backlog hash; per-item DoR gaps, RED proof, PR ref, review verdict | P6. |

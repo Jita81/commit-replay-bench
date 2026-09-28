@@ -237,7 +237,7 @@ def test_seq_collision_is_reallocated_under_the_lock_never_dropped(
                 "'t', 3, 'ts', 'system', 'dup', 'ok', '', '', '', '', '', '', '', '', '', '{}', "
                 ":prev, :row)"
             ),
-            # well-formed chain columns (revision 0031's CHECK), so only the seq can refuse it
+            # well-formed chain columns (revision 0013's CHECK), so only the seq can refuse it
             {"prev": "c" * 64, "row": "d" * 64},
         )
         s.commit()

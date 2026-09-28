@@ -72,9 +72,8 @@ try:
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
 
-#: The packaged head. Stream I of the north-star Wave 2 holds the temporary id 0031 (the
-#: events chain); the integration renumbers it to follow the head it lands on.
-HEAD = "0031"
+#: The packaged head: 0013, the events chain (north-star Wave 2, stream I).
+HEAD = "0013"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -528,7 +527,7 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     # 0008 offline adds the reaper count to that table after it exists
     count = sql.find("ADD COLUMN unconfirmed_containers INTEGER DEFAULT '0' NOT NULL")
     assert count > workers, sql[-2000:]
-    # 0031 offline refuses an unchained row too (P-123): the CHECK after the back-fill
+    # 0013 offline refuses an unchained row too (P-246): the CHECK after the back-fill
     check = sql.find("ck_events_chain_hashes")
     assert check > sql.find("ADD COLUMN row_hash"), sql[-2000:]
     assert migrate.current(backend.url) is None  # offline mode touched nothing
@@ -1001,7 +1000,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
 
 
 def _insert_event(conn: Any, *, n: int, payload: str = '{"k": [1, 2]}') -> None:
-    """One stored ``events`` row as a pre-0031 schema holds it (no chain columns)."""
+    """One stored ``events`` row as a pre-0013 schema holds it (no chain columns)."""
     conn.execute(
         text(
             "INSERT INTO events (event_id, trace_id, seq, timestamp, stage, action, status, "
@@ -1029,8 +1028,8 @@ def _chain_of(engine: Engine) -> list[tuple[int, str, str]]:
         ]
 
 
-def test_0031_chains_the_existing_events_deterministically_and_verifies(backend: Backend) -> None:
-    """Revision 0031 (ADR-0041, F51) adds the chain columns and chains every event that was
+def test_0013_chains_the_existing_events_deterministically_and_verifies(backend: Backend) -> None:
+    """Revision 0013 (ADR-0029, F51) adds the chain columns and chains every event that was
     already there, from genesis, in id order — the same rows give the same hashes on every
     run — so the runtime verifier reads the migrated audit trail as intact, and the next
     event written chains onto it. The triggers are back afterwards."""
@@ -1074,9 +1073,9 @@ def test_0031_chains_the_existing_events_deterministically_and_verifies(backend:
     assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
 
 
-def test_0031_adopts_a_create_all_schema_from_the_release_before(backend: Backend) -> None:
-    """A pre-0031 ``create_all`` database (events without the chain) is at 0012 by its
-    markers; 0031 adds the columns, chains the rows it holds and leaves no drift."""
+def test_0013_adopts_a_create_all_schema_from_the_release_before(backend: Backend) -> None:
+    """A pre-0013 ``create_all`` database (events without the chain) is at 0012 by its
+    markers; 0013 adds the columns, chains the rows it holds and leaves no drift."""
     from crb.store.events import verify_events
 
     fresh = _reset(backend)
@@ -1092,7 +1091,7 @@ def test_0031_adopts_a_create_all_schema_from_the_release_before(backend: Backen
     assert verify_events(make_session_factory(fresh)).rows == 1
 
 
-def test_0031_frozen_rule_is_the_runtime_rule() -> None:
+def test_0013_frozen_rule_is_the_runtime_rule() -> None:
     """The revision carries its own copy of the chain rule (a released revision imports
     nothing of the runtime); a copy that drifted would chain the migrated rows under a rule
     the verifier does not read."""
@@ -1100,7 +1099,7 @@ def test_0031_frozen_rule_is_the_runtime_rule() -> None:
 
     from crb.core.event_chain import GENESIS_HASH, event_row_hash
 
-    m = importlib.import_module("crb.store.migrations.versions.v0031_events_hash_chain")
+    m = importlib.import_module("crb.store.migrations.versions.v0013_events_hash_chain")
     row = {
         "event_id": "e" * 32,
         "trace_id": "t" * 32,
@@ -1127,10 +1126,10 @@ def test_0031_frozen_rule_is_the_runtime_rule() -> None:
         assert m._row_hash(row, prev) == event_row_hash(row, prev)
 
 
-def test_0031_refuses_a_row_from_the_release_before_it_and_keeps_recording(
+def test_0013_refuses_a_row_from_the_release_before_it_and_keeps_recording(
     backend: Backend,
 ) -> None:
-    """P-123: during a rolling upgrade the release before 0031 keeps writing events, and a
+    """P-246: during a rolling upgrade the release before 0013 keeps writing events, and a
     rollback runs it against the migrated schema. Its INSERT names no chain column. The
     migrated table must refuse that row outright — if it stored ``''`` it would become a
     head no later write can chain onto, and the audit trail (sign-in included) would stop

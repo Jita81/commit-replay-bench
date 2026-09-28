@@ -155,7 +155,7 @@ jobs:
         with:
           persist-credentials: false
           # the artefacts' history vouches for each retired gap id, and the base branch's
-          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-060)
+          # committed gap analysis for one a squash merge dropped (STANDARD.md §6, P-127)
           fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
@@ -457,7 +457,7 @@ jobs:
         # the step fails if the postgres parametrisation was skipped for any reason.
         run: |
           # test_store_events_chain.py: the audit trail's chain, and the two-writer race that
-          # only PostgreSQL's concurrency can lose without the lock (ADR-0041)
+          # only PostgreSQL's concurrency can lose without the lock (ADR-0029)
           .venv/bin/pytest -q tests/test_store_db.py tests/test_store_ledger.py tests/test_store_migrate.py \
             tests/test_store_events_chain.py -rs --junitxml=store-postgres.xml
           if grep -q 'CRB_TEST_POSTGRES_URL not set' store-postgres.xml; then

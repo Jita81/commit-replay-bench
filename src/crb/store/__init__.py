@@ -19,7 +19,7 @@ What it does: Re-exports the five names the server, worker and CLI need to open 
               ``crb.store.db`` directly for the common path.
 How:          Plain re-exports; no logic. Importing the package imports
               ``crb.store.events``, whose import installs the flush hook that chains every
-              ``events`` row (ADR-0041) — so no writer of the table can run without it.
+              ``events`` row (ADR-0029) — so no writer of the table can run without it.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0008-stdlib-core-and-downward-layers.md

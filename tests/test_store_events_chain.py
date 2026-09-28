@@ -1,5 +1,5 @@
 """The ``events`` table is hash-chained by construction, on SQLite and PostgreSQL (F51,
-ADR-0041).
+ADR-0029).
 
 Every writer of the audit trail — the run's sink, the out-of-band ``append_event``, the
 routes' ``append_system_event``, a plain ORM ``add`` — goes through one flush hook, so no
@@ -24,7 +24,7 @@ How:          The shared ``backend`` fixture (SQLite always, PostgreSQL when
               ``CRB_TEST_POSTGRES_URL`` is set); raw SQL for the tampering; two threads over
               one session factory for the race.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md,
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/events.py (the flush hook, ``verify_events``, ``events_head``),
               src/crb/core/event_chain.py (the hash rule), tests/conftest_store.py (backends)
@@ -209,7 +209,7 @@ def test_the_database_refuses_a_second_row_on_the_same_predecessor(db: Backend) 
 
 
 def _previous_release_insert(b: Backend, n: int) -> None:
-    """The INSERT the release before revision 0031 makes: every column but the chain's, so a
+    """The INSERT the release before revision 0013 makes: every column but the chain's, so a
     server default (if one existed) would fill ``prev_hash`` and ``row_hash``. It stands for
     any writer that bypasses the flush hook — an old pod during the upgrade, a rollback, a
     Core ``insert(Event)``."""
@@ -229,7 +229,7 @@ def _previous_release_insert(b: Backend, n: int) -> None:
 
 
 def test_a_row_without_the_chain_is_refused_and_the_trail_keeps_recording(db: Backend) -> None:
-    """P-123: the database refuses an unchained row outright, so one write from a writer
+    """P-246: the database refuses an unchained row outright, so one write from a writer
     that skipped the hook fails alone — it never becomes a head of ``''`` that turns every
     later write into a unique-index collision on genesis."""
     _write_through_every_writer(db)
@@ -270,7 +270,7 @@ def _force_unchained_head(b: Backend) -> None:
 
 
 def test_a_head_that_is_not_a_hash_is_a_named_break_never_a_new_genesis(db: Backend) -> None:
-    """P-123: genesis is the predecessor of the first row of an EMPTY table only. A head
+    """P-246: genesis is the predecessor of the first row of an EMPTY table only. A head
     that is not a SHA-256 is refused by name, so the writer never chains onto genesis a
     second time and the failure says what is wrong."""
     from crb.store.events import EventChainHeadError
@@ -295,7 +295,7 @@ class _Clock:
 
 
 def test_the_verifier_walks_only_new_rows_between_full_walks(db: Backend) -> None:
-    """P-126: ``/ledger/verify`` is read on every Ledger and Posture page view, and the audit
+    """P-249: ``/ledger/verify`` is read on every Ledger and Posture page view, and the audit
     trail holds every step of every run. Between full walks (at most ``full_every_s`` apart)
     the verifier re-hashes only the rows appended since its last walk, starting from that
     walk's head — after checking the head row and the row count are still what it walked."""

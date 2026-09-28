@@ -19,7 +19,7 @@
  * How:          The glob is resolved by Vite (`../../../docs/adr/…` is the repository's
  *               docs/adr); the dev server reads it through `server.fs.allow` (`../docs`), and
  *               the image build carries it because deploy/Dockerfile.dockerignore re-includes
- *               `docs/adr/*.md` (P-106 — before that the image shipped no guide at all).
+ *               `docs/adr/*.md` (P-173 — before that the image shipped no guide at all).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none (DL-073)
  * Works with:   ui/src/screens/Help/HelpPage.tsx (lists `ADR_TITLES` as links),
@@ -62,7 +62,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0024', '"Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard'],
   ['0026', 'The context standard: pre-registered context arms, a look rule with one error budget per cell, a leak guard, an entry gate, class sets held out by commit, and a library that reaches a brief only when measured'],
   ['0028', 'The moments the flow reading needs are recorded when they happen, never derived'],
-  ['0041', 'The audit trail is hash-chained, and both chains\' heads are served to be kept outside the store'],
+  ['0029', 'The audit trail is hash-chained, and both chains\' heads are served to be kept outside the store'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

@@ -609,7 +609,7 @@ its sessions. On a deployment whose cookies are `Secure` (the default outside
 everybody signs in once more after the upgrade. From this release, signing out ends the
 account's sessions on every device.
 
-**Upgrading to revision `0031`** (the audit trail's hash chain, ADR-0041): the revision
+**Upgrading to revision `0013`** (the audit trail's hash chain, ADR-0029): the revision
 chains every event already stored, then makes the database refuse any event that does not
 carry the chain — the two chain columns have no default and must each hold a SHA-256. The
 release before it does not write the chain, so while its API and worker pods still run
@@ -620,7 +620,7 @@ the new release writes normally. To avoid that window, scale the API and the wor
 before the upgrade (`kubectl -n crb scale deploy --replicas=0 -l
 'app.kubernetes.io/instance=crb,app.kubernetes.io/component in (api,worker)'`, or
 `docker compose stop api worker`); `helm upgrade` then starts them on the new release. A
-`helm rollback` across `0031` leaves the previous release refused on every event, since
+`helm rollback` across `0013` leaves the previous release refused on every event, since
 the schema is not downgraded: do not roll back across it — restore the pre-upgrade dump
 instead.
 
@@ -661,7 +661,7 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
 - [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0` with `events.chain_ok:
-      true` (the audit trail's own chain, ADR-0041), and both heads it serves —
+      true` (the audit trail's own chain, ADR-0029), and both heads it serves —
       `head_row_hash` (the grade ledger's last `row_hash`) and `events.head_row_hash` — are
       recorded out of band: in the change record for go-live, and after that from the
       `ledger heads at worker start` line every worker start writes to the log store (§9.4).
@@ -791,7 +791,7 @@ after 20 passes ([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is n
 ### 9.5 Events
 
 Every step of a run is a `StepEvent` in the `events` table (append-only, ordered by `seq`
-within a trace, and hash-chained over the whole table in id order — ADR-0041; `/ledger/verify`
+within a trace, and hash-chained over the whole table in id order — ADR-0029; `/ledger/verify`
 walks the chain), streamed live as SSE from `GET /runs/{id}/events` and paged from
 `GET /runs/{id}/events/log`. The complete vocabulary — stage, action, status, payload keys,
 emitter, consumer — is [API.md § Event vocabulary](API.md#event-vocabulary), kept in step
@@ -804,7 +804,7 @@ break, or when an operator asks with `?full=true`; each answer says which walk i
 (`events.walk`) and when the last full walk ran (`events.full_walk_at`). A full walk still
 slows as the table grows [hypothesis — two readings on SQLite over 100,000 events: 1.6 s and
 2.7 s a walk; time `crb ledger verify --store`, which always walks in full, on your own
-store to know yours] (ADR-0041, Consequences). The
+store to know yours] (ADR-0029, Consequences). The
 JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be rotated
 freely.
 

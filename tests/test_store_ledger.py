@@ -12,7 +12,7 @@ What it does: Pins that appends chain from genesis and verify, that ``append_man
               tampered underneath dropped triggers, labels through the JSON column,
               ``assert_append_only`` passing with triggers and raising without — every
               append-only table seeded from its own columns, each trigger swapped for one
-              that lets its write through, one table and one verb at a time (P-122) — that import
+              that lets its write through, one table and one verb at a time (P-245) — that import
               re-chains and keeps the source row hash, that an export re-verifies standalone,
               pack store / get round trip and append-only, and that four threads appending
               concurrently form one valid chain.
@@ -182,7 +182,7 @@ def test_assert_append_only_passes_with_triggers_and_raises_without(
     assert_append_only(backend.factory)
 
 
-# P-058 (the external assessment's A5(c)): the probe proved `grades` only and read ANY
+# P-125 (the external assessment's A5(c)): the probe proved `grades` only and read ANY
 # exception from its UPDATE as the trigger firing — a lost connection or a missing table
 # read as "append-only proven". It now proves every table and matches the trigger's text.
 
@@ -251,7 +251,7 @@ def _a_value_for(col: Any) -> Any:
     if kind is bytes:
         return b"x"
     # a string as long as the column allows, so a length CHECK is met (the events chain's
-    # hash columns must hold 64 characters since revision 0031, P-123)
+    # hash columns must hold 64 characters since revision 0013, P-246)
     return "x" * int(getattr(col.type, "length", None) or 1)
 
 
@@ -291,7 +291,7 @@ def test_the_probe_proves_update_and_delete_refused_on_every_table_that_holds_a_
     backend: Backend, ledger: DbLedger, table: str, kind: str, verb: str
 ) -> None:
     """Each table, each verb, on the table's own row: a trigger that exists but lets that
-    write through is caught (P-058 as the stream's verifiers found it — the test seeded
+    write through is caught (P-125 as the stream's verifiers found it — the test seeded
     ``grades`` and ``events`` only and broke only the events UPDATE trigger, so a probe that
     skipped the DELETE or every table but ``events`` still passed)."""
     _seed_one_row(backend, table)

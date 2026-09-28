@@ -29,7 +29,7 @@ refuses a run that asks for the local executor in its own parameters. In ``prod`
 must name who set it and why (``CRB_ALLOW_UNSEALED_PROD_BY`` / ``_REASON``, G-663):
 :func:`announce_start` checks the name is an active admin and writes the audit event, or the
 worker exits 2 without taking a run — as it does when the event cannot be written (a store
-error at start is the JSON error on stderr, never a traceback; P-118).
+error at start is the JSON error on stderr, never a traceback; P-241).
 
 **At every start the worker logs both chains' heads** (G-601): the grade ledger's and the audit
 trail's last ``row_hash``, so the log store holds a copy outside the database.
@@ -63,7 +63,7 @@ How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — everything this
               file configures), src/crb/store/jobs.py (``RUN_KINDS`` for ``--kinds``),
               src/crb/server/unsealed_override.py (the override's start-up event),
@@ -483,7 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         announce_start(worker)
     except (OverrideRefused, SQLAlchemyError) as exc:
         # the override names no active admin, or its start could not be recorded (a lost
-        # connection, a lock timeout): do not start, and say so as the JSON error (P-118)
+        # connection, a lock timeout): do not start, and say so as the JSON error (P-241)
         print(json.dumps({"error": f"{type(exc).__name__}: {exc}"}), file=sys.stderr)
         return EXIT_ERROR
 

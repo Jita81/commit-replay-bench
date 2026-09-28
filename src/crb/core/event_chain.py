@@ -4,7 +4,7 @@ trail was not altered.
 The grade ledger has been a chain since ADR-0002; the audit trail beside it (``events``:
 who signed in, who changed a role, who set the unsealed override, every step of every run)
 was append-only by trigger only, so a person with the database's owner role could drop the
-trigger, edit a row and put the trigger back without a trace (backlog F51). ADR-0041 chains
+trigger, edit a row and put the trigger back without a trace (backlog F51). ADR-0029 chains
 it the same way: each row carries ``prev_hash`` (the previous row's ``row_hash``, or
 :data:`GENESIS_HASH` for the first) and ``row_hash`` (the SHA-256 of the canonical JSON of
 the row's fields and ``prev_hash``). The chain order is the row id order.
@@ -12,7 +12,7 @@ the row's fields and ``prev_hash``). The chain order is the row id order.
 Invariants
 ----------
 * **One body.** :func:`event_body` is the only definition of what an event row hashes; the
-  store's write path and every verifier call it, so the two cannot disagree. Revision 0031
+  store's write path and every verifier call it, so the two cannot disagree. Revision 0013
   carries a frozen copy (a released revision imports nothing of the runtime) and a test
   holds the copy to this function.
 * **Values are normalised to what the database hands back.** ``seq`` and ``duration_ms``
@@ -41,17 +41,17 @@ How:          ``canonical_json`` + ``sha256_text`` from crb.core.evidence (the o
               serialisation every hash in the product is taken over); the walk compares each
               ``prev_hash`` with the running head and each ``row_hash`` with a recomputation.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md,
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/events.py (chains every new ``events`` row in the writer's own
-              flush), src/crb/store/migrations/versions/v0031_events_hash_chain.py (chains
+              flush), src/crb/store/migrations/versions/v0013_events_hash_chain.py (chains
               the rows that existed before, with a frozen copy of ``event_body``),
               src/crb/server/routes/ledger.py (``/ledger/verify`` serves the report),
               src/crb/cli/commands/ledger.py (``crb ledger verify --store``)
 Tested by:    tests/test_event_chain.py, tests/test_store_events_chain.py
 Touch when:   never for a new repository; a column added to ``events`` is either added to
               ``EVENT_CHAIN_FIELDS`` under a new ``EVENT_CHAIN_SCHEMA`` (old rows keep
-              verifying under the old one) or named in ``EVENT_CHAIN_UNHASHED``, and ADR-0041
+              verifying under the old one) or named in ``EVENT_CHAIN_UNHASHED``, and ADR-0029
               says which — tests/test_event_chain.py fails until one of the two is done.
 """
 
@@ -94,8 +94,8 @@ EVENT_CHAIN_FIELDS: tuple[str, ...] = (
 )
 #: ``events`` columns deliberately left OUT of the hash (besides the id and the chain). Empty:
 #: every column is hashed. A test holds ``EVENT_CHAIN_FIELDS`` plus this tuple to the table's
-#: columns (P-124), so a new column is a reviewed decision — hashed under a new schema, or
-#: named here with the reason in ADR-0041 — never an edit the walk cannot see.
+#: columns (P-247), so a new column is a reviewed decision — hashed under a new schema, or
+#: named here with the reason in ADR-0029 — never an edit the walk cannot see.
 EVENT_CHAIN_UNHASHED: tuple[str, ...] = ()
 _INT_FIELDS = frozenset({"seq", "duration_ms"})
 

@@ -11,7 +11,7 @@ refuses the start and writes nothing.
 
 The event is a statement by the deployment's operator that a named admin owns the decision;
 the product cannot prove the admin typed the variable, only that an admin who exists was
-named and that the naming is on the tamper-evident trail (ADR-0041).
+named and that the naming is on the tamper-evident trail (ADR-0029).
 
 Navigation
 ----------
@@ -28,7 +28,7 @@ How:          ``record_unsealed_override`` = take the events write lock (``lock_
               hashes it).
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/server/settings.py (``unsealed_override_ack_refusal`` — the static half:
               no name, no start), src/crb/server/app.py (the API's start-up calls it),
               src/crb/server/worker_main.py (``announce_start`` — the worker's),
@@ -115,7 +115,7 @@ def record_unsealed_override(
     active admin — the caller must not start."""
     with factory() as db:
         # the events write lock first: every start writes this one trace, and two processes
-        # starting at once must not read one ``seq`` (P-118 — the API and a worker, or two
+        # starting at once must not read one ``seq`` (P-241 — the API and a worker, or two
         # replicas, at the same moment; the second insert would break (trace_id, seq))
         lock_events(db)
         user = find_acknowledging_admin(db, by)

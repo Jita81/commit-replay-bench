@@ -5,7 +5,7 @@ recomputes every ``row_hash`` from the STORED columns (the same canonical body
 :class:`~crb.core.ledger.GradeRow` hashes, without constructing one — a tampered
 or false-Q1 row must be REPORTED, not hidden behind an exception), checks each
 ``prev_hash`` link, and counts false-Q1 over the stored belts. It walks the audit
-trail's own chain too (``events``, ADR-0041) and serves both heads — the last
+trail's own chain too (``events``, ADR-0029) and serves both heads — the last
 ``row_hash`` of each — as values an operator records outside the store (G-601). ``ok``
 is ``chain_ok and false_q1_total == 0 and clean_without_pack == 0 and events.chain_ok``.
 
@@ -37,7 +37,7 @@ How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` 
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this must mirror),
               src/crb/store/ledger.py (``import_rows`` / ``count``),
               src/crb/store/events.py (``verify_events_in`` — the audit trail's walk),
@@ -148,7 +148,7 @@ def verify_ledger(
     """The chain walk + the two SQL counts (false-Q1, clean-without-pack); never raises —
     the first break is reported by ``seq`` and the walk continues to count rows. The audit
     trail is walked by ``events_verifier`` (the app's, which re-hashes only new events
-    between full walks — P-126) or, without one, in full."""
+    between full walks — P-249) or, without one, in full."""
     rows = 0
     prev = GENESIS_HASH
     broken_at: int | None = None

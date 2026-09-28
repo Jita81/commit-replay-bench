@@ -1659,7 +1659,7 @@ class Worker:
         """ADR-0023: a prod worker running unsealed under the override says so on every
         apparatus it writes (and so in every pack); nothing when sealed or in dev. A worker
         whose DEFAULTS are sealed stamps a run that asks for another executor in its own
-        parameters (only the override admits one), naming who set the override (P-125)."""
+        parameters (only the override admits one), naming who set the override (P-248)."""
         o = dict(self.settings.unsealed_override)
         if not o and self.settings.env == "prod":
             kind = self._executor_kind(ctx)

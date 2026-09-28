@@ -506,11 +506,11 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); `/health` proves the
   triggers are live on every call (`assert_append_only`: both triggers on every append-only
   table, and an `UPDATE` and a `DELETE` refused in the trigger's own words on each table that
-  holds a row — any other error is not taken as proof, P-058). [measured] `tests/test_store_*.py`
+  holds a row — any other error is not taken as proof, P-125). [measured] `tests/test_store_*.py`
 - The audit trail (`events`: sign-ins, account changes, sign-off decisions, cancels, the
   unsealed override's starts) is hash-chained too, in id order, by a flush hook no writer can
   skip; `GET /ledger/verify` and `crb ledger verify --store` report an edited, deleted or moved
-  event by id, and serve both chains' heads to be recorded outside the store (ADR-0041).
+  event by id, and serve both chains' heads to be recorded outside the store (ADR-0029).
   [measured] `tests/test_store_events_chain.py` tampers each way on SQLite and PostgreSQL
 - Every grade row carries `prev_hash` and `row_hash` (SHA-256 over canonical JSON); the chain
   verifies end to end (`crb ledger verify`, `GET /ledger/verify`); an exported JSONL verifies

@@ -284,7 +284,7 @@ def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -
     refused in the trigger's own words on every table that holds a row (counting alone
     would pass a trigger that exists but does not fire). An accepted write is ``down`` in
     the ledger's own words (:class:`LedgerIntegrityError` names no secret); any other error
-    — the probe no longer reads one as proof (P-058) — is ``down`` with the fixed
+    — the probe no longer reads one as proof (P-125) — is ``down`` with the fixed
     ``failure_detail``."""
     expected = 2 * len(APPEND_ONLY_TABLES)
 

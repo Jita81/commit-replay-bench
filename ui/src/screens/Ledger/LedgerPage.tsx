@@ -6,7 +6,7 @@
  * What it is:   The screen at /ledger: the chain-verification gate, the false-Q1 tile, the
  *               filterable row table and the export buttons.
  * What it does: Shows `GET /ledger/verify` as a gate with one row per part it checks — the
- *               grade chain (by row), the audit trail's chain (by event id, ADR-0041),
+ *               grade chain (by row), the audit trail's chain (by event id, ADR-0029),
  *               false-Q1 total = 0 and every clean row's pack — so a break names its part, and
  *               lists `GET /grades` rows AS STORED — belts, clean / DQ / error, cost, latency,
  *               oracle strength, provenance and the row hash — with the API's filters carried
@@ -17,7 +17,7 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
  *               docs/adr/0007-abstract-cell-export-only.md,
- *               docs/adr/0041-the-audit-trail-is-hash-chained.md
+ *               docs/adr/0029-the-audit-trail-is-hash-chained.md
  * Works with:   ui/src/api/hooks.ts (`useLedgerVerify`, `useGrades`), ui/src/api/types.ts
  *               (`GradeRow`, `LedgerVerify`, `beltsOf`), ui/src/components/GateBanner.tsx (the
  *               gate), ui/src/components/BeltPills.tsx and ui/src/components/Provenance.tsx

@@ -7,14 +7,14 @@ What it does: For each registered pair (``MIRRORS``) — a response whose every 
               reads to tell the reader what holds and what failed — pins that the TypeScript
               interface names exactly the pydantic model's fields. A field the API adds fails
               here until the UI type carries it and a person decides how the screens show
-              it (P-120: ``/ledger/verify`` began to fail on the audit trail's chain through
+              it (P-243: ``/ledger/verify`` began to fail on the audit trail's chain through
               ``ok``, the UI type had no ``events`` and the Ledger page reported the break
               as the grade chain's, "broken at row ?").
 How:          Reads the model's ``model_fields`` and the interface's top-level field names
               from ``types.ts`` (a two-space-indented ``name:`` or ``name?:`` line inside
               ``export interface <Name> {``).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/server/schemas.py (the models), ui/src/api/types.ts (the interfaces),
               ui/src/screens/Ledger/LedgerPage.tsx and ui/src/screens/Posture/PosturePage.tsx
               (the screens that read ``LedgerVerify``)

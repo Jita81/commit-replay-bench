@@ -14,15 +14,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Audit you can prove: the audit trail is hash-chained, and the unsealed override names who set it**
   (north-star Wave 2, stream I; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2-i)).
-  Every `events` row is chained as it is written, and revision 0031 chains the rows already
-  there (ADR-0041, DL-103); `GET /ledger/verify` and `crb ledger verify --store` walk it, and
+  Every `events` row is chained as it is written, and revision 0013 chains the rows already
+  there (ADR-0029, DL-091); `GET /ledger/verify` and `crb ledger verify --store` walk it, and
   every worker start logs both chains' heads. In production the override needs
   `CRB_ALLOW_UNSEALED_PROD_BY` (an active admin) and `_REASON`, and each start records that
-  admin (DL-102). The append-only probe proves every table (DL-104), `crb_signoffs_total`
-  counts sign-offs, and the Ledger and Posture pages name a broken audit event (P-118 to P-122).
-  From 0031 the database refuses an event written without the chain, so stop the API and the
+  admin (DL-090). The append-only probe proves every table (DL-092), `crb_signoffs_total`
+  counts sign-offs, and the Ledger and Posture pages name a broken audit event (P-241 to P-245).
+  From 0013 the database refuses an event written without the chain, so stop the API and the
   worker for that upgrade and never roll back across it (DEPLOYMENT §6); between full walks,
-  at most five minutes apart, `/ledger/verify` re-hashes only new events (P-123 to P-126).
+  at most five minutes apart, `/ledger/verify` re-hashes only new events (P-246 to P-249).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

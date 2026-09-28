@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-09-13
 **Apparatus impact:** none (storage, not verdict semantics)
-**Amended:** 2026-09-27 by [ADR-0041](0041-the-audit-trail-is-hash-chained.md) — the `events`
+**Amended:** 2026-09-27 by [ADR-0029](0029-the-audit-trail-is-hash-chained.md) — the `events`
 table (§5) is hash-chained too, and both chains' heads are served to be kept outside the store
 
 ## Context

@@ -14,12 +14,12 @@ What it does: Pins that a starting worker logs the grade ledger's and the audit 
               unknown or non-admin name refuses the start with nothing written; and that
               ``crb worker`` itself (``worker_main.main``) does all of it at every start, and
               turns a store error while the start is recorded into its JSON error and exit 2
-              (P-121, P-118).
+              (P-244, P-241).
 How:          A ``Worker`` over a temp SQLite store (``init_db``), rows through ``DbLedger``
               and the event sink, accounts through ``create_local_user``; ``caplog`` reads
               the log line, rendered again through the deployed redacting JSON handler.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md,
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md
 Works with:   src/crb/server/worker_main.py (under test), src/crb/server/unsealed_override.py
               (the event), src/crb/store/events.py (``events_head``)
@@ -142,7 +142,7 @@ def test_a_prod_worker_naming_an_unknown_or_non_admin_account_refuses_to_start(
 
 # --- the entry point: `crb worker` itself does both at every start --------------------------
 # The tests above call announce_start directly; these drive worker_main.main, so a main()
-# that stopped calling it (no override event, no refusal, no heads) fails here (P-118).
+# that stopped calling it (no override event, no refusal, no heads) fails here (P-241).
 
 
 def _prod_override_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, by: str) -> list[str]:
@@ -222,7 +222,7 @@ def test_crb_worker_whose_start_cannot_be_recorded_exits_2_with_the_error_as_jso
 ) -> None:
     """A store error while the start is recorded (a lost connection, a lock timeout) is the
     worker's JSON error and ``EXIT_ERROR``, never a traceback with exit 1 — and it never
-    takes a run unrecorded (P-118)."""
+    takes a run unrecorded (P-241)."""
     from sqlalchemy.exc import OperationalError
 
     argv = _prod_override_env(monkeypatch, tmp_path, "root")

@@ -551,7 +551,7 @@ def probe_database(engine: Engine, factory: sessionmaker[Session], url: str) -> 
     append-only guarantee holds the way ``/health`` proves it — ``probe_append_only``:
     every trigger present (counted against ``APPEND_ONLY_TABLES``) AND an UPDATE and a
     DELETE refused, in the trigger's own words, on every append-only table that holds a
-    row (P-058)."""
+    row (P-125)."""
     from sqlalchemy import inspect
 
     from crb.observability import probes

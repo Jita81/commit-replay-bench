@@ -18,16 +18,16 @@ Invariants
 * Out-of-band system events (a reclaim, a worker note) go through
   :func:`append_event`, which allocates the next ``seq`` under the same write
   lock the ledger uses, so they never collide with a live emitter's sequence.
-* **Every row is chained, by construction** (ADR-0041, F51). A ``before_flush`` hook on
+* **Every row is chained, by construction** (ADR-0029, F51). A ``before_flush`` hook on
   every ``Session`` gives each new ``Event`` its ``prev_hash`` (the table's head) and
   ``row_hash`` (:func:`crb.core.event_chain.event_row_hash`) under the events write lock,
   in insertion order, overwriting anything the writer set. The sink, ``append_event``, the
   routes' ``append_system_event`` and any plain ``add`` all flush, so none can skip it.
-  A writer that bypasses the ORM (a Core insert, the release before revision 0031) is
+  A writer that bypasses the ORM (a Core insert, the release before revision 0013) is
   refused by the database: the chain columns have no default and a CHECK requires a
   SHA-256 in each, and the unique index on ``prev_hash`` refuses a second row on one
   predecessor. Genesis is the predecessor of the first row of an empty table only; a head
-  that is not a hash raises :class:`EventChainHeadError` (P-123).
+  that is not a hash raises :class:`EventChainHeadError` (P-246).
 
 Navigation
 ----------
@@ -50,7 +50,7 @@ How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one tr
               ``row_hash``.
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — the envelope
               and the sequence assigner), src/crb/store/models.py (the ``Event`` columns),
               src/crb/store/jobs.py (writes reclaim / cancel notes through ``append_event``),
@@ -153,7 +153,7 @@ def lock_events(s: Session) -> None:
 
     Serialises ``seq`` allocation the way :class:`crb.store.ledger.DbLedger` does. A writer
     that reads ``max(seq)`` on a trace other processes also write, at the same moment, must
-    hold it (P-083, P-118: without it two writers read one ``seq`` and the second insert
+    hold it (P-150, P-241: without it two writers read one ``seq`` and the second insert
     breaks the unique ``(trace_id, seq)``). Call it first in a fresh session."""
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
@@ -163,7 +163,7 @@ def lock_events(s: Session) -> None:
 
 
 # ---------------------------------------------------------------------------
-# The chain (ADR-0041): every new ``events`` row is chained in its writer's own flush
+# The chain (ADR-0029): every new ``events`` row is chained in its writer's own flush
 # ---------------------------------------------------------------------------
 
 #: The columns a row's hash covers, by attribute name (everything but the id and the chain).
@@ -215,7 +215,7 @@ def _stored_values(obj: Event) -> dict[str, Any]:
 class EventChainHeadError(RuntimeError):
     """The ``events`` table has rows but its last ``row_hash`` is not a SHA-256: a row reached
     the table without the chain (only possible with the CHECK constraint lifted). Nothing
-    more is chained onto it — the operator restores the table or re-chains it (ADR-0041)."""
+    more is chained onto it — the operator restores the table or re-chains it (ADR-0029)."""
 
 
 _HEX = frozenset("0123456789abcdef")
@@ -223,7 +223,7 @@ _HEX = frozenset("0123456789abcdef")
 
 def _predecessor(head: str | None) -> str:
     """The ``prev_hash`` of the next row: genesis for an EMPTY table only (``head`` is
-    ``None``); otherwise the head, which must be a SHA-256 in hex (P-123 — a head of ``''``
+    ``None``); otherwise the head, which must be a SHA-256 in hex (P-246 — a head of ``''``
     read as genesis once made every later write collide with the first row)."""
     if head is None:
         return GENESIS_HASH
@@ -490,7 +490,7 @@ def verify_events(factory: sessionmaker[Session]) -> EventChainReport:
 
 
 #: The longest a tail walk may lean on an earlier full walk: every ``/ledger/verify`` after
-#: this re-hashes the whole chain again (P-126).
+#: this re-hashes the whole chain again (P-249).
 FULL_WALK_EVERY_S = 300.0
 
 
@@ -510,7 +510,7 @@ class _Walked:
 
 
 class EventChainVerifier:
-    """The audit trail's walk for a page that is read often (P-126).
+    """The audit trail's walk for a page that is read often (P-249).
 
     A full walk re-hashes every row — the audit trail holds every step of every run, so it
     grows without bound. Between full walks (at most ``full_every_s`` apart, measured on

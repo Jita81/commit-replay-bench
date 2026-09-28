@@ -100,7 +100,7 @@ unless someone read the apparatus stamp's executor field.
 - **Bump the apparatus.** Rejected: no verdict changes meaning; the executor was already on
   the stamp, and the override is an additional, explicit field.
 
-## Amendment 2026-09-27 — the override names who set it (DL-102, G-663)
+## Amendment 2026-09-27 — the override names who set it (DL-090, G-663)
 
 **Context.** Decision 3 made the override visible (a warning, `/health`, `/settings`, the
 Posture page, every run's apparatus) but not attributable: an environment variable carries no
@@ -127,7 +127,7 @@ naming who set it".
    system event per process start, on the trace `posture:unsealed_override`, whose actor is
    the admin's account id and whose payload names the username, the reason, the process
    (`api` | `worker`), the host, the process id and the posture it admits. The event is on
-   the hash-chained audit trail (ADR-0041), so it cannot be edited or removed unseen.
+   the hash-chained audit trail (ADR-0029), so it cannot be edited or removed unseen.
 9. **The name is stamped beside the override.** The worker's `unsealed_prod_override` stamp
    carries `acknowledged_by` on every run it admits — replay and factory alike — so a row
    produced under the override names, in its own evidence, who decided to produce it.

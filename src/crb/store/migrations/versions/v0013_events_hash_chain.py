@@ -1,15 +1,15 @@
-"""events.prev_hash / events.row_hash — the audit trail becomes a hash chain (ADR-0041, F51)
+"""events.prev_hash / events.row_hash — the audit trail becomes a hash chain (ADR-0029, F51)
 
 Navigation
 ----------
-What it is:   Revision 0031: the two chain columns on ``events`` and the chaining of every row
+What it is:   Revision 0013: the two chain columns on ``events`` and the chaining of every row
               that existed before them.
 What it does: Adds ``prev_hash`` and ``row_hash`` (``VARCHAR(64) NOT NULL``, server default
               ``''`` so a populated table can take them), chains the existing rows in id
               order from the genesis hash — deterministically: the same rows give the same
               hashes on any run, on either dialect — then drops the server default and adds
               a CHECK that each column holds 64 characters (so a writer that names no chain
-              column, the release before this one included, is refused row by row — P-123),
+              column, the release before this one included, is refused row by row — P-246),
               and adds the unique indexes on both columns (one successor per row, so the
               chain cannot fork). ``events`` is append-only, so its UPDATE trigger is dropped
               for the back-fill and the triggers are re-installed at the end, in the same
@@ -25,17 +25,16 @@ How:          ``op.add_column`` twice (skipped when ``init_db`` already made the
               ``install_append_only_triggers_on``. Offline (``--sql``) there are no rows to
               read, so the back-fill is skipped.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md,
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md,
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/models.py (``Event.prev_hash`` / ``Event.row_hash`` are declared
               LAST so the column order matches), src/crb/store/migrate.py
-              (``REVISION_MARKERS`` carries ``("0031", "events", "row_hash")``; the trigger
+              (``REVISION_MARKERS`` carries ``("0013", "events", "row_hash")``; the trigger
               helper), src/crb/core/event_chain.py (the runtime rule this file copies),
               src/crb/store/events.py (chains every row written after this revision)
 Tested by:    tests/test_store_migrate.py
-Touch when:   never — a released revision is immutable. This id is temporary (stream I of the
-              north-star Wave 2); at integration it is renumbered to follow the head it lands
-              on and its ``down_revision`` re-pointed.
+Touch when:   never — a released revision is immutable (stream I of the north-star Wave 2
+              held a temporary id; the Wave 2 integration numbered it 0013 on 0012).
 """
 
 from __future__ import annotations
@@ -50,14 +49,14 @@ from alembic import context, op
 
 from crb.store.migrate import install_append_only_triggers_on
 
-revision: str = "0031"
+revision: str = "0013"
 down_revision: str | None = "0012"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 TABLE = "events"
 #: The append-only tables that exist at this revision (pinned; see 0001).
-APPEND_ONLY_AT_0031: tuple[str, ...] = (
+APPEND_ONLY_AT_0013: tuple[str, ...] = (
     "grades",
     "events",
     "signoffs",
@@ -66,7 +65,7 @@ APPEND_ONLY_AT_0031: tuple[str, ...] = (
     "task_qualifications",
 )
 PREV_INDEX = "uq_events_prev_hash"
-#: P-123: after the back-fill both chain columns lose the server default and must hold a
+#: P-246: after the back-fill both chain columns lose the server default and must hold a
 #: SHA-256, so a writer that names no chain column (the release before this revision, still
 #: running during the upgrade or after a rollback) is refused for that row instead of
 #: storing a head of '' that no later write can chain onto. Pinned text, not imported.
@@ -185,7 +184,7 @@ def _chain_existing_rows(bind: sa.Connection) -> int:
         last = int(rows[-1]["id"])
 
 
-def _events_at_0031(*, checked: bool) -> sa.Table:
+def _events_at_0013(*, checked: bool) -> sa.Table:
     """The whole ``events`` table at this revision, pinned — what an OFFLINE (``--sql``)
     SQLite rebuild copies from, since there is no database to reflect. ``checked`` is the
     state after this revision (no default, the CHECK); otherwise the state before it."""
@@ -223,7 +222,7 @@ def _events_at_0031(*, checked: bool) -> sa.Table:
 
 def _copy_from(*, checked: bool) -> sa.Table | None:
     offline_sqlite = context.is_offline_mode() and op.get_context().dialect.name == "sqlite"
-    return _events_at_0031(checked=checked) if offline_sqlite else None
+    return _events_at_0013(checked=checked) if offline_sqlite else None
 
 
 def _checks() -> set[str]:
@@ -260,7 +259,7 @@ def upgrade() -> None:
         op.create_index(PREV_INDEX, TABLE, ["prev_hash"], unique=True)
     if ROW_INDEX not in names:
         op.create_index(ROW_INDEX, TABLE, ["row_hash"], unique=True)
-    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0031)
+    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0013)
 
 
 def downgrade() -> None:
@@ -279,4 +278,4 @@ def downgrade() -> None:
         for name in ("row_hash", "prev_hash"):
             if name in cols or context.is_offline_mode():
                 batch.drop_column(name)
-    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0031)
+    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0013)

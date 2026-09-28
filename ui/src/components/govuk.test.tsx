@@ -154,7 +154,7 @@ describe('PosturePage', () => {
   })
 
 
-  it('an edited audit event is reported as the audit trail, naming the event, and sends the reader to verify the store (P-120)', async () => {
+  it('an edited audit event is reported as the audit trail, naming the event, and sends the reader to verify the store (P-243)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },

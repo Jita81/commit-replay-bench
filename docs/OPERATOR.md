@@ -778,7 +778,7 @@ the verification.
 
 On the API host, `crb ledger verify --store` verifies the database itself: the grade ledger
 and the audit trail (the `events` table — every sign-in, account change, sign-off decision
-and cancel — which is hash-chained too, ADR-0041). It exits 1 if either chain is broken and
+and cancel — which is hash-chained too, ADR-0029). It exits 1 if either chain is broken and
 names the first bad row or event; it prints both heads, the values to record out of band.
 `GET /api/v1/ledger/verify` serves the same to any signed-in reader, and every worker start
 writes both heads to its log. A chain cannot show that rows were cut from its end or that

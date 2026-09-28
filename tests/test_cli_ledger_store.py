@@ -12,7 +12,7 @@ How:          ``crb migrate`` on a temp SQLite URL; rows through ``DbLedger`` an
               sink; ``main(argv)`` in-process with ``CRB_DATABASE_URL`` set; tampering by raw
               SQL after the ``events`` triggers are dropped.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/cli/commands/ledger.py (under test), src/crb/store/events.py
               (``verify_events`` / ``events_head``), src/crb/store/ledger.py (``DbLedger``)
 Tested by:    tests/test_cli_ledger_store.py

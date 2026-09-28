@@ -11,11 +11,11 @@
  *               abstract cells, sees neither; that clean, sighted and blind are terms
  *               that open inline next to the filters; and that the gate's failure states
  *               each close it on their own row — the grade chain (its row), the audit trail
- *               (its event, ADR-0041), false-Q1 (and the red tile) and a missing pack.
+ *               (its event, ADR-0029), false-Q1 (and the red tile) and a missing pack.
  * How:          `mockApi` + `renderApp` at `/ledger` per role.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0007-abstract-cell-export-only.md,
- *               docs/adr/0041-the-audit-trail-is-hash-chained.md
+ *               docs/adr/0029-the-audit-trail-is-hash-chained.md
  * Works with:   ui/src/screens/Ledger/LedgerPage.tsx (the code under test), ui/src/test/utils.tsx
  * Tested by:    ui/src/screens/Ledger/LedgerPage.test.tsx
  * Touch when:   an export or a filter is added, or `GET /ledger/verify` gains a part.
@@ -74,7 +74,7 @@ describe('LedgerPage', () => {
     expect(clean).toHaveAttribute('aria-expanded', 'true')
   })
 
-  // The failure states (G-183, P-120): each part of the verification is its own row, so a
+  // The failure states (G-183, P-243): each part of the verification is its own row, so a
   // break is reported as the part that broke — never an audit-trail break read as the grades'.
 
   it('an edited audit event closes the gate on the audit trail, naming the event, while the grade chain still verifies', async () => {

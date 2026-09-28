@@ -9,7 +9,7 @@ grades     — APPEND-ONLY: one row per graded attempt, hash-chained (``GradeRow
 evidence   — evidence pack bodies keyed by pack hash (opt-in retention window applies
              to any transcript ref inside; the pack itself is always kept)
 events     — APPEND-ONLY: StepEvent stream, ordered by (trace_id, seq), hash-chained in id
-             order (``prev_hash`` / ``row_hash``; revision 0031, ADR-0041)
+             order (``prev_hash`` / ``row_hash``; revision 0013, ADR-0029)
 signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
 reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
              (``ReviewRecord`` columns; revision 0003)
@@ -33,7 +33,7 @@ How:          ``DeclarativeBase`` subclasses with ``Mapped[...]`` columns; times
               identically; JSON columns hold the core's ``to_dict()`` shapes unchanged.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md, docs/adr/0011-repo-lint-belt.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``GradeRow`` — the ``grades`` columns must stay in
               step), src/crb/store/ledger.py (maps rows ↔ models), src/crb/store/db.py (the
               triggers on ``APPEND_ONLY_TABLES``),
@@ -72,7 +72,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-#: The CHECK on ``events`` (revision 0031, P-123): both chain columns hold a SHA-256 in hex.
+#: The CHECK on ``events`` (revision 0013, P-246): both chain columns hold a SHA-256 in hex.
 #: ``length`` is the one spelling SQLite and PostgreSQL share.
 EVENTS_CHAIN_CHECK_NAME = "ck_events_chain_hashes"
 EVENTS_CHAIN_CHECK = "length(prev_hash) = 64 AND length(row_hash) = 64"
@@ -248,7 +248,7 @@ class EvidencePackRow(Base):
 
 
 class Event(Base):
-    """APPEND-ONLY and hash-chained (ADR-0041). Columns mirror
+    """APPEND-ONLY and hash-chained (ADR-0029). Columns mirror
     :class:`crb.observability.events.StepEvent`, plus the chain's ``prev_hash`` / ``row_hash``."""
 
     __tablename__ = "events"
@@ -272,10 +272,10 @@ class Event(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    # revision 0031 (ADR-0041, F51): the audit trail's hash chain, in id order. Set by the
+    # revision 0013 (ADR-0029, F51): the audit trail's hash chain, in id order. Set by the
     # flush hook in src/crb/store/events.py whatever the writer put there; declared LAST so
     # the column order matches a migrated database. No server default and a CHECK on both
-    # (P-123): a writer that skips the hook — the release before 0031 during an upgrade or
+    # (P-246): a writer that skips the hook — the release before 0013 during an upgrade or
     # after a rollback, a Core insert — is refused for that one row instead of storing a
     # head of '' that no later write could chain onto.
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -284,7 +284,7 @@ class Event(Base):
     # UNIQUE: ``seq`` is the SSE resume cursor; two rows of a trace with one ``seq`` would
     # lose one on ``?after=`` (revision 0004; ``DbEventSink`` re-allocates on collision).
     # UNIQUE ``prev_hash``: one successor per row, so a writer that copies the head cannot
-    # fork the chain (revision 0031). The CHECK refuses a row whose chain columns are not
+    # fork the chain (revision 0013). The CHECK refuses a row whose chain columns are not
     # hashes at all — the unique index alone would accept the first such row.
     __table_args__ = (
         Index("uq_events_trace_seq", "trace_id", "seq", unique=True),

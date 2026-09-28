@@ -1,6 +1,6 @@
-# ADR-0041 — The audit trail is hash-chained, and both chains' heads are served to be kept outside the store
+# ADR-0029 — The audit trail is hash-chained, and both chains' heads are served to be kept outside the store
 
-**Status:** Proposed (DL-103; north-star Wave 2, stream I — backlog F51 and G-601)
+**Status:** Proposed (DL-091; north-star Wave 2, stream I — backlog F51 and G-601)
 **Date:** 2026-09-27
 **Apparatus impact:** none (storage and audit, not verdict semantics: no belt, size, class,
 route, threshold or sign-off rule changes meaning; no row of any apparatus version is re-graded).
@@ -47,12 +47,11 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
    two rows chaining onto one predecessor, and one on `row_hash` refuses a duplicate. The
    hook reads genesis as the predecessor of the first row of an EMPTY table only; a head
    that is not a SHA-256 raises `EventChainHeadError` rather than starting a second chain
-   (P-123 — a head of `''` once collided every later write with the first row).
+   (P-246 — a head of `''` once collided every later write with the first row).
    Every column of `events` is hashed: `EVENT_CHAIN_FIELDS` plus `EVENT_CHAIN_UNHASHED`
    (empty) must equal the table's columns, and a test fails until a new column is hashed
-   under a new chain schema or named unhashed with its reason here (P-124).
-3. **Existing rows are chained by the migration** (revision 0031, a temporary id the
-   integration renumbers): in id order from genesis, with a frozen copy of the rule that a
+   under a new chain schema or named unhashed with its reason here (P-247).
+3. **Existing rows are chained by the migration** (revision 0013): in id order from genesis, with a frozen copy of the rule that a
    test holds to the runtime one, so the same rows give the same hashes on every run and
    either dialect. The `events` update trigger is dropped for the back-fill and every
    trigger is re-installed in the same revision. After the back-fill the revision drops the
@@ -63,7 +62,7 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
    re-hashes only the events written since its last clean walk, from that walk's head, once
    the head row still hashes to it and the count up to it is unchanged (`walk: tail`); it
    walks in full on the first read, at most five minutes after the last full walk, when that
-   check fails, after a break, and on an operator's `?full=true` (P-126,
+   check fails, after a break, and on an operator's `?full=true` (P-249,
    `ledger.operations.11`). An edited event reads `row_hash mismatch` at its id; an
    event deleted from the middle, or moved, reads `prev_hash mismatch` at the event after
    the gap. `crb ledger verify --store` prints the same and exits 1 on either break.
@@ -74,7 +73,7 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
    already ships off the host (DEPLOYMENT §9.4) — holds a copy the database cannot rewrite.
    A head recorded earlier must still be in the chain, and the chain must still verify: a
    store replaced wholesale, or cut at its end, fails that comparison.
-6. **The append-only probe proves every table in the trigger's own words** (P-058, DL-104).
+6. **The append-only probe proves every table in the trigger's own words** (P-125, DL-092).
    `crb.store.ledger.assert_append_only` checks both triggers of every table in
    `APPEND_ONLY_TABLES` in the catalogue and, where a table holds a row, that an `UPDATE`
    and a `DELETE` of it are refused with `"<table> is append-only"`
@@ -90,7 +89,7 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
   wait for each other's commit; the SSE stream reads committed rows as before. A writer that
   reads a trace's last `seq` on a trace other processes write at the same moment takes the
   lock before it reads (`crb.store.events.lock_events`): the override's start event does, as
-  every process start writes its one trace (P-118).
+  every process start writes its one trace (P-241).
 - A full walk of the trail costs a re-hash of every event. The trail holds a row for every
   step of every run, many times the grade ledger, so a full walk slows as it grows
   [hypothesis — two readings of `verify_events` over 100,000 events, SQLite on developers'

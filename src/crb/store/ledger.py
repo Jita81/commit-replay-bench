@@ -372,7 +372,7 @@ def assert_append_only(
        rolled-back transaction. A write that goes through is a missing or non-firing
        trigger (:class:`LedgerIntegrityError`); a write refused for any OTHER reason — a lost
        connection, a missing table, another trigger's error — is not proof, and propagates
-       to the caller (P-058: the probe used to read any exception as the trigger firing).
+       to the caller (P-125: the probe used to read any exception as the trigger firing).
     """
     with factory() as s:
         present = trigger_pairs(s)

@@ -8,7 +8,7 @@ What it is:   The concurrency suite for ``crb.server.unsealed_override.record_un
 What it does: Pins that the API and a worker (or two workers, or two API processes) starting
               at the same moment each write their ``posture.unsealed_override`` event on the
               one shared trace, with dense ``seq`` values and an intact chain — neither start
-              crashes on the unique ``(trace_id, seq)`` (P-118, P-083's class on a trace every
+              crashes on the unique ``(trace_id, seq)`` (P-241, P-150's class on a trace every
               process start writes).
 How:          Two threads call ``record_unsealed_override`` over one store; a barrier placed
               after the event is built (its ``seq`` read) and before the commit makes the two
@@ -16,7 +16,7 @@ How:          Two threads call ``record_unsealed_override`` over one store; a ba
               holds the lock keeps the other out, the barrier times out, and both commit.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0023-production-refuses-the-unsealed-posture.md,
-              docs/adr/0041-the-audit-trail-is-hash-chained.md
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/server/unsealed_override.py (under test), src/crb/store/events.py
               (``lock_events``, ``verify_events``), tests/conftest_store.py (the backends)
 Tested by:    tests/test_unsealed_override_race.py

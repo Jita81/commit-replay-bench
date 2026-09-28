@@ -16,9 +16,9 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               (409 ``last_admin``), that ``GET /users`` rows carry ``active`` and
               ``last_login``, that every change lands as one event with actor and target
               and never a password, that those events are ordinary ``events`` rows —
-              trigger-protected and on the audit trail's own hash chain (ADR-0041) — and that a
+              trigger-protected and on the audit trail's own hash chain (ADR-0029) — and that a
               password set by any door rotates the session nonce, so the old sessions end
-              even when the stored hash does not move (#52's revocation, P-082).
+              even when the stored hash does not move (#52's revocation, P-149).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the
@@ -502,7 +502,7 @@ def test_every_change_is_one_event_with_actor_and_target(client: TestClient, app
 def test_account_events_are_on_the_hash_chained_audit_trail(client: TestClient, app: Any) -> None:
     """The ``user.*`` events are the same mechanism as every other system event
     (``repo.created``, ``run.cancel_requested``…): an ``events`` row, append-only by DB
-    trigger AND chained onto the audit trail's head (ADR-0041, F51) — so a reader can prove
+    trigger AND chained onto the audit trail's head (ADR-0029, F51) — so a reader can prove
     no account change was edited or removed afterwards (``/ledger/verify``'s ``events``,
     ``crb ledger verify --store``)."""
     from crb.store.events import verify_events
@@ -524,7 +524,7 @@ def test_account_events_are_on_the_hash_chained_audit_trail(client: TestClient, 
 def test_a_write_that_skips_the_chain_is_refused_and_sign_in_keeps_working(
     client: TestClient, app: Any
 ) -> None:
-    """P-123: the release before revision 0031 (still running during the upgrade, or after
+    """P-246: the release before revision 0013 (still running during the upgrade, or after
     a rollback) inserts events naming no chain column. That one write must fail on its own;
     it must not leave a head the next sign-in cannot chain onto (which answered 500 to every
     sign-in from then on)."""

@@ -1318,7 +1318,7 @@ class SignoffRevokeRequest(BaseModel):
 
 
 class EventsVerifyOut(BaseModel):
-    """The audit trail's chain (``events``, ADR-0041): ``broken_at`` is an event id."""
+    """The audit trail's chain (``events``, ADR-0029): ``broken_at`` is an event id."""
 
     rows: int
     chain_ok: bool
@@ -1327,7 +1327,7 @@ class EventsVerifyOut(BaseModel):
     #: The last event's ``row_hash`` (``""`` when there is none) — to record outside the store.
     head_row_hash: str
     #: ``full`` — every event re-hashed; ``tail`` — only those appended since the last clean
-    #: walk, from its head (P-126). ``?full=true`` (operator) forces ``full``.
+    #: walk, from its head (P-249). ``?full=true`` (operator) forces ``full``.
     walk: str = "full"
     #: When the last full walk behind this answer ran (ISO 8601, UTC).
     full_walk_at: str = ""

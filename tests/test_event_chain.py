@@ -1,4 +1,4 @@
-"""The ``events`` chain's hash rule and walk (ADR-0041, backlog F51), without a database.
+"""The ``events`` chain's hash rule and walk (ADR-0029, backlog F51), without a database.
 
 Navigation
 ----------
@@ -13,7 +13,7 @@ What it does: Pins that every ``events`` column is hashed or named unhashed (the
               the walk still counting every row.
 How:          Plain dict rows chained by ``event_row_hash``; each tamper is applied to a copy.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0041-the-audit-trail-is-hash-chained.md
+ADRs:         docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/event_chain.py (under test), src/crb/core/evidence.py (the
               canonical JSON and SHA-256 the rule hashes with), tests/test_store_events_chain.py
               (the same rule against SQLite and PostgreSQL), tests/test_store_migrate.py (the
@@ -89,14 +89,14 @@ def test_the_body_holds_the_named_fields_and_normalises_to_what_a_database_retur
 
 
 def test_every_events_column_is_hashed_or_named_unhashed() -> None:
-    """P-124: the hashed field set is held to the TABLE, not to itself. A column added to
+    """P-247: the hashed field set is held to the TABLE, not to itself. A column added to
     ``events`` and left out of ``EVENT_CHAIN_FIELDS`` would be editable without a trace; it
     must be hashed (a new chain schema) or named in ``EVENT_CHAIN_UNHASHED``, reviewed."""
     from crb.store.models import Event
 
     columns = {c.key for c in Event.__table__.columns} - {"id", "prev_hash", "row_hash"}
     hashed = {"payload_json" if f == "payload" else f for f in EVENT_CHAIN_FIELDS}
-    assert EVENT_CHAIN_UNHASHED == ()  # a change here is a reviewed decision in ADR-0041
+    assert EVENT_CHAIN_UNHASHED == ()  # a change here is a reviewed decision in ADR-0029
     assert not hashed & set(EVENT_CHAIN_UNHASHED)
     assert columns == hashed | set(EVENT_CHAIN_UNHASHED)
 

@@ -11,7 +11,7 @@ What it does: Finds every block (a paragraph, a list item, a table row or a run 
               ``CRB_ALLOW_UNSEALED_PROD_REASON``. In production the override without them
               stops both processes at start (ADR-0023 as amended, G-663), so a document that
               names only the one variable sends the operator to pods that crash on start
-              (P-119: the Helm README, ``values.yaml`` and the compose file did, after the
+              (P-242: the Helm README, ``values.yaml`` and the compose file did, after the
               override began to require the other two).
 How:          Splits each file into blocks by blank lines, list items, headings, table rows
               and — in YAML and ``.env`` files — runs of comment lines; a companion

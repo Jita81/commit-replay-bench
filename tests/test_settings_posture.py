@@ -234,7 +234,7 @@ class TestWorker:
 
 
 class TestTheOverrideNamesWhoSetIt:
-    """G-663 (ADR-0023 as amended 2026-09-27, DL-102): an environment variable carries no
+    """G-663 (ADR-0023 as amended 2026-09-27, DL-090): an environment variable carries no
     identity, so in production the override needs a named acknowledgement beside it — the
     username of an existing, active admin and a reason — and every process start under it
     writes an audit event naming that person and the reason."""
