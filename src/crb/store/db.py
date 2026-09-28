@@ -6,13 +6,17 @@ SQLite (``RAISE(ABORT)``) and PostgreSQL (a trigger function raising an
 exception). Alembic migrations (``crb.store.migrations``) call the same helper
 so a migrated database carries the same protection as a freshly created one.
 
-Short of DDL on the triggers themselves, no statement the product's connections can
-issue rewrites or removes an append-only row: ``UPDATE`` and ``DELETE`` meet the row
-triggers; SQLite's ``REPLACE`` meets the delete trigger because every connection turns
-``recursive_triggers`` on; PostgreSQL's ``TRUNCATE`` meets a statement-level trigger and
-its ``ON CONFLICT DO UPDATE`` the update trigger. Trigger DDL (``DROP``/``DISABLE``) is
-what ``/health``'s ``append_only`` probe watches, and what a separate owner role
-removes from the application's reach on PostgreSQL (docs/DEPLOYMENT.md).
+Short of DDL (on the tables or on their triggers), which only the tables' owner can
+issue, no statement the product's connections can issue rewrites or removes an
+append-only row: ``UPDATE`` and ``DELETE`` meet the row triggers; SQLite's ``REPLACE``
+meets the delete trigger because every connection turns ``recursive_triggers`` on;
+PostgreSQL's ``TRUNCATE`` meets a statement-level trigger and its ``ON CONFLICT DO
+UPDATE`` the update trigger. Table DDL (``ALTER TABLE … ALTER COLUMN … TYPE … USING``,
+``DROP COLUMN``, ``DROP TABLE``) rewrites or removes rows with no trigger firing, and
+trigger DDL (``DROP``/``DISABLE``/a ``WHEN`` that never holds) stops the triggers; the
+``append_only`` probe watches the triggers, ``verify`` catches a rewrite it did not
+re-hash, and a separate owner role removes all of that DDL from the application's reach
+on PostgreSQL (docs/DEPLOYMENT.md §3.3).
 
 Navigation
 ----------
@@ -49,6 +53,7 @@ Touch when:   never for a new repository (the database is per deployment, not pe
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -189,6 +194,25 @@ def _pg_trigger_sql(table: str, name: str) -> str:
     )
 
 
+def _normalised(sql: str) -> str:
+    """``sql`` with its whitespace collapsed and any trailing ``;`` dropped — how a stored
+    trigger definition is compared with the installer's own."""
+    return " ".join(sql.split()).rstrip(";").rstrip()
+
+
+def _pg_definition_re(table: str, name: str) -> re.Pattern[str]:
+    """What ``pg_get_triggerdef`` returns for :func:`_pg_trigger_sql`'s trigger: the same
+    statement, the table schema-qualified (and the function too when it is not on the
+    ``search_path``), no ``WHEN``, no column list, no arguments."""
+    event = _event_of(name, "postgresql")
+    level = "STATEMENT" if event == "TRUNCATE" else "ROW"
+    schema = r'(?:(?:[a-z_][a-z0-9_$]*|"[^"]+")\.)?'
+    return re.compile(
+        f"CREATE TRIGGER {re.escape(name)} BEFORE {event} ON {schema}{re.escape(table)} "
+        f"FOR EACH {level} EXECUTE FUNCTION {schema}crb_append_only\\(\\)"
+    )
+
+
 def _read(conn: Connection, sql: str, params: dict[str, Any] | None = None) -> list[Any] | None:
     """The rows of ``sql``, or ``None`` on an offline (``alembic upgrade --sql``) connection,
     which emits statements and reads nothing — so every trigger is emitted there."""
@@ -204,23 +228,27 @@ def _pg_function_src(conn: Connection) -> str | None:
 
 def live_triggers(conn: Connection) -> set[str]:
     """The expected append-only triggers that are LIVE on ``conn``'s database: on their own
-    table, refusing their own event, and — on PostgreSQL — enabled and calling an unaltered
-    ``crb_append_only()``. A trigger its table's owner disabled (``ALTER TABLE … DISABLE
-    TRIGGER``), one of the right name hung on another table, or a function rewritten to a
-    no-op is not counted (EI-4). ``/health``'s ``append_only`` probe and the installer both
-    read it. Unsupported dialects: none."""
+    table, with the WHOLE definition the installer writes (so a ``WHEN`` clause or a column
+    list that stops it firing is not live), and — on PostgreSQL — enabled and calling an
+    unaltered ``crb_append_only()``. A trigger its table's owner disabled (``ALTER TABLE …
+    DISABLE TRIGGER``), one of the right name hung on another table, one re-created with a
+    never-true ``WHEN``, or a function rewritten to a no-op is not counted (EI-4), and so
+    the installer re-creates it on the next start. ``/health``'s ``append_only`` probe and
+    the installer both read it. Unsupported dialects: none."""
     dialect = conn.dialect.name
     expected = expected_triggers(dialect)
+    wanted = set(expected)
     if dialect == "sqlite":
         rows = _read(conn, "SELECT tbl_name, name, sql FROM sqlite_master WHERE type = 'trigger'")
         if rows is None:
             return set()
+        # the WHOLE definition must be the installer's own: a WHEN clause, a column list or
+        # any other change can make a trigger that matches by name and text never fire
         found = {
             (str(t), str(n))
             for t, n, sql in rows
-            if str(n) in {name for _, name in expected}
-            and f"RAISE(ABORT, '{t} is append-only')" in str(sql or "")
-            and f"BEFORE {_event_of(str(n), dialect)} ON {t} " in " ".join(str(sql).split())
+            if (str(t), str(n)) in wanted
+            and _normalised(str(sql or "")) == _normalised(_sqlite_trigger_sql(str(t), str(n)))
         }
     elif dialect == "postgresql":
         if _pg_function_src(conn) != _PG_FUNCTION_SRC:
@@ -240,11 +268,13 @@ def live_triggers(conn: Connection) -> set[str]:
         )
         if rows is None:
             return set()
+        # pg_get_triggerdef is the catalogue's canonical text: it must be the installer's own
+        # definition (a WHEN clause, a column list or FOR EACH changed is not live)
         found = {
             (str(t), str(n))
             for t, n, ddl in rows
-            if str(n) in {name for _, name in expected}
-            and f" BEFORE {_event_of(str(n), dialect)} ON " in str(ddl)
+            if (str(t), str(n)) in wanted
+            and _pg_definition_re(str(t), str(n)).fullmatch(_normalised(str(ddl)))
         }
     else:  # pragma: no cover — unsupported by policy
         return set()

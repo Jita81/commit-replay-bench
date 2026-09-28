@@ -309,8 +309,12 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crb_app;
 append-only ones are `APPEND_ONLY_TABLES` in `src/crb/store/models.py`.) The API and the
 worker then start with no DDL: `init_db` re-creates only a trigger that is not live, and a
 store whose triggers are all live gets none. The application role cannot `TRUNCATE`,
-disable, drop or redefine anything, and a trigger that is missing or disabled makes
-`/health`'s `append_only` probe `down` with its name in `data.missing`. The proof is
+disable, drop or redefine anything, nor issue the table DDL that rewrites or removes rows
+with no trigger firing (`ALTER TABLE … ALTER COLUMN … TYPE … USING`, `DROP COLUMN`, `DROP
+TABLE`) — on a single-role deployment the application IS the owner and can. A trigger that
+is missing, disabled or re-created with any definition other than the installer's (a `WHEN`
+that never holds) makes `/health`'s `append_only` probe `down` with its name in
+`data.missing`, and the next start re-creates it. The proof is
 `tests/test_store_db.py::test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_protection`,
 run on PostgreSQL in CI.
 

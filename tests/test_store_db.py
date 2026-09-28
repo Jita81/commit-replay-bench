@@ -12,11 +12,13 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               keys are enforced, that ``session_scope`` commits and rolls back, and that every
               append-only table refuses UPDATE and DELETE while still accepting INSERT — and that
               the ordinary tables (``repos`` / ``runs`` / ``users``) stay mutable. Also that no
-              statement short of trigger DDL rewrites an append-only row (SQLite's REPLACE,
+              statement short of DDL rewrites an append-only row (SQLite's REPLACE,
               PostgreSQL's TRUNCATE and upsert — EI-4, EI-5), that the ``append_only`` probe
-              goes down on a disabled, moved or missing trigger and on an accepted REPLACE,
-              that a PostgreSQL application role that does not own the tables starts with no
-              DDL and cannot remove the protection, and that a system event holds its
+              goes down on a disabled, moved, missing or ``WHEN``-neutered trigger (which the
+              next start re-creates) and on an accepted REPLACE, and never claims an UPDATE it
+              did not try on an empty ledger, that a PostgreSQL application role that does
+              not own the tables starts with no DDL and cannot remove the protection nor
+              issue table DDL, and that a system event holds its
               trace's ``seq`` until it commits (EI-1).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
@@ -377,6 +379,73 @@ def test_the_append_only_probe_goes_down_when_a_trigger_is_disabled_or_moved(
     assert f"{expected - 1}/{expected} append-only triggers present" in res.detail
 
 
+def test_a_trigger_neutered_by_a_when_clause_is_not_live_and_a_restart_heals_it(
+    backend: Backend,
+) -> None:
+    """The skeptic on EI-4: liveness was read by name, table, event and function (or the
+    RAISE text), not by the whole definition, so ``events_no_delete`` re-created with a
+    never-true ``WHEN`` counted as live while every ``DELETE FROM events`` went through —
+    and because the installer skips a live trigger, a restart no longer healed it. A
+    trigger is now live only when its whole definition is the installer's own: the neutered
+    one is ``down`` by name, and ``install_append_only_triggers`` re-creates it."""
+    from crb.observability.probes import DOWN, OK
+    from crb.server.routes.system import probe_append_only
+
+    store_db.init_db(backend.engine)
+    with backend.factory() as s:
+        s.add(_one_row("grades"))
+        s.add(_one_row("events"))
+        s.commit()
+    with backend.engine.begin() as c:
+        if backend.dialect == "postgresql":
+            c.execute(text("DROP TRIGGER events_no_delete ON events"))
+            c.execute(
+                text(
+                    "CREATE TRIGGER events_no_delete BEFORE DELETE ON events FOR EACH ROW "
+                    "WHEN (false) EXECUTE FUNCTION crb_append_only()"
+                )
+            )
+        else:
+            c.execute(text("DROP TRIGGER events_no_delete"))
+            c.execute(
+                text(
+                    "CREATE TRIGGER events_no_delete BEFORE DELETE ON events WHEN 0 "
+                    "BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;"
+                )
+            )
+    with backend.engine.connect() as c:
+        assert "events_no_delete" not in store_db.live_triggers(c)
+    res = probe_append_only(backend.factory)
+    assert res.status == DOWN and res.data["missing"] == ["events_no_delete"], res.detail
+    store_db.install_append_only_triggers(backend.engine)  # a restart's init_db
+    assert probe_append_only(backend.factory).status == OK
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("DELETE FROM events"))
+    assert _count(backend, "events") == 1
+
+
+def test_the_append_only_probe_never_claims_an_update_it_did_not_try(backend: Backend) -> None:
+    """The skeptic on EI-4: ``assert_append_only`` returns without writing anything when
+    ``grades`` is empty, yet ``/health`` said "UPDATE on grades refused" on every fresh
+    store. On an empty ledger the detail now says no UPDATE was tried (the live-trigger count
+    still decides the status); once a row exists it says the UPDATE was refused."""
+    from crb.observability.probes import OK
+    from crb.server.routes.system import probe_append_only
+    from crb.store.ledger import assert_append_only
+
+    store_db.init_db(backend.engine)
+    assert assert_append_only(backend.factory) is False  # nothing to try
+    res = probe_append_only(backend.factory)
+    assert res.status == OK
+    assert res.detail == "triggers present; no grades row to test the UPDATE on", res.detail
+    with backend.factory() as s:
+        s.add(_one_row("grades"))
+        s.commit()
+    assert assert_append_only(backend.factory) is True  # tried, and refused
+    res = probe_append_only(backend.factory)
+    assert (res.status, res.detail) == (OK, "triggers present; UPDATE on grades refused")
+
+
 def test_the_append_only_probe_counts_the_truncate_trigger(backend: Backend) -> None:
     """EI-4: on PostgreSQL the statement-level ``TRUNCATE`` trigger is part of the expected
     set, so a store that lacks it (one created before it existed, or one whose owner dropped
@@ -483,7 +552,9 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
     an application role granted ``SELECT``/``INSERT`` on the append-only tables: that role
     starts the API and the worker (``init_db`` issues no DDL on a store whose triggers are
     live), the migration job at head passes, the probe is ``ok`` — and TRUNCATE, disabling a
-    trigger, dropping one and rewriting the trigger function are each refused to it."""
+    trigger, dropping one, rewriting the trigger function and DDL on the table itself
+    (retyping a column with ``USING``, dropping a column, dropping the table — each rewrites
+    or removes rows with no trigger firing) are each refused to it."""
     import secrets
 
     from sqlalchemy.engine import make_url
@@ -524,6 +595,11 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
             "DROP TRIGGER grades_no_delete ON grades",
             "CREATE OR REPLACE FUNCTION crb_append_only() RETURNS trigger AS "
             "$$ BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql",
+            # table DDL rewrites or removes rows with no trigger firing (the skeptic on
+            # DL-145): only the owner may issue it, so the application role is refused
+            "ALTER TABLE grades ALTER COLUMN model TYPE text USING 'a-model-that-never-ran'",
+            "ALTER TABLE grades DROP COLUMN model",
+            "DROP TABLE grades CASCADE",
             "DELETE FROM grades",
             "UPDATE events SET repo = 'tampered'",
         ):

@@ -12,11 +12,12 @@ store-level checks:
   the detail where applicable (an empty store has none). A ``create_all`` store whose
   schema equals the head (a ``crb serve`` without ``crb migrate``) is ``degraded``, not
   down: complete, but unstamped until ``crb migrate`` runs.
-* ``append_only`` — every expected ledger trigger is LIVE (on its own table; on PostgreSQL
-  enabled and calling ``crb_append_only`` — :func:`crb.store.db.expected_triggers`) AND an
-  ``UPDATE`` on ``grades`` is refused, on SQLite a ``REPLACE`` too
-  (:func:`crb.store.ledger.assert_append_only`). A missing, moved or disabled trigger =
-  ``down``, named in ``data.missing``.
+* ``append_only`` — every expected ledger trigger is LIVE (on its own table with the
+  installer's whole definition; on PostgreSQL enabled and calling ``crb_append_only`` —
+  :func:`crb.store.db.expected_triggers`) AND an ``UPDATE`` on ``grades`` is refused, on
+  SQLite a ``REPLACE`` too (:func:`crb.store.ledger.assert_append_only`; on an empty
+  ``grades`` table none is tried and the detail says so). A missing, moved, disabled or
+  ``WHEN``-neutered trigger = ``down``, named in ``data.missing``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``.
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
@@ -266,9 +267,11 @@ def probe_migrations(factory: sessionmaker[Session], *, request_id: str = "") ->
 
 
 def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
-    """``append_only``: every expected trigger LIVE (present on its own table, enabled, and
-    calling the append-only function) AND an UPDATE on ``grades`` refused (on SQLite a
-    ``REPLACE`` too) — counting names alone passed a trigger that exists but does not fire.
+    """``append_only``: every expected trigger LIVE (present on its own table with the
+    installer's whole definition, enabled, and calling the append-only function) AND an
+    UPDATE on ``grades`` refused (on SQLite a ``REPLACE`` too) — counting names alone passed a
+    trigger that exists but does not fire. On an empty ``grades`` table no write is tried and
+    the ``ok`` detail says so ("no grades row to test the UPDATE on").
     An accepted write is ``down`` in the ledger's own words (:class:`LedgerIntegrityError`
     names no secret); a read that raises is ``down`` with the fixed ``failure_detail``. A
     ``down`` names the missing triggers in ``data.missing``."""
@@ -283,7 +286,7 @@ def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -
         if missing:
             data["missing"] = missing
         try:
-            assert_append_only(factory)
+            tried = assert_append_only(factory)
         except LedgerIntegrityError as exc:
             return ProbeResult("append_only", DOWN, str(exc), data)
         if missing:
@@ -293,7 +296,10 @@ def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -
                 f"{expected - len(missing)}/{expected} append-only triggers present",
                 data,
             )
-        return ProbeResult("append_only", OK, "triggers present; UPDATE on grades refused", data)
+        # never claim an UPDATE that was not tried: an empty grades table has no row to try
+        # it on, and the live-trigger count above is then the whole proof
+        refused = "UPDATE on grades refused" if tried else "no grades row to test the UPDATE on"
+        return ProbeResult("append_only", OK, f"triggers present; {refused}", data)
 
     return probes.run_probe("append_only", _read, request_id=request_id)
 

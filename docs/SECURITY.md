@@ -505,10 +505,15 @@ a ticket or a shell history again (review 2026-09-13, action #9).
   and `DELETE` (SQLite `RAISE(ABORT)`, PostgreSQL trigger function); SQLite's `REPLACE`
   meets the delete trigger because every product connection turns `recursive_triggers` on,
   and PostgreSQL's `TRUNCATE` meets a statement-level trigger (DL-145). `/health` proves the
-  triggers are live on every call: each expected trigger on its own table and, on
-  PostgreSQL, enabled and calling an unaltered function, plus a refused `UPDATE` (and on
-  SQLite a refused `REPLACE`) (`probe_append_only`, `assert_append_only`). What remains is
-  DDL on the triggers themselves, which the tables' owner can issue: on PostgreSQL run the
+  triggers are live on every call: each expected trigger on its own table with the
+  installer's whole definition (a `WHEN` that never holds is not live) and, on PostgreSQL,
+  enabled and calling an unaltered function, plus a refused `UPDATE` (and on SQLite a
+  refused `REPLACE`) once `grades` has a row — on an empty ledger the detail says no write
+  was tried (`probe_append_only`, `assert_append_only`). What remains is DDL, on the
+  tables or on their triggers, which only the tables' owner can issue: a trigger dropped,
+  disabled or neutered, or a table altered so rows change with no trigger firing
+  (`ALTER TABLE … ALTER COLUMN … TYPE … USING`, `DROP COLUMN`, `DROP TABLE`; `verify`
+  catches a rewrite that was not re-hashed). On PostgreSQL run the
   API and the worker as a role that does not own the tables
   ([DEPLOYMENT §3.3](DEPLOYMENT.md#33-postgresql)) — the shipped chart and compose do not
   split the roles yet [gap] G-760 (docs/PREVENTION.md P-232). [measured]

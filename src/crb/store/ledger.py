@@ -31,7 +31,8 @@ How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` �
               ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
               ``check_review_anchor``, then chains and inserts the same way;
               ``assert_append_only`` tries a no-op UPDATE on the first ``grades`` row and, on
-              SQLite, a same-row ``REPLACE``, and requires both refused.
+              SQLite, a same-row ``REPLACE``, requires both refused, and returns whether it
+              tried (an empty ``grades`` table has no row to try them on).
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md
@@ -358,13 +359,16 @@ class DbReviewLedger:
         return verify_review_chain(self.records())
 
 
-def assert_append_only(factory: sessionmaker[Session]) -> None:
+def assert_append_only(factory: sessionmaker[Session]) -> bool:
     """Prove the triggers are live: an UPDATE on grades must fail, and on SQLite so must a
-    ``REPLACE`` of the same row. Used by /health."""
+    ``REPLACE`` of the same row. Used by /health. Returns whether a write was TRIED: on an
+    empty ``grades`` table there is no row to try it on, so it returns ``False`` without
+    testing anything, and the caller must not say an UPDATE was refused (the live-trigger
+    count, :func:`crb.store.db.live_triggers`, is then the whole proof)."""
     with factory() as s:
         first = s.execute(select(Grade).order_by(Grade.seq).limit(1)).scalar_one_or_none()
         if first is None:
-            return
+            return False
         try:
             # A no-op UPDATE (actor = actor): a live trigger aborts it; a missing one lets
             # it through, the rollback undoes the harmless write, and we report the gap.
@@ -378,6 +382,7 @@ def assert_append_only(factory: sessionmaker[Session]) -> None:
             )
         if s.get_bind().dialect.name == "sqlite":
             _assert_replace_refused(s, first.seq)
+    return True
 
 
 def _assert_replace_refused(s: Session, seq: int) -> None:
