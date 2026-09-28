@@ -61,7 +61,7 @@ An organisation that signs in with OIDC creates one local service account for it
 |---|---|
 | `viewer` | read everything (map, routes, tasks, runs, evidence, ledger verify, sign-offs) |
 | `operator` | also register/update/probe repositories, start and cancel runs, freeze a factory backlog |
-| `approver` | also `deliver_override` on a factory run (recorded as the approver's act) |
+| `approver` | the route gate's override on another person's factory run is `POST /runs/{id}/deliver-override` — not an MCP tool (a second approver's act, ADR-0003 amendment 2026-09-27) |
 
 Environment variables:
 
@@ -106,7 +106,7 @@ For the dev stack on this machine the defaults suffice apart from the account:
 | `crb_register_repo`, `crb_update_repo`, `crb_probe_repo` | `POST /repos`, `PUT /repos/{name}`, `POST /repos/{name}/probe` | operator |
 | `crb_tasks`, `crb_task` | `GET /repos/{name}/tasks`, `GET /tasks/{repo}/{task_id}` | viewer |
 | `crb_runs`, `crb_run`, `crb_run_tasks`, `crb_run_events` | `GET /runs`, `/runs/{id}`, `/runs/{id}/tasks`, `/runs/{id}/events/log` | viewer |
-| `crb_start_run` | `POST /runs` — **spends model budget** for replay/blind/factory kinds | operator (`deliver_override`: approver) |
+| `crb_start_run` | `POST /runs` — **spends model budget** for replay/blind/factory kinds | operator (`deliver_override` is refused 409 `same_actor`: the override is a second approver's act) |
 | `crb_cancel_run` | `POST /runs/{id}/cancel` | operator |
 | `crb_grades`, `crb_grade`, `crb_evidence`, `crb_grade_patch` | `GET /grades`, `/grades/{row_id}`, `/evidence/{pack_hash}`, `/grades/{row_hash}/patch` | viewer |
 | `crb_capability_map`, `crb_routes`, `crb_failure_split` | `GET /capability-map`, `/routes`, `/failure-split` | viewer |

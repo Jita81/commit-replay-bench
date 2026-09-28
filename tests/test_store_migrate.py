@@ -66,7 +66,7 @@ from sqlalchemy.exc import DBAPIError
 from crb.core.ledger import GENESIS_HASH
 from crb.core.review import ReviewRecord, verify_review_chain
 from crb.store import migrate
-from crb.store.db import init_db, make_engine, make_session_factory
+from crb.store.db import expected_triggers, init_db, make_engine, make_session_factory
 from crb.store.ledger import DbLedger, DbReviewLedger, assert_append_only
 from crb.store.models import APPEND_ONLY_TABLES, Base
 
@@ -236,9 +236,7 @@ def test_upgrade_head_equals_init_db(backend: Backend, tmp_path: Path) -> None:
         created = _snapshot(engine)
 
     assert created == migrated
-    assert created["__triggers__"] == sorted(
-        f"{t}_{k}" for t in APPEND_ONLY_TABLES for k in ("no_update", "no_delete")
-    )
+    assert created["__triggers__"] == sorted(name for _, name in expected_triggers(backend.dialect))
 
 
 def test_migration_defines_every_model_table(backend: Backend) -> None:

@@ -37,7 +37,8 @@
  *               reading of the map's economics fold; `useSignGap` (POST signoff-gap),
  *               `useRegisterBacklog` (POST backlog, the form or JSON in a dialog),
  *               `useCreateRun` (kind `factory`, `deliver` toggle gated by the backlog's
- *               delivery pre-flight; `deliver_override` for an approver); `EvidenceDrawer`
+ *               delivery pre-flight; the route-gate override explained as a second
+ *               approver's act on the run's page); `EvidenceDrawer`
  *               opens the newest build's pack; `useNarrow` (matchMedia at Tailwind's `sm`)
  *               folds an item's six step cards behind a Details at phone width (J-FAC-14).
  *               A 404 = no backlog registered: the instruction, not an error. `?item=`
@@ -661,7 +662,6 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   const map = useCapabilityMap(repo, ['capability_class', 'size'])
   const run = useCreateRun()
   const [deliver, setDeliver] = useState(false)
-  const [override, setOverride] = useState(false)
   const [ownBuilder, setOwnBuilder] = useState('')
   const [ownModel, setOwnModel] = useState('')
   const choice = builderChoice(health.data)
@@ -709,7 +709,6 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
       kind: 'factory',
       deliver: deliver && canDeliver,
       ...body,
-      ...(deliver && canDeliver && override ? { deliver_override: true } : {}),
     })
   }
 
@@ -768,12 +767,8 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           </span>
         </Hint>
         {deliver && canDeliver && canOverride && (
-          <Hint as="label" id="field.factory.override" className="flex items-start gap-2">
-            <input type="checkbox" className="mt-1" checked={override} onChange={(e) => setOverride(e.target.checked)} />
-            <span>
-              Override the route gate (approver)
-              <span className="block text-xs text-on-surface-muted">Recorded on the evidence chain as your override of the route gate, under your name.</span>
-            </span>
+          <Hint id="field.factory.override" className="block text-xs text-on-surface-muted" data-testid="factory-override-note">
+            An override of the route gate is a second approver’s act: once this run is queued, another approver grants it on the run’s page, under their name. It never lifts a cell with a false-Q1 row.
           </Hint>
         )}
         <Hint as="div" id="details.factory.own_builder">

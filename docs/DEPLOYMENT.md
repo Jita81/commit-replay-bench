@@ -109,7 +109,7 @@ server and never appear in logs or `/settings`.
 | `CRB_BOOTSTRAP_ADMIN__USERNAME` / `__PASSWORD` | first boot | seeds the first admin **only while `users` is empty** (≥ 12 chars) |
 | `CRB_LOCAL_AUTH_ENABLED` | | set `false` once OIDC works |
 | `CRB_OIDC__ISSUER`, `__CLIENT_ID`, `__CLIENT_SECRET`, `__REDIRECT_URL`, `__SCOPES`, `__ROLE_CLAIM`, `__ROLE_MAP`, `__ADMIN_GROUPS` | for SSO | see §4.1 for the Entra ID mapping |
-| `CRB_OIDC__ROLE_FROM_CLAIMS` | | `first_login` (default): the claims set a role on the account's first sign-in and an admin's later change stands; `always`: the provider decides at every sign-in (removing someone from the admin group demotes them next time), each change recorded as `user.role_overridden` ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)) |
+| `CRB_OIDC__ROLE_FROM_CLAIMS` | | `first_login` (default): the claims set a role on the account's first sign-in and an admin's later change stands; `always`: the provider decides at every sign-in (removing someone from the admin group demotes them next time), each change recorded as `user.role_overridden`, but never a demotion of the last active admin — or of the last who can sign in (a local admin does not count once `CRB_LOCAL_AUTH_ENABLED=false`) — which keeps its role and records `user.role_override_refused` ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)) |
 | `CRB_GITHUB__APP_ID`, `__APP_SLUG`, `__PRIVATE_KEY` or `__PRIVATE_KEY_FILE`, `__API_URL`, `__WEB_URL` | for *Connect from GitHub* | the deployment's GitHub App (docs/GITHUB-APP.md); set on the **API and the worker**; the key from the secret store, never inline in a values file |
 | `CRB_INTAKE__TRACKER`, `__URL`, `__PROJECT`, `__COLUMN`, `__AREA_PATH`, `__JQL`, `__EMAIL`, `__POINTS_FIELD`, `__ACCEPTANCE_FIELD`, `__POLL_S`, `__MAX_PER_POLL`, `__POLL_BUDGET_S`, `__OUTCOME_MAP`, `__REQUIRE_APPROVAL`, `__APPROVE_AUTHORS` | for *work arriving from a board* | the tracker this deployment takes work from (ADR-0017); set on the **API and the worker** so one environment configures both. `TRACKER` is `none` (the default — nothing is read anywhere), `ado` or `jira`; `URL` must be `https://`; `POLL_S` defaults to 300; `MAX_PER_POLL` (200) bounds one pass — a longer column is not read at all, it stops with `column_too_large` — and `POLL_BUDGET_S` (60) is how long one pass may take before it stops early and serves what it read; `OUTCOME_MAP` is JSON (`{"merged": "Done"}`) and is **empty by default**, so no ticket is ever moved. `REQUIRE_APPROVAL` is **`true` by default** (ADR-0022): a ready ticket waits on the Intake screen until an operator registers it; `APPROVE_AUTHORS` is a JSON list of tracker authors (the ticket's creator) whose tickets skip that act, **empty by default**. The credential is NOT an environment variable: an admin stores it at `PUT /settings/secrets/tracker-token`. Whether a given repository's listener is on is per repository, **default off**, and an operator's to switch |
 | `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default in `prod`, fail-closed) or `local` (development; the worker's default in `dev`). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent). `local` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` (below) |
@@ -288,6 +288,67 @@ the selector labels, `checksum/config`): the pod would carry the key twice.
 managed server; use `sslmode=require` (or `verify-full` with the CA) and a private endpoint.
 `postgresql.mode: embedded` renders a single-replica StatefulSet (`postgres:16-alpine`, uid
 70, read-only root) for **evaluation only** — no HA, no PITR, no managed backups.
+
+**Do not let the application own the ledger.** On PostgreSQL the role that owns a table may
+disable, drop or re-create its triggers, so a deployment whose API and worker connect as the
+tables' owner holds append-only only against its own good behaviour (DL-081). Where your
+platform allows a second role, split them:
+
+- the **owner** runs `crb migrate` (the migration job) and owns every table and the
+  `crb_append_only()` function;
+- the **application** role — the one in the API's and the worker's `CRB_DATABASE_URL` — is
+  granted `SELECT, INSERT` on the append-only tables, `SELECT, INSERT, UPDATE, DELETE` on
+  the rest, only `SELECT` on `alembic_version` (only the owner migrates, so only the owner
+  records the schema's version), and `USAGE, SELECT` on the sequences:
+
+```sql
+-- as the owner, after `crb migrate` has created the schema
+CREATE ROLE crb_app LOGIN PASSWORD '<secret>';
+GRANT CONNECT ON DATABASE crb TO crb_app;
+GRANT USAGE ON SCHEMA public TO crb_app;
+GRANT SELECT, INSERT ON grades, events, signoffs, evidence, reviews, task_qualifications
+  TO crb_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON repos, runs, tasks, users, workers,
+  github_installations TO crb_app;
+GRANT SELECT ON alembic_version TO crb_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crb_app;
+-- tables and sequences the owner creates later (a release that adds a table)
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES TO crb_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO crb_app;
+```
+
+The default grants apply to what the owner creates, so run them as the owner. A table a
+later release adds gets the narrower grant, `SELECT, INSERT`, so a new table is never
+rewritable by the application before someone has decided it may be. When a release adds a
+table the application must update or delete, its upgrade notes name it: grant `UPDATE,
+DELETE` on that table as the owner before you restart the API and the worker, or those
+writes are refused with `permission denied`.
+
+(`SELECT tablename FROM pg_tables WHERE schemaname = 'public'` lists every table; the
+append-only ones are `APPEND_ONLY_TABLES` in `src/crb/store/models.py`.) The API and the
+worker then start with no DDL: `init_db` re-creates only a trigger that is not live, and a
+store whose triggers are all live gets none. The application role cannot `TRUNCATE`,
+disable, drop or redefine anything, nor issue the table DDL that rewrites or removes rows
+with no trigger firing (`ALTER TABLE … ALTER COLUMN … TYPE … USING`, `DROP COLUMN`, `DROP
+TABLE`) — on a single-role deployment the application IS the owner and can. A trigger that
+is missing, disabled or re-created with any definition other than the installer's (a `WHEN`
+that never holds) makes `/health`'s `append_only` probe `down` with its name in
+`data.missing`. Where the application owns the tables (a single-role deployment, and SQLite)
+the next start re-creates it. With the roles split, the application role cannot: its start
+is refused (`permission denied`), so restore the trigger as the owner with `crb migrate`
+(`CRB_DATABASE_URL=<owner URL> crb migrate`) before you restart the API and the worker. The
+proofs are
+`tests/test_store_db.py::test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_protection`
+and
+`tests/test_store_db.py::test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_the_application`,
+run on PostgreSQL in CI.
+
+The chart and the compose file still give the migration job, the API and the worker one
+`CRB_DATABASE_URL` [gap] G-709: run `crb migrate` as the owner yourself before each
+install or upgrade (`CRB_DATABASE_URL=<owner URL> crb migrate`), and put the application
+role's URL in the Secret. The chart's migration hook then finds the store at head, issues no
+DDL and passes; an upgrade whose migration the owner has not run fails at that hook, before
+any pod changes.
 
 ### 3.4 The worker's sandbox — choose deliberately
 
@@ -675,14 +736,17 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 - [ ] `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
       [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
-      line. `append_only` proves an
-      UPDATE refused, `ledger` reads `false_q1=0`, `builders`
+      line. `append_only` proves every trigger live and, once `grades` has a row, an
+      UPDATE refused (on an empty ledger no write is tried, and its `ok` detail says
+      so), `ledger` reads `false_q1=0`, `builders`
       configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host).
 - [ ] `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
+- [ ] On PostgreSQL, the API and the worker connect as a role that does not own the ledger
+      tables (§3.3) — or the reason your platform cannot is written down.
 - [ ] `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0`; the last `row_hash`
       (`SELECT row_hash FROM grades ORDER BY seq DESC LIMIT 1`) is recorded out of band.
 - [ ] OIDC login works with a role-mapped user; `CRB_LOCAL_AUTH_ENABLED=false`; the
@@ -690,7 +754,10 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
       `crb users set-password <admin>` on the API host) or the account deactivated
       (`PUT /users/{id}/active {"active": false}` / `crb users deactivate <admin>` —
       possible once another active admin exists, for example the first OIDC sign-in
-      from an `CRB_OIDC__ADMIN_GROUPS` member); `CRB_BOOTSTRAP_ADMIN__*` unset
+      from an `CRB_OIDC__ADMIN_GROUPS` member). A bootstrap admin kept active with local
+      sign-in off is not a second admin: nobody can sign in as it, so the last-admin rule
+      does not count it and the only OIDC admin still cannot be demoted or deactivated;
+      `CRB_BOOTSTRAP_ADMIN__*` unset
       ([OPERATOR.md §9](OPERATOR.md#9-users)).
 - [ ] Egress test from a worker pod fails to any public address.
 - [ ] `crb repo probe <repo>` is green inside the sandbox for every configured repository.

@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The security and governance review's findings closed: sign-in, evidence, store, delivery**
+  (the operator's internal review, streams A to D; [#63](https://github.com/Jita81/commit-replay-bench/pull/63)).
+  A login attempt counts before its password is checked, the identity provider never demotes
+  the last admin who can sign in, and sign-out, deactivation and every credential change are
+  events (DL-076, DL-077). Only rows this deployment measured license anything, and every chain
+  is verified on the server (DL-078, DL-079). A read-modify-write holds its table's one lock
+  from read to commit, and no statement the product can issue rewrites an append-only row
+  (DL-080, DL-081, DL-085). A route-gate override needs a second person and never delivers on
+  a false-Q1 cell; the licence is for the change delivered (DL-082 to DL-084).
+
 - **Wave 1 finished: accounts, the Learn page's writes, keyboard and wayfinding**
   (north-star Wave 1, streams U, L, A1 and A2; [#65](https://github.com/Jita81/commit-replay-bench/pull/65)).
   Settings › Users shows each account's kind, state and last sign-in; an admin sets a password,

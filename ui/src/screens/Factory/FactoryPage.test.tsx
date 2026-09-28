@@ -467,7 +467,7 @@ describe('FactoryPage — the shipped contract', () => {
     expect(box).toHaveTextContent('not linked — no pull request')
   })
 
-  it('when the repository can deliver, the opt-in says where the pull request goes and the approver’s override is explained in visible text', async () => {
+  it('when the repository can deliver, the opt-in says where the pull request goes and the second approver’s override is explained in visible text', async () => {
     const { calls } = mockApi(
       base({
         'GET /auth/me': { ...PRINCIPAL, role: 'approver' },
@@ -483,12 +483,14 @@ describe('FactoryPage — the shipped contract', () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     await userEvent.click(deliver)
     expect(box).toHaveTextContent('on — a clean build in a deliver cell pushes a branch to acme/cobra and opens a pull request against main; nothing is written to main.')
-    const override = within(box).getByRole('checkbox', { name: /Override the route gate/ })
-    expect(box).toHaveTextContent('Recorded on the evidence chain as your override of the route gate, under your name.')
-    await userEvent.click(override)
+    // GOV-4: the override is a SECOND approver's act on the run's page — never asked for at enqueue
+    expect(within(box).queryByRole('checkbox', { name: /Override the route gate/ })).toBeNull()
+    expect(within(box).getByTestId('factory-override-note')).toHaveTextContent('An override of the route gate is a second approver’s act: once this run is queued, another approver grants it on the run’s page, under their name.')
     await userEvent.click(screen.getByRole('button', { name: /^Run the factory/ }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
-    expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))).toMatchObject({ deliver: true, deliver_override: true })
+    const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
+    expect(body).toMatchObject({ deliver: true })
+    expect(body).not.toHaveProperty('deliver_override')
   })
 
   it('an item that was built opens its evidence and links its run; a refused item says why and what to do (F15, J-FAC-15)', async () => {

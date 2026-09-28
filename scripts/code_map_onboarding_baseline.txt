@@ -14,7 +14,6 @@ src/crb/intake/draft.py
 src/crb/intake/fake.py
 src/crb/intake/feedback.py
 src/crb/mcp/__init__.py
-src/crb/server/claude_login.py
 src/crb/server/github_app.py
 src/crb/server/reaper.py
 src/crb/server/routes/__init__.py
@@ -59,7 +58,6 @@ tests/test_deploy_health_probes.py
 tests/test_factory_backlog.py
 tests/test_factory_readiness.py
 tests/test_factory_review.py
-tests/test_factory_testfirst.py
 tests/test_git.py
 tests/test_intake_client.py
 tests/test_intake_draft.py
@@ -79,10 +77,8 @@ tests/test_redact.py
 tests/test_release_tag.py
 tests/test_routing.py
 tests/test_runners_parsers.py
-tests/test_server_claude_login.py
 tests/test_server_github_app.py
 tests/test_server_reaper.py
-tests/test_server_routes_admin_secrets.py
 tests/test_server_routes_forecast.py
 tests/test_server_routes_grades.py
 tests/test_server_routes_oracle.py

@@ -10,7 +10,9 @@ What it does: Collects the probes the readiness route actually serves (every pro
               §9.3 said seven probes while ``/health`` served eleven, and API.md said ten and
               left out ``provision`` (G-403; docs/PREVENTION.md P-126). And refuses a §9.3
               that names other probes as raising a banner than the UI raises one for: every
-              UI reader of a probe is classified in ``BANNERS`` (P-188).
+              UI reader of a probe is classified in ``BANNERS`` (P-188). And refuses a guide
+              sentence that says the ``append_only`` probe refused an UPDATE without saying it
+              is tried only once ``grades`` has a row (P-233).
 How:          ``collect_health`` over a session factory that raises and probe functions that
               raise, as tests/test_server_system.py's fixed-detail test does; the names come
               from the body; each guide's section is cut from the Markdown and searched for
@@ -162,3 +164,43 @@ def test_the_guide_names_the_probes_that_raise_a_banner(
     assert named == banner, (
         f"DEPLOYMENT §9.3 says {sorted(named)} raise a banner; the UI raises one for {sorted(banner)}"
     )
+
+
+#: The guides an operator reads the probes from; the records (the register, the decision
+#: log) quote what was once true on purpose, so they are not read here.
+_GUIDES = ("API.md", "DEPLOYMENT.md", "OPERATOR.md", "SECURITY.md")
+_CLAIMS_AN_UPDATE = re.compile(r"\bUPDATE\b[^.;|]*\brefused\b|\brefused\b[^.;|]*\bUPDATE\b")
+
+
+def _sentences(text: str) -> list[str]:
+    """Sentences, a line break inside one read as a space (a checklist item wraps)."""
+    return [s for s in re.split(r"(?<=\.)\s+", re.sub(r"\s*\n\s*", " ", text)) if s.strip()]
+
+
+def test_no_guide_claims_an_update_the_append_only_probe_did_not_try() -> None:
+    """P-233: P-216 stopped the probe and ``crb doctor`` claiming an UPDATE refused on an
+    empty ledger, where none is tried, and corrected two criteria — but DEPLOYMENT §8's
+    go-live checklist still said the probe proves "an UPDATE refused", unconditionally. Every
+    sentence of a guide that speaks of the ``append_only`` probe refusing an UPDATE says it
+    is tried only once ``grades`` has a row, or what happens on an empty ledger. The walker
+    is not vacuous: the old checklist line fails it."""
+
+    def offenders(text: str) -> list[str]:
+        return [
+            s[:120]
+            for s in _sentences(text)
+            if "append_only" in s
+            and _CLAIMS_AN_UPDATE.search(s)
+            and "empty" not in s
+            and "has a row" not in s
+        ]
+
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    found = {name: offenders((docs / name).read_text(encoding="utf-8")) for name in _GUIDES}
+    assert not any(found.values()), found
+    old = (
+        "- [ ] `GET /api/v1/health` is green: `db` answers, the store is behind, ahead, empty or\n"
+        "      older. A half-migrated database cannot pass this line. `append_only` proves every\n"
+        "      trigger live and an UPDATE refused, `ledger` reads `false_q1=0`."
+    )
+    assert offenders(old), "the walker must catch the unconditional claim"

@@ -36,6 +36,18 @@ measurement]`. Convention is not evidence.
 5. The database store (P4) holds the same rows with the same chain; `grades`, `events` and
    `signoffs` tables have DB triggers that forbid `UPDATE` and `DELETE`. Revocation of a
    sign-off is a **new row** referencing the revoked one.
+   *Amendment (2026-09-27, DL-081):* the triggers must also hold against the statements
+   that do not look like an `UPDATE` or a `DELETE` — every SQLite connection the product
+   opens turns `PRAGMA recursive_triggers` on, so `REPLACE`'s implicit delete meets the
+   delete trigger, and PostgreSQL gets a statement-level `BEFORE TRUNCATE` trigger on every
+   append-only table. `/health` counts a trigger only when it is live (on its own table,
+   with the installer's whole definition, and on PostgreSQL enabled and calling an
+   unaltered function), and the installer re-creates only what is not live, so the API and
+   the worker can run as a PostgreSQL role that does not own the tables and therefore
+   cannot disable, drop or neuter them (docs/DEPLOYMENT.md §3.3). What the triggers cannot
+   stop is DDL, on the tables or on their triggers — retyping a column with `USING`,
+   dropping a column or the table rewrites or removes rows with no trigger firing — and
+   only the owner can issue it.
 6. JSONL is the portable interchange: the store imports the census `grades.jsonl` (1,071
    rows, stamped `provenance="imported:…"`, `belt_set="v3-legacy"` where belt 4 is absent)
    and exports rows verbatim. **Only the complete ledger verifies standalone from
@@ -45,7 +57,17 @@ measurement]`. Convention is not evidence.
    on that file reports the first gap. To verify a subset, verify the full export and check
    the subset's `row_hash` values are in it (`export` + a join), or re-chain it on import
    (`import` re-chains foreign rows and keeps the source hash in
-   `labels.source_row_hash`).
+   `labels.source_row_hash`). *Amended 2026-09-27 (DL-078):* an import also stamps every
+   row as imported inside its hashed body — `provenance` `imported:…`, `actor` `import`,
+   who imported it, when and from which file, and the source row's own actor and
+   provenance in `labels` — and is one `ledger.imported` event; an imported row is a
+   record of someone else's measurement and never counts toward a sign-off or the route
+   the delivery gate reads. The `signoffs` and `reviews` chains are verified on the
+   server as the `grades` chain is (`/ledger/verify`, `/signoffs/verify`, the `/health`
+   `ledger` probe). *Amended 2026-09-27 (DL-079):* a sign-off chain that does not verify end
+   to end lifts nothing in any repository and every record is served inactive
+   (`chain_ok: false`) — trust is decided on the chain, never on a row, since an edited
+   row's scope is the editor's choice.
 7. Statistics are computed only from ledger rows (`cell_stats`, `all_cell_stats`), and
    `cell_stats.false_q1` re-derives `clean == all recorded belts True` at read time.
 

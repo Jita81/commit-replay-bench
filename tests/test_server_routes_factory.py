@@ -19,14 +19,21 @@ What it does: Pins that a backlog registers frozen and hashed with the freeze in
               records each delivered pull request's fate at most closed then merged — a
               closed-only delivery is read again and its later merge lands; a merged-only
               one mints no token — task view, backlog summary and capability-map counts
-              agree (B-9 / F30).
+              agree (B-9 / F30); and that two registrations at once — two evolutions, or the
+              intake listener freezing twice on an empty backlog — both land on the active
+              backlog in the chain's order (EI-7), and that every server function deciding
+              between freeze and evolve does so inside the registration lock (a ratchet,
+              P-213).
 How:          FastAPI TestClient over the seeded SQLite app (``fixtures.server_seed``);
-              the factory state is read back through ``FactoryHome`` to check the files.
+              the factory state is read back through ``FactoryHome`` to check the files; the
+              races are staged with a barrier inside the registration that times out when
+              the code under test serialises it.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/server/routes/factory.py (under test), src/crb/server/factory_state.py
               (the state it writes), src/crb/factory/backlog.py (validation),
               src/crb/factory/readiness.py (slots), tests/fixtures/server_seed.py (the app),
+              tests/fixtures/concurrency.py (the staged races),
               tests/test_server_github_app.py (``FakeGitHub`` plays the pulls API)
 Tested by:    tests/test_server_routes_factory.py
 Touch when:   never for a new repository; a factory route or a field of the task view changes
@@ -56,6 +63,7 @@ from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
 from crb.server.settings import GitHubAppSettings
 from crb.store.models import GitHubInstallation, Repo, Run
+from fixtures.concurrency import at_once, pause_after
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
 from fixtures.signoff_seed import clear_policy
 
@@ -488,32 +496,91 @@ def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
     assert r.status_code == 422 and "factory runs only" in envelope(r)["message"]
 
 
-def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> None:
-    """`deliver` / `max_rework` are stored on the run; `deliver_override` needs an approver
-    and stamps the caller's identity into `params.deliver_override_by` (the route gate's
-    override is an approver's act, on the evidence chain — DL-038); none of them apply to
-    a non-factory run."""
+def test_factory_delivery_fields_and_the_second_approver_override(env: Env) -> None:
+    """`deliver` / `max_rework` are stored on the run. The route gate's override licenses a
+    delivery the map refused, so it is a SECOND approver's evented act (GOV-4, ADR-0016's
+    two-person rule): nobody overrides at enqueue — an operator is 403, an approver 409
+    ``same_actor`` and nothing is queued — and on a queued or running factory run that
+    delivers, ``POST /runs/{id}/deliver-override`` is refused to the run's own actor and to
+    a role below approver, and granted to another approver, named on the run and on a
+    ``system/run.deliver_override`` event; factory fields on another kind are refused."""
+    import hashlib
+
+    from sqlalchemy import func, select
+
+    from crb.store.models import Event
+
     login(env.client, "operator")
     assert _register(env, [ITEM]).status_code == 201
     body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
     r = env.post("/runs", json={**body, "deliver": True, "max_rework": 2})
     assert r.status_code == 201, r.text
+    operators_run = r.json()["id"]
     with env.factory() as s:
-        run = s.get(Run, r.json()["id"])
+        run = s.get(Run, operators_run)
         assert run is not None
         assert run.params_json["deliver"] is True and run.params_json["max_rework"] == 2
         assert "deliver_override_by" not in run.params_json
-    # an operator may not override the route gate
+    # nobody overrides at enqueue: an operator is refused the role, an approver the act
     r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
     assert r.status_code == 403 and envelope(r)["code"] == "forbidden"
-    # an approver may — and is named for it
     login(env.client, "approver")
-    r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
-    assert r.status_code == 201, r.text
     with env.factory() as s:
-        run = s.get(Run, r.json()["id"])
-        assert run is not None and run.params_json["deliver_override_by"]
-        assert run.params_json["deliver_override_by"] == run.actor
+        before = s.execute(select(func.count()).select_from(Run)).scalar_one()
+    r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor", r.text
+    assert "deliver-override" in envelope(r)["message"]
+    with env.factory() as s:
+        assert s.execute(select(func.count()).select_from(Run)).scalar_one() == before
+    # the approver queues a run that delivers, and cannot override its own run's gate
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    approvers_run = r.json()["id"]
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor"
+    # an operator may never grant it
+    login(env.client, "operator")
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 403
+    # a second approver (here the admin, who outranks one) grants it — named, evented
+    login(env.client, "admin")
+    root = hashlib.sha256(b"root").hexdigest()[:32]
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 200, r.text
+    assert r.json()["factory"]["deliver_override_by"] == root
+    with env.factory() as s:
+        run = s.get(Run, approvers_run)
+        assert run is not None and run.params_json["deliver_override_by"] == root != run.actor
+        events = (
+            s.execute(
+                select(Event).where(
+                    Event.trace_id == approvers_run, Event.action == "run.deliver_override"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [(e.actor, e.stage) for e in events] == [(root, "system")]
+    assert events[0].payload_json["run_actor"] != root
+    # once granted it stands for the run; a second grant is refused
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "override_already_granted"
+    # a run that does not deliver has no gate to override; an unknown run is 404
+    login(env.client, "operator")
+    r = env.post("/runs", json={**body, "deliver": False})
+    quiet = r.json()["id"]
+    login(env.client, "admin")
+    r = env.post(f"/runs/{quiet}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "delivery_off"
+    assert env.post("/runs/nope/deliver-override").status_code == 404
+    # a finished run is past its gates
+    with env.factory() as s:
+        done = s.get(Run, operators_run)
+        assert done is not None
+        done.status = "succeeded"
+        s.commit()
+    r = env.post(f"/runs/{operators_run}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "run_terminal"
     # factory-only fields on another kind are refused, naming them
     login(env.client, "operator")
     r = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "deliver": True, "max_rework": 1})
@@ -521,6 +588,61 @@ def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> Non
         r.status_code == 422
         and "['deliver', 'max_rework'] apply to factory runs only" in envelope(r)["message"]
     )
+    r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
+    assert r.status_code == 201
+    login(env.client, "admin")
+    r = env.post(f"/runs/{r.json()['id']}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "not_a_factory_run"
+
+
+def test_two_approvers_granting_one_override_at_once_grant_it_once(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-228: ``POST /runs/{id}/deliver-override`` read ``deliver_override_by`` with no lock
+    and wrote it later, so two approvers granting at the same moment both passed the
+    ``override_already_granted`` check: the trace recorded two grants while the run named
+    one (the last commit won). The check and the grant are now one step under the events
+    write lock, re-read under it: exactly one grant, one event, and the other approver is
+    refused naming the one who granted it."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    import crb.server.routes.runs as runs_routes
+    from crb.store.models import Event
+    from fixtures.server_seed import user_id
+
+    assert _register(env, [ITEM]).status_code == 201
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    run_id = r.json()["id"]
+    login(env.client, "approver")
+    with TestClient(env.client.app) as other:
+        login(other, "admin")
+        pause_after(monkeypatch, runs_routes, "_get_run")
+        results = at_once(
+            lambda: env.post(f"/runs/{run_id}/deliver-override"),
+            lambda: other.post(f"{API_PREFIX}/runs/{run_id}/deliver-override"),
+        )
+    codes = sorted(getattr(r, "status_code", type(r).__name__) for r in results)
+    assert codes == [200, 409], [getattr(r, "text", r) for r in results]
+    won = next(r for r in results if r.status_code == 200)
+    lost = next(r for r in results if r.status_code == 409)
+    grantor = won.json()["factory"]["deliver_override_by"]
+    assert grantor in {user_id("appr1"), user_id("root")}
+    assert envelope(lost)["code"] == "override_already_granted"
+    assert envelope(lost)["detail"]["deliver_override_by"] == grantor
+    with env.factory() as s:
+        run = s.get(Run, run_id)
+        assert run is not None and run.params_json["deliver_override_by"] == grantor
+        grants = list(
+            s.execute(
+                select(Event).where(
+                    Event.trace_id == run_id, Event.action == "run.deliver_override"
+                )
+            ).scalars()
+        )
+    assert [e.actor for e in grants] == [grantor]
 
 
 def test_task_view_folds_the_refusal_reason_and_the_build_ids(env: Env) -> None:
@@ -1104,3 +1226,143 @@ def test_outcome_sync_reads_a_closed_only_delivery_again_and_records_its_merge(
     assert r.status_code == 200, r.text
     assert (r.json()["checked"], r.json()["merged"], r.json()["errors"]) == (0, 0, [])
     assert env.get(f"/factory/{ALPHA}/evidence").json()["total"] == n_events + 1
+
+
+# ---------------------------------------------------------------------------
+# EI-7: registration is one locked read-modify-write of the active backlog
+# ---------------------------------------------------------------------------
+
+
+def test_two_simultaneous_evolutions_both_land_on_the_active_backlog(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-7: two evolutions registered at once both loaded the same active backlog, both
+    appended ``backlog.evolved`` to the (locked) evidence chain and both answered 201 — and
+    the second write of ``backlog.json`` dropped the first, so an item the chain records as
+    registered never builds (10 of 20 unstaged runs on the audit). Registration now holds
+    one lock from the load to the active pointer: both evolutions are on the backlog, in
+    the order the chain records them, and the task view serves both."""
+    from crb.factory.backlog import Backlog
+
+    assert _register(env, [ITEM]).status_code == 201
+    pause_after(monkeypatch, Backlog, "evolve")
+
+    def evolve(item_id: str) -> Any:
+        return lambda: env.post(
+            f"/factory/{ALPHA}/backlog/evolutions", json={"item": {**ITEM, "id": item_id}}
+        )
+
+    results = at_once(evolve("E-A"), evolve("E-B"))
+    assert [getattr(r, "status_code", type(r).__name__) for r in results] == [201, 201], [
+        getattr(r, "text", r) for r in results
+    ]
+    home = FactoryHome(env.settings.home, ALPHA)
+    active = home.load_backlog()
+    assert active is not None
+    chained = [e.item_id for e in home.events() if e.kind == "backlog.evolved"]
+    assert sorted(chained) == ["E-A", "E-B"]
+    assert [i.id for i in active.evolutions] == chained
+    tasks = {t["id"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert {"I-1", "E-A", "E-B"} <= tasks
+    assert env.get(f"/factory/{ALPHA}/evidence").json()["verified"] is True
+
+
+def test_the_intake_listener_racing_itself_on_an_empty_backlog_keeps_both_items(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """EI-7, the intake path: two tickets registered at once on a repository with no backlog
+    both saw none and both FROZE, so the second freeze replaced the first. The listener's
+    freeze-or-evolve now runs under the same registration lock."""
+    from crb.factory.backlog import BacklogItem
+    from crb.server.intake import _register as intake_register
+
+    home = FactoryHome(env.settings.home, ALPHA)
+    pause_after(monkeypatch, FactoryHome, "load_backlog")
+    a = BacklogItem.from_dict({**ITEM, "id": "T-1"})
+    b = BacklogItem.from_dict({**ITEM, "id": "T-2"})
+    results = at_once(
+        lambda: intake_register(home, a, actor="intake"),
+        lambda: intake_register(home, b, actor="intake"),
+    )
+    assert sorted(map(str, results)) == ["evolved", "frozen"], results
+    active = home.load_backlog()
+    assert active is not None and {"T-1", "T-2"} <= {i.id for i in active.all_items()}
+
+
+#: callers that load the backlog outside ``registration()`` and then register, each with the
+#: reason the load cannot go stale into a lost item
+_UNLOCKED_LOAD_EXEMPT = {
+    ("routes/factory.py", "register_evolution"): (
+        "a 404 peek only: FactoryHome.register_evolution loads again under the lock and "
+        "evolves what it loaded there, and a registered backlog is never removed"
+    ),
+}
+
+
+def test_every_freeze_or_evolve_decision_holds_the_registration_lock() -> None:
+    """EI-7's class, as a ratchet: a function that loads the active backlog and then freezes
+    or evolves it is a read-modify-write of ``backlog.json``. Three callers made that
+    decision (Learn, intake and the prevention route); the first fix locked two, and the
+    third still froze twice on an empty backlog. Every function in the server that calls
+    ``.load_backlog()`` and ``.register_backlog(`` / ``.register_evolution(`` must make every
+    one of those calls inside a ``with <home>.registration():`` block, or be named in
+    ``_UNLOCKED_LOAD_EXEMPT`` with the reason it cannot lose an item."""
+    import ast
+
+    import crb.server as server_pkg
+
+    writes = {"register_backlog", "register_evolution"}
+    root = Path(server_pkg.__file__).parent
+
+    def attr_calls(fn: ast.AST, names: set[str]) -> list[ast.Call]:
+        return [
+            n
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr in names
+        ]
+
+    def locked_spans(fn: ast.AST) -> list[tuple[int, int]]:
+        spans = []
+        for node in ast.walk(fn):
+            if isinstance(node, ast.With | ast.AsyncWith) and any(
+                isinstance(item.context_expr, ast.Call)
+                and isinstance(item.context_expr.func, ast.Attribute)
+                and item.context_expr.func.attr == "registration"
+                for item in node.items
+            ):
+                spans.append((node.lineno, node.end_lineno or node.lineno))
+        return spans
+
+    seen: set[tuple[str, str]] = set()
+    unlocked: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            loads = attr_calls(fn, {"load_backlog"})
+            registers = attr_calls(fn, writes)
+            if not loads or not registers:
+                continue
+            seen.add((rel, fn.name))
+            spans = locked_spans(fn)
+            last_write = max(c.lineno for c in registers)
+            outside = [
+                c.lineno
+                for c in [*loads, *registers]
+                if c.lineno <= last_write and not any(a <= c.lineno <= b for a, b in spans)
+            ]
+            if outside and (rel, fn.name) not in _UNLOCKED_LOAD_EXEMPT:
+                unlocked.append(f"{rel}::{fn.name} (lines {outside})")
+    assert unlocked == [], f"a freeze-or-evolve decision outside registration(): {unlocked}"
+    # every caller that decides was found, and every exemption still names a real one
+    assert {
+        ("intake.py", "_register"),
+        ("routes/learn.py", "_register_items"),
+        ("routes/prevention.py", "learn_register_item"),
+    } <= seen
+    assert set(_UNLOCKED_LOAD_EXEMPT) <= seen
+    assert all(why.strip() for why in _UNLOCKED_LOAD_EXEMPT.values())

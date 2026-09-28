@@ -54,10 +54,12 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               refused and served with those runs, so money is never spent twice (P-182).
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
-              the writes go through ``apply_triage`` / ``FactoryHome.register_*`` /
-              ``new_run`` + the job queue, each inside ``_learn_step``: the lock (which
-              fails closed), the side effect once, and the event on the repo's
-              ``learn:<repo>`` trace, retried on a lost ``seq`` race (P-420, P-429, P-431).
+              the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
+              ``FactoryHome.registration``) / ``new_run`` + ``stage_queued``, each inside
+              ``_learn_step``: the lock (which fails closed), the side effect once, and the
+              event on the repo's ``learn:<repo>`` trace, retried on a lost ``seq`` race
+              (P-420, P-429, P-431); the queue's in-flight guard is read under the events
+              write lock too (``lock_event_writes``), so the check and the act are one step.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
 Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` — the same
@@ -70,7 +72,8 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               registration path), src/crb/server/routes/runs.py (``new_run``,
               ``submit_refusals``, ``require_jobs``, ``append_system_event`` — how a run is
               built, refused at submit, queued, and how an event is chained),
-              src/crb/server/routes/factory.py
+              src/crb/store/events.py (``lock_event_writes``), src/crb/store/jobs.py
+              (``stage_queued``), src/crb/server/routes/factory.py
               (``_refuse_if_run_active``, ``_next_item_id`` — the backlog write's own
               guards, shared rather than copied), src/crb/cli/commands/learn.py (the CLI
               twin), docs/LEARNING-LOOP.md (what loops mechanically, what a human decides),
@@ -130,6 +133,8 @@ from crb.server.routes.runs import (
     system_trace_id,
 )
 from crb.server.schemas import TERMINAL_STATUSES, RunCreateRequest
+from crb.store.events import lock_event_writes
+from crb.store.jobs import stage_queued
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run, Task
 
@@ -302,8 +307,11 @@ def _lock_learn_trace(db: Session) -> None:
     ``crb.store.jobs``). A rollback or commit releases it.
 
     Fails closed (P-429): when a transaction is already open, ``BEGIN IMMEDIATE`` cannot
-    run and nothing proves this session holds the write lock (a deferred ``BEGIN`` holds
-    none), so :class:`LearnLockNotHeld` is raised and nothing is written."""
+    run, and its error is no documented proof that this session holds the write lock (a
+    deferred ``BEGIN`` holds none). SQLite does take the lock before it raises — its
+    ``OP_Transaction`` step runs before ``OP_AutoCommit``'s error — so the old helper held
+    it by accident; failing closed removes the dependence on that order.
+    :class:`LearnLockNotHeld` is raised and nothing is written."""
     dialect = db.get_bind().dialect.name
     if dialect == "sqlite":
         try:
@@ -656,26 +664,31 @@ def _register_items(
 ) -> tuple[Backlog | None, dict[str, str] | None]:
     """Write the items :func:`_plan_registration` tried, in order, appending each to
     ``registered`` as it lands. Returns the backlog after the last write and, when the
-    record refused an item part way, ``{item_id, reason}`` for it: the trial passed, so only
-    another registration path (the factory route, the intake Register act — neither takes
-    the Learn lock) can have moved the record since. The caller records what landed on the
-    Learn trace before it answers 409 (P-432). A freeze never replaces a backlog another
-    path froze in the meantime."""
+    record refused an item part way, ``{item_id, reason}`` for it: the trial passed, and the
+    caller holds the registration lock (EI-7) from the trial to here, so only a write the
+    record itself refuses, or a path outside that lock, can refuse an item part way. The
+    caller records what landed on the Learn trace before it answers 409 (P-432). A freeze
+    never replaces a backlog another path froze in the meantime. The lock is re-entrant, so
+    taking it here again costs nothing under the caller's and keeps every load and write of
+    this function inside it."""
     backlog: Backlog | None = None
-    for item, how in planned:
-        try:
-            if how == "frozen":
-                if home.load_backlog() is not None:
-                    raise BacklogError(
-                        "another path froze a backlog for this repository after this request "
-                        "read the record"
-                    )
-                backlog = home.register_backlog([item], actor=actor)
-            else:
-                backlog = home.register_evolution(item, actor=actor)
-        except (BacklogError, ValueError, LookupError) as exc:
-            return backlog, {"item_id": item.id, "reason": str(exc)}
-        registered.append(RegisteredItemOut(item_id=item.id, supersedes=item.supersedes, how=how))
+    with home.registration():
+        for item, how in planned:
+            try:
+                if how == "frozen":
+                    if home.load_backlog() is not None:
+                        raise BacklogError(
+                            "another path froze a backlog for this repository after this "
+                            "request read the record"
+                        )
+                    backlog = home.register_backlog([item], actor=actor)
+                else:
+                    backlog = home.register_evolution(item, actor=actor)
+            except (BacklogError, ValueError, LookupError) as exc:
+                return backlog, {"item_id": item.id, "reason": str(exc)}
+            registered.append(
+                RegisteredItemOut(item_id=item.id, supersedes=item.supersedes, how=how)
+            )
     return backlog, None
 
 
@@ -846,8 +859,9 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
 
     **409 ``register_refused``** (``detail.registered``) when the backlog record refuses an
     item (P-432). Every item is tried on the record in memory before any is written, so a
-    refusal there registers nothing (``registered`` is empty). Only another registration
-    path moving the record between that trial and the write can refuse an item part way:
+    refusal there registers nothing (``registered`` is empty). The trial and the writes are
+    one step under the registration lock (EI-7), so only the record refusing a write itself
+    can refuse an item part way:
     the items before it are then on the backlog, and the ``learn.strengthen.registered``
     event names exactly those, with ``refused`` ``{item_id, reason}``, before the 409.
     """
@@ -879,8 +893,12 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
         # record refuses before anything is written (P-432)
         if not done:
             _refuse_if_run_active(db, repo)
-            planned = _plan_registration(home, items)
-            done.append(_register_items(home, planned, registered, actor=operator.id))
+            # one locked read-modify-write from the trial's load to the last pointer write
+            # (EI-7): a second registration waits, then sees this one's freeze and evolves
+            # onto it — never a second freeze that replaces the first
+            with home.registration():
+                planned = _plan_registration(home, items)
+                done.append(_register_items(home, planned, registered, actor=operator.id))
         backlog, refused = done[0]
         if backlog is None:  # the record refused the first write: nothing landed
             assert refused is not None
@@ -966,14 +984,14 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     refused with nothing queued; **409 ``remeasure_already_queued``** while any run an earlier
     queue of this cell (same mode and apparatus) put on the queue has not finished, naming
     those runs — the plan is derived from graded rows only, so without this a double click
-    or a second operator would spend the estimate twice. The check, the runs and the
-    ``learn.remeasure.queued`` event that names them are one locked transaction (P-420): two
-    concurrent queues cannot both pass the check, and a failed insert or a lost ``seq`` race
-    leaves no run on the queue that no event names, and a transaction already open when the
-    lock is taken refuses the queue rather than run it unlocked (P-429);
-    **409 ``remeasure_concurrent_write``**
-    when other Learn writes won that race three times, with nothing queued; **503
-    ``queue_unavailable``** when this server has no queue.
+    or a second operator would spend the estimate twice. The guard, the runs and the
+    ``learn.remeasure.queued`` event that names them are one locked transaction under the
+    events write lock too (EI-1, P-420): two concurrent queues cannot both pass the check,
+    and a failed insert or a lost ``seq`` race leaves no run on the queue that no event
+    names, and a transaction already open when the lock is taken refuses the queue rather
+    than run it unlocked (P-429); **409 ``remeasure_concurrent_write``** when other Learn
+    writes won that race three times, with nothing queued; **503 ``queue_unavailable``**
+    when this server has no queue.
     """
     get_repo_or_404(db, repo)
     if body.apparatus != APPARATUS_VERSION:
@@ -1008,14 +1026,7 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             detail={"modes": sorted(c.mode for c in matches)},
         )
     cell = matches[0]
-    api = require_jobs()
-    if api.stage is None:  # pragma: no cover - crb.store.jobs always offers it
-        raise ApiError(
-            503,
-            "queue_unavailable",
-            "this server's job queue cannot enqueue inside the transaction that records it, "
-            "so a re-measurement is never queued from Learn — nothing was queued",
-        )
+    require_jobs()  # 503 before anything is read under the lock
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
     # whole or not at all (P-160 — the gate is the one POST /runs applies)
     validated_runs: list[RunCreateRequest] = []
@@ -1030,15 +1041,19 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
         submit_refusals(db, settings, validated, new_run(validated, actor=operator.id))
         validated_runs.append(validated)
 
-    # P-420: the check, the runs and the event that names them are ONE serialised
-    # transaction. The lock makes a concurrent queue of any cell wait for this one to
-    # commit (so it sees these runs and is refused); the runs are staged in the same
-    # transaction as the event, so a lost ``seq`` race or a failed insert rolls every run
-    # back with it, and a retry never finds runs on the queue that no event names.
+    # P-420: the guard, the runs and the event that names them are ONE serialised
+    # transaction (EI-1, DL-080). The lock makes a concurrent queue of any cell wait for this
+    # one to commit (so it sees these runs and is refused); the runs are staged on the
+    # request's own session (``stage_queued``), in the same transaction as the event, so a
+    # lost ``seq`` race or a failed insert rolls every run back with it, and a retry never
+    # finds runs on the queue that no event names.
     def stage() -> dict[str, Any]:
         # the check and the runs are staged again on every attempt: they are in the
         # transaction, so a lost race rolled them back with the event; each run meets the
-        # submit gate again under the lock, where nothing can change before it is staged
+        # submit gate again under the lock, where nothing can change before it is staged.
+        # The guard is read under the events write lock as well (EI-1): a second request
+        # waits here and then reads the first one's event, so it is refused
+        lock_event_writes(db)
         in_flight = in_flight_runs(
             db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
         )
@@ -1054,8 +1069,7 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
         for v in validated_runs:
             run = new_run(v, actor=operator.id)
             submit_refusals(db, settings, v, run)
-            assert api.stage is not None  # checked above; a closure does not keep the narrowing
-            runs.append(api.stage(db, run))
+            runs.append(stage_queued(db, run))
         return {
             "cell": cell.cell.label,
             "mode": cell.mode,

@@ -62,9 +62,11 @@ enforced by :func:`check_signable` (the first failing clause, as
 The cell's oracle strength is resolved in one place (:func:`resolve_oracle_strength`):
 the caller's ``oracle_strength`` (the server passes the mean of the latest task-level
 mutation scores of the cell's tasks — the same per-task reduction ``/oracle/{repo}``
-serves), else the route decision's, else the rows' own mean (census-imported rows
-carry one). It feeds the two oracle clauses and the stamped snapshot, never the
-route: the route stays the capability map's, so the two can never disagree.
+serves), else the strength the route decision was taken under, and only for a cell
+with no decision the rows' own mean (census-imported rows carry one; the server routes
+under its own oracle ledger, so a row's own number never reaches a sign-off there). It
+feeds the two oracle clauses and the stamped snapshot, never the route: the route stays
+the capability map's, so the two can never disagree.
 
 A deployment may relax the numeric thresholds and the two ``require_*`` route /
 controls switches (:meth:`SignoffPolicy.from_env`, bounds in :data:`POLICY_BOUNDS`);
@@ -313,6 +315,12 @@ REFUSAL_ORACLE_WEAK = "oracle_weak"
 REFUSAL_ROUTE_NOT_DELIVER = "route_not_deliver"  # emitted as ``route_not_deliver:<reason_code>``
 REFUSAL_ATTESTATION_MISSING = "attestation_missing"
 REFUSAL_SAME_ACTOR = "same_actor"
+#: The attested row was not measured by this deployment (an imported row, EI-2): an approver
+#: attests to a diff this instrument graded, never to a record of someone else's grading.
+REFUSAL_ATTESTED_ROW_NOT_MEASURED = "attested_row_not_measured"
+#: The attested row's evidence pack is not stored here, or does not re-hash to its name: the
+#: approver cannot have read the accepted diff it would attest to (EI-2).
+REFUSAL_ATTESTED_ROW_WITHOUT_PACK = "attested_row_without_pack"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_FALSE_Q1,
     REFUSAL_SCOPE_MISMATCH,
@@ -325,6 +333,8 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_ORACLE_WEAK,
     REFUSAL_ROUTE_NOT_DELIVER,
     REFUSAL_ATTESTATION_MISSING,
+    REFUSAL_ATTESTED_ROW_NOT_MEASURED,
+    REFUSAL_ATTESTED_ROW_WITHOUT_PACK,
     REFUSAL_SAME_ACTOR,
 )
 #: Clauses no deployment setting can switch off (``signoff-policy.v2`` added the oracle one,
@@ -333,6 +343,8 @@ NON_OVERRIDABLE_REFUSALS: tuple[str, ...] = (
     REFUSAL_FALSE_Q1,
     REFUSAL_ORACLE_UNMEASURED,
     REFUSAL_ATTESTATION_MISSING,
+    REFUSAL_ATTESTED_ROW_NOT_MEASURED,
+    REFUSAL_ATTESTED_ROW_WITHOUT_PACK,
     REFUSAL_SAME_ACTOR,
 )
 
@@ -693,16 +705,19 @@ class SignoffRecord:
         Evidence expires when the apparatus changes (EVIDENCE-AND-CLAIMS §4): a sign-off
         stamped at 2.1 does not license a cell that is now read at 2.2, so the overlay
         treats it as *stale* — kept on the record, shown in the Decisions inbox to be
-        re-signed or revoked, but lifting nothing. A record with no stamp (``crb.signoff.v1``)
-        or a cell with no rows is not judged stale here (the thin-cell rule covers the
-        latter); a cell read across several apparatus versions is covered when the
-        record's versions include every one of them.
+        re-signed or revoked, but lifting nothing. A record with no stamp (``crb.signoff.v1``,
+        or a stored row whose cell carries none) cannot show it covers the rows read now, so
+        it covers nothing and is stale on every apparatus (governance review 2026-09-27,
+        GOV-6: the write-time rules that once refused its thin cell do not run at read). A
+        cell with no rows is not judged here (the thin-cell rule refuses it); a cell read
+        across several apparatus versions is covered when the record's versions include
+        every one of them.
         """
         stamped = {v.strip() for v in self.apparatus_version.split(",") if v.strip()}
         current = set(cell.stats.apparatus_versions) if cell.stats is not None else set()
-        if not stamped or not current:
+        if not current:
             return True
-        return current <= stamped
+        return bool(stamped) and current <= stamped
 
     @property
     def arm(self) -> str:
@@ -718,10 +733,9 @@ class SignoffRecord:
 
     def covers_posture(self, cell: CapabilityCell) -> bool:
         """True when the attestation was made on evidence graded in the posture class(es) the
-        cell is read in (ADR-0019 §8): a sign-off never lifts a cell of another posture. As
-        with :meth:`covers_apparatus`, a record with no stamp (its evidence carried no
-        posture — before apparatus 2.3, and so stale by its apparatus already) or a cell with
-        no rows is not judged here."""
+        cell is read in (ADR-0019 §8): a sign-off never lifts a cell of another posture. A
+        record with no posture stamp (its evidence carried no posture — before apparatus 2.3,
+        and so stale by its apparatus already) or a cell with no rows is not judged here."""
         if not self.posture_class or cell.stats is None:
             return True
         return ",".join(cell.stats.posture_classes) == self.posture_class
@@ -797,14 +811,18 @@ def resolve_oracle_strength(
 
     ``oracle_strength`` is the caller's measurement (the server: the mean of the
     latest task-level mutation scores of the cell's tasks, from the oracle events —
-    ``None`` = it found none); else the route decision's (``decision`` defaults to
-    the cell's own); else the rows' own mean (census-imported rows carry one).
+    ``None`` = it found none); else the strength the route decision was taken under
+    (``decision`` defaults to the cell's own) — ``None`` there too means the route found
+    none, and nothing below it is read; only a cell with no decision falls back to the
+    rows' own mean. A caller that routed the cell under its own oracle ledger
+    (:func:`crb.core.capability.measure_cell` with ``oracle_by_task``, as the server does)
+    therefore never lends the cell a row's own number (EI-2, 2026-09-27).
     ``None`` all the way down means *unmeasured* — never 0.0, never a pass.
     """
     if oracle_strength is not None:
         return oracle_strength
     d = decision if decision is not None else cell.decision
-    if d is not None and d.oracle_strength is not None:
+    if d is not None:
         return d.oracle_strength
     return cell.stats.oracle_strength_mean if cell.stats is not None else None
 
