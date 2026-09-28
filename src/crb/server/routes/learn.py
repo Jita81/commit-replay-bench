@@ -111,15 +111,22 @@ from crb.core.learn import (
     triage_refusals,
 )
 from crb.core.routing import DEFAULT_POLICY
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
 from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
-from crb.server.routes.capability import CHECKS_CURRENT, rows_for_arm
+from crb.server.routes.capability import (
+    CHECKS_CURRENT,
+    POSTURE_DEPLOYMENT,
+    filter_posture,
+    rows_for_arm,
+)
 from crb.server.routes.factory import _next_item_id, _refuse_if_run_active
-from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict
+from crb.server.routes.oracle import SCORE_ACTIONS, latest_controls_verdict, oracle_by_task
+from crb.server.routes.readings import reading_book, rows_on_standard_arms
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.routes.runs import (
     append_system_event,
@@ -236,10 +243,11 @@ def derive_refusals(factory: SessionFactoryDep, repo: str) -> RefusalReport:
 
 
 def derive_strengthen(
-    db: Session, factory: SessionFactoryDep, repo: str, *, by: str, since: str
+    db: Session, factory: SessionFactoryDep, repo: str, *, by: str, since: str, settings: object
 ) -> StrengthenBacklog:
     """The repo's strengthening backlog (``StrengthenBacklog``) under the projection ``by``,
-    routed on the same policy and latest controls verdict the delivery gate reads."""
+    routed on the same policy, latest controls verdict and deployment posture class the
+    delivery gate reads."""
     if by not in PROJECTIONS:
         raise ApiError(
             422,
@@ -248,12 +256,29 @@ def derive_strengthen(
             detail={"allowed": sorted(PROJECTIONS)},
         )
     # the repository's own checks arm: a cell never pools two arms (ADR-0024)
-    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
+    every = list(DbLedger(factory).rows(repo=repo))
+    rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
+    # the deployment's posture class: a reading licenses only the rows it counted on (P-311)
+    rows = filter_posture(db, repo, rows, POSTURE_DEPLOYMENT, settings).rows
+    # one reading: the current apparatus and global class set, each cell on its standard arm
+    # (ADR-0025 item 1, ADR-0026) — never two pooled
+    book = reading_book(db, repo, every)
+    rows = rows_on_standard_arms(
+        [
+            r
+            for r in rows
+            if r.apparatus_version == APPARATUS_VERSION and r.taxonomy in ("", GLOBAL_CLASS_SET)
+        ],
+        PROJECTIONS[by],
+        book,
+    )
     cmap = build_capability_map(
         rows,
         projection=PROJECTIONS[by],
         policy=DEFAULT_POLICY,
         controls=latest_controls_verdict(db, repo),
+        oracle_by_task=oracle_by_task(db, repo),
+        readings=book,
     )
     return strengthening_backlog(
         cmap,
@@ -335,6 +360,7 @@ def learn_strengthen(
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    settings: SettingsDep,
     *,
     repo: str = Query(min_length=1, max_length=64),
     by: str = Query(default="class_size", max_length=32),
@@ -342,7 +368,7 @@ def learn_strengthen(
 ) -> dict[str, Any]:
     del viewer
     get_repo_or_404(db, repo)
-    backlog = derive_strengthen(db, factory, repo, by=by, since=since)
+    backlog = derive_strengthen(db, factory, repo, by=by, since=since, settings=settings)
     return {"repo": repo, "projection": by, **backlog.to_dict()}
 
 
@@ -661,7 +687,7 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     """
     get_repo_or_404(db, repo)
     _refuse_if_run_active(db, repo)
-    derived = derive_strengthen(db, factory, repo, by=body.by, since=body.since)
+    derived = derive_strengthen(db, factory, repo, by=body.by, since=body.since, settings=settings)
     by_id = {i.id: i for i in derived.items}
     chosen = list(dict.fromkeys(body.item_ids))  # the caller's order, each id once
     unknown = [i for i in chosen if i not in by_id]

@@ -54,7 +54,7 @@ describe('TERMS', () => {
   })
 
   it('the four routes and the two rates carry their thresholds', () => {
-    expect(TERMS.deliver.short).toMatch(/n ≥ 10/)
+    expect(TERMS.deliver.short).toMatch(/20 of the first 20, 29 of the first 30 or 38 of the first 40/)
     expect(TERMS.deliver.short).toMatch(/never means a change is safe to merge/)
     expect(TERMS.oracle_strength.short).toMatch(/killed \/ mutants planted/)
     expect(TERMS.wilson.short).toMatch(/95 %/)

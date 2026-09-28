@@ -59,34 +59,50 @@ import { ReasonCode } from '../Capability/ReasonCode'
 /** A decision as the base contract types it, with the A2 fields optional so an older server still renders. */
 type Decision = RouteDecision & Partial<RouteDecisionWithControls>
 
+/** `{"20": 0, "30": 1, "40": 2}` → `20/20 · 29/30 · 38/40` — the look rule's deliver points. */
+export function lookText(looks: Record<string, number> | undefined): string {
+  if (!looks) return '—'
+  return Object.entries(looks)
+    .map(([n, m]) => [Number(n), m] as const)
+    .sort((a, b) => a[0] - b[0])
+    .map(([n, m]) => `${n - m}/${n}`)
+    .join(' · ')
+}
+
 /** The thresholds in force and the rule in words — the same rule `crb.core.routing.route` applies. */
 function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; controls?: ControlsVerdict }) {
   return (
     <Card title="Policy in force" eyebrow={`${policy.version}${policy.controls_version ? ` + ${policy.controls_version}` : ''}`} actions={<ControlsPill verdict={controls} />}>
       <dl className="num grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-5">
         <div>
-          <Hint as="dt" id="policy.routing.min_n" className="label">
-            min n
+          <Hint as="dt" id="policy.routing.rule" className="label">
+            look rule
           </Hint>
-          <dd>{fmtInt(policy.min_n)}</dd>
+          <dd className="font-mono text-xs">{policy.rule}</dd>
         </div>
         <div>
-          <Hint as="dt" id="policy.routing.min_point" className="label">
-            min point
+          <Hint as="dt" id="policy.routing.looks" className="label">
+            deliver at
           </Hint>
-          <dd>{fmtPct(policy.min_point, 0)}</dd>
+          <dd>{lookText(policy.looks)}</dd>
         </div>
         <div>
-          <Hint as="dt" id="policy.routing.min_ci_low" className="label">
-            min Wilson lower
+          <Hint as="dt" id="policy.routing.budget" className="label">
+            error budget per cell
           </Hint>
-          <dd>{fmtPct(policy.min_ci_low, 0)}</dd>
+          <dd>{fmtRatio(policy.cell_error_budget)}</dd>
         </div>
         <div>
           <Hint as="dt" id="policy.routing.min_oracle" className="label">
             min oracle strength
           </Hint>
           <dd>{fmtRatio(policy.min_oracle_strength)}</dd>
+        </div>
+        <div>
+          <Hint as="dt" id="policy.routing.min_oracle_share" className="label">
+            min commits scored
+          </Hint>
+          <dd>{fmtPct(policy.min_oracle_share, 0)}</dd>
         </div>
         <div>
           <Hint as="dt" id="policy.routing.granularize" className="label">
@@ -111,9 +127,9 @@ function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; c
           </>
         )}
       </dl>
+      {/* the published bar, word for word as the server renders it (RoutingPolicy.describe — README carries the same sentence) */}
       <Hint as="p" id="tile.routing.rule" className="mt-3 text-xs text-on-surface-muted" data-testid="policy-rule">
-        The one rule: <em>deliver</em> iff n ≥ {policy.min_n} ∧ point ≥ {fmtPct(policy.min_point, 0)} ∧ Wilson-lower ≥ {fmtPct(policy.min_ci_low, 0)} ∧ false-Q1 = 0 ∧ (oracle strength ≥ {fmtRatio(policy.min_oracle_strength)} when measured)
-        {policy.controls_version ? <> ∧ negative controls passed ∧ ≥ {fmtPct(policy.min_controls_share, 0)} of control rows constructible ∧ escapes ≤ {fmtInt(policy.max_controls_escapes)}</> : null}. Any false-Q1 ⇒ <em>do not ship</em>; XL ⇒ <em>granularize</em>; a FAILED controls gate, a weak oracle or an escaped control ⇒ <em>human</em>; controls unmeasured or thin ⇒ <em>calibrate</em>; otherwise <em>calibrate</em>. The all-rows point routes; the model rate on fair attempts is shown beside it, never instead of it.
+        {policy.description}
       </Hint>
     </Card>
   )

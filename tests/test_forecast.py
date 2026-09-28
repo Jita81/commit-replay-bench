@@ -39,6 +39,7 @@ from crb.core import signoff as so
 from crb.core.ledger import GradeRow
 from crb.core.routing import ROUTE_CALIBRATE, ROUTE_DELIVER, ROUTE_GRANULARIZE, ROUTE_HUMAN
 from fixtures.posture import posture_row
+from fixtures.readings import live_labels, world_for
 
 PACK = "c" * 64
 
@@ -55,6 +56,8 @@ def _row(
     task_id: str = "0123456789abcdef",
     **kw: Any,
 ) -> GradeRow:
+    live = live_labels(task_id)
+    live["labels"] = {**live["labels"], **kw.pop("labels", {})}
     return posture_row(
         repo="todo",
         task_id=task_id,
@@ -73,8 +76,19 @@ def _row(
         latency_s=latency,
         oracle_strength=oracle_strength,
         evidence_pack_hash=PACK if clean else "",
-        **kw,
+        gold_clean=True,
+        **{**live, **kw},
     )
+
+
+def forecast(mix: Any, rows: list[GradeRow], *, oracle: float = 0.9, **kw: Any) -> fc.Forecast:
+    """``forecast_build`` under routing.v2's world: a reading per full cell, an oracle score
+    per task and a passing controls report at 2.4 (``fixtures.readings.world_for``)."""
+    return fc.forecast_build(mix, rows, **{**world_for(rows, oracle=oracle), **kw})
+
+
+def readiness(mix: Any, rows: list[GradeRow], **kw: Any) -> fc.ReadinessReport:
+    return fc.assess_readiness(mix, rows, **{**world_for(rows), **kw})
 
 
 def _cell_rows(
@@ -134,7 +148,7 @@ def test_forecast_cost_variance_routing_and_unmeasured() -> None:
     rows = (
         _cell_rows("bug.fix", "S", cost=0.5, cost_sd=0.1)  # deliver
         + _cell_rows("backend.route.add", "M", cost=0.6, clean=40)  # deliver
-        + _cell_rows("frontend.component.add", "M", cost=0.7, clean=16)  # 40% → calibrate
+        + _cell_rows("frontend.component.add", "M", cost=0.7, clean=16)  # 40% → insufficient
     )
     mix = {
         "bug.fix/S": 2,
@@ -142,7 +156,7 @@ def test_forecast_cost_variance_routing_and_unmeasured() -> None:
         "frontend.component.add/M": 1,
         "docs.update/S": 3,
     }
-    f = fc.forecast_build(mix, rows)
+    f = forecast(mix, rows)
 
     assert f.components == 7 and f.measured_components == 4
     assert f.coverage == pytest.approx(4 / 7)
@@ -152,8 +166,8 @@ def test_forecast_cost_variance_routing_and_unmeasured() -> None:
     # variance: only bug.fix has σ (≈0.1 sample σ over ±0.1 alternation) over 2 units
     sigma = _sigma_of([0.4, 0.6] * 20)
     assert f.total_cost_stddev == pytest.approx(math.sqrt(2 * sigma**2), rel=1e-6)
-    # routing: 3 units deliver, 1 calibrate, 3 not yet measured
-    assert f.deliver == 3 and f.calibrate == 1 and f.human == 0
+    # routing: 3 units deliver, 1 human (the reading read insufficient), 3 not yet measured
+    assert f.deliver == 3 and f.calibrate == 0 and f.human == 1
     assert f.units_by_route[cap.NOT_YET_MEASURED] == 3
     assert f.unmeasured == ("docs.update/S",)
     # build time: 4 measured units × 600 s = 40 min
@@ -166,11 +180,11 @@ def test_forecast_cost_variance_routing_and_unmeasured() -> None:
     assert per["bug.fix/S"].config == "agentic/gpt-oss-120b@cerebras"
     assert (
         per["frontend.component.add/M"].config == ""
-        and per["frontend.component.add/M"].route == ROUTE_CALIBRATE
+        and per["frontend.component.add/M"].route == ROUTE_HUMAN
     )
     assert per["docs.update/S"].route == cap.NOT_YET_MEASURED and per["docs.update/S"].n == 0
     assert per["bug.fix/S"].n == 40 and per["bug.fix/S"].ci_low is not None
-    assert f.policy_version == "routing.v1"
+    assert f.policy_version == "routing.v2"
     assert f.to_dict()["unmeasured"] == ["docs.update/S"]
 
 
@@ -180,40 +194,42 @@ def _sigma_of(xs: list[float]) -> float:
 
 
 def test_forecast_routes_to_cheapest_passing_config() -> None:
-    # bug.fix/S is weak on the cheap model but passes on the dear one → priced at the dear one;
-    # docs.update passes on both → priced at the cheap one.
+    # bug.fix/S is weak on the cheap model but passes on the dear one; docs.update is measured
+    # on the cheap model alone and passes → priced at it.
     rows = (
         _cell_rows("bug.fix", "S", model="cheap", cost=0.5, clean=2)
         + _cell_rows("bug.fix", "S", model="dear", cost=2.7, clean=40)
         + _cell_rows("docs.update", "S", model="cheap", cost=0.5, clean=40)
-        + _cell_rows("docs.update", "S", model="dear", cost=2.7, clean=40)
     )
-    f = fc.forecast_build({"bug.fix/S": 1, "docs.update/S": 1}, rows)
+    f = forecast({"bug.fix/S": 1, "docs.update/S": 1}, rows)
     per = {c.label: c for c in f.per_component}
-    # the (class × size) cell for bug.fix pools both models: 42/80 → calibrate, so the
-    # forecast is honest that the CELL is not deliverable even though one config passes.
+    # the (class × size) cell for bug.fix pools both models, so no one model's reading licenses
+    # it (ADR-0025 item 12) → calibrate: the CELL is not deliverable though one config passes.
     assert per["bug.fix/S"].route == ROUTE_CALIBRATE and per["bug.fix/S"].config == ""
     assert per["docs.update/S"].route == ROUTE_DELIVER and "cheap" in per["docs.update/S"].config
     assert per["docs.update/S"].unit_cost_usd == pytest.approx(0.5)
     # a model-projected forecast is the caller's tool for "escalate to the dear model":
-    m = cap.build_capability_map(rows, projection=cap.PROJECTION_CLASS_SIZE_MODEL)
+    m = cap.build_capability_map(
+        rows, projection=cap.PROJECTION_CLASS_SIZE_MODEL, **world_for(rows)
+    )
     assert m.get(capability_class="bug.fix", size="S", model="dear").route == ROUTE_DELIVER
 
 
 def test_forecast_class_only_key_uses_class_projection() -> None:
     rows = _cell_rows("bug.fix", "S", clean=40) + _cell_rows("bug.fix", "M", clean=40)
-    f = fc.forecast_build({"bug.fix": 3}, rows)
+    f = forecast({"bug.fix": 3}, rows)
     c = f.per_component[0]
-    assert c.size == "" and c.route == ROUTE_DELIVER and c.n == 80  # the pick pools both sizes
-    assert f.deliver == 3
+    # a class-wide cell pools two sizes: no one cell's reading licenses it (routing.v2)
+    assert c.size == "" and c.route == ROUTE_CALIBRATE and c.n == 80
+    assert f.deliver == 0 and f.calibrate == 3
 
 
 def test_forecast_uncosted_cells_are_reported_not_priced() -> None:
-    # uncosted = no cost was ever reported (an imported row), not a builder-reported $0,
-    # which is a known $0 and prices at $0 (P-131: test_economics.py pins that side)
-    rows = _cell_rows("bug.fix", "S", cost=0.0, latency=0.0, provenance="imported:census")
+    # uncosted = no price was known for the builder's model (``cost_known`` pinned false), not
+    # a builder-reported $0, which is a known $0 and prices at $0 (P-131: test_economics.py)
+    rows = _cell_rows("bug.fix", "S", cost=0.0, latency=0.0, labels={"cost_known": "false"})
     assert not any(r.cost_known for r in rows)
-    f = fc.forecast_build({"bug.fix/S": 2}, rows)
+    f = forecast({"bug.fix/S": 2}, rows)
     assert f.measured_components == 2 and f.costed_components == 0 and f.timed_components == 0
     assert f.total_cost_mean == 0.0 and f.total_build_minutes == 0.0
     assert f.per_component[0].unit_cost_usd is None and f.per_component[0].unit_minutes is None
@@ -221,29 +237,25 @@ def test_forecast_uncosted_cells_are_reported_not_priced() -> None:
 
 
 def test_single_rep_band_is_surfaced() -> None:
-    f = fc.forecast_build(
-        {"bug.fix/S": 2, "novel.thing/S": 3}, _cell_rows("bug.fix", "S", clean=40)
-    )
+    f = forecast({"bug.fix/S": 2, "novel.thing/S": 3}, _cell_rows("bug.fix", "S", clean=40))
     assert f.p_clean_mean == 1.0 and f.p_clean_stddev == 0.0 and f.single_rep_band
     assert "absence of spread" in fc.render_forecast(f)
 
 
 def test_forecast_special_routes() -> None:
-    rows = _cell_rows("bug.fix", "XL", clean=40) + _cell_rows(
-        "bug.fix", "S", clean=40, oracle_strength=0.5
-    )
-    f = fc.forecast_build({"bug.fix/XL": 2, "bug.fix/S": 1}, rows)
+    rows = _cell_rows("bug.fix", "XL", clean=40) + _cell_rows("bug.fix", "S", clean=40)
+    f = forecast({"bug.fix/XL": 2, "bug.fix/S": 1}, rows, oracle=0.5)
     assert f.units_by_route[ROUTE_GRANULARIZE] == 2 and f.units_by_route[ROUTE_HUMAN] == 1
     assert f.deliver == 0
 
 
 def test_forecast_rejects_negative_counts() -> None:
     with pytest.raises(ValueError, match="negative"):
-        fc.forecast_build({"bug.fix/S": -1}, [])
+        forecast({"bug.fix/S": -1}, [])
 
 
 def test_render_forecast_smoke() -> None:
-    f = fc.forecast_build({"bug.fix/S": 1, "missing.x/S": 1}, _cell_rows("bug.fix", "S"))
+    f = forecast({"bug.fix/S": 1, "missing.x/S": 1}, _cell_rows("bug.fix", "S"))
     txt = fc.render_forecast(f)
     assert "Build forecast" in txt and "missing.x/S" in txt and "Unmeasured" in txt
     assert "| `bug.fix/S` | 1 | **deliver** | 40 |" in txt
@@ -275,7 +287,7 @@ def test_thresholds_are_frozen_and_never_relax_false_q1() -> None:
 def test_readiness_reports_the_punch_list() -> None:
     # default bar on automated-pass data + an unmeasured class + a thin cell ⇒ NOT ready
     rows = _cell_rows("bug.fix", "S", clean=40) + _cell_rows("test.add", "S", n=3, clean=3)
-    r = fc.assess_readiness({"bug.fix/S": 2, "test.add/S": 1, "novel.x/S": 3}, rows)
+    r = readiness({"bug.fix/S": 2, "test.add/S": 1, "novel.x/S": 3}, rows)
     assert not r.ok
     assert r.coverage == pytest.approx(3 / 6)
     assert r.measured == 3 and r.total == 6
@@ -296,14 +308,14 @@ def test_readiness_passes_when_bar_relaxed_and_go_with_signoff() -> None:
     t = fc.ReadinessThresholds(
         min_coverage=0.0, min_reps=1, require_earned_tier=False, min_buildable=0.80
     )
-    r = fc.assess_readiness({"bug.fix/S": 3}, rows, thresholds=t)
+    r = readiness({"bug.fix/S": 3}, rows, thresholds=t)
     assert r.ok and not r.gaps
     assert r.coverage == 1.0 and r.buildable_frac == 1.0
     assert "GO" in fc.render_readiness(r)
     # the DEFAULT bar is met once a human signs the cell off
-    strict = fc.assess_readiness({"bug.fix/S": 3}, rows)
+    strict = readiness({"bug.fix/S": 3}, rows)
     assert not strict.ok and any("earned" in g for g in strict.gaps)
-    signed = fc.assess_readiness(
+    signed = readiness(
         {"bug.fix/S": 3},
         rows,
         signoffs=[so.SignoffRecord(repo="todo", capability_class="bug.fix", verifier="alice")],
@@ -317,7 +329,7 @@ def test_readiness_false_q1_is_cardinal() -> None:
     bad = _row(cls="bug.fix", size="S")
     object.__setattr__(bad, "target_green", False)
     rows = [*_cell_rows("bug.fix", "S", clean=40), bad]
-    r = fc.assess_readiness(
+    r = readiness(
         {"bug.fix/S": 3},
         rows,
         thresholds=fc.ReadinessThresholds(
@@ -328,7 +340,7 @@ def test_readiness_false_q1_is_cardinal() -> None:
     assert r.false_q1_total == 1
     assert any("CARDINAL" in g and "false_q1=1" in g for g in r.gaps)
     # a sign-off cannot rescue it either
-    r2 = fc.assess_readiness(
+    r2 = readiness(
         {"bug.fix/S": 3},
         rows,
         signoffs=[so.SignoffRecord(repo="todo", capability_class="bug.fix", verifier="alice")],
@@ -338,6 +350,6 @@ def test_readiness_false_q1_is_cardinal() -> None:
 
 
 def test_readiness_empty_mix_is_not_ready() -> None:
-    r = fc.assess_readiness({}, [])
+    r = readiness({}, [])
     assert not r.ok and r.total == 0 and r.coverage == 0.0
     assert any("coverage 0%" in g for g in r.gaps)

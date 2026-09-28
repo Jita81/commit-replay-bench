@@ -45,6 +45,7 @@ import { DocLink, Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, PageTitle, SummaryList, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
+import { SIGNOFF_POLICY_VERSION } from '../Signoff/contract'
 
 /** The next step after a value that is not the production posture: the sentence, the guide, and Settings for an admin. */
 function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolean; doc?: ReactNode }) {
@@ -152,7 +153,7 @@ export function PosturePage() {
             '…'
           ),
         },
-        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · signoff-policy.v3` },
+        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · ${SIGNOFF_POLICY_VERSION}` },
         { key: 'Licence', hint: 'summary.posture.licence', value: 'Apache-2.0' },
       ],
     },

@@ -42,7 +42,9 @@ What is measured, and the rule for each
   (process or context), come from the bug register behind :func:`default_register` — stream
   L's prevention register over the loop's own chain; ``source`` names it.
 * **Prospective routing precision** — walk the rows in time order; before each row, route its
-  cell (repository × mode × cell key) with the ONE routing rule from the rows before it only;
+  cell (repository × mode × checks arm × apparatus × context arm × class set × cell key) with
+  the ONE routing rule from the rows before it only (a ceiling or descriptive arm never
+  delivers);
   of the rows attempted under a ``deliver`` decision, how many were clean (and working).
   Controls are not evaluated here (numeric clauses only) and the output says so.
 * **One checks arm** (ADR-0024) — a row graded with the format step or belt 6 on answers a
@@ -69,8 +71,8 @@ What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from
 How:          ``select_rows`` (repo, apparatus) → the ``checks`` arm → ``north_star``
               (``Rate`` × ``precision``) → ``process_loss`` → ``learning_curve``
               (``BugRegister.class_of`` per attempt, windows, ``statuses`` → shares) →
-              ``prospective_routing`` (running ``CellStats`` per cell → ``route``) → per-cell
-              and per-repository roll-ups.
+              ``prospective_routing`` (the look rule over each cell's running first
+              attempts) → per-cell and per-repository roll-ups.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0024-working-by-construction.md
               (the headline reads one checks arm)
@@ -97,6 +99,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from crb.core.checks import ARM_OFF, ARMS
+from crb.core.context_arm import parse_arm
 from crb.core.flow import Spend, spend_of_rows
 from crb.core.ledger import (
     FAILURE_BUDGET,
@@ -108,13 +111,21 @@ from crb.core.ledger import (
     FAILURE_PROTOCOL,
     PROTOCOL_VIOLATION_PREFIX,
     CellKey,
-    CellStats,
     GradeRow,
 )
 from crb.core.prevention import Mechanisms, PreventionRecord, PreventionRegister
+from crb.core.reading import STATE_DELIVER, STATE_INSUFFICIENT, look_state
 from crb.core.review import ReviewRecord, latest_reviews
-from crb.core.routing import DEFAULT_POLICY, ROUTE_DELIVER, ROUTES, RoutingPolicy, route
-from crb.core.stats import Interval, mean, wilson_interval
+from crb.core.routing import (
+    DEFAULT_POLICY,
+    ROUTE_CALIBRATE,
+    ROUTE_DELIVER,
+    ROUTE_GRANULARIZE,
+    ROUTE_HUMAN,
+    ROUTES,
+    RoutingPolicy,
+)
+from crb.core.stats import Interval, wilson_interval
 from crb.core.version import APPARATUS_VERSION
 
 VALUE_SCHEMA = "crb.value.v1"
@@ -192,6 +203,12 @@ class ValueRow:
     provider: str = ""
     #: The ``checks`` arm the row was graded under (ADR-0024): a cell never pools two
     checks_arm: str = ARM_OFF
+    #: The context arm and class-set version (ADR-0026 items 1 and 9) — ``""`` before 2.4;
+    #: the loop on and off are two arms, and a cell never pools two of either
+    context_arm: str = ""
+    taxonomy: str = ""
+    #: The distinct change the row observed (``GradeRow.change_id``, else the task)
+    change: str = ""
     grade: GradeRow | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -283,6 +300,9 @@ def value_row_from_grade(row: GradeRow) -> ValueRow:
         model=row.model,
         provider=row.provider,
         checks_arm=row.checks_arm,
+        context_arm=row.context_arm,
+        taxonomy=row.taxonomy,
+        change=row.change_id or row.task_id,
         grade=row,
     )
 
@@ -910,14 +930,6 @@ def learning_curve(
 # --- prospective routing ----------------------------------------------------------------
 
 
-@dataclass
-class _Running:
-    n: int = 0
-    clean: int = 0
-    strengths: list[float] = field(default_factory=list)
-    apparatus: set[str] = field(default_factory=set)
-
-
 @dataclass(frozen=True)
 class RoutingPrecision:
     rows_scored: int
@@ -932,8 +944,10 @@ class RoutingPrecision:
             "policy_version": self.policy_version,
             "controls": "not evaluated",
             "method": (
-                "rows in time order; before each row its cell (repository x mode x cell key) is "
-                "routed from the rows before it only; deliver = clean among the rows attempted "
+                "rows in time order; before each row its cell (repository x mode x checks arm "
+                "x apparatus x context arm x class set x cell key) is routed from the rows "
+                "before it only, and a ceiling (S3) or descriptive (A0) context arm never "
+                "delivers; deliver = clean among the rows attempted "
                 "under a deliver decision; deliver_working = the deterministic PROXY (clean, "
                 "lint-clean, no public-API break) among the same rows — no review is read"
             ),
@@ -950,42 +964,55 @@ class RoutingPrecision:
 def prospective_routing(
     rows: Iterable[ValueRow], *, policy: RoutingPolicy = DEFAULT_POLICY
 ) -> RoutingPrecision:
-    """Replay the routing rule forward in time; score every ``deliver`` on the row it let in."""
-    running: dict[tuple[str, ...], _Running] = {}
+    """Replay routing.v2's look rule forward in time; score every ``deliver`` on the row it
+    let in. A PROXY: per (repository, mode, checks arm, apparatus, context arm, class set,
+    full cell) the rows are read in arrival order as if a reading had been registered before
+    the first — each distinct change counted once, by its first row — so a cell delivers from
+    the first look its running first attempts clear (ADR-0026 item 3), reads ``human`` once a
+    miss puts the last look out of reach, and ``calibrate`` before either; a size the policy
+    splits reads ``granularize``; an arm that does not certify — ``S3`` (a ceiling) or ``A0``
+    (descriptive) — reads ``calibrate``, as routing.v2 routes it (ADR-0026 item 4). The seeded
+    order, the posture, the oracle and the controls are not replayed (``controls: not
+    evaluated``), and a later row never changes an earlier decision."""
+    outcomes: dict[tuple[str, ...], list[bool | None]] = {}
+    seen: dict[tuple[str, ...], set[str]] = {}
     decisions: dict[str, int] = dict.fromkeys(ROUTES, 0)
     delivered: list[ValueRow] = []
     scored = 0
     for r in _ordered(rows):
         if not r.eligible:
             continue
-        key = (r.repo, r.mode, r.checks_arm, *r.cell.to_tuple())
-        st = running.setdefault(key, _Running())
-        ci = wilson_interval(st.clean, st.n)
-        stats = CellStats(
-            cell=r.cell,
-            n=st.n,
-            clean=st.clean,
-            disqualified=0,
-            errors=0,
-            false_q1=0,
-            point=st.clean / st.n if st.n else 0.0,
-            ci=ci,
-            cost_usd_mean=0.0,
-            latency_s_mean=0.0,
-            oracle_strength_mean=mean(st.strengths) if st.strengths else None,
-            apparatus_versions=tuple(sorted(st.apparatus)),
-            checks_arm=r.checks_arm,
+        key = (
+            r.repo,
+            r.mode,
+            r.checks_arm,
+            r.apparatus_version,
+            r.context_arm,
+            r.taxonomy,
+            *r.cell.to_tuple(),
         )
-        decision = route(stats, policy=policy)
-        decisions[decision.route] += 1
+        so_far = outcomes.setdefault(key, [])
+        if r.cell.size in policy.granularize_sizes:
+            decision = ROUTE_GRANULARIZE
+        elif r.context_arm and not parse_arm(r.context_arm).certifies:
+            decision = ROUTE_CALIBRATE  # a ceiling (S3) or descriptive (A0) arm never delivers
+        else:
+            state = look_state(so_far, policy.rule).state
+            decision = (
+                ROUTE_DELIVER
+                if state == STATE_DELIVER
+                else ROUTE_HUMAN
+                if state == STATE_INSUFFICIENT
+                else ROUTE_CALIBRATE
+            )
+        decisions[decision] += 1
         scored += 1
-        if decision.route == ROUTE_DELIVER:
+        if decision == ROUTE_DELIVER:
             delivered.append(r)
-        st.n += 1
-        st.clean += int(r.clean)
-        if r.oracle_strength is not None:
-            st.strengths.append(r.oracle_strength)
-        st.apparatus.add(r.apparatus_version)
+        change = r.change or r.task_id
+        if change not in seen.setdefault(key, set()):
+            seen[key].add(change)
+            so_far.append(r.clean)
     by_mode: dict[str, int] = {}
     for r in delivered:
         by_mode[r.mode] = by_mode.get(r.mode, 0) + 1
@@ -1082,14 +1109,34 @@ class ValueReport:
 _SIZE_ORDER = {s: i for i, s in enumerate(("XS", "S", "M", "L", "XL"))}
 
 
+def _first_attempts(rows: Sequence[ValueRow]) -> Rate:
+    """Distinct changes, each by its first observed ``r1`` attempt in time order (ADR-0025
+    item 2) — the per-arm unit ``/value`` serves beside the attempt rate."""
+    seen: dict[str, bool] = {}
+    for r in _ordered(rows):
+        if not r.valid or (r.trial and r.trial.strip().lower() != "r1"):
+            continue
+        seen.setdefault(r.change or r.task_id, r.clean)
+    return Rate(sum(1 for c in seen.values() if c), len(seen))
+
+
 def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]:
-    groups: dict[tuple[str, str, str, str], list[ValueRow]] = {}
+    groups: dict[tuple[str, str, str, str, str, str], list[ValueRow]] = {}
     for r in rows:
-        groups.setdefault((r.capability_class, r.size, r.mode, r.checks_arm), []).append(r)
+        key = (r.capability_class, r.size, r.mode, r.checks_arm, r.context_arm, r.taxonomy)
+        groups.setdefault(key, []).append(r)
     out = []
-    for (cls, size, mode, arm), rs in sorted(
+    for (cls, size, mode, arm, context_arm, taxonomy), rs in sorted(
         groups.items(),
-        key=lambda kv: (kv[0][0], _SIZE_ORDER.get(kv[0][1], 9), kv[0][1], kv[0][2], kv[0][3]),
+        key=lambda kv: (
+            kv[0][0],
+            _SIZE_ORDER.get(kv[0][1], 9),
+            kv[0][1],
+            kv[0][2],
+            kv[0][3],
+            kv[0][4],
+            kv[0][5],
+        ),
     ):
         rate = _rate(rs)
         cell_spend = spend_of_rows(rs)
@@ -1100,6 +1147,11 @@ def _cells(rows: Sequence[ValueRow], usd_per_gbp: float) -> list[dict[str, Any]]
                 "size": size,
                 "mode": mode,
                 "checks": arm,
+                # ADR-0026: one context arm and class-set version per cell — the loop on
+                # (``+L``) and off are two arms, never pooled (stream-learn.measure.27)
+                "context_arm": context_arm,
+                "taxonomy": taxonomy,
+                "first_attempts": _first_attempts(rs).to_dict(),
                 "attempts": len(rs),
                 "n_valid": rate.n,
                 "clean": rate.to_dict(),

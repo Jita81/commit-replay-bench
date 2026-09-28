@@ -44,7 +44,8 @@ Works with:   src/crb/builders/brief.py (the one composer), src/crb/core/grade.p
               unchanged), src/crb/core/workspace.py (the trial tree), src/crb/factory/testfirst.py
               (``RedProof`` / identity check), src/crb/builders/base.py (``Builder``,
               ``BuildBrief``, ``Rung``), src/crb/core/ledger.py (``GradeRow`` with
-              ``PROCESS_FACTORY``), src/crb/factory/delivery.py (commits the kept workspace),
+              ``PROCESS_FACTORY``; its labels from ``row_labels_at_write``, the helper replay
+              rows use too), src/crb/factory/delivery.py (commits the kept workspace),
               src/crb/factory/review.py (replays the edits it recorded)
 Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py
 Touch when:   never for a new repository; when ``GradeRow`` gains a field (``factory_row``
@@ -77,6 +78,7 @@ from crb.builders.brief import (
     compose,
     context_arm_for,
 )
+from crb.core import version as _version
 from crb.core.checks import LABEL_CHECKS, RepoChecks, ResolvedChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.deps import NullDepsProvider, TaskDeps
@@ -91,7 +93,10 @@ from crb.core.ledger import (
     GradeRow,
     JsonlLedger,
     api_labels,
+    builder_stop_reason,
+    context_arm_of_factory_author,
     posture_labels,
+    row_labels_at_write,
 )
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
@@ -361,6 +366,24 @@ class BuildResult:
         }
 
 
+def factory_row_arm(test_author: str) -> str:
+    """A factory row's context arm (ADR-0026 item 1): a person's failing test
+    (``operator:<name>``) is ``S2``; an authored one is ``S1@<canonical model>`` — the author's
+    model through :func:`~crb.factory.testfirst.canonical_model`, so a provider label or a
+    dated id never makes one model two authors. No ``+L``: a factory brief does not carry the
+    loop's overlay today (stream F's composer adds it only when the standard arm does)."""
+    author = (test_author or "").strip()
+    if author.startswith("operator:") or ":" not in author:
+        return context_arm_of_factory_author(author or "operator:unknown")
+    return context_arm_of_factory_author(author, canonical_model(author.split(":", 1)[1]))
+
+
+def factory_context_arm(labels: Mapping[str, str]) -> str:
+    """The arm of a factory row from the labels it carries (``test_author``, or an explicit
+    ``context_arm`` the brief composer stamped)."""
+    return str(labels.get("context_arm") or "") or factory_row_arm(labels.get("test_author", ""))
+
+
 def factory_row(
     task: TaskSpec,
     result: GradeResult,
@@ -372,9 +395,27 @@ def factory_row(
     trial: str,
     actor: str,
     labels: Mapping[str, str],
+    apparatus_version: str = "",
 ) -> GradeRow:
     """The ledger row for a factory grade — the same fields as a replay row with
-    ``process_step=factory`` and the belt-5 set; ``GradeRow`` enforces false-Q1 = 0."""
+    ``process_step=factory`` and the belt-5 set; ``GradeRow`` enforces false-Q1 = 0.
+
+    Its classification comes from the core's ONE row-labelling helper
+    (``crb.core.ledger.row_labels_at_write``, ADR-0025 item 6): from apparatus 2.4 the row
+    pins ``failure_kind`` and ``lint_reason`` as a replay row does; below it the row is
+    written as it always was. ``apparatus_version`` is read from ``crb.core.version`` at
+    call time when not given."""
+    apparatus = apparatus_version or _version.APPARATUS_VERSION
+    written = row_labels_at_write(
+        result,
+        apparatus_version=apparatus,
+        error=result.error or error,
+        builder_error=error,
+        stop_reason=builder_stop_reason(builder),
+        pin_kind_below_v2=False,
+        process_step=PROCESS_FACTORY,
+        context_arm=factory_context_arm(dict(labels)),
+    )
     return GradeRow(
         repo=task.repo,
         task_id=task.task_id,
@@ -407,9 +448,16 @@ def factory_row(
         latency_s=builder.latency_s,
         gold_clean=None,
         evidence_pack_hash=pack.pack_hash,
+        apparatus_version=apparatus,
         belt_set=BELT_SET_V5,
         provenance="measured",
-        labels={"rung": trial, **dict(labels), **posture_labels(result), **api_labels(result)},
+        labels={
+            "rung": trial,
+            **dict(labels),
+            **posture_labels(result),
+            **api_labels(result),
+            **written,
+        },
     )
 
 

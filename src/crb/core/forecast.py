@@ -69,6 +69,8 @@ from crb.core.capability import (
     WILDCARD,
     CapabilityCell,
     ConfigPick,
+    OracleByTask,
+    ReadingBook,
     best_config,
     build_capability_map,
 )
@@ -78,11 +80,14 @@ from crb.core.routing import (
     ROUTE_CALIBRATE,
     ROUTE_DELIVER,
     ROUTE_HUMAN,
+    ControlsVerdict,
     RoutingPolicy,
 )
 from crb.core.signoff import SignoffRecord, apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.core.stats import mean, stddev
+from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.core.version import APPARATUS_VERSION
 
 ComponentKey = str | tuple[str, str]
 
@@ -177,12 +182,30 @@ def _resolve(
     signoffs: Iterable[SignoffRecord] | None,
     repo: str,
     language: str | None,
+    readings: ReadingBook | None = None,
+    oracle_by_task: OracleByTask | None = None,
+    controls: ControlsVerdict | None = None,
 ) -> list[_Resolved]:
     """The ONE resolution both the forecast and the readiness gate use, so they can
-    never disagree about how a component is routed or priced."""
-    rs = list(rows)
-    cs_map = build_capability_map(rs, projection=PROJECTION_CLASS_SIZE, policy=policy)
-    c_map = build_capability_map(rs, projection=PROJECTION_CLASS, policy=policy)
+    never disagree about how a component is routed or priced. It reads one apparatus (the
+    current one) and one class-set version, each cell on its own proven standard arm, routed
+    on the repository's registered ``readings``, per-task oracle scores and controls verdict
+    (routing.v2: without them nothing delivers) — ADR-0025 item 1, ADR-0026."""
+    book = readings or ReadingBook()
+    base = [
+        r
+        for r in rows
+        if r.apparatus_version == APPARATUS_VERSION and r.taxonomy in ("", GLOBAL_CLASS_SET)
+    ]
+    world = {"controls": controls, "oracle_by_task": oracle_by_task, "readings": book}
+    rs = book.standard_rows(base, PROJECTION_CLASS_SIZE)
+    cs_map = build_capability_map(rs, projection=PROJECTION_CLASS_SIZE, policy=policy, **world)  # type: ignore[arg-type]
+    c_map = build_capability_map(
+        book.standard_rows(base, PROJECTION_CLASS),
+        projection=PROJECTION_CLASS,
+        policy=policy,
+        **world,  # type: ignore[arg-type]
+    )
     if signoffs is not None:
         sign = list(signoffs)
         cs_map = apply_signoffs_to_map(cs_map, sign, repo=repo)
@@ -208,11 +231,14 @@ def _resolve(
             cell_rows = rows_for(PROJECTION_CLASS, (cls,))
         pick = (
             best_config(
-                rs,
+                base,
                 capability_class=cls,
                 size=size or None,
                 language=language,
                 policy=policy,
+                readings=book,
+                oracle_by_task=oracle_by_task,
+                controls=controls,
             )
             if cell.route == ROUTE_DELIVER
             else None
@@ -359,6 +385,9 @@ def forecast_build(
     signoffs: Iterable[SignoffRecord] | None = None,
     repo: str = WILDCARD,
     language: str | None = None,
+    readings: ReadingBook | None = None,
+    oracle_by_task: OracleByTask | None = None,
+    controls: ControlsVerdict | None = None,
 ) -> Forecast:
     """Forecast ``component_mix`` (``{class or class/size: count}``) against the ledger.
 
@@ -368,7 +397,15 @@ def forecast_build(
     independent units: σ_total = sqrt(Σ count · σ_unit²).
     """
     resolved = _resolve(
-        component_mix, rows, policy=policy, signoffs=signoffs, repo=repo, language=language
+        component_mix,
+        rows,
+        policy=policy,
+        signoffs=signoffs,
+        repo=repo,
+        language=language,
+        readings=readings,
+        oracle_by_task=oracle_by_task,
+        controls=controls,
     )
     total = measured = costed = timed = 0
     cost_mean = cost_var = minutes = 0.0
@@ -539,6 +576,9 @@ def assess_readiness(
     signoffs: Iterable[SignoffRecord] | None = None,
     repo: str = WILDCARD,
     language: str | None = None,
+    readings: ReadingBook | None = None,
+    oracle_by_task: OracleByTask | None = None,
+    controls: ControlsVerdict | None = None,
 ) -> ReadinessReport:
     """Is the evidence good enough to let the factory loose on this mix?
 
@@ -547,7 +587,15 @@ def assess_readiness(
     """
     t = thresholds
     resolved = _resolve(
-        component_mix, rows, policy=policy, signoffs=signoffs, repo=repo, language=language
+        component_mix,
+        rows,
+        policy=policy,
+        signoffs=signoffs,
+        repo=repo,
+        language=language,
+        readings=readings,
+        oracle_by_task=oracle_by_task,
+        controls=controls,
     )
     total = measured = earned = buildable = fq1 = 0
     min_reps_seen: int | None = None

@@ -1011,6 +1011,26 @@ export interface CapabilityCell {
   belt_set?: string
   /** Every belt set behind `n` (`v4`, `v5`…) — with `apparatus_versions`, the provenance a rate keeps. */
   belt_sets?: string[]
+  // --- routing.v2 (ADR-0025, ADR-0026) ------------------------------------------------
+  /** The one context arm and class-set version the cell reads (never pooled). */
+  context_arm?: string
+  taxonomy?: string
+  apparatus_version?: string
+  /** What the cell's reading says about its arm, and the counts it read at. */
+  look_state?: string
+  reading_id?: string
+  counted?: number
+  counted_clean?: number
+  counted_ci_low?: number
+  counted_ci_high?: number
+  needed?: number
+  next_look?: number | null
+  shortfalls?: Shortfall[]
+  /** Every arm of the reading that speaks for the cell; `null` — none registered. */
+  reading?: ReadingOutcome | null
+  standard?: CellStandard | null
+  /** What the briefs carried beyond their arm (label → distinct values) — never a split. */
+  provenance?: Record<string, string[]>
 }
 
 /** Headline numbers of one map; `false_q1_total` must read 0. */
@@ -1043,16 +1063,88 @@ export interface CapabilityMap {
   policy: RoutingPolicy
   /** F35 — the economics of every row behind the map, folded from the rows (the Baseline's tiles). */
   economics?: Economics
+  /** The one context arm the map reads (`standard` = each cell on its own) and the arms present. */
+  arm?: string
+  arms?: string[]
+  taxonomy?: string
+  /** ADR-0025 item 1: the apparatus in force, the one read, and what earlier ones hold as history. */
+  apparatus?: { current: string; read: string; superseded_rows: number; superseded_versions: string[] }
 }
 
-/** `crb.core.routing.RoutingPolicy.to_dict()` */
+/** `crb.core.routing.RoutingPolicy.to_dict()` — routing.v2 (ADR-0025 as ADR-0026 amends it): the look rule replaces routing.v1's `min_n`, point and Wilson bars. */
 export interface RoutingPolicy {
-  min_n: number
-  min_point: number
-  min_ci_low: number
+  /** The look rule a reading is read under (`look.v1`, `look.v1-strict`, `look.v1-late`). */
+  rule: string
+  /** Look size → the misses allowed at that look (`{"20": 0, "30": 1, "40": 2}`). */
+  looks: Record<string, number>
+  /** The rule's exact chance of delivering a cell whose true first-attempt rate is 0.80. */
+  p_deliver_at_0_80: number
+  /** One error budget per cell (ADR-0026 item 5). */
+  cell_error_budget: number
   min_oracle_strength: number
+  min_oracle_share: number
   granularize_sizes: string[]
   version: string
+  /** The published bar as one sentence — README carries it byte for byte (ADR-0025 item 10). */
+  description: string
+}
+
+/** One clause a cell fails, with what to measure next (ADR-0025 item 8). */
+export interface Shortfall {
+  code: string
+  route: string
+  observed: unknown
+  threshold: unknown
+  /** `register`, `replay`, `qualify`, `mine`, `oracle`, `controls`, `seal`, `config`, `strengthen`, `new_reading`, `calibration_builds`, `build_on_standard`, `split`, `audit`, `none`. */
+  next: string
+  count: number
+  model_money: boolean
+}
+
+/** One arm of a registered reading (`crb.core.reading.ArmReading.to_dict`). */
+export interface ArmReading {
+  arm: string
+  /** `deliver`, `insufficient`, `undecided`, `look_pending`, `descriptive`, `stopped`. */
+  state: string
+  descriptive: boolean
+  stopped_by: string
+  counted: number
+  clean: number
+  misses: number
+  ci_low: number
+  ci_high: number
+  next_look: number | null
+  needed: number
+}
+
+/** A registered reading evaluated (`crb.core.reading.ReadingOutcome.to_dict`). */
+export interface ReadingOutcome {
+  reading_id: string
+  rule: string
+  hierarchy: string[]
+  /** `standard`, `ceiling`, `look_pending`, `insufficient`, `undecided`. */
+  state: string
+  standard: string | null
+  ceiling: boolean
+  chain: string[]
+  stopped_at: string | null
+  needed: number
+  spend: number
+  registered_at: string
+  pool: number
+  pool_sha256: string
+  arms: ArmReading[]
+}
+
+/** A cell's proven context: its standard arm, or `standard: null` — "no proven standard". */
+export interface CellStandard {
+  standard: string | null
+  ceiling: boolean
+  label: string
+  next: string
+  next_count: number
+  budget: number
+  spent: number
 }
 
 /** `crb.core.routing.RouteDecision.to_dict()` */

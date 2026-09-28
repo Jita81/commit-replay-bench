@@ -79,7 +79,7 @@ from crb.cli.commands.service import (
 from crb.cli.main import main
 from crb.core.secrets_file import SecretsStore
 from crb.observability import probes
-from crb.server.routes.system import APPEND_ONLY_OK_DETAIL, APPEND_ONLY_UNTRIED_DETAIL
+from crb.server.routes.system import APPEND_ONLY_UNTRIED_DETAIL
 from crb.server.settings import GitHubAppSettings, Settings
 from crb.store import migrate
 

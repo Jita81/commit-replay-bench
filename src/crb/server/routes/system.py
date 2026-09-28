@@ -272,14 +272,11 @@ def probe_migrations(factory: sessionmaker[Session], *, request_id: str = "") ->
 
 #: What the ``append_only`` probe says when it passes and a write was tried.
 APPEND_ONLY_OK_DETAIL = (
-    "triggers live on every append-only table; UPDATE and DELETE refused on each that "
-    "holds a row"
+    "triggers live on every append-only table; UPDATE and DELETE refused on each that holds a row"
 )
 #: What it says when it passes on a store whose append-only tables are all empty: no write
 #: was tried, so it claims none was refused (P-216) — the live-trigger check is the proof.
-APPEND_ONLY_UNTRIED_DETAIL = (
-    "triggers live on every append-only table; no row to test a write on"
-)
+APPEND_ONLY_UNTRIED_DETAIL = "triggers live on every append-only table; no row to test a write on"
 
 
 def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:

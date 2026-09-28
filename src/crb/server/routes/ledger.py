@@ -106,6 +106,10 @@ _ERR = {"model": ErrorEnvelope}
 EXPORT_BATCH = 1000
 MAX_IMPORT_BYTES = 64 * 1024 * 1024
 FORMATS: tuple[str, ...] = ("jsonl", "csv")
+#: Hashed labels the CSV export also carries as their own columns, beside ``builder`` and
+#: ``model``, so a reading can be re-derived outside the product (ADR-0026 items 1 and 9): the
+#: context arm and the class-set version never pool, so a reader must be able to split on them.
+EXPORT_LABEL_COLUMNS: tuple[str, ...] = ("context_arm", "taxonomy")
 
 #: Census row markers (``bench.py`` output): a verdict keyed by ``task``/``wave`` with no schema.
 _CENSUS_KEYS = frozenset({"task", "wave", "blind_mode", "regraded_calm"})
@@ -331,12 +335,18 @@ def _csv(factory: sessionmaker[Session], repo: str | None) -> Iterator[bytes]:
     """Header row then one row per grade, every cell through ``_csv_value``."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
-    w.writerow(ROW_FIELDS)
+    w.writerow((*ROW_FIELDS, *EXPORT_LABEL_COLUMNS))
     yield buf.getvalue().encode("utf-8")
     for d in _export_rows(factory, repo):
         buf.seek(0)
         buf.truncate()
-        w.writerow([_csv_value(d.get(k)) for k in ROW_FIELDS])
+        labels = dict(d.get("labels") or {})
+        w.writerow(
+            [
+                *(_csv_value(d.get(k)) for k in ROW_FIELDS),
+                *(_csv_value(labels.get(k, "")) for k in EXPORT_LABEL_COLUMNS),
+            ]
+        )
         yield buf.getvalue().encode("utf-8")
 
 

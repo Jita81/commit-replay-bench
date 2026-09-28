@@ -57,6 +57,24 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   built on. The strength probe is required, keys are checked again at claim, and replay and
   the factory share one composer with a leak guard and a replay `S1` arm (DL-098 to DL-100).
 
+- **Routing reads one reading: apparatus 2.4, routing.v2 and the context standard**
+  (north-star Wave 2, stream R; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
+  ADR-0025 as ADR-0026 amends it; DL-095 to DL-097). Every 2.4 row stamps its context arm and
+  class-set version, never pooled. A cell delivers only on its standard arm, when a reading
+  registered before its first attempt reaches a look of the look rule in the sealed posture,
+  with a measured oracle and controls. A reading licenses only the checks arm and posture
+  class it counted on, freezes its pool by a rule, never a list, and never counts an imported
+  row. A `crb.signoff.v5` sign-off lifts only its own arm, class-set version and reading.
+
+- **The grade says why, and a distinct commit is a distinct change**
+  (north-star Wave 2, stream G; [the stream's pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
+  ADR-0025 items 5, 6, 7 and 13; DL-093, DL-094). Belt 5 records why it holds what it holds.
+  From apparatus 2.4 every row carries its failure kind, belt 5's reason and its change, and
+  the oracle scorer is `mutation.v2`; a row or score below 2.4 keeps the 2.3 rules and is
+  refused if it carries a 2.4 label or rule. The miner counts each change once. The executor
+  and worker refuse an empty kind, docker's exit 125 is told from a suite's, each pack and
+  worktree has its own files. The pack names the files the tests wrote.
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

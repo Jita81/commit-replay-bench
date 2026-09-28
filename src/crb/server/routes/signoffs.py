@@ -121,6 +121,7 @@ from sqlalchemy.orm import Session
 from crb.core.capability import (
     WILDCARD,
     CapabilityCell,
+    ReadingBook,
     empty_cell,
     key_matches,
     measure_cell,
@@ -150,6 +151,7 @@ from crb.core.signoff import (
     SIGNOFF_SCHEMA_V1,
     SIGNOFF_SCHEMA_V2,
     SIGNOFF_SCHEMA_V3,
+    SIGNOFF_SCHEMA_V4,
     Attestation,
     SignoffPolicy,
     SignoffRecord,
@@ -173,6 +175,7 @@ from crb.server.routes.oracle import (
     oracle_by_task,
     verdict_dict,
 )
+from crb.server.routes.readings import reading_book, rows_on_standard_arms
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas import (
     Page,
@@ -237,6 +240,19 @@ _VERIFIER_KIND = "verifier_kind"
 _EV_CHECKS = "evidence_checks_arm"
 # crb.signoff.v4 (ADR-0019): the posture class(es) the evidence was graded in.
 _EV_POSTURE = "evidence_posture_class"
+# crb.signoff.v5 (ADR-0025 item 9, ADR-0026 item 6): the arm, class-set version and reading
+# the sign-off is bound to, the evidence per distinct change, the oracle's coverage and the
+# controls report's apparatus — all under the store row's hash (absent before).
+_EV_ARM = "evidence_context_arm"
+_EV_TAXONOMY = "evidence_taxonomy"
+_EV_READING = "evidence_reading_id"
+_EV_N_TASKS = "evidence_n_tasks"
+_EV_TASK_CLEAN = "evidence_task_clean"
+_EV_TASK_CI_LOW = "evidence_task_ci_low"
+_EV_TASK_CI_HIGH = "evidence_task_ci_high"
+_EV_ORACLE_SCORED = "evidence_oracle_scored_tasks"
+_EV_ORACLE_SHARE = "evidence_oracle_share"
+_CTL_APPARATUS = "controls_apparatus"
 
 #: Envelope codes: the floor keeps its historical code; every policy clause is one.
 CODE_FALSE_Q1 = "false_q1_refused"
@@ -473,10 +489,12 @@ def _attestation_of(cj: dict[str, str]) -> Attestation | None:
 
 def _schema_of(cj: dict[str, str]) -> str:
     """The record schema a stored row was written under, read from the keys it carries:
-    the checks arm → v4, ``verifier_kind`` → v3, a policy snapshot → v2, none → v1 (never
-    assumed)."""
-    if _EV_CHECKS in cj:
+    the context arm → v5, the checks arm → v4, ``verifier_kind`` → v3, a policy snapshot →
+    v2, none → v1 (never assumed)."""
+    if _EV_ARM in cj:
         return SIGNOFF_SCHEMA
+    if _EV_CHECKS in cj:
+        return SIGNOFF_SCHEMA_V4
     if _VERIFIER_KIND in cj:
         return SIGNOFF_SCHEMA_V3
     return SIGNOFF_SCHEMA_V2 if _POLICY_VERSION in cj else SIGNOFF_SCHEMA_V1
@@ -521,6 +539,16 @@ def to_record(row: Signoff) -> SignoffRecord:
         verifier_kind=str(cj.get(_VERIFIER_KIND, "") or ""),
         checks_arm=str(cj.get(_EV_CHECKS, "") or ""),
         posture_class=str(cj.get(_EV_POSTURE, "") or ""),
+        n_tasks_at_signoff=_int(cj.get(_EV_N_TASKS, 0)),
+        task_clean_at_signoff=_int(cj.get(_EV_TASK_CLEAN, 0)),
+        task_ci_low_at_signoff=_float_or_none(cj.get(_EV_TASK_CI_LOW)) or 0.0,
+        task_ci_high_at_signoff=_float_or_none(cj.get(_EV_TASK_CI_HIGH)) or 1.0,
+        oracle_scored_tasks=_int(cj.get(_EV_ORACLE_SCORED, 0)),
+        oracle_share=_float_or_none(cj.get(_EV_ORACLE_SHARE)) or 0.0,
+        controls_apparatus=str(cj.get(_CTL_APPARATUS, "") or ""),
+        context_arm=str(cj.get(_EV_ARM, "") or ""),
+        taxonomy=str(cj.get(_EV_TAXONOMY, "") or ""),
+        reading_id=str(cj.get(_EV_READING, "") or ""),
         schema=_schema_of(cj),
         record_id=row.signoff_id,
         prev_hash=row.prev_hash,
@@ -605,6 +633,16 @@ def cell_rows(
     return [r for r in rows_for_checks(rows, arm) if r.posture_class == posture_class]
 
 
+def scope_book(session: Session, repo: str, scope: CellKey) -> ReadingBook:
+    """The repository's readings evaluated over the scope's rows — every posture, arm and
+    apparatus, since a reading counts its own and a hierarchy reads its arms together. Only
+    the scope is read, so a false-Q1 row in another cell refuses that cell's sign-off, not
+    this one's (the floor is scoped to the cell, as :func:`cell_false_q1` is)."""
+    q = _scope_where(select(Grade), repo, scope).order_by(Grade.seq)
+    grades: Iterable[Grade] = session.execute(q).scalars()
+    return reading_book(session, repo, [GradeRow.from_dict(grade_to_dict(g)) for g in grades])
+
+
 def _grade_posture(g: Grade) -> str:
     """The posture class of a stored row (ADR-0019) — its hashed ``posture_class`` label,
     ``""`` on a row from before apparatus 2.3."""
@@ -636,14 +674,18 @@ def measured_cell(
     scope: CellKey,
     controls: ControlsVerdict,
     oracle_by_task: Mapping[str, float | None] | None = None,
+    readings: ReadingBook | None = None,
 ) -> CapabilityCell:
-    """The scope's cell routed under the repo's controls verdict and its task-level
-    oracle scores — exactly as the capability map routes it; the honest-empty cell
+    """The scope's cell routed under the repo's controls verdict, its task-level oracle
+    scores and its registered readings — exactly as the capability map routes it, on the
+    cell's standard arm (routing.v2: a sign-off is written only for it); the honest-empty cell
     when there are no rows."""
     proj = _projection(scope)
+    book = readings or ReadingBook()
+    rows = rows_on_standard_arms(rows, proj, book)
     if not rows:
         return empty_cell(scope, proj)
-    return measure_cell(rows, proj, controls=controls, oracle_by_task=oracle_by_task)
+    return measure_cell(rows, proj, controls=controls, oracle_by_task=oracle_by_task, readings=book)
 
 
 def _grade_key(g: Grade) -> CellKey:
@@ -691,6 +733,16 @@ def cell_oracle_strength(
         by_task = oracle_by_task(session, repo)
     scored = sum(1 for tid in task_ids if by_task.get(tid) is not None)  # unscoreable = None
     return CellOracle(task_oracle_strength(rows, by_task), scored, len(task_ids))
+
+
+def cell_oracle(cell: CapabilityCell) -> CellOracle:
+    """The oracle evidence the cell was ROUTED under (ADR-0025 item 9: a sign-off reads the
+    ``OracleEvidence`` the route reads, never the rows' mean) — the commits the reading
+    counted, each at its minimum ``mutation.v2`` score at this apparatus."""
+    o = cell.oracle
+    if o is None:
+        return CellOracle(None, 0, 0)
+    return CellOracle(o.strength if o.measured else None, o.scored_tasks, o.n_tasks)
 
 
 def _subjects(session: Session, repo: str, task_ids: Iterable[str]) -> dict[str, str]:
@@ -1386,8 +1438,8 @@ def preview_signoff(
     rows = cell_rows(db, repo, scope, arm, posture)
     controls = latest_controls_verdict(db, repo)
     by_task = oracle_by_task(db, repo)
-    cell = measured_cell(rows, scope, controls, by_task)
-    oracle = cell_oracle_strength(db, repo, rows, by_task=by_task)
+    cell = measured_cell(rows, scope, controls, by_task, scope_book(db, repo, scope))
+    oracle = cell_oracle(cell)
     strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     attestation_out: AttestationOut | None = None
     attested: ResolvedAttestation | None = None
@@ -1550,8 +1602,9 @@ def create_signoff(
     rows = cell_rows(db, body.repo, scope, arm, posture)
     controls = latest_controls_verdict(db, body.repo)
     by_task = oracle_by_task(db, body.repo)
-    cell = measured_cell(rows, scope, controls, by_task)
-    oracle = cell_oracle_strength(db, body.repo, rows, by_task=by_task)
+    book = scope_book(db, body.repo, scope)
+    cell = measured_cell(rows, scope, controls, by_task, book)
+    oracle = cell_oracle(cell)
     # 3. The attestation: the named row must be an accepted row of THIS cell — and the
     #    actors behind it and behind every accepted row, for the two-person rule.
     attested: ResolvedAttestation | None = None
@@ -1620,6 +1673,16 @@ def create_signoff(
         _EV_APPARATUS: ",".join(cell.stats.apparatus_versions),
         _EV_CHECKS: stamped.checks_arm,
         _EV_POSTURE: stamped.posture_class,
+        _EV_ARM: stamped.context_arm,
+        _EV_TAXONOMY: stamped.taxonomy,
+        _EV_READING: stamped.reading_id,
+        _EV_N_TASKS: str(stamped.n_tasks_at_signoff),
+        _EV_TASK_CLEAN: str(stamped.task_clean_at_signoff),
+        _EV_TASK_CI_LOW: f"{stamped.task_ci_low_at_signoff:.6f}",
+        _EV_TASK_CI_HIGH: f"{stamped.task_ci_high_at_signoff:.6f}",
+        _EV_ORACLE_SCORED: str(stamped.oracle_scored_tasks),
+        _EV_ORACLE_SHARE: f"{stamped.oracle_share:.6f}",
+        _CTL_APPARATUS: stamped.controls_apparatus,
         _EV_ORACLE: ""
         if stamped.oracle_strength_at_signoff is None
         else f"{stamped.oracle_strength_at_signoff:.6f}",

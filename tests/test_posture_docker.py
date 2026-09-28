@@ -79,6 +79,7 @@ from crb.core.grade import (
     GradeResult,
     grade,
 )
+from crb.core.mine import change_identity
 from crb.core.posture import Posture, PostureMismatch, resolve_posture
 from crb.core.qualify import (
     QUAL_ENV_UNLOADABLE,
@@ -250,6 +251,8 @@ def rig() -> Iterator[Rig]:
             target_tests=("./calc",),
             belt_scope=(),
             language="go",
+            # the change the commit carries, as the miner stamps it (a 2.4 row names it)
+            labels={lg.LABEL_CHANGE_ID: change_identity(repo, feat)},
         )
         host_env = {
             **LocalExecutor._host_base_env(),

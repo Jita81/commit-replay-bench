@@ -189,7 +189,7 @@ export interface StrengthenReport {
   note: string
 }
 
-/** One cell with rows older than the current apparatus: how many are stale, how many current, how many still needed for n ≥ min_n, and the estimated spend. */
+/** One cell with rows older than the current apparatus: how many are stale, how many current, how many still needed to reach the look rule’s first look (routing.v2), and the estimated spend. */
 export interface RemeasureCell {
   label: string
   /** The mode this cell is planned for: the map never pools sighted and blind, so nor does the plan. */
@@ -895,7 +895,7 @@ function RemeasureSection({ repo }: { repo: string }) {
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Stale rows" hint="stat.learn.stale_rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
-        <StatTile label="Rows still needed" hint="stat.learn.needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`rule n ≥ ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
+        <StatTile label="Rows still needed" hint="stat.learn.needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`first look at n = ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
         <StatTile
           label="Estimated spend"
           hint="stat.learn.remeasure_cost"

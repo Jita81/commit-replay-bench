@@ -82,6 +82,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from crb.core.context_arm import PROVENANCE_LABELS
 from crb.core.economics import Economics, fold_economics
 from crb.core.git import GitError, GitRepo
 from crb.core.ledger import (
@@ -92,13 +93,24 @@ from crb.core.ledger import (
     GradeRow,
     cell_stats,
     false_q1_total,
+    first_attempts,
     group_by_cell,
+)
+from crb.core.reading import (
+    ArmVerdict,
+    Reading,
+    ReadingOutcome,
+    canonical_cell_key,
+    evaluate,
+    latest_outcome,
+    verdict_for,
 )
 from crb.core.routing import (
     DEFAULT_POLICY,
     ROUTE_DELIVER,
     ROUTES,
     ControlsVerdict,
+    OracleEvidence,
     RouteDecision,
     RoutingPolicy,
     route,
@@ -230,6 +242,18 @@ class CapabilityCell:
     #: (an explicit apparatus, ``all``, a census JSONL) names them rather than hiding whose
     #: evidence a route rests on (EI-2 residual, 2026-09-27).
     rows_imported: int = 0
+    #: What the cell's registered reading says about the cell's context arm (routing.v2,
+    #: ADR-0026 item 6) — ``None`` only for an unmeasured cell.
+    verdict: ArmVerdict | None = None
+    #: The oracle evidence the cell was routed under (ADR-0025 item 3).
+    oracle: OracleEvidence | None = None
+    #: The reading that speaks for the cell (every arm of it), when one is registered.
+    reading: ReadingOutcome | None = None
+    #: What the cell's briefs carried beyond their arm — the digests of the brief's parts, the
+    #: harness command, the rules version, the loop's playbook and lines, the checklist, the
+    #: budget profile (``crb.core.context_arm.PROVENANCE_LABELS``): each label → the distinct
+    #: values the rows carry. Shown and filterable; never a reason to split a cell.
+    provenance: Mapping[str, tuple[str, ...]] | None = None
 
     def __post_init__(self) -> None:
         # the invariants of the module docstring, enforced at construction: honest-empty
@@ -371,6 +395,10 @@ class CapabilityCell:
             "model_n": self.model_n,
             "model_point": None if self.model_point is None else round(self.model_point, 4),
             "n_tasks": self.n_tasks,
+            "verdict": None if self.verdict is None else self.verdict.to_dict(),
+            "oracle": None if self.oracle is None else self.oracle.to_dict(),
+            "reading": None if self.reading is None else self.reading.to_dict(),
+            "provenance": {k: list(v) for k, v in (self.provenance or {}).items()},
         }
 
 
@@ -394,20 +422,133 @@ def empty_cell(key: CellKey, projection: Sequence[str] = PROJECTION_CELL) -> Cap
 
 OracleByTask = Mapping[str, float | None]
 
+#: The arm a cell with no proven standard is read on: ``S3``, the arm every sighted replay row
+#: of 2.4 carries (the commit's own tests) — a ceiling, so it never delivers.
+DISPLAY_ARM = "S3"
+
+
+def oracle_evidence(
+    task_ids: Sequence[str],
+    oracle_by_task: OracleByTask | None,
+    *,
+    mutation_version: str = "",
+    apparatus_version: str = "",
+) -> OracleEvidence:
+    """The oracle evidence of the commits a route counted (ADR-0025 item 3): the mean of each
+    commit's score in ``oracle_by_task`` — the server's per-task MINIMUM ``mutation.v2``
+    strength at the reading's apparatus — over the commits that have one, with the scored
+    share. One reduction, shared by the capability map's route and the sign-off's evidence,
+    so the two can never disagree about a cell's oracle. No score is *unmeasured*, never 0.0."""
+    ids = list(dict.fromkeys(t for t in task_ids if t))
+    scored = [s for t in ids if (s := (oracle_by_task or {}).get(t)) is not None]
+    return OracleEvidence(
+        strength=mean(scored) if scored else None,
+        scored_tasks=len(scored),
+        n_tasks=len(ids),
+        mutation_version=mutation_version,
+        apparatus_version=apparatus_version,
+    )
+
 
 def task_oracle_strength(
     rows: Iterable[GradeRow], oracle_by_task: OracleByTask | None
 ) -> float | None:
-    """The oracle strength of a group of rows as the repo's oracle ledger knows it: the
-    mean of the latest task-level mutation score over the group's DISTINCT tasks that
-    have a scoreable one (``None`` = no task scored — *unmeasured*, never 0.0). One
-    reduction, shared by the capability map's route and the sign-off's evidence, so
-    the two can never disagree about a cell's oracle."""
-    if not oracle_by_task:
-        return None
-    task_ids = {r.task_id for r in rows if r.task_id}
-    strengths = [s for tid in task_ids if (s := oracle_by_task.get(tid)) is not None]
-    return mean(strengths) if strengths else None
+    """The mean oracle strength over the routing commits of ``rows`` (their first observed
+    attempts) — :func:`oracle_evidence`'s strength, for a reader that wants the number."""
+    ids = [a.task_id for a in first_attempts(rows) if a.routes]
+    return oracle_evidence(ids, oracle_by_task).strength
+
+
+@dataclass(frozen=True)
+class ReadingBook:
+    """A repository's registered readings (``crb.core.reading``), each evaluated once over the
+    repository's rows of every arm — the hierarchy reads its arms together — so a cell of one
+    arm is routed on what its reading says about that arm."""
+
+    outcomes: tuple[ReadingOutcome, ...] = ()
+
+    @classmethod
+    def evaluate(cls, readings: Iterable[Reading], rows: Iterable[GradeRow]) -> ReadingBook:
+        rs = list(rows)
+        return cls(tuple(evaluate(r, rs) for r in readings))
+
+    def outcome_for(
+        self,
+        repo: str,
+        cell: CellKey,
+        *,
+        apparatus: str,
+        taxonomy: str,
+        checks_arm: str,
+        posture_class: str,
+    ) -> ReadingOutcome | None:
+        """The reading that speaks for one full cell at one apparatus, class-set version,
+        checks arm and posture class — every scope field the reading counted its rows on
+        (``_counts_for``), so a licence never crosses an arm or a posture (P-311)."""
+        want = canonical_cell_key(cell)
+        return latest_outcome(
+            o
+            for o in self.outcomes
+            if o.reading.repo == repo
+            and o.reading.cell_key == want
+            and o.reading.apparatus == apparatus
+            and o.reading.taxonomy == taxonomy
+            and o.reading.checks_arm == checks_arm
+            and o.reading.posture_class == posture_class
+        )
+
+    def standard_rows(
+        self, rows: Sequence[GradeRow], projection: Sequence[str], *, display_arm: str = DISPLAY_ARM
+    ) -> list[GradeRow]:
+        """Each projected cell's rows on ONE context arm: the cell's proven standard (the arm
+        its reading certified, or the richest arm of a ceiling), else ``display_arm`` when the
+        cell holds it, else the first arm it holds (in sorted order — shown, and routed on an
+        arm no reading licenses). A row from before 2.4 carries no arm and is kept (history,
+        one apparatus). A projected cell never holds two arms (ADR-0026 item 1)."""
+        out: list[GradeRow] = []
+        for group in group_by_cell(rows, key_fields=projection).values():
+            outcome = self.outcome_for_rows(group)
+            present = sorted({r.context_arm for r in group if r.context_arm})
+            arm = display_arm if display_arm in present or not present else present[0]
+            if outcome is not None and outcome.standard:
+                arm = outcome.standard
+            elif outcome is not None and outcome.chain:
+                arm = outcome.chain[-1]
+            out.extend(r for r in group if r.context_arm == arm or not r.context_arm)
+        return out
+
+    def outcome_for_rows(self, rows: Sequence[GradeRow]) -> ReadingOutcome | None:
+        """The reading of the ONE full cell ``rows`` belong to; ``None`` when they span more
+        than one repository, full cell key, checks arm or posture class (a projection that
+        pools builders or models, or a view that pools posture classes, is never licensed by
+        one reading — P-311)."""
+        repos = {r.repo for r in rows}
+        keys = {r.cell for r in rows}
+        checks = {r.checks_arm for r in rows}
+        postures = {r.posture_class for r in rows}
+        if not rows or any(len(s) != 1 for s in (repos, keys, checks, postures)):
+            return None
+        r0 = rows[0]
+        return self.outcome_for(
+            r0.repo,
+            r0.cell,
+            apparatus=r0.apparatus_version,
+            taxonomy=r0.taxonomy,
+            checks_arm=r0.checks_arm,
+            posture_class=r0.posture_class,
+        )
+
+
+def provenance_of(rows: Iterable[GradeRow]) -> dict[str, tuple[str, ...]]:
+    """Each provenance label the rows carry → its distinct values (ADR-0026 item 1): the loop
+    adding a playbook line mid-campaign changes a digest here, never the cell."""
+    out: dict[str, set[str]] = {}
+    for r in rows:
+        for k in PROVENANCE_LABELS:
+            v = r.labels.get(k)
+            if v:
+                out.setdefault(k, set()).add(v)
+    return {k: tuple(sorted(v)) for k, v in sorted(out.items())}
 
 
 def measure_cell(
@@ -417,18 +558,17 @@ def measure_cell(
     policy: RoutingPolicy = DEFAULT_POLICY,
     controls: ControlsVerdict | None = None,
     oracle_by_task: OracleByTask | None = None,
+    readings: ReadingBook | None = None,
 ) -> CapabilityCell:
     """Reduce one group of rows (all sharing the projected key) to a cell.
 
-    The route is ``route(stats, controls=controls, policy=policy)`` — nothing
-    else. ``controls`` is the repo's negative-controls verdict (``None`` = not
-    evaluated by this caller; the decision records the absence). ``oracle_by_task``
-    is the repo's latest mutation score per task (:func:`task_oracle_strength`): when it
-    is given (even empty) the cell is routed under that measured strength or unmeasured,
-    and the rows' own ``oracle_strength`` is never read — a caller that keeps an oracle
-    ledger (the server) never lends a cell a row's own number (EI-2, 2026-09-27); with no
-    ledger (``None``, the CLI over a census JSONL) the rows' own mean, else unmeasured.
-    The tier is ``untrusted`` iff
+    The route is ``route(stats, oracle=…, controls=controls, reading=…, policy=policy)`` —
+    nothing else. ``controls`` is the repo's negative-controls verdict (``None`` =
+    unmeasured). ``readings`` are the repo's registered readings: the cell is routed on what
+    the reading of its one full cell says about its context arm (none → ``reading_unregistered``).
+    ``oracle_by_task`` is the repo's per-task score (:func:`oracle_evidence`), read over the
+    commits the reading counted (else the cell's routing commits); the rows' own
+    ``oracle_strength`` column never routes. The tier is ``untrusted`` iff
     ``false_q1 > 0`` (structurally impossible for rows written through
     :class:`~crb.core.ledger.GradeRow`, re-checked here anyway) and
     ``automated-pass`` otherwise; earned tiers are overlaid by
@@ -439,12 +579,20 @@ def measure_cell(
         raise ValueError("measure_cell needs at least one row; use empty_cell for none")
     stats = projected_stats(rows, proj)
     eligible = [r for r in rows if r.eligible]
+    outcome = (readings or ReadingBook()).outcome_for_rows(rows)
+    verdict = verdict_for(outcome, stats.context_arm)
+    counted = (
+        list(verdict.counted_commits)
+        if verdict.counted
+        else [a.task_id for a in first_attempts(rows) if a.routes]
+    )
+    oracle = oracle_evidence(counted, oracle_by_task, apparatus_version=stats.apparatus_version)
     decision = route(
         stats,
-        oracle_strength=task_oracle_strength(rows, oracle_by_task),
+        oracle=oracle,
         controls=controls,
+        reading=verdict,
         policy=policy,
-        rows_oracle=oracle_by_task is None,
     )
     tier = TIER_UNTRUSTED if stats.false_q1 > 0 else TIER_AUTOMATED_PASS
     economics = fold_economics(rows)
@@ -465,6 +613,10 @@ def measure_cell(
         latency_known=economics.latency_known > 0,
         economics=economics,
         rows_imported=sum(1 for r in rows if r.provenance != PROVENANCE_MEASURED),
+        verdict=verdict,
+        oracle=oracle,
+        reading=outcome,
+        provenance=provenance_of(rows),
     )
 
 
@@ -546,15 +698,25 @@ def build_capability_map(
     policy: RoutingPolicy = DEFAULT_POLICY,
     controls: ControlsVerdict | None = None,
     oracle_by_task: OracleByTask | None = None,
+    readings: ReadingBook | None = None,
 ) -> CapabilityMap:
     """Group ``rows`` by ``projection`` and route every group under ``controls``
-    (the repo's negative-controls verdict; ``None`` = not evaluated) and
-    ``oracle_by_task`` (the repo's latest mutation score per task). Pure; no I/O."""
+    (the repo's negative-controls verdict; ``None`` = unmeasured), ``oracle_by_task`` (the
+    repo's per-task oracle score) and ``readings`` (the repo's registered readings). The rows
+    must be ONE apparatus, context arm, class-set version and checks arm — a group of two is
+    refused by ``cell_stats``. Pure; no I/O."""
     proj = _check_projection(projection)
     rs = list(rows)
     groups = group_by_cell(rs, key_fields=proj)
     cells = [
-        measure_cell(g, proj, policy=policy, controls=controls, oracle_by_task=oracle_by_task)
+        measure_cell(
+            g,
+            proj,
+            policy=policy,
+            controls=controls,
+            oracle_by_task=oracle_by_task,
+            readings=readings,
+        )
         for g in groups.values()
     ]
     cells.sort(key=lambda c: c.key.to_tuple())
@@ -574,11 +736,14 @@ def capability_views(
     *,
     policy: RoutingPolicy = DEFAULT_POLICY,
     controls: ControlsVerdict | None = None,
+    readings: ReadingBook | None = None,
 ) -> dict[str, CapabilityMap]:
     """Every named projection in :data:`PROJECTIONS`, built from one pass over the rows."""
     rs = list(rows)
     return {
-        name: build_capability_map(rs, projection=proj, policy=policy, controls=controls)
+        name: build_capability_map(
+            rs, projection=proj, policy=policy, controls=controls, readings=readings
+        )
         for name, proj in PROJECTIONS.items()
     }
 
@@ -663,6 +828,8 @@ def config_candidates(
     language: str | None = None,
     policy: RoutingPolicy = DEFAULT_POLICY,
     controls: ControlsVerdict | None = None,
+    readings: ReadingBook | None = None,
+    oracle_by_task: OracleByTask | None = None,
 ) -> list[CapabilityCell]:
     """Config cells (see :func:`config_projection`) for the class that PASS.
 
@@ -672,7 +839,16 @@ def config_candidates(
     the exclusion is not left implicit.
     """
     proj = config_projection(size=size, language=language)
-    cmap = build_capability_map(rows, projection=proj, policy=policy, controls=controls)
+    if readings is not None:  # each config on its own standard arm, never two pooled
+        rows = readings.standard_rows(list(rows), proj)
+    cmap = build_capability_map(
+        rows,
+        projection=proj,
+        policy=policy,
+        controls=controls,
+        readings=readings,
+        oracle_by_task=oracle_by_task,
+    )
     out: list[CapabilityCell] = []
     for c in cmap.cells:
         k = c.key
@@ -730,6 +906,8 @@ def best_config(
     policy: RoutingPolicy = DEFAULT_POLICY,
     selection: str = SELECTION_COST_THEN_LATENCY,
     controls: ControlsVerdict | None = None,
+    readings: ReadingBook | None = None,
+    oracle_by_task: OracleByTask | None = None,
 ) -> ConfigPick | None:
     """The cheapest + fastest PASSING config for a class (× size × language).
 
@@ -746,6 +924,8 @@ def best_config(
         language=language,
         policy=policy,
         controls=controls,
+        readings=readings,
+        oracle_by_task=oracle_by_task,
     )
     if not candidates:
         return None
@@ -986,6 +1166,8 @@ def trusted_autonomy_coverage(
     cells: CapabilityMap | None = None,
     policy: RoutingPolicy = DEFAULT_POLICY,
     language: str | None = None,
+    readings: ReadingBook | None = None,
+    oracle_by_task: OracleByTask | None = None,
 ) -> CoverageSummary:
     """Join a change profile to the (class × size) map and weight routes by volume.
 
@@ -1014,6 +1196,8 @@ def trusted_autonomy_coverage(
                 language=language,
                 policy=policy,
                 controls=cmap.controls,
+                readings=readings,
+                oracle_by_task=oracle_by_task,
             )
             if cell.route == ROUTE_DELIVER
             else None

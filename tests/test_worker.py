@@ -1692,7 +1692,7 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
     # THE ROUTE GATE (DL-038): with delivery opted in, the worker hands the loop the
     # capability map's decision for the item's cell — the SAME signed map the API serves.
     # The first factory run above wrote one sighted process_step=factory row into the
-    # fixture's bug.fix XS cell, so the map now says `calibrate (n_below_min)` for it →
+    # fixture's bug.fix XS cell, so the map now says `calibrate (reading_unregistered)` for it →
     # delivery WITHHELD (recorded with the measured route, no PR attempted), and the item
     # is still built, reviewed and accepted. The reading is the PRE-run map (DL-045): the
     # first run's row counts (n=1), the gated run's own row does not — and it is on the
@@ -1703,7 +1703,9 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
     assert gated.counts_json["by_status"] == {"accepted": 1}
     routes = [e for e in home.events() if e.kind == fe.EV_ROUTE]
     cell = routes[-1].payload["cell_route"]
-    assert cell["route"] == "calibrate" and cell["n"] == 1 and cell["reason_code"] == "n_below_min"
+    # routing.v2: no reading registered for the cell before its first attempt licenses it
+    assert cell["route"] == "calibrate" and cell["n"] == 1
+    assert cell["reason_code"] == "reading_unregistered"
     assert cell["apparatus_versions"] == [rows[0].apparatus_version]
     assert len(list(h.worker.ledger.rows(run_id=gated.id))) == 1  # its own row landed after
     refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
@@ -1711,8 +1713,8 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
         "route gate: the cell routes calibrate"
     )
     assert refused[-1].payload["measured_route"] == "calibrate"
-    assert refused[-1].payload["reason_code"] == "n_below_min"
-    assert refused[-1].payload["policy_version"] == "routing.v1"
+    assert refused[-1].payload["reason_code"] == "reading_unregistered"
+    assert refused[-1].payload["policy_version"] == "routing.v2"
     withheld = [e.action for e in h.events(gated.id) if e.stage == "factory"]
     assert "delivery.withheld" in withheld and "delivery.opened" not in withheld
     # a second approver's override lifts the sign-off clause and nothing else (ADR-0026

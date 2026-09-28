@@ -34,6 +34,17 @@ import { collectHints } from './Help'
 import { ConfirmationPanel, Details, NotificationBanner, SummaryList, Tag, TaskList } from './govuk'
 
 describe('govuk patterns', () => {
+  it('a task list status wraps at phone width instead of pushing the page sideways (P-307)', () => {
+    render(
+      <MemoryRouter>
+        <TaskList completed={0} tasks={[{ num: 8, name: 'Deliver your first change', status: 'Backlog frozen — run the factory', tone: 'blue', to: '/factory' }]} />
+      </MemoryRouter>,
+    )
+    const tag = screen.getByText('Backlog frozen — run the factory')
+    expect(tag.className).toContain('whitespace-normal')
+    expect(tag.className).not.toContain('whitespace-nowrap')
+  })
+
   it('task list, summary list, banner and confirmation panel', () => {
     render(
       <MemoryRouter>

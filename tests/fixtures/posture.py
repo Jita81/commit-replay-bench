@@ -10,7 +10,10 @@ What it does: ``adhoc`` — an unwitnessed context from the task's discovery val
               and whose witness is a real ``GoldWitness`` on the fixture repository, so a
               blamed row names a control that actually ran. Neither is a qualification a
               deployment would accept: that is measured by ``qualify_task``.
-How:          Thin wrappers over ``crb.core.qualify``.
+              ``posture_row`` stamps the labels a row of the current apparatus carries;
+              ``at_apparatus`` / ``dict_at_apparatus`` move a row to an older apparatus through
+              ``crb.core.ledger.labels_at_apparatus`` — never by hand (P-309).
+How:          Thin wrappers over ``crb.core.qualify`` and ``crb.core.ledger``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/core/qualify.py (``adhoc_context``, ``GoldWitness``, ``Qualification``),
@@ -201,7 +204,70 @@ def with_posture_labels(fields: dict[str, Any]) -> dict[str, Any]:
             for b in ("tests_unmodified", "target_green", "no_new_failures", "source_changed")
         )
         labels.setdefault("blame_control", "api_diff" if api_only else "gold_green")
+    if parsed >= (2, 4):
+        _classification_labels(fields, labels)
     return {**fields, "labels": labels}
+
+
+def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> None:
+    """ADR-0025 items 5 and 6 (stream G): a measured row of 2.4 or later carries its own
+    ``failure_kind``, ``lint_reason`` and, on a replay row, ``change_id`` — filled in here,
+    as the writer would, where the test did not name them."""
+    from crb.core.ledger import (
+        LABEL_CHANGE_ID,
+        LABEL_FAILURE_KIND,
+        LABEL_LINT_REASON,
+        PROCESS_REPLAY,
+        api_only_failure,
+        derive_failure_kind,
+        lint_only_failure,
+    )
+
+    error = str(fields.get("error") or "")
+    lint = fields.get("repo_lint_clean")
+    labels.setdefault(
+        LABEL_FAILURE_KIND,
+        derive_failure_kind(
+            clean=bool(fields.get("clean")),
+            disqualified=bool(fields.get("disqualified")),
+            error=error,
+            builder_error=labels.get("builder_error", ""),
+            stop_reason=labels.get("stop_reason", ""),
+            lint_only=lint_only_failure(fields),
+            api_only=api_only_failure({**fields, "api_stable": labels.get("api_stable")}),
+        ),
+    )
+    reason = (
+        "none_detected" if lint is None else "error" if error.startswith("lint:") else "evaluated"
+    )
+    labels.setdefault(LABEL_LINT_REASON, reason)
+    if str(fields.get("process_step") or PROCESS_REPLAY) == PROCESS_REPLAY:
+        labels.setdefault(LABEL_CHANGE_ID, f"change-{fields.get('task_id', '')}")
+        # a measured replay row of 2.4 was qualified in its posture (ADR-0019 §4)
+        fields.setdefault("gold_clean", True)
+    _context_labels(fields, labels)
+
+
+def _context_labels(fields: dict[str, Any], labels: dict[str, str]) -> None:
+    """ADR-0026 items 1 and 9 (stream R): a row of 2.4 carries the context arm its brief
+    carried and the class-set version its class was read under — decided here as the writer
+    decides them (``context_arm_for`` over the step, the mode and the loop's ``learn`` label;
+    a factory row from its ``test_author``), where the test did not name them."""
+    from crb.core.context_arm import LABEL_CONTEXT_ARM, context_arm_for, loop_on
+    from crb.core.ledger import PROCESS_FACTORY, context_arm_of_factory_author
+    from crb.core.taxonomy import GLOBAL_CLASS_SET, LABEL_TAXONOMY
+
+    if LABEL_CONTEXT_ARM not in labels:
+        if str(fields.get("process_step") or "") == PROCESS_FACTORY:
+            arm = context_arm_of_factory_author(labels.get("test_author", "fixture:author"))
+            labels[LABEL_CONTEXT_ARM] = arm + ("+L" if loop_on(labels) else "")
+        else:
+            labels[LABEL_CONTEXT_ARM] = context_arm_for(
+                process_step="replay",
+                mode=str(fields.get("mode") or "sighted"),
+                loop=loop_on(labels),
+            )
+    labels.setdefault(LABEL_TAXONOMY, GLOBAL_CLASS_SET)
 
 
 def posture_result(*args: Any, **kw: Any) -> GradeResult:
@@ -214,6 +280,16 @@ def posture_result(*args: Any, **kw: Any) -> GradeResult:
     kw.setdefault("posture_class", TEST_POSTURE_CLASS)
     kw.setdefault("qualification_id", TEST_QUALIFICATION_ID)
     belts = kw.get("belts")
+    if belts is not None:  # belt 5's reason, as grade() writes it (ADR-0025 item 5)
+        lint = belts.repo_lint_clean
+        kw.setdefault(
+            "lint_status",
+            "none_detected"
+            if lint is None
+            else "error"
+            if str(kw.get("error") or "").startswith("lint:")
+            else "evaluated",
+        )
     blamed = (
         belts is not None
         and not kw.get("clean")
@@ -249,3 +325,27 @@ def posture_row(**kw: Any) -> GradeRow:
     """``GradeRow(**kw)`` with :func:`with_posture_labels` applied — the test factories'
     shape for a measured row of the current apparatus."""
     return GradeRow(**with_posture_labels(kw))
+
+
+def at_apparatus(row: GradeRow, version: str, **changes: Any) -> GradeRow:
+    """``row`` rewritten at apparatus ``version`` (with ``changes``), keeping only the labels
+    a row of that apparatus carries (:func:`crb.core.ledger.labels_at_apparatus`, P-309): a
+    test that moves a 2.4 row to an older apparatus goes through here, never by hand."""
+    import dataclasses
+
+    from crb.core.ledger import labels_at_apparatus
+
+    labels = labels_at_apparatus(changes.pop("labels", row.labels), version)
+    return dataclasses.replace(row, apparatus_version=version, labels=labels, **changes)
+
+
+def dict_at_apparatus(d: dict[str, Any], version: str) -> dict[str, Any]:
+    """The ``to_dict`` form of :func:`at_apparatus`: ``d`` with its apparatus set to
+    ``version`` and only the labels a row of that apparatus carries."""
+    from crb.core.ledger import labels_at_apparatus
+
+    return {
+        **d,
+        "apparatus_version": version,
+        "labels": labels_at_apparatus(d.get("labels") or {}, version),
+    }

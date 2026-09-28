@@ -85,9 +85,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.concurrency import run_in_threadpool
 
-from crb.builders.budget import PRICING_ENV, load_pricing
 from crb.builders.adapter import parse_rung_label, rungs_from_entries
 from crb.builders.base import Rung
+from crb.builders.budget import PRICING_ENV, load_pricing
 from crb.builders.claude_code import credential_missing as claude_code_credential_missing
 from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
@@ -120,8 +120,8 @@ from crb.server.schemas import (
     StepEventOut,
 )
 from crb.server.secrets import secrets_dir_for
-from crb.store.events import lock_event_writes
 from crb.server.spend_cap import unpriced_rungs
+from crb.store.events import lock_event_writes
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 

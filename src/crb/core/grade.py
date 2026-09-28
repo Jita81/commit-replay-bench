@@ -79,12 +79,14 @@ What it does: Evaluates belts 1–6 mechanically against the parent tree and the
               measured there, and a verdict that would blame the builder names a witness run
               there first (``MisattributionViolation`` otherwise) — a red one is an
               ``environment:`` error, never a model failure; a trial tree the sandbox could not
-              take is witnessed the same way (green: the trial is disqualified).
+              take is witnessed the same way (green: the trial is disqualified). Says why belt 5
+              holds what it holds (``lint_status``) and keeps the files the tests themselves
+              wrote as a diagnostic (``touched_post_run``) that no belt reads.
 How:          Posture check (spec, context, executor) → integrity check of the git view →
               tamper scan (target tests, test infrastructure, other tests) → the dependency
               closure (belt 1b) → the builder's changes and diff, read before any run →
-              target run → belt-scope run → belt 5 plan → belt 6 (opt-in) → the witness →
-              result.
+              target run → belt-scope run → belt 5 plan and its ``lint_status`` → the post-run
+              walk → belt 6 (opt-in) → the witness → result.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0019-qualification-is-posture-relative.md,
@@ -94,7 +96,7 @@ Works with:   src/crb/core/workspace.py (the trial tree and its integrity), src/
               (the row a result becomes), src/crb/core/runners/base.py (the test runs),
               src/crb/core/test_infra.py (belt 1's infrastructure table)
 Tested by:    tests/test_grade.py, tests/test_grade_api_belt.py, tests/test_oracle_controls.py,
-              tests/test_runners_node.py
+              tests/test_runners_node.py, tests/test_lint_status.py, tests/test_grade_post_run.py
 Touch when:   never for a new repository — configure the runner, belt scope and lint in the
               repo config instead (docs/OPERATOR.md); adding a belt or changing what "clean"
               means needs an ADR and an apparatus bump (docs/EVIDENCE-AND-CLAIMS.md).
@@ -114,7 +116,15 @@ from crb.core.api_surface import ApiRun, WorkspaceTrees
 from crb.core.api_surface import evaluate as evaluate_api_surface
 from crb.core.deps import ClosureViolation, DepsBinding, TaskDeps
 from crb.core.execution import Executor, SandboxUnavailable
-from crb.core.lint import LintRun, run_plan
+from crb.core.lint import (
+    LINT_NOT_REACHED,
+    LINT_NOT_REQUESTED,
+    LintRun,
+    lint_disabled,
+    lint_status,
+    lint_status_violation,
+    run_plan,
+)
 from crb.core.posture import Posture, PostureMismatch
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
@@ -337,10 +347,24 @@ class GradeResult:
     env_code: str = ""
     #: belt 6's record when it was switched on (ADR-0024); ``None`` otherwise
     api_run: ApiRun | None = None
+    #: Why belt 5 holds what it holds (``crb.core.lint.LINT_STATUSES``, ADR-0025 item 5);
+    #: empty only on a result built by hand (a test, an import).
+    lint_status: str = ""
+    #: The files the tests themselves wrote: touched after the belt runs and not before
+    #: them (ADR-0025 item 13). A diagnostic in the pack that no belt reads — belts 4 and
+    #: 5 read the builder's changes as they stood before the first test ran.
+    touched_post_run: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
+        if self.lint_status:
+            why = lint_status_violation(
+                self.lint_status, self.belts.repo_lint_clean, clean=self.clean
+            )
+            if why:
+                raise ValueError(f"grade for {self.task_id[:10]}: {why}")
+        object.__setattr__(self, "touched_post_run", tuple(self.touched_post_run))
         if self.clean and not (self.belts.all_true and not self.disqualified and not self.error):
             raise FalseQ1Violation(
                 f"refusing to construct a clean grade for {self.task_id[:10]} with belts="
@@ -414,6 +438,9 @@ class GradeResult:
             **({"blame_control": self.blame_control} if self.blame_control else {}),
             **({"control": self.control.to_dict()} if self.control is not None else {}),
             **({"env_code": self.env_code} if self.env_code else {}),
+            # present iff set, for the same reason
+            **({"lint_status": self.lint_status} if self.lint_status else {}),
+            **({"touched_post_run": list(self.touched_post_run)} if self.touched_post_run else {}),
         }
 
 
@@ -560,6 +587,8 @@ def grade(
         "qualification_id": ctx.qualification.qualification_id,
     }
     baseline = ctx.qualification.baseline  # the in-posture union, never the discovery set
+    # belt 5's reason until the grade reaches it (ADR-0025 item 5); every return carries it
+    kw["lint_status"] = LINT_NOT_REACHED if evaluate_lint else LINT_NOT_REQUESTED
 
     def environment(
         run: TestRun,
@@ -665,7 +694,25 @@ def grade(
             "extra": {"control": run.to_dict()},
         }
 
+    #: set once the first test run starts: from then on every return names what the tests
+    #: wrote (ADR-0025 item 13), whichever belt it stops at
+    tests_ran: list[bool] = [False]
+    touched_pre: list[str] = []
+
+    def post_run() -> tuple[str, ...]:
+        """The files touched after the first test run started and not before it — a
+        diagnostic for the pack, read by no belt, so a failed walk records nothing and
+        can never turn a verdict into a harness error."""
+        pre = set(touched_pre)
+        try:
+            post = ws.touched_files()
+        except Exception:  # a diagnostic never decides a verdict
+            return ()
+        return tuple(sorted(f for f in post if f not in pre)[:200])
+
     def done(**changes: Any) -> GradeResult:
+        if tests_ran[0] and "touched_post_run" not in changes:
+            changes["touched_post_run"] = post_run()
         merged: dict[str, Any] = {
             "clean": False,
             "belts": belts,
@@ -680,12 +727,14 @@ def grade(
     try:
         # --- pre-flight (both modes): the worktree's git view is still the harness's.
         #     HEAD is the parent, the gitdir is the clone's, no index entry carries a
-        #     skip-worktree / assume-unchanged bit, and the shared info/exclude holds
-        #     only what the harness wrote (anything else is removed and reported). The
-        #     independent review pass (2026-09-14, finding 1) graded a hidden
-        #     conftest.py clean by each of these routes. A violation is a DQ, never a
-        #     verdict — and touched_files() below reads the tree, not git's views, so
-        #     the check is a belt over the ground, not the only thing holding it. ----
+        #     skip-worktree / assume-unchanged bit, the shared info/exclude holds only
+        #     what it held when the harness first used the clone (read, never rewritten)
+        #     and the worktree's own excludes file only the harness's patterns (anything
+        #     else is reported). The independent review pass (2026-09-14, finding 1)
+        #     graded a hidden conftest.py clean by each of these routes. A violation is a
+        #     DQ, never a verdict — and touched_files() below reads the tree, not git's
+        #     views, so the check is a belt over the ground, not the only thing holding
+        #     it. ----
         violations = ws.enforce_integrity()
         if violations:
             files = sorted({f for v in violations for f in v.files})
@@ -705,7 +754,7 @@ def grade(
             )
 
         # --- belt 1b (both modes, pre-run): no test-infrastructure file touched ---
-        touched_pre = ws.touched_files()
+        touched_pre[:] = ws.touched_files()
         infra = infra_tampered(ws, touched_pre, exclude=task.test_files, config=config)
         if infra:
             _emit(on_event, "grade.tamper", task=task.task_id, files=infra[:10], kind="test_infra")
@@ -811,6 +860,7 @@ def grade(
         diff = ws.diff_stats(exclude=task.test_files)
 
         # --- belt 2: target green -------------------------------------------------
+        tests_ran[0] = True
         target_run = runner.run_for(
             executor,
             ws.root,
@@ -909,6 +959,7 @@ def grade(
         lint_run: LintRun | None = None
         lint_error = ""
         plan = runner.lint_plan(ws.root, executor) if evaluate_lint else None
+        disabled = lint_disabled(getattr(getattr(runner, "config", None), "lint", None))
         if plan is not None:
             present = [f for f in changed if ws.exists(f)]
             # the plan's own wall clock (RepoConfig.lint.timeout or the lint default)
@@ -927,6 +978,10 @@ def grade(
                 lint_error = f"lint: {lint_run.error}"
             elif lint_run.ok is False and not note:
                 note = f"lint: {lint_run.note}"
+        if evaluate_lint:
+            kw["lint_status"] = lint_status(lint_run, disabled=disabled)
+        # the files the tests wrote, read before belt 6 runs (item 13)
+        touched_post_run = post_run()
         api_run = (
             _belt_six(ws, task, changed, on_event, forward=api_forward) if evaluate_api else None
         )
@@ -965,6 +1020,7 @@ def grade(
             "belt_run": belt_run,
             "lint_run": lint_run,
             "api_run": api_run,
+            "touched_post_run": touched_post_run,
         }
         final.update(blame)
         return done(**final)

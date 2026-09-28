@@ -210,6 +210,7 @@ from crb.core.execution import (
     DockerSettings,
     Executor,
     SandboxUnavailable,
+    executor_kind,
     make_executor,
 )
 from crb.core.git import (
@@ -257,6 +258,7 @@ from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, UNCLASSIFIED, RepoConfig, TaskSpec
 from crb.core.stats import mean
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
@@ -571,6 +573,7 @@ class WorkerSettings:
             raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
+        executor_kind(self.executor)  # P-300: an empty or unknown kind never starts a worker
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +793,13 @@ class _RunLedger:
 # ---------------------------------------------------------------------------
 
 Handler = Callable[[RunContext], tuple[str, dict[str, Any], str]]
+
+
+def run_executor_kind(params: Mapping[str, Any], settings: WorkerSettings) -> str:
+    """The executor a run asks for: its own ``params.executor``, else the worker's setting —
+    never a default of our own, so an empty kind reaches ``make_executor`` and is refused
+    there (P-300); the unsealed-override stamp reads the same answer."""
+    return str(params.get("executor") or settings.executor)
 
 
 class Worker:
@@ -1606,15 +1616,16 @@ class Worker:
         return ctx._runner
 
     def _executor_kind(self, ctx: RunContext) -> str:
-        """The executor this run asks for: its own ``params.executor``, else the worker's."""
-        return str(ctx.params.get("executor") or self.settings.executor or "local")
+        """The executor this run asks for: :func:`run_executor_kind`."""
+        return run_executor_kind(ctx.params, self.settings)
 
     def _executor(self, ctx: RunContext) -> Executor:
         """The run's executor. Docker is fail-closed: no image / no daemon → the
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        kind = self._executor_kind(ctx)
+        # no default here: an empty kind reaches make_executor and is refused (P-300)
+        kind = run_executor_kind(ctx.params, self.settings)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
                 f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
@@ -3253,6 +3264,9 @@ class Worker:
                 capability_class=new.capability_class,
                 class_source=new.class_source,
                 previous_class=task.capability_class,
+                # the class-set version this label was read under (ADR-0026 item 9): the
+                # (task, version) table is folded from these events, never a stored row
+                taxonomy=GLOBAL_CLASS_SET,
                 changed=new.capability_class != task.capability_class,
                 cost_usd=labeller.usage.last.get("cost_usd"),
                 latency_ms=int(float(labeller.usage.last.get("latency_s") or 0.0) * 1000),

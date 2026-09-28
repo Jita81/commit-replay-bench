@@ -1030,12 +1030,20 @@ class EvidenceResponse(BaseModel):
 
 
 class RoutingPolicyOut(BaseModel):
-    min_n: int
-    min_point: float
-    min_ci_low: float
+    """:meth:`crb.core.routing.RoutingPolicy.to_dict` — routing.v2's bar: the look rule
+    (``rule``, its ``looks`` — look size → misses allowed — and its exact chance of
+    delivering a cell whose true rate is 0.80), the per-cell error budget, the oracle clauses
+    and ``description``, the one sentence README carries byte for byte (ADR-0025 item 10)."""
+
+    rule: str
+    looks: dict[str, int]
+    p_deliver_at_0_80: float
+    cell_error_budget: float
     min_oracle_strength: float
+    min_oracle_share: float
     granularize_sizes: list[str]
     version: str
+    description: str
 
 
 class CapabilityCellOut(BaseModel):

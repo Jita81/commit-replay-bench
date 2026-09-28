@@ -66,7 +66,8 @@ from crb.server.factory_state import FactoryHome
 from crb.server.settings import GitHubAppSettings
 from crb.store.models import GitHubInstallation, Repo, Run
 from fixtures.concurrency import at_once, pause_after
-from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
+from fixtures.proven import add_rows, add_tasks
+from fixtures.server_seed import ALPHA, THIN_CELL, Env, envelope, login, logout, make_env
 from fixtures.signoff_seed import clear_policy
 
 PATHS: list[tuple[str, str, str]] = [
@@ -401,11 +402,20 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     deliver = {**ITEM, "id": "D-1", "capability_class": "bug.fix", "size_estimate": "S"}
     thin = {**ITEM, "id": "T-1", "capability_class": "backend.route.add", "size_estimate": "M"}
     assert _register(env, [deliver, thin]).status_code == 201
-    # before the controls gate passes and the oracle is scored, even the strong cell routes
-    # to a human — and the task says so
+    # before a reading proves the cell, the controls gate passes and the oracle is scored,
+    # even the strong cell routes calibrate (routing.v2: unmeasured is never deliver) — and
+    # the task says so
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
-    assert by_id["D-1"]["route"] == "human" and by_id["D-1"]["deliverable"] is False
+    assert by_id["D-1"]["route"] == "calibrate" and by_id["D-1"]["deliverable"] is False
     clear_policy(env)
+    # the deployment now grades in the sealed posture, so the thin cell is measured there
+    # too: four sealed first attempts and no registered reading
+    add_rows(
+        env.factory,
+        add_tasks(env.factory, 4, prefix="thin", cell=THIN_CELL),
+        arm="S3",
+        cell=THIN_CELL,
+    )
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
     assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is True
     assert by_id["D-1"]["n"] >= 10 and by_id["D-1"]["reason_code"] == "deliver"
@@ -414,7 +424,7 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     assert d1["point"] >= 0.9 and d1["ci_low"] >= 0.8 and d1["ci_high"] >= d1["point"]
     assert d1["apparatus_versions"] == [APPARATUS_VERSION]
     assert by_id["T-1"]["route"] != "deliver" and by_id["T-1"]["deliverable"] is False
-    assert by_id["T-1"]["reason_code"] and by_id["T-1"]["n"] > 0
+    assert by_id["T-1"]["reason_code"] == "reading_unregistered" and by_id["T-1"]["n"] == 4
 
 
 def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:

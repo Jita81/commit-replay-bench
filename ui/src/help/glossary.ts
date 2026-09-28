@@ -110,12 +110,12 @@ export const TERMS: Record<TermId, Term> = {
   },
   deliver: {
     term: 'deliver',
-    short: 'The route that lets the factory open a branch and pull request for this class of change: n ≥ 10, point ≥ 0.90, Wilson lower ≥ 0.80, false-Q1 = 0, oracle ≥ 0.80 and the controls gate passed. It never means a change is safe to merge.',
+    short: 'The route that lets the factory open a branch and pull request for this class of change: the cell’s standard context arm, read by a registered reading in the sealed posture, was clean on 20 of the first 20, 29 of the first 30 or 38 of the first 40 distinct commits, with false-Q1 = 0, oracle ≥ 0.80 on at least half of them and the controls gate passed. It never means a change is safe to merge.',
     readMore: 'EVIDENCE-AND-CLAIMS#7-what-must-never-be-said',
   },
   calibrate: {
     term: 'calibrate',
-    short: 'Not enough evidence yet, or the rate is under the bar. More attempts, or running the controls, can change it.',
+    short: 'Something the rule needs is not measured yet: no registered reading, a look still pending, the oracle or the controls, or the sealed posture. The cell names what to measure next.',
     readMore: 'OPERATOR#4-read-the-capability-map',
   },
   human: {

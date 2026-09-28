@@ -17,9 +17,21 @@ prevention artifact (each escape names a missing assertion, deterministically).
 
 Honesty properties (all correct-by-construction, none advisory)
 ---------------------------------------------------------------
-* **No randomness anywhere.** Candidates are collected in AST source order and sorted
-  on ``(line, col, operator-rank, description)``; two runs on the same input are
-  byte-identical. ``max_mutants`` truncates a stable PREFIX.
+* **The scoring rule is the apparatus's, never ahead of it.** ``mutation.v2`` (below) is
+  the rule of apparatus 2.4 (ADR-0025 item 14); below 2.4 the scorer is ``mutation.v1``
+  as it stood — a stable prefix of the changed files' candidates, a timeout read as a
+  kill — and its stamp and operator-set hash are v1's byte for byte
+  (:func:`mutation_version`, read at call time). So no score stamped 2.3 is a v2 score,
+  and a reader that keeps one apparatus keeps one rule (P-295).
+* **No randomness anywhere, and every changed file is reached** (``mutation.v2``,
+  ADR-0025 item 7). Every candidate of every changed file is generated, with no cap per
+  file; within a file the candidates are ranked by the SHA-256 of
+  ``task_id|path|line|col|op``; files are taken in path order, one candidate each in turn,
+  up to ``max_mutants`` (sampler ``hash-rr.v1``). The sample is deterministic, seeded by
+  the commit, and never only the first file's earliest lines — ``mutation.v1`` kept a
+  stable prefix, so a change to several files was scored on its first file alone
+  (external assessment 2026-09-25, A6). The provenance records the sampler and the
+  candidates per file; two runs on the same input are byte-identical.
 * **Every mutant compiles — or is excluded.** A syntactically broken mutant would be
   "killed" by a collection error, dishonestly inflating strength. The Python AST
   mutator drops non-compiling candidates before they are counted; the text mutators
@@ -31,11 +43,14 @@ Honesty properties (all correct-by-construction, none advisory)
   bytes are what belt 1 checks anyway.
 * **A RED baseline is not scoreable.** A gold state that fails its own target tests
   yields ``oracle_strength=None`` — never averaged in as strength.
-* **A harness error is neither a kill nor an escape.** An executor/runner exception
-  on a mutant is recorded as an *error* outcome and excluded from the denominator;
-  a sandbox failure propagates. A **timeout** IS a kill: the tests did not pass
-  with the fault present (the fault was observable; CI would be red) — it is
-  recorded as ``timed_out`` so a reader can recompute without it.
+* **Nothing the oracle did not observe is a kill or an escape.** An executor/runner
+  exception on a mutant is an *error* outcome; a run that hit its wall clock is
+  ``timeout``; a run that exited 0 with output the runner could not parse is
+  ``unattributed``. None of them enters the numerator or the denominator; each is
+  counted. When the excluded outcomes (errors, uncompilable, timeouts, unattributed)
+  exceed half of the planned mutants, the task is NOT scoreable, with a note naming the
+  causes — a score read from the minority that happened to run is not a strength. A
+  sandbox failure propagates.
 * **The file under mutation is restored byte-exact** — after every mutant and again
   in a ``finally`` — and the restore is verified by hash. Each version is written
   with a distinct integer mtime that is also newer than wall-clock, so neither a
@@ -64,23 +79,27 @@ What it does: At a task's GOLD state, plants deterministic faults on the changed
               a test file; a RED baseline, a harness error or a toolchain-rejected mutant is
               never a number; the source is restored byte-exact and verified by hash.
 How:          baseline run (must be GREEN) → ``changed_lines_for`` (``git diff -U0``) →
-              ``mutator.generate`` (pure, sorted, bounded) → per mutant: write with a fresh
-              mtime → ``runner.run_for`` → killed / escaped / uncompilable / error → restore →
-              ``CommitOracleScore`` → ``aggregate_by_cell`` / ``to_report``.
+              ``mutator.generate`` (pure, every candidate of every changed file) →
+              ``sample_mutants`` (``hash-rr.v1``: hash-ranked per file, round-robin across
+              files) → per mutant: write with a fresh mtime → ``runner.run_for`` → killed /
+              escaped / uncompilable / timeout / unattributed / error → restore → more than
+              half excluded is not scoreable → ``CommitOracleScore`` → ``aggregate_by_cell`` /
+              ``to_report``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0009-text-level-mutators.md
+ADRs:         docs/adr/0009-text-level-mutators.md; ADR-0025 item 7 (``mutation.v2``, stream G)
 Works with:   src/crb/core/oracle/mutant.py (the ``Mutant``/``Mutator`` contract),
               src/crb/core/oracle/mutators_text.py (the other family, registered here),
               src/crb/core/runners/base.py (``run_for`` and the ``parse_error`` that marks
               ``uncompilable``), src/crb/core/workspace.py (the gold worktree and its git
               view), src/crb/core/oracle/adequacy.py (turns the number into a decision),
               src/crb/server/worker.py (the oracle run kind)
-Tested by:    tests/test_oracle_mutation.py, tests/test_oracle_mutation_text.py
+Tested by:    tests/test_oracle_mutation.py, tests/test_oracle_mutation_text.py,
+              tests/test_oracle_mutation_v2.py
 Touch when:   never for a new repository (an oracle run needs only a configured runner —
               docs/OPERATOR.md); adding an operator changes ``PYTHON_OPERATORS``, the rank
-              table and therefore the operator-set hash — a ``MUTATION_VERSION`` bump and a
-              note in docs/EVIDENCE-AND-CLAIMS.md; a new language is a mutator in
-              src/crb/core/oracle/mutators_text.py, not an edit here.
+              table and therefore the operator-set hash — a new ``mutation_version`` (with the
+              apparatus bump it rides) and a note in docs/EVIDENCE-AND-CLAIMS.md; a new
+              language is a mutator in src/crb/core/oracle/mutators_text.py, not an edit here.
 Claims:       A strength is comparable only within one language and one operator-set hash;
               it measures the target tests, not the patch (docs/EVIDENCE-AND-CLAIMS.md).
 """
@@ -94,23 +113,44 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence, Set
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from crb.core import version as _version
 from crb.core.evidence import canonical_json, sha256_text
 from crb.core.execution import Executor, SandboxUnavailable
+from crb.core.ledger import is_v2_apparatus
 from crb.core.oracle.mutant import DEFAULT_MAX_MUTANTS, Mutant, Mutator
 from crb.core.oracle.mutators_text import MUTATOR_FAMILY_TEXT, text_mutators
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
 from crb.core.spec import RepoConfig, TaskSpec
-from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace, sha256_bytes
 
 MUTATION_SCHEMA = "crb.oracle_strength.v1"
-MUTATION_VERSION = "mutation.v1"
+#: The scoring rule below apparatus 2.4: a stable prefix of the changed files' candidates in
+#: file order, and a timeout read as a kill (recorded ``timed_out``).
+MUTATION_V1 = "mutation.v1"
+#: The scoring rule from apparatus 2.4 (ADR-0025 items 7 and 14): every changed file sampled
+#: (``SAMPLER_HASH_RR``), timeouts and unparsed exit-0 runs counted apart from kills, more
+#: than half excluded not scoreable. A score is comparable only with scores of its version.
+MUTATION_V2 = "mutation.v2"
+#: Hash-ranked within a file, round-robin across files in path order.
+SAMPLER_HASH_RR = "hash-rr.v1"
+#: The generation bound handed to a mutator: none (v2 generates every candidate).
+_EVERY_CANDIDATE = 1 << 31
 MUTATOR_FAMILY_AST = "ast"
+
+
+def mutation_version(apparatus_version: str | None = None) -> str:
+    """The scoring rule of ``apparatus_version`` (the live apparatus, read at call time, by
+    default): :data:`MUTATION_V2` from 2.4, :data:`MUTATION_V1` below it. The rule follows
+    the apparatus stamp and never runs ahead of it, so no score stamped 2.3 is a v2 score
+    (P-295)."""
+    apparatus = apparatus_version if apparatus_version is not None else _version.APPARATUS_VERSION
+    return MUTATION_V2 if is_v2_apparatus(apparatus) else MUTATION_V1
+
 
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
@@ -409,7 +449,7 @@ class PythonAstMutator:
             "language": self.language,
             "mutator": type(self).__name__,
             "family": self.family,
-            "version": MUTATION_VERSION,
+            "version": mutation_version(),
             "operators": [{"op": op, "rank": _OP_RANK[op]} for op in self.operators],
             "cmp_flips": sorted(desc for _, desc in _CMP_FLIPS.values()),
             "arith_flips": sorted(desc for _, desc in _ARITH_FLIPS.values()),
@@ -459,6 +499,39 @@ OUTCOME_KILLED = "killed"
 OUTCOME_ESCAPED = "escaped"
 OUTCOME_ERROR = "error"
 OUTCOME_UNCOMPILABLE = "uncompilable"
+#: The run hit its wall clock: the oracle never finished, so it observed nothing (v2).
+OUTCOME_TIMEOUT = "timeout"
+#: The run exited 0 but its output did not parse: no verdict can be read from it (v2).
+OUTCOME_UNATTRIBUTED = "unattributed"
+
+
+def rank_key(task_id: str, mutant: Mutant) -> str:
+    """A mutant's place in its file's sample: ``sha256(task_id|path|line|col|op)``."""
+    raw = f"{task_id}|{mutant.path}|{mutant.line}|{mutant.col}|{mutant.op}"
+    return sha256_text(raw)
+
+
+def sample_mutants(
+    task_id: str, per_file: Mapping[str, Sequence[Mutant]], max_mutants: int
+) -> list[Mutant]:
+    """The ``hash-rr.v1`` sample: each file's candidates ranked by :func:`rank_key` (ties
+    by description, then source), files taken in path order, one candidate each in turn,
+    until ``max_mutants`` are taken or every file is exhausted."""
+    ranked = {
+        path: sorted(ms, key=lambda m: (rank_key(task_id, m), m.description, m.mutated_source))
+        for path, ms in per_file.items()
+    }
+    paths = sorted(ranked)
+    out: list[Mutant] = []
+    depth = 0
+    while len(out) < max_mutants and any(depth < len(ranked[p]) for p in paths):
+        for p in paths:
+            if len(out) >= max_mutants:
+                break
+            if depth < len(ranked[p]):
+                out.append(ranked[p][depth])
+        depth += 1
+    return out
 
 
 def compile_failure(run: TestRun) -> bool:
@@ -477,8 +550,10 @@ def compile_failure(run: TestRun) -> bool:
 @dataclass(frozen=True)
 class MutantOutcome:
     """One mutant's fate. ``killed`` is ``None`` when the mutant was not graded: a
-    harness error (``error``) or a toolchain rejection (``uncompilable``) — both are
-    excluded from the denominator and told apart by ``uncompilable``."""
+    harness error (``error``), a toolchain rejection (``uncompilable``), a run that hit
+    its wall clock (``timed_out``) or an exit-0 run whose output did not parse
+    (``unattributed``) — all excluded from the denominator and told apart by
+    :attr:`status`."""
 
     mutant_id: str
     op: str
@@ -492,17 +567,30 @@ class MutantOutcome:
     tail: str = ""
     error: str = ""
     uncompilable: bool = False
+    unattributed: bool = False
+    #: ``mutation.v1``'s reading: a run that timed out is a kill. Only a v1 score sets it;
+    #: without it a timed-out outcome cannot be graded (v2). Never serialised.
+    timeout_is_kill: bool = False
 
     def __post_init__(self) -> None:
         # Poka-yoke: an outcome cannot be both excluded and graded.
         if self.uncompilable and self.killed is not None:
             raise ValueError("an uncompilable mutant cannot also be killed/escaped")
+        if self.unattributed and self.killed is not None:
+            raise ValueError("an unattributed mutant run cannot also be killed/escaped")
+        if self.timed_out and self.killed is not None and not self.timeout_is_kill:
+            raise ValueError("a mutant run that timed out cannot also be killed/escaped (v2)")
 
     @property
     def status(self) -> str:
-        """``killed`` | ``escaped`` | ``error`` | ``uncompilable`` — the one-word fate."""
+        """``killed`` | ``escaped`` | ``error`` | ``uncompilable`` | ``timeout`` |
+        ``unattributed`` — the one-word fate."""
         if self.uncompilable:
             return OUTCOME_UNCOMPILABLE
+        if self.unattributed:
+            return OUTCOME_UNATTRIBUTED
+        if self.timed_out and self.killed is None:
+            return OUTCOME_TIMEOUT
         if self.killed is None:
             return OUTCOME_ERROR
         return OUTCOME_KILLED if self.killed else OUTCOME_ESCAPED
@@ -523,6 +611,7 @@ class MutantOutcome:
             "tail": self.tail,
             "error": self.error,
             "uncompilable": self.uncompilable,
+            "unattributed": self.unattributed,
         }
 
 
@@ -530,8 +619,11 @@ class MutantOutcome:
 class MutationProvenance:
     """Which instrument produced the strength number. Evidence expires with it."""
 
-    apparatus_version: str = APPARATUS_VERSION
-    mutation_version: str = MUTATION_VERSION
+    #: read at construction, so the stamp is the apparatus the score was measured under
+    apparatus_version: str = field(default_factory=lambda: _version.APPARATUS_VERSION)
+    #: ``""`` means "the apparatus's rule" (:func:`mutation_version`), filled in at
+    #: construction
+    mutation_version: str = ""
     language: str = ""
     mutator: str = ""
     mutator_family: str = ""  # "ast" | "text" — strengths compare only within one
@@ -539,9 +631,26 @@ class MutationProvenance:
     max_mutants: int = DEFAULT_MAX_MUTANTS
     runner: str = ""
     executor: Mapping[str, Any] = field(default_factory=dict)
+    #: How the mutants were chosen (:data:`SAMPLER_HASH_RR` under ``mutation.v2``; ``""``
+    #: under v1, whose prefix has no sampler) and from how many candidates each changed file
+    #: offered (path → count, v2 only).
+    sampler: str = ""
+    candidates_per_file: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "executor", dict(self.executor))
+        object.__setattr__(self, "candidates_per_file", dict(self.candidates_per_file))
+        rule = mutation_version(self.apparatus_version)
+        if not self.mutation_version:
+            object.__setattr__(self, "mutation_version", rule)
+        if self.mutation_version != rule:
+            # poka-yoke (P-301): a stamp cannot name a rule its apparatus does not score by
+            raise ValueError(
+                f"mutation_version {self.mutation_version!r} is not the rule of apparatus "
+                f"{self.apparatus_version} ({rule!r}): a score's rule follows its apparatus"
+            )
+        if self.mutation_version == MUTATION_V2 and not self.sampler:
+            object.__setattr__(self, "sampler", SAMPLER_HASH_RR)
 
     def to_dict(self) -> dict[str, Any]:
         """The stamp as stored with every score and report."""
@@ -555,6 +664,15 @@ class MutationProvenance:
             "max_mutants": self.max_mutants,
             "runner": self.runner,
             "executor": dict(self.executor),
+            # a v1 stamp is written as v1 always wrote it: it has no sampler
+            **(
+                {
+                    "sampler": self.sampler,
+                    "candidates_per_file": dict(sorted(self.candidates_per_file.items())),
+                }
+                if self.mutation_version == MUTATION_V2
+                else {}
+            ),
         }
 
 
@@ -564,9 +682,10 @@ class CommitOracleScore:
 
     ``oracle_strength = killed / total`` over the mutants that ran to a verdict;
     ``None`` when not scoreable (RED baseline, no mutants, no mutator, harness error
-    on the baseline). ``errors`` counts mutants excluded for harness errors and
-    ``uncompilable`` those the toolchain rejected — both are in neither numerator
-    nor denominator.
+    on the baseline, or more than half the planned mutants excluded). ``errors`` counts
+    mutants excluded for harness errors, ``uncompilable`` those the toolchain rejected,
+    ``timeouts`` those whose run hit its wall clock and ``unattributed`` those whose exit-0
+    run did not parse — none is in the numerator or the denominator.
     """
 
     task_id: str
@@ -583,6 +702,8 @@ class CommitOracleScore:
     baseline: TestRun | None = None
     provenance: MutationProvenance = field(default_factory=MutationProvenance)
     uncompilable: int = 0
+    timeouts: int = 0
+    unattributed: int = 0
 
     def __post_init__(self) -> None:
         # Poka-yoke: a strength without a denominator, or more kills than mutants, cannot exist.
@@ -598,8 +719,9 @@ class CommitOracleScore:
 
     @property
     def scoreable(self) -> bool:
-        """At least one mutant reached a verdict — only these enter an aggregate."""
-        return self.total > 0
+        """The score carries a strength — at least one mutant reached a verdict and no more
+        than half were excluded; only these enter an aggregate."""
+        return self.oracle_strength is not None
 
     @property
     def escaped(self) -> tuple[MutantOutcome, ...]:
@@ -621,6 +743,8 @@ class CommitOracleScore:
             "escaped": self.total - self.killed,
             "errors": self.errors,
             "uncompilable": self.uncompilable,
+            "timeouts": self.timeouts,
+            "unattributed": self.unattributed,
             "oracle_strength": self.oracle_strength,
             "note": self.note,
             "outcomes": [o.to_dict() for o in self.outcomes],
@@ -780,9 +904,11 @@ def score_task(
             total=0, killed=0, oracle_strength=None, note=note, baseline=baseline, **base
         )
 
-    # --- generate (pure) ---------------------------------------------------------
+    # --- generate: v2 takes every candidate (pure) and samples hash-rr.v1; v1 took a
+    #     stable prefix of each file's candidates, in the commit's file order ------------
+    v2 = prov.mutation_version == MUTATION_V2
     originals: dict[str, bytes] = {}
-    planned: list[Mutant] = []
+    per_file: dict[str, list[Mutant]] = {}
     for rel in targets:
         raw = (ws.root / rel).read_bytes()
         try:
@@ -795,8 +921,14 @@ def score_task(
             if changed_lines is not None
             else changed_lines_for(ws, rel)
         )
-        planned.extend(mut.generate(text, lines, max_mutants=max_mutants, path=rel))
-    planned = planned[: max(0, max_mutants)]
+        bound = _EVERY_CANDIDATE if v2 else max_mutants
+        per_file[rel] = mut.generate(text, lines, max_mutants=bound, path=rel)
+    if v2:
+        planned = sample_mutants(task.task_id, per_file, max(0, max_mutants))
+        prov = replace(prov, candidates_per_file={p: len(ms) for p, ms in per_file.items()})
+        base["provenance"] = prov
+    else:
+        planned = [m for ms in per_file.values() for m in ms][: max(0, max_mutants)]
     mutants = [
         Mutant(
             f"m{i:02d}_{m.op}_L{m.line}",
@@ -825,8 +957,8 @@ def score_task(
     # A mutant that turns a loop condition or a guard into an infinite loop runs to the
     # runner's full wall clock (900 s) — one such mutant held click's oracle run for 15
     # minutes per task (2026-09-15). A mutant gets a bounded multiple of the GREEN
-    # baseline's own duration: a timeout is a kill either way (the tests did not pass),
-    # so the bound never changes a verdict, only how long it takes to record.
+    # baseline's own duration; a run that reaches it is a ``timeout`` — excluded, never a
+    # kill (v2) — and counts toward the half that makes the task not scoreable.
     effective = timeout or int(
         getattr(runner, "opts", {}).get("timeout", getattr(runner, "default_timeout", 0))
     )
@@ -865,6 +997,33 @@ def score_task(
             finally:
                 tick = _next_tick(tick)
                 _write_version(files[m.path], originals[m.path], tick)
+            if v2 and (run.timed_out or (run.returncode == 0 and run.parse_error)):
+                # the oracle observed nothing it finished saying: neither a kill nor an
+                # escape (v2) — a timeout, or an exit-0 run whose output did not parse
+                outcomes.append(
+                    MutantOutcome(
+                        m.mutant_id,
+                        m.op,
+                        m.line,
+                        m.description,
+                        None,
+                        diff,
+                        m.path,
+                        timed_out=run.timed_out,
+                        returncode=run.returncode,
+                        tail=redact_and_cap(run.tail, max_chars=600),
+                        error=redact_and_cap(run.parse_error, max_chars=200),
+                        unattributed=not run.timed_out,
+                    )
+                )
+                _emit(
+                    on_event,
+                    "oracle.mutation.excluded",
+                    task=task.task_id,
+                    mutant=m.mutant_id,
+                    status=outcomes[-1].status,
+                )
+                continue
             if compile_failure(run):
                 # the toolchain rejected the mutant before a test could see it:
                 # excluded from the denominator, never a kill
@@ -891,7 +1050,8 @@ def score_task(
                     returncode=run.returncode,
                 )
                 continue
-            killed = not run.green  # RED (incl. timeout) = the fault was observable
+            # RED = the fault was observable; under v1 a timeout reached here and was a kill
+            killed = not run.green
             outcomes.append(
                 MutantOutcome(
                     m.mutant_id,
@@ -904,6 +1064,7 @@ def score_task(
                     timed_out=run.timed_out,
                     returncode=run.returncode,
                     tail=redact_and_cap(run.tail, max_chars=600),
+                    timeout_is_kill=not v2,
                 )
             )
             _emit(
@@ -924,19 +1085,33 @@ def score_task(
                 raise MutationRestoreError(f"{rel} did not restore byte-exact after mutation")
 
     graded = [o for o in outcomes if o.killed is not None]
-    uncompilable_n = sum(1 for o in outcomes if o.uncompilable)
-    errors = len(outcomes) - len(graded) - uncompilable_n
+    uncompilable_n = sum(1 for o in outcomes if o.status == OUTCOME_UNCOMPILABLE)
+    timeouts_n = sum(1 for o in outcomes if o.status == OUTCOME_TIMEOUT)
+    unattributed_n = sum(1 for o in outcomes if o.status == OUTCOME_UNATTRIBUTED)
+    errors = sum(1 for o in outcomes if o.status == OUTCOME_ERROR)
     killed_n = sum(1 for o in graded if o.killed)
     total = len(graded)
-    strength = round(killed_n / total, 4) if total else None
-    note = (
-        ""
-        if total
-        else (
+    excluded = len(outcomes) - total
+    causes = (
+        f"harness errors={errors}, uncompilable={uncompilable_n}, timeouts={timeouts_n}, "
+        f"unattributed={unattributed_n}"
+    )
+    if not total and not v2:  # v1's words, as it wrote them
+        strength = None
+        note = (
             f"no mutant reached a verdict (uncompilable={uncompilable_n}, harness "
             f"errors={errors}) — not scoreable"
         )
-    )
+    elif not total:
+        strength, note = None, f"no mutant reached a verdict ({causes}) — not scoreable"
+    elif v2 and 2 * excluded > len(mutants):
+        strength = None
+        note = (
+            f"{excluded} of {len(mutants)} mutants excluded ({causes}) — more than half, "
+            "so not scoreable"
+        )
+    else:
+        strength, note = round(killed_n / total, 4), ""
     _emit(
         on_event,
         "oracle.mutation.scored",
@@ -945,6 +1120,8 @@ def score_task(
         killed=killed_n,
         errors=errors,
         uncompilable=uncompilable_n,
+        timeouts=timeouts_n,
+        unattributed=unattributed_n,
         oracle_strength=strength,
     )
     return CommitOracleScore(
@@ -956,6 +1133,8 @@ def score_task(
         note=note,
         baseline=baseline,
         uncompilable=uncompilable_n,
+        timeouts=timeouts_n,
+        unattributed=unattributed_n,
         **base,
     )
 
@@ -977,7 +1156,16 @@ def aggregate_by_cell(scores: Iterable[CommitOracleScore]) -> dict[str, dict[str
             continue
         cell = cells.setdefault(
             s.cell,
-            {"tasks": 0, "mutants": 0, "killed": 0, "escaped": 0, "errors": 0, "uncompilable": 0},
+            {
+                "tasks": 0,
+                "mutants": 0,
+                "killed": 0,
+                "escaped": 0,
+                "errors": 0,
+                "uncompilable": 0,
+                "timeouts": 0,
+                "unattributed": 0,
+            },
         )
         cell["tasks"] += 1
         cell["mutants"] += s.total
@@ -985,6 +1173,8 @@ def aggregate_by_cell(scores: Iterable[CommitOracleScore]) -> dict[str, dict[str
         cell["escaped"] += s.total - s.killed
         cell["errors"] += s.errors
         cell["uncompilable"] += s.uncompilable
+        cell["timeouts"] += s.timeouts
+        cell["unattributed"] += s.unattributed
     for cell in cells.values():
         cell["oracle_strength"] = round(cell["killed"] / cell["mutants"], 4)
     return dict(sorted(cells.items()))
@@ -1010,6 +1200,8 @@ def to_report(scores: Sequence[CommitOracleScore]) -> dict[str, Any]:
                 "escaped": s.total - s.killed,
                 "errors": s.errors,
                 "uncompilable": s.uncompilable,
+                "timeouts": s.timeouts,
+                "unattributed": s.unattributed,
                 "oracle_strength": s.oracle_strength,
                 "note": s.note,
                 "escaped_mutants": [
@@ -1036,6 +1228,8 @@ def to_report(scores: Sequence[CommitOracleScore]) -> dict[str, Any]:
             "escaped": mutants - killed,
             "errors": sum(s.errors for s in scores),
             "uncompilable": sum(s.uncompilable for s in scores),
+            "timeouts": sum(s.timeouts for s in scores),
+            "unattributed": sum(s.unattributed for s in scores),
             "oracle_strength": round(killed / mutants, 4) if mutants else None,
         },
     }
@@ -1111,14 +1305,18 @@ def oracle_strength_stamp(score: CommitOracleScore) -> str:
 __all__ = [
     "DEFAULT_MAX_MUTANTS",
     "MUTATION_SCHEMA",
-    "MUTATION_VERSION",
+    "MUTATION_V1",
+    "MUTATION_V2",
     "MUTATOR_FAMILIES",
     "MUTATOR_FAMILY_AST",
     "OUTCOME_ERROR",
     "OUTCOME_ESCAPED",
     "OUTCOME_KILLED",
+    "OUTCOME_TIMEOUT",
+    "OUTCOME_UNATTRIBUTED",
     "OUTCOME_UNCOMPILABLE",
     "PYTHON_OPERATORS",
+    "SAMPLER_HASH_RR",
     "CommitOracleScore",
     "Mutant",
     "MutantOutcome",
@@ -1132,11 +1330,14 @@ __all__ = [
     "compile_failure",
     "eligible_lines",
     "generate_mutants",
+    "mutation_version",
     "mutator_family",
     "mutator_for",
     "operator_set_hash",
     "oracle_strength_stamp",
+    "rank_key",
     "render_markdown",
+    "sample_mutants",
     "score_task",
     "to_report",
 ]

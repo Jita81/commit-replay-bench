@@ -40,7 +40,13 @@ from sqlalchemy import text
 from crb.core.federated import ABSTRACT_ALLOWLIST
 from crb.core.ledger import GENESIS_HASH, GradeRow, verify_chain
 from crb.server.app import API_PREFIX
-from fixtures.posture import TEST_POSTURE_CLASS, TEST_POSTURE_ID, TEST_QUALIFICATION_ID
+from crb.server.routes.ledger import EXPORT_LABEL_COLUMNS
+from fixtures.posture import (
+    TEST_POSTURE_CLASS,
+    TEST_POSTURE_ID,
+    TEST_QUALIFICATION_ID,
+    dict_at_apparatus,
+)
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, login, make_env
 
 
@@ -220,18 +226,28 @@ class TestExport:
         assert r.headers["content-disposition"] == 'attachment; filename="crb-ledger.csv"'
         reader = csv.reader(io.StringIO(r.text))
         header = next(reader)
-        assert header == list(GradeRow.__dataclass_fields__)
+        # every field, then the arm and the class-set version as their own columns beside
+        # builder and model, so a reading can be re-derived outside the product (ADR-0026)
+        assert header == [*GradeRow.__dataclass_fields__, *EXPORT_LABEL_COLUMNS]
         body = list(reader)
         assert len(body) == 50
         first = dict(zip(header, body[0], strict=True))
         assert first["clean"] == "true" and first["source_changed"] == "true"
-        # the whole mapping, exactly: the seed's rung plus the posture labels (ADR-0019)
+        # the whole mapping, exactly: the seed's rung, the posture labels (ADR-0019) and the
+        # labels every 2.4 row carries (ADR-0025 items 6 and 13, ADR-0026 items 1 and 9)
         assert json.loads(first["labels"]) == {
             "rung": "r1",
             "posture_id": TEST_POSTURE_ID,
             "posture_class": TEST_POSTURE_CLASS,
             "qualification_id": TEST_QUALIFICATION_ID,
+            "change_id": "change-01",
+            "failure_kind": "",
+            "lint_reason": "none_detected",
+            "context_arm": "S3",
+            "taxonomy": "global/classes@v1",
         }
+        assert (first["context_arm"], first["taxonomy"]) == ("S3", "global/classes@v1")
+        assert first["builder"] and first["model"]
         legacy = [
             dict(zip(header, b, strict=True))
             for b in body
@@ -260,7 +276,10 @@ class TestExport:
         r = env.get("/ledger/export/abstract")
         assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-ndjson")
         cells = [json.loads(ln) for ln in r.text.splitlines() if ln.strip()]
-        assert len(cells) == 3
+        # ADR-0026 item 12: only S3 rows at the global vocabulary leave — the seed's census
+        # rows (no arm, apparatus 1.0-census) stay home
+        assert len(cells) == 2
+        assert {c["capability_class"] for c in cells} == {"bug.fix", "backend.route.add"}
         for c in cells:
             assert set(c) == set(ABSTRACT_ALLOWLIST)  # no repo, no task ids, no timestamps
         deliver = next(c for c in cells if c["capability_class"] == "bug.fix")
@@ -349,11 +368,10 @@ class TestImport:
         src = env.info.rows[0].to_dict()
         v4 = GradeRow.from_dict(
             {
-                **src,
+                **dict_at_apparatus(src, "2.1"),  # the pre-belt-5 apparatus that wrote v4 rows
                 "repo": "delta",
                 "row_id": "delta-v4",
                 "belt_set": "v4",
-                "apparatus_version": "2.1",  # the pre-belt-5 apparatus that wrote v4 rows
                 "repo_lint_clean": None,
                 "evidence_pack_hash": "a" * 64,
                 "prev_hash": "",

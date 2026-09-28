@@ -54,7 +54,9 @@ How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one tr
               ``_chain_new_events`` (``before_flush``) = lock → head → hash each new row in
               insertion order; ``verify_events`` = keyset pages by id → ``walk_event_chain``;
               ``EventChainVerifier`` = the last clean walk's (id, head, count) re-checked, then
-              a walk resumed from it; ``events_head`` = count + last ``row_hash``.
+              a walk resumed from it; ``events_head`` = count + last ``row_hash``;
+              ``append_event_checked`` = lock → decide the payload → insert, raising instead
+              of dropping (the registered readings of ADR-0026 item 2).
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0029-the-audit-trail-is-hash-chained.md
@@ -601,6 +603,48 @@ def events_head(factory: sessionmaker[Session]) -> tuple[int, str]:
     return n, head or ""
 
 
+def append_event_checked(
+    factory: sessionmaker[Session],
+    *,
+    trace_id: str,
+    stage: str,
+    action: str,
+    build: Callable[[Session], dict[str, Any]],
+    actor: str = "",
+    repo: str = "",
+) -> StepEvent:
+    """Write one event whose payload is decided UNDER the write lock: ``build(session)``
+    reads what it must (and may raise to refuse) and returns the payload; the event is
+    inserted with the next ``seq`` in the same transaction. Unlike :func:`append_event`
+    nothing is swallowed — a record that decides something (a registered reading, whose
+    budget two concurrent writers must not both spend) is written or the caller hears why."""
+    with factory() as s:
+        lock_event_writes(s)
+        payload = build(s)
+        nxt = (
+            int(
+                s.execute(
+                    select(func.max(Event.seq)).where(Event.trace_id == trace_id)
+                ).scalar_one_or_none()
+                or 0
+            )
+            + 1
+        )
+        ev = StepEvent(
+            trace_id=trace_id,
+            stage=stage,
+            action=action,
+            status=StepStatus.OK,
+            actor=actor,
+            repo=repo,
+            payload=dict(payload),
+            seq=nxt,
+        )
+        s.add(_to_model(ev))
+        s.commit()
+        return ev
+
+
 __all__ = [
     "DEFAULT_READ_LIMIT",
     "FULL_WALK_EVERY_S",
@@ -609,6 +653,7 @@ __all__ = [
     "EventChainHeadError",
     "EventChainVerifier",
     "append_event",
+    "append_event_checked",
     "count_events",
     "events_head",
     "events_of_action",

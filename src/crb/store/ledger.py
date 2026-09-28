@@ -7,9 +7,9 @@ Because ``prev_hash``/``row_hash`` are stored, an exported JSONL verifies
 standalone with :func:`crb.core.ledger.verify_chain`.
 
 Imports (``import_rows``) re-chain foreign rows into this ledger, stamped as imported inside
-the hashed body (``provenance``, ``actor`` ``import``, who and when, and the source row's own
-hash, actor and provenance in ``labels``) so an imported row can never pass for one measured
-here (:func:`import_stamp`).
+the hashed body (``provenance``, ``actor`` ``import``, ``labels['imported'] = 'true'``, who
+and when, and the source row's own hash, actor and provenance in ``labels``) so an imported
+row can never pass for one measured here, and a reading never counts it (:func:`import_stamp`).
 
 :class:`DbReviewLedger` is the same contract for the ``reviews`` table
 (:class:`crb.core.review.ReviewRecord`): its own chain, its own write lock, and the
@@ -72,6 +72,8 @@ from crb.core.evidence import EvidencePack
 from crb.core.ledger import (
     GENESIS_HASH,
     IMPORTED_PROVENANCE_PREFIX,
+    LABEL_IMPORTED,
+    LABEL_SOURCE_ROW_HASH,
     PROVENANCE_IMPORTED_LEDGER,
     GradeRow,
     LedgerIntegrityError,
@@ -107,6 +109,13 @@ def _from_model(m: Grade) -> GradeRow:
     d: dict[str, Any] = {k: getattr(m, k) for k in _ROW_COLUMNS}
     d["labels"] = dict(m.labels_json or {})
     return GradeRow(**d)
+
+
+def rows_in(session: Session, repo: str) -> list[GradeRow]:
+    """A repository's rows in chain (``seq``) order, read in the caller's session — what a
+    reader that already holds one (the capability map's reading book) evaluates readings over."""
+    q = select(Grade).where(Grade.repo == repo).order_by(Grade.seq)
+    return [_from_model(m) for m in session.execute(q).scalars()]
 
 
 class DbLedger:
@@ -258,14 +267,15 @@ def import_stamp(
 ) -> dict[str, Any]:
     """``row``'s fields as an IMPORTED row of this ledger (EI-2, 2026-09-27): ``provenance``
     ``imported:ledger`` (a source row already ``imported:…`` keeps its own), ``actor``
-    ``import``, and the labels ``imported_by`` (the admin), ``imported_at``,
+    ``import``, and the labels ``imported`` (``true``), ``imported_by`` (the admin), ``imported_at``,
     ``import_sha256`` (the file), ``source_actor``, ``source_provenance`` and
     ``source_row_hash`` — the last ALWAYS present, empty when the source row had no hash.
     Every value is inside the hashed body, so the stamp cannot be removed without the chain
     saying so. The file's ``oracle_strength`` is kept as the source recorded it; no reader
     that licenses anything reads it (the oracle comes from this deployment's scores)."""
     labels = dict(row.labels)
-    labels.setdefault("source_row_hash", row.row_hash or "")
+    labels[LABEL_IMPORTED] = "true"  # a reading never counts it (P-313)
+    labels.setdefault(LABEL_SOURCE_ROW_HASH, row.row_hash or "")
     labels.setdefault("source_actor", row.actor)
     labels.setdefault("source_provenance", row.provenance)
     labels["imported_by"] = imported_by
