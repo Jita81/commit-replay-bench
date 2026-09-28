@@ -11,7 +11,7 @@
  *               server's refusal is shown in its own words.
  * How:          `mockApi` over the shared go-live fixture; the calls it records are read back.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ * ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
  * Works with:   ui/src/screens/Settings/AttestationsCard.tsx (under test), ui/src/test/golive.ts
  *               (the reading it is given),
  *               src/crb/server/routes/golive.py (the routes these calls reach)

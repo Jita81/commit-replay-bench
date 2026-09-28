@@ -1,4 +1,4 @@
-"""``GET /golive`` and ``PUT`` / ``DELETE /settings/attestations/{line}`` (ADR-0045).
+"""``GET /golive`` and ``PUT`` / ``DELETE /settings/attestations/{line}`` (ADR-0031).
 
 Navigation
 ----------
@@ -18,7 +18,7 @@ What it does: Pins that every signed-in role reads every line with its state and
 How:          ``create_app`` over a temp SQLite store with the bootstrap admin; accounts of
               each role created through ``POST /users``; events read from the table.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
 Works with:   src/crb/server/routes/golive.py (under test), src/crb/server/golive.py (the
               lines and checks), src/crb/server/routes/system.py (``/version``),
               src/crb/server/routes/flow.py (the platform stream's counts), docs/API.md#admin

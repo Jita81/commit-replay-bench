@@ -26,7 +26,7 @@ What it is:   The pure half of dependency provisioning: lockfile readers over gi
               refusal rules, the content-addressed bundle key and the closure selector.
 What it does: Reads ``go.mod``/``go.sum`` (and a local replace target's ``go.mod``),
               pinned ``requirements*.txt`` (following ``-r``), a ``uv.lock``, ``poetry.lock``
-              or PEP 751 ``pylock.toml`` (DL-125) or ``runner_opts.deps_lock``,
+              or PEP 751 ``pylock.toml`` (DL-109) or ``runner_opts.deps_lock``,
               and ``package.json`` + ``package-lock.json`` at a commit; refuses every source
               the ADR refuses; computes the bundle keys; says which set a trial selects.
 How:          ``GitRepo.show_blob`` / ``tree_names`` → per-language parser → ``LockInputs``
@@ -322,7 +322,7 @@ _PY_SOURCE_OPTS = (
     "--trusted-host",
     "--no-index",
 )
-#: Python locks this version still refuses (uv, poetry and pylock are read since DL-125).
+#: Python locks this version still refuses (uv, poetry and pylock are read since DL-109).
 _PY_ALT_LOCKS: tuple[str, ...] = ("Pipfile.lock",)
 
 
@@ -440,7 +440,7 @@ def _py_declares(reader: _Reader) -> bool:
 
 # ---------------------------------------------------------------------------
 # Python — the structured locks (uv, poetry, PEP 751 pylock): read into the same pinned,
-# hashed ``PyPin`` set a requirements lock gives, so one recipe fetches all four (DL-125)
+# hashed ``PyPin`` set a requirements lock gives, so one recipe fetches all four (DL-109)
 # ---------------------------------------------------------------------------
 
 #: A PEP 751 lock's file name: ``pylock.toml`` or ``pylock.<name>.toml``.

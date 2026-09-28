@@ -18,7 +18,7 @@ What it does: Pins that every line of docs/DEPLOYMENT.md §8 is in ``LINES`` wit
 How:          ``init_db`` on the parametrised backend; ``Settings`` built in-process; a health
               body and a ledger body passed as the routes pass them.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
 Works with:   src/crb/server/golive.py (under test), docs/DEPLOYMENT.md (the §8 markers),
               tests/conftest_store.py (the backends)
 Tested by:    tests/test_golive.py

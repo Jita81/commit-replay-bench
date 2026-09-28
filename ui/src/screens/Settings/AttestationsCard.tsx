@@ -16,7 +16,7 @@
  *               writes; a native date input capped at today; `ErrorState` shows the server's
  *               refusal in its own words.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ * ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
  * Works with:   ui/src/screens/Settings/SettingsPage.tsx (mounts it for an admin),
  *               ui/src/screens/Posture/GoLiveList.tsx (where a reviewer reads the result),
  *               ui/src/api/hooks.ts (`useGoLive`, `useAttest`, `useWithdrawAttestation`),

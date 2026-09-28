@@ -195,7 +195,7 @@ export interface Version {
 }
 
 // ---------------------------------------------------------------------------
-// Go-live (docs/DEPLOYMENT.md §8, ADR-0045)
+// Go-live (docs/DEPLOYMENT.md §8, ADR-0031)
 // ---------------------------------------------------------------------------
 
 /** Who recorded an operator act, the day it was done, when it was recorded, and what was done. */

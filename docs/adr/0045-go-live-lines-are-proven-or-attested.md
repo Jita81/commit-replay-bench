@@ -1,6 +1,6 @@
-# ADR-0045 — Each go-live line is proven by the product or attested by a named admin, and the sealed posture runs without a hand in the store
+# ADR-0031 — Each go-live line is proven by the product or attested by a named admin, and the sealed posture runs without a hand in the store
 
-**Status:** Proposed (DL-124, DL-125, DL-126; north-star Wave 4, stream P — G-317 and the
+**Status:** Proposed (DL-108, DL-109, DL-110; north-star Wave 4, stream P — G-317 and the
 lines it unifies, G-950, G-951, G-966). Amends ADR-0019 on three points (§4 to §6).
 **Date:** 2026-09-27
 **Apparatus impact:** none. No belt, size, class, route or threshold changes meaning. The
@@ -91,14 +91,14 @@ Three operating gaps kept the sealed posture from going live without a person's 
    Nothing writes an attestation except that route. A line reads `attested` only when a
    person recorded it.
 4. **A private mirror's credential reaches the fetch container, and only it** (amends
-   ADR-0019 §6; DL-126). `CRB_PROVISION__MIRROR_CREDENTIAL_ENV` holds the name of a worker
+   ADR-0019 §6; DL-110). `CRB_PROVISION__MIRROR_CREDENTIAL_ENV` holds the name of a worker
    variable, never the credential itself. Only a networked `fetch` step to a registry that
    is not public carries it. It is passed by name (`--env CRB_MIRROR_CREDENTIAL`), so the
    value is on no command line. A shell prelude writes it to the owner-only `.netrc` or
    `.npmrc` the toolchain reads, then unsets it. Any output that is kept is scrubbed of it.
    An install or rebuild step, a test container, a builder and every other docker call build
    their environment from an allowlist that cannot name it.
-5. **uv, poetry and pylock locks are read** (amends ADR-0019 §6 and its list of refusals; DL-125).
+5. **uv, poetry and pylock locks are read** (amends ADR-0019 §6 and its list of refusals; DL-109).
    Each is read from git objects into the same `PyPin` set a requirements lock gives: exact
    versions, `sha256` hashes, and markers joined from the dependency edges. The project and
    its workspace members are the repository's own code and are never fetched. A git, URL,
@@ -106,7 +106,7 @@ Three operating gaps kept the sealed posture from going live without a person's 
    `lock-version` other than `1.x` is `PROVISION_LOCK_UNSUPPORTED`. A pinned requirements
    file still wins when both are committed. `Pipfile.lock` stays refused.
 6. **A damaged set is quarantined, not reused, and what cites it is revoked** (amends
-   ADR-0019 §9's `BUNDLE_INTEGRITY` row; DL-126). When the provider's `verify` finds a set
+   ADR-0019 §9's `BUNDLE_INTEGRITY` row; DL-110). When the provider's `verify` finds a set
    that fails its digest, it moves the set to `<store>/.quarantine/<lang>/<key>.<time>` with
    a record of why (`provision.quarantined`), and names the key on the refusal. The posture
    gate then revokes every qualification in force whose `deps.keys` cites it: one new

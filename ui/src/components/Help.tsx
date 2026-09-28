@@ -13,7 +13,7 @@
  *               registry has no entry. Every link it offers leads behind `RequireAuth`, so on
  *               a definite "no session" (the sign-in page) it names the guides and the
  *               glossary as text and links nothing — a link would bounce the reader straight
- *               back to sign-in (P-110). "Elements on this screen" is generated when the block
+ *               back to sign-in (P-177). "Elements on this screen" is generated when the block
  *               opens: every `data-hint` on the page (deduplicated; the screen's own, under
  *               `<main>`, in DOM order, then the shell's under their own sub-heading) with
  *               the trigger's visible text and the registry sentence — the printable,

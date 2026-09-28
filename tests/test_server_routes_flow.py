@@ -709,7 +709,7 @@ class TestRunThePlatform:
     def test_the_accounts_are_counted_and_the_go_live_lines_are_read(self, env: Env) -> None:
         s = stream(reading(env), "run-the-platform")
         assert s["counts"]["accounts"] == 4 and s["counts"]["admins_active"] == 1
-        # the go-live checklist is read, not named as missing (G-584 closed by ADR-0045)
+        # the go-live checklist is read, not named as missing (G-584 closed by ADR-0031)
         assert s["not_captured"] == []
         c = s["counts"]
         assert c["golive_lines"] == 14

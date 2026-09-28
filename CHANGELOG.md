@@ -16,10 +16,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   (north-star Wave 4, stream P; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4-p)).
   `GET /golive` reads the fourteen lines of DEPLOYMENT §8: five proven by the product's own
   checks, nine the operator's acts that an admin records on Settings as dated
-  `golive.attested` events (ADR-0045, DL-124). `/posture` lists both, names every row's
+  `golive.attested` events (ADR-0031, DL-108). `/posture` lists both, names every row's
   source, prints for a review board and carries the go-live journey's eyebrow. A private
   mirror's credential reaches the fetch alone; uv, poetry and pylock locks are provisioned;
-  a damaged sealed set is quarantined and what cites it revoked (DL-125, DL-126).
+  a damaged sealed set is quarantined and what cites it revoked (DL-109, DL-110).
 
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

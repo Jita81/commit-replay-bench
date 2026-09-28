@@ -17,7 +17,7 @@
  * How:          `mockApi` with the go-live fixture from govuk.test.tsx; the shell mounted as the
  *               app mounts it where the print of the chrome is under test.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ * ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
  * Works with:   ui/src/screens/Posture/PosturePage.tsx (under test),
  *               ui/src/screens/Posture/GoLiveList.tsx (the go-live section),
  *               ui/src/components/Layout.tsx (the print of the chrome), ui/src/help/help.ts
@@ -77,7 +77,7 @@ describe('PosturePage — sources, go-live and print', () => {
     await waitFor(() => expect(screen.getAllByText('the version could not be read').length).toBeGreaterThan(2))
   })
 
-  it('reads the belt set, the sign-off policy and the licence from /version, never from a literal (P-160)', async () => {
+  it('reads the belt set, the sign-off policy and the licence from /version, never from a literal (P-330)', async () => {
     // values no literal in the page could match: a row that prints its own words fails here
     mockApi(base('viewer', { 'GET /version': { ...VERSION, belt_set: 'v9-test', signoff_policy: 'signoff-policy.test', licence: 'TEST-1.0' } }))
     renderApp(<PosturePage />, { route: '/posture' })

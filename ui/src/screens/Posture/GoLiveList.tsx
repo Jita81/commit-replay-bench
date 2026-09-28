@@ -16,7 +16,7 @@
  * How:          `useGoLive`; `SummaryList` rows with `note` for the source; `QueryBoundary`
  *               says when the checklist could not be read.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ * ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
  * Works with:   ui/src/screens/Posture/PosturePage.tsx (mounts it), ui/src/api/hooks.ts
  *               (`useGoLive`), src/crb/server/golive.py (every rule), ui/src/screens/Settings/
  *               AttestationsCard.tsx (where an admin records an act),

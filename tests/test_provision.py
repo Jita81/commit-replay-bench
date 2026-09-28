@@ -486,7 +486,7 @@ def test_refusals_carry_scope_fix_and_doc() -> None:
         ProvisionRefused("PROVISION_MADE_UP", "x")
 
 
-# --- the structured Python locks: uv, poetry, PEP 751 pylock (G-951, DL-125) --------------
+# --- the structured Python locks: uv, poetry, PEP 751 pylock (G-951, DL-109) --------------
 
 H1, H2, H3 = ("sha256:" + c * 64 for c in "123")
 

@@ -23,7 +23,7 @@ How:          ``read_golive`` → ``collect_health`` + ``verify_ledger`` + ``oid
               a reading at most a minute old; the writes call ``golive.attest`` /
               ``golive.withdraw`` and commit, then serve the fresh reading.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
 Works with:   src/crb/server/golive.py (every rule lives there), src/crb/server/routes/system.py
               (``collect_health``), src/crb/server/routes/ledger.py (``verify_ledger``),
               src/crb/server/routes/flow.py (counts the lines for the platform stream),

@@ -194,7 +194,7 @@ export function useVersion(): UseQueryResult<Version, ApiError> {
 }
 
 // ---------------------------------------------------------------------------
-// Go-live (ADR-0045)
+// Go-live (ADR-0031)
 // ---------------------------------------------------------------------------
 
 /** `GET /golive` — every go-live line with its state now (any signed-in role). */

@@ -660,11 +660,11 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     open: async () => {
       await screen.findByTestId('settings-sandbox-mode')
     },
-    // the configuration, the Users card and the go-live attestations card (ADR-0045)
+    // the configuration, the Users card and the go-live attestations card (ADR-0031)
     minHints: 67,
   },
   {
-    // ADR-0045: the go-live attestations card, with Withdraw's question open — its two buttons are a state of their own
+    // ADR-0031: the go-live attestations card, with Withdraw's question open — its two buttons are a state of their own
     name: '/settings as admin + go-live attestation Withdraw confirm',
     route: '/settings',
     path: '/settings',

@@ -22,9 +22,9 @@
  *               attestation is withdrawn and the line reads unproven again. Home's task 7
  *               reads Completed. Both screens are axe-clean in the states the walk leaves.
  * How:          The `test` fixture's page is the signed-in bootstrap admin; `page.emulateMedia`
- *               for the print; `axeViolations` settles transitions first (P-063).
+ *               for the print; `axeViolations` settles transitions first (P-130).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ * ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
  * Works with:   ui/e2e/walkthrough/support.ts (`field`, `env`, `personaPassword`, `test`),
  *               ui/e2e/axe.ts, ui/src/screens/Posture/PosturePage.tsx and GoLiveList.tsx,
  *               ui/src/screens/Settings/AttestationsCard.tsx, src/crb/server/golive.py,

@@ -8,7 +8,7 @@
  * What it does: Lets the Deployment page and the Settings card be tested against one reading.
  * How:          A typed constant.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md
+ * ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md
  * Works with:   ui/src/components/govuk.test.tsx (the five groups),
  *               ui/src/screens/Posture/PosturePage.test.tsx (the go-live section),
  *               ui/src/screens/Settings/AttestationsCard.test.tsx (the recording),

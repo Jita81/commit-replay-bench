@@ -333,7 +333,7 @@ stream D read 4 from the deployment's ledger export, which is not committed — 
   sees it at the same path) and mounted **read-only** into the test container, which keeps
   `--network=none`: Go's modules at `/deps/gomod` with `GOPROXY=off` (one cache for the
   parent's and the gold's modules), Python's wheels (from a pinned requirements file, a `uv.lock`, a `poetry.lock` or a PEP 751
-  `pylock.toml`, each read into the same pinned, hashed set; DL-125) installed with no network at
+  `pylock.toml`, each read into the same pinned, hashed set; DL-109) installed with no network at
   `/deps/site`, Node's `node_modules` from `npm ci --ignore-scripts` at `/work/node_modules`;
 - every stop is a code with a fix, served as `{code, message, fix, doc}`:
 

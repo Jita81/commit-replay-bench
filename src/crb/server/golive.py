@@ -1,4 +1,4 @@
-"""The go-live checklist as a reading: each line proven, attested or unproven (ADR-0045).
+"""The go-live checklist as a reading: each line proven, attested or unproven (ADR-0031).
 
 docs/DEPLOYMENT.md §8 lists what must hold before a deployment goes live. Some lines are
 checks this product can run itself — the health check is green, the ledger verifies, people
@@ -39,7 +39,7 @@ How:          ``LINES`` → ``evaluate(session, settings, health, ledger, oidc_e
               ``GoLiveReading`` (``to_dict``); ``attest`` / ``withdraw`` validate the line
               and append one event with ``append_system_event`` (the caller commits).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0045-go-live-lines-are-proven-or-attested.md,
+ADRs:         docs/adr/0031-go-live-lines-are-proven-or-attested.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md,
               docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/server/routes/golive.py (the routes that serve and record it),
