@@ -134,8 +134,11 @@ export function LoginPage() {
     return (
       <div className="flex min-h-screen flex-col bg-surface text-on-surface">
         <DevAutologinBanner />
-        <div className="flex flex-1 items-center justify-center text-on-surface-muted" role="status">
-          Checking your session…
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-on-surface-muted" role="status">
+          <span>Checking your session…</span>
+          {/* the session check waits on `/version` (it says whether automatic sign-in is on), so
+              the pending organisation check is named here too, never silent (G-191) */}
+          {version.isPending && <span className="text-[11px]">Checking for an organisation sign-in…</span>}
         </div>
       </div>
     )
