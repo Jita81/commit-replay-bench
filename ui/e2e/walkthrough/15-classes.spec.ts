@@ -15,8 +15,9 @@
  *               focus moving to the next commit after each label; the class's page says in
  *               words that feature.add sets no readiness question. The validity report shows
  *               its numbers — κ, the sample, coverage — and fails on too small a sample. The
- *               `walk-approver` persona signs it; it still routes nothing, because its report
- *               fails, and a reading of its class and a run stamped with it are both refused
+ *               `walk-approver` persona signs it and hears the result where focus lands; it
+ *               still routes nothing, because its report fails (the route line never naming the
+ *               points check), and a reading of its class and a run stamped with it are both refused
  *               `class_set_not_routing`. The class's page reads in plain words: what the work
  *               is, the rule, example commits, what a ticket carries and "No proven standard"
  *               per size. Walked at 375 px without sideways scroll, the versions table's Open
@@ -121,7 +122,16 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
   await page.getByRole('button', { name: 'Sign this class set' }).click()
   await expect(page.getByTestId('class-set-status')).toHaveText('signed')
   await expect(page.getByTestId('class-set-route')).toHaveText('Routes nothing')
-  await expect(page.getByText(/Its validity report does not pass \(.*agreement.*\), so it routes nothing\./)).toBeVisible()
+  const failing = /Its validity report does not pass \(.*agreement.*\), so it routes nothing\./
+  // the route line names only the checks that stop routing: never the points check (P-688)
+  const routeLine = page.getByText(failing).and(page.locator(':not([role="status"])'))
+  await expect(routeLine).toBeVisible()
+  await expect(routeLine).not.toContainText('size agreement')
+  // the signature's result is said where focus lands, with why it still routes nothing (P-687)
+  const signed = page.getByTestId('class-set-signed')
+  await expect(signed).toContainText(`You signed ${VERSION}.`)
+  await expect(signed).toContainText(failing)
+  await expect(signed).toBeFocused()
 
   // routing nothing: no reading of its classes, no run stamped with it
   const reading = await page.request.post(`${env.baseUrl}/api/v1/readings`, {
