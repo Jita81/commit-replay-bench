@@ -19,7 +19,7 @@ meet. The journey is the shell: the one sentence a sponsor reads before they hav
 ("Measures what an AI builder can be trusted to change in your repository, graded by your own
 tests."), a session with a role chip, "This is where the deployment is on the way from an empty
 install to a change delivered under evidence", the glossary and the eight bundled guides, and a
-designed way back from an address that does not exist.
+designed way back from an address that does not exist **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Entry → exit.** Entry is a link to the deployment, a bookmarked screen that bounces to
 `/login?next=`, or an unknown address that bounces the same way. Exit is a person who holds a

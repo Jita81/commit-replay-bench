@@ -23,7 +23,7 @@ Capability cell's "routing", a Decisions row's "Read why", or the instrument nav
 thresholds and the rule sentence), the count of cells per route, and one decision per cell:
 route, reason code with its sentence, n, point, model split, Wilson interval with provenance,
 false-Q1, oracle strength and policy version. There is no outbound link from a decision row;
-with nothing measured, Connect or (operator) Start a replay run.
+with nothing measured, Connect or (operator) Start a replay run **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The rule is not edited here and cannot be edited per repository: the page reads
 the policy from the API. Route counts are cells, not attempts. Nothing is signed or run from

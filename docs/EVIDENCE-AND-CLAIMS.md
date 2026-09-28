@@ -14,7 +14,8 @@ Contents: [1 Claim tags](#1-claim-tags) · [2 CLEAN, semantic Q1, false-Q1](#2-c
 [4 The apparatus stamp — evidence expires](#4-the-apparatus-stamp--evidence-expires) ·
 [5 The legacy-belt caveat](#5-the-legacy-belt-caveat-on-the-census-ledger) ·
 [6 Permitted claim shapes](#6-permitted-claim-shapes-by-maturity) ·
-[7 What must never be said](#7-what-must-never-be-said) · [8 Principles](#8-validation-principles-we-inherit)
+[7 What must never be said](#7-what-must-never-be-said) · [8 Principles](#8-validation-principles-we-inherit) ·
+[9 The quality baseline](#9-the-quality-baseline--named-never-claimed)
 
 ---
 
@@ -32,9 +33,27 @@ Every claim in this repository — README, ADRs, architecture, UI copy — carri
 **The rule is a gate.** CI's `claims` job runs `scripts/claims_check.py`, which reads the
 pages on its allowlist, finds the sentences that quantify something, and fails when one
 carries no tag — or when a `[measured]` one carries no `n`, no method and no apparatus
-version. It checks the *shape* of the evidence, never whether a figure is sound, and it
+version, or says its own rows are not in this repository: a reading nobody can re-derive
+here is a `[hypothesis]` with that reason (DL-088). On README, the most public page, a `[measured]` tag must also say where its rows
+are — `rows: data/<campaign>/`, a directory the repository carries with a checksum manifest
+(`MANIFEST.sha256`) that verifies — and `tests/test_measured_claims.py` re-derives every
+number the tag covers, and its apparatus, from those rows with the product's own code. Each
+number is held to the figure it is meant to be ("49 of 55" to the cell's clean count of its
+attempts), so a real figure in the wrong role fails, and so does a number no figure is
+bound to.
+Elsewhere the gate checks the *shape* of the evidence, never whether a figure is sound, and it
 reads only the pages on the allowlist; the script's docstring states both limits and the
-gap analysis names the pages still ungated. The same job holds a review to its own actions:
+gap analysis names the pages still ungated. The allowlist holds four entries: README, every
+guide directly under `docs/`, every review under `docs/reviews/` and every
+definition-of-done page under `docs/dod/`, each folder read as a glob so a page added later
+is gated the day it lands **[measured — n = 4 entries on `ALLOWLIST`; method: by inspection
+of `scripts/claims_check.py`, which prints the same count in its own report; apparatus n/a —
+a count, not a rate, so no interval]**. The decision records and CHANGELOG are not on it yet
+(G-945), and the generated code map and gap analysis are held by their own generators'
+checks. A gap register line (`- **G-nnn** — what is missing · what closes it · owner`,
+under `## Gaps` on a definition-of-done page or in the prevention register, where the
+definition-of-done check reads it) is a `[gap]` statement by its form, so it needs no
+separate tag; the same line anywhere else is prose. The same job holds a review to its own actions:
 every numbered row of a review's *Actions* table needs a line in the
 [decision log](DECISION-LOG.md) that names the review, the action and its state (`closed`,
 `open`, `declined` or `[gap]`), and every such record needs its action still in the table,
@@ -138,29 +157,34 @@ stamp is an anecdote.
 
 The census ledger that seeds this product (`grades.jsonl`, **1,071 rows**) was produced by
 the upstream apparatus. **706 of the 1,071 rows were graded under three belts before belt 4
-(`source_changed`) existed; 365 carry all four.** `[measured]` from the file itself: the
-`source_changed` key is present on 365 rows and absent on 706.
+(`source_changed`) existed; 365 carry all four.** **[measured — n = 1,071 rows; method: from
+the file itself, the `source_changed` key is present on 365 rows and absent on 706; apparatus
+1.0-census]**
 
 The product handles this as follows and it is not configurable:
 
 - Legacy rows are imported with `belt_set = "v3-legacy"`, `apparatus_version = "1.0-census"`
-  and `provenance = "imported:…"`. The false-Q1 invariant is applied to the **three belts
-  they recorded** (`GradeRow.recorded_belts`); a clean legacy row with any of those three
-  belts not `True` is refused at import.
+  and `provenance = "imported:…"`. The false-Q1 invariant is applied to the **belts they
+  recorded** (`GradeRow.recorded_belts`); a clean legacy row with any of those belts not
+  `True` is refused at import.
 - Cells report legacy and v4 rows **separately**; `apparatus_versions` on a cell makes any
   mixture visible, and the UI does not combine them into one point estimate.
 - **No claim blends apparatus versions.** "Under apparatus 1.0-census, cell X was …" and
-  "under apparatus 2.0, cell X is …" are two statements.
+  "under apparatus 2.0, cell X is …" are separate statements.
 - The plan's P1 gate re-derives all 1,071 rows: `clean == all recorded belts True` and no
   clean row has a false belt. That gate proves the *mechanical* false-Q1 = 0 statement
   about the seed data; it says nothing about the fourth belt on the 706 rows, which is
-  simply unmeasured for them.
+  simply unmeasured for them **[measured — n = 1,071 rows; method: `tests/test_census_gate.py`
+  imports every row and applies the invariant on every pull request, and counts the 706
+  three-belt rows; apparatus 1.0-census]**.
 - The same caveat applies one belt on: rows written before apparatus 2.2 carry
   `belt_set = "v4"` and **belt 5 (`repo_lint_clean`) is unrecorded for them** — never
   re-derived, not hashed, not rendered ([ADR-0011](adr/0011-repo-lint-belt.md)). Rows
   written by 2.2 carry `belt_set = "v5"`; there belt 5 is `null` when the repository
   configures no linter (*not evaluated*), and that `null` is hashed. The belt sets are
-  three populations — `v3-legacy` (3 belts), `v4` (4), `v5` (5, with belt 5 optional) —
+  separate populations — `v3-legacy` (3 belts), `v4` (4), `v5` (5, with belt 5 optional)
+  **[measured — n = 3 belt sets; method: the belt-set constants of the ledger module and the
+  belts a row of each records, read at this commit; apparatus n/a]** —
   and `belt_sets` on a cell keeps them apart.
 
 ## 6. Permitted claim shapes, by maturity
@@ -215,10 +239,13 @@ Every word of that sentence is a field of the record (`policy_version`,
 `GET /signoffs/{id}`. Why the oracle clause has no knob: a human signing a cell whose
 oracle was never scored would be attesting to a number whose *meaning* was never
 measured — precisely the "a green suite proves correctness" claim §7 forbids, dressed as
-an attestation. `[measured 2026-09-14]` the NHS reading that earned the clause: an
-oracle of 0.36 on nhsuk-frontend with 2 of 6 tasks scoreable, and 4 of 10 clean rows
-failing their own repository's type check — a weak or unmeasured oracle is where a human
-sign-off is most likely to be wrong. What the sentence does **not** mean:
+an attestation. The NHS reading that earned the clause: an oracle of 0.36 on
+nhsuk-frontend with 2 of 6 tasks scoreable, and 4 of 10 clean rows failing their own
+repository's type check **[hypothesis, recorded as measured 2026-09-14 — n = 6 tasks and 10 clean rows; method: the
+oracle run and a type check of each clean row's patch in the NHS measurement
+(docs/reviews/2026-09-14-nhs-public-repos.md), whose rows are the operator's and not in this
+repository; apparatus 2.2]** — a weak or unmeasured oracle is where a human sign-off is most
+likely to be wrong. What the sentence does **not** mean:
 
 - that the cell is safe for autonomous delivery (§6 still applies: `deliver` is a
   high-confidence candidate under the published bar, not a safety claim);
@@ -231,7 +258,7 @@ sign-off is most likely to be wrong. What the sentence does **not** mean:
 A deployment may relax the numeric thresholds and the route / controls switches within
 the published bounds (`docs/API.md`, `/signoffs/policy`); a record then says so
 (`policy_thresholds` differs from the defaults, `relaxed: true` on the policy) and any
-quote of it must name the relaxed bar. Four clauses have no knob and never will: a
+quote of it must name the relaxed bar. These clauses have no knob and never will: a
 false-Q1 cell cannot be signed, a cell whose oracle was never measured cannot be signed
 (`oracle_unmeasured`, since v2), a sign-off without an attestation cannot be made, and
 the person who produced the evidence cannot sign it (`same_actor`, since v3 — a
@@ -256,7 +283,9 @@ sources, on repositories whose suite runs in the sandbox. Every rate from it is 
 **that** population. It says nothing about:
 
 - changes that were never encoded as a test (on our own repository 46 of 242 non-merge
-  commits are source-only — docs/reviews/2026-09-16-dogfood.md §3);
+  commits are source-only **[measured — n = 242 non-merge commits on `main` on 2026-09-16;
+  method: the files each commit touched, classed by the dogfood review's §3
+  (docs/reviews/2026-09-16-dogfood.md); apparatus n/a]**);
 - architecture, requirements ambiguity, migrations, operational and security design, UX and
   product judgement — work whose result is not a source+test commit;
 - the original engineering reasoning: a builder sees the commit's subject and description
@@ -359,6 +388,50 @@ that what was recorded is true. Evidence ranks, weakest first:
 7. **The system must be capable of becoming less autonomous** — a later row can demote a
    cell; a stop condition (any false-Q1, sandbox escape, ledger chain break, secret in an
    artefact) halts delivery until root cause, correction and re-qualification.
+
+## 9. The quality baseline — named, never claimed
+
+A clean row says the repository's own tests passed and, where it configures one, its own
+linter accepted the change. This section names which qualities that evidences, against ISO/IEC
+25010:2023's product quality model, so a reader can tell what a clean row says and what it says
+nothing about. The table is data in the product (`crb.core.quality_model`) and is copied here
+exactly; a test compares the two ([ADR-0026](adr/0026-the-context-standard.md) item 11).
+
+| ISO/IEC 25010:2023 characteristic | counted as evidence of part of it, and when each runs | argued secondary, not counted | note |
+|---|---|---|---|
+| Functional suitability | belt 2 `target_green` (functional correctness) — at every grade: every replay and factory attempt that reaches the grader; belt 3 `no_new_failures` (functional correctness) — at every grade: every replay and factory attempt that reaches the grader; review verdict `defect` (functional correctness) — when a person reviews an accepted row or a factory pull request; review verdict `regression` (functional correctness) — when a person reviews an accepted row or a factory pull request | — | completeness only as far as the tests assert; mutation strength says how far to trust them; belt 3 is regression correctness and counts here only |
+| Performance efficiency | — | — | not evidenced |
+| Compatibility | — | belt 6 `api_stable` (interoperability) — at every grade, only where `checks.api_stable` is switched on | not evidenced; belt 6 is argued as a secondary here and not counted |
+| Interaction capability | — | — | not evidenced |
+| Reliability | — | — | not evidenced; belt 3 is regression correctness and counts under functional suitability only |
+| Security | — | — | not evidenced; F31 proposes the repository's own security scanner as a review probe |
+| Maintainability | belt 5 `repo_lint_clean` (analysability) — at every grade, only where the repository configures a linter; the format step (analysability) — before the grade, only where `checks.format_step` is switched on; belt 6 `api_stable` (modifiability) — at every grade, only where `checks.api_stable` is switched on; review verdict `style` (analysability) — when a person reviews an accepted row or a factory pull request; review verdict `api_change` (modifiability) — when a person reviews an accepted row or a factory pull request | — | by the repository's own rules, not ISO/IEC 5055's |
+| Flexibility | — | — | not evidenced |
+| Safety | — | — | not evidenced |
+
+The belts evidence parts of two of the standard's nine characteristics: functional suitability
+and maintainability **[measured — n = 9 characteristics of ISO/IEC 25010:2023; method: each
+characteristic read against the belt, review-verdict and check definitions in
+`crb.core.quality_model`, and the count taken from its `evidenced()`; apparatus n/a — a count
+of a table, not a rate, so no interval]**. Belt 3 is regression correctness and counts under
+functional suitability only, never under reliability. Belt 6 counts as modifiability; the
+compatibility it may also say something about is argued, not counted. Belts 1 and 4, the
+negative controls and mutation strength evidence the instrument's integrity, not a quality of
+the product.
+
+ISO/IEC 5055: not evidenced — none of its measures is computed; one may enter only as the repository's own analyser, run as a gate (ADR-0011).
+
+**Named, never claimed.** Passing these checks does not mean the code conforms to ISO/IEC
+25010, to ISO/IEC 5055 or to any other standard, and nothing may say that it does (§7). The
+claims gate (`scripts/claims_check.py`) refuses any sentence that says code conforms to,
+complies with or is certified against an ISO standard in README, the guides and the
+factory's pull-request body template, wherever it renders: a heading, a table cell or a
+checklist item as well as prose. A sentence that only names a standard, as this one names
+ISO/IEC 25010, passes, and so does one whose own verb denies the claim, as the first sentence
+of this paragraph does ("does not mean the code conforms"); a "no" or a "without" elsewhere
+in the sentence, "not only", or a refusal in another clause denies nothing. An organisation's own standard with a runnable check
+becomes a finish-gate or belt command on its repository; without one it is shown and signed
+but counts as no evidence.
 
 Related: [ADR-0001](adr/0001-four-belts-and-false-q1-at-write.md) ·
 [ADR-0003](adr/0003-one-routing-rule.md) · [ARCHITECTURE §7.4](ARCHITECTURE.md#74-versioning) ·

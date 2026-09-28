@@ -38,7 +38,7 @@ kind and the task filled in) → register the strengthening item and queue the r
 from the reports themselves →
 record the refusal verdicts on the same page (or with `crb learn refusals --apply`). Leave with a strengthened cell
 re-measured on the current apparatus, deliver no longer withheld for `oracle_weak` or
-`controls_escapes`, and a guard-corpus line that carries its decider and provenance.
+`controls_escapes`, and a guard-corpus line that carries its decider and provenance **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The loop never decides for the person: nothing is appended, registered, spent or
 judged except as a named operator's own act, recorded with their identity, and no derivation

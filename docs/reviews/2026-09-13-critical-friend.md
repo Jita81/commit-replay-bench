@@ -1,13 +1,13 @@
 # Critical-friend review — is the AI's code actually good, and is our governance of it honest?
 
 **Date:** 2026-09-13 · **Scope:** Commit Replay Bench v2 (`reboot/v2` @ `95a4f2e`) run live against three public repositories (spf13/cobra, pallets/click, koajs/koa) with Claude Sonnet 5 via Claude Code, plus the *Automated Agile v2 Playbook* (Aug 2026) that describes the process. · **Lens:** an AI-governance community that has to decide what this evidence licenses.
-**Reviewer:** Claude Opus 5, acting as critical friend at the operator's request. This review was itself produced by an AI; treat it as a structured set of claims to verify, not a sign-off.
+**Reviewer:** Claude Opus 5, acting as critical friend at the operator's request. This review was itself produced by an AI; treat it as a structured set of claims to verify, not a sign-off **[hypothesis — recorded at the time; not re-checked since]**.
 
 ---
 
 ## 1. Verdict in one paragraph
 
-The *instrument* is honest: across every grade row written today, false-Q1 = 0 (no row credited clean with a failed belt), the ledger's hash chain verifies, and every failure — including the instrument's own — is recorded as not-clean with its reason. The *code the AI produced* is competent and green against the maintainers' own tests, but **not one of the three "clean" cobra patches I examined would have been merged as-is by a careful maintainer**: one fails the repository's own `gofmt` lint, one has two behavioural gaps I exposed with two 15-line tests written in five minutes, one silently changes the public API surface. The *data* is far too thin to license anything beyond "keep measuring": n = 3–9 per cell, no cell routes to `deliver`, and **13 of the 29 replay rows failed because of our harness, not the model**. The *governance document* (the playbook) still publishes a specification-value claim that the underlying research corrected a month before the playbook's date. The honest summary for a governance community is: the floor holds; the ceiling is unmeasured; human review of *what was accepted* — not just *that* it was accepted — is still mandatory; and our own process needs the same discipline we are selling.
+The *instrument* is honest: across every grade row written today, false-Q1 = 0 (no row credited clean with a failed belt), the ledger's hash chain verifies, and every failure — including the instrument's own — is recorded as not-clean with its reason. The *code the AI produced* is competent and green against the maintainers' own tests, but **not one of the three "clean" cobra patches I examined would have been merged as-is by a careful maintainer**: one fails the repository's own `gofmt` lint, one has two behavioural gaps I exposed with two 15-line tests written in five minutes, one silently changes the public API surface. The *data* is far too thin to license anything beyond "keep measuring": n = 3–9 per cell, no cell routes to `deliver`, and **13 of the 29 replay rows failed because of our harness, not the model**. The *governance document* (the playbook) still publishes a specification-value claim that the underlying research corrected a month before the playbook's date. The honest summary for a governance community is: the floor holds; the ceiling is unmeasured; human review of *what was accepted* — not just *that* it was accepted — is still mandatory; and our own process needs the same discipline we are selling **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 ---
 
@@ -29,7 +29,7 @@ Everything below cites its n. Where I say "would not be merged" I mean I ran the
 
 ## 3. Is the code actually good? — four patches, read line by line
 
-I re-ran the first three gold-clean cobra tasks with worktrees kept so a human could read the AI's diff next to the maintainer's. One was blocked by our own guard (§5.4); I fixed the guard and re-ran it, so four AI patches are on the table.
+I re-ran the first three gold-clean cobra tasks with worktrees kept so a human could read the AI's diff next to the maintainer's. One was blocked by our own guard (§5.4); I fixed the guard and re-ran it, so four AI patches are on the table **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### 3.1 cobra #2241 — "Flow context to command in SetHelpFunc" (XS, bug fix)
 
@@ -69,7 +69,7 @@ First run: not clean, $0.16, 41 s, `error: archaeology: could not parse the comm
 
 ### 3.5 What this means
 
-Three for three "clean" patches carry a reviewer-visible defect or divergence — and these are XS–M changes in a well-tested, idiomatic Go library with the strongest oracle we measured (0.94). "Clean" here means precisely what ADR-0001 says it means: *the four mechanical predicates held*. It does not mean mergeable, idiomatic, API-consistent, or lint-clean. The playbook says this in words (§05 "mechanical vs semantic"). The capability map, the sign-off screen and the word "deliver" in the routing rule do not say it loudly enough.
+Three for three "clean" patches carry a reviewer-visible defect or divergence — and these are XS–M changes in a well-tested, idiomatic Go library with the strongest oracle we measured (0.94). "Clean" here means precisely what ADR-0001 says it means: *the four mechanical predicates held*. It does not mean mergeable, idiomatic, API-consistent, or lint-clean. The playbook says this in words (§05 "mechanical vs semantic"). The capability map, the sign-off screen and the word "deliver" in the routing rule do not say it loudly enough **[hypothesis — recorded at the time; not re-checked since]**.
 
 ---
 
@@ -88,20 +88,20 @@ Three for three "clean" patches carry a reviewer-visible defect or divergence �
 | koa | blind | 3 | 1 | 0 | 2 | 0.35 | 116 |
 | **all** | | **29** | **14** | **2** | **13** | | |
 
-\*click run 2 wrote 5 rows: 4 clean, 1 guard false positive (`$(pwd)` — old guard build on the live worker). Total spend $9.56; 79 builder-minutes. Every row: `capability_class = bug.fix`. False-Q1 violations: **0** (checked directly against the belts, not the flag).
+\*click run 2 wrote 5 rows: 4 clean, 1 guard false positive (`$(pwd)` — old guard build on the live worker). Total spend $9.56; 79 builder-minutes. Every row: `capability_class = bug.fix`. False-Q1 violations: **0** (checked directly against the belts, not the flag) **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 ### 4.2 Six honest readings
 
-1. **The floor held.** Zero clean rows with a failed belt, across 29 live rows, 4 review rows, 161 negative-control rows and every gate. This is the one number the whole design defends and it is intact.
-2. **The instrument, not the model, produced most of the failures.** 13 of 15 non-clean rows are harness or protocol errors: an unprovisioned environment that led the model to `pip install` (8 rows), guard false positives on ordinary shell (`$(find …)`, `$(pwd)`, quoted parentheses — 4 rows), and `git stash` (1 row, arguably a legitimate protocol refusal). Only **2 rows** are the model failing the task. The ledger records this honestly (fail-closed, reason in `error`), but a naive "clean rate" of 48% would badly misdescribe the model, and an honest "≈ 88% when the harness works" would badly overclaim from n = 16.
+1. **The floor held.** Zero clean rows with a failed belt, across 29 live rows, 4 review rows, 161 negative-control rows and every gate. This is the one number the whole design defends and it is intact **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
+2. **The instrument, not the model, produced most of the failures.** 13 of 15 non-clean rows are harness or protocol errors: an unprovisioned environment that led the model to `pip install` (8 rows), guard false positives on ordinary shell (`$(find …)`, `$(pwd)`, quoted parentheses — 4 rows), and `git stash` (1 row, arguably a legitimate protocol refusal). Only **2 rows** are the model failing the task. The ledger records this honestly (fail-closed, reason in `error`), but a naive "clean rate" of 48% would badly misdescribe the model, and an honest "≈ 88% when the harness works" would badly overclaim from n = 16 **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 3. **Nothing routes to `deliver`, and nothing should.** The rule needs n ≥ 10 ∧ point ≥ 0.90 ∧ Wilson-low ≥ 0.80 ∧ false-Q1 = 0 ∧ oracle ≥ 0.8. The largest cell has n = 7. At n = 5 with 4 clean the Wilson lower bound is 0.38. The product correctly says `calibrate` everywhere. Anyone reading today's map as capability evidence is reading noise.
 4. **The class axis is degenerate on these repos.** The classifier is path-based; a code file outside recognised `routes/`, `models/`, `migrations/` … patterns falls through to `bug.fix`. cobra #1559 is a behaviour change and the ShellCompDirective task is a feature; both are labelled `bug.fix`. The cell key's "class" therefore carries no information on library repos. This is not what the essay measured (the census used labelled classes) and it must be fixed before any per-class claim is made from this product.
-5. **Oracle strength is a lower bound on weakness, not a certificate of coverage.** cobra's 0.94 comes from text-level mutators that produce many uncompilable mutants (14 of 21 in the M cell were excluded). The #1559 task sits in a cell scored 0.95 and its test missed two behaviours a reviewer found in minutes. Mutation score measures whether the tests notice *crude* breakage; it says nothing about flag handling, API shape or style.
-6. **The negative-control gate is thin outside Python.** On cobra and koa only 3 of 7 controls are constructible (gold, noop, test_tamper); the load-bearing ones — regression, stub, hardcode-cheat, env-poison — are Python-AST-only and read `not_constructible`. "Controls: passed" on a Go or JS repo currently means "the three easy ones passed". On click, where all 7 run, the gate **failed** (regression 7/7 violations because the suite is too large to run in full and the belt scope is TARGET_ONLY, so belt 3 is blind) — and the replay runs proceeded anyway and produced clean rows the capability map shows without that caveat.
+5. **Oracle strength is a lower bound on weakness, not a certificate of coverage.** cobra's 0.94 comes from text-level mutators that produce many uncompilable mutants (14 of 21 in the M cell were excluded). The #1559 task sits in a cell scored 0.95 and its test missed two behaviours a reviewer found in minutes. Mutation score measures whether the tests notice *crude* breakage; it says nothing about flag handling, API shape or style **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
+6. **The negative-control gate is thin outside Python.** On cobra and koa only 3 of 7 controls are constructible (gold, noop, test_tamper); the load-bearing ones — regression, stub, hardcode-cheat, env-poison — are Python-AST-only and read `not_constructible`. "Controls: passed" on a Go or JS repo currently means "the three easy ones passed". On click, where all 7 run, the gate **failed** (regression 7/7 violations because the suite is too large to run in full and the belt scope is TARGET_ONLY, so belt 3 is blind) — and the replay runs proceeded anyway and produced clean rows the capability map shows without that caveat **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 ### 4.3 A finding I disagree with the product's own docs about
 
-On click, the `env_poison` control **escaped 3 of 7 times**: an identity edit to the source plus a new root `conftest.py` that execs the gold module at collection time graded *clean*. The product's docstring calls this a "measured oracle escape — a finding, never a violation — not a grader bug". I think that is the wrong call. Belt 1 protects the *test files*; the oracle is the *test run*, and for pytest that run includes `conftest.py`, `pytest.ini`, `pyproject.toml [tool.pytest]`, `sitecustomize.py`, `.pth` files and `PYTHONPATH` (for JS: `jest.config.*`, `vitest.config.*`, `.mocharc`, `package.json#jest`). A builder that adds any of those has modified the oracle and should be disqualified under belt 1, not scored as "the repo's tests are weak". Until that is closed, a motivated (or merely confused) agent can earn a clean grade by poisoning collection. **This is the most important hardening item in this review.**
+On click, the `env_poison` control **escaped 3 of 7 times**: an identity edit to the source plus a new root `conftest.py` that execs the gold module at collection time graded *clean*. The product's docstring calls this a "measured oracle escape — a finding, never a violation — not a grader bug". I think that is the wrong call. Belt 1 protects the *test files*; the oracle is the *test run*, and for pytest that run includes `conftest.py`, `pytest.ini`, `pyproject.toml [tool.pytest]`, `sitecustomize.py`, `.pth` files and `PYTHONPATH` (for JS: `jest.config.*`, `vitest.config.*`, `.mocharc`, `package.json#jest`). A builder that adds any of those has modified the oracle and should be disqualified under belt 1, not scored as "the repo's tests are weak". Until that is closed, a motivated (or merely confused) agent can earn a clean grade by poisoning collection. **This is the most important hardening item in this review.** **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**
 
 ---
 
@@ -139,11 +139,11 @@ The pattern: the *mechanical* governance is strong and honest; the *human* gover
 
 ## 7. Where human checks are non-negotiable (as of this evidence)
 
-1. **Reading the accepted diff** for every change in any cell that is not yet `deliver` — which today is every cell. Not sampling: every one. (Three of three had findings.)
+1. **Reading the accepted diff** for every change in any cell that is not yet `deliver` — which today is every cell. Not sampling: every one. (Three of three had findings.) **[hypothesis — recorded at the time; not re-checked since]**
 2. **Lint/CI of the target repo** as a fifth belt, mechanically — `gofmt`, `golangci-lint`, `ruff`, `eslint`, `tsc` — because "clean" currently means the tests, not the repo's own definition of acceptable. Cheap, deterministic, and would have caught §3.2 finding 1.
 3. **Classification audit** on a sample per repo until the class axis is intent-derived.
 4. **Oracle review by a test engineer** for any class proposed for `deliver`: not the mutation score — the tests themselves.
-5. **Refusal triage**: every harness/protocol error read by a person until the instrument-caused share is < 5% of rows (today 45%).
+5. **Refusal triage**: every harness/protocol error read by a person until the instrument-caused share is < 5% of rows (today 45%) **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 6. **Sign-off** only by a named person who has read at least one accepted diff in that cell, with the controls-gate verdict on the screen.
 7. **Risk classing** (clinical, financial, safety, PII) stays human in perpetuity — the product has no notion of it, and should not pretend to.
 
@@ -176,10 +176,10 @@ upstream T2 ledger tallied on 2026-09-26; apparatus n/a — the upstream harness
 
 ## 9. What the evidence *does* license today
 
-- Saying: "We have an instrument that grades AI code changes against a repository's own held-out tests, fails closed, cannot record a false pass, and proves it on 161 negative-control rows and every live row so far." **[measured]**
-- Saying: "On three public libraries, Sonnet 5 reproduced 14 of 16 changes the harness let it attempt, at $0.17–0.43 and 1–4 minutes each." **[measured, n = 16, single run, no CI]**
+- Saying: "We have an instrument that grades AI code changes against a repository's own held-out tests, fails closed, cannot record a false pass, and proves it on 161 negative-control rows and every live row so far." **[hypothesis, recorded as measured — n = 161 negative-control rows and 29 live rows; method: the controls and replay runs of §2 on the operator's stack, whose rows are not in this repository; apparatus 2.0]**
+- Saying: "On three public libraries, Sonnet 5 reproduced 14 of 16 changes the harness let it attempt, at $0.17–0.43 and 1–4 minutes each." **[hypothesis, recorded as measured, n = 16, single run, no CI; method: the replay rows of §2 the harness let the builder attempt, on the operator's stack; apparatus 2.0]**
 - Saying: "Mechanically clean is not mergeable: in a 3-patch sample, 3 had reviewer-visible defects or divergences." **[measured, n = 3]**
-- **Not** saying: any per-class capability, any `deliver` routing, any semantic-correctness rate, anything about NHS code (the three NHS repos are validated but not yet run).
+- **Not** saying: any per-class capability, any `deliver` routing, any semantic-correctness rate, anything about NHS code (the three NHS repos are validated but not yet run) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ---
 

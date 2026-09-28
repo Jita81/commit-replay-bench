@@ -1,6 +1,6 @@
 # NHS accepted patches — review evidence (apparatus 2.1, Sonnet 5)
 
-Ten rows graded clean on 2026-09-14. Each patch below is the builder's change against the task's parent (`git diff HEAD` plus untracked files), exactly as graded; the finding is the independent decider's (Fable 5.1) after reading it against the maintainers' commit and running the repository's own lint/type gates. Retained worktrees were purged after this commit (DL-018).
+Ten rows graded clean on 2026-09-14. Each patch below is the builder's change against the task's parent (`git diff HEAD` plus untracked files), exactly as graded; the finding is the independent decider's (Fable 5.1) after reading it against the maintainers' commit and running the repository's own lint/type gates. Retained worktrees were purged after this commit (DL-018) **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 | repo | task | mode | size | subject | patch | finding |
 |---|---|---|---|---|---|---|

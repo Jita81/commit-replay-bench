@@ -25,7 +25,7 @@ no `?repo=` the most recently updated repository is chosen, and with no reposito
 the only exit is Connect. Every row's next step is one click: open the ticket on the team's
 own board, or open the item on `/factory?repo=&item=`. The three operator acts — switch the
 listener on or off, re-read the column now, post the feedback again — each leave a success
-state naming what happened, or the server's own stop reason with the server's own advice.
+state naming what happened, or the server's own stop reason with the server's own advice **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** It does not configure the tracker (that is a deployment setting an admin
 sets, plus a credential in the product's secret store) and it never shows the credential.

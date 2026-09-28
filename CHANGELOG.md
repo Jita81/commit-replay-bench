@@ -12,6 +12,13 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Every public page is gated, README's measured numbers re-derive, and the quality baseline is named, never claimed**
+  (north-star Wave 2, stream C; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
+  The claims gate reads README, every guide, every review and every definition-of-done
+  page; README's `[measured]` tags name vendored rows that a test re-derives; ISO/IEC 25010's characteristics are
+  mapped to the checks that evidence part of them (`crb.core.quality_model`, EVIDENCE-AND-CLAIMS §9), and a
+  conformity claim is refused (DL-088, DL-089).
+
 - **Find your way: every screen says what it is, and the decision records open in the product**
   (north-star Wave 1, stream A2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).
   The sign-in page, the help pages and the unknown address carry an About block; the

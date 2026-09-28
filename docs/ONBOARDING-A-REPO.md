@@ -13,7 +13,9 @@ evidence, never writes). All three exist as RBAC roles ([SECURITY.md](SECURITY.m
 
 **Time and money, honestly.** A first repository takes a working day of a developer's
 attention (most of it on step 2) and, with Claude Sonnet, roughly £0.20–£0.60 per attempt;
-a first useful picture (≈ 30 attempts) is under £20. Nothing spends money without a queued
+a first useful picture (≈ 30 attempts) is under £20 **[hypothesis — this guide's estimate
+from the repositories onboarded so far; not timed, and a deployment's own mean cost per
+attempt, with its n, replaces it once measured]**. Nothing spends money without a queued
 run you can see and cancel.
 
 ---
@@ -108,7 +110,9 @@ experiment; without them a pass rate is a rumour.
 A sighted replay run: the builder sees the failing test and must make it pass; the grader
 never trusts the builder's word. Start with `limit: 10`, `retain: {worktrees, transcripts}`
 so a human can read every accepted patch, `preflight: true` so the repository's own
-formatter is applied before grading (4 of the 6 NHS misses were formatting), and
+formatter is applied before grading (4 of the 6 NHS misses were formatting **[hypothesis —
+as the NHS measurement of 2026-09-14 reported them; its rows are the operator's and not in
+this repository]**), and
 `outage_stop` at its default so a usage-limit outage stops the run rather than burning it.
 
 **What to look at on the Run page:** the failure split. `builder_red` is the model's;
@@ -118,7 +122,8 @@ instrument's or the operator's — each is named per row, none is hidden in a ra
 ## Step 5 — Read the map (everyone)
 
 Capability → the grid of *change class × size*. A cell shows `n` attempts **and**
-`n_tasks` distinct commits (16 attempts on 4 commits is a statement about 4 commits),
+`n_tasks` distinct commits (many attempts on a few commits is a statement about those few
+commits),
 the pass rate with its Wilson interval, false-Q1 (must be 0), the oracle strength, the
 controls verdict, and the route the ONE published rule gives: `deliver`, `calibrate`,
 `human` — with the reason code. The rule is in [adr/0003-one-routing-rule.md](adr/0003-one-routing-rule.md);
@@ -182,7 +187,8 @@ configures the tracker, stores its credential and sets this deployment's own add
 relative path would resolve against your tracker's host, so the listener cannot be switched on
 without it). Then an operator switches the listener on for a repository from the Factory
 screen's *Work arriving from your board*, or at `/factory/intake?repo=`. Every repository starts
-with its listener **off**. The two steps are two **roles**, not necessarily two people: the role
+with its listener **off**. The steps belong to separate **roles**, not necessarily separate
+people: the role
 ladder admits an admin wherever an operator is asked for, so one admin account can take both.
 The switch records who threw it and when; nothing here refuses the same person taking both
 steps, and the product's two-person rule applies to signing a cell, not to this switch
@@ -212,14 +218,18 @@ Story points map to a size tier on a published scale: `≤ 1 → XS`, `≤ 3 →
 `≤ 20 → L`, above that `XL`. A ticket with no estimate is `S`, and the comment says so.
 
 **What it writes, counted, so nobody has to wonder.** Over a ticket's life the product adds
-up to four comments, each marked as its own: what is missing, a note when the work is queued,
-a note when a pull request opens, and a note if the work stopped. It sets one `crb:` label.
+up to four comments **[measured — n = 4 comment kinds; method: the distinct markers the
+intake writes its comments under, read in the server's intake code at this commit; apparatus
+n/a]**, each marked as its own: what is missing, a note when the work is queued, a note when
+a pull request opens, and a note if the work stopped. It sets one `crb:` label.
 It attaches a link to the backlog item and a link to the pull request. And — only where your
 deployment configured a mapping — it makes one state change after a pull request merges. It
 edits no other ticket field. It never creates a ticket. It never reads a column it was not
 pointed at. It never puts your source code, your diffs, the ledger or an evidence pack on the
 tracker. Those are bounded by the size of the protocol it has (six verbs: read the column,
-read a ticket, comment, label, link, transition), not by a rule somebody has to remember
+read a ticket, comment, label, link, transition **[measured — n = 6 verbs; method: the
+methods of the tracker client protocol every intake adapter implements, read at this
+commit; apparatus n/a]**), not by a rule somebody has to remember
 ([SECURITY §2](SECURITY.md#2-trust-boundaries)). The comment on your ticket carries the same
 list, so this page and your board cannot drift apart.
 

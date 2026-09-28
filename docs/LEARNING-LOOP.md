@@ -6,8 +6,9 @@ The honest answer was: **half of it**. The *measurement* half loops mechanically
 *learning* half — a failure becoming a prevention artefact, a weak oracle becoming
 test-strengthening work, an apparatus change triggering re-measurement — happened only
 through people and agents reading the ledger. `crb.core.learn` (this document's subject)
-makes the learning half product behaviour: three deterministic derivations from the ledger
-as it is, each stopping exactly where a decision needs a name attached.
+makes the learning half product behaviour: deterministic derivations from the ledger as it
+is — the refusals, what to strengthen and what to re-measure — each stopping exactly where a
+decision needs a name attached.
 
 Contents: [1 What loops today](#1-what-loops-mechanically-today) ·
 [2 What this module adds](#2-what-crbcorelearn-adds) · [3 What still needs a human, and why](#3-what-still-needs-a-human-and-why-that-is-deliberate) ·
@@ -40,10 +41,10 @@ from its own failures*:
 
 ## 2. What `crb.core.learn` adds
 
-Three pure functions over `GradeRow`s (stdlib only, ADR-0008), each with a CLI verb
+A pure function over `GradeRow`s per report (stdlib only, ADR-0008), each with a CLI verb
 (`crb learn …`), an API route (`GET /learn/{refusals,strengthen,remeasure}`, viewer role — the
-reads are pure; the three writes a person authorises are §3), and a byte-identity guarantee:
-same rows → same report.
+reads are pure; the writes a person authorises are §3), and a byte-identity guarantee: same
+rows → same report.
 
 ### 2.1 Refusal triage — `triage_refusals(rows)` → `crb learn refusals`
 
@@ -60,7 +61,9 @@ the ledger's field caps), normalises the command to its **shape** (paths → `<p
 `<sha>`, quoted strings → `"<str>"`, numbers → `<n>`, URLs → `<url>`; flags, verbs, pipes,
 redirections and `$(…)` substitutions kept, because they are what a guard decides on),
 groups by (prefix, reason, shape), and reports per group: `n`, `$` and minutes lost, the
-repos / tasks / row hashes, up to three raw examples, and a **candidate corpus line** in
+repos / tasks / row hashes, up to three raw examples **[measured — n = 3 examples at most;
+method: the cut the refusals triage makes in the learn module, read at this commit; apparatus
+n/a]**, and a **candidate corpus line** in
 exactly the format `tests/test_builders_guard_corpus.py` loads — one for the honest corpus
 and one (`<command><TAB><prefix>:`) for the refused corpus.
 
@@ -107,7 +110,7 @@ in the factory's frozen-backlog item shape (`crb.factory.backlog.BacklogItem`):
 }
 ```
 
-Two deliberate choices. The class is `test.add`, whose catalogue slots are all
+Both choices are deliberate. The class is `test.add`, whose catalogue slots are all
 **structural** (`subject_under_test`, `behaviour_asserted`) and both are filled from facts
 the ledger and the oracle run already hold — never a value from the answer — so the
 Definition-of-Ready gate (`crb.factory.readiness.assess`) says `build` without a human
@@ -161,7 +164,7 @@ registered (`/factory?repo=…&item=<id>`).
 
 ## 3. What still needs a human, and why that is deliberate
 
-Three decisions, three writes, one rule: **the product proposes and a named person accepts**. What
+Each decision is one write, under one rule: **the product proposes and a named person accepts**. What
 changed on 2026-09-23 (G-532) is *where* the person accepts — on the screen that showed them the
 reason, not as a command on the host. The decision itself is no more automatic than it was: each
 write is operator-gated, takes no `decided_by` field (the signed-in operator is the decider, so a
@@ -263,7 +266,7 @@ summary.
   recorder's cap and flagged `truncated`), quoted parentheses in a grep pattern, `git stash`,
   `npx jest`, `npx prettier`, `uv run`, the NHS two-violation row, a reviewer's free-text
   violation with no command.
-* **Determinism**: same rows in any order → byte-identical JSON for all three reports; item
+* **Determinism**: same rows in any order → byte-identical JSON for every report; item
   ids independent of the `registered` stamp; the CLI writes identical files twice.
 * **Never auto-accept**: every group is `unsure`; a `RefusalGroup` with another verdict
   cannot be constructed; `apply_triage` needs `decided_by`, validates every decision before
@@ -294,7 +297,7 @@ summary.
 ## 7. Prevention — a bug is closed by a change that stops it recurring
 
 *The operator, 2026-09-25: "We should be learning from a bug and then going back to update
-our process or context to remove it moving forward."* The three reports above stop where a
+our process or context to remove it moving forward."* The reports above stop where a
 person decides. The prevention loop (`crb.core.prevention`, ADR-0020) goes one step further
 for the failures a builder makes: it names each failure class, gives it the strongest change
 the class admits, and keeps, retires or escalates that change by what the next attempts show.
@@ -315,11 +318,13 @@ mechanisms and add checklist lines to the brief, and nothing else:
 It never writes a belt or its switch (`checks.api_stable` included), the lint plan, a runner,
 the guards or their corpus, the oracle, a routing threshold or the failure rule —
 `check_writable` refuses each by name — and it never switches anything off. A fix that needs
-one of those keys, or needs code, becomes a *filed item* for a person. All three mechanisms
-ship (streams W and K); none is on by default, so a repository runs under one only when an
+one of those keys, or needs code, becomes a *filed item* for a person. All of these
+mechanisms ship (streams W and K); none is on by default, so a repository runs under one only when an
 operator sets it or the loop applies it with the switch at `config`. The loop applies the
-calibrated budget only where K's rule can set it — a cell with at least 8 clean completions —
-and otherwise passes it over as "cannot calibrate" and files the budget hand-off instead.
+calibrated budget only where K's rule can set it — a cell with at least 8 clean completions
+**[measured — n = 8 clean completions at least; method: the calibration minimum in the spend
+module, read at this commit; apparatus n/a]** — and otherwise passes it over as "cannot
+calibrate" and files the budget hand-off instead.
 
 ### 7.2 The switch
 
@@ -366,9 +371,12 @@ register:
 * **Decisive n** — `ceil(ln 0.025 ÷ ln(1 − p0))`, clamped to 10–200, where `p0` is the
   class's rate in the before window (its stratum's last 100 comparable first attempts,
   frozen when the change is applied). It is the smallest n at which zero recurrences is
-  significant. For 9 refusals in 30 first attempts, `p0` is 0.30 and n is 11. The formatter
-  step, whose effect the row itself records, needs 3.
-* **The keep test** — at exactly two looks, the first n and the first 2n exposed first
+  significant. For 9 refusals in 30 first attempts, `p0` is 0.30 and n is 11 **[measured —
+  n = 30 first attempts in a worked example, not a reading; method: the formula above,
+  computed by hand; apparatus n/a]**. The formatter step, whose effect the row itself records,
+  needs 3.
+* **The keep test** **[measured — n = 2 looks; method: the constants of the prevention rule (`crb.prevention.rule.v1`) in the prevention module, read at this commit; apparatus n/a]** — at exactly two looks, the
+  first n and the first 2n exposed first
   attempts (those whose own labels name the change): keep when `P(X ≤ k | n, p0) ≤ 0.025`;
   at the second look, retire when it did not keep. At the tenth exposed attempt and at each
   look, retire at once when `P(X ≥ k | n, p0) ≤ 0.01` or the exposed clean rate's Wilson-95
@@ -377,7 +385,8 @@ register:
 * **The closed window** — a kept change closes its class after `max(20, n)` exposed first
   attempts with no recurrence (a refusal before spend counts), provided the stratum's
   non-clean rate is no more than 5 points above the before window; otherwise the class reads
-  `displaced` and names what it now fails as. Any later recurrence reopens it.
+  `displaced` and names what it now fails as **[measured — n = 1 margin of 0.05; method:
+  the constants of the prevention rule (`crb.prevention.rule.v1`) in the prevention module, read at this commit; apparatus n/a]**. Any later recurrence reopens it.
 
 Only first attempts count: a retry exists only after a failure, and stream K's escalation rule
 decides how many there are. Harness and disqualified rows stay in n, so moving a failure into
@@ -417,8 +426,9 @@ and 13 blind first attempts; method: the same script; apparatus 2.0–2.2].
   moved to another class;
 * put free text, a model's words, or anything from a task's gold diff, target tests or
   review notes into a brief — lines come from closed templates, reach a task only when two
-  other tasks taught them, and are dropped at injection if a slot shares a word with the
-  task's test or source file names;
+  other tasks taught them **[measured — n = 2 other tasks at least; method: the default of
+  the playbook's held-out rule, read at this commit; apparatus n/a]**, and are dropped at
+  injection if a slot shares a word with the task's test or source file names;
 * register an item on a backlog, or write on a board, without a named person;
 * re-apply a lever a person reverted.
 

@@ -19,7 +19,7 @@ reports list refusals that should become guard tests, weak oracles that should b
 work, and evidence that has gone stale since the apparatus changed. The product decides nothing
 on its own: the register acts only under an operator's switch, and each report's decision is
 made here by an operator and recorded with their name." (`help.ts` About copy for `/learn`; the
-header purpose says the same and the eyebrow reads `Instrument · Learn`.)
+header purpose says the same and the eyebrow reads `Instrument · Learn`.) **[aspiration — this artefact's specification; its criteria state what is met]**
 
 the `INSTRUMENT` list in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
 `Layout.tsx:121`), from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
@@ -45,7 +45,7 @@ registered) after a registration, `Re-qualify`, `Re-score` and `Re-run controls`
 → `/runs?repo=` from the plan and after a queue, and a class's evidence → `/ledger?repo=`. The
 plan can also be read against a named apparatus version before a bump; that what-if plan
 offers no Queue control. With no repository chosen the body is the empty state `Pick a repository` and
-the only way forward is the picker in the header.
+the only way forward is the picker in the header **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The page never decides on its own. The three reports write only when an operator
 makes one of the three decisions they hand off to — `Decide`, `Register` or `Queue runs` — and
@@ -57,7 +57,7 @@ item and the run from the ledger), spends nothing without confirming the estimat
 offers a viewer none of the three. The register card writes only what an operator does with its
 controls, each a record naming the person; it never writes a grader key and never computes a
 verdict in the browser. No report derives a route in the browser (the held reason and the
-threshold are the served routing policy's) or blends a rate across apparatus versions.
+threshold are the served routing policy's) or blends a rate across apparatus versions **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 ## Definition of done
 

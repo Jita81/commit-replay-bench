@@ -153,10 +153,10 @@ hostile repositories. This is documented, not implemented.
 **The images.** `deploy/sandbox/Dockerfile.{python,node,go}` are the reference sandbox
 images: each `FROM` pinned by the multi-arch index digest, the toolchain and the test runner
 only (pytest hash-pinned; Go copied onto a slim base without gcc or git), `USER 65534:65534`,
-OCI labels, hadolint-clean **[measured — `tests/test_sandbox_images_docker.py` reads `USER`
-and the six labels from each image's config; hadolint in CI]**. CI's `sandbox-images` job
+OCI labels, hadolint-clean **[measured — n = 3 images; `tests/test_sandbox_images_docker.py`
+reads `USER` and the six labels from each image's config, and hadolint runs in CI]**. CI's `sandbox-images` job
 builds each on every pull request and proves the controls above from inside it through the
-real runner of that language **[measured — 10 tests × 3 images before ADR-0019: uid 65534 by default and
+real runner of that language **[measured — n = 10 tests × 3 images before ADR-0019: uid 65534 by default and
 under the executor, `/usr` + `/work` read-only from inside (now `/src`, with `/work` the throwaway copy), `/tmp` writable and `noexec`
 except for the Go runner's command, no setuid/setgid file in the image, a network probe
 fails through the runner, an absent image is `SandboxUnavailable` without a pull, qualify +

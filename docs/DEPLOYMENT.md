@@ -25,7 +25,7 @@ Contents: [1 Shapes](#1-deployment-shapes) ·
 | **Single host, Docker Compose** | pilots, one team, one VM in the tenant | [deploy/README.md](../deploy/README.md) |
 | **Kubernetes, Helm** | shared platform, AKS/EKS/on-prem, managed PostgreSQL | §3 of this page; [deploy/helm/crb](../deploy/helm/crb/README.md) |
 
-The two container shapes run the same image and the same four things: PostgreSQL, a one-shot **migrate** step,
+Both container shapes run the same image and the same four things: PostgreSQL, a one-shot **migrate** step,
 the **api** (HTTP + UI) and the **worker** (queue consumer that mines, builds, grades and
 appends to the ledger). Both enforce the same invariants: the append-only tables carry DB
 triggers, every verdict is hash-chained, the sandbox fails closed, and the only permitted
@@ -41,7 +41,9 @@ which receives only the package names and versions the task's lockfiles pin
 ### 1.1 Single host without containers (evaluation)
 
 The shape every walkthrough, the first factory run (B-1b) and the development stack use:
-one directory, one SQLite file, two processes. It is for evaluation — the local executor
+one directory, one SQLite file, two processes **[measured — n = 2 processes; method: the
+commands in the block below, which the development stack runs, one serving the API and the
+other the queue; apparatus n/a]**. It is for evaluation — the local executor
 does not isolate test runs and SQLite is not the production store (§2.1) — but it holds
 sign-offs and ledger rows like any other, so it deserves a fixed address.
 
@@ -473,7 +475,7 @@ whenever the job is split differently, and the aggregator's does not;
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under
-(it blocked PR #48 until the two job names were shortened). Keep every `name:` in
+(it blocked PR #48 until its long job names were shortened). Keep every `name:` in
 `.github/workflows/ci.yml` under 100 characters.
 
 ## 4. Azure
@@ -517,7 +519,8 @@ Set `serviceAccount.annotations: {azure.workload.identity/client-id: <uami>}` an
   private endpoint in the AKS VNet, `sslmode=require`; its NIC IP goes in
   `networkPolicy.postgres.cidrs` — the chart REFUSES to render an external-postgres
   release without it (under default deny every pod would lose its database silently).
-  Enable PITR (7–35 days) — this is the ledger's backup.
+  Enable PITR (7–35 days) — this is the ledger's backup. **[hypothesis — the range is
+  Azure's published retention for point-in-time restore; this product has not checked it]**
 * **Azure OpenAI**: private endpoint + `privatelink.openai.azure.com` DNS zone; public
   network access disabled; NIC IP in `networkPolicy.modelEndpoint.cidrs`. Content
   filtering/abuse monitoring settings are your data-protection decision — record it in the
@@ -678,7 +681,8 @@ On PostgreSQL the same statements with `DROP TRIGGER events_no_update ON events`
 crb_append_only()`. Record the ids you moved in your change log; then re-run `migrate
 upgrade`. (The dev stack that produced the NHS measurement needed exactly three such
 moves on 2026-09-16 — three `run.cancel_requested` notes that had collided with the
-worker's next event.)
+worker's next event **[hypothesis — as recorded when that stack was upgraded; its rows are
+not in this repository, so the count cannot be re-derived here]**.)
 
 **Upgrading to revision `0009`** (`users.session_nonce`): additive; every account keeps
 its sessions. On a deployment whose cookies are `Secure` (the default outside
@@ -752,15 +756,19 @@ mirror makes the fetch network-less too. To operate fully inside the tenant:
 - [ ] The reverse proxy limits `POST /api/v1/auth/login` per client address (for example
       ingress-nginx `nginx.ingress.kubernetes.io/limit-rpm: "20"` on a path-scoped ingress,
       or `limit_req` on `/api/v1/auth/login`). This is required: the product's own limiter
-      (five failures a minute per username and address, twenty per address) lives in the
+      (five failures a minute per username and address, twenty per address **[measured —
+      n = 2 limits; method: the defaults of the sign-in rate limiter in the server's
+      authentication module, read at this commit; apparatus n/a]**) lives in the
       memory of one API process, so it does not see the other replicas or survive a restart
       ([SECURITY §3.4](SECURITY.md#34-authentication-and-authorisation--crbserverauth)).
 
 ## 9. Observability
 
-Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, seven
+Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, eleven
 probes), **events** (the run's audit trail, streamed as SSE and stored in the `events`
-table). Logs are JSON and redacted. Nothing here leaves the tenant.
+table) **[measured — n = 11 probes and 2 expositions; method: the probes the readiness
+route runs, counted in its code and held there by `tests/test_health_probe_docs.py`, and one
+exposition per process that records metrics; apparatus n/a]**. Logs are JSON and redacted. Nothing here leaves the tenant.
 
 ### 9.1 Metrics — which process carries which series
 
@@ -797,11 +805,13 @@ the module defines that is not here, or is here under other labels, fails the su
 | `crb_http_requests_total` | counter | `method, route, status` | api | requests by route template (never a raw id) |
 | `crb_http_request_duration_seconds` | histogram | `method, route` | api | request latency |
 
-Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds.
+Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds **[measured — n = 10
+buckets; method: the bucket bounds every histogram is built with in the metrics module,
+read at this commit; apparatus n/a]**.
 
 ### 9.2 Alert rules
 
-Four rules cover the operating posture. Expressions assume both targets are scraped.
+These rules cover the operating posture; expressions assume both targets are scraped.
 
 | Alert | Expression | Meaning and action |
 |---|---|---|
@@ -823,7 +833,9 @@ empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_on
 `sandbox` (skipped for `CRB_ROLE=api`), `provision` (dependency provisioning, ADR-0019;
 skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders`,
 `worker`, `intake` and `build` (the served commits agree) — each documented in
-[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface).
+[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface) **[measured — n = 11
+probes; method: the probes the readiness route runs, counted in its code and held there by
+`tests/test_health_probe_docs.py`; apparatus n/a]**.
 `GET /api/v1/health/live` is the liveness probe: the process and its database, nothing else.
 
 The `worker` probe reads the `workers` table: every worker upserts its row every
@@ -846,7 +858,9 @@ the Azure Monitor agent, `docker compose logs`); nothing else is written to disk
 per-run JSONL event copy under `<CRB_HOME>/events/<run_id>.jsonl` and the worker's reaper
 queue `<CRB_HOME>/unconfirmed-containers.json` — the names of builder containers whose
 `docker kill` the daemon never confirmed, retried every poll until reaped or given up on
-after 20 passes ([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is non-empty the
+after 20 passes **[measured — n = 20 passes; method: the bound on reap passes, one per
+worker poll, in the worker's reaper module, read at this commit; apparatus n/a]**
+([API.md](API.md#runs), `POST /runs/{id}/cancel`); while it is non-empty the
 `/health` worker probe reads `degraded`.
 
 ### 9.5 Events
@@ -857,6 +871,8 @@ Every step of a run is a `StepEvent` in the `events` table (append-only, hash-or
 emitter, consumer — is [API.md § Event vocabulary](API.md#event-vocabulary), kept in step
 with the code by `tests/test_event_vocabulary.py`. Retention: the table is append-only and
 is never pruned by crb; size it with the ledger (a replay writes roughly 10–30 events per
-task). The JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be
+task **[hypothesis — an estimate from the development stack's runs, not counted over a stated
+number of tasks; a count of events per task over one sweep would confirm or replace it]**).
+The JSONL copy under `<CRB_HOME>/events/` is the operator's local mirror and may be
 rotated freely.
 

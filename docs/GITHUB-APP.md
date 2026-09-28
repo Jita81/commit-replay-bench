@@ -30,12 +30,14 @@ person can see. A **GitHub App** belongs to the deployment: an organisation admi
 on *selected* repositories, GitHub records exactly which, and the product mints
 **installation tokens** — scoped to that installation — on demand. The one-hour token
 lifetime is GitHub's documented contract for installation tokens, not something this product
-measures; what the product does with the token is **[measured]**: minted per use with the
+measures; what the product does with the token is **[measured — n = 2 tests; method: the
+two tests named below, over a fake GitHub transport, run on every pull request; apparatus
+2.2]**: minted per use with the
 app JWT, cached in memory until five minutes before the `expires_at` GitHub returned, never
 persisted, passed to git as a one-shot header and never on argv
 (`tests/test_server_github_app.py::test_installation_tokens_are_minted_with_the_jwt_cached_and_refreshed_near_expiry`
 and `::test_worker_clones_with_the_installation_token_in_the_environment_never_argv` — a
-fake GitHub transport, 10 cases in the file, apparatus 2.2; the fake returns `expires_at`
+fake GitHub transport; the fake returns `expires_at`
 one hour out, a second call inside that hour re-uses the token, and a token inside the
 five-minute margin is re-minted). Nothing is handed over; nothing
 long-lived is stored. That the named vendors connect this way is **[hypothesis]** drawn from
@@ -50,7 +52,7 @@ The product needs very little:
 | Contents | write | *factory delivery only*: push the `crb/<item>` branch |
 | Pull requests | write | *factory delivery only*: open the pull request |
 
-Install with read-only permissions first. Grant the two write permissions only to the
+Install with read-only permissions first. Grant the write permissions only to the
 installations whose repositories the factory may deliver to — the Connect screen and the
 Settings card say "can deliver" / "read-only" per installation, and the route gate
 (ADR-0003, amendment 2026-09-16) still decides *whether* a given change may be delivered.
@@ -140,7 +142,9 @@ link over a measured row. The same guard sits under connect.
 ## 5. What happens at clone and at delivery
 
 - **Clone** (any run): the worker sees `config_json.github.installation_id`, mints an
-  installation token (cached until five minutes before its one-hour expiry), and clones with
+  installation token (cached until five minutes before its one-hour expiry **[measured — n = 1
+  margin of 300 seconds; method: the refresh margin of the server's GitHub App client, read
+  at this commit; apparatus n/a]**), and clones with
   it as a one-shot `Authorization` header passed through git's `GIT_CONFIG_COUNT`
   environment mechanism — never on the command line, never in `.git/config`, never in an
   event or a log (`repo.clone.start` carries `github_app: true` and the redacted URL only).

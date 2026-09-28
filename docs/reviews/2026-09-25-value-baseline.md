@@ -5,7 +5,7 @@ value; it must produce working software, and its self-learning must get better t
 goes through it. Before any change can be judged, how much working software does it produce
 today for each pound, and is anything it learns stopping a bug from coming back?
 
-**Claims in this record.** Every figure below is **[measured — n = 618 graded rows exported
+**Claims in this record.** Every figure below is **[hypothesis, recorded as measured — n = 618 graded rows exported
 from the operator's stack on 2026-09-25 (`GET /ledger/export`, pipe-separated projection) and
 n = 10 review records from its review store, plus the three cobra verdicts of
 [the critical-friend review](2026-09-13-critical-friend.md) §3; method: `scripts/value_baseline.py`

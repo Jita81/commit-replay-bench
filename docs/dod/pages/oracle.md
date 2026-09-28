@@ -27,7 +27,7 @@ strength, band and the gate a green licenses; the negative-controls gate with th
 verdict and the seven control rows. Exits as coded: a task id opens `/tasks/:repo/:taskId`
 (`OraclePage.tsx:98,187`); no repo → `Choose a repo` with one link to `/connect` (`:223`); an
 operator with nothing scored or no controls report gets `Run oracle` → `/runs?repo=&new=oracle`
-(`:242`) and `Run controls` → `/runs?repo=&new=controls` (`:134`).
+(`:242`) and `Run controls` → `/runs?repo=&new=controls` (`:134`) **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The page never queues a run itself (the Runs dialog does), never derives the
 controls gate in the browser (the server's `verdict` is rendered as served), never strengthens

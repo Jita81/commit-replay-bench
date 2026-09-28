@@ -154,15 +154,19 @@ language and runner — no token is handed over; the worker mints the installati
 repository you already measured can instead be *linked* to the picked GitHub repository — it
 keeps its name and its evidence; only its URL moves ([GITHUB-APP §4](GITHUB-APP.md)).
 Without the app, *Connect by URL* registers a public repository (or one the worker's git can
-reach). Either way the repository then walks the six stages (probe → mine → oracle →
-controls → first measurement) on `/connect/<name>`, each saying what it proves and what it
-costs, and lands on **Results**.
+reach). Either way the repository then walks the six stages (registration, then probe → mine
+→ oracle → controls → first measurement) on `/connect/<name>`, each saying what it proves and
+what it costs, and lands on **Results** **[measured — n = 6 stages; method: the stages the
+Connect screen's walk builds for a repository, read in its code at this commit; apparatus
+n/a]**.
 
 A registered repository is edited on its page under **Configuration** (operators and
 admins edit; viewers see the same form read-only). The form covers every field
 `PUT /repos/{name}` accepts — language, runner, clone path / URL, layout (source prefix,
 extensions, test mode with the matching test prefix or `|`-separated test suffixes), belt
-scope (the three policies or an explicit list with one scope per row), probe scope,
+scope (one of the three policies **[measured — n = 3 policies; method: the belt-scope values
+the repository configuration accepts, read in its validation at this commit; apparatus
+n/a]**, or an explicit list with one scope per row), probe scope,
 sandbox image, layer, mining caps — and the **runner options** as a sub-form that offers
 exactly the keys the selected runner reads (below), with a *Raw JSON* view that
 round-trips for anything else. Inline validation refuses what the API would refuse, in
@@ -409,8 +413,8 @@ apparatus record of every row measured under it.
 
 ### 2.1b Clean means working — the `checks` switchboard
 
-A clean row says the repository's tests accept a patch. Three mechanisms make it also mean
-the repository's reviewers would (ADR-0024). Each is **off** until you switch it on, for one
+A clean row says the repository's tests accept a patch. The mechanisms in the table below make
+it also mean the repository's reviewers would (ADR-0024). Each is **off** until you switch it on, for one
 run or for the repository, and every row it touches records it.
 
 | switch | what it does | what the row records |
@@ -479,7 +483,8 @@ era's services are brought up before the builder starts and their `export` envir
 of the test command the brief shows, so the builder runs the oracle the grader will run — it
 never has to (and is never allowed to) start the service itself. Measured on mesh-client
 (2026-09-15): without this, 2 of 4 sighted attempts were refused for reaching for `docker ps` /
-`curl localhost:8701`.
+`curl localhost:8701` **[hypothesis — one reading on the operator's stack, n = 4 attempts;
+its rows are not in this repository, so it cannot be re-derived here]**.
 
 **The shape.** One entry per service, exactly one of `image` | `compose` | `build`:
 
@@ -568,9 +573,9 @@ which is also what the `post_create` symlinks point every worktree's client cert
 pre-boundary worktrees have their own committed copies and the symlink hook leaves an
 existing file alone). The tests keep their hard-coded `https://localhost:8701`; no `export`
 is needed. Switching eras restarts the one service (compose project
-`crb-mesh-client-mesh_sandbox-<variant>`), so **concurrency is 1 per service**: two runs of
-the same repository must not share a worker. To run two eras side by side give each variant
-its own host port and export the URL instead.
+`crb-mesh-client-mesh_sandbox-<variant>`), so **concurrency is 1 per service**: runs of the
+same repository must not share a worker. To run eras side by side give each variant its own
+host port and export the URL instead.
 
 **Where fixtures live, and why.** Under the runner's `env_dir` — `<home>/envs/<name>/services/`
 (worker) or `<workdir>/envs/<name>/services/` (CLI) — never under `/private/tmp` or
@@ -664,7 +669,7 @@ per task with belt 5, `repo_lint_clean`; four on a repository without a lint pla
 `ledger.append`. The full vocabulary — every action, its payload and who reads it — is
 [API.md § Event vocabulary](API.md#event-vocabulary). Skips are normal: a commit whose
 target is already green at the parent, or times out, is not a valid oracle and is
-excluded, not counted. A queued run shows its place in the line ("Queued — 3 runs ahead of
+excluded, not counted. A queued run shows its place in the line ("Queued — n runs ahead of
 it"); if the health check's `worker` probe is not `ok`, no worker will take it — see §7.
 
 Every graded task produces an **evidence pack** (redacted; no raw diff, no transcript by
@@ -675,7 +680,7 @@ pack's hash. A row cannot be `clean` without a pack.
 
 #### 3.0.2 Spend: the calibrated budget and the measured escalation rule
 
-Two switches decide what a build run pays for (`crb.core.spend`). Each is set per run on
+The switches in the table below decide what a build run pays for (`crb.core.spend`). Each is set per run on
 `POST /runs` or per repository on `PUT /repos/{name}` as `spend: {…}`; the run wins, and
 the run's apparatus says which applied and why (`extra.spend.sources`).
 
@@ -687,10 +692,10 @@ the run's apparatus says which applied and why (`extra.spend.sources`).
 Why: in the 2026-09-25 export, 40 escalated attempts (a same-model retry: a bare `r2` / `r3`
 rung is the run's own builder and model at the same budget, on a fresh worktree with the same
 brief) produced 2 clean patches for $20.70, against $1.35 per clean patch on a first blind
-attempt; and 47 attempts stopped at their budget cost $28.87 for no output `[measured
+attempt; and 47 attempts stopped at their budget cost $28.87 for no output **[hypothesis, recorded as measured
 2026-09-25; n = 322 valid of 618 rows, apparatus 2.0–2.2, builder claude_code /
-claude-sonnet-5; method: the product's failure rule over the export,
-scripts/spend_from_export.py]`. Every row a rule shaped says so: `labels.escalation` and
+claude-sonnet-5; method: the product's failure rule over the export, by
+`scripts/spend_from_export.py`; the export is the operator's and is not in this repository]**. Every row a rule shaped says so: `labels.escalation` and
 `labels.escalation_rule` on the row that stopped or climbed, `labels.budget_profile`,
 `labels.budget_calibration` and `labels.budget_tier` on a calibrated attempt.
 
@@ -737,7 +742,7 @@ tests can observe — the same operator measures something slightly different th
 is exactly why the family and language travel with the number.
 
 Every mutant is generated deterministically (candidates sorted on line, column, operator
-rank and description; two runs are byte-identical; `max_mutants` — default 20 — truncates
+rank and description; a rerun is byte-identical to the first; `max_mutants` — default 20 — truncates
 a stable prefix), the file under mutation is restored byte-exact after every mutant (and
 verified by hash), and test files are never mutated. The blind-spot catalogue — every
 escaped mutant with its diff — is the prevention artifact: each entry names a missing
@@ -874,7 +879,7 @@ the grader first runs the same failing scope on the humans' own change, now, in 
 posture. If that control passes, the row is `builder_red` (or `lint`) and names the witness
 (`labels.blame_control`). If it fails, the row is `harness` with `error: environment: …`
 — counted against autonomy, never against the model — and the task's qualification is
-revoked. Two such rows in a row stop the run (`env_stop`, default 2). When the trial's own
+revoked. Such rows in a row stop the run once they number `env_stop` (default 2). When the trial's own
 tree could not be copied into the sandbox (`tree_copy_failed`), the same control decides:
 if the gold's tree runs there, the trial's tree was the problem (too big for `work_size`, a
 file the sandbox user cannot read) and the attempt is **disqualified**, never charged and
@@ -1089,8 +1094,8 @@ change, the draft is chained onto it.
 
 A team's own board can be the front door of the factory: a ticket moved into one watched
 column is the request to manufacture, and the ticket **is** the backlog item
-(ADR-0017). Nothing about this is on by default, and it takes two separate decisions by
-two different roles to switch on.
+(ADR-0017). Nothing about this is on by default, and it takes a decision by an admin and
+another by an operator to switch on.
 
 **1. An admin configures the connection, once per deployment.** Set the `CRB_INTAKE__*`
 block on the API *and* the worker (DEPLOYMENT.md §2.1), then store the credential:
@@ -1166,7 +1171,9 @@ sign-in name, the Jira email or, where Jira hides it, the account id); `false` i
 on every registration. The allowlist trusts who **created** the ticket, not who edited it
 since; leave it empty if that difference matters to you. An edited ticket comes back as an
 *evolution* — a new item superseding the old one; the frozen record is never rewritten. Over
-a ticket's life it can receive four comments, each marked as its own (what is missing, the
+a ticket's life it can receive four comments **[measured — n = 4 comment kinds; method: the
+distinct markers the intake writes its comments under, read in the server's intake code at
+this commit; apparatus n/a]**, each marked as its own (what is missing, the
 queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
 to the item and a link to the pull request, and — only where the outcome map is configured —
 one state change. It edits no other field, never creates a ticket, and never reads a column it
@@ -1175,7 +1182,9 @@ code block, and the branch name is lower-case letters, digits and hyphens. **One
 time:** the worker's timer, *Re-read the column now* and *Register* each take the repository's
 lease first; a second one that finds it held does nothing and says so (`intake_busy`). A
 rate-limited tracker (HTTP 429) is waited out for up to 10 seconds at a time, twice, as its
-`Retry-After` asks, before the pass stops `unreachable`; and the tracker credential is only
+`Retry-After` asks, before the pass stops `unreachable` **[measured — n = 2 retries of at most
+10 seconds; method: the bounds in the intake's HTTP client, read at this commit; apparatus
+n/a]**; and the tracker credential is only
 ever sent to the tracker's own address. Switching the listener on or off is itself an event on the repository's
 system trace (`intake.listener.switched`) naming the operator, so a later switch cannot
 quietly overwrite who consented.
@@ -1254,7 +1263,7 @@ backup (DEPLOYMENT §5). The chain lives in the database, never in `CRB_HOME`.
 
 ## 13. The three learning reports
 
-The **Learn** page, beside the prevention register, shows three reports for one repository
+The **Learn** page, beside the prevention register, shows the loop's reports for one repository
 (any viewer; `GET /learn/refusals`, `/learn/strengthen` and `/learn/remeasure`, or `crb learn
 refusals|strengthen|remeasure` over exported files — [LEARNING-LOOP §2](LEARNING-LOOP.md#2-what-crbcorelearn-adds)).
 None of them spends anything or changes anything.
