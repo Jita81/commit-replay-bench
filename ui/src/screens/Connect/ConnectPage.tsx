@@ -20,7 +20,9 @@
  *               the running stage's line is the polled run's own counter (`runningDetail`),
  *               and a passed controls report that still carries a finding (an escape, a
  *               thin set) reads "Done, with a finding" in amber — deliver is withheld until
- *               it is answered. Every door to /results is named "Baseline", as the nav
+ *               it is answered. A row whose oracle, controls or map read fails for a reason
+ *               other than 404 (never run) shows that error with Retry in its Next stage
+ *               cell, never a stage state (G-124). Every door to /results is named "Baseline", as the nav
  *               names it, and opens /results (a measured row's button; an unmeasured row's
  *               reads "Continue" and opens the walk); at phone width the repository link
  *               is the row's door to the walk. Every element a reader meets — the two
@@ -49,8 +51,9 @@
  *               for the CLI)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element on /connect and /connect/:name resolves to a registry id)
- * Touch when:   a stage is added (connection.ts first); the API grows a GitHub App install
- *               flow (replace the URL field with the installation's repository picker).
+ * Touch when:   never for a new repository (it appears on the list once connected); a stage
+ *               is added (connection.ts first); the API grows a GitHub App install flow
+ *               (replace the URL field with the installation's repository picker).
  */
 
 import { useEffect, useState } from 'react'
@@ -269,6 +272,13 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
   })
   const s = stageSummary(stages)
   const d = STATUS_DISPLAY[s.status]
+  // G-124: a read that failed for any reason but 404 (never run) is an error on this row,
+  // never a stage state: the walk cannot say where the repository is without it
+  const failed = ([
+    { q: oracle, what: 'oracle scores' },
+    { q: controls, what: 'controls report' },
+    { q: map, what: 'capability map' },
+  ] as const).find(({ q }) => q.isError && !notRun(q.error))
   return (
     <tr className="border-t border-border">
       <td className="py-2 pr-4 font-mono text-xs">
@@ -282,9 +292,17 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
         {repo.task_counts.total} · {repo.task_counts.gold_clean} <Term id="gold_clean">gold-clean</Term>
       </td>
       <td className="py-2 pr-4">
-        <Pill tone={d.tone} glyph={d.glyph} size="xs" hint="pill.connect.stage_summary">
-          {s.label}
-        </Pill>
+        {failed ? (
+          <div data-testid="connect-row-error" className="min-w-[16em]">
+            <ErrorState compact title={`Could not read the ${failed.what}`} error={failed.q.error} onRetry={() => void failed.q.refetch()}>
+              <p className="m-0 text-xs">The next stage is unknown until it answers. Retry, or open the repository.</p>
+            </ErrorState>
+          </div>
+        ) : (
+          <Pill tone={d.tone} glyph={d.glyph} size="xs" hint="pill.connect.stage_summary">
+            {s.label}
+          </Pill>
+        )}
       </td>
       <td className="py-2 pr-4 font-mono text-xs text-on-surface-muted">
         {repo.last_run ? `${repo.last_run.kind} · ${repo.last_run.status}` : '—'}

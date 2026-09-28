@@ -8,7 +8,8 @@
  * What it does: Shows `GET /ledger/verify` as a gate (chain intact ∧ false-Q1 total = 0) and
  *               lists `GET /grades` rows AS STORED — belts, clean / DQ / error, cost, latency,
  *               oracle strength, provenance and the row hash — with the API's filters carried
- *               in the URL. Export links point straight at the API's download URLs (JSONL,
+ *               in the URL; a filter that arrives in a link and has no control (run, task,
+ *               builder, language) shows as a removable chip above the rows (G-180). Export links point straight at the API's download URLs (JSONL,
  *               CSV, and for operators the abstract cell export that carries no code or ids).
  * How:          `useLedgerVerify` → `GateBanner`; filters read from `?…` into
  *               `GradeListParams` → `useGrades` → `DataTable` with offset paging (100 rows).
@@ -25,8 +26,9 @@
  *               role, the filter terms), ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN
  *               with false-Q1 = 0, rows listed, the JSONL export verifies with
  *               `crb ledger verify`), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a filter is added to `GET /grades` (docs/API.md) — add it to `FILTER_KEYS`
- *               and `GradeListParams` in ui/src/api/types.ts; never for a new repository.
+ * Touch when:   never for a new repository; a filter is added to `GET /grades` (docs/API.md) —
+ *               add it to `FILTER_KEYS` and `GradeListParams` in ui/src/api/types.ts, and to
+ *               `LINKED_FILTERS` unless the page offers a control for it.
  * Claims:       A verified chain proves the rows were not edited, reordered or removed — not
  *               that a clean row is mergeable
  *               (docs/EVIDENCE-AND-CLAIMS.md#7-what-must-never-be-said).
@@ -59,6 +61,14 @@ import { fmtDate, fmtInt, fmtRatio, fmtSeconds, fmtUsd } from '../../lib/format'
 const PAGE = 100
 /** The `GET /grades` filters carried in the URL (docs/API.md "Tasks / grades / evidence"). */
 const FILTER_KEYS = ['run_id', 'task_id', 'clean', 'mode', 'builder', 'model', 'capability_class', 'size', 'language'] as const
+
+/** The filters the page offers no control for (they arrive in a link): each is shown as a removable chip, so Matching rows never shrinks with nothing on screen saying why (G-180). */
+const LINKED_FILTERS: ReadonlyArray<{ key: (typeof FILTER_KEYS)[number]; label: string }> = [
+  { key: 'run_id', label: 'Run' },
+  { key: 'task_id', label: 'Task' },
+  { key: 'builder', label: 'Builder' },
+  { key: 'language', label: 'Language' },
+]
 
 /** The screen. `?repo=` and the filters live in the URL so a filtered view is a shareable link; `offset` is local. */
 export function LedgerPage() {
@@ -228,6 +238,28 @@ export function LedgerPage() {
           </>
         }
       >
+        {LINKED_FILTERS.some(({ key }) => params.get(key)) && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs" data-testid="ledger-linked-filters">
+            <span className="text-on-surface-muted">Also filtered by:</span>
+            {LINKED_FILTERS.filter(({ key }) => params.get(key)).map(({ key, label }) => {
+              const value = params.get(key) ?? ''
+              return (
+                <Hint
+                  as="button"
+                  key={key}
+                  id="button.ledger.remove_filter"
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-container px-2 py-0.5 font-mono hover:bg-surface-high"
+                  aria-label={`Remove the ${label.toLowerCase()} filter ${value}`}
+                  data-testid={`ledger-filter-chip-${key}`}
+                  onClick={() => setFilter(key, '')}
+                >
+                  {label}: {value.length > 16 ? `${value.slice(0, 12)}…` : value} <span aria-hidden>✕</span>
+                </Hint>
+              )
+            })}
+          </div>
+        )}
         <p className="border-b border-border px-3 py-2 text-xs text-on-surface-muted" data-testid="ledger-filter-legend">
           A row is <Term id="clean">clean</Term> when every evaluated <Term id="belt">belt</Term> held. Mode is <Term id="sighted">sighted</Term> (the builder saw the failing test) or <Term id="blind">blind</Term> (it did not); the two are never one rate.
         </p>

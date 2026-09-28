@@ -13,7 +13,10 @@
  *               "apparatus", "belt", "Wilson", "false-Q1" or "oracle" only when that term is
  *               in the screen's `terms[]`; every string is plain (no exclamation mark) and
  *               `next.viewer` always exists; (5) the /learn About block says the product
- *               decides nothing on its own, in the words its DoD criteria cite.
+ *               decides nothing on its own, in the words its DoD criteria cite; (6) no About
+ *               block states a policy threshold as a number (`≥ 0.80`, `n ≥ 10`): every
+ *               threshold is the served policy's, which a deployment may tighten, so the
+ *               copy points at the card that shows it (G-255, G-204).
  * How:          Reads `ui/src/App.tsx` and the eight guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -21,7 +24,8 @@
  * Works with:   ui/src/help/help.ts, ui/src/App.tsx (the route table it reads),
  *               ui/src/help/glossary.ts, ui/src/help/docs.ts (`slugify`, `isDocName`)
  * Tested by:    ui/src/help/help.test.ts
- * Touch when:   a screen is added — it needs a `HELP` entry before this passes.
+ * Touch when:   never for a new repository; a screen is added — it needs a `HELP` entry before
+ *               this passes.
  */
 import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'
@@ -147,5 +151,14 @@ describe('HELP ratchet', () => {
         }
       }
     }
+  })
+
+  it('no About block states a policy threshold as a number: the served policy may be tightened, and the copy would drift (G-255, G-204)', () => {
+    for (const h of HELP) {
+      for (const s of [h.purpose, ...Object.values(h.next), h.numbers ?? '']) {
+        expect(s, `${h.route}: a hard-coded threshold: ${s}`).not.toMatch(/[≥≤]\s*\d/)
+      }
+    }
+    expect(helpFor('/routing')!.numbers).toContain('the ones on the Policy in force card')
   })
 })

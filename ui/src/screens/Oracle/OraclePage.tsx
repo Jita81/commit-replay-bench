@@ -11,8 +11,10 @@
  *               seven negative controls through the real grader). The controls gate is green
  *               only with zero VIOLATION rows; an ESCAPE is shown as a finding (the repo's
  *               tests could not tell a cheat from an implementation), not as an instrument
- *               failure. A 404 on controls is the designed "not measured yet" state with the
- *               run button.
+ *               failure. Each caught control shows its gold witness — the commit's own change
+ *               graded beside it in the same posture — and a red witness reads as an
+ *               instrument failure (G-952). A 404 on controls is the designed "not measured
+ *               yet" state with the run button.
  * How:          `useOracle` → tiles computed from the tasks (mean over scored tasks only;
  *               unscoreable never averaged in) → two `DataTable`s; `ControlsSection` reads the
  *               latest report and builds the `GateBanner` criteria from its counts.
@@ -26,12 +28,13 @@
  *               (the routes), src/crb/core/oracle/adequacy.py (bands and gates),
  *               src/crb/core/oracle/controls.py (the control matrix and verdict vocabulary)
  * Tested by:    ui/src/screens/Oracle/OraclePage.test.tsx (the purpose, no "auto-ship", terms,
- *               the run actions per role), ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
+ *               the run actions per role, the Wilson interval and served floors, the gold
+ *               witness column), ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
  *               (strength, band and gate per task; every control with its verdict; no
  *               VIOLATION), ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
- * Touch when:   a control or a verdict word is added (src/crb/core/oracle/controls.py — add it
- *               to `VERDICT_TONE` and `ControlName` in ui/src/api/types.ts); never for a new
- *               repository.
+ * Touch when:   never for a new repository; a control or a verdict word is added
+ *               (src/crb/core/oracle/controls.py — add it to `VERDICT_TONE` and `ControlName`
+ *               in ui/src/api/types.ts).
  * Claims:       A green on a weak or unscored oracle licenses nothing; the gate column is what
  *               a clean grade may be claimed to mean
  *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
@@ -100,6 +103,22 @@ function ControlsSection({ repo }: { repo: string }) {
       { key: 'control', header: 'Control', hint: 'col.controls.control', mono: true, sortValue: (r) => r.control, cell: (r) => r.control },
       { key: 'expected', header: 'Expected', hint: 'col.controls.expected', sortValue: (r) => r.expected, cell: (r) => r.expected },
       { key: 'observed', header: 'Observed', hint: 'col.controls.expected', sortValue: (r) => r.observed, cell: (r) => r.observed },
+      // G-952: the gold graded beside a catch in the same posture; a catch with no clean
+      // witness is a violation (a report from before controls.v3 carries none: a dash)
+      {
+        key: 'witness',
+        header: 'Gold witness',
+        hint: 'col.controls.witness',
+        sortValue: (r) => r.witness ?? '',
+        cell: (r) =>
+          r.witness ? (
+            <span className={`font-mono text-xs ${r.witness === 'clean' ? 'text-status-green' : 'font-bold text-status-red'}`} data-testid="controls-witness">
+              {r.witness === 'clean' ? 'clean' : `${r.witness} — instrument failure`}
+            </span>
+          ) : (
+            <span className="text-xs text-on-surface-muted">—</span>
+          ),
+      },
       {
         key: 'verdict',
         header: 'Verdict',

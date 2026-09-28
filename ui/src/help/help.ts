@@ -230,8 +230,8 @@ export const HELP: ScreenHelp[] = [
     route: '/capability',
     purpose: 'The full map for one repository: one cell per class and size (and, projected, language or model) with its rate, interval, false-Q1 count, cost, latency, oracle strength and the route the evidence licenses.',
     next: {
-      viewer: 'Read a cell’s route and interval; an empty cell says not measured, never zero.',
-      operator: 'Open a cell for every number with its method and links to its rows and its route decision. Export CSV gives the rows behind the map.',
+      viewer: 'Read a cell’s route and interval; an empty cell says not measured, never zero. Anyone signed in can press Export CSV for the rows behind the map; each export is recorded with who took it.',
+      operator: 'Open a cell for every number with its method and links to its rows and its route decision. Anyone signed in can press Export CSV for the rows behind the map; each export is recorded with who took it.',
     },
     numbers: 'point = clean / n; the bracket is the 95 % Wilson interval; fQ1 is the false-Q1 count and must be 0; “or” is the mean oracle strength; the glyph is the verification tier. Cells with more than one apparatus version are flagged mixed, never averaged.',
     terms: ['cell', 'wilson', 'false_q1', 'oracle_strength', 'apparatus', 'deliver', 'calibrate', 'human', 'granularize', 'reason_code', 'belt'],
@@ -247,7 +247,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Read the reason code beside each cell; the policy card shows the thresholds in force.',
       operator: 'A calibrate reason names what is missing (n, point, lower bound, controls). A human reason will not change with more attempts: strengthen the tests or run the controls.',
     },
-    numbers: 'Route counts are cells, not attempts. Thresholds are the policy’s: n ≥ 10, point ≥ 0.90, Wilson lower ≥ 0.80, oracle ≥ 0.80, controls passed with 0 escapes and a majority constructed.',
+    numbers: 'Route counts are cells, not attempts. The thresholds are the ones on the Policy in force card, read from this deployment’s policy: the least n, point and Wilson lower bound, the oracle strength floor and the controls clauses. A deployment may tighten them, so this block never repeats them.',
     terms: ['cell', 'route_gate', 'reason_code', 'deliver', 'calibrate', 'human', 'granularize', 'wilson', 'oracle_strength', 'controls_escape', 'belt'],
     readMore: [
       { to: 'EVIDENCE-AND-CLAIMS#6-permitted-claim-shapes-by-maturity', label: 'What a route licenses' },
@@ -261,7 +261,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'The gate rows name what held and what did not; escapes are findings about the tests, not failures of the grader.',
       operator: 'If the controls gate is not open, run the controls. If a task is weak, the strengthen report on Learn turns it into test work.',
     },
-    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong ≥ 0.80, adequate, weak.',
+    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong at or above the policy’s deliver floor, adequate at or above its adequate floor, weak below it; the Strong and Adequate tiles name the floors this deployment serves.',
     terms: ['oracle_strength', 'negative_controls', 'controls_escape', 'wilson', 'human', 'cell', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#31-oracle-adequacy--mutation-scoring', label: 'Oracle adequacy: mutation scoring' },

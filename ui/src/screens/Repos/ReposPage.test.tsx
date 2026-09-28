@@ -10,7 +10,9 @@
  *               naming its state and detail, and the task, gold-clean and hard-pool counts —
  *               and a never-probed repository reads "Not probed"; that an operator is offered
  *               Add repo and, on an empty list, Add the first repo; and that a viewer is offered
- *               neither and is told to ask an operator.
+ *               neither and is told to ask an operator; and that a deployment past one page is
+ *               listed whole with a line saying so, or says how many of the total it shows
+ *               (G-229).
  * How:          `mockApi` with `GET /auth/me` per role and `GET /repos`; `renderApp` at `/repos`;
  *               assertions on the table rows, the pill labels and the buttons.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -19,7 +21,8 @@
  *               ui/src/screens/Repos/repoFixtures.ts (`REPO`), ui/src/lib/verdict.ts
  *               (`probeDisplay`), ui/src/test/utils.tsx (`mockApi`, `renderApp`, `PRINCIPAL`)
  * Tested by:    ui/src/screens/Repos/ReposPage.test.tsx
- * Touch when:   a column is added to the list or the role rule for Add repo changes.
+ * Touch when:   never for a new repository; a column is added to the list or the role rule
+ *               for Add repo changes.
  */
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -85,5 +88,36 @@ describe('ReposPage', () => {
     expect(screen.getByText('Ask an operator to add one.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add repo' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Add the first repo' })).toBeNull()
+  })
+
+  it('a deployment past one page lists every repository and says all are listed (G-229)', async () => {
+    // 60 repositories served 50 to a page: the page must read the second page too
+    const all = Array.from({ length: 60 }, (_, i) => ({ ...REPO, name: `r${String(i).padStart(2, '0')}` }))
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos': (url: string) => {
+        const q = new URL(url, 'http://x').searchParams
+        const offset = Number(q.get('offset') ?? 0)
+        const limit = Math.min(Number(q.get('limit') ?? 50), 50)
+        return new Response(JSON.stringify({ items: all.slice(offset, offset + limit), total: all.length, limit, offset }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      },
+    })
+    renderApp(<ReposPage />, { route: '/repos' })
+    const table = await screen.findByRole('table', { name: 'Repositories under measurement' })
+    expect(within(table).getByRole('link', { name: 'r59' })).toBeInTheDocument()
+    expect(screen.getByTestId('repos-count')).toHaveTextContent('All 60 repositories are listed.')
+  })
+
+  it('a list that changed while it was read says how many of the total it shows (G-229)', async () => {
+    // the first page promised 2; the second came back empty (one was removed meanwhile)
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos': (url: string) => {
+        const offset = Number(new URL(url, 'http://x').searchParams.get('offset') ?? 0)
+        return new Response(JSON.stringify({ items: offset === 0 ? [MEASURED] : [], total: 2, limit: 500, offset }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      },
+    })
+    renderApp(<ReposPage />, { route: '/repos' })
+    expect(await screen.findByTestId('repos-count')).toHaveTextContent('1 of 2 repositories are listed')
   })
 })
