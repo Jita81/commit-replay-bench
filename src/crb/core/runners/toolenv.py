@@ -29,7 +29,7 @@ What it does: Resolves a runner's declared tools against the worker's ``PATH`` (
               complete environment a host test command runs in, with a digest that moves when
               a declared tool's bytes or version move and never when an undeclared tool
               appears. It never reads a secret and never inherits ``PATH``.
-How:          ``ToolSpec`` list → ``shutil.which`` / the explicit path → realpath, size and
+How:          ``ToolSpec`` list → the worker's ``PATH`` / the explicit path → realpath, size and
               mtime keyed cache of the SHA-256 and the version line → canonical JSON → SHA-256
               digest → the farm, built in a sibling temp directory and renamed into place.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -115,13 +115,15 @@ POSIX_BASICS: tuple[str, ...] = (
     "which",
 )
 
-#: The names a host test command may take from the worker's environment (every runner).
-#: Their VALUES enter the digest only when they can change an outcome by value
-#: (:data:`VALUE_SIGNIFICANT`); a path-valued name counts by presence.
+#: The names a host test command may take from the host environment (every runner). A
+#: name's VALUE enters the digest unless it is a path (:data:`PATH_VALUED`), which counts by
+#: presence: a locale, a time zone or ``GOPROXY=off`` can change an outcome by value.
 HOST_PASSTHROUGH: tuple[str, ...] = ("HOME", "LANG", "LC_ALL", "TZ", "TMPDIR")
 
-#: Passthrough names whose value can change a test's outcome (a locale, a time zone).
-VALUE_SIGNIFICANT: frozenset[str] = frozenset({"LANG", "LC_ALL", "TZ"})
+#: Passthrough names whose value is a location, not a behaviour (counted by presence only).
+PATH_VALUED: frozenset[str] = frozenset(
+    {"HOME", "TMPDIR", "GOPATH", "GOCACHE", "GOMODCACHE", "CARGO_HOME", "RUSTUP_HOME"}
+)
 
 #: Wall clock for one tool's version probe.
 VERSION_PROBE_TIMEOUT_S = 30
@@ -244,10 +246,24 @@ def _version_line(path: str, args: Sequence[str]) -> str:
     return ""
 
 
+def _find_on_path(name: str, search_path: str | None) -> str | None:
+    """The first executable file called ``name`` on ``search_path`` (default: the worker's
+    ``PATH``) — the lookup ``which`` does, kept here so it reads only the path it is given."""
+    for d in (search_path if search_path is not None else os.environ.get("PATH", os.defpath)).split(
+        os.pathsep
+    ):
+        if not d:
+            continue
+        cand = os.path.join(d, name)
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return None
+
+
 def resolve_tool(spec: ToolSpec, search_path: str | None = None) -> ResolvedTool:
     """``spec`` found on ``search_path`` (default: the worker's ``PATH``) or at its pinned
     path, with its version line and SHA-256; absent when there is no executable file."""
-    found = spec.path if spec.path else shutil.which(spec.name, path=search_path)
+    found = spec.path if spec.path else _find_on_path(spec.name, search_path)
     if not found:
         return ResolvedTool(spec.name, link=spec.link)
     real = os.path.realpath(found)
@@ -279,8 +295,8 @@ def environment_digest(
     tools: Iterable[ResolvedTool], values: Mapping[str, str], names: Iterable[str]
 ) -> str:
     """SHA-256 over what can change a test's outcome: each tool's name, version and bytes
-    (never its path — two paths to the same bytes are one environment), the values of the
-    value-significant names and the set of names present."""
+    (never its path — two paths to the same bytes are one environment), the values of every
+    name that is not a path, and the set of names present."""
     return hashlib.sha256(
         _canonical(
             {
@@ -375,7 +391,7 @@ def declare_environment(
     env: dict[str, str] = {k: source[k] for k in names if k in source}
     env.setdefault("LANG", "C.UTF-8")
     env.update(LOCAL_FIXED_ENV)
-    values = {k: v for k, v in env.items() if k in VALUE_SIGNIFICANT or k in LOCAL_FIXED_ENV}
+    values = {k: v for k, v in env.items() if k not in PATH_VALUED}
     digest = environment_digest(tools, values, env)
     bin_dir = ensure_farm(tools, root=root)
     env["PATH"] = os.pathsep.join([str(bin_dir), *extra_path])
@@ -385,8 +401,8 @@ def declare_environment(
 __all__ = [
     "HOST_PASSTHROUGH",
     "IDENTITY_PREFIX",
+    "PATH_VALUED",
     "POSIX_BASICS",
-    "VALUE_SIGNIFICANT",
     "DeclaredEnvironment",
     "ResolvedTool",
     "ToolSpec",

@@ -361,3 +361,22 @@ def test_maven_and_cargo_still_inherit_and_say_so() -> None:
         runner = get_runner(RepoConfig(name="x", language=lang, runner=runner_name))
         assert runner.declared_tools(LocalExecutor()) is None
         assert runner.declared_environment(LocalExecutor()) is None
+
+
+def test_the_declared_environment_reads_the_executors_host_environment(tmp_path: Path) -> None:
+    """The source is the executor's own host environment (what a deployment configured on
+    it), never the process's: its allowlisted names reach the tests, its other names do not,
+    and a module setting such as ``GOPROXY=off`` is part of the digest by value."""
+    host = tmp_path / "host"
+    _tool(host, "go")
+    base = {"PATH": str(host), "HOME": "/h", "GOPROXY": "off", "SECRET_TOKEN": "s"}
+    runner = get_runner(_go_config())
+    offline = runner.declared_environment(LocalExecutor(base_env=base))
+    assert offline is not None
+    assert offline.env["GOPROXY"] == "off" and offline.env["HOME"] == "/h"
+    assert "SECRET_TOKEN" not in offline.env
+    assert (Path(offline.bin_dir) / "go").exists()
+    online = runner.declared_environment(
+        LocalExecutor(base_env={k: v for k, v in base.items() if k != "GOPROXY"})
+    )
+    assert online is not None and online.digest != offline.digest

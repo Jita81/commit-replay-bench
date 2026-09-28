@@ -512,9 +512,13 @@ class BaseRunner:
         specs = self.declared_tools(executor, root)
         if specs is None:
             return None
+        # the executor's own host environment is the source (a worker's allowlisted slice
+        # of its process environment, or what a deployment configured on the executor)
+        host_env = getattr(executor, "base_env", None)
         return declare_environment(
             (*specs, *self.repo_tools()),
             passthrough=self.env_passthrough(),
+            host_env=host_env if isinstance(host_env, dict) else None,
             extra_path=self.declared_path(root),
         )
 

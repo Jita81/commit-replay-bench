@@ -45,14 +45,15 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
    - A repository whose tests run another host tool declares it in `runner_opts.tools`.
    - `crb.core.runners.toolenv` links exactly those tools into a private, content-addressed
      directory. That directory is the whole `PATH`. Only `HOME`, `LANG`, `LC_ALL`, `TZ`,
-     `TMPDIR` and the runner's named caches come from the worker. The command is marked
+     `TMPDIR` and the names the runner lists (Go: its caches and its module settings, such as
+     `GOPROXY`) come from the executor's host environment. The command is marked
      `Command.declared_env`, and the host executor then passes nothing else, not even `PATH`.
    - The test run, the environment probe and the witness's probe all run in it. Under docker
      nothing changes: the image is the environment.
 2. **The environment has an identity, and the posture carries it.** Each tool is recorded with
    its resolved path, its version line and the SHA-256 of its bytes. The digest covers each
-   tool's name, version and bytes, the values of `LANG`, `LC_ALL` and `TZ`, and which names
-   are present. `Posture.environment` is `declared:sha256:<digest>` and is part of the
+   tool's name, version and bytes, the value of every passed name that is not a location (a
+   locale, a time zone, `GOPROXY=off`), and which names are present. `Posture.environment` is `declared:sha256:<digest>` and is part of the
    `posture_id`; `Posture.environment_tools` names the tools for a reader and is not hashed,
    as `image_ref` is not. Both are on every qualification record (its `posture`) and every
    evidence pack (its `posture` block). A changed declared tool changes the posture, so the

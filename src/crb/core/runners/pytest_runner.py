@@ -35,7 +35,8 @@ How:          ``command``: resolve the interpreter (opts → venv → crb's own)
               (``runner_opts.pip`` / fallback, else ``-e .[test]``) → uninstall the repo's own
               distribution → dist-info stubs → ``finish_setup``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0048-the-host-posture-declares-its-environment.md
+ADRs:         docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0048-the-host-posture-declares-its-environment.md
 Works with:   src/crb/core/runners/base.py (the contract and the setup records),
               src/crb/core/lint.py (``python_plan``, ``pinned_ruff_spec``),
               src/crb/core/execution.py (``Executor.tool`` picks the sandbox interpreter),

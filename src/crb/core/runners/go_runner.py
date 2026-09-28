@@ -98,8 +98,20 @@ class GoRunner(BaseRunner):
         return tuple(tools)
 
     def env_passthrough(self) -> tuple[str, ...]:
-        """The module and build caches (and ``GOPATH``) the worker's environment points at."""
-        return ("GOPATH", "GOCACHE", "GOMODCACHE")
+        """The module and build caches (and ``GOPATH``) the host environment points at, and
+        how modules resolve there (``GOPROXY=off`` makes a warm cache the only source);
+        the resolution settings' values are part of the digest."""
+        return (
+            "GOPATH",
+            "GOCACHE",
+            "GOMODCACHE",
+            "GOPROXY",
+            "GOSUMDB",
+            "GONOSUMDB",
+            "GOPRIVATE",
+            "GONOPROXY",
+            "GOINSECURE",
+        )
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool:
         """``go list ./...`` with ``GOPROXY=off`` — resolves offline or it is not ready."""

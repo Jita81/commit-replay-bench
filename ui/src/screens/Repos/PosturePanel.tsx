@@ -7,7 +7,8 @@
  * What it is:   The Overview card on /repos/:name that reads `GET /repos/{name}/posture`.
  * What it does: Shows the posture class, the image, the exact toolchain, where the tests get
  *               their tools (a declared host environment, the image, or inherited from the
- *               host — ADR-0048) and whether dependency provisioning is on; how many tasks are proven there out of how many; each
+ *               host — ADR-0048) and whether dependency provisioning is on; how many tasks
+ *               are proven there out of how many; each
  *               refusal code with how many tasks it keeps out, its fix and a guide link; why the
  *               record is stale; and — for an operator only — "Qualify for this posture — no
  *               model spend", which queues a `qualify` run and opens it.

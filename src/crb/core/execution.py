@@ -331,6 +331,13 @@ class LocalExecutor:
         """A configured override, else the binary on PATH, else the bare name."""
         return host_override or shutil.which(name) or name
 
+    @property
+    def base_env(self) -> dict[str, str]:
+        """A copy of the environment this executor gives a command that declares none: the
+        source a runner's declared environment reads its allowlisted names and its tool
+        search ``PATH`` from (ADR-0048)."""
+        return dict(self._base_env)
+
     def describe(self) -> dict[str, Any]:
         return {"executor": self.name}
 
