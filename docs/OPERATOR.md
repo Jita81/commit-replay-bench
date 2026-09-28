@@ -276,7 +276,7 @@ server) call the same runner method on the host (the local posture). Per languag
 | `pytest` | `uv venv` (or `python -m venv`), then `pip install` of `runner_opts.pip` (falling back to `pip_fallback`), then `pip uninstall` of `runner_opts.uninstall` | `<env>/venv` under `<workdir>/envs/<name>` (CLI) or `<home>/envs/<name>` (worker) | the configured interpreter imports `pytest` |
 | `node` / `jest` / `vitest` / `mocha` | `npm ci` when `package-lock.json` is committed, else `npm install` (both `--no-audit --no-fund`) | `node_modules` **in the clone** (every worktree symlinks it) | `node_modules/.bin` exists, or `package.json` declares no dependencies |
 | `go` | `go mod download` | the host module cache (`$GOMODCACHE`) | `go list ./...` resolves with `GOPROXY=off` |
-| `maven` | `mvn -q -B <maven_flags> test -DskipTests` (compiler, resources, surefire and dependencies in one warm-up) | the local repository (`~/.m2`) | the same goal succeeds offline (`-o`) |
+| `maven` | `mvn -q -B <maven_flags> test -DskipTests` (compiler, resources, surefire and dependencies), then a provider probe, `mvn -fn test -Djvm=<stub>`: surefire resolves its test-framework provider and forks a stub `java` that runs nothing. Two offline `-X` dry plans run first, and setup refuses, with a note, a POM whose surefire would not fork the stub or that binds any other plugin to the `test` phase (it would run with the network): warm those by hand | the local repository (`~/.m2`) | the same guards and probe succeed offline (`-o`): every failed module's surefire fork reached the stub |
 | `cargo` | `cargo fetch` | the registry cache (`$CARGO_HOME`) | `cargo metadata --offline` resolves the graph |
 
 Python runner options (`--runner-opt KEY=VALUE` on `repo add`, or the census keys):

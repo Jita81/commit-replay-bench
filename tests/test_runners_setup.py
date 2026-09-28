@@ -68,6 +68,7 @@ from crb.core.runners.base import (
 )
 from crb.core.runners.jvm_runner import (
     SurefireProbe,
+    only_surefire_runs_at_test,
     surefire_forks_to_stub,
     surefire_probe_ready,
 )
@@ -567,6 +568,58 @@ def test_go_setup_needs_a_module(tmp_path: Path) -> None:
 jvmrepo = langs.fixture_module("jvmrepo")
 
 
+def _plan(*goals: str, project: str = "ex:calc:0.1.0") -> str:
+    """One module's ``-X`` PROJECT BUILD PLAN, as Maven 3.9 prints it."""
+    head = f"[DEBUG] === PROJECT BUILD PLAN ======\n[DEBUG] Project:       {project}\n"
+    return head + "".join(
+        f"[DEBUG] -----------\n[DEBUG] Goal:          {g}\n[DEBUG] Style:         Regular\n"
+        for g in goals
+    )
+
+
+_BEFORE_TEST = (
+    "org.apache.maven.plugins:maven-resources-plugin:3.3.1:resources (default-resources)",
+    "org.apache.maven.plugins:maven-compiler-plugin:3.14.0:compile (default-compile)",
+    "org.apache.maven.plugins:maven-compiler-plugin:3.14.0:testCompile (default-testCompile)",
+)
+_SUREFIRE_GOAL = "org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test)"
+_EXEC_GOAL = "org.codehaus.mojo:exec-maven-plugin:3.5.0:exec (js-tests)"
+#: The fake executor's answers for the two offline plans (the more specific needle first): a
+#: module with nothing bound at ``test`` (the stub's path is not known before setup runs, so
+#: a surefire block could not name it — the forking guard has its own test).
+_PLANS = {
+    "process-test-classes": (0, _plan(*_BEFORE_TEST)),
+    " -X ": (0, _plan(*_BEFORE_TEST)),
+}
+
+
+def test_only_surefire_may_run_in_the_probes_test_phase() -> None:
+    """The second guard before the online probe (hermetic). The probe drops ``-DskipTests``,
+    so every plugin bound to ``test`` that honours it (exec, frontend-maven-plugin's
+    karma/jest, scalatest) would run too — with the network — wherever surefire does not
+    fork the stub first (a module with no test classes, or surefire skipped). The executions
+    the ``test`` plan adds to the ``process-test-classes`` plan are exactly the ``test``
+    phase; the probe runs only when each is a surefire ``test``. Unknown fails closed."""
+    before = _plan(*_BEFORE_TEST)
+    assert only_surefire_runs_at_test(_plan(*_BEFORE_TEST, _SUREFIRE_GOAL), before)
+    assert only_surefire_runs_at_test(_plan(*_BEFORE_TEST), before)  # nothing at `test`
+    second = _SUREFIRE_GOAL.replace("default-test", "slow-tests")
+    assert only_surefire_runs_at_test(_plan(*_BEFORE_TEST, _SUREFIRE_GOAL, second), before)
+    assert not only_surefire_runs_at_test(_plan(*_BEFORE_TEST, _SUREFIRE_GOAL, _EXEC_GOAL), before)
+    # declared before surefire in the POM, or in a module with no surefire at all (pom packaging)
+    assert not only_surefire_runs_at_test(_plan(*_BEFORE_TEST, _EXEC_GOAL, _SUREFIRE_GOAL), before)
+    assert not only_surefire_runs_at_test(
+        _plan(*_BEFORE_TEST, _SUREFIRE_GOAL) + _plan(_EXEC_GOAL, project="ex:web:0.1.0"),
+        before + _plan(project="ex:web:0.1.0"),
+    )
+    # surefire's report goal is not its test goal
+    report = _SUREFIRE_GOAL.replace(":test (default-test)", ":report (x)")
+    assert not only_surefire_runs_at_test(_plan(*_BEFORE_TEST, report), before)
+    # a module the earlier plan does not name: every execution counts, so it is refused
+    assert not only_surefire_runs_at_test(_plan(*_BEFORE_TEST, _SUREFIRE_GOAL), "")
+    assert not only_surefire_runs_at_test("", before)  # no plan read: refused
+
+
 def test_maven_setup_plan(tmp_path: Path) -> None:
     root, _ = jvmrepo.build(tmp_path)
     cfg = RepoConfig(
@@ -578,9 +631,9 @@ def test_maven_setup_plan(tmp_path: Path) -> None:
         runner_opts={"maven_flags": ["-Denforcer.skip=true"], "java_home": "/opt/jdk"},
     )
     r = get_runner(cfg)
-    ex = FakeExecutor()
+    ex = FakeExecutor(script=_PLANS)
     r.setup(ex, root, env_dir=tmp_path / "env", timeout=0)
-    build, preflight, probe = ex.commands
+    build, preflight, before_test, probe = ex.commands
     assert build.argv == ("mvn", "-q", "-B", "-Denforcer.skip=true", "test", "-DskipTests")
     # the provider probe: surefire resolves its provider, then forks a stub that runs nothing
     jvm = next(a for a in probe.argv if a.startswith("-Djvm="))
@@ -597,7 +650,20 @@ def test_maven_setup_plan(tmp_path: Path) -> None:
         jvm,
         "-DforkCount=1",
     )
-    assert not preflight.network
+    # and the plan up to the phase before `test`, same flags: the difference is what the probe
+    # adds by running `test` without -DskipTests, and it must be surefire alone
+    assert before_test.argv == (
+        "mvn",
+        "-o",
+        "-X",
+        "-B",
+        "-Denforcer.skip=true",
+        "process-test-classes",
+        "-DskipTests",
+        jvm,
+        "-DforkCount=1",
+    )
+    assert not preflight.network and not before_test.network
     assert probe.argv == (
         "mvn",
         "-q",
@@ -614,12 +680,23 @@ def test_maven_setup_plan(tmp_path: Path) -> None:
         assert cmd.network and cmd.env == {"JAVA_HOME": "/opt/jdk"}
         assert "target" in cmd.writable_paths
         assert "-o" not in cmd.argv  # setup is the ONLINE phase; the test command stays offline
+    # another plugin at `test` would run with the network once -DskipTests is gone: refused
+    exec_at_test = {
+        "process-test-classes": (0, _PLANS["process-test-classes"][1]),
+        " -X ": (0, _plan(*_BEFORE_TEST, _EXEC_GOAL)),
+    }
+    ex = FakeExecutor(script=exec_at_test)
+    res = r.setup(ex, root, env_dir=tmp_path / "env", timeout=0)
+    assert not res.ok and "other than surefire" in res.note, res.note
+    assert len(ex.commands) == 3 and not any("-fn" in c.argv for c in ex.commands)
     ex = FakeExecutor(script={"-DskipTests": (1, "[ERROR] compile failed")})
     assert not r.setup(ex, root, env_dir=tmp_path / "env", timeout=0).ok
     assert len(ex.commands) == 1  # a failed build is the stop; no probe after it
     # a POM that keeps surefire in-process outranks the command line: refused, never probed
     in_process = _SUREFIRE_CONFIG.format(fork="0", jvm="/x/bin/java")
-    ex = FakeExecutor(script={" -X ": (0, in_process)})
+    ex = FakeExecutor(
+        script={"process-test-classes": _PLANS["process-test-classes"], " -X ": (0, in_process)}
+    )
     res = r.setup(ex, root, env_dir=tmp_path / "env", timeout=0)
     assert not res.ok and "without running tests" in res.note
     assert len(ex.commands) == 2 and not any("-fn" in c.argv for c in ex.commands)
@@ -826,6 +903,70 @@ def test_maven_setup_warms_a_cold_local_repository_without_running_tests(tmp_pat
     assert not res.ok and "without running tests" in res.note, res.to_dict()
     assert not r.environment_ready(root, env_dir)
     assert not marker.exists(), "an in-process surefire ran repository test code"
+
+
+def _add_test_phase_exec(root: Path, marker: Path) -> None:
+    """A repository with no Java tests and an exec plugin bound to ``test`` that honours
+    ``skipTests`` — the shape of a scalatest or frontend (karma/jest) module. Surefire finds
+    no test class, so no fork stops the module and the exec goal is next."""
+    shutil.rmtree(root / "src" / "test")
+    pom = root / "pom.xml"
+    pom.write_text(
+        pom.read_text(encoding="utf-8").replace(
+            "    </plugins>",
+            "      <plugin>\n"
+            "        <groupId>org.codehaus.mojo</groupId>\n"
+            "        <artifactId>exec-maven-plugin</artifactId>\n"
+            "        <version>3.5.0</version>\n"
+            "        <executions><execution>\n"
+            "          <id>js-tests</id><phase>test</phase><goals><goal>exec</goal></goals>\n"
+            "          <configuration>\n"
+            "            <skip>${skipTests}</skip><executable>sh</executable>\n"
+            "            <arguments><argument>-c</argument>\n"
+            f"              <argument>echo ran &gt;&gt; {marker.as_posix()}</argument>\n"
+            "            </arguments>\n"
+            "          </configuration>\n"
+            "        </execution></executions>\n"
+            "      </plugin>\n"
+            "    </plugins>",
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.network("repo.maven.apache.org")
+@pytest.mark.toolchain("mvn")
+@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
+@pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")
+def test_maven_setup_refuses_a_test_phase_plugin_the_probe_would_run(tmp_path: Path) -> None:
+    """Regression for the provider probe (docs/SECURITY.md T1): it runs ``test`` without
+    ``-DskipTests``, so in a module where surefire does not fork the stub, any other plugin at
+    ``test`` that honours ``skipTests`` would run repository code with the network — in setup,
+    and again on the host in readiness. Setup must refuse such a POM, and neither setup nor
+    readiness may run the plugin. An offline ``mvn test`` is the positive control: the plugin
+    does run once tests are asked for. The local repository is EMPTY and private."""
+    root, _ = jvmrepo.build(tmp_path)
+    marker = tmp_path / "test-phase-plugin-ran"
+    _add_test_phase_exec(root, marker)
+    m2 = f"-Dmaven.repo.local={tmp_path / 'm2'}"
+    base = jvmrepo.config(offline=True)
+    r = get_runner(dataclasses.replace(base, runner_opts={**base.runner_opts, "maven_flags": [m2]}))
+    env_dir = tmp_path / "env"
+    res = r.setup(LocalExecutor(), root, env_dir=env_dir, timeout=900)
+    assert not res.ok and "other than surefire" in res.note, res.to_dict()
+    assert not marker.exists(), "setup ran a test-phase plugin with the network"
+    assert not r.environment_ready(root, env_dir)
+    assert not marker.exists(), "the readiness check ran a test-phase plugin"
+    control = LocalExecutor().run(
+        Command(
+            ("mvn", "-q", "-B", "-o", m2, "test"),
+            root,
+            env={"JAVA_HOME": jvmrepo.java_home()},
+            timeout=600,
+        )
+    )
+    assert control.ok, control.combined[-2000:]
+    assert marker.exists()  # positive control: the plugin runs once -DskipTests is gone
 
 
 # --- cargo ---------------------------------------------------------------------------------
