@@ -626,15 +626,19 @@ The UI's **Verify** button runs the same probe on the **API** host with the stor
 
 **A run cannot start on a dead login** (pilot D1, 2026-09-27: a canary was queued on a login
 that answered HTTP 401, and every screen read the login as present). The top of the Claude
-Code login card shows **the login runs use** — `verified`, `not verified` or `invalid`, with
-its source (`keychain`, `secrets_file`, `env`) and how long ago it was checked. A replay,
-measure, budget sweep or factory run is refused `builder_login_invalid` before it is queued,
-and before anything is spent, when that login failed its last check; when it was not checked
-in the last `CRB_BUILDER__LOGIN_TTL_S` (10 minutes by default), the submit checks it once first.
-To repair it: sign in again (or store a new token) on this card, then press **Verify the
-login runs use** — the answer is recorded, and the next run and `/health` read it. A row the
-provider refused because the login was rejected is still an `outage` (outside every rate),
-but from apparatus 2.4 it says `outage_cause: auth` — "your login", not "the provider" — and
+Code login card shows **the logins runs use** — one line per auth mode a run could use (the
+default first, then `cli` or `api_key` when its credential is stored or it was checked), each
+`verified`, `not verified` or `invalid`, with its source (`keychain`, `secrets_file`, `env`;
+operators and above) and how long ago it was checked. A replay, measure, budget sweep or
+factory run is refused `builder_login_invalid` before it is queued, and before anything is
+spent, when that login failed its last check; when it was not checked in the last
+`CRB_BUILDER__LOGIN_TTL_S` (10 minutes by default), the submit checks it once first. A run
+already queued when its login is recorded invalid is failed by the worker when it claims it,
+before anything is built. To repair it: sign in again (or store a new token) on this card,
+then press **Verify** on the line for the mode the refusal names (its link opens this card) —
+the answer is recorded, and the next run and `/health` read it. A row the provider refused
+because the login was rejected is still an `outage` (outside every rate), but from apparatus
+2.4 it says `outage_cause: auth` — "your login", not "the provider" — and
 the scorecard's process-loss line counts the two apart.
 
 **Rotate it** (after a suspected exposure, when a person with access leaves, or on a
