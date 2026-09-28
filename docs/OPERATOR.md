@@ -1254,7 +1254,11 @@ what people know about it that a test cannot say, in one vocabulary: its **compo
 **work types** (kinds of change), the **decisions** in force, its **conventions**, the
 **patterns** that recur and its **standards**. Each entry has the id `<kind>/<slug>`, a
 statement of at most 400 characters and where it came from — a file at a commit, the graded
-rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-099).
+rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-099). Graded rows
+must be rows of this repository's ledger. A file's path, commit and digest are as the proposer
+gave them: the product reads the file only at the repository's head, after each mine, and
+marks the entry stale when it differs. No field of an entry may carry a credential — the
+library is append-only, so a secret written to it could never be removed.
 
 **Two people sign every entry.** An operator proposes an entry and becomes its sponsor; an
 entry a miner or a model proposed waits in Decisions until a person adopts it with
@@ -1262,7 +1266,9 @@ entry a miner or a model proposed waits in Decisions until a person adopts it wi
 the page disables the sponsor's own Sign button and the API refuses it (`409
 library_refused`, `same_person`) — and a miner or a model is never a person. A signature
 names the version the approver read: a changed entry is a new version and needs a new
-signature.
+signature. For an entry learned from graded rows, an approver who produced one of those rows —
+as the row's actor or the person who queued its run — cannot sign it either (`same_actor`).
+On Decisions, an entry you sponsored reads "waits for another approver", with no Sign.
 
 **Nothing is edited.** A revocation (the entry was wrong) and a retirement (it no longer
 holds) are appended with a reason and kept as history. An entry read from a file goes
@@ -1278,8 +1284,10 @@ its sponsor, signer, date, provenance and measured effect — what is proven for
 standard arm with its distinct commits, interval and apparatus, or "No proven standard" and
 the reading that would prove it), and which of the repository's switched-on checks evidence
 which ISO/IEC 25010 characteristic. A **standard** entry names the characteristic it refines
-and the check that evidences it; without a check the repository runs, it is advisory and
-counts as no evidence.
+and the check that evidences it. It counts as evidence only when the product's quality table
+counts that check for that characteristic and the repository runs it — `target_green` says
+nothing of Security — otherwise it is advisory and counts as no evidence. While the table is
+not on the build, every standard is advisory.
 
 **Time and money.** Proposing and signing an entry spends nothing: no act on the library starts
 a run or calls a model. **[measured — n = 1 scripted pass from the repository's page through
