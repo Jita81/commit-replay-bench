@@ -8,8 +8,8 @@ the factory writers share; a replay row also names the change it observed (``cha
 and must have been gold-checked clean. The ledger refuses a 2.4 row that breaks any of that,
 at write and on read alike. Rows below 2.4 are written and read exactly as before.
 
-The apparatus does not move here: stream R owns the bump to 2.4. These tests stamp rows
-``2.4`` explicitly (``apparatus_version=``), which is what ``crb.core.version`` will say.
+These tests stamp rows ``2.4`` explicitly (``apparatus_version=``), which is the current
+value in ``crb.core.version`` since stream R's bump.
 
 Navigation
 ----------

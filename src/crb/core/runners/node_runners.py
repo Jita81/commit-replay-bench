@@ -165,14 +165,20 @@ class _NodeBase(BaseRunner):
         """The setup commands' environment: ``runner_opts.env``, and — when
         ``runner_opts.node`` pins a node — that node's directory first on ``PATH``, so
         ``npm`` (a node script) runs under it. The pin is declared and in the test
-        environment's digest; a ``PATH`` in ``runner_opts.env`` is refused (ADR-0048)."""
+        environment's digest; a ``PATH`` in ``runner_opts.env`` is refused (ADR-0048).
+        Only where the executor runs the pin (``executor.tool`` takes it): a container's
+        toolchain is on the image's ``PATH`` and a host pin never applies there, so its
+        ``PATH`` is left alone (P-724). The rest of ``PATH`` is the executor's host
+        environment, or the worker's own when it has none — never ``os.defpath`` first."""
         env = {"NODE_ENV": "development", "npm_config_update_notifier": "false"}
         env.update({str(k): str(v) for k, v in dict(self.opts.get("env", {})).items()})
         node = str(self.opts.get("node") or "")
         if node and os.path.isabs(node) and "PATH" not in env:
+            if executor.tool("node", node) != node:
+                return env  # the executor ignores host pins (a container): nothing to lead
             base = getattr(executor, "base_env", None)
-            host_path = base.get("PATH", os.defpath) if isinstance(base, dict) else os.defpath
-            env["PATH"] = os.pathsep.join([os.path.dirname(node), host_path])
+            source = base if isinstance(base, dict) else os.environ
+            env["PATH"] = os.pathsep.join([os.path.dirname(node), source.get("PATH", os.defpath)])
         return env
 
     def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:

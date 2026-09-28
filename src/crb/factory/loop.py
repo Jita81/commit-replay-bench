@@ -142,14 +142,13 @@ from crb.factory.delivery import (
 )
 from crb.factory.evidence import (
     EV_BACKLOG_FROZEN,
-    EV_CALIBRATION_FUNDED,
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
     EV_PROBE_WAIVED,
     OUTCOME_CLOSED,
     FactoryEvent,
     FactoryEvidence,
-    spent_grants,
+    waiting_grant,
 )
 from crb.factory.readiness import (
     ROUTE_HUMAN,
@@ -567,18 +566,16 @@ class FactoryLoop:
 
     def _calibration(self, item: BacklogItem) -> Calibration | None:
         """The item's unspent calibration grant: the newest ``calibration.funded`` that no
-        run has claimed (one grant funds ONE run — :func:`spent_grants`). Reading it is not
+        run has claimed (one grant funds ONE run — :func:`waiting_grant`). Reading it is not
         taking it: :meth:`_assess` claims it on the chain before any spend (P-298)."""
-        grant: Calibration | None = None
-        events = self.spec.evidence.events_for(item.id)
-        for ev in events:
-            if ev.kind == EV_CALIBRATION_FUNDED:
-                grant = Calibration(
-                    approver=str(ev.payload.get("approver", "")),
-                    reason=str(ev.payload.get("reason", "")),
-                    event_id=ev.event_id,
-                )
-        return None if grant is None or grant.event_id in spent_grants(events) else grant
+        ev = waiting_grant(self.spec.evidence.events_for(item.id), item.id)
+        if ev is None:
+            return None
+        return Calibration(
+            approver=str(ev.payload.get("approver", "")),
+            reason=str(ev.payload.get("reason", "")),
+            event_id=ev.event_id,
+        )
 
     def _stop_entry(self, item: BacklogItem, r: Readiness, entry: Entry) -> NoReturn:
         """Record the entry gate's stop — before any spend — and end the item."""

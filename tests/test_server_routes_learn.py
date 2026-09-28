@@ -1525,3 +1525,81 @@ def test_two_simultaneous_first_registrations_keep_both_items(
     active = FactoryHome(env.settings.home, ALPHA).load_backlog()
     assert active is not None
     assert {first, second} <= {i.id for i in active.all_items()}
+
+
+def test_learn_routes_on_the_rows_the_maps_current_reading_reads(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-728: Learn says it routes on what the capability map and the delivery gate read —
+    ``rows_for_apparatus(rows_for_mode(rows, "sighted"), "current")`` — so a blind row that
+    carries no certifying arm, and an imported row stamped with the current apparatus
+    (someone else's measurement, EI-2), never reach Learn's map, as they never reach the
+    capability map's. Filtering on the apparatus stamp alone kept both."""
+    from crb.core.ledger import LABEL_IMPORTED, GradeRow
+    from crb.server.routes import learn as learn_routes
+
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean and r.mode == "sighted")
+    # a blind A0 row alone in its own cell (the sighted reading drops it, P-338's rule), and
+    # an imported row stamped with the current apparatus
+    for trial, change, labels in (
+        ("p728-blind", {"mode": "blind", "capability_class": "docs.update"}, {"context_arm": "A0"}),
+        ("p728-imported", {"provenance": "imported:peer"}, {LABEL_IMPORTED: "true"}),
+    ):
+        d = template.to_dict()
+        d.update(
+            {
+                **change,
+                "trial": trial,
+                "labels": {**template.labels, **labels},
+                "row_id": "",
+                "prev_hash": "",
+                "row_hash": "",
+            }
+        )
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        ledger.append(GradeRow.from_dict(d))
+    seen: list[GradeRow] = []
+    real = learn_routes.build_capability_map
+
+    def capture(rows: Any, **kw: Any) -> Any:
+        seen.extend(rows)
+        return real(rows, **kw)
+
+    monkeypatch.setattr(learn_routes, "build_capability_map", capture)
+    assert env.get(f"/learn/strengthen?repo={ALPHA}").status_code == 200
+    assert seen, "Learn built no map"
+    assert not {r.trial for r in seen} & {"p728-blind", "p728-imported"}
+
+
+def test_the_login_check_runs_before_the_learn_lock_never_under_it(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-729: the login check can verify a stale login and write its outcome on a SECOND
+    connection. Under the Learn events write lock that second write waits for the lock the
+    request's own transaction holds (SQLite: ``database is locked``). So every run meets the
+    login check once, before the lock; the locked re-check re-runs every other refusal."""
+    del builder_keys
+    from crb.server.routes import learn as learn_routes
+    from crb.server.routes import runs as runs_routes
+
+    order: list[str] = []
+    real_login = runs_routes.login_refusal
+    real_lock = learn_routes.lock_event_writes
+
+    def login(*a: Any, **kw: Any) -> None:
+        order.append("login")
+        real_login(*a, **kw)
+
+    def lock(db: Any) -> None:
+        order.append("lock")
+        real_lock(db)
+
+    monkeypatch.setattr(runs_routes, "login_refusal", login)
+    monkeypatch.setattr(learn_routes, "lock_event_writes", lock)
+    _add_stale_rows(env)
+    r = _queue(env, cell=STALE_CELL)
+    assert r.status_code == 201, r.text
+    assert order.count("login") == len(r.json()["run_ids"]) == 2
+    assert "lock" in order and "login" not in order[order.index("lock") :], order

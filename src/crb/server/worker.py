@@ -2424,14 +2424,18 @@ class Worker:
                 streak["n"] += 1
                 streak["last"] = attempt.error
                 # pilot D1: a refused LOGIN is recorded invalid at once, so the next submit on
-                # it is refused before it is queued (src/crb/server/builder_login.py)
-                record_refused_login(
-                    self.factory,
-                    attempt.builder.name,
-                    str((p.get("builder_config") or {}).get("auth", "") or ""),
-                    attempt.error,
-                    actor=self.worker_id,
-                )
+                # it is refused before it is queued (src/crb/server/builder_login.py). Best
+                # effort: a failed write must never replace the attempt's own error (P-731)
+                try:
+                    record_refused_login(
+                        self.factory,
+                        attempt.builder.name,
+                        str((p.get("builder_config") or {}).get("auth", "") or ""),
+                        attempt.error,
+                        actor=self.worker_id,
+                    )
+                except Exception:
+                    _LOG.exception("could not record the refused login of %s", attempt.builder.name)
             else:
                 streak["n"] = 0
             return attempt
