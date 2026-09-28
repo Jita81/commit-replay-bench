@@ -133,11 +133,13 @@ def _commit_audited(db: Session, write: Callable[[], None]) -> None:
 
     Two sign-ins to one account can read the same last ``seq`` on its trace; the loser's
     insert then breaks ``uq_events_trace_seq``. That is a lost race, not a refused sign-in,
-    so the transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
+    so the transaction is rolled back and ``write`` runs again on fresh rows (DL-068). The
+    break can surface inside ``write`` too: a later query there (the next ``seq`` of the
+    sign-in trace, ADR-0028 §8) autoflushes the earlier insert, so both are guarded.
     """
     for attempt in range(_AUDIT_ATTEMPTS):
-        write()
         try:
+            write()
             db.commit()
             return
         except IntegrityError:
