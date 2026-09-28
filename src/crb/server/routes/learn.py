@@ -605,47 +605,78 @@ def _latest_in_lineage(backlog: Backlog, item_id: str) -> str:
     return current
 
 
+_How = Literal["frozen", "evolved"]
+
+
+def _plan_registration(
+    home: FactoryHome, items: list[BacklogItem]
+) -> list[tuple[BacklogItem, _How]]:
+    """Try every item on the backlog IN MEMORY, in order, before any is written (P-432):
+    freeze the first when there is none, evolve the rest, and give an id already on the
+    record a NEW id superseding the latest of its lineage. The record's own rules run on
+    each step (:meth:`Backlog.freeze`, :meth:`Backlog.evolve`), so an item the record would
+    refuse is refused here — **409 ``register_refused``** with nothing registered — and a
+    refusal can never leave the items before it on the backlog with no Learn event."""
+    planned: list[tuple[BacklogItem, _How]] = []
+    trying = items[0].id if items else ""
+    try:
+        current = home.load_backlog()
+        for item in items:
+            trying = item.id
+            if current is None:
+                current = Backlog(items=(item,), repo=home.repo).freeze()
+                planned.append((item, "frozen"))
+                continue
+            to_register = item
+            if current.get(item.id) is not None:
+                to_register = replace(
+                    item,
+                    id=_next_item_id(item.id, [i.id for i in current.all_items()]),
+                    supersedes=_latest_in_lineage(current, item.id),
+                )
+            current = current.evolve(to_register)
+            planned.append((to_register, "evolved"))
+    except (BacklogError, ValueError) as exc:
+        raise ApiError(
+            409,
+            "register_refused",
+            f"item {trying!r} would not be accepted by the backlog record: {exc} — nothing "
+            "was registered",
+            detail={"registered": []},
+        ) from exc
+    return planned
+
+
 def _register_items(
     home: FactoryHome,
-    items: list[BacklogItem],
+    planned: list[tuple[BacklogItem, _How]],
     registered: list[RegisteredItemOut],
     *,
     actor: str,
-) -> Backlog:
-    """Register ``items`` onto ``home``'s backlog — freeze the first when there is none,
-    evolve the rest, and register an id already on the record as a NEW id superseding the
-    latest of its lineage — appending each to ``registered`` as it lands, so a refusal part
-    way names what already did. Returns the backlog as it stands after the last."""
-    for item in items:
-        active = home.load_backlog()
+) -> tuple[Backlog | None, dict[str, str] | None]:
+    """Write the items :func:`_plan_registration` tried, in order, appending each to
+    ``registered`` as it lands. Returns the backlog after the last write and, when the
+    record refused an item part way, ``{item_id, reason}`` for it: the trial passed, so only
+    another registration path (the factory route, the intake Register act — neither takes
+    the Learn lock) can have moved the record since. The caller records what landed on the
+    Learn trace before it answers 409 (P-432). A freeze never replaces a backlog another
+    path froze in the meantime."""
+    backlog: Backlog | None = None
+    for item, how in planned:
         try:
-            if active is None:
-                home.register_backlog([item], actor=actor)
-                registered.append(RegisteredItemOut(item_id=item.id, supersedes="", how="frozen"))
-                continue
-            to_register = item
-            if active.get(item.id) is not None:
-                to_register = replace(
-                    item,
-                    id=_next_item_id(item.id, [i.id for i in active.all_items()]),
-                    supersedes=_latest_in_lineage(active, item.id),
-                )
-            home.register_evolution(to_register, actor=actor)
-        except (BacklogError, ValueError) as exc:
-            raise ApiError(
-                409,
-                "register_refused",
-                f"item {item.id!r} was not registered: {exc}",
-                detail={"registered": [r.item_id for r in registered]},
-            ) from exc
-        registered.append(
-            RegisteredItemOut(
-                item_id=to_register.id, supersedes=to_register.supersedes, how="evolved"
-            )
-        )
-    final = home.load_backlog()
-    assert final is not None  # something was registered above, or a 409 was raised
-    return final
+            if how == "frozen":
+                if home.load_backlog() is not None:
+                    raise BacklogError(
+                        "another path froze a backlog for this repository after this request "
+                        "read the record"
+                    )
+                backlog = home.register_backlog([item], actor=actor)
+            else:
+                backlog = home.register_evolution(item, actor=actor)
+        except (BacklogError, ValueError, LookupError) as exc:
+            return backlog, {"item_id": item.id, "reason": str(exc)}
+        registered.append(RegisteredItemOut(item_id=item.id, supersedes=item.supersedes, how=how))
+    return backlog, None
 
 
 @router.post(
@@ -812,6 +843,13 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     records the event again without registering again, and **409
     ``learn_concurrent_write``** (``detail.registered``) names what landed when other Learn
     writes won that race three times.
+
+    **409 ``register_refused``** (``detail.registered``) when the backlog record refuses an
+    item (P-432). Every item is tried on the record in memory before any is written, so a
+    refusal there registers nothing (``registered`` is empty). Only another registration
+    path moving the record between that trial and the write can refuse an item part way:
+    the items before it are then on the backlog, and the ``learn.strengthen.registered``
+    event names exactly those, with ``refused`` ``{item_id, reason}``, before the 409.
     """
     get_repo_or_404(db, repo)
     _refuse_if_run_active(db, repo)  # early, before the derivation; again under the lock
@@ -832,22 +870,37 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
     items = [_backlog_item(by_id[i]) for i in chosen]
     home = FactoryHome(settings.home, repo)
     registered: list[RegisteredItemOut] = []
-    done: list[Backlog] = []
+    done: list[tuple[Backlog | None, dict[str, str] | None]] = []
 
     def stage() -> dict[str, Any]:
         # the backlog is frozen or evolved ONCE, under the lock; a retry after a lost
         # ``seq`` race records the same registration again and never registers a second
-        # item superseding the first (P-431)
+        # item superseding the first (P-431). Every item is tried in memory first, so the
+        # record refuses before anything is written (P-432)
         if not done:
             _refuse_if_run_active(db, repo)
-            done.append(_register_items(home, items, registered, actor=operator.id))
-        return {
+            planned = _plan_registration(home, items)
+            done.append(_register_items(home, planned, registered, actor=operator.id))
+        backlog, refused = done[0]
+        if backlog is None:  # the record refused the first write: nothing landed
+            assert refused is not None
+            raise ApiError(
+                409,
+                "register_refused",
+                f"item {refused['item_id']!r} was not registered: {refused['reason']} — "
+                "nothing was registered",
+                detail={"registered": []},
+            )
+        payload: dict[str, Any] = {
             "projection": body.by,
             "since": body.since,
             "items": [r.model_dump() for r in registered],
-            "backlog_hash": done[0].backlog_hash,
-            "evolutions_hash": done[0].evolutions_hash,
+            "backlog_hash": backlog.backlog_hash,
+            "evolutions_hash": backlog.evolutions_hash,
         }
+        if refused is not None:
+            payload["refused"] = refused
+        return payload
 
     _learn_step(
         db,
@@ -864,7 +917,16 @@ def register_strengthening(  # noqa: PLR0917 — FastAPI dependencies + body + q
             detail={"registered": [r.item_id for r in registered]},
         ),
     )
-    final = done[0]
+    final, refused = done[0]
+    assert final is not None  # a write that landed nothing raised inside the step
+    if refused is not None:
+        raise ApiError(
+            409,
+            "register_refused",
+            f"item {refused['item_id']!r} was not registered: {refused['reason']} — the "
+            "items before it are on the backlog and recorded on the Learn trace",
+            detail={"registered": [r.item_id for r in registered]},
+        )
     return StrengthenRegisterOut(
         repo=repo,
         registered=registered,

@@ -20,7 +20,10 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               on the chain with the account as actor and is idempotent; that the API refuses
               exactly what the CLI refuses; that registering freezes the first item, evolves the
               rest and supersedes a re-registered one; that an unknown id and an in-flight
-              factory run are refused with nothing written; that queueing enqueues the PLAN's
+              factory run are refused with nothing written; that an item the backlog record
+              refuses registers nothing, and a record moved under the request records exactly
+              what landed (P-432); that reading the three reports queues no run and writes
+              nothing; that queueing enqueues the PLAN's
               own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
               (a cell whose builder has no credential is refused whole — P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
@@ -71,9 +74,12 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from crb.core import learn as core_learn
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
 from crb.core.version import APPARATUS_VERSION
+from crb.factory.backlog import Backlog, BacklogError, BacklogItem, ItemExists
 from crb.server.app import API_PREFIX
+from crb.server.factory_state import FactoryHome
 from crb.server.routes import learn as learn_routes
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
@@ -658,6 +664,98 @@ def test_registering_refuses_an_unknown_id_and_a_factory_run_in_flight(env: Env)
     blocked = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [item_id]})
     assert blocked.status_code == 409 and envelope(blocked)["code"] == "factory_run_active"
     assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404  # nothing was written
+
+
+def _registered_events(env: Env) -> list[Event]:
+    with env.factory() as s:
+        return list(
+            s.execute(
+                select(Event).where(
+                    Event.action == "learn.strengthen.registered", Event.repo == ALPHA
+                )
+            ).scalars()
+        )
+
+
+def test_a_register_whose_second_item_the_record_refuses_registers_nothing(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-432: every item is tried on the backlog in memory before any is written, so a
+    record that refuses the second item leaves the first unregistered too — never a frozen
+    backlog that no ``learn.strengthen.registered`` event names."""
+    items = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
+    first, second = items[0]["id"], items[1]["id"]
+    real_evolve = Backlog.evolve
+
+    def evolve(self: Backlog, item: BacklogItem) -> Backlog:
+        if item.id == second:
+            raise BacklogError(f"the record refuses {second!r} (staged by the test)")
+        return real_evolve(self, item)
+
+    monkeypatch.setattr(Backlog, "evolve", evolve)
+    r = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first, second]})
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "register_refused"
+    assert envelope(r)["detail"]["registered"] == []
+    assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404  # the first is not frozen
+    assert _registered_events(env) == []
+
+
+def test_a_record_moved_under_the_register_records_exactly_what_landed(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-432's residue: another registration path (the factory's own route, the intake
+    Register act) does not take the Learn lock, so the record can refuse an item after the
+    in-memory trial passed. What already landed is then recorded on the Learn trace, naming
+    the refused item, before the 409 — never a backlog change with no Learn event."""
+    items = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"]
+    first, second = items[0]["id"], items[1]["id"]
+    real_register = FactoryHome.register_evolution
+
+    def register_evolution(self: FactoryHome, item: BacklogItem, *, actor: str) -> Backlog:
+        if item.id == second:
+            raise ItemExists(f"{second!r} was registered by another path (staged by the test)")
+        return real_register(self, item, actor=actor)
+
+    monkeypatch.setattr(FactoryHome, "register_evolution", register_evolution)
+    r = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [first, second]})
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "register_refused"
+    assert envelope(r)["detail"]["registered"] == [first]
+    on_record = [i["id"] for i in env.get(f"/factory/{ALPHA}/backlog").json()["items"]]
+    assert on_record == [first]
+    events = _registered_events(env)
+    assert len(events) == 1
+    payload = events[0].payload_json
+    assert [x["item_id"] for x in payload["items"]] == [first]
+    assert payload["refused"]["item_id"] == second
+    assert "another path" in payload["refused"]["reason"]
+
+
+def test_reading_the_three_learn_reports_queues_no_run_and_writes_nothing(env: Env) -> None:
+    """The guide's cost of reading (learn-and-strengthen.time-cost.19): the three reports,
+    each read twice and with a what-if apparatus, queue no run and append no event, and the
+    derivations they call import no builder — so reading spends nothing."""
+    runs_before = env.get("/runs").json()["total"]
+    with env.factory() as s:
+        events_before = len(list(s.execute(select(Event)).scalars()))
+    for _ in range(2):
+        for path in (
+            f"/learn/refusals?repo={ALPHA}",
+            f"/learn/strengthen?repo={ALPHA}",
+            f"/learn/remeasure?repo={ALPHA}",
+            f"/learn/remeasure?repo={ALPHA}&apparatus=99.0",
+        ):
+            assert env.get(path).status_code == 200, path
+    assert env.get("/runs").json()["total"] == runs_before
+    with env.factory() as s:
+        assert len(list(s.execute(select(Event)).scalars())) == events_before
+    for module in (learn_routes.__file__, core_learn.__file__):
+        assert module is not None
+        tree = ast.parse(Path(module).read_text(encoding="utf-8"))
+        imported = [n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
+        imported += [a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names]
+        assert not [m for m in imported if m.startswith("crb.builders")], module
 
 
 @pytest.fixture
