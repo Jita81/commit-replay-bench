@@ -15,7 +15,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **One governed delivery, end to end: the entry gate reads the registered readings**
   (the north-star Wave 2 integration; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).
   The seven Wave 2 streams are merged on `feat/ns2` on Wave 1's final form (#63 to #65), their
-  ids renumbered after Wave 1's. The factory's entry gate now reads a cell's standard from
+  ids renumbered after Wave 1's, and the pilot's prevention streams Q1 and Q2 after them. The factory's entry gate now reads a cell's standard from
   routing.v2's registered readings, signed only by a sign-off on its arm, class-set version
   and reading (`crb.server.factory_standard`). A new test walks sealed rows, a reading, a
   sign-off, an authored test, a build, a required strength probe and a pull request on a fake
@@ -28,6 +28,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   model; viewers see presence only. Every builder names a refused key alike, so from
   apparatus 2.4 an outage says "your login" apart from "the provider".
   `CRB_METRICS_PORT=auto` picks a free port. A store at head is compared with the models.
+
+- **A host tool can no longer change a verdict, and a failure nothing names fails belt 3**
+  (north-star Wave 2, stream Q2; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2);
+  ADR-0048; DL-235, DL-236). On the host, the Go, Python and Node runners' tests see only the
+  tools they declare; `PATH` in `runner_opts.env` and host config files are refused. The
+  tools' bytes are a digest on the posture, every qualification and every pack, so a changed
+  tool asks for requalification. A Go belt narrower than the module also builds every
+  package. A package that stops compiling, or a test process that stops before every test
+  reported, now fails belt 3.
 
 - **Every public page is gated, README's measured numbers re-derive, and the quality baseline is named, never claimed**
   (north-star Wave 2, stream C; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns2)).

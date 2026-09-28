@@ -24,8 +24,8 @@
  *               ui/src/screens/Repos/repoFixtures.ts (`REPO`), ui/src/test/utils.tsx
  *               (`mockApi`, `renderApp`, `envelope`, `json`)
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx
- * Touch when:   a field, a validation message or the audit payload changes — extend the
- *               matching case.
+ * Touch when:   never for a new repository; a field, a validation message or the audit
+ *               payload changes — extend the matching case.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -149,15 +149,15 @@ describe('RepoConfigTab', () => {
     await user.click(screen.getByTestId('runner-opt-extra_args-add'))
     await user.type(screen.getByLabelText('Extra arguments 2'), 'unit')
     await user.click(screen.getByTestId('runner-opt-env-add'))
-    await user.type(screen.getByLabelText('Environment variables name 1'), 'PATH')
-    await user.type(screen.getByLabelText('Environment variables value 1'), '/opt/node@24/bin:/usr/bin')
+    await user.type(screen.getByLabelText('Environment variables name 1'), 'TZ')
+    await user.type(screen.getByLabelText('Environment variables value 1'), 'UTC')
     expect(screen.getByTestId('repo-config-pending')).toHaveTextContent('language, runner, runner_opts')
     await user.click(screen.getByTestId('repo-config-save'))
     const body = await putBody(calls)
     expect(body).toEqual({
       language: 'javascript',
       runner: 'jest',
-      runner_opts: { pythonpath_suffix: '/src', python: '/opt/py/bin/python', extra_args: ['--selectProjects', 'unit'], env: { PATH: '/opt/node@24/bin:/usr/bin' } },
+      runner_opts: { pythonpath_suffix: '/src', python: '/opt/py/bin/python', extra_args: ['--selectProjects', 'unit'], env: { TZ: 'UTC' } },
     })
   })
 

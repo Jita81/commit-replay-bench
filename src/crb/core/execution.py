@@ -33,7 +33,9 @@ What it is:   The executors — ``LocalExecutor`` (host subprocess) and ``Docker
               whose output is read as it runs.
 What it does: Runs one command with a wall clock and a cancel token and reports exit code,
               output, timeout and cancellation honestly; strips the host environment down
-              to an allowlist so a repository's tests never see the operator's secrets; and
+              to an allowlist so a repository's tests never see the operator's secrets — or
+              to nothing when the runner declared the whole environment
+              (``Command.declared_env``, ADR-0048); and
               refuses — ``SandboxUnavailable`` — whenever the container cannot be provided
               exactly as hardened (no binary, no daemon, root user, forbidden mount, launch
               failure). It never falls back to the host. Before a container starts it makes
@@ -138,6 +140,16 @@ _HOST_ENV_PASSTHROUGH: tuple[str, ...] = (
     "NODE_OPTIONS",
     "npm_config_cache",
 )
+
+#: The flags every host command carries whatever its environment: parseable test output
+#: (``CI``, ``NO_COLOR``) and no bytecode written into the worktree. A declared environment
+#: (``Command.declared_env``, :mod:`crb.core.runners.toolenv`) carries them too.
+LOCAL_FIXED_ENV: dict[str, str] = {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+    "CI": "1",
+    "NO_COLOR": "1",
+}
 
 DEFAULT_TIMEOUT_S = 900
 
@@ -244,6 +256,10 @@ class Command:
     ro_mounts: tuple[BundleMount, ...] = ()
     #: False: the command reads nothing of the tree — no mount, no copy, no walk.
     tree: bool = True
+    #: True: ``env`` is the command's WHOLE environment, declared by its runner
+    #: (:mod:`crb.core.runners.toolenv`, ADR-0048) — the host executor inherits nothing, not
+    #: even ``PATH``. A container's environment is its image's, so docker ignores it.
+    declared_env: bool = False
 
     def __post_init__(self) -> None:
         if not self.argv:
@@ -308,15 +324,19 @@ class LocalExecutor:
         bytecode."""
         env = {k: v for k, v in os.environ.items() if k in _HOST_ENV_PASSTHROUGH}
         env.setdefault("LANG", "C.UTF-8")
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["PYTHONUNBUFFERED"] = "1"
-        env["CI"] = "1"
-        env["NO_COLOR"] = "1"
+        env.update(LOCAL_FIXED_ENV)
         return env
 
     def tool(self, name: str, host_override: str | None = None) -> str:
         """A configured override, else the binary on PATH, else the bare name."""
         return host_override or shutil.which(name) or name
+
+    @property
+    def base_env(self) -> dict[str, str]:
+        """A copy of the environment this executor gives a command that declares none: the
+        source a runner's declared environment reads its allowlisted names and its tool
+        search ``PATH`` from (ADR-0048)."""
+        return dict(self._base_env)
 
     def describe(self) -> dict[str, Any]:
         return {"executor": self.name}
@@ -338,7 +358,9 @@ class LocalExecutor:
             # a mount is a container concept; on the host a binding's local_env points the
             # toolchain at its set instead, so a mount here is a caller's mistake
             raise ValueError("the local executor cannot bind-mount a dependency set")
-        env = dict(self._base_env)
+        # a declared environment is the WHOLE environment: nothing of the worker's (its
+        # PATH above all) reaches the tests (ADR-0048)
+        env = {} if cmd.declared_env else dict(self._base_env)
         env.update(cmd.env)
         cwd = cmd.root / cmd.cwd_rel
         started = time.monotonic()
@@ -1327,6 +1349,7 @@ __all__: Sequence[str] = (
     "EXECUTOR_KINDS",
     "KILL_CONFIRM_S",
     "KILL_CONFIRM_STEP_S",
+    "LOCAL_FIXED_ENV",
     "SANDBOX_TREES",
     "TREE_COPY",
     "TREE_COPY_MARKER",

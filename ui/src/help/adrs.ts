@@ -66,6 +66,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0028', 'The moments the flow reading needs are recorded when they happen, never derived'],
   ['0029', 'The audit trail is hash-chained, and both chains\' heads are served to be kept outside the store'],
   ['0030', 'A run keeps the spend cap it declares, and stops before the work that could pass it'],
+  ['0048', 'The host posture declares its test environment, and a package that names no failing test never subtracts'],
 ]
 
 /** `ADR-0015` — the name a record carries in the /help/docs route. */

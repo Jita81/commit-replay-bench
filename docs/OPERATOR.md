@@ -191,13 +191,41 @@ kept untouched and listed as "not read by this runner"):
 | Runner | Keys read (`crb.core.runners`) |
 |---|---|
 | every runner | `timeout` (s, one test command), `setup_timeout` (s, one setup step) |
-| `pytest` | `python`, `pythonpath_suffix`, `pip` (list), `pip_fallback` (list), `uninstall` (list), `env` (map) |
-| `node` | `node`, `npm`, `env` — `node --test` takes no extra arguments |
-| `jest` / `vitest` | `npm`, `extra_args` (list), `env` |
-| `mocha` | `npm`, `mocha_require`, `extra_args`, `env` |
-| `go` | `go`, `cgo` (`0`/`1`), `gomodcache` (docker only) |
+| `pytest` | `python`, `pythonpath_suffix`, `pip` (list), `pip_fallback` (list), `uninstall` (list), `tools` (list), `env` (map) |
+| `node` | `node`, `npm`, `tools`, `env` — `node --test` takes no extra arguments |
+| `jest` / `vitest` | `node`, `npm`, `extra_args` (list), `tools`, `env` |
+| `mocha` | `node`, `npm`, `mocha_require`, `extra_args`, `tools`, `env` |
+| `go` | `go`, `cgo` (`0`/`1`), `gomodcache` (docker only), `tools` (list) |
 | `cargo` | `cargo`, `offline` (default true), `cargo_home` (docker only) |
 | `maven` | `mvn`, `maven_flags` (list), `java_home`, `offline` (default true), `writable` (list), `maven_opts` (docker only) |
+
+**The tools a test can run on the host are declared (ADR-0048).** Under the local executor the
+`go`, `pytest` and node runners never hand the tests the worker's `PATH`. The tests see the
+runner's toolchain, `git` and the POSIX basics the sealed images carry, linked into one
+private directory, and nothing else: a tool that happens to be installed (the pilot's
+Homebrew `shellcheck`) cannot change a verdict. If a repository's tests run another tool
+(`make`, `protoc`), name it in `tools`. It is then found on the worker's `PATH` and added. Each
+declared tool's version and bytes are part of the posture (`environment` on the Posture page,
+every qualification and every evidence pack), so upgrading one asks for the pool to be
+qualified again (`POSTURE_DRIFT`). Nothing can be put over the declaration: an `env` that
+sets `PATH` or a library-loader variable (`LD_PRELOAD`, `DYLD_*`) is refused before any test
+runs. Pin a toolchain in its own field (`go`, `python`, `node`, `npm`) instead. No host
+configuration file is read either: a `go env -w` file, `~/.gitconfig` and Python's per-user
+`site-packages` are switched off. A Python repository's own virtualenv `bin` follows the tools
+on the tests' `PATH`, and what is in it is part of the posture too. With no interpreter
+configured, crb's own interpreter runs the tests and crb's own `bin` never reaches them. The
+`cargo` and `maven` runners do not declare their environment yet and still inherit the
+worker's `PATH` (G-791).
+
+**A Go belt narrower than the module still checks that every package builds.** When a Go
+repository's belt scope is not the whole module (the target package alone, as for cobra),
+every belt run is followed by a build of every package and its tests that runs no test. A
+patch that stops any package compiling fails belt 3. The gold must pass the same check, so a
+module with a package that does not build in the posture (one that needs cgo on a host
+without it) has its tasks refused at qualification. A run whose test process stopped before
+every test reported (a test that calls `os.Exit`, an interrupted pytest session, a process
+that exits 0 before its tests run) is unattributed: belt 2 reads it as not green and belt 3
+as failed.
 
 Three shapes we met onboarding NHS repositories, as worked examples — each is what the
 form saves, shown as the stored `runner_opts` / layout it produces:
@@ -210,12 +238,13 @@ sources, so a test *prefix* cannot tell them apart: test mode **suffix** with
 `.test.js|.test.mjs|.test.ts|.test.tsx`. Belt scope **AFFECTED_DIRS**. Runner options:
 *Extra arguments* rows `--selectProjects` and `unit` (one row each — jest's variadic
 option would otherwise swallow the test paths, which is why the runner puts `--` before
-them), and an *Environment variables* row `PATH` = `/opt/homebrew/opt/node@24/bin:/usr/bin:/bin`
-(applies to `npm ci` in setup as well as to every test command). Stored:
+them), and *node binary* = `/opt/homebrew/opt/node@24/bin/node`. That node is the `node`
+on every test command's `PATH`, and it leads the `PATH` of `npm ci` in setup, so an
+engine-strict install runs under it. Stored:
 
 ```json
 {"extra_args": ["--selectProjects", "unit"],
- "env": {"PATH": "/opt/homebrew/opt/node@24/bin:/usr/bin:/bin"}}
+ "node": "/opt/homebrew/opt/node@24/bin/node"}
 ```
 
 **A jest + TypeScript component library whose commits touch snapshots.** Many commits
@@ -946,7 +975,7 @@ Posture panel lists each with how many tasks it keeps out.
 | Code | Scope | What to do |
 |---|---|---|
 | `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
-| `POSTURE_DRIFT` | run | the image, toolchain, limits or runner environment changed after qualification: qualify again |
+| `POSTURE_DRIFT` | run | the image, toolchain, limits, runner environment or a declared host tool changed after qualification: qualify again |
 | `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
 | `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |

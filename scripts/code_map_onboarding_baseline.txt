@@ -65,7 +65,6 @@ tests/test_oracle_mutation_text.py
 tests/test_oracle_sealed_corpus.py
 tests/test_redact.py
 tests/test_release_tag.py
-tests/test_runners_parsers.py
 tests/test_server_github_app.py
 tests/test_server_routes_grades.py
 tests/test_server_secrets.py
@@ -116,15 +115,12 @@ ui/src/screens/Connect/GitHubConnectDialog.test.tsx
 ui/src/screens/Connect/GitHubConnectDialog.tsx
 ui/src/screens/Connect/connection.test.ts
 ui/src/screens/Repos/RepoConfigForm.tsx
-ui/src/screens/Repos/RepoConfigTab.test.tsx
 ui/src/screens/Repos/RepoConfigTab.tsx
 ui/src/screens/Repos/RepoNewDialog.test.tsx
 ui/src/screens/Repos/RepoNewDialog.tsx
 ui/src/screens/Repos/repoConfigModel.test.ts
 ui/src/screens/Repos/repoConfigModel.ts
 ui/src/screens/Repos/repoFixtures.ts
-ui/src/screens/Repos/runnerOpts.test.ts
-ui/src/screens/Repos/runnerOpts.ts
 ui/src/screens/Runs/EvidenceDrawer.tsx
 ui/src/screens/Runs/telemetry.test.ts
 ui/src/screens/Runs/telemetry.ts

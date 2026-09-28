@@ -448,7 +448,7 @@ def qualify(
             return MineOutcome(sha, None, "target green at parent", time.monotonic() - started)
 
         belt_scope = runner.belt_scope(target_scope, cand.test_files)
-        base = runner.run_for(
+        base = runner.run_belt_for(
             executor, ws.root, belt_scope, timeout=timeout, authored=repo.author_date(cand.sha)
         )
         if base.timed_out:
@@ -456,8 +456,9 @@ def qualify(
             return MineOutcome(sha, None, "baseline timeout", time.monotonic() - started)
         # the rule qualify_task applies (ADR-0019, one vocabulary): a baseline whose output
         # does not parse is refused unless the RED itself was a build failure that explains
-        # it — else the task would later fail belt 3 on the unparsed run (P-124)
-        if base.parse_error and red.failing:
+        # it — else the task would later fail belt 3 on the unparsed run (P-124); a RED
+        # with an unattributed part (a target package that did not build) explains it too
+        if base.parse_error and red.failing and not red.parse_error:
             reason = (
                 f"{QUAL_BASELINE_UNATTRIBUTED}: the belt scope failed at the parent without "
                 f"naming a test: {base.parse_error}"
@@ -677,7 +678,7 @@ def gold_check(
             )
             _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
-        belt = runner.run_for(
+        belt = runner.run_belt_for(
             executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
         )
         if belt.timed_out or belt.parse_error:

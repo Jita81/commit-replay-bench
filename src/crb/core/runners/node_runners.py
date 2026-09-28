@@ -25,15 +25,17 @@ What it does: Builds each tool's machine-readable command (JUnit XML for ``node 
               task commit's manifest differs; detects eslint/prettier/standard/tsc for belt 5.
 How:          ``run``: ``ensure_era`` (hash the worktree's lockfile → install/re-point the
               symlink) → base ``run``. ``parse``: locate the JSON/XML in stdout → walk the
-              reporter's result tree → ids. ``setup``: ``npm ci``/``install`` in the clone.
+              reporter's result tree → ids. ``setup``: ``npm ci``/``install`` in the clone,
+              with a pinned ``runner_opts.node`` first on its ``PATH`` (``setup_env``).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0048-the-host-posture-declares-its-environment.md
 Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/workspace.py (symlinks
               each worktree's ``node_modules`` to the clone's — what an era re-points),
               src/crb/core/lint.py (``js_plan``), src/crb/core/execution.py (``Executor.tool``),
               src/crb/core/runners/__init__.py (the four registry names)
 Tested by:    tests/test_runners_node.py, tests/test_node_eras.py, tests/test_runners_parsers.py,
-              tests/test_runners_setup.py
+              tests/test_runners_setup.py, tests/test_runners_toolenv.py
 Touch when:   a JavaScript repository needs a different invocation — prefer ``runner_opts``
               (``extra_args``, ``env``, ``npm``/``node``, ``mocha_require``, ``era_keep``,
               ``era_min_free_mb``; docs/OPERATOR.md) over editing; a new reporter shape or a
@@ -65,6 +67,7 @@ from crb.core.runners.base import (
     TestRun,
     tail_of,
 )
+from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
 
 _NPM_FLAGS: tuple[str, ...] = ("--no-audit", "--no-fund", "--loglevel=error")
 
@@ -158,6 +161,34 @@ class _NodeBase(BaseRunner):
         """``node --version`` — the runtime the tests run under, part of the posture."""
         return (executor.tool("node", self.opts.get("node")), "--version")
 
+    def setup_env(self, executor: Executor) -> dict[str, str]:
+        """The setup commands' environment: ``runner_opts.env``, and — when
+        ``runner_opts.node`` pins a node — that node's directory first on ``PATH``, so
+        ``npm`` (a node script) runs under it. The pin is declared and in the test
+        environment's digest; a ``PATH`` in ``runner_opts.env`` is refused (ADR-0048)."""
+        env = {"NODE_ENV": "development", "npm_config_update_notifier": "false"}
+        env.update({str(k): str(v) for k, v in dict(self.opts.get("env", {})).items()})
+        node = str(self.opts.get("node") or "")
+        if node and os.path.isabs(node) and "PATH" not in env:
+            base = getattr(executor, "base_env", None)
+            host_path = base.get("PATH", os.defpath) if isinstance(base, dict) else os.defpath
+            env["PATH"] = os.pathsep.join([os.path.dirname(node), host_path])
+        return env
+
+    def declared_tools(self, executor: Executor, root: Path | None = None) -> tuple[ToolSpec, ...]:
+        """What a Node test may run by name on the host (ADR-0048): ``node`` (the pinned one
+        when ``runner_opts.node`` names it), ``npm``, ``npx``, ``git`` and the POSIX basics.
+        A ``PATH`` in ``runner_opts.env`` is refused before any test runs."""
+        node = self.opts.get("node")
+        npm = self.opts.get("npm")
+        return (
+            ToolSpec("node", str(node) if node else None, ("--version",)),
+            ToolSpec("npm", str(npm) if npm else None),
+            ToolSpec("npx"),
+            ToolSpec("git", None, ("--version",)),
+            *(ToolSpec(name) for name in POSIX_BASICS),
+        )
+
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
         """Test files as the tool addresses them; a ``.snap`` maps to the test that owns it."""
         return tuple(sorted({snapshot_to_test(f) for f in test_files}))
@@ -247,8 +278,7 @@ class _NodeBase(BaseRunner):
                 shutil.copyfile(src, era / name)
         npm = executor.tool("npm", self.opts.get("npm"))
         verb = "ci" if (era / "package-lock.json").is_file() else "install"
-        env = {"NODE_ENV": "development", "npm_config_update_notifier": "false"}
-        env.update({str(k): str(v) for k, v in dict(self.opts.get("env", {})).items()})
+        env = self.setup_env(executor)
         # scripts off: an era is a dependency tree, not a build (husky/prepare hooks
         # expect the repository checkout around them)
         cmd = Command(
@@ -342,10 +372,8 @@ class _NodeBase(BaseRunner):
             return session.result(False, "no package.json: nothing npm could install")
         npm = executor.tool("npm", self.opts.get("npm"))
         verb = "ci" if (root / "package-lock.json").is_file() else "install"
-        # runner_opts.env (e.g. a PATH that puts the repo's required node@24 first) applies to
-        # setup too — `npm` is a node script, so an engine-strict repo fails otherwise.
-        env = {"NODE_ENV": "development", "npm_config_update_notifier": "false"}
-        env.update({str(k): str(v) for k, v in dict(self.opts.get("env", {})).items()})
+        # `npm` is a node script: an engine-strict repo needs the pinned node first on PATH
+        env = self.setup_env(executor)
         session.run(
             Command(
                 (npm, verb, *_NPM_FLAGS),
