@@ -481,20 +481,24 @@ def test_the_append_only_probe_never_claims_an_update_it_did_not_try(backend: Ba
     store. On an empty ledger the detail now says no UPDATE was tried (the live-trigger count
     still decides the status); once a row exists it says the UPDATE was refused."""
     from crb.observability.probes import OK
-    from crb.server.routes.system import probe_append_only
+    from crb.server.routes.system import (
+        APPEND_ONLY_OK_DETAIL,
+        APPEND_ONLY_UNTRIED_DETAIL,
+        probe_append_only,
+    )
     from crb.store.ledger import assert_append_only
 
     store_db.init_db(backend.engine)
     assert assert_append_only(backend.factory) is False  # nothing to try
     res = probe_append_only(backend.factory)
     assert res.status == OK
-    assert res.detail == "triggers present; no grades row to test the UPDATE on", res.detail
+    assert res.detail == APPEND_ONLY_UNTRIED_DETAIL, res.detail
     with backend.factory() as s:
         s.add(_one_row("grades"))
         s.commit()
     assert assert_append_only(backend.factory) is True  # tried, and refused
     res = probe_append_only(backend.factory)
-    assert (res.status, res.detail) == (OK, "triggers present; UPDATE on grades refused")
+    assert (res.status, res.detail) == (OK, APPEND_ONLY_OK_DETAIL)
 
 
 def test_the_append_only_probe_counts_the_truncate_trigger(backend: Backend) -> None:

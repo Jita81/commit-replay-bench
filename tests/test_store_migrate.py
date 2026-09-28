@@ -52,6 +52,7 @@ from __future__ import annotations
 import io
 import sqlite3
 from contextlib import redirect_stdout
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +61,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, inspect, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from crb.store import migrate
 from crb.store.db import expected_triggers, init_db, make_engine, make_session_factory
@@ -71,6 +72,9 @@ try:
     from tests.conftest_store import Backend, backend, grade_row, pg_schema
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
+
+#: The packaged head: 0013, the events chain (north-star Wave 2, stream I).
+HEAD = "0013"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -129,7 +133,9 @@ def _canonical_sql(sql: str | None) -> tuple[str, frozenset[str]]:
     open_at = sql.find("(")
     if open_at < 0:
         return (" ".join(sql.split()), frozenset())
-    head = " ".join(sql[:open_at].split())
+    # SQLite stores a table rebuilt by batch mode's rename as ``CREATE TABLE "t"``; the
+    # quoted and bare lower-case names are one identifier, so the head drops the quotes
+    head = " ".join(sql[:open_at].replace('"', "").split())
     body = sql[open_at + 1 : sql.rfind(")")]
     defs: list[str] = []
     depth = 0
@@ -360,7 +366,7 @@ def test_upgrade_adopts_an_older_release_init_db_database_and_adds_belt_five(
 
     migrate.upgrade(backend.url)  # stamps 0001, applies 0002 (and every later revision)
 
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
     assert migrate.check(backend.url) is True
     assert _autogen_diff(backend.engine) == []
     assert "repo_lint_clean" in {c["name"] for c in inspect(backend.engine).get_columns("grades")}
@@ -452,7 +458,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     # the refusal rolls the whole downgrade back — 0008's column, 0007's and 0005's tables, 0006's
     # column, 0004's index swap and 0003's drop of the (empty) reviews table included — so the database stays
     # exactly where it was
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == HEAD
 
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -467,7 +473,7 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     with pytest.raises(DBAPIError, match="append-only"), fresh.begin() as c:
         c.execute(text("DELETE FROM grades"))
     migrate.upgrade(backend.url)  # and back up again
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
 
 
 def test_downgrade_of_an_empty_database_drops_the_schema(backend: Backend) -> None:
@@ -520,6 +526,9 @@ def test_offline_sql_includes_tables_and_triggers(backend: Backend) -> None:
     # 0008 offline adds the reaper count to that table after it exists
     count = sql.find("ADD COLUMN unconfirmed_containers INTEGER DEFAULT '0' NOT NULL")
     assert count > workers, sql[-2000:]
+    # 0013 offline refuses an unchained row too (P-246): the CHECK after the back-fill
+    check = sql.find("ck_events_chain_hashes")
+    assert check > sql.find("ADD COLUMN row_hash"), sql[-2000:]
     assert migrate.current(backend.url) is None  # offline mode touched nothing
 
 
@@ -608,7 +617,7 @@ def test_0004_refuses_a_database_holding_duplicate_trace_seq_pairs(backend: Back
     fresh = _reset(backend)
     migrate.upgrade(backend.url, revision="0003")
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
     assert "uq_events_trace_seq" in {ix["name"] for ix in inspect(fresh).get_indexes("events")}
 
 
@@ -631,7 +640,7 @@ def test_0006_backfills_the_github_identity_and_refuses_duplicate_legacy_links(
         c.execute(text(row), {"name": "calc", "cfg": linked})
         c.execute(text(row), {"name": "by-url", "cfg": '{"language": "go"}'})
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == HEAD
     with backend.engine.connect() as c:
         got = dict(c.execute(text("SELECT name, github_full_name FROM repos")).all())
     assert got == {"calc": "acme/calc", "by-url": None}
@@ -684,7 +693,7 @@ def test_0007_adds_the_workers_table_and_adoption_tolerates_its_absence(backend:
         c.execute(text("DROP TABLE workers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
     assert "workers" in set(inspect(fresh).get_table_names())
 
 
@@ -706,7 +715,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
             )
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == HEAD
     cols = {c["name"] for c in inspect(backend.engine).get_columns("workers")}
     assert "unconfirmed_containers" in cols
     with backend.engine.connect() as c:
@@ -730,7 +739,7 @@ def test_0008_adds_the_unconfirmed_containers_count_and_adoption_reads_its_absen
         c.execute(text("ALTER TABLE workers DROP COLUMN unconfirmed_containers"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
 
 
 def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
@@ -753,7 +762,7 @@ def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
             {"active": True},
         )
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
     with backend.engine.connect() as c:
         got = c.execute(text("SELECT session_nonce FROM users")).scalar_one()
     assert got == ""
@@ -771,7 +780,7 @@ def test_0009_adds_the_session_nonce_and_keeps_every_account_signed_in(
         c.execute(text("ALTER TABLE users DROP COLUMN session_nonce"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
 
 
 def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
@@ -808,7 +817,7 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
             s.add(Task(repo="calc", task_id=t.task_id, spec_json=t.to_dict(), authored=t.authored))
         s.commit()
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
     with backend.engine.connect() as c:
         n = c.execute(text("SELECT COUNT(*) FROM task_qualifications")).scalar_one()
         states = {r[0] for r in c.execute(text("SELECT state FROM task_qualifications"))}
@@ -833,7 +842,7 @@ def test_0011_adds_task_qualifications_backfills_one_legacy_row_per_task(
     assert migrate.current(backend.url) == "0008"
     assert "task_qualifications" not in set(inspect(backend.engine).get_table_names())
     migrate.upgrade(backend.url)  # and back up at head, equal to init_db
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(backend.engine) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(backend.engine) == []
 
 
 def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: Backend) -> None:
@@ -867,7 +876,7 @@ def test_0011_downgrade_refuses_while_a_measured_qualification_exists(backend: B
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0008")
     assert "task_qualifications" in set(inspect(backend.engine).get_table_names())
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == HEAD
 
 
 def test_no_released_revision_imports_the_application_runtime() -> None:
@@ -951,7 +960,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     with backend.engine.begin() as c:
         _insert_review(c, n=1)
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == "0012"
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
     with backend.engine.connect() as c:
         assert c.execute(text("SELECT minutes FROM reviews")).scalar_one() is None
     assert {"reviews_no_update", "reviews_no_delete"} <= backend.trigger_names()
@@ -966,7 +975,7 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0011")
-    assert migrate.current(backend.url) == "0012"
+    assert migrate.current(backend.url) == HEAD
     # with no minutes stated the column is empty and may go
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
@@ -986,4 +995,167 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
         c.execute(text("ALTER TABLE reviews DROP COLUMN minutes"))
     assert migrate.current(backend.url) is None
     migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == "0012" and _autogen_diff(fresh) == []
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
+
+
+def _insert_event(conn: Any, *, n: int, payload: str = '{"k": [1, 2]}') -> None:
+    """One stored ``events`` row as a pre-0013 schema holds it (no chain columns)."""
+    conn.execute(
+        text(
+            "INSERT INTO events (event_id, trace_id, seq, timestamp, stage, action, status, "
+            "step_id, parent_step_id, actor, repo, task_id, input_ref, output_ref, error_code, "
+            "error_message, duration_ms, cost_usd, payload_json) VALUES (:e, :t, :s, "
+            "'2026-09-26T10:00:00+00:00', 'system', 'user.login', 'ok', '', '', 'u1', '', '', "
+            "'', '', '', '', :d, :c, :p)"
+        ),
+        {
+            "e": f"{n:032x}",
+            "t": "t" * 32,
+            "s": n,
+            "d": n * 10,
+            "c": 1 if n % 2 else None,
+            "p": payload,
+        },
+    )
+
+
+def _chain_of(engine: Engine) -> list[tuple[int, str, str]]:
+    with engine.connect() as c:
+        return [
+            (int(i), str(p), str(h))
+            for i, p, h in c.execute(text("SELECT id, prev_hash, row_hash FROM events ORDER BY id"))
+        ]
+
+
+def test_0013_chains_the_existing_events_deterministically_and_verifies(backend: Backend) -> None:
+    """Revision 0013 (ADR-0029, F51) adds the chain columns and chains every event that was
+    already there, from genesis, in id order — the same rows give the same hashes on every
+    run — so the runtime verifier reads the migrated audit trail as intact, and the next
+    event written chains onto it. The triggers are back afterwards."""
+    from crb.observability.events import StepEvent
+    from crb.store.events import DbEventSink, verify_events
+
+    migrate.upgrade(backend.url, revision="0012")
+    with backend.engine.begin() as c:
+        for n in range(1, 6):
+            _insert_event(c, n=n)
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
+    first = _chain_of(backend.engine)
+    assert first[0][1] == "0" * 64 and len({h for _i, _p, h in first}) == 5
+    assert all(b[1] == a[2] for a, b in pairwise(first))
+    report = verify_events(backend.factory)
+    assert report.ok and report.rows == 5 and report.head == first[-1][2], report.detail
+    assert _autogen_diff(backend.engine) == []
+    assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("UPDATE events SET prev_hash = row_hash"))
+    DbEventSink(backend.factory).emit(StepEvent(trace_id="x", stage="system", action="a", seq=1))
+    assert verify_events(backend.factory).rows == 6 and verify_events(backend.factory).ok
+    # deterministic: the same rows migrated again give the same chain
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url, revision="0012")
+    with fresh.begin() as c:
+        for n in range(1, 6):
+            _insert_event(c, n=n)
+    migrate.upgrade(backend.url)
+    assert _chain_of(fresh) == first
+    # and the downgrade drops the chain, never the events
+    cfg = migrate.alembic_config(backend.url)
+    with fresh.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0012")
+    cols = {c["name"] for c in inspect(fresh).get_columns("events")}
+    assert "row_hash" not in cols and "prev_hash" not in cols
+    with fresh.connect() as c:
+        assert c.execute(text("SELECT COUNT(*) FROM events")).scalar_one() == 5
+    assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
+
+
+def test_0013_adopts_a_create_all_schema_from_the_release_before(backend: Backend) -> None:
+    """A pre-0013 ``create_all`` database (events without the chain) is at 0012 by its
+    markers; 0013 adds the columns, chains the rows it holds and leaves no drift."""
+    from crb.store.events import verify_events
+
+    fresh = _reset(backend)
+    # the release before's schema is 0012's (test_upgrade_head_equals_init_db holds every
+    # revision to create_all); drop the version table and it is that release's create_all
+    migrate.upgrade(backend.url, revision="0012")
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE alembic_version"))
+        _insert_event(c, n=1)
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
+    assert verify_events(make_session_factory(fresh)).rows == 1
+
+
+def test_0013_frozen_rule_is_the_runtime_rule() -> None:
+    """The revision carries its own copy of the chain rule (a released revision imports
+    nothing of the runtime); a copy that drifted would chain the migrated rows under a rule
+    the verifier does not read."""
+    import importlib
+
+    from crb.core.event_chain import GENESIS_HASH, event_row_hash
+
+    m = importlib.import_module("crb.store.migrations.versions.v0013_events_hash_chain")
+    row = {
+        "event_id": "e" * 32,
+        "trace_id": "t" * 32,
+        "seq": 3,
+        "timestamp": "2026-09-26T10:00:00+00:00",
+        "stage": "system",
+        "action": "user.login",
+        "status": "ok",
+        "step_id": "",
+        "parent_step_id": "",
+        "actor": "u1",
+        "repo": "r",
+        "task_id": "",
+        "input_ref": "",
+        "output_ref": "",
+        "error_code": "",
+        "error_message": "é ✓",
+        "duration_ms": 5,
+        "cost_usd": 1,
+        "payload_json": {"b": (1, 2), "a": {"z": None}},
+    }
+    assert m.GENESIS_HASH == GENESIS_HASH
+    for prev in (GENESIS_HASH, "a" * 64):
+        assert m._row_hash(row, prev) == event_row_hash(row, prev)
+
+
+def test_0013_refuses_a_row_from_the_release_before_it_and_keeps_recording(
+    backend: Backend,
+) -> None:
+    """P-246: during a rolling upgrade the release before 0013 keeps writing events, and a
+    rollback runs it against the migrated schema. Its INSERT names no chain column. The
+    migrated table must refuse that row outright — if it stored ``''`` it would become a
+    head no later write can chain onto, and the audit trail (sign-in included) would stop
+    for good."""
+    from crb.observability.events import StepEvent
+    from crb.store.events import DbEventSink, verify_events
+
+    migrate.upgrade(backend.url, revision="0012")
+    with backend.engine.begin() as c:
+        _insert_event(c, n=1)
+    migrate.upgrade(backend.url)
+    for n in (2, 3):
+        with pytest.raises(IntegrityError), backend.engine.begin() as c:
+            _insert_event(c, n=n)
+    sink = DbEventSink(backend.factory)
+    sink.emit(StepEvent(trace_id="x", stage="system", action="a", seq=1))
+    assert sink.dropped == 0
+    report = verify_events(backend.factory)
+    assert report.ok and report.rows == 2, report.detail
+    assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
+    # the rollback path the runbook names: downgrade first, then the old release writes
+    cfg = migrate.alembic_config(backend.url)
+    with backend.engine.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0012")
+    with backend.engine.begin() as c:
+        _insert_event(c, n=4)
+    migrate.upgrade(backend.url)
+    report = verify_events(backend.factory)
+    assert report.ok and report.rows == 3, report.detail

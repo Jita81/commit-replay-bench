@@ -218,6 +218,13 @@ image keeps working against the untouched schema. Rolling back a *successful* mi
 not supported while the ledger holds rows — `downgrade` refuses by design; restore the
 pre-upgrade dump instead.
 
+Upgrading to revision `0013` (the audit trail's hash chain): from it the database refuses an
+event written without the chain, which is every event the previous image writes. Run
+`$C stop api worker` before `$C run --rm migrate`, so no sign-in or run step is refused in
+between; `$C up -d` starts them on the new image. Never go back to an image from before
+`0013` against the upgraded database — restore the dump instead
+([DEPLOYMENT §6](../docs/DEPLOYMENT.md#6-upgrade)).
+
 ## 6. Air-gap: egress only to the model endpoint
 
 crb makes exactly two kinds of outbound connections: the **worker** to the configured model
@@ -332,8 +339,10 @@ socket exactly as in §3. `/settings` (admin) shows the posture under `builder`.
 `CRB_ENV=prod` the builder defaults to `docker` (compose passes the one value to the API and
 the worker, so `/health` describes the builds the worker runs), and the API and
 the worker refuse to start with `host` — or with `CRB_SANDBOX__EXECUTOR=local` — unless
-`CRB_ALLOW_UNSEALED_PROD=1` is set; that override is shown on `/health` and the Posture page
-and stamped into every run's apparatus. Factory builds are not sealed yet (they run on the
+`CRB_ALLOW_UNSEALED_PROD=1` is set with `CRB_ALLOW_UNSEALED_PROD_BY` (an admin's username)
+and `CRB_ALLOW_UNSEALED_PROD_REASON`; each start under that override writes an audit event
+naming the admin, and the override is shown on `/health` and the Posture page and stamped
+into every run's apparatus. Factory builds are not sealed yet (they run on the
 host), so a `prod` worker refuses a factory run unless the override is set ([ADR-0023](../docs/adr/0023-production-refuses-the-unsealed-posture.md)). For an
 Azure OpenAI endpoint set `CRB_BUILDER__ALLOW_HOSTS=<resource>.privatelink.openai.azure.com`
 (the sidecar resolves it through the host's DNS, so the private zone applies).

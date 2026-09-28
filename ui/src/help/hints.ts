@@ -774,7 +774,7 @@ export const HINTS = {
   'summary.posture.retention':
     'Nothing raw is kept by default; worktrees and transcripts are opt-in per run.',
   'summary.posture.ledger':
-    'The live chain verification: rows, whether every hash links, and the false-Q1 total. A broken chain is a finding, never repaired in place.',
+    'The live chain verification: rows, whether every hash links in the ledger and in the audit trail, and the false-Q1 total. A broken chain is a finding, never repaired in place.',
   'summary.posture.append_only':
     'Whether the database refuses updates and deletes on the ledger, from the health probe.',
   'summary.posture.export':
@@ -1577,9 +1577,13 @@ export const HINTS = {
   'button.ledger.export_abstract':
     'Download cells only: no code, no identifiers. This is what a federated deployment may share.',
   'gate.ledger.banner':
-    'The live proof that the ledger is intact: every row’s hash links to the previous one, and no row is credited clean against its belts.',
+    'The live proof that the ledger and the audit trail are intact: every row’s hash links to the previous one, and no row is credited clean against its belts.',
   'gate.ledger.chain':
     'Every row’s prev_hash and row_hash match across the whole ledger. A broken chain names the row; it is a finding, never repaired in place.',
+  'gate.ledger.audit_trail':
+    'Every audit event’s prev_hash and row_hash match across the whole trail. A broken trail names the event; the export holds grades only, so verify the store itself.',
+  'gate.ledger.packs':
+    'Every clean row points at its evidence pack. A clean row without one cannot be checked again, so the ledger does not verify.',
   'gate.ledger.false_q1':
     'No row anywhere is credited clean against a failed belt. Enforced when a row is written and re-derived when read.',
   'stat.ledger.rows':

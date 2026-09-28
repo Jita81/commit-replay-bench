@@ -26,21 +26,23 @@ What it is:   The Prometheus metric definitions and the recording helpers the wo
               server call, behind a no-op fallback when ``prometheus_client`` is not
               installed; the worker's own exposition server.
 What it does: Counts runs, graded tasks by outcome, belt failures, builder tokens and cost
-              (by repo), deliveries by outcome, GitHub installation-token mints (never the
-              token); times grades and builds; gauges queue depth, ``crb_false_q1_total``
-              (must stay 0) and the ledger row count; renders the exposition for the API's
+              (by repo), deliveries by outcome, sign-off decisions by outcome (the API),
+              GitHub installation-token mints (never the token); times grades and builds;
+              gauges queue depth, ``crb_false_q1_total`` (must stay 0) and the ledger row
+              count; renders the exposition for the API's
               ``/metrics`` and starts the worker's on its port.
 How:          Import-time try/except picks the real registry or ``_Noop``; every metric is
               a module-level object created through ``_counter``/``_gauge``/``_histogram``;
               call-sites use ``record_grade``/``record_build``/``record_event``/
-              ``set_ledger_health``; ``fresh_registry`` rebinds every metric to a new
-              registry for tests.
+              ``record_signoff``/``set_ledger_health``; ``fresh_registry`` rebinds every
+              metric to a new registry for tests.
 Layer:        observability — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
 Works with:   src/crb/server/worker.py (calls the recorders after each grade and build,
               meters events through ``record_event``, sets the queue gauge on check-in),
               src/crb/server/worker_main.py (``start_worker_exposition`` before the loop),
               src/crb/server/routes/system.py (``/metrics`` renders ``render()``),
+              src/crb/server/routes/signoffs.py (``record_signoff`` after each decision),
               src/crb/server/http_metrics.py (the HTTP-level metrics on the same registry),
               src/crb/core/ledger.py (the source of the false-Q1 count the gauge reflects),
               deploy/helm/crb/values.yaml and deploy/docker-compose.yml (the two scrape
@@ -197,6 +199,13 @@ _SPECS: tuple[tuple[str, str, str, str, list[str]], ...] = (
         ["repo", "outcome"],
     ),
     (
+        "signoffs_total",
+        "counter",
+        "crb_signoffs_total",
+        "Sign-off decisions at the API, by outcome (created|refused|revoked).",
+        ["outcome"],
+    ),
+    (
         "github_tokens_minted_total",
         "counter",
         "crb_github_tokens_minted_total",
@@ -237,6 +246,7 @@ grade_latency_seconds: Any = _metrics["grade_latency_seconds"]
 build_latency_seconds: Any = _metrics["build_latency_seconds"]
 sandbox_unavailable_total: Any = _metrics["sandbox_unavailable_total"]
 deliveries_total: Any = _metrics["deliveries_total"]
+signoffs_total: Any = _metrics["signoffs_total"]
 github_tokens_minted_total: Any = _metrics["github_tokens_minted_total"]
 queue_depth: Any = _metrics["queue_depth"]
 false_q1_total: Any = _metrics["false_q1_total"]
@@ -330,6 +340,19 @@ def record_event(event: Any) -> None:
             deliveries_total.labels(str(getattr(event, "repo", "") or ""), outcome).inc()
     except Exception:  # pragma: no cover — defensive: metering must not affect a run
         _LOG.exception("metrics: record_event failed")
+
+
+#: The outcomes ``crb_signoffs_total`` counts — one per ``signoff.<outcome>`` event.
+SIGNOFF_OUTCOMES: tuple[str, ...] = ("created", "refused", "revoked")
+
+
+def record_signoff(outcome: str) -> None:
+    """One sign-off decision the API committed (G-924): ``created``, ``refused`` or
+    ``revoked`` — called after the ``signoff.*`` event it mirrors is committed, so the
+    counter and the audit trail agree. An unknown outcome is a programming error."""
+    if outcome not in SIGNOFF_OUTCOMES:
+        raise ValueError(f"unknown sign-off outcome {outcome!r}; expected {SIGNOFF_OUTCOMES}")
+    signoffs_total.labels(outcome).inc()
 
 
 def set_ledger_health(*, rows: int, false_q1: int) -> None:

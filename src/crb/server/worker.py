@@ -545,6 +545,11 @@ class WorkerSettings:
     #: ADR-0023: a prod worker running unsealed under the override — stamped into every
     #: run's apparatus and every pack; empty when sealed or in dev.
     unsealed_override: Mapping[str, Any] = field(default_factory=dict)
+    #: G-663: ``{"by", "reason"}`` when this prod worker starts under the override — the
+    #: admin who set it and why. ``announce_start`` writes them into an audit event (and
+    #: refuses the start for a name that is not an active admin); every factory run's stamp
+    #: carries the name. Empty when the override is not set or in dev.
+    unsealed_override_ack: Mapping[str, str] = field(default_factory=dict)
     #: ``CRB_ENV`` as the entrypoint read it. A factory build is never sealed (its builder is
     #: handed a host worktree), so in ``prod`` a factory run is refused unless the override is
     #: set, and one run under it is stamped (ADR-0023, ``_run_factory``).
@@ -1574,12 +1579,16 @@ class Worker:
             ctx._runner.env_dir = self.env_dir(ctx.run.repo)
         return ctx._runner
 
+    def _executor_kind(self, ctx: RunContext) -> str:
+        """The executor this run asks for: its own ``params.executor``, else the worker's."""
+        return str(ctx.params.get("executor") or self.settings.executor or "local")
+
     def _executor(self, ctx: RunContext) -> Executor:
         """The run's executor. Docker is fail-closed: no image / no daemon → the
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        kind = str(ctx.params.get("executor") or self.settings.executor or "local")
+        kind = self._executor_kind(ctx)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
                 f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
@@ -1673,7 +1682,7 @@ class Worker:
             "runner": self._runner(ctx).name,
             "executor": self._executor(ctx).describe(),
             "worker": self.worker_id,
-            **self._override_stamp(),
+            **self._override_stamp(ctx),
             **extra,
         }
         self.queue.set_apparatus(ctx.run.id, apparatus, worker_id=self.worker_id)
@@ -1684,6 +1693,7 @@ class Worker:
         on a worker whose replay posture is sealed and stamps nothing else."""
         if self.settings.env != "prod":
             return {}
+        ack = dict(self.settings.unsealed_override_ack)
         stamp = {
             "env": "prod",
             "sandbox_executor": self.settings.executor,
@@ -1692,13 +1702,28 @@ class Worker:
             "run_kind": "factory",
             "override": ALLOW_UNSEALED_PROD_ENV,
             "adr": "0023",
+            **({"acknowledged_by": ack["by"]} if ack.get("by") else {}),
         }
         return {"unsealed_prod_override": stamp}
 
-    def _override_stamp(self) -> dict[str, Any]:
+    def _override_stamp(self, ctx: RunContext) -> dict[str, Any]:
         """ADR-0023: a prod worker running unsealed under the override says so on every
-        apparatus it writes (and so in every pack); nothing when sealed or in dev."""
+        apparatus it writes (and so in every pack); nothing when sealed or in dev. A worker
+        whose DEFAULTS are sealed stamps a run that asks for another executor in its own
+        parameters (only the override admits one), naming who set the override (P-248)."""
         o = dict(self.settings.unsealed_override)
+        if not o and self.settings.env == "prod":
+            kind = self._executor_kind(ctx)
+            if kind != "docker":
+                ack = dict(self.settings.unsealed_override_ack)
+                o = {
+                    "env": "prod",
+                    "sandbox_executor": kind,
+                    "builder_executor": self.settings.builder_executor,
+                    "override": ALLOW_UNSEALED_PROD_ENV,
+                    "adr": "0023",
+                    "acknowledged_by": ack.get("by", ""),
+                }
         return {"unsealed_prod_override": o} if o else {}
 
     def _progress(self, ctx: RunContext, done: int, total: int) -> None:
@@ -2244,7 +2269,7 @@ class Worker:
             on_environment=gate.on_environment,
             extra={
                 "worker": self.worker_id,
-                **self._override_stamp(),
+                **self._override_stamp(ctx),
                 "budget": budget.to_dict(),
                 "builder_config": dict(p.get("builder_config") or {}),
                 "learning": learning.apparatus(),

@@ -18,6 +18,10 @@ Invariants
   ``/settings``, the Posture page) and the worker stamps it into every run's apparatus. In
   ``prod`` the builder defaults to ``docker``; in ``dev`` to ``host``.
   :func:`unsealed_prod_refusal` is the one rule; ``crb worker`` applies the same function.
+  **The override names who set it** (ADR-0023 as amended, G-663): in ``prod`` it is refused
+  without ``CRB_ALLOW_UNSEALED_PROD_BY`` (an admin's username) and
+  ``CRB_ALLOW_UNSEALED_PROD_REASON`` (:func:`unsealed_override_ack_refusal`); the start-up of
+  each process checks the name against the store and writes the audit event.
 * **A deployment never lives in a temporary directory** (DL-045). ``CRB_HOME`` under
   ``/tmp``, ``/private/tmp``, ``/var/folders`` or ``$TMPDIR`` is refused in ``prod`` and
   warned about in ``dev`` (:func:`temp_dir_reason`); ``CRB_ALLOW_TEMP_HOME=true`` is the
@@ -32,14 +36,15 @@ What it does: Parses the environment into typed, nested settings (OIDC, bootstra
               retention, sandbox, builder container, factory); refuses to start in ``prod`` without a
               strong ``CRB_SECRET_KEY``, with a short bootstrap password or with a ``CRB_HOME``
               under an OS-managed temporary directory (``dev`` warns), or with the host builder
-              or the local executor unless ``CRB_ALLOW_UNSEALED_PROD=1`` (ADR-0023); keeps secret
+              or the local executor unless ``CRB_ALLOW_UNSEALED_PROD=1`` names who set it and
+              why (``_BY``, ``_REASON``; ADR-0023); keeps secret
               values as ``SecretStr`` and exposes only ``redacted_dict`` for display. Defines
               the role ladder and ``MIN_PASSWORD_LENGTH`` the auth module enforces.
 How:          ``pydantic-settings`` with ``CRB_`` prefix and ``__`` nesting; CSV-or-JSON
               list fields via ``NoDecode`` + a ``before`` validator; an ``after`` validator
               generates a dev-only ephemeral key, applies the temporary-home guard
               (``temp_dir_reason``), resolves the builder's default executor for the env and
-              applies ``unsealed_prod_refusal``.
+              applies ``unsealed_prod_refusal`` and ``unsealed_override_ack_refusal``.
 Layer:        server — docs/ARCHITECTURE.md#71-security
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md
@@ -126,6 +131,13 @@ TEMP_HOME_ADVICE = (
 #: The one explicit opt-in to running production unsealed (ADR-0023). Its presence is the
 #: operator's statement that this deployment's measurements are a development reading.
 ALLOW_UNSEALED_PROD_ENV = "CRB_ALLOW_UNSEALED_PROD"
+#: Who set the override: the username of an existing, active admin account (ADR-0023 as
+#: amended 2026-09-27, G-663). An environment variable carries no identity, so production
+#: refuses the override without this name, and every process start under it writes an
+#: audit event naming that person (``crb.server.unsealed_override``).
+ALLOW_UNSEALED_PROD_BY_ENV = f"{ALLOW_UNSEALED_PROD_ENV}_BY"
+#: Why it was set, in the admin's words — written into the same event.
+ALLOW_UNSEALED_PROD_REASON_ENV = f"{ALLOW_UNSEALED_PROD_ENV}_REASON"
 #: The sealed kind for both executors: tests in the fail-closed sandbox (ADR-0005), the
 #: builder in its sealed container (ADR-0012).
 SEALED_EXECUTOR = "docker"
@@ -168,10 +180,41 @@ def unsealed_prod_refusal(
     return (
         "production refuses the unsealed posture (ADR-0023): "
         + "; ".join(unsealed)
-        + f". Use docker for both, or set {ALLOW_UNSEALED_PROD_ENV}=1 to run unsealed on "
-        "purpose: the override is shown on /health and the Posture page and stamped into "
-        "every run's apparatus, and what such a run measures is a development reading, not "
-        f"evidence ({UNSEALED_PROD_DOC})"
+        + f". Use docker for both, or set {ALLOW_UNSEALED_PROD_ENV}=1 with "
+        f"{ALLOW_UNSEALED_PROD_BY_ENV}=<an admin's username> and "
+        f"{ALLOW_UNSEALED_PROD_REASON_ENV} to run unsealed on purpose: each start under the "
+        "override is an audit event naming that admin, the override is shown on /health and "
+        "the Posture page and stamped into every run's apparatus, and what such a run "
+        f"measures is a development reading, not evidence ({UNSEALED_PROD_DOC})"
+    )
+
+
+def unsealed_override_ack_refusal(env: str, *, allow: bool, by: str, reason: str) -> str:
+    """Why the override may not be used as set, or ``""`` (ADR-0023 as amended, G-663).
+
+    In ``prod`` the override (``allow``) must name who set it and why:
+    ``CRB_ALLOW_UNSEALED_PROD_BY`` (an admin's username; that it is an existing, active
+    admin is checked against the store when the process starts) and
+    ``CRB_ALLOW_UNSEALED_PROD_REASON``. It is required whether or not the replay posture is
+    sealed, because the override also admits factory builds on the host. ``dev`` and an
+    unset override never need it. The API and the worker both call this."""
+    if env != "prod" or not allow:
+        return ""
+    missing = [
+        name
+        for name, value in (
+            (ALLOW_UNSEALED_PROD_BY_ENV, by),
+            (ALLOW_UNSEALED_PROD_REASON_ENV, reason),
+        )
+        if not value.strip()
+    ]
+    if not missing:
+        return ""
+    return (
+        f"{ALLOW_UNSEALED_PROD_ENV}=1 in production must say who set it and why (ADR-0023): "
+        f"set {' and '.join(missing)} — {ALLOW_UNSEALED_PROD_BY_ENV} is the username of an "
+        "active admin account, and each start under the override writes an audit event "
+        "naming that person and the reason"
     )
 
 
@@ -655,6 +698,11 @@ class Settings(BaseSettings):
     #: ``CRB_ALLOW_UNSEALED_PROD=1`` admits the host builder or the local test executor in
     #: ``prod`` (ADR-0023). Shown by :meth:`posture`; the worker stamps it on every run.
     allow_unsealed_prod: bool = False
+    #: ``CRB_ALLOW_UNSEALED_PROD_BY`` / ``CRB_ALLOW_UNSEALED_PROD_REASON``: who set the
+    #: override (an active admin's username) and why — required with it in ``prod``, and
+    #: written into an audit event at every start under it (G-663).
+    allow_unsealed_prod_by: str = ""
+    allow_unsealed_prod_reason: str = ""
     database_url: str | None = None
     secret_key: SecretStr | None = None
     #: Session lifetime in seconds (default 8 hours).
@@ -800,6 +848,14 @@ class Settings(BaseSettings):
         )
         if refusal:
             raise ValueError(refusal)
+        ack = unsealed_override_ack_refusal(
+            self.env,
+            allow=self.allow_unsealed_prod,
+            by=self.allow_unsealed_prod_by,
+            reason=self.allow_unsealed_prod_reason,
+        )
+        if ack:
+            raise ValueError(ack)
         # dependency provisioning: a typo in an allowlist, a public registry in prod without
         # allow_public, or an unpinned fetch image fails at start-up — never at the first fetch
         refusal_p = self.provision_config.production_refusal()
@@ -844,6 +900,17 @@ class Settings(BaseSettings):
             and not sealed
             and self.allow_unsealed_prod,
             "factory_builds": factory_builds_posture(self.env, allow=self.allow_unsealed_prod),
+        }
+
+    @property
+    def unsealed_override_ack(self) -> dict[str, str]:
+        """``{"by", "reason"}`` when this production process starts under the override (the
+        start-up writes them into an audit event, G-663); ``{}`` otherwise."""
+        if self.env != "prod" or not self.allow_unsealed_prod:
+            return {}
+        return {
+            "by": self.allow_unsealed_prod_by.strip(),
+            "reason": self.allow_unsealed_prod_reason.strip(),
         }
 
     @property
@@ -965,5 +1032,6 @@ __all__ = [
     "default_builder_executor",
     "factory_builds_posture",
     "temp_dir_reason",
+    "unsealed_override_ack_refusal",
     "unsealed_prod_refusal",
 ]

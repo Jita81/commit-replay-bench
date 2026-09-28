@@ -1355,10 +1355,27 @@ class SignoffVerifyOut(ChainVerifyOut):
     verified_at: str
 
 
+class EventsVerifyOut(BaseModel):
+    """The audit trail's chain (``events``, ADR-0029): ``broken_at`` is an event id."""
+
+    rows: int
+    chain_ok: bool
+    broken_at: int | None
+    detail: str
+    #: The last event's ``row_hash`` (``""`` when there is none) — to record outside the store.
+    head_row_hash: str
+    #: ``full`` — every event re-hashed; ``tail`` — only those appended since the last clean
+    #: walk, from its head (P-249). ``?full=true`` (operator) forces ``full``.
+    walk: str = "full"
+    #: When the last full walk behind this answer ran (ISO 8601, UTC).
+    full_walk_at: str = ""
+
+
 class LedgerVerifyOut(BaseModel):
     """``GET /ledger/verify`` — the grades chain, false-Q1 over the stored belts, the clean
-    rows measured here whose pack is absent or does not re-hash to its name, and the
-    sign-off and review chains (EI-6): ``ok`` only when every one of them holds."""
+    rows measured here whose pack is absent or does not re-hash to its name, the sign-off
+    and review chains (EI-6) and the audit trail's chain (``events``, ADR-0029): ``ok`` only
+    when every one of them holds."""
 
     rows: int
     ok: bool
@@ -1370,6 +1387,10 @@ class LedgerVerifyOut(BaseModel):
     signoffs: ChainVerifyOut
     reviews: ChainVerifyOut
     verified_at: str
+    #: The grade ledger's last ``row_hash`` (``""`` when empty) — to record outside the
+    #: store, so a chain replaced wholesale reads another head (G-601).
+    head_row_hash: str = ""
+    events: EventsVerifyOut
 
 
 class LedgerImportOut(BaseModel):

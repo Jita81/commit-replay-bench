@@ -233,8 +233,11 @@ def test_seq_collision_is_reallocated_under_the_lock_never_dropped(
             text(
                 "INSERT INTO events (event_id, trace_id, seq, timestamp, stage, action, status, "
                 "step_id, parent_step_id, actor, repo, task_id, input_ref, output_ref, "
-                "error_code, error_message, payload_json) VALUES ('x', 't', 3, 'ts', 'system', "
-                "'dup', 'ok', '', '', '', '', '', '', '', '', '', '{}')"
-            )
+                "error_code, error_message, payload_json, prev_hash, row_hash) VALUES ('x', "
+                "'t', 3, 'ts', 'system', 'dup', 'ok', '', '', '', '', '', '', '', '', '', '{}', "
+                ":prev, :row)"
+            ),
+            # well-formed chain columns (revision 0013's CHECK), so only the seq can refuse it
+            {"prev": "c" * 64, "row": "d" * 64},
         )
         s.commit()

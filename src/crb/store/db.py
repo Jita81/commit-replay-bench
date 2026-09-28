@@ -29,6 +29,8 @@ What it does: Resolves the database URL (``CRB_DATABASE_URL`` → explicit → S
               refusing triggers on every append-only table — plus, on PostgreSQL, a
               statement-level ``TRUNCATE``-refusing one. Refuses any dialect other than
               SQLite or PostgreSQL rather than run without the triggers.
+              Owns the one text the triggers raise (``append_only_error_text``), which the
+              append-only probe takes as the only proof a trigger fired.
 How:          ``database_url`` → ``make_engine`` (per-connection pragmas via an event
               listener) → ``init_db`` = ``create_all`` + ``install_append_only_triggers``;
               ``expected_triggers`` is the one list the installer, the ``/health`` probe and
@@ -141,6 +143,17 @@ def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
         s.close()
 
 
+#: What an append-only trigger raises, on both dialects: ``"<table> is append-only"``. The
+#: probe (:func:`crb.store.ledger.assert_append_only`) takes only this text as proof that
+#: the trigger fired, so it is defined once, here, beside the trigger SQL.
+APPEND_ONLY_SUFFIX = " is append-only"
+
+
+def append_only_error_text(table: str) -> str:
+    """The text ``table``'s triggers raise (``"grades is append-only"``)."""
+    return f"{table}{APPEND_ONLY_SUFFIX}"
+
+
 #: The trigger kinds each dialect installs on every append-only table, with the event each
 #: refuses. SQLite has no ``TRUNCATE`` (its truncate is ``DELETE`` without ``WHERE``, which
 #: the row trigger refuses); PostgreSQL's ``TRUNCATE`` is a STATEMENT event no ``FOR EACH
@@ -152,9 +165,9 @@ TRIGGER_KINDS: dict[str, tuple[tuple[str, str], ...]] = {
 
 #: The body of ``crb_append_only()`` exactly as installed — the live check compares it, so a
 #: function its owner replaced with a no-op does not count as protection.
-_PG_FUNCTION_SRC = """
+_PG_FUNCTION_SRC = f"""
 BEGIN
-  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
+  RAISE EXCEPTION '%{APPEND_ONLY_SUFFIX}', TG_TABLE_NAME;
 END;
 """
 _PG_FUNCTION = (
@@ -181,7 +194,7 @@ def _event_of(name: str, dialect: str) -> str:
 def _sqlite_trigger_sql(table: str, name: str) -> str:
     return (
         f"CREATE TRIGGER {name} BEFORE {_event_of(name, 'sqlite')} ON {table} "
-        f"BEGIN SELECT RAISE(ABORT, '{table} is append-only'); END;"
+        f"BEGIN SELECT RAISE(ABORT, '{append_only_error_text(table)}'); END;"
     )
 
 
