@@ -12,8 +12,9 @@
  *               as the answer when the read fails: the Connect row and walk showed "Not started"
  *               and offered a paid Measure, and the Measure page priced a run from the documented
  *               range, each while the read behind it was down. The sources that did this before
- *               the ratchet are listed in `NOT_YET_READ` — a list that only shrinks: an entry
- *               that no longer offends must be removed, and a new offender fails. The matcher is
+ *               the ratchet are listed in `NOT_YET_READ`, and a match that is not a query at all
+ *               in `NOT_A_QUERY` with why — lists that only shrink: an entry that no longer
+ *               offends must be removed, and a new offender fails. The matcher is
  *               pinned on its own strings, so the ratchet cannot pass by matching nothing.
  * How:          `import.meta.glob` over the sources as `?raw` text; comments stripped; one regex
  *               for the reads and one per way of reading the failure.
@@ -47,7 +48,6 @@ const NOT_YET_READ: ReadonlySet<string> = new Set([
   'screens/Connect/ConnectPage.tsx::watched',
   'screens/Connect/MeasurePage.tsx::active',
   'screens/Connect/MeasurePage.tsx::health',
-  'screens/Connect/MeasurePage.tsx::sandbox',
   'screens/Decisions/useDecisionCount.ts::v',
   'screens/Factory/FactoryPage.tsx::map',
   'screens/Factory/FactoryPage.tsx::runs',
@@ -60,6 +60,11 @@ const NOT_YET_READ: ReadonlySet<string> = new Set([
   'screens/Settings/ClaudeCodeLoginCard.tsx::session',
   'screens/Signoff/SignoffPage.tsx::evidence',
   'screens/Signoff/SignoffPage.tsx::map',
+])
+
+/** Matches that are not a query's read at all, each with why. Only shrinks. */
+const NOT_A_QUERY: ReadonlyMap<string, string> = new Map([
+  ['screens/Connect/MeasurePage.tsx::sandbox', 'a `/health` probe object (`health.data?.probes.find(…)`), whose own `data` is the probe payload; the `health` read it comes from is listed above'],
 ])
 
 /** The queries a source reads through a fallback or into a derived value and never answers when they fail. */
@@ -97,12 +102,12 @@ describe('failed reads (P-173, G-730)', () => {
   it('no screen or component shows a fallback for a read that failed, beyond the reads not yet read (a list that only shrinks)', () => {
     const offenders = Object.entries(SOURCES).flatMap(([path, src]) => unansweredReads(src).map((n) => key(path, n)))
     expect(
-      offenders.filter((o) => !NOT_YET_READ.has(o)),
+      offenders.filter((o) => !NOT_YET_READ.has(o) && !NOT_A_QUERY.has(o)),
       'answer the failed read (an isError branch, QueryBoundary or failedRead) before showing its fallback',
     ).toEqual([])
     expect(
-      [...NOT_YET_READ].filter((o) => !offenders.includes(o)),
-      'this read no longer offends: remove it from NOT_YET_READ',
+      [...NOT_YET_READ, ...NOT_A_QUERY.keys()].filter((o) => !offenders.includes(o)),
+      'this read no longer offends: remove it from its list',
     ).toEqual([])
   })
 })

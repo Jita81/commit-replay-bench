@@ -242,8 +242,9 @@ describe('ConnectPage', () => {
         return envelope(503, 'store_unavailable', 'the store is not answering')
       },
     })
-    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     const err = await screen.findByTestId('connect-walk-error')
+    expect(unhinted(container)).toEqual([])
     expect(err).toHaveTextContent(title)
     expect(err).toHaveTextContent('HTTP 503')
     // no stage reads "Not started" in the read's place, and nothing is offered to run or spend
