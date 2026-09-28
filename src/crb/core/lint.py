@@ -1187,20 +1187,33 @@ def js_lint_evidence(root: Path | ConfigFiles) -> dict[str, str]:
     found: dict[str, str] = {}
     for tool, configs, key in (
         ("eslint", _ESLINT_CONFIGS, "eslintConfig"),
-        ("prettier", _PRETTIER_CONFIGS, "prettier"),
         ("stylelint", _STYLELINT_CONFIGS, "stylelint"),
     ):
         hit = next((c for c in configs if files.is_file(c)), "")
-        value = pkg.get(key)
-        # prettier's key may hold a shared config's name (a string); the others hold objects
-        in_pkg = value is not None if tool == "prettier" else isinstance(value, dict)
-        if hit or in_pkg:
+        if hit or isinstance(pkg.get(key), dict):
             found[tool] = hit or "package.json"
+    prettier = prettier_evidence(files)
+    if prettier:
+        found["prettier"] = prettier
+    found = {t: found[t] for t in ("eslint", "prettier", "stylelint") if t in found}
     if not found and _standard_script(pkg):
         found["standard"] = "package.json"
     if tsc_evidence(files, pkg) is not None:
         found["tsc"] = "package.json"
     return found
+
+
+def prettier_evidence(root: Path | ConfigFiles) -> str:
+    """The file that configures prettier — a config file, or ``package.json`` when its
+    ``prettier`` key is set (an object, or a shared config's name) — or ``""``. The format
+    step asks this too (``crb.core.formatting``), so the two never disagree (P-191)."""
+    files = config_files(root)
+    hit = next((c for c in _PRETTIER_CONFIGS if files.is_file(c)), "")
+    if hit:
+        return hit
+    return (
+        "package.json" if _json_of(files.text("package.json")).get("prettier") is not None else ""
+    )
 
 
 def _standard_script(pkg: Mapping[str, Any]) -> bool:
@@ -1541,6 +1554,7 @@ __all__ = [
     "jvm_plan",
     "lint_disabled",
     "plan_from_config",
+    "prettier_evidence",
     "python_lint_evidence",
     "python_plan",
     "python_ruff_evidence",
