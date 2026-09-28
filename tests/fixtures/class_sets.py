@@ -40,6 +40,7 @@ from crb.core.class_sets import (
     OrgClass,
     PersonLabel,
     classify,
+    example_keys,
     from_message,
 )
 from crb.core.spec import TaskSpec
@@ -86,6 +87,8 @@ def version(
 
 
 def cases(count: int = 200, *, size: str = "S", repo: str = REPO) -> list[Case]:
+    """The report's view of ``count`` commits, each mined as ``bug.fix`` (as
+    :func:`add_commits` writes them)."""
     v = version()
     return [
         Case(
@@ -94,18 +97,21 @@ def cases(count: int = 200, *, size: str = "S", repo: str = REPO) -> list[Case]:
             split=v.split(repo, sha(i)),
             size=size,
             message=from_message(message(i)),
+            mined_class="bug.fix",
         )
         for i in range(count)
     ]
 
 
 def agreeing_labels(cs: list[Case], *, labeller: str = LABELLER) -> list[PersonLabel]:
-    """A person who reads every derivation commit exactly as the rule does."""
+    """A person who reads every derivation commit they are offered exactly as the rule does
+    (a class's example commits are never offered)."""
     v = version()
+    shown = example_keys(cs)
     return [
         PersonLabel(c.repo, c.task_id, classify(v, c.fields).slug, labeller)
         for c in cs
-        if c.split == "derivation"
+        if c.split == "derivation" and (c.repo, c.task_id) not in shown
     ]
 
 
@@ -177,9 +183,10 @@ CHORE_IN = {
 
 
 def label_all(env: Any, n: int = 1) -> int:
-    """As the signed-in person, label every derivation commit of ``acme`` version ``n`` the way
-    the rule reads it (a person who agrees with the rule)."""
+    """As the signed-in person (never the version's sponsor), label every derivation commit
+    ``acme`` version ``n`` offers the way the rule reads it (a person who agrees with the rule)."""
     queue = env.get(f"/classes/{ORG}/v/{n}/label-queue").json()
+    assert queue["sponsor"] is False, "the sponsor is offered nothing to label"
     words = {"parser": "parser-fix", "parse": "parser-fix", "cli": "cli-fix", "flag": "cli-fix"}
     done = 0
     for item in queue["items"]:
@@ -195,8 +202,9 @@ def label_all(env: Any, n: int = 1) -> int:
 
 
 def routing_version(env: Any) -> dict[str, Any]:
-    """``acme/classes@v1`` over ``alpha``, proposed by the operator, labelled by them in full
-    and signed by the approver: a version that routes. Leaves the operator signed in."""
+    """``acme/classes@v1`` over ``alpha``, proposed by the operator (its sponsor), labelled in
+    full by the admin and signed by the approver — three people: a version that routes. Leaves
+    the operator signed in."""
     from fixtures.server_seed import login, logout
 
     r = env.post(
@@ -204,6 +212,8 @@ def routing_version(env: Any) -> dict[str, Any]:
     )
     assert r.status_code == 201, r.text
     proposed = dict(r.json())
+    logout(env.client)
+    login(env.client, "admin")
     label_all(env)
     logout(env.client)
     login(env.client, "approver")
@@ -212,3 +222,35 @@ def routing_version(env: Any) -> dict[str, Any]:
     logout(env.client)
     login(env.client, "operator")
     return dict(signed)
+
+
+def seed_routing_version(factory: sessionmaker[Session], *, repo: str = REPO) -> str:
+    """Write a routing ``acme/classes@v1`` over ``repo`` straight into the store — proposed by
+    :data:`SPONSOR` with the chores class, labelled in full by :data:`LABELLER` as the rule
+    reads it, signed by :data:`APPROVER` — for a test that has a store but no app (the worker).
+    ``repo`` must already hold :func:`add_commits`'s commits. Returns the version id."""
+    from crb.core.class_sets import ACT_PROPOSE, ACT_SIGN
+    from crb.server.class_set_state import cases_for
+    from crb.store.class_sets import SOURCE_PERSON, DbClassSets, new_act
+
+    chores = OrgClass(
+        slug="chore", title="Housekeeping", definition="Version bumps and other housekeeping.",
+        parent="docs.update", rule=ClassRule(words=("chore", "task")),
+    )  # fmt: skip
+    v = ClassSetVersion(
+        org=ORG, n=1, classes=(PARSER, CLI, chores), repos=(repo,), proposed_by=SPONSOR
+    )
+    store = DbClassSets(factory)
+    store.append(new_act(ORG, v.version_id, v.digest, ACT_PROPOSE, SPONSOR,
+                         body={"version": v.content()}))  # fmt: skip
+    with factory() as s:
+        cs = cases_for(s, v)
+    shown = example_keys(cs)
+    store.add_labels(
+        v.version_id,
+        [(c.repo, c.task_id, classify(v, c.fields).slug) for c in cs
+         if c.split == "derivation" and (c.repo, c.task_id) not in shown],
+        source=SOURCE_PERSON, labeller=LABELLER,
+    )  # fmt: skip
+    store.append(new_act(ORG, v.version_id, v.digest, ACT_SIGN, APPROVER))
+    return v.version_id

@@ -12,9 +12,11 @@ Four rules keep such a set honest:
 * **Held out by commit.** Before any class is proposed, each repository's replayable commits
   are split by ``sha256("crb.split.v1|" + repo + "|" + commit)`` into a **derivation set**
   (:data:`DERIVATION_SHARE`, one third — an ADR-0026 [operator] value) and a **confirmation
-  set** (two thirds). Proposing, merging, splitting, labelling and the separation test read
-  derivation commits only; a version licenses only on confirmation commits, through a reading
-  registered after it was signed (:func:`refuse_reading_pool`).
+  set** (two thirds). Proposing and labelling read derivation commits only (a class's example
+  commits, :func:`examples_of`, are derivation commits set aside from the labelled sample); a
+  version licenses only on confirmation commits, through a reading registered after it was
+  signed (:func:`refuse_reading_pool`). There is no merge, split or separation-test tool yet
+  (G-764): a version is changed by proposing the next one.
 * **One rule on both sides.** A version's rule reads only what a ticket carries —
   :class:`TicketFields`: its text, work-item type, component or area, labels and points, and
   the organisation's component names from the library. At intake it reads the ticket; at
@@ -23,8 +25,10 @@ Four rules keep such a set honest:
   dataclass has no field for them. A person's ``crb:class=`` override on a ticket is honoured
   and counted, and a high override rate fails the rule.
 * **The validity report** (:func:`validity_report`) — coverage, agreement with a
-  person-labelled sample (Cohen's κ), stability, ticket consistency, points-to-churn size
-  agreement, measurability and the override rate — runs before a version may route.
+  person-labelled sample (Cohen's κ, never reading the sponsor's labels: the rule is theirs),
+  stability, ticket consistency, points-to-churn size agreement, measurability (only commits a
+  reading of the class can pool: mined under its parent) and the override rate — runs before a
+  version may route.
 * **Two people.** A version is proposed by a sponsor and signed by a different approver,
   through the library's one two-person rule (:func:`crb.core.library.refuse_same_person`).
   A version routes nothing until its report passes and it is signed (:func:`routes`).
@@ -35,7 +39,8 @@ What it is:   The class-set record (``OrgClass``, ``ClassRule``, ``ClassSetVersi
               ticket-time fields a rule reads (``TicketFields``), the per-commit split, the one
               classifier, the version's acts and their fold (``ClassSetAct``, ``VersionState``),
               the validity report and the routing and reading-pool guards.
-What it does: Splits commits into derivation and confirmation sets by a seeded hash; classifies
+What it does: Splits commits into derivation and confirmation sets by a seeded hash; picks each
+              class's example commits (set aside from the labelled sample); classifies
               a ticket or a commit's message by the version's rule (override first, then the
               first matching class, else unclassified); checks each act against the version's
               state (a proposal is the org's next number; a signature needs a person who is not
@@ -156,6 +161,9 @@ REFUSAL_NOT_SIGNABLE = "not_signable"
 REFUSAL_DERIVATION_COMMIT = "derivation_commit"
 REFUSAL_NOT_ROUTING = "class_set_not_routing"
 REFUSAL_CONFIRMATION_LABEL = "confirmation_commit"
+REFUSAL_EXAMPLE_LABEL = "example_commit"
+REFUSAL_SPONSOR_LABEL = "sponsor_label"
+REFUSAL_REPO_TAKEN = "repository_has_a_class_set"
 
 # --- why a version does not route ---------------------------------------------------------
 ROUTE_OK = "routes"
@@ -163,6 +171,20 @@ ROUTE_UNKNOWN = "class_set_unknown"
 ROUTE_UNSIGNED = "class_set_unsigned"
 ROUTE_REVOKED = "class_set_revoked"
 ROUTE_REPORT_FAILED = "class_set_report_failed"
+
+#: Example commits a class's page shows at most — drawn from the derivation commits set aside
+#: from the labelled sample, so no person labels a commit they were shown as the rule's example
+#: (P-686).
+EXAMPLES_PER_CLASS = 5
+#: The share of derivation commits set aside as examples, and the seed of that draw: a property
+#: of each commit alone (like the split), so mining more history never turns an example into a
+#: commit to label, nor the reverse.
+EXAMPLE_SHARE = 1 / 8
+EXAMPLE_SEED = "crb.example.v1"
+
+#: The report's measures that never stop a version routing: size agreement decides only
+#: whether story points size a ticket (ADR-0026 item 8; DL-331).
+NOT_ROUTING_CONDITIONS: frozenset[str] = frozenset({"size_agreement"})
 
 MAX_CLASSES = 64
 MAX_TERMS = 32
@@ -330,6 +352,12 @@ class ClassRule:
 # ---------------------------------------------------------------------------
 
 
+def global_parents() -> tuple[str, ...]:
+    """The global classes an organisation's class may be a child of, in the vocabulary's
+    order (every global class but ``(unclassified)``)."""
+    return tuple(k for k in CLASS_DEFINITIONS if k != UNCLASSIFIED)
+
+
 @dataclass(frozen=True)
 class OrgClass:
     """One class of an organisation's set: a slug apart from the global classes, a title, a
@@ -355,7 +383,10 @@ class OrgClass:
                 f"{self.slug} is a global class: an organisation's class is named apart from them"
             )
         if self.parent == UNCLASSIFIED or self.parent not in CLASS_DEFINITIONS:
-            raise ValueError(f"{self.slug}: its parent is one of the global classes")
+            raise ValueError(
+                f"{self.slug}: its parent {self.parent!r} is not a global class; it is one of "
+                + ", ".join(global_parents())
+            )
         title = self.title.strip()
         if not title or len(title) > TITLE_MAX:
             raise ValueError(f"a class title is 1 to {TITLE_MAX} characters")
@@ -714,8 +745,11 @@ def fold(acts: Iterable[ClassSetAct]) -> dict[str, VersionState]:
 @dataclass(frozen=True)
 class Case:
     """One replayable commit as the report reads it: its repository and id, which set it is
-    in, its churn tier (``size``), whether it is qualified (gold checked clean), its message and
-    — when one is linked — its ticket as it stood at the parent's date."""
+    in, its churn tier (``size``), whether it is qualified (gold checked clean), its message,
+    — when one is linked — its ticket as it stood at the parent's date, and the global class the
+    miner gave it (``mined_class``, read from its paths: never an input to the rule, but what a
+    reading's pool is keyed by, so measurability counts only commits mined under a class's
+    parent)."""
 
     repo: str
     task_id: str
@@ -724,6 +758,7 @@ class Case:
     message: TicketFields
     ticket: TicketFields | None = None
     qualified: bool = True
+    mined_class: str = ""
 
     @property
     def fields(self) -> TicketFields:
@@ -790,7 +825,7 @@ class ValidityReport:
 
     @property
     def passes(self) -> bool:
-        return all(m.passed for m in self.measures if m.name != "size_agreement")
+        return all(m.passed for m in self.measures if m.name not in NOT_ROUTING_CONDITIONS)
 
     @property
     def size_from_points(self) -> bool:
@@ -834,6 +869,41 @@ def _pct(x: float | None) -> str:
     return "—" if x is None else f"{x * 100:.1f}%"
 
 
+def set_aside(repo: str, commit: str) -> bool:
+    """Whether a derivation commit is set aside as a possible example: the first 16 hex digits
+    of ``sha256(EXAMPLE_SEED + "|" + repo + "|" + commit)`` read as a fraction fall below
+    :data:`EXAMPLE_SHARE` — fixed per commit, blind to every class and outcome."""
+    digest = hashlib.sha256(f"{EXAMPLE_SEED}|{repo}|{commit}".encode()).hexdigest()
+    return int(digest[:16], 16) / 16**16 < EXAMPLE_SHARE
+
+
+def example_keys(cases: Iterable[Case]) -> set[tuple[str, str]]:
+    """The (repository, commit) keys of the derivation commits set aside as examples: never
+    offered for labelling and never read by the report, whether or not a page shows them."""
+    return {
+        (c.repo, c.task_id) for c in cases if c.split == DERIVATION and set_aside(c.repo, c.task_id)
+    }
+
+
+def examples_of(
+    version: ClassSetVersion, cases: Iterable[Case], *, k: int = EXAMPLES_PER_CLASS
+) -> dict[str, tuple[Case, ...]]:
+    """class slug → its example commits: up to ``k`` of the set-aside derivation commits
+    (:func:`example_keys`), in (repository, commit) order, the version's rule puts in it. A
+    class's page shows them; no person labels a commit they were shown as the rule's answer
+    (P-686)."""
+    out: dict[str, list[Case]] = {c.slug: [] for c in version.classes}
+    ordered = sorted(cases, key=lambda c: (c.repo, c.task_id))
+    aside = example_keys(ordered)
+    for case in ordered:
+        if (case.repo, case.task_id) not in aside:
+            continue
+        slug = classify(version, case.fields).slug
+        if slug in out and len(out[slug]) < k:
+            out[slug].append(case)
+    return {slug: tuple(v) for slug, v in out.items()}
+
+
 def latest_person_labels(labels: Iterable[PersonLabel]) -> dict[tuple[str, str, str], str]:
     """(repo, task, labeller) → the labeller's latest class: a person may change their mind,
     and only their last word counts."""
@@ -853,10 +923,13 @@ def validity_report(
     intake_classified: int = 0,
 ) -> ValidityReport:
     """The validity report of ``version`` over its repositories' replayable commits
-    (``cases``) and the person-labelled sample (``labels``; only derivation commits count).
-    ``points_tier`` maps story points to a size tier (intake's published scale);
+    (``cases``) and the person-labelled sample (``labels``). Only a label of a derivation
+    commit counts, never one of a class's example commits (the labeller was shown the rule's
+    answer) and never the sponsor's (the rule is their own words: κ would measure its author
+    against it). ``points_tier`` maps story points to a size tier (intake's published scale);
     ``intake_overrides`` of ``intake_classified`` tickets carried a ``crb:class=`` override."""
     decided = {(c.repo, c.task_id): classify(version, c.fields) for c in cases}
+    shown = example_keys(cases)
     n = len(cases)
     classified = sum(1 for d in decided.values() if d.classified)
     coverage = _share(classified, n)
@@ -874,15 +947,25 @@ def validity_report(
     # agreement: the rule against a person, on derivation commits only
     derivation = {(c.repo, c.task_id) for c in cases if c.split == DERIVATION}
     pairs: list[tuple[str, str]] = []
-    per_class = dict.fromkeys((c.slug for c in version.classes), 0)
+    # the per-class minimum counts labelled COMMITS, as the sample does: two people labelling
+    # the same three commits are still three commits of the class (P-681)
+    in_class: dict[str, set[tuple[str, str]]] = {c.slug: set() for c in version.classes}
     sampled: set[tuple[str, str]] = set()
-    for (repo, task, _who), slug in latest_person_labels(labels).items():
+    skipped = {"sponsor": 0, "examples": 0}
+    for (repo, task, who), slug in latest_person_labels(labels).items():
         if (repo, task) not in derivation:
+            continue
+        if who == version.proposed_by:
+            skipped["sponsor"] += 1
+            continue
+        if (repo, task) in shown:
+            skipped["examples"] += 1
             continue
         sampled.add((repo, task))
         pairs.append((decided[(repo, task)].slug, slug))
-        if slug in per_class:
-            per_class[slug] += 1
+        if slug in in_class:
+            in_class[slug].add((repo, task))
+    per_class = {slug: len(keys) for slug, keys in in_class.items()}
     kappa = cohen_kappa(pairs)
     thin = sorted(s for s, k in per_class.items() if k < PER_CLASS_MIN)
     agree_ok = kappa is not None and kappa >= KAPPA_MIN and len(sampled) >= SAMPLE_MIN and not thin
@@ -895,7 +978,9 @@ def validity_report(
     if len(sampled) < SAMPLE_MIN:
         words += f"; the sample needs {SAMPLE_MIN - len(sampled)} more commits"
     if thin:
-        words += f"; fewer than {PER_CLASS_MIN} labels in {', '.join(thin)}"
+        words += f"; fewer than {PER_CLASS_MIN} labelled commits in {', '.join(thin)}"
+    if skipped["sponsor"]:
+        words += f"; {skipped['sponsor']} of the sponsor's own labels are not read"
     measures.append(
         Measure(
             "agreement",
@@ -905,7 +990,7 @@ def validity_report(
             len(sampled),
             "pass" if agree_ok else "fail",
             words + ".",
-            {"per_class": dict(per_class), "labels": len(pairs)},
+            {"per_class": dict(per_class), "labels": len(pairs), "set_aside": dict(skipped)},
         )
     )
     # stability: the rule applied again gives the same labels
@@ -992,13 +1077,27 @@ def validity_report(
             ),
         )
     )
-    # measurability: confirmation commits per class and size cell
+    # measurability: confirmation commits per class and size cell — only those a reading of
+    # the class can pool, which are the commits mined under its parent (a reading's cell is
+    # the parent's; P-682); the rest are counted as a diagnostic, never as measurable
     cells: dict[tuple[str, str], int] = {}
+    elsewhere = 0
     for c in cases:
         d = decided[(c.repo, c.task_id)]
-        if c.split == CONFIRMATION and c.qualified and d.classified:
-            cells[(d.slug, c.size)] = cells.get((d.slug, c.size), 0) + 1
+        if not (c.split == CONFIRMATION and c.qualified and d.classified):
+            continue
+        if c.mined_class != d.parent:
+            elsewhere += 1
+            continue
+        cells[(d.slug, c.size)] = cells.get((d.slug, c.size), 0) + 1
     routable = tuple(sorted(k for k, v in cells.items() if v >= MEASURABLE_MIN))
+    diagnostic = (
+        f" {elsewhere} more qualified confirmation commit{'s' if elsewhere != 1 else ''} of "
+        "these classes were mined under another global class, so no reading of the class can "
+        "read them (the miner's class comes from the changed files; G-761)."
+        if elsewhere
+        else ""
+    )
     measures.append(
         Measure(
             "measurability",
@@ -1012,8 +1111,12 @@ def validity_report(
                 if routable
                 else f"No class and size cell holds {MEASURABLE_MIN} qualified confirmation "
                 "commits yet, so the version can route no cell."
-            ),
-            {"cells": [{"class": k[0], "size": k[1], "n": v} for k, v in sorted(cells.items())]},
+            )
+            + diagnostic,
+            {
+                "cells": [{"class": k[0], "size": k[1], "n": v} for k, v in sorted(cells.items())],
+                "other_parent": elsewhere,
+            },
         )
     )
     # the override rate: how often a person had to correct the rule
@@ -1074,7 +1177,13 @@ def routes(state: VersionState | None, report: ValidityReport | None) -> RouteVe
             "No approver other than its sponsor has signed it, so it routes nothing.",
         )
     if report is None or not report.passes:
-        failed = [m.name for m in (report.measures if report else ()) if not m.passed]
+        # only the checks that stop routing are named: size agreement decides whether points
+        # size a ticket, never whether the version routes (DL-331; P-688)
+        failed = [
+            m.name
+            for m in (report.measures if report else ())
+            if not m.passed and m.name not in NOT_ROUTING_CONDITIONS
+        ]
         return RouteVerdict(
             False,
             ROUTE_REPORT_FAILED,
@@ -1150,14 +1259,21 @@ __all__ = [
     "COVERAGE_MIN",
     "DERIVATION",
     "DERIVATION_SHARE",
+    "EXAMPLES_PER_CLASS",
+    "EXAMPLE_SEED",
+    "EXAMPLE_SHARE",
     "KAPPA_MIN",
     "MEASURABLE_MIN",
+    "NOT_ROUTING_CONDITIONS",
     "OVERRIDE_RATE_MAX",
     "PER_CLASS_MIN",
     "REFUSAL_CONFIRMATION_LABEL",
     "REFUSAL_DERIVATION_COMMIT",
+    "REFUSAL_EXAMPLE_LABEL",
     "REFUSAL_NOT_ROUTING",
     "REFUSAL_OUT_OF_ORDER",
+    "REFUSAL_REPO_TAKEN",
+    "REFUSAL_SPONSOR_LABEL",
     "ROUTE_OK",
     "ROUTE_REPORT_FAILED",
     "ROUTE_REVOKED",
@@ -1186,12 +1302,16 @@ __all__ = [
     "apply",
     "classify",
     "cohen_kappa",
+    "example_keys",
+    "examples_of",
     "fold",
     "from_message",
+    "global_parents",
     "is_org_class_set",
     "latest_person_labels",
     "refuse_reading_pool",
     "routes",
+    "set_aside",
     "split_of",
     "validity_report",
     "verify_chain",

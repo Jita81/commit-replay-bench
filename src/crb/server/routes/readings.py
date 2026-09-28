@@ -22,7 +22,8 @@ What it is:   The readings route module and the store readers the capability map
 What it does: Registers a reading (operator): freezes the pool by rule from the repository's
               qualified tasks (``pool_by_rule``; a list the rule does not give is refused) —
               under an organisation's class set, only the confirmation commits its rule puts in
-              the reading's ``org_class``, and only while the set routes (ADR-0026 item 9),
+              the reading's ``org_class``, on that class's parent's cell, and only while the set
+              routes (ADR-0026 item 9),
               refuses an unsealed posture for a replayed arm, reads the rows and the readings
               already registered under the lock, and writes the event; lists readings with
               every arm's state and the budget per cell; answers a cell's proven standard on
@@ -298,6 +299,16 @@ def register_reading(
             # the class the version's rule gave each commit (the label table), and only its
             # confirmation commits: a commit that derived the class never licenses it
             state, _verdict = verdict_for(s, body.taxonomy)
+            klass = state.version.class_of(body.org_class) if state is not None else None
+            parent = klass.parent if klass is not None else ""
+            if parent and body.cell.get("capability_class", "") != parent:
+                # the organisation's class splits its parent's cell and no other: a reading on
+                # another global class's cell would be an orphan cell no gate reads (P-682)
+                raise ReadingRefused(
+                    f"{body.org_class} is a child of {parent}: a reading of it sits on a "
+                    f"{parent} cell, never on {body.cell.get('capability_class', '')!r}",
+                    code=REFUSAL_INVALID,
+                )
             labelled = DbClassSets(factory).rule_labels(body.taxonomy, body.repo)
             qualified = {
                 c: t

@@ -38,7 +38,8 @@ Works with:   src/crb/core/class_sets.py (the rule, the report, the verdict),
               src/crb/server/intake.py (the draft stamper),
               src/crb/server/factory_standard.py (the gate's readers),
               src/crb/server/routes/readings.py (the reading's pool)
-Tested by:    tests/test_server_routes_classes.py, tests/test_class_set_hooks.py
+Tested by:    tests/test_server_routes_classes.py, tests/test_class_set_hooks.py,
+              tests/test_class_set_worker.py
 Touch when:   onboarding a client repository never needs it — a repository joins a class set
               when a version names it; a tracker gains a history reader (bind
               ``LINKED_TICKET_READER``); a place that reads a class set is added (read the
@@ -87,6 +88,10 @@ EV_TICKET_CLASSIFIED = "class_set.ticket_classified"
 LABEL_TAXONOMY = "taxonomy"
 LABEL_ORG_CLASS = "org_class"
 LABEL_CLASS_BY = "class_by"
+#: The labels only the intake's classification writes; a backlog item registered by hand may
+#: not carry them, or it could claim an organisation's class no rule gave and no override
+#: counted (P-683).
+RESERVED_LABELS: tuple[str, ...] = (LABEL_TAXONOMY, LABEL_ORG_CLASS, LABEL_CLASS_BY)
 
 
 def points_tier(points: float) -> str:
@@ -112,6 +117,7 @@ def cases_for(session: Session, version: ClassSetVersion) -> list[Case]:
                 message=from_message(t.subject),
                 ticket=ticket,
                 qualified=t.gold_clean is True,
+                mined_class=t.capability_class,
             )
         )
     return out
@@ -306,6 +312,7 @@ __all__ = [
     "LABEL_ORG_CLASS",
     "LABEL_TAXONOMY",
     "LINKED_TICKET_READER",
+    "RESERVED_LABELS",
     "active_version",
     "cases_for",
     "draft_stamper",
