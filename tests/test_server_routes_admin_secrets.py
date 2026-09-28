@@ -489,6 +489,35 @@ def test_each_store_and_removal_is_one_event_naming_the_admin(
         )
 
 
+def test_the_credentials_trace_is_served_by_no_route(client: TestClient) -> None:
+    """Why ``settings.secret_set`` may carry the four-character fingerprint (a review of
+    PR #63 asked for it to go): the event is stored for an audit of the database, and no
+    route serves the credentials trace — every parameterised read, handed the trace's id as
+    each parameter, answers without a ``settings.*`` event in it. The same four characters
+    are what ``GET /settings/secrets`` already shows an operator by design (a viewer gets
+    presence only). A route that starts serving the trace fails here, and must then decide
+    what a history reader may see."""
+    from crb.server.routes.admin import SECRETS_TRACE
+
+    login(client)
+    assert client.put(PATH_, json={"token": GOOD}).status_code == 200
+    assert _secret_events(client)  # the event is there to be found
+    paths = client.get(f"{API_PREFIX}/openapi.json").json()["paths"]
+    reads = sorted(p for p, ops in paths.items() if "get" in ops and "{" in p)
+    for reader in ("/runs/{run_id}/events/log", "/users/{user_id}/events", "/repos/{name}/events"):
+        assert f"{API_PREFIX}{reader}" in reads, reads
+    served = []
+    for path in reads:
+        url = path
+        while "{" in url:
+            head, _, rest = url.partition("{")
+            url = head + SECRETS_TRACE + rest.partition("}")[2]
+        r = client.get(url)
+        if "settings.secret" in r.text or GOOD[-4:] in r.text:
+            served.append((path, r.status_code))
+    assert served == []
+
+
 def test_a_refused_store_writes_no_event(client: TestClient) -> None:
     login(client)
     assert client.put(PATH_, json={"token": "sk-ant-oat01-tiny"}).status_code == 422

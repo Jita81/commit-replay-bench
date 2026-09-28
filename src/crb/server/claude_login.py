@@ -68,6 +68,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -278,40 +279,39 @@ class LoginBroker:
         loaded = json.loads(path.read_text(encoding="utf-8"))
         return dict(loaded) if isinstance(loaded, dict) else {}
 
+    def _readable_sessions(self) -> Iterator[SessionState]:
+        """Every session that can be read, newest first — the one listing both readers
+        below use. A session that cannot be read is skipped, never raised: a directory a
+        concurrent sweep removed while it was listed (``OSError``), a ``meta.json`` that is
+        not JSON (``ValueError``) or lacks a field (``KeyError``, ``TypeError``). The secrets
+        list, every sign-in read and the API's start list sessions, so one damaged session
+        must not answer 500 to every role or stop the start (P-231)."""
+        if not self.sessions_dir.exists():
+            return
+
+        def mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:  # removed while it was listed
+                return 0.0
+
+        for sdir in sorted(self.sessions_dir.iterdir(), key=mtime, reverse=True):
+            try:
+                if not sdir.is_dir() or not (sdir / "meta.json").exists():
+                    continue
+                yield self.state(sdir.name)
+            except (LoginError, OSError, ValueError, KeyError, TypeError):
+                continue
+
     def done_sessions(self) -> list[SessionState]:
         """Every session whose token the helper stored (``done``), newest first."""
-        if not self.sessions_dir.exists():
-            return []
-        out: list[SessionState] = []
-        for sdir in sorted(
-            self.sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
-        ):
-            if not sdir.is_dir() or not (sdir / "meta.json").exists():
-                continue
-            try:
-                st = self.state(sdir.name)
-            except LoginError:
-                continue
-            if st.state == STATE_DONE:
-                out.append(st)
-        return out
+        return [st for st in self._readable_sessions() if st.state == STATE_DONE]
 
     def active(self) -> SessionState | None:
         """The one non-terminal session, if any (newest first)."""
-        if not self.sessions_dir.exists():
-            return None
-        for sdir in sorted(
-            self.sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
-        ):
-            if not sdir.is_dir() or not (sdir / "meta.json").exists():
-                continue
-            try:
-                st = self.state(sdir.name)
-            except LoginError:
-                continue
-            if st.state not in TERMINAL_STATES:
-                return st
-        return None
+        return next(
+            (st for st in self._readable_sessions() if st.state not in TERMINAL_STATES), None
+        )
 
     def submit_code(self, session_id: str, code: str) -> SessionState:
         """Hand the pasted code to the helper. The code is written once, owner-only, and

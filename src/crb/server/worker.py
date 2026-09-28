@@ -2793,9 +2793,11 @@ class Worker:
     def _deliver_override(self, run_id: str) -> str:
         """Who overrides this factory run's route gate, read from the run's row NOW: the
         ``params.deliver_override_by`` a second approver granted (``POST
-        /runs/{id}/deliver-override``), honoured only when it names an account that holds
-        the approver role at the moment of the gate — ``""`` otherwise (GOV-4). The loop
-        refuses one that names the run's own actor, on the record."""
+        /runs/{id}/deliver-override``), honoured only when it names an ACTIVE account that
+        holds the approver role at the moment of the gate — ``""`` otherwise (GOV-4): a
+        deactivated approver's grant licenses nothing, as deactivation ends everything the
+        account holds (P-229). The loop refuses one that names the run's own actor, on the
+        record."""
         with self.factory() as s:
             row = s.get(Run, run_id)
             who = str(
@@ -2807,7 +2809,11 @@ class Worker:
             if not who:
                 return ""
             user = s.get(User, who)
-            if user is None or ROLE_RANK.get(user.role, -1) < ROLE_RANK["approver"]:
+            if (
+                user is None
+                or not user.active
+                or ROLE_RANK.get(user.role, -1) < ROLE_RANK["approver"]
+            ):
                 return ""
         return who
 

@@ -1794,6 +1794,35 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
     assert overrides[-1].payload["override_by"] == grace
 
 
+def test_the_worker_never_honours_an_override_from_a_deactivated_approver(h: Harness) -> None:
+    """P-229: the worker read the override live at the gate and checked only that its
+    approver's account existed with the approver role — not that it was still active. An
+    approver who granted an override and was then deactivated (a leaver) still licensed the
+    delivery under their name, though deactivation ends everything the account holds. The
+    gate withholds it: no ``override_by`` on the route, the refusal is the route gate's."""
+    from crb.factory import evidence as fe
+    from crb.store.models import User
+
+    home, _item, _ = _multiply_backlog(h)
+    tester = _approver(h, "tester")
+    leaver = _approver(h, "leaver")
+    with h.factory() as s:
+        account = s.get(User, leaver)
+        assert account is not None
+        account.active = False
+        s.commit()
+    h.enqueue(
+        "factory",
+        ladder_json=["fake:m0"],
+        actor=tester,
+        params_json={"deliver": True, "deliver_override_by": leaver},
+    )
+    assert h.run_one().counts_json["by_status"] == {"accepted": 1}
+    refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED][-1].payload
+    assert refused["reason"].startswith("route gate:") and "override_by" not in refused
+    assert not [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
+
+
 def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness) -> None:
     """GOV-3 (governance review 2026-09-27): the worker resolves a factory run's ``checks``
     exactly as a replay's (``params.checks`` over the repository's block): the build is

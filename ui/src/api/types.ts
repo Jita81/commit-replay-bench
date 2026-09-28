@@ -1165,6 +1165,24 @@ export function approverName(s: Pick<Signoff, 'approver' | 'approver_name'>): st
   return s.approver_name || s.approver
 }
 
+/**
+ * Why a stale sign-off is stale, in the words both screens that list one use (the Sign-off
+ * table's status pill and the Decisions page), so a reason explained on one is never "signed
+ * at apparatus ?" on the other (P-232). `current` stands in when the record names no current
+ * apparatus.
+ */
+export function signoffStaleWhy(
+  s: Pick<Signoff, 'stale_reason' | 'checks_arm' | 'checks_arm_current' | 'apparatus_current' | 'evidence'>,
+  current = '',
+): string {
+  const now = s.apparatus_current || current || '?'
+  if (s.stale_reason === 'no_apparatus_stamp') return `signed before the apparatus stamp, now reading at ${now}`
+  if (s.checks_arm && s.checks_arm_current && s.checks_arm !== s.checks_arm_current) {
+    return `signed on the ${s.checks_arm} checks arm, now reading the ${s.checks_arm_current} arm`
+  }
+  return `signed at apparatus ${s.evidence.apparatus_versions.join(', ') || '?'}, now reading at ${now}`
+}
+
 /** `POST /signoffs` body (the older shape; the Sign-off screen's fuller request lives in ui/src/screens/Signoff/contract.ts). */
 export interface SignoffCreateRequest {
   repo: string
