@@ -30,9 +30,10 @@ How:          Thin handlers over src/crb/server/auth.py — ``authenticate_local
               ``upsert_oidc_user`` → event, all through ``_commit_audited``) → cookies →
               redirect, or ``_back_to_login`` (a race lost on every retry: ``oidc_failed``).
 Layer:        server — docs/ARCHITECTURE.md#71-security
-ADRs:         none
+ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md (§8, every sign-in)
 Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
-              (``record_user_event`` — the account trail), src/crb/server/routes/runs.py
+              (``record_user_event`` — the account trail; ``record_sign_in`` — every
+              sign-in, ADR-0028 §8), src/crb/server/routes/runs.py
               (``append_system_event`` for a refusal with no account), src/crb/server/app.py
               (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
               src/crb/server/settings.py (``OidcSettings``, ``local_auth_enabled``),
@@ -85,7 +86,7 @@ from crb.server.auth import (
     upsert_oidc_user,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
-from crb.server.routes.admin import record_user_event
+from crb.server.routes.admin import record_sign_in, record_user_event
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.settings import Settings
 from crb.store.models import User
@@ -235,6 +236,8 @@ def login(
             raise ApiError(401, "invalid_credentials", "username or password is incorrect")
         account.last_login = _now()
         record_user_event(db, action="user.login", actor=uid, target=account, method="local")
+        # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
+        record_sign_in(db, user=account, by="local")
 
     _commit_audited(db, _signed_in)
     user = db.get(User, uid) or user
@@ -482,6 +485,7 @@ def _complete_oidc(
             )
         user.last_login = _now()
         record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
+        record_sign_in(db, user=user, by="oidc")
         signed_in.append(user)
 
     try:

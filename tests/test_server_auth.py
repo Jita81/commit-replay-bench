@@ -28,9 +28,9 @@ Works with:   src/crb/server/auth.py (under test), src/crb/server/routes/auth.py
               src/crb/store/models.py (the ``users`` table), docs/SECURITY.md (authentication
               and authorisation, §3.4), docs/DEPLOYMENT.md (Entra ID → ``CRB_OIDC__*``, §4.1)
 Tested by:    tests/test_server_auth.py
-Touch when:   never for a new repository; a role is added to the ladder (the map and the RBAC
-              matrices in every route suite); the OIDC claims mapping changes; never so that a
-              mutating route skips CSRF.
+Touch when:   never for a new repository (onboarding one adds no role or sign-in path); a
+              role is added to the ladder (the map and the RBAC matrices in every route
+              suite); the OIDC claims mapping changes; never so that a mutating route skips CSRF.
 """
 
 from __future__ import annotations
@@ -642,6 +642,40 @@ def _user_events(app: Any, action: str) -> list[Any]:
         return list(
             s.execute(select(Event).where(Event.action == action).order_by(Event.seq)).scalars()
         )
+
+
+class TestEverySignInIsRecorded:
+    """``User.last_login`` keeps only the latest sign-in, so a recovery timed against it
+    (``GET /flow``, run-the-platform) was timed to the latest sign-in, not the first after
+    the reset. Every successful sign-in, local or OIDC, now writes ``user.signed_in``; a
+    refused one writes nothing (ADR-0028 §8)."""
+
+    def test_a_local_sign_in_writes_one_event_and_a_refused_one_none(
+        self, settings: Settings
+    ) -> None:
+        app = create_app(settings)
+        with TestClient(app) as c:
+            r = c.post(f"{API_PREFIX}/auth/login", json={"username": "root", "password": "nope-x"})
+            assert r.status_code == 401
+            assert _user_events(app, "user.signed_in") == []
+            uid = login(c).json()["id"]
+            login(c)
+        evs = _user_events(app, "user.signed_in")
+        assert len(evs) == 2
+        assert all(ev.actor == uid and ev.payload_json["target"] == uid for ev in evs)
+        assert all("password" not in str(ev.payload_json) for ev in evs)
+
+    def test_an_oidc_sign_in_writes_one_event(self, tmp_path: Path) -> None:
+        fake = FakeOidc({"sub": "entra-oid-7", "name": "Cy", "roles": ["crb-operators"]})
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        app = create_app(settings, oidc_client=fake)
+        c = _oidc_login(app, settings)
+        try:
+            uid = c.get(f"{API_PREFIX}/auth/me").json()["id"]
+        finally:
+            c.__exit__(None, None, None)
+        (ev,) = _user_events(app, "user.signed_in")
+        assert ev.actor == uid and ev.payload_json["target"] == uid
 
 
 class TestSessionRevocation:

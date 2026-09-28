@@ -30,11 +30,12 @@ Works with:   docs/SUMMARY.md (the customer summary), README.md (Start here, ste
               (the derivations the loop sentence describes), CHANGELOG.md (the frozen shape),
               scripts/claims_check.py (the allowlist the summary joins)
 Tested by:    (this is a test file)
-Touch when:   never for a new repository; the miner's defaults change (update README step 1 and
-              EVIDENCE-AND-CLAIMS §6b in the same change); routing.v2 or a belt-5 change lands
-              (rewrite the summary's bar and its Open gaps with the tests that fail);
-              ``crb.core.learn`` gains a path that acts (rewrite README's "What the product is" and
-              this test together); a pull request adds its changelog paragraph.
+Touch when:   never for a new repository (onboarding one changes no public document); the
+              miner's defaults change (update README step 1 and EVIDENCE-AND-CLAIMS §6b in
+              the same change); routing.v2 or a belt-5 change lands (rewrite the summary's bar
+              and its Open gaps with the tests that fail); ``crb.core.learn`` gains a path
+              that acts (rewrite README's "What the product is" and this test together); a
+              pull request adds its changelog paragraph.
 """
 
 from __future__ import annotations
@@ -221,7 +222,9 @@ def test_readme_says_the_loop_proposes_while_learn_has_no_actuator() -> None:
 
 # ─── E4: the changelog grows by one paragraph per pull request ───────────────────────────
 
-PR_LINK = "https://github.com/Jita81/commit-replay-bench/pull"
+#: A pull request's own page, ``pull/<digits>`` — never ``pull/new/<branch>``, GitHub's create
+#: form, which never becomes the pull request's page (docs/PREVENTION.md P-191).
+PR_LINK = re.compile(r"https://github\.com/Jita81/commit-replay-bench/pull/\d+\)")
 MAX_WORDS = 120
 
 
@@ -235,7 +238,8 @@ def test_unreleased_is_one_paragraph_per_pull_request() -> None:
     for entry in entries:
         assert entry.startswith("- "), entry[:80]
         assert "\n- " not in entry and "\n  - " not in entry, f"nested list: {entry[:80]}"
-        assert PR_LINK in entry, f"no pull request link: {entry[:80]}"
+        assert PR_LINK.search(entry), f"no pull request link: {entry[:80]}"
+        assert "/pull/new/" not in entry, f"a create-form link: {entry[:80]}"
         words = len(entry.split())
         assert words <= MAX_WORDS, f"{words} words: {entry[:80]}"
 

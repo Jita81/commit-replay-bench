@@ -225,6 +225,25 @@ def record_user_event(
     )
 
 
+def sign_in_trace_id(user_id: str) -> str:
+    """The ``system`` trace every sign-in of one account lands on (``signins:<id>``) — apart
+    from the account trail, because a sign-in changes nothing about the account."""
+    return system_trace_id("signins", user_id)
+
+
+def record_sign_in(db: Session, *, user: User, by: str) -> None:
+    """One ``user.signed_in`` event, in the caller's transaction: every successful sign-in,
+    so a recovery is timed to the first after a reset (ADR-0028 §8, DL-220). The payload
+    names the account and the way in — never a password or a hash."""
+    append_system_event(
+        db,
+        trace_id=sign_in_trace_id(user.id),
+        action="user.signed_in",
+        actor=user.id,
+        payload={"target": user.id, "by": by},
+    )
+
+
 def _username(user: User) -> str:
     return user.subject.removeprefix("local:") if user.issuer == LOCAL_ISSUER else user.subject
 
