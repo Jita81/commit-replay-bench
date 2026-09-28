@@ -99,6 +99,7 @@ from typing import Any, Protocol, runtime_checkable
 from crb.core.evidence import sha256_text, utc_now_iso
 from crb.core.git import GitError, GitRepo, git_config_env
 from crb.core.redact import redact
+from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import BacklogItem
 from crb.factory.build import FACTORY_IDENTITY, BuildResult
 from crb.factory.review import VERDICT_ACCEPT
@@ -319,6 +320,16 @@ def fenced(lines: list[str], *, info: str = "text") -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def _licensed_size(item: BacklogItem, build: BuildResult) -> str:
+    """The size of the cell a delivery is licensed on: the measured tier when the change
+    measures larger than the estimate (GOV-2), else the estimate."""
+    tiers = SIZE_TIER_NAMES
+    est, got = item.size_estimate, build.task.size
+    if got in tiers and (est not in tiers or tiers.index(got) > tiers.index(est)):
+        return got
+    return est
+
+
 def pr_body(
     item: BacklogItem,
     build: BuildResult,
@@ -362,6 +373,10 @@ def pr_body(
         f"- apparatus: `{build.pack.apparatus.apparatus_version}` runner `{build.pack.apparatus.runner}` "
         f"executor `{build.pack.apparatus.executor.get('executor', '')}`",
         f"- ledger row: `{build.row.row_hash if build.row else '(not ledgered)'}`",
+        # GOV-2: the licence covers the size of the change delivered — the larger of the
+        # item's estimate and the diff's measured tier names the cell the route was read on
+        f"- size: estimated `{item.size_estimate}`, measured `{build.task.size}` — licensed "
+        f"on the (`{item.capability_class}`, `{_licensed_size(item, build)}`) cell",
     ]
     if route_decision:
         lines.append(

@@ -58,13 +58,13 @@ Claims:       ``accept`` is the probes' licence plus one identity's opinion — 
 
 from __future__ import annotations
 
-import shutil
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from crb.core.confine import write_bytes_confined
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
@@ -200,7 +200,10 @@ class Probe(Protocol):
 
 def replay_edits(build: BuildResult, dest: Workspace) -> list[str]:
     """Copy the builder's SOURCE edits (never the oracle) from the build worktree
-    into ``dest``; a file the builder deleted is deleted. Returns the paths."""
+    into ``dest``; a file the builder deleted is deleted. Returns the paths. The write into
+    ``dest`` goes through :func:`crb.core.confine.write_bytes_confined`: a path the
+    repository commits as a symbolic link is refused, never followed out of the review tree
+    (GOV-5's class)."""
     src = build.workspace
     if src is None:
         raise ValueError("build workspace was closed — cannot replay its edits")
@@ -209,8 +212,7 @@ def replay_edits(build: BuildResult, dest: Workspace) -> list[str]:
         s = src.root / rel
         d = dest.root / rel
         if s.is_file():
-            d.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(s, d)
+            write_bytes_confined(dest.root, rel, s.read_bytes())
         elif d.exists():
             d.unlink()
         out.append(rel)

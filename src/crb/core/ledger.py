@@ -953,7 +953,7 @@ def grade_row_from_result(
             ),
             **({LABEL_STOP_REASON: stop_reason} if stop_reason else {}),
             **posture_labels(result),
-            **_api_labels(result),
+            **api_labels(result),
         },
     )
 
@@ -974,7 +974,7 @@ def posture_labels(result: GradeResult) -> dict[str, str]:
     return out
 
 
-def _api_labels(result: GradeResult) -> dict[str, str]:
+def api_labels(result: GradeResult) -> dict[str, str]:
     """Belt 6's hashed labels — only when the belt was switched on for the grade."""
     run = result.api_run
     if run is None:

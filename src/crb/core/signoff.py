@@ -705,16 +705,19 @@ class SignoffRecord:
         Evidence expires when the apparatus changes (EVIDENCE-AND-CLAIMS §4): a sign-off
         stamped at 2.1 does not license a cell that is now read at 2.2, so the overlay
         treats it as *stale* — kept on the record, shown in the Decisions inbox to be
-        re-signed or revoked, but lifting nothing. A record with no stamp (``crb.signoff.v1``)
-        or a cell with no rows is not judged stale here (the thin-cell rule covers the
-        latter); a cell read across several apparatus versions is covered when the
-        record's versions include every one of them.
+        re-signed or revoked, but lifting nothing. A record with no stamp (``crb.signoff.v1``,
+        or a stored row whose cell carries none) cannot show it covers the rows read now, so
+        it covers nothing and is stale on every apparatus (governance review 2026-09-27,
+        GOV-6: the write-time rules that once refused its thin cell do not run at read). A
+        cell with no rows is not judged here (the thin-cell rule refuses it); a cell read
+        across several apparatus versions is covered when the record's versions include
+        every one of them.
         """
         stamped = {v.strip() for v in self.apparatus_version.split(",") if v.strip()}
         current = set(cell.stats.apparatus_versions) if cell.stats is not None else set()
-        if not stamped or not current:
+        if not current:
             return True
-        return current <= stamped
+        return bool(stamped) and current <= stamped
 
     @property
     def arm(self) -> str:
@@ -730,10 +733,9 @@ class SignoffRecord:
 
     def covers_posture(self, cell: CapabilityCell) -> bool:
         """True when the attestation was made on evidence graded in the posture class(es) the
-        cell is read in (ADR-0019 §8): a sign-off never lifts a cell of another posture. As
-        with :meth:`covers_apparatus`, a record with no stamp (its evidence carried no
-        posture — before apparatus 2.3, and so stale by its apparatus already) or a cell with
-        no rows is not judged here."""
+        cell is read in (ADR-0019 §8): a sign-off never lifts a cell of another posture. A
+        record with no posture stamp (its evidence carried no posture — before apparatus 2.3,
+        and so stale by its apparatus already) or a cell with no rows is not judged here."""
         if not self.posture_class or cell.stats is None:
             return True
         return ",".join(cell.stats.posture_classes) == self.posture_class

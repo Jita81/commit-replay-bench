@@ -471,6 +471,19 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
   })
 }
 
+/**
+ * `POST /runs/{id}/deliver-override` — a SECOND approver overrides a factory run's route gate
+ * (ADR-0003 amendment 2026-09-27): refused 409 `same_actor` for the run's own actor; the grant
+ * is an event on the run's trace and never lifts a false-Q1 cell.
+ */
+export function useGrantDeliverOverride(): UseMutationResult<Run, ApiError, string> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id) => api<Run>(`/runs/${enc(id)}/deliver-override`, { method: 'POST' }),
+    onSuccess: (_r, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
+  })
+}
+
 /** `GET /runs/{id}/tasks` — every task of the run (one request, limit 500); polls only while asked. */
 export function useRunTasks(id: string, opts: { poll?: boolean } = {}): UseQueryResult<Page<RunTaskRow>, ApiError> {
   return useQuery({

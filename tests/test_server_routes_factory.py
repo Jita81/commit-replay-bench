@@ -496,32 +496,91 @@ def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
     assert r.status_code == 422 and "factory runs only" in envelope(r)["message"]
 
 
-def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> None:
-    """`deliver` / `max_rework` are stored on the run; `deliver_override` needs an approver
-    and stamps the caller's identity into `params.deliver_override_by` (the route gate's
-    override is an approver's act, on the evidence chain — DL-038); none of them apply to
-    a non-factory run."""
+def test_factory_delivery_fields_and_the_second_approver_override(env: Env) -> None:
+    """`deliver` / `max_rework` are stored on the run. The route gate's override licenses a
+    delivery the map refused, so it is a SECOND approver's evented act (GOV-4, ADR-0016's
+    two-person rule): nobody overrides at enqueue — an operator is 403, an approver 409
+    ``same_actor`` and nothing is queued — and on a queued or running factory run that
+    delivers, ``POST /runs/{id}/deliver-override`` is refused to the run's own actor and to
+    a role below approver, and granted to another approver, named on the run and on a
+    ``system/run.deliver_override`` event; factory fields on another kind are refused."""
+    import hashlib
+
+    from sqlalchemy import func, select
+
+    from crb.store.models import Event
+
     login(env.client, "operator")
     assert _register(env, [ITEM]).status_code == 201
     body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
     r = env.post("/runs", json={**body, "deliver": True, "max_rework": 2})
     assert r.status_code == 201, r.text
+    operators_run = r.json()["id"]
     with env.factory() as s:
-        run = s.get(Run, r.json()["id"])
+        run = s.get(Run, operators_run)
         assert run is not None
         assert run.params_json["deliver"] is True and run.params_json["max_rework"] == 2
         assert "deliver_override_by" not in run.params_json
-    # an operator may not override the route gate
+    # nobody overrides at enqueue: an operator is refused the role, an approver the act
     r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
     assert r.status_code == 403 and envelope(r)["code"] == "forbidden"
-    # an approver may — and is named for it
     login(env.client, "approver")
-    r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
-    assert r.status_code == 201, r.text
     with env.factory() as s:
-        run = s.get(Run, r.json()["id"])
-        assert run is not None and run.params_json["deliver_override_by"]
-        assert run.params_json["deliver_override_by"] == run.actor
+        before = s.execute(select(func.count()).select_from(Run)).scalar_one()
+    r = env.post("/runs", json={**body, "deliver": True, "deliver_override": True})
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor", r.text
+    assert "deliver-override" in envelope(r)["message"]
+    with env.factory() as s:
+        assert s.execute(select(func.count()).select_from(Run)).scalar_one() == before
+    # the approver queues a run that delivers, and cannot override its own run's gate
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    approvers_run = r.json()["id"]
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor"
+    # an operator may never grant it
+    login(env.client, "operator")
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 403
+    # a second approver (here the admin, who outranks one) grants it — named, evented
+    login(env.client, "admin")
+    root = hashlib.sha256(b"root").hexdigest()[:32]
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 200, r.text
+    assert r.json()["factory"]["deliver_override_by"] == root
+    with env.factory() as s:
+        run = s.get(Run, approvers_run)
+        assert run is not None and run.params_json["deliver_override_by"] == root != run.actor
+        events = (
+            s.execute(
+                select(Event).where(
+                    Event.trace_id == approvers_run, Event.action == "run.deliver_override"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [(e.actor, e.stage) for e in events] == [(root, "system")]
+    assert events[0].payload_json["run_actor"] != root
+    # once granted it stands for the run; a second grant is refused
+    r = env.post(f"/runs/{approvers_run}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "override_already_granted"
+    # a run that does not deliver has no gate to override; an unknown run is 404
+    login(env.client, "operator")
+    r = env.post("/runs", json={**body, "deliver": False})
+    quiet = r.json()["id"]
+    login(env.client, "admin")
+    r = env.post(f"/runs/{quiet}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "delivery_off"
+    assert env.post("/runs/nope/deliver-override").status_code == 404
+    # a finished run is past its gates
+    with env.factory() as s:
+        done = s.get(Run, operators_run)
+        assert done is not None
+        done.status = "succeeded"
+        s.commit()
+    r = env.post(f"/runs/{operators_run}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "run_terminal"
     # factory-only fields on another kind are refused, naming them
     login(env.client, "operator")
     r = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "deliver": True, "max_rework": 1})
@@ -529,6 +588,11 @@ def test_factory_delivery_fields_and_the_approver_only_override(env: Env) -> Non
         r.status_code == 422
         and "['deliver', 'max_rework'] apply to factory runs only" in envelope(r)["message"]
     )
+    r = env.post("/runs", json={"repo": ALPHA, "kind": "mine"})
+    assert r.status_code == 201
+    login(env.client, "admin")
+    r = env.post(f"/runs/{r.json()['id']}/deliver-override")
+    assert r.status_code == 409 and envelope(r)["code"] == "not_a_factory_run"
 
 
 def test_task_view_folds_the_refusal_reason_and_the_build_ids(env: Env) -> None:

@@ -503,6 +503,31 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     expect(line.textContent).toBe('factory · sighted · editblock · gpt-oss-120b · cerebras · ladder r1,r2 · delivery on (override by Grace)')
   })
 
+  it('a second approver overrides a factory run’s route gate on the run’s page; the run’s own actor is never offered it (GOV-4)', async () => {
+    const factory = { ...RUN, kind: 'factory' as const, factory: { deliver: true, deliver_override_by: null, deliver_override_by_name: null, backlog_hash: 'f'.repeat(64) } }
+    const { calls } = mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': factory,
+      'GET /runs/run-1/tasks': tasksPage([]),
+      'POST /runs/run-1/deliver-override': () => new Response(JSON.stringify({ ...factory, factory: { ...factory.factory, deliver_override_by: 'u1', deliver_override_by_name: 'Ada' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(await screen.findByRole('button', { name: 'Override the route gate (second approver)' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs/run-1/deliver-override')).toBe(true))
+  })
+
+  it('the approver who queued a factory run is not offered its route-gate override (GOV-4)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, id: 'ada' },
+      'GET /runs/run-1': { ...RUN, kind: 'factory', factory: { deliver: true, deliver_override_by: null, deliver_override_by_name: null, backlog_hash: 'f'.repeat(64) } },
+      'GET /runs/run-1/tasks': tasksPage([]),
+    })
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    await screen.findByTestId('run-identity')
+    expect(screen.queryByRole('button', { name: /Override the route gate/ })).toBeNull()
+  })
+
   it('live log: a failed belt and an error row carry the red glyph, and every row explains its action', async () => {
     mockApi({
       'GET /auth/me': PRINCIPAL,

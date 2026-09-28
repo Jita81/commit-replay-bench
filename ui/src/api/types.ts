@@ -544,7 +544,7 @@ export interface RunCreateRequest {
    * `model` / `provider` / `name` (the recorded identity) and credential-shaped keys.
    */
   builder_config?: Record<string, unknown>
-  /** factory runs only — delivery is route-gated (ADR-0003 amendment 2026-09-16); `deliver_override` needs approver. */
+  /** factory runs only — delivery is route-gated (ADR-0003 amendment 2026-09-16); `deliver_override` is refused 409 `same_actor` at enqueue — a second approver grants it with `POST /runs/{id}/deliver-override` (amendment 2026-09-27). */
   /** Per-run raw-retention switches (both default off — ADR-0006). */
   retain?: { worktrees?: boolean; transcripts?: boolean }
   deliver?: boolean
@@ -1114,8 +1114,10 @@ export interface Signoff {
   revoked: boolean
   /** Live: not revoked, not superseded, the cell still false-Q1-free and the apparatus unchanged. */
   active: boolean
-  /** Made on an earlier apparatus than the one the deployment reads at now (ADR-0015): kept, verifying, lifting nothing until re-signed or revoked. */
+  /** Made on an earlier apparatus than the one the deployment reads at now, or carrying no apparatus stamp (ADR-0015): kept, verifying, lifting nothing until re-signed or revoked. */
   stale: boolean
+  /** Why `stale` (first match): `no_apparatus_stamp` — signed before the stamp existed, so it covers no rows (GOV-6); `apparatus_moved`; `checks_arm_moved`; `posture_moved`; `""` when not stale. */
+  stale_reason?: '' | 'no_apparatus_stamp' | 'apparatus_moved' | 'checks_arm_moved' | 'posture_moved'
   /** The deployment's current apparatus, for comparison with `evidence.apparatus_versions`. */
   apparatus_current: string
   /** This stored row no longer hashes to its own `row_hash` — altered under the append-only triggers (EI-6). */

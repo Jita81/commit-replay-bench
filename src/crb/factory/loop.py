@@ -39,7 +39,9 @@ What it does: Sequences readiness (where the capability map's route for the item
               build ladder → independent review → rework (edit permitted only after a
               recorded verdict; bounded by ``max_rework``; a ``weak_oracle`` verdict never
               rebuilds against an unchanged oracle — DL-045 rule 3) → optional delivery
-              (default OFF, fails closed, gated on that route, and reached ONLY by an
+              (default OFF, fails closed, gated on that route — re-read on the measured cell
+              when the change measures larger than its estimate; an override honoured only
+              from a second approver and never on a false-Q1 cell — and reached ONLY by an
               ``accept`` verdict — ADR-0021), turning every governed refusal into an
               ``ItemOutcome`` status rather than an exception; an open pull request an
               earlier run opened is updated on ``accept`` and closed, naming the verdict, on
@@ -54,7 +56,8 @@ How:          ``FactorySpec`` carries every collaborator; ``FactoryLoop.run_item
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md,
-              docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19),
+              docs/adr/0003-one-routing-rule.md (the route gate; amended 2026-09-19 and
+              2026-09-27),
               docs/adr/0013-external-review-is-advisory-and-recorded.md (amended
               2026-09-21: a weak_oracle verdict never rebuilds against an unchanged oracle),
               docs/adr/0021-factory-review-before-delivery.md (review before delivery; only
@@ -76,10 +79,12 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from dataclasses import replace as dc_replace
 from pathlib import Path
 from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
+from crb.core.checks import ResolvedChecks
 from crb.core.deps import TaskDeps
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
@@ -87,9 +92,10 @@ from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
 from crb.core.posture import Posture
 from crb.core.redact import redact_and_cap, redact_and_cap_head
+from crb.core.routing import REASON_FALSE_Q1, ROUTE_DO_NOT_SHIP
 from crb.core.routing import ROUTE_DELIVER as ROUTE_DELIVER_WORD
 from crb.core.runners.base import BaseRunner
-from crb.core.spec import RepoConfig
+from crb.core.spec import SIZE_TIER_NAMES, RepoConfig
 from crb.factory.backlog import KIND_OPERATOR, Backlog, BacklogError, BacklogItem
 from crb.factory.build import BuildResult, build_ladder
 from crb.factory.delivery import (
@@ -224,12 +230,21 @@ class FactorySpec:
     #: delivery: a pull request is opened only when it reads ``deliver``. ``None`` (no map
     #: available) withholds delivery like any other non-deliver route. Called ONCE per
     #: item, at readiness, before any build: the map that licenses a delivery is the map
-    #: as it stood before this run's own rows landed (B-1b finding 2 → DL-045).
+    #: as it stood before this run's own rows landed (B-1b finding 2 → DL-045). It must answer
+    #: from ONE pre-run reading of the map (the worker's is computed once, without this run's
+    #: rows): when the built change measures larger than the item's estimate it is asked
+    #: again, for the measured cell, and that answer licenses the delivery (GOV-2).
     route_decision_for: Callable[[BacklogItem], Mapping[str, Any] | None] | None = None
     #: An approver's identity that overrides the route gate for THIS run; recorded on the
     #: evidence chain as a ``route.decided`` event naming the measured route it overrode.
-    #: Empty = no override (the default).
+    #: Empty = no override (the default). Never honoured when it names the run's own
+    #: ``actor`` (GOV-4: ADR-0016's two-person rule) or on a cell refused for false-Q1 (GOV-1:
+    #: the honesty floor) — both refusals are recorded on the chain.
     deliver_override_by: str = ""
+    #: The same override read LIVE at each item's delivery gate (the worker reads the run's
+    #: row, so a second approver's grant made while the run works reaches the next gate);
+    #: ``None`` = the static ``deliver_override_by``.
+    deliver_override_for: Callable[[], str] | None = None
     keep_workspaces: bool = False
     #: The posture the run grades in and the dependency bindings its items build with
     #: (ADR-0019). ``None`` resolves the posture live per build and uses the null
@@ -239,6 +254,10 @@ class FactorySpec:
     #: Keep every graded attempt's patch under ``<evidence_dir>/patches`` (crb.core.patches);
     #: ``False`` when the deployment keeps no code (``retention.patches`` off).
     keep_patches: bool = True
+    #: The run's ``checks`` switches (ADR-0024; the worker resolves ``params.checks`` over the
+    #: repository's block, as for a replay): every build is graded on that arm — the arm the
+    #: route gate read its licence on (GOV-3). ``None`` = the repository's own block.
+    checks: ResolvedChecks | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ladder", tuple(self.ladder))
@@ -326,6 +345,47 @@ def _route_summary(route: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return {k: route[k] for k in _ROUTE_SUMMARY_KEYS if k in route}
 
 
+#: The ``reason_code`` of a delivery withheld because the change measured larger than the
+#: cell its licence was read on, and the measured cell does not route ``deliver`` (GOV-2).
+REASON_SIZE_EXCEEDS_LICENCE = "size_exceeds_licence"
+#: Why an approver's override was NOT honoured, as the refusal records it (``override_refused``).
+OVERRIDE_REFUSED_FALSE_Q1 = "false_q1"
+OVERRIDE_REFUSED_SAME_ACTOR = "same_actor"
+_OVERRIDE_REFUSED_WHY: dict[str, str] = {
+    OVERRIDE_REFUSED_FALSE_Q1: (
+        "false-Q1 = 0 is the honesty floor: no override delivers on a cell with a false-Q1 "
+        "row (the override by {by} was refused)"
+    ),
+    OVERRIDE_REFUSED_SAME_ACTOR: (
+        "the override was named by this run's own actor {by}; a second approver grants it "
+        "(ADR-0016's two-person rule), so it was refused"
+    ),
+}
+
+
+def _tier(size: str) -> int:
+    """A size tier's rank (``XS`` = 0); an unknown word ranks below every tier."""
+    return SIZE_TIER_NAMES.index(size) if size in SIZE_TIER_NAMES else -1
+
+
+def _override_refusal(route: Mapping[str, Any] | None, override_by: str, *, actor: str) -> str:
+    """Why an override naming ``override_by`` cannot lift this route (``""`` = it may):
+    the honesty floor (a ``do_not_ship`` cell, a ``false_q1`` reason or any false-Q1 row in
+    the cell — GOV-1), or an override named by the run's own actor (GOV-4)."""
+    if not override_by:
+        return ""
+    r = route or {}
+    try:
+        fq1 = int(r.get("false_q1") or 0)
+    except (TypeError, ValueError):
+        fq1 = 1  # an unreadable count is not a clean one
+    if r.get("route") == ROUTE_DO_NOT_SHIP or r.get("reason_code") == REASON_FALSE_Q1 or fq1 > 0:
+        return OVERRIDE_REFUSED_FALSE_Q1
+    if actor and override_by == actor:
+        return OVERRIDE_REFUSED_SAME_ACTOR
+    return ""
+
+
 class _Stop(Exception):
     """Internal: end the item with a status (never escapes ``run_item``)."""
 
@@ -374,6 +434,13 @@ class FactoryLoop:
             return None
         d = f(item)
         return None if d is None else dict(d)
+
+    def _override_by(self) -> str:
+        """Who overrides the route gate for this run, read now: the live seam when the spec
+        has one (a second approver's grant made while the run works), else the static
+        value. ``""`` = nobody."""
+        f = self.spec.deliver_override_for
+        return str((f() if f is not None else self.spec.deliver_override_by) or "").strip()
 
     def _assess(self, item: BacklogItem) -> tuple[Readiness, dict[str, Any] | None]:
         """Step 1: readiness; stops the item on an unsigned structural gap or a human route.
@@ -493,6 +560,7 @@ class FactoryLoop:
             posture=s.posture,
             deps=s.deps,
             keep_patches=s.keep_patches,
+            checks=s.checks,
         )
         for res in results:
             s.evidence.record_build(
@@ -553,7 +621,17 @@ class FactoryLoop:
         # reviewed, but no pull request is opened; the withholding and the measured route
         # are on the evidence chain. An approver may override for one run, and that
         # override is itself an event naming the route it overrode. The route was read
-        # ONCE, at readiness, before this build's row landed (DL-045) — never re-read here.
+        # ONCE, at readiness, before this build's row landed (DL-045) — never re-read here,
+        # unless the change measures larger than the item's estimate (below).
+        #
+        # The licence covers the size of the change DELIVERED (GOV-2): the cell read at
+        # readiness is the item's declared size (a ticket's story points); when the build
+        # measures larger, the measured cell — from the same pre-run map — is the licence.
+        declared, delivered = item.size_estimate, final.task.size
+        resized = _tier(delivered) > _tier(declared)
+        if resized:
+            route = self._map_route(dc_replace(item, size_estimate=delivered))
+        sizes = {"size_estimate": declared, "size_measured": delivered} if resized else {}
         measured = str(route.get("route", "")) if route else ""
         if measured != ROUTE_DELIVER_WORD:
             why = (
@@ -561,14 +639,31 @@ class FactoryLoop:
                 if route is None
                 else f"the cell routes {measured} ({route.get('reason_code') or route.get('reason', '')})"
             )
-            if not s.deliver_override_by:
+            reason_code = str((route or {}).get("reason_code", ""))
+            if resized:
+                why = (
+                    f"the change measures {delivered} ({final.task.src_churn} changed lines) "
+                    f"where the item was estimated {declared}, and the ({item.capability_class}, "
+                    f"{delivered}) cell licenses no delivery: {why}"
+                )
+                reason_code = REASON_SIZE_EXCEEDS_LICENCE
+            override_by = self._override_by()
+            refused = _override_refusal(route, override_by, actor=s.actor)
+            if not override_by or refused:
+                note = (
+                    f" — {_OVERRIDE_REFUSED_WHY[refused].format(by=override_by)}" if refused else ""
+                )
                 s.evidence.record_delivery_refused(
                     item.id,
-                    f"route gate: {why}",
+                    f"route gate: {why}{note}",
                     pack_hash=final.pack_hash,
                     measured_route=measured,
-                    reason_code=str((route or {}).get("reason_code", "")),
+                    reason_code=reason_code,
                     policy_version=str((route or {}).get("policy_version", "")),
+                    **sizes,
+                    **(
+                        {"override_refused": refused, "override_by": override_by} if refused else {}
+                    ),
                 )
                 self._emit(
                     "delivery.withheld",
@@ -576,21 +671,23 @@ class FactoryLoop:
                     status=StepStatus.SKIPPED,
                     reason=why,
                     measured_route=measured,
+                    **({"override_refused": refused} if refused else {}),
                 )
                 return None, ""
             s.evidence.record_route(
                 item.id,
                 ROUTE_DELIVER_WORD,
-                f"route gate overridden by {s.deliver_override_by}: {why}",
-                override_by=s.deliver_override_by,
+                f"route gate overridden by {override_by}: {why}",
+                override_by=override_by,
                 measured_route=measured,
-                reason_code=str((route or {}).get("reason_code", "")),
+                reason_code=reason_code,
                 policy_version=str((route or {}).get("policy_version", "")),
+                **sizes,
             )
             self._emit(
                 "delivery.override",
                 item.id,
-                override_by=s.deliver_override_by,
+                override_by=override_by,
                 measured_route=measured,
             )
         try:

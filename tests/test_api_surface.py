@@ -480,3 +480,20 @@ def test_workspace_trees_read_parent_gold_and_trial_from_a_real_repository(tmp_p
         assert run.findings[0].gold == "func(int)" and run.findings[0].after == "func(string)"
     finally:
         ws.remove()
+
+
+def test_forward_mode_allows_an_addition_and_refuses_a_change_or_a_removal() -> None:
+    """GOV-3 (governance review 2026-09-27): the factory's task commit carries only the
+    oracle, so there is no gold to mirror. Forward mode reads the parent's surface plus what
+    the trial ADDS as the reference: a new public symbol (the feature the item asked for)
+    is matched, a changed or removed existing one is a finding. Replay mode is unchanged —
+    the same addition with no gold is a finding there."""
+    parent = {"m.py": "def f(a): ...\n\ndef g(a): ...\n"}
+    added = {"m.py": "def f(a): ...\n\ndef g(a): ...\n\ndef h(a): ...\n"}
+    run = api.evaluate(["m.py"], _three(parent, added, parent), forward=True)
+    assert run.ok is True and run.matched == 1 and not run.findings
+    assert api.evaluate(["m.py"], _three(parent, added, parent)).ok is False  # replay: a finding
+    broke = {"m.py": "def f(a, b): ...\n\ndef h(a): ...\n"}  # f changed, g removed, h added
+    bad = api.evaluate(["m.py"], _three(parent, broke, parent), forward=True)
+    assert bad.ok is False
+    assert sorted((f.kind, f.symbol) for f in bad.findings) == [("changed", "f"), ("removed", "g")]

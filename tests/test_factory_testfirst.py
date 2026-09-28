@@ -132,6 +132,72 @@ def test_non_test_path_and_malformed_oracle_are_refused(harness: Harness) -> Non
         harness.prove(item, tf.AuthoredTest(TEST_MULTIPLY, "x = 1\n", OPERATOR))
 
 
+def _commit_link(repo: pr.PyRepo, rel: str, target: Path) -> None:
+    """Commit ``rel`` in the fixture repository as a symbolic link to ``target``."""
+    link = repo.path / rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    pr.git(repo.path, "add", "-A")
+    pr.git(repo.path, "commit", "-q", "-m", "chore: link a shared test path")
+
+
+def test_an_authored_test_under_a_symlinked_directory_never_leaves_the_worktree(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """GOV-5 (governance review 2026-09-27): the oracle's path is model output steered by the
+    ticket's text. A directory the repository commits as a symbolic link must not carry the
+    product's own write — the RED proof's, and the oracle commit's — outside the worktree."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    _commit_link(harness.repo, "tests/ext", outside)
+    authored = tf.AuthoredTest("tests/ext/test_escape.py", TEST_MULTIPLY_SRC, OPERATOR)
+    with pytest.raises(tf.NotRed, match="symbolic link"):
+        harness.prove(multiply_item(), authored)
+    assert list(outside.iterdir()) == []
+
+
+def test_an_authored_test_that_is_itself_a_symlink_is_never_written_through(
+    harness: Harness, tmp_path: Path
+) -> None:
+    """GOV-5: the final entry may be the link — to a file outside (overwritten through it)
+    or to a name that does not exist yet (created through it). Both are refused and the
+    outside path is untouched."""
+    victim = tmp_path / "victim.py"
+    victim.write_text("# the host's own file\n", encoding="utf-8")
+    _commit_link(harness.repo, "tests/test_linked.py", victim)
+    dangling = tmp_path / "created_through_the_link.py"
+    _commit_link(harness.repo, "tests/test_dangling.py", dangling)
+    for rel in ("tests/test_linked.py", "tests/test_dangling.py"):
+        with pytest.raises(tf.NotRed, match="symbolic link"):
+            harness.prove(multiply_item(), tf.AuthoredTest(rel, TEST_MULTIPLY_SRC, OPERATOR))
+    assert victim.read_text(encoding="utf-8") == "# the host's own file\n"
+    assert not dangling.exists()
+
+
+def test_the_confined_write_refuses_every_escape_and_writes_inside(tmp_path: Path) -> None:
+    """The one helper every product write of a repository-relative path goes through
+    (``crb.core.confine``): an absolute path, ``..``, a symlinked component or final entry
+    and a component that is a file are refused; a missing directory is created; the write
+    lands inside the root."""
+    from crb.core import confine
+
+    root = tmp_path / "root"
+    (root / "tests").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "tests" / "ext").symlink_to(outside)
+    (root / "tests" / "plain.py").write_text("x = 1\n", encoding="utf-8")
+    for rel in ("/etc/passwd", "../x.py", "tests/../../x.py", "tests/ext/x.py", "tests/plain.py/x"):
+        with pytest.raises(confine.PathEscape):
+            confine.write_text_confined(root, rel, "boom")
+    written = confine.write_text_confined(root, "tests/new/deep/test_ok.py", "ok\n")
+    assert written == root / "tests" / "new" / "deep" / "test_ok.py"
+    assert written.read_text(encoding="utf-8") == "ok\n"
+    assert confine.write_text_confined(root, "tests/new/deep/test_ok.py", "again\n") == written
+    assert written.read_text(encoding="utf-8") == "again\n"
+    assert list(outside.iterdir()) == []
+
+
 def test_timeout_and_unattributed_failure_fail_closed(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

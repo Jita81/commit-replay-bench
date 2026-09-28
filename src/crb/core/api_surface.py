@@ -1028,8 +1028,13 @@ def compare(
     return findings, matched
 
 
-def evaluate(changed: Sequence[str], trees: Trees) -> ApiRun:
-    """Belt 6 over the trial's changed non-test files (the grader passes belt 4's list)."""
+def evaluate(changed: Sequence[str], trees: Trees, *, forward: bool = False) -> ApiRun:
+    """Belt 6 over the trial's changed non-test files (the grader passes belt 4's list).
+
+    ``forward`` — forward mode (the factory, GOV-3): the task commit carries only the
+    oracle, so there is no maintainers' change to mirror. The reference is the parent's
+    surface plus every symbol the trial ADDS (the feature the item asked for): a change or
+    a removal of an existing public symbol is still a finding, an addition never is."""
     units = units_for(changed)
     if not units:
         return ApiRun(
@@ -1045,6 +1050,8 @@ def evaluate(changed: Sequence[str], trees: Trees) -> ApiRun:
             skipped.append(unit)
             continue
         p, t, g = (s or {} for s in surfaces)
+        if forward:
+            g = {**p, **{sym: sig for sym, sig in t.items() if sym not in p}}
         found, same = compare(unit, p, t, g)
         findings += found
         matched += same

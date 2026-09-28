@@ -60,7 +60,12 @@ refuses.
    empty by default) names tracker authors — the ticket's creator: Azure DevOps
    `System.CreatedBy` sign-in name, Jira `creator` email, or its account id when the email
    is hidden — whose ready tickets register without the act; the registration records
-   `approved_by: allowlist:<author>`. `require_approval: false` registers every ready ticket
+   `approved_by: allowlist:<author>`. The author the allowlist reads is an identity the
+   ticket's author cannot set: an Azure DevOps creator with no `uniqueName` (sign-in name) is
+   read as no author — never as its `displayName`, a profile field its owner chooses and could
+   make read as a listed sign-in name — and an empty author never matches, so that ticket
+   waits for the Register act (amended 2026-09-27, governance review GOV-7; DL-148).
+   `require_approval: false` registers every ready ticket
    unattended and records `approved_by: unattended`. The allowlist trusts the ticket's
    **creator**; it does not see who edited the ticket since. A deployment that needs
    per-edit trust leaves the allowlist empty.
