@@ -576,6 +576,34 @@ class TestOidc:
             c.get(f"{API_PREFIX}/auth/oidc/start?next=//evil.example/x", follow_redirects=False)
             assert read_oidc_cookie(settings, c.cookies[OIDC_COOKIE]).next_path == "/"
 
+    @pytest.mark.parametrize(
+        ("asked", "lands"),
+        [
+            ("//evil.example/x", "/"),
+            ("https://evil.example/x", "/"),
+            ("/\\evil.example", "/"),
+            ("/runs?repo=alpha", "/runs?repo=alpha"),
+        ],
+    )
+    def test_the_callback_redirects_only_to_the_checked_next(
+        self, oidc_app: tuple[Any, FakeOidc], tmp_path: Path, asked: str, lands: str
+    ) -> None:
+        """The contract docs/API.md states for ``next``: the start keeps a same-origin path
+        and replaces anything else with ``/``, and the COMPLETED sign-in redirects to that
+        checked value from the signed state cookie — never to a raw parameter (CWE-601)."""
+        app, _ = oidc_app
+        settings = make_settings(tmp_path, oidc=OIDC_SETTINGS)
+        with TestClient(app) as c:
+            c.get(f"{API_PREFIX}/auth/oidc/start", params={"next": asked}, follow_redirects=False)
+            pending = read_oidc_cookie(settings, c.cookies[OIDC_COOKIE])
+            r = c.get(
+                f"{API_PREFIX}/auth/oidc/callback",
+                params={"code": "good-code", "state": pending.state, "next": "//evil.example"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 302, r.text
+            assert r.headers["location"] == lands
+
     def test_real_client_is_built_when_configured(self, tmp_path: Path) -> None:
         from crb.server.auth import AuthlibOidcClient
 

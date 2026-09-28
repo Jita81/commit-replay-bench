@@ -150,8 +150,10 @@ def _record_failed_login(db: Session, username: str) -> None:
 
     On the account's own trail when the name is a local account (its History shows who
     tried); otherwise one event with NO name on a shared trace — a person who typed their
-    password into the username box must not have it stored, and writing on both paths keeps
-    the response time from saying whether the account exists."""
+    password into the username box must not have it stored. An event is written on both
+    paths, and the password check costs the same either way (``_DUMMY_HASH``), but the audit
+    writes differ by path and the whole response has not been timed: that it does not say
+    whether the account exists is a hypothesis, not a guarantee (DL-068, CWE-208)."""
     known = find_local_user(db, username) if username else None
     if known is not None:
         record_user_event(

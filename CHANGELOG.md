@@ -47,9 +47,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `GET /flow?repo=` derives each stream's lead time, spend and counts from stored records, and
   each stream's screen shows its own. Money is summed by one rule in `/flow` and `/value`: an
   unpriced row is never $0, and the per-pound figures are withheld while one is in scope
-  (DL-066). `POST /reviews` takes the reviewer's minutes (DL-067, revision 0012). A cell first
-  routing deliver, the install and the first green `/health` are recorded when they happen,
-  never back-dated (ADR-0028).
+  (DL-066). `POST /reviews` takes the reviewer's minutes (DL-067, revision 0012). Three
+  moments are recorded when they happen, never back-dated: a cell's first `deliver` route,
+  the install, and the first green `/health` (ADR-0028).
 
 - **Every cost and latency carries its n, its interval and its apparatus**
   (north-star Wave 1, stream E, F35; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns1)).

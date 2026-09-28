@@ -21,16 +21,14 @@ on its own: the register acts only under an operator's switch, and each report's
 made here by an operator and recorded with their name." (`help.ts` About copy for `/learn`; the
 header purpose says the same and the eyebrow reads `Instrument · Learn`.)
 
-the `INSTRUMENT` list in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
-`Layout.tsx:121`), from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
-that class's details open, or from a screen that reveals a need for the strengthen report —
-a cell withheld for its oracle on the Baseline map, the controls gate on Oracle, an amber
-controls stage on the Connection walk, an item stopped for a weak test on the Factory — each
-of which opens `/learn?repo=#strengthen`. A line under the header says which of the loop's six
-steps happen here. Pick a repository and leave with the prevention register — every
-**Entry → exit.** Arrive by the Instrument nav entry `Learn` (every role, like
-the three reads behind it: `INSTRUMENT` in `Layout.tsx`), or from a Decisions `prevention` row, which opens `/learn?repo=&class=` with
-bug class with its lever and level, before → after with n and the bar, its status and what
+**Entry → exit.** Arrive by the Instrument nav entry `Learn` (every role, like the three reads
+behind it: `INSTRUMENT` in `Layout.tsx`), from a Decisions `prevention` row, which opens
+`/learn?repo=&class=` with that class's details open, or from a screen that reveals a need for
+the strengthen report — a cell withheld for its oracle on the Baseline map, the controls gate on
+Oracle, an amber controls stage on the Connection walk, an item stopped for a weak test on the
+Factory — each of which opens `/learn?repo=#strengthen`. A line under the header says which of
+the loop's six steps happen here. Pick a repository and leave with the prevention register —
+every bug class with its lever and level, before → after with n and the bar, its status and what
 happens next (an operator can throw the switch, revert a change or register a filed item from
 here) — and three derivations of its ledger: refusal classes with the spend they cost and a
 verdict that reads `unsure` until a named person has decided it; the cells withheld from
@@ -44,8 +42,9 @@ registered) after a registration, `Re-qualify`, `Re-score` and `Re-run controls`
 `/runs?repo=&new=<kind>&tasks=<the item's task>` from an operator's strengthening row, `Runs`
 → `/runs?repo=` from the plan and after a queue, and a class's evidence → `/ledger?repo=`. The
 plan can also be read against a named apparatus version before a bump; that what-if plan
-offers no Queue control. With no repository chosen the body is the empty state `Pick a repository` and
-the only way forward is the picker in the header.
+offers no Queue control. With no repository chosen the body is the empty state `Pick a repository`,
+and it offers two ways forward: choose one in the picker in the header, or `Connect a repository`
+(`/connect`) from the body.
 
 **Non-goals.** The page never decides on its own. The three reports write only when an operator
 makes one of the three decisions they hand off to — `Decide`, `Register` or `Queue runs` — and
