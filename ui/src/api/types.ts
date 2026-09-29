@@ -1374,6 +1374,16 @@ export interface ChainVerify {
   detail: string
 }
 
+/** The `disqualified` block of `GET /ledger/verify` (G-400, DL-312): rows graded
+ *  `disqualified` in the last `window_days`, per builder; `over` = the builders at or past
+ *  `threshold`. Read by the Ledger's disqualified tile (stream pgs). */
+export interface LedgerDisqualified {
+  window_days: number
+  threshold: number
+  by_builder: Array<{ builder: string; n: number }>
+  over: string[]
+}
+
 export interface LedgerVerify {
   rows: number
   ok: boolean
@@ -1389,6 +1399,7 @@ export interface LedgerVerify {
   /** The grade ledger's last `row_hash` (`""` when empty), to record outside the store. */
   head_row_hash: string
   events: EventsVerify
+  disqualified: LedgerDisqualified
 }
 
 /** `GET /ledger/export?format=`. */

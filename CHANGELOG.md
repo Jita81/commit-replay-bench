@@ -13,14 +13,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Every stop condition has a surface, and the operator guide says what operating costs**
-  (north-star Wave 6, stream ops; [the branch](https://github.com/Jita81/commit-replay-bench/tree/feat/ns6-ops)).
+  (north-star Wave 6, stream ops; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-ops)).
   `/health` gains a `redaction` probe over the newest stored evidence packs (down naming the
-  pack, never the value); `/metrics` carries each repository's controls verdict one-hot,
-  refreshed at scrape; a sealed build's denied egress is evented and metered; `/ledger/verify`
-  serves the disqualified count per builder against DL-312's threshold. DEPLOYMENT §9 has the
-  three alerts and says what the product cannot see; OPERATOR §8 tables every factory stop
-  with its way forward and §6.1 states the routine, a sweep's estimate and the measured cost
-  of a thousand rows (G-400, G-401, G-534, G-920, G-978; DL-312; P-640).
+  pack, never the value; an approver's acknowledgement after rotation is the way back —
+  DL-313); `/metrics` carries each repository's controls verdict; a sealed build's denied
+  egress is read from the whole proxy log, evented, metered and alerted; `/ledger/verify`
+  serves the disqualified count per builder (DL-312). DEPLOYMENT §9 has the rules and what
+  the product cannot see; OPERATOR §8.1 tables every factory stop with its way forward and
+  §6.1 states the routine and the costs (G-400, G-401, G-920, G-978; P-640 to P-643).
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).

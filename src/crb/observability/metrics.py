@@ -46,12 +46,13 @@ How:          Import-time try/except picks the real registry or ``_Noop``; every
 Layer:        observability — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
 Works with:   src/crb/server/worker.py (calls the recorders after each grade and build,
-              meters events through ``record_event``, sets the queue gauge on check-in),
+              meters every event through ``record_event`` — the sealed build's
+              ``builder.egress_denied`` from src/crb/builders/container.py among them, since
+              the builders layer may not import this one — and sets the queue gauge on
+              check-in),
               src/crb/server/worker_main.py (``start_worker_exposition`` before the loop),
               src/crb/server/routes/system.py (``/metrics`` renders ``render()`` after
               refreshing the ledger and controls gauges),
-              src/crb/builders/container.py (emits ``builder.egress_denied`` after a sealed
-              build; ``record_event`` meters it — the builders layer may not import this one),
               src/crb/server/routes/signoffs.py (``record_signoff`` after each decision),
               src/crb/server/http_metrics.py (the HTTP-level metrics on the same registry),
               src/crb/core/ledger.py (the source of the false-Q1 count the gauge reflects),
@@ -103,6 +104,15 @@ DELIVERY_OUTCOMES: Mapping[str, str] = {
 #: ``crb_egress_denied_total{repo}`` — the metering lives here because the builders layer and
 #: this one are siblings (pyproject's layer contract) and may not import each other.
 EGRESS_DENIED_ACTION = "builder.egress_denied"
+
+#: The ``system``-stage events the worker emits first for every run (``run.claimed`` at the
+#: claim, ``run.start`` when the run body begins): ``record_event`` PRIMES the series the
+#: ``increase()`` alerts read — ``crb_egress_denied_total{repo}`` and
+#: ``crb_tasks_total{repo,outcome="disqualified"}`` — at 0 for the run's repository, because
+#: Prometheus cannot see a series appear: a counter created on its first increment makes the
+#: first denied host of a fresh worker invisible to **Egress denied** and **Disqualified
+#: rising** fire one late (P-642).
+PRIME_ACTIONS: frozenset[str] = frozenset({"run.claimed", "run.start"})
 
 #: The one-hot states of ``crb_controls_verdict{repo,state}`` — the words
 #: :meth:`crb.core.routing.ControlsVerdict.state` returns, in the order the router applies
@@ -374,8 +384,9 @@ def record_event(event: Any) -> None:
     """Meter what an event says (a ``CallbackSink`` on the worker's emitter): a
     ``factory``-stage ``delivery.*`` action counts one delivery by outcome; a ``build``-stage
     :data:`EGRESS_DENIED_ACTION` counts its denied ``hosts`` (at least one) into
-    ``crb_egress_denied_total{repo}``. Any other event is ignored. Never raises (a sink must
-    never break a run)."""
+    ``crb_egress_denied_total{repo}``; a ``system``-stage :data:`PRIME_ACTIONS` event primes
+    the two series the ``increase()`` alerts read at 0 for its repository. Any other event
+    is ignored. Never raises (a sink must never break a run)."""
     try:
         action = str(getattr(event, "action", ""))
         repo = str(getattr(event, "repo", "") or "")
@@ -385,6 +396,9 @@ def record_event(event: Any) -> None:
         elif action == EGRESS_DENIED_ACTION and getattr(event, "stage", "") == "build":
             hosts = dict(getattr(event, "payload", {}) or {}).get("hosts") or ()
             egress_denied_total.labels(repo).inc(max(1, len(list(hosts))))
+        elif action in PRIME_ACTIONS and getattr(event, "stage", "") == "system":
+            egress_denied_total.labels(repo).inc(0)
+            tasks_total.labels(repo, "disqualified").inc(0)
     except Exception:  # pragma: no cover — defensive: metering must not affect a run
         _LOG.exception("metrics: record_event failed")
 

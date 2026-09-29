@@ -15,7 +15,7 @@ What it does: Renders the chart with and without ``prometheusRule.enabled`` and 
               alerts of DEPLOYMENT §9.2 (``ALERTS``), each ``expr`` the table's own expression; that
               the false-Q1 alert fires on any non-zero value with no delay; that the
               operator's labels reach the resource; that a worker with its metrics port
-              off is refused, since three of the four rules read the worker's series; and
+              off is refused, since five of the seven rules read the worker's series; and
               that the no-worker rule reads a series the API's exposition never serves, so it
               can fire while the API is scraped (P-268).
 How:          ``helm template`` through tests/test_deploy_secrets_store.py's strict loader;

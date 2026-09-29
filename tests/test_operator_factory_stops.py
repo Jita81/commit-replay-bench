@@ -70,11 +70,15 @@ def _section_8() -> str:
     return text.split("\n## 8. Stop conditions", 1)[1].split("\n## ", 1)[0]
 
 
+FACTORY_HEADING = "### 8.1 Factory stop conditions"
+
+
 def _factory_table() -> list[list[str]]:
-    """The rows of the ``**Factory stop conditions**`` table: the first table after the lead."""
+    """The rows of the ``### 8.1 Factory stop conditions`` table: the first table after the
+    lead (the heading gives the Factory About's read-more an anchor of its own)."""
     section = _section_8()
-    assert "**Factory stop conditions**" in section, "OPERATOR §8 has no factory table"
-    after = section.split("**Factory stop conditions**", 1)[1]
+    assert FACTORY_HEADING in section, "OPERATOR §8 has no factory table"
+    after = section.split(FACTORY_HEADING, 1)[1]
     rows = []
     for line in after.split("\n"):
         if line.startswith("|"):
@@ -115,7 +119,7 @@ def test_section_8_names_every_factory_stop_the_code_can_reach_with_a_way_forwar
         assert len(cause) >= 20, f"{code}: the cause cell is too thin: {cause!r}"
         assert len(forward) >= 20, f"{code}: the way-forward cell is too thin: {forward!r}"
     # the lead points at where the factory is explained, not at a numbered section of its own
-    lead = _section_8().split("**Factory stop conditions**", 1)[1].split("\n|", 1)[0]
+    lead = _section_8().split(FACTORY_HEADING, 1)[1].split("\n|", 1)[0]
     for anchor in (
         "ONBOARDING-A-REPO.md#step-8",
         "#10-the-factorys-test-author",
@@ -129,5 +133,5 @@ def test_the_factory_screen_links_to_the_stop_conditions() -> None:
     """The Factory About's read-more carries the anchor (help.ts: the ``/factory`` entry)."""
     text = HELP.read_text(encoding="utf-8")
     entry = text.split("route: '/factory',", 1)[1].split("route: '", 1)[0]
-    assert "to: 'OPERATOR#8-stop-conditions'" in entry, "the /factory readMore lacks §8"
+    assert "to: 'OPERATOR#81-factory-stop-conditions'" in entry, "the /factory readMore lacks §8.1"
     assert "label: 'Factory stop conditions'" in entry

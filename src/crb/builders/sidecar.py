@@ -11,8 +11,10 @@ proxy script copied beside the caller's scratch and mounted read-only), joins it
 internal network and waits for its ``READY`` line — failing closed
 (:class:`~crb.core.execution.SandboxUnavailable`) at every step. :meth:`close` keeps the
 proxy's log tail (its ``allow`` / ``deny`` decisions, never tunnel contents), removes the
-sidecar and the network, and never raises. :meth:`denied_hosts` reads the ``deny`` lines —
-what a failed fetch names in its refusal.
+sidecar and the network, and never raises. :meth:`denied_hosts` reads the ``deny host:port``
+lines from the WHOLE proxy log (the kept tail is display only — a long agentic build writes
+one ``allow`` line per CONNECT, P-641) — what a failed fetch names in its refusal and what
+the sealed build reports as ``builder.egress_denied`` (G-400).
 
 Navigation
 ----------
@@ -32,7 +34,7 @@ Works with:   src/crb/builders/egress_proxy.py (the program the sidecar runs),
               src/crb/provision/fetch.py (the dependency fetch uses it),
               src/crb/core/execution.py (``SandboxUnavailable``)
 Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py,
-              tests/test_provision_fetch.py
+              tests/test_provision_fetch.py, tests/test_container_egress.py
 Touch when:   never for a new repository; a new endpoint is an allowlist entry
               (``CRB_BUILDER__ALLOW_HOSTS`` / ``CRB_PROVISION__*``), never an edit here; any
               flag on the sidecar's ``docker run`` is a security decision (docs/SECURITY.md).
@@ -61,7 +63,9 @@ PROXY_START_TIMEOUT_S = 30.0
 #: ``docker <args…>`` with the client's minimal environment → the completed process.
 DockerCall = Callable[..., "subprocess.CompletedProcess[str]"]
 
-_DENY = re.compile(r"\bdeny\s+(\S+)")
+#: A ``deny host:port`` decision line; the proxy's ``deny method=GET`` (a non-CONNECT
+#: request) is not a denied host and is not matched (P-641).
+_DENY = re.compile(r"\bdeny\s+([^\s=]+:\d+)(?=\s|$)")
 
 
 class EgressSidecar:
@@ -97,6 +101,7 @@ class EgressSidecar:
         self._proxy_started = False
         self._script_written = False
         self.log = ""
+        self._denied: list[str] = []
 
     @property
     def url(self) -> str:
@@ -185,21 +190,41 @@ class EgressSidecar:
                 )
             time.sleep(0.2)
 
-    def read_log(self) -> str:
-        """The proxy's log so far (``allow`` / ``deny`` decisions); ``""`` if unreadable."""
+    def _whole_log(self) -> str:
+        """One ``docker logs`` read: the WHOLE log (returned) and its last 4000 characters
+        kept as :attr:`log` for display. Before the proxy starts, or once it is removed, the
+        kept tail is all there is. Unreadable = the kept tail (never raises)."""
         if not self._proxy_started:
             return self.log
         with contextlib.suppress(OSError, subprocess.SubprocessError):
             logs = self._docker("logs", self.proxy_name, timeout=30)
-            self.log = ((logs.stdout or "") + (logs.stderr or ""))[-4000:]
+            whole = (logs.stdout or "") + (logs.stderr or "")
+            self.log = whole[-4000:]
+            self._denied = self._denied_in(whole)
+            return whole
         return self.log
 
-    def denied_hosts(self) -> list[str]:
-        """``host:port`` for every ``deny`` line the proxy logged, in order, de-duplicated."""
+    def read_log(self) -> str:
+        """The proxy's log tail so far (``allow`` / ``deny`` decisions); ``""`` if unreadable."""
+        self._whole_log()
+        return self.log
+
+    @staticmethod
+    def _denied_in(text: str) -> list[str]:
         seen: dict[str, None] = {}
-        for m in _DENY.finditer(self.read_log()):
+        for m in _DENY.finditer(text):
             seen[m.group(1)] = None
         return list(seen)
+
+    def denied_hosts(self) -> list[str]:
+        """``host:port`` for every ``deny`` line the proxy logged, in order, de-duplicated —
+        read from the WHOLE log, not the 4000-character tail :attr:`log` keeps for display:
+        a long agentic build writes one ``allow`` line per CONNECT and a denial two hundred
+        connections ago would otherwise be gone (P-641). After the proxy is removed the
+        last whole read stands."""
+        if self._proxy_started:
+            self._whole_log()
+        return list(self._denied)
 
     def close(self) -> None:
         """Tear down; never raises (the log tail is kept in :attr:`log`)."""

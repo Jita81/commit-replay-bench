@@ -1015,7 +1015,17 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - a secret in an evidence pack, log or export — the `redaction` probe on `/health` re-checks
   the newest stored packs for the credential shapes the redactor knows and reads `down`
   naming the pack hash, never the value ([DEPLOYMENT §9.3](DEPLOYMENT.md#93-health)); it
-  reads known shapes in stored packs only, so a log or an export is still yours to read;
+  reads known shapes in stored packs only, so a log or an export is still yours to read.
+  **The way back** (DL-313): a stored pack is never deleted (the table is append-only,
+  [DATA-RETENTION](DATA-RETENTION.md)), so `down` does not clear by itself — while it holds,
+  the load balancer stops routing to the API and you reach it on the pod or the host directly
+  (`kubectl port-forward`, or the compose port). (1) Rotate the credential the pack shows
+  ([§5](#5-credentials) — after rotation the value is dead); (2) an approver acknowledges the
+  pack with the reason: `POST /api/v1/system/redaction/<pack_hash>/acknowledge`
+  `{"reason": "…"}` — one `redaction.acknowledged` event on the audit chain under their
+  name, never the value; the probe reads `ok` again at once, naming the acknowledged pack.
+  A pack acknowledged is not silence: the next leaking pack is `down` again. Nothing else
+  clears it — not a restart, not the arrival of newer packs;
 - a sandbox escape or unexpected network egress from a test container — a builder's
   connection the egress sidecar refused shows as `crb_egress_denied_total` and the **Egress
   denied** alert, and the run's `builder.egress_denied` events name the targets
@@ -1064,7 +1074,9 @@ registered from a partial read.
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
 | `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
 
-**Factory stop conditions** (the loop's own words). A factory run stops an item, or refuses
+### 8.1 Factory stop conditions
+
+The loop's own words. A factory run stops an item, or refuses
 to start, with one of the words below; each is on the item's evidence chain and on the
 Factory screen, word for word. Forward mode is explained in
 [ONBOARDING Step 8](ONBOARDING-A-REPO.md#step-8--forward-mode-when-a-cell-is-trusted), the
@@ -1083,8 +1095,8 @@ fix on your side moves it on. A stop is not a defect in the factory; a stop noth
 | `granularize` | the size rule reads the item as XL at its estimate or the next size up — too large to be delivered as one change | split the item into changes the map has measured, and register each |
 | `unsized` | the ticket carries no size estimate the gate can read | size the ticket (XS to XL) and register it again |
 | `not_licensed` | delivery is on and no rung of the ladder holds a licence at the item's size, so a build would cost money and could not be delivered | sign off a cell at that size, or run with delivery off to measure; `$0` was spent |
-| `size_exceeds_licence` | the change measured larger than the licence it was routed on, so its own cell is not signed | sign that cell, or split the change; the branch holds the change, no pull request was opened |
-| `cell_not_licensed` | the final rung's builder and model at the measured size are not a licensed cell | sign that cell or route the item to a licensed rung; nothing was pushed |
+| `size_exceeds_licence` | the change measured larger than the licence it was routed on, so its own cell is not signed | sign that cell, or split the change; the change is on the local branch — nothing was pushed and no pull request was opened |
+| `cell_not_licensed` | the final rung's builder and model at the measured size are not a licensed cell | sign that cell or route the item to a licensed rung; the change is on the local branch — nothing was pushed and no pull request was opened |
 | `calibration_build` | an approver's calibration build was accepted by its review — evidence for the standard, never a delivery | read the evidence; if the standard holds, sign the cell and register the item as work |
 | `oracle_needs_strengthening` | the review asked for a stronger test (a `weak_oracle` finding) and no changed test can be had — no test author, or the author returned the same test | register a superseding item with a stronger test attached; a rebuild against the same test would only pass it another way |
 | `oracle_not_scoreable` | the required strength probe could not score the authored test and no approver waived it for those bytes | an approver waives the probe for that test on the run page, or a superseding item carries a test the probe can score |

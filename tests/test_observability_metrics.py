@@ -163,6 +163,28 @@ def test_record_event_meters_deliveries_by_outcome_and_nothing_else(registry: An
     metrics.record_event(object())  # not an event at all: ignored, never raises
 
 
+def test_a_claimed_run_primes_the_series_the_increase_alerts_read(registry: Any) -> None:
+    """P-642: ``increase()`` cannot see a series appear — a counter created lazily on its
+    first increment makes Prometheus miss the jump from absent to 1, so the FIRST denied
+    host of a fresh worker never fired **Egress denied** and **Disqualified rising**
+    (``>= 2``) fired one late. The worker's first event of every run (``run.claimed``, the
+    ``system`` stage) primes both series at 0 for the run's repository."""
+    em = Emitter(MemorySink(), trace_id="t" * 32, actor="worker", repo="demo")
+    em.emit("system", "run.claimed", worker="w-1", kind="factory", mode="blind")
+    for ev in em.sink._events:  # type: ignore[attr-defined]
+        metrics.record_event(ev)
+    assert sample(registry, "crb_egress_denied_total", repo="demo") == 0
+    assert sample(registry, "crb_tasks_total", repo="demo", outcome="disqualified") == 0
+    assert sample(registry, "crb_tasks_total", repo="demo", outcome="clean") is None
+    assert frozenset({"run.claimed", "run.start"}) == metrics.PRIME_ACTIONS
+    # priming never disturbs a count already made
+    em.emit("build", "builder.egress_denied", hosts=["a.example:443"], n=1)
+    em.emit("system", "run.claimed", worker="w-1", kind="factory", mode="blind")
+    for ev in em.sink._events[1:]:  # type: ignore[attr-defined]
+        metrics.record_event(ev)
+    assert sample(registry, "crb_egress_denied_total", repo="demo") == 1
+
+
 # --- the worker's counters end to end --------------------------------------------------
 
 

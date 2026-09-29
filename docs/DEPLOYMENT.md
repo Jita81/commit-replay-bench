@@ -941,7 +941,7 @@ scraped, and that suite fails if the api serves one.
 | `crb_false_q1_total` | gauge | — | api (recounted on every scrape and every `/health`) and worker (after every run) | clean ledger rows with a failed belt. **Must be 0** — a stop condition ([OPERATOR §8](OPERATOR.md#8-stop-conditions)) |
 | `crb_ledger_rows` | gauge | — | api, worker | rows in the grade ledger |
 | `crb_controls_verdict` | gauge | `repo, state` | api (recomputed on every scrape from the latest `controls.report`) | each repository's negative-controls verdict at the running apparatus, one-hot over `state` ∈ `unmeasured`, `failed`, `escaped`, `thin`, `passed` — the router's own word, the same read the Oracle screen and the route gate make. Set at scrape time, never by the worker, so an API restart blanks nothing and an alert on `state!="passed"` cannot fall silent when the deployment comes back. Only `passed` licenses delivery ([OPERATOR §3.1](OPERATOR.md#31-oracle-adequacy--mutation-scoring)) |
-| `crb_egress_denied_total` | counter | `repo` | worker | `host:port` targets the builder's egress sidecar refused a CONNECT to during sealed builds, one count per denied target per build, metered from the run's own `builder.egress_denied` event. The allowlist held — this is a builder that tried to reach somewhere it may not — and it is a stop condition to read ([OPERATOR §8](OPERATOR.md#8-stop-conditions)); what it cannot see is under the alert below |
+| `crb_egress_denied_total` | counter | `repo` | worker | `host:port` targets the builder's egress sidecar refused a CONNECT to during sealed builds, one count per denied target per build, metered from the run's own `builder.egress_denied` event — read from the proxy's WHOLE log at close (the run page's `proxy_log` is the last 4000 characters, display only; a `deny method=…` line for a non-CONNECT request is not a host and is not counted). The allowlist held — this is a builder that tried to reach somewhere it may not — and it is a stop condition to read ([OPERATOR §8](OPERATOR.md#8-stop-conditions)); what it cannot see is under the alert below |
 | `crb_http_requests_total` | counter | `method, route, status` | api | requests by route template (never a raw id) |
 | `crb_http_request_duration_seconds` | histogram | `method, route` | api | request latency |
 
@@ -980,6 +980,15 @@ serves.
 | **Disqualified rising** | `sum by (repo) (increase(crb_tasks_total{outcome="disqualified"}[7d])) >= 2` | attempts disqualified for test tampering on one repository in the window reached DL-312's threshold — the rising `disqualified` count [OPERATOR §8](OPERATOR.md#8-stop-conditions) names. The per-builder split against the same threshold is served on `GET /ledger/verify` (`disqualified`) and shown on the Ledger's tile: stop delivering from the builder it names and read its rows' `dq_reason`. Warning |
 | **Egress denied** | `increase(crb_egress_denied_total[1h]) > 0` | the egress sidecar refused a builder's CONNECT to a host outside the allowlist in the last hour. The allowlist held; read the run's `builder.egress_denied` events for the targets, and decide whether the host belongs on `CRB_BUILDER__ALLOW_HOSTS` or the builder was reaching where it should not ([OPERATOR §8](OPERATOR.md#8-stop-conditions)). Warning |
 
+**A first count is seen.** `increase()` cannot see a series appear, so both counter rules
+read series the worker primes at 0 for a run's repository at the run's claim
+(`run.claimed`, `crb.observability.metrics.PRIME_ACTIONS`): the FIRST denied host of a
+fresh worker fires **Egress denied**, and **Disqualified rising** fires at the second
+disqualification DL-312 names, not the third. **Disqualified rising** counts per repository
+over the worker's series; the API's `GET /ledger/verify` counts per builder over the ledger,
+so the two can differ by builder split and by a worker restarted mid-window — the ledger is
+the count to act on.
+
 **What the product cannot see.** The grading sandbox runs with no network at all
 (`--network=none`, ADR-0005), so it has no sidecar and writes no deny line: nothing there can
 be reported because nothing can be attempted. A runtime escape — a container that reaches the
@@ -1002,7 +1011,12 @@ rate is worth a look), `histogram_quantile(0.9, rate(crb_grade_latency_seconds_b
 empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_only`, `ledger`,
 `redaction` (the newest fifty stored evidence packs carry no credential shape the redactor
 knows — `down` naming the pack hash, never the value, when one does; known shapes only, in
-stored packs only, never a log or an export — G-400), `sandbox` (skipped for `CRB_ROLE=api`),
+stored packs only, never a log or an export — G-400; the way back is an approver's
+acknowledgement after rotation, `POST /system/redaction/{pack_hash}/acknowledge`, recorded
+on the audit chain — a pack is never deleted, and nothing else clears the reading,
+[OPERATOR §8](OPERATOR.md#8-stop-conditions); while it holds, the Service stops routing to
+the API and the shell's header pill has no reading to show, so the stop is read on
+`/health` itself, on `crb doctor` and on your readiness alerting), `sandbox` (skipped for `CRB_ROLE=api`),
 `provision` (dependency provisioning, ADR-0019; skipped for `CRB_ROLE=api` and while
 provisioning is off), `toolchains`, `builders`, `worker`, `intake` and `build` (the served
 commits agree) — each documented in

@@ -53,9 +53,11 @@ import pytest
 from alembic import command
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.ledger import BELT_SET_V3_LEGACY
+from crb.core.redact import redact, redact_and_cap_head
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics
@@ -76,8 +78,8 @@ from crb.server.routes.system import (
 from crb.server.settings import Settings
 from crb.store import migrate
 from crb.store.db import make_engine, make_session_factory
-from crb.store.models import EvidencePackRow, Grade, Repo, Run, WorkerRow
-from fixtures.server_seed import ALPHA, BETA, make_env
+from crb.store.models import Event, EvidencePackRow, Grade, Repo, Run, WorkerRow
+from fixtures.server_seed import ALPHA, BETA, assert_rbac, make_env
 
 ROOT_PW = "correct-horse-battery-staple"
 PROBE_NAMES = {
@@ -948,10 +950,12 @@ class TestRedactionProbe:
             "packs": 2,
             "window": REDACTION_PROBE_PACKS,
             "leaking": ["d" * 64],
+            "acknowledged": [],
             "unreadable": [],
         }
-        # a reading that is not ok is never cached, so a fixed store is seen at once (the
-        # evidence table is append-only — a leaked pack is retired by retention, not deleted)
+        # a reading that is not ok is never cached, so an acknowledged pack is seen at once
+        # (the evidence table is append-only and a pack is never deleted: the way back is the
+        # approver's acknowledgement, DL-313 — the next test)
         assert not system_mod._redaction_cache
         assert _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")["status"] == "down"
 
@@ -960,19 +964,109 @@ class TestRedactionProbe:
     ) -> None:
         """The plan critique's false alarm: ``redact_and_cap_head`` truncates, so a stored
         ``api_key=[REDACT …`` re-matches the ``key=value`` rule and a naive
-        ``redact(s) != s`` reads a secret where the redactor already did its job. The rule
-        is a match whose captured value is not a marker, whole or truncated."""
+        ``redact(s) != s`` reads a secret where the redactor already did its job. P-640,
+        extended by the Wave 6 verifiers (2026-09-29): cutting the marker to an empty string
+        made ``token=[REDACTED] mismatch`` read as ``token= mismatch`` — the rule re-matches
+        the next word — and the six-character cut ``[REDAC`` (``max_chars=1997`` here) is a
+        value the rule accepts. The rule now: the redactor would ADD a marker the pack does
+        not already carry (its own markers, whole or cut at the end, are counted first)."""
         assert not carries_secret_shape("api_key=[REDACTED] and token=[REDACTED-GH]")
         assert not carries_secret_shape("api_key=[REDACT …")
         assert carries_secret_shape("api_key=[REDACTED] but password=hunter22 too")
+        # the shapes the redactor itself writes at pack-write time (redact_and_cap on a
+        # test-output tail, redact_and_cap_head on an error string), followed by a word
+        for written in (
+            "api_key=abcdef123456 invalid",
+            "token=abcdef1234 expired",
+            "Authorization: Bearer abcdefghijklmnop returned 401",
+            "E  AssertionError: token=abcdef123 mismatch",
+            "SECRET_KEY=abcdefgh1234 loaded",
+            "https://crb:s3cretpassw0rd@db.internal/crb refused",
+            "TOKEN: abcdefgh12 rejected",
+        ):
+            stored = redact(written)
+            assert stored != written, written  # the redactor did change it at write time
+            assert not carries_secret_shape(stored), stored
+        # every cut position of the head cap over a redacted marker, the six-character cut
+        # (``[REDAC``) included
+        tail = "x" * 1980 + " api_key=abcdefghijklmnop rest of line"
+        for n in range(1985, 2020):
+            cut = redact_and_cap_head(tail, max_chars=n)
+            assert not carries_secret_shape(cut), (n, cut[-24:])
+        # a real secret beside a cut marker is still seen
+        assert carries_secret_shape("password=hunter22 and api_key=[REDAC …")
+        assert carries_secret_shape("ghp_" + "a" * 36)
+        assert carries_secret_shape("AKIA" + "B" * 16)
         with factory() as s:
             s.add(_pack("e" * 64, error="model_error: api_key=[REDACT …"))
             s.add(_pack("f" * 64, log="Authorization: Bearer [REDACTED]\nkey=[REDACTED-KEY]"))
+            s.add(_pack("1" * 64, log=redact("E  AssertionError: token=abcdef123 mismatch")))
+            s.add(_pack("2" * 64, error=redact_and_cap_head(tail, max_chars=1997)))
             s.commit()
         probe = _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")
         assert probe["status"] == "ok", probe["detail"]
-        assert probe["data"]["packs"] == 2 and probe["data"]["leaking"] == []
+        assert probe["data"]["packs"] == 4 and probe["data"]["leaking"] == []
         assert "known shapes only" in probe["detail"]
+
+    def test_an_acknowledged_pack_returns_readiness_and_is_on_the_chain(
+        self, tmp_path: Path
+    ) -> None:
+        """The way back from ``down`` (DL-313): the evidence table is append-only and a pack
+        is never deleted, so an approver acknowledges the named pack — after rotating the
+        credential — with a reason; the act is a ``redaction.acknowledged`` system event on
+        the audit chain, the probe reads ``ok`` again naming the acknowledged pack, and a
+        pack acknowledged is not silence: a NEW leaking pack is ``down`` again. The act needs
+        the approver role; a pack the store does not hold is 404; one that carries no shape is
+        409 (nothing to acknowledge)."""
+        leak = "ghp_" + "b" * 36
+        with make_env(tmp_path, role="approver") as env:
+            with env.factory() as s:
+                s.add(_pack("d" * 64, log=f"Authorization: token {leak} used"))
+                s.commit()
+            system_mod._redaction_cache.clear()
+            r = env.get("/health")
+            assert r.status_code == 503 and _probe(r.json(), "redaction")["status"] == "down"
+            assert "acknowledge" in _probe(r.json(), "redaction")["detail"]
+            path = f"/system/redaction/{'d' * 64}/acknowledge"
+            r = env.post(path, json={"reason": "token rotated 2026-09-29, incident INC-12"})
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["pack_hash"] == "d" * 64 and body["actor"] and body["acknowledged_at"]
+            assert body["reason"] == "token rotated 2026-09-29, incident INC-12"
+            assert leak not in r.text
+            r = env.get("/health")
+            assert r.status_code == 200, r.text
+            probe = _probe(r.json(), "redaction")
+            assert probe["status"] == "ok" and "d" * 64 in probe["detail"]
+            assert probe["data"]["leaking"] == [] and probe["data"]["acknowledged"] == ["d" * 64]
+            # on the chain, with the actor and the reason — never the value
+            with env.factory() as s:
+                ev = s.execute(
+                    select(Event).where(Event.action == "redaction.acknowledged")
+                ).scalar_one()
+                assert ev.stage == "system" and ev.payload_json["pack_hash"] == "d" * 64
+                assert ev.actor == body["actor"]
+            # acknowledging twice is idempotent (200, the first record); a pack the store
+            # does not hold is 404; a clean pack has nothing to acknowledge (409)
+            r = env.post(path, json={"reason": "again"})
+            assert r.status_code == 200 and r.json()["reason"].startswith("token rotated")
+            r = env.post(f"/system/redaction/{'0' * 64}/acknowledge", json={"reason": "rotated"})
+            assert r.status_code == 404
+            with env.factory() as s:
+                s.add(_pack("c" * 64, log="all green"))
+                s.commit()
+            r = env.post(f"/system/redaction/{'c' * 64}/acknowledge", json={"reason": "rotated"})
+            assert r.status_code == 409
+            # a new leak after the acknowledgement is a new stop (seen within a heartbeat:
+            # the ok reading is reused for REDACTION_PROBE_TTL_S, cleared here)
+            with env.factory() as s:
+                s.add(_pack("9" * 64, log="AKIA" + "Q" * 16))
+                s.commit()
+            system_mod._redaction_cache.clear()
+            r = env.get("/health")
+            assert r.status_code == 503
+            assert _probe(r.json(), "redaction")["data"]["leaking"] == ["9" * 64]
+            assert_rbac(env, "POST", path, min_role="approver", json={"reason": "rotated"})
 
     def test_redaction_probe_is_degraded_not_down_when_one_pack_cannot_be_read(
         self, client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch

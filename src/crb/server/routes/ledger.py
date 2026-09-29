@@ -48,10 +48,10 @@ Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this mus
               src/crb/store/ledger.py (``import_rows`` / ``count``),
               src/crb/store/events.py (``verify_events_in`` — the audit trail's walk),
               src/crb/core/federated.py (``export_abstract`` and its allowlist),
-              src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
-              src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
+              src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``) and
               src/crb/server/routes/system.py (``disqualified_counts`` — the block verify
               serves),
+              src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
               src/crb/server/routes/runs.py (``append_system_event`` — the export's audit
               event, DATA-RETENTION §4),
               src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``, whose

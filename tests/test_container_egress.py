@@ -25,6 +25,7 @@ Works with:   src/crb/builders/container.py (``ContainerSession.report_egress`` 
               (``record_event``, ``EGRESS_DENIED_ACTION``, ``WORKER_SERIES``),
               src/crb/builders/adapter.py (passes the raw ``on_event`` into the session),
               docs/API.md#event-vocabulary (the action's row), docs/DEPLOYMENT.md#92-alert-rules
+              (the alert that reads the counter)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; the sidecar's log line format changes (the ``deny``
               regex in sidecar.py), or the action or the metric is renamed — change API.md and
@@ -135,6 +136,35 @@ def test_two_hosts_count_two_and_a_wrong_stage_counts_nothing(registry: Any) -> 
     for ev in em.sink._events:  # type: ignore[attr-defined]
         metrics.record_event(ev)
     assert registry.get_sample_value("crb_egress_denied_total", {"repo": "demo"}) == 2.0
+
+
+def test_a_deny_line_older_than_the_kept_tail_is_still_reported(
+    registry: Any, tmp_path: Path
+) -> None:
+    """P-641: ``proxy_log`` keeps the last 4000 characters for display, and a long agentic
+    build writes one ``allow`` line per CONNECT — a ``deny`` two hundred connections ago is
+    outside that tail. The denied hosts are read from the WHOLE proxy log at close, once;
+    the tail stays what the run page shows."""
+    events: list[tuple[str, dict[str, Any]]] = []
+    whole = "deny evil.example:443\n" + "allow api.anthropic.com:443\n" * 300
+    assert len(whole) > 4000 and "deny" not in whole[-4000:]
+    session = _session(tmp_path, whole, events)
+    session.close()
+    assert events == [("builder.egress_denied", {"hosts": ["evil.example:443"], "n": 1})]
+    assert session.denied_hosts == ["evil.example:443"]
+    assert len(session.proxy_log) == 4000 and "deny" not in session.proxy_log
+
+
+def test_a_denied_method_is_not_a_denied_host(registry: Any, tmp_path: Path) -> None:
+    """The proxy also logs ``deny method=GET`` for a non-CONNECT request; only a
+    ``host:port`` target is a denied host — the method line is neither evented nor counted."""
+    events: list[tuple[str, dict[str, Any]]] = []
+    session = _session(tmp_path, "deny method=GET\nallow api.anthropic.com:443\n", events)
+    session.close()
+    assert events == [] and session.denied_hosts == []
+    session = _session(tmp_path, "deny method=GET\ndeny evil.example:443\n", events)
+    session.close()
+    assert events == [("builder.egress_denied", {"hosts": ["evil.example:443"], "n": 1})]
 
 
 def test_an_unnetworked_session_has_no_sidecar_and_reports_nothing(tmp_path: Path) -> None:

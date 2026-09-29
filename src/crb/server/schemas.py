@@ -1425,6 +1425,25 @@ class DisqualifiedBuilderOut(BaseModel):
     n: int
 
 
+class RedactionAckIn(BaseModel):
+    """``POST /system/redaction/{pack_hash}/acknowledge`` (DL-313): why the named pack no
+    longer needs to hold readiness — the credential was rotated, the incident reference."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class RedactionAckOut(BaseModel):
+    """The acknowledgement as recorded on the audit chain: who, why and when; never the
+    value the pack carries."""
+
+    pack_hash: str
+    actor: str
+    reason: str
+    acknowledged_at: str
+
+
 class DisqualifiedOut(BaseModel):
     """The rising-disqualified stop condition, served (G-400, DL-312): rows graded
     ``disqualified`` in the last ``window_days``, per builder, and ``over`` = the builders at
