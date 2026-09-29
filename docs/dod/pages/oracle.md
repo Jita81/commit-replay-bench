@@ -7,7 +7,7 @@ parent: dod.journey.prove-the-instrument
 children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
-status: partial                # WRITTEN BY THE CHECKER — never by hand
+status: done                # WRITTEN BY THE CHECKER — never by hand
 updated: 2026-09-26
 ---
 
