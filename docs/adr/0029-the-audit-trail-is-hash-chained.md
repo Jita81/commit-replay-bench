@@ -67,12 +67,17 @@ asked for it as a manual `SELECT` whose result nobody could read from the produc
      of the rows already there chains the whole trail.
    - *What it writes.* Only the two columns this revision adds (`prev_hash`, `row_hash`) on
      rows that existed before it. Every column those rows held before 0013 — each hashed
-     field and the id — is left byte for byte as it was, including through SQLite's table
-     rebuild [measured — n = 1 revision, 5 rows; method:
-     `tests/test_store_migrate.py::test_0013_leaves_every_existing_events_field_byte_identical`
-     casts every pre-0013 column to text before and after the upgrade and compares, on SQLite
-     here and on PostgreSQL in CI's `test-postgres` job (`CRB_TEST_POSTGRES_URL`); apparatus
-     n/a, a property of the product's own code, not a graded row].
+     field and the id — is kept by how the revision writes: the back-fill's `UPDATE` sets
+     only the two chain columns, SQLite's table rebuild copies each column into one of the
+     same declared type, and PostgreSQL alters the table in place [hypothesis — the stored
+     bytes are not compared]. What the test shows is narrower: each pre-0013 column keeps
+     its declared type and reads as the same text before and after the upgrade [measured —
+     n = 1 revision, 5 rows; method:
+     `tests/test_store_migrate.py::test_0013_leaves_every_existing_events_field_as_it_was`
+     reads every pre-0013 column's declared type and casts its value to text before and
+     after the upgrade and compares, on SQLite here and on PostgreSQL in CI's `test-postgres`
+     job (`CRB_TEST_POSTGRES_URL`); apparatus n/a, a property of the product's own code, not
+     a graded row].
    - *The trigger.* `events_no_update` is dropped for the back-fill and re-installed, with
      every other append-only trigger, before the revision ends, inside the one migration
      transaction `crb.store.migrate.upgrade` opens on both dialects.
