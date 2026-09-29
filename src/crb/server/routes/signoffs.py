@@ -121,12 +121,14 @@ from sqlalchemy.orm import Session
 from crb.core.capability import (
     WILDCARD,
     CapabilityCell,
+    ReadingBook,
     empty_cell,
     key_matches,
     measure_cell,
     task_oracle_strength,
 )
 from crb.core.checks import ARM_OFF, LABEL_CHECKS, arm_from_label
+from crb.core.context_arm import mode_admits
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     BELT_SET_V3_LEGACY,
@@ -150,6 +152,7 @@ from crb.core.signoff import (
     SIGNOFF_SCHEMA_V1,
     SIGNOFF_SCHEMA_V2,
     SIGNOFF_SCHEMA_V3,
+    SIGNOFF_SCHEMA_V4,
     Attestation,
     SignoffPolicy,
     SignoffRecord,
@@ -173,6 +176,7 @@ from crb.server.routes.oracle import (
     oracle_by_task,
     verdict_dict,
 )
+from crb.server.routes.readings import reading_book, rows_on_standard_arms
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.schemas import (
     Page,
@@ -197,7 +201,7 @@ from crb.server.schemas_signoff import (
     SignoffRouteOut,
     SignoffWithPolicyOut,
 )
-from crb.store.models import EvidencePackRow, Grade, Repo, Run, Signoff, Task, User
+from crb.store.models import Event, EvidencePackRow, Grade, Repo, Run, Signoff, Task, User
 
 router = APIRouter(tags=["signoffs"])
 _ERR = {"model": ErrorEnvelope}
@@ -237,6 +241,19 @@ _VERIFIER_KIND = "verifier_kind"
 _EV_CHECKS = "evidence_checks_arm"
 # crb.signoff.v4 (ADR-0019): the posture class(es) the evidence was graded in.
 _EV_POSTURE = "evidence_posture_class"
+# crb.signoff.v5 (ADR-0025 item 9, ADR-0026 item 6): the arm, class-set version and reading
+# the sign-off is bound to, the evidence per distinct change, the oracle's coverage and the
+# controls report's apparatus — all under the store row's hash (absent before).
+_EV_ARM = "evidence_context_arm"
+_EV_TAXONOMY = "evidence_taxonomy"
+_EV_READING = "evidence_reading_id"
+_EV_N_TASKS = "evidence_n_tasks"
+_EV_TASK_CLEAN = "evidence_task_clean"
+_EV_TASK_CI_LOW = "evidence_task_ci_low"
+_EV_TASK_CI_HIGH = "evidence_task_ci_high"
+_EV_ORACLE_SCORED = "evidence_oracle_scored_tasks"
+_EV_ORACLE_SHARE = "evidence_oracle_share"
+_CTL_APPARATUS = "controls_apparatus"
 
 #: Envelope codes: the floor keeps its historical code; every policy clause is one.
 CODE_FALSE_Q1 = "false_q1_refused"
@@ -337,9 +354,37 @@ def signoff_chain_intact(rows: Sequence[Signoff]) -> bool:
     return True
 
 
+#: The audit events that carry a sign-off row's ``row_hash`` (J-TEL-8), each written in the
+#: same transaction as its row: the sign-off chain's anchor on the hash-chained audit trail
+#: (ADR-0029). A chain cut at its end still links from genesis, so only a row an event names
+#: and the chain lacks shows the cut (P-337).
+SIGNOFF_ROW_EVENTS = ("signoff.created", "signoff.revoked")
+
+
+def _trail_row_hashes(session: Session) -> list[str]:
+    """Every sign-off ``row_hash`` the audit trail's sign-off events name, in event order."""
+    q = select(Event.payload_json).where(Event.action.in_(SIGNOFF_ROW_EVENTS)).order_by(Event.id)
+    out: list[str] = []
+    payload: Any
+    for payload in session.execute(q).scalars():
+        h = payload.get("row_hash") if isinstance(payload, Mapping) else None
+        if isinstance(h, str) and h:
+            out.append(h)
+    return out
+
+
+def signoff_rows_missing(session: Session, rows: Sequence[Signoff]) -> list[str]:
+    """The ``row_hash`` of every sign-off row the audit trail names that ``rows`` (the whole
+    store's chain) does not hold, in the order the events were written."""
+    have = {r.row_hash for r in rows}
+    return [h for h in _trail_row_hashes(session) if h not in have]
+
+
 def signoff_store_intact(session: Session) -> bool:
-    """:func:`signoff_chain_intact` over every stored sign-off row, whatever its repository."""
-    return signoff_chain_intact(load_signoff_rows(session))
+    """:func:`signoff_chain_intact` over every stored sign-off row, whatever its repository,
+    with every row the audit trail names still in it (P-337)."""
+    rows = load_signoff_rows(session)
+    return signoff_chain_intact(rows) and not signoff_rows_missing(session, rows)
 
 
 def _iter_signoffs(session: Session, batch: int = 1000) -> Iterable[Signoff]:
@@ -366,8 +411,12 @@ def verify_signoffs(session: Session) -> SignoffVerifyOut:
     prev = GENESIS_HASH
     broken_at: int | None = None
     detail = ""
+    have: set[str] = set()
+    last_seq = 0
     for r in _iter_signoffs(session):
         rows += 1
+        have.add(r.row_hash)
+        last_seq = r.seq
         edited = signoff_tampered(r)
         tampered += int(edited)
         if broken_at is None:
@@ -376,6 +425,14 @@ def verify_signoffs(session: Session) -> SignoffVerifyOut:
             elif edited:
                 broken_at, detail = r.seq, f"seq {r.seq}: row_hash mismatch (row edited)"
         prev = r.row_hash
+    if broken_at is None:
+        cut = [h for h in _trail_row_hashes(session) if h not in have]
+        if cut:
+            broken_at = last_seq + 1
+            detail = (
+                f"{len(cut)} sign-off row(s) the audit trail names are missing from the chain "
+                f"(first {cut[0][:12]}…) — rows were deleted"
+            )
     chain_ok = broken_at is None
     if chain_ok:
         detail = f"{rows} rows, chain intact"
@@ -473,10 +530,12 @@ def _attestation_of(cj: dict[str, str]) -> Attestation | None:
 
 def _schema_of(cj: dict[str, str]) -> str:
     """The record schema a stored row was written under, read from the keys it carries:
-    the checks arm → v4, ``verifier_kind`` → v3, a policy snapshot → v2, none → v1 (never
-    assumed)."""
-    if _EV_CHECKS in cj:
+    the context arm → v5, the checks arm → v4, ``verifier_kind`` → v3, a policy snapshot →
+    v2, none → v1 (never assumed)."""
+    if _EV_ARM in cj:
         return SIGNOFF_SCHEMA
+    if _EV_CHECKS in cj:
+        return SIGNOFF_SCHEMA_V4
     if _VERIFIER_KIND in cj:
         return SIGNOFF_SCHEMA_V3
     return SIGNOFF_SCHEMA_V2 if _POLICY_VERSION in cj else SIGNOFF_SCHEMA_V1
@@ -521,6 +580,16 @@ def to_record(row: Signoff) -> SignoffRecord:
         verifier_kind=str(cj.get(_VERIFIER_KIND, "") or ""),
         checks_arm=str(cj.get(_EV_CHECKS, "") or ""),
         posture_class=str(cj.get(_EV_POSTURE, "") or ""),
+        n_tasks_at_signoff=_int(cj.get(_EV_N_TASKS, 0)),
+        task_clean_at_signoff=_int(cj.get(_EV_TASK_CLEAN, 0)),
+        task_ci_low_at_signoff=_float_or_none(cj.get(_EV_TASK_CI_LOW)) or 0.0,
+        task_ci_high_at_signoff=_float_or_none(cj.get(_EV_TASK_CI_HIGH)) or 1.0,
+        oracle_scored_tasks=_int(cj.get(_EV_ORACLE_SCORED, 0)),
+        oracle_share=_float_or_none(cj.get(_EV_ORACLE_SHARE)) or 0.0,
+        controls_apparatus=str(cj.get(_CTL_APPARATUS, "") or ""),
+        context_arm=str(cj.get(_EV_ARM, "") or ""),
+        taxonomy=str(cj.get(_EV_TAXONOMY, "") or ""),
+        reading_id=str(cj.get(_EV_READING, "") or ""),
         schema=_schema_of(cj),
         record_id=row.signoff_id,
         prev_hash=row.prev_hash,
@@ -546,9 +615,10 @@ def load_signoff_records(session: Session, repo: str | None = None) -> list[Sign
     over the whole store), no record is returned. A per-row check is not enough — an
     edited row's scope, repository and kind are the editor's choice, so no reading of it can
     be trusted to withdraw what it withdrew (EI-6, 2026-09-27). ``/signoffs/verify`` and the
-    ``/health`` ``ledger`` probe name the break."""
+    ``/health`` ``ledger`` probe name the break. So does a row the audit trail names that the
+    chain no longer holds — its last row deleted leaves a chain that still links (P-337)."""
     rows = load_signoff_rows(session)
-    if not signoff_chain_intact(rows):
+    if not signoff_chain_intact(rows) or signoff_rows_missing(session, rows):
         return []
     return [to_record(r) for r in rows if not repo or r.repo in (repo, WILDCARD)]
 
@@ -581,11 +651,13 @@ def cell_false_q1(session: Session, repo: str, scope: CellKey) -> tuple[int, lis
 def cell_rows(
     session: Session, repo: str, scope: CellKey, arm: str, posture_class: str
 ) -> list[GradeRow]:
-    """The scope's SIGHTED rows on the CURRENT apparatus and on the ``checks`` ``arm`` as
+    """The scope's SIGHTED rows — and, from 2.4, every row on a certifying arm, which
+    :func:`measured_cell` reads one arm of (:func:`crb.core.context_arm.mode_admits`; the
+    replay ``S1`` arm is written blind, P-338) — on the CURRENT apparatus and on the ``checks`` ``arm`` as
     :class:`GradeRow` (raises ``FalseQ1Violation`` on a bad row — call :func:`cell_false_q1`
     first so the refusal is explicit, not incidental). A sign-off is a claim about the
-    current instrument on the sighted measurement: rows from an older belt set, blind
-    attempts, or rows graded with the format step or belt 6 switched differently never lift
+    current instrument on the cell's standard arm: rows from an older belt set, blind
+    attempts with no arm, or rows graded with the format step or belt 6 switched differently never lift
     the cell (EVIDENCE-AND-CLAIMS §5, ADR-0024; the capability map applies the same
     defaults — its ``checks`` default is :func:`checks_arm_in`). Only rows this deployment
     MEASURED count: an imported row is a record of someone else's measurement and never
@@ -593,16 +665,29 @@ def cell_rows(
     q = (
         _scope_where(select(Grade), repo, scope)
         .where(
-            Grade.mode == "sighted",
             Grade.apparatus_version == APPARATUS_VERSION,
             Grade.provenance == PROVENANCE_MEASURED,
         )
         .order_by(Grade.seq)
     )
     grades: Iterable[Grade] = session.execute(q).scalars()
-    rows = [GradeRow.from_dict(grade_to_dict(g)) for g in grades]
+    rows = [
+        r
+        for r in (GradeRow.from_dict(grade_to_dict(g)) for g in grades)
+        if mode_admits(r.mode, r.context_arm, "sighted")
+    ]
     # ADR-0019 §8: and in the posture class the deployment grades the repository in
     return [r for r in rows_for_checks(rows, arm) if r.posture_class == posture_class]
+
+
+def scope_book(session: Session, repo: str, scope: CellKey) -> ReadingBook:
+    """The repository's readings evaluated over the scope's rows — every posture, arm and
+    apparatus, since a reading counts its own and a hierarchy reads its arms together. Only
+    the scope is read, so a false-Q1 row in another cell refuses that cell's sign-off, not
+    this one's (the floor is scoped to the cell, as :func:`cell_false_q1` is)."""
+    q = _scope_where(select(Grade), repo, scope).order_by(Grade.seq)
+    grades: Iterable[Grade] = session.execute(q).scalars()
+    return reading_book(session, repo, [GradeRow.from_dict(grade_to_dict(g)) for g in grades])
 
 
 def _grade_posture(g: Grade) -> str:
@@ -636,14 +721,18 @@ def measured_cell(
     scope: CellKey,
     controls: ControlsVerdict,
     oracle_by_task: Mapping[str, float | None] | None = None,
+    readings: ReadingBook | None = None,
 ) -> CapabilityCell:
-    """The scope's cell routed under the repo's controls verdict and its task-level
-    oracle scores — exactly as the capability map routes it; the honest-empty cell
+    """The scope's cell routed under the repo's controls verdict, its task-level oracle
+    scores and its registered readings — exactly as the capability map routes it, on the
+    cell's standard arm (routing.v2: a sign-off is written only for it); the honest-empty cell
     when there are no rows."""
     proj = _projection(scope)
+    book = readings or ReadingBook()
+    rows = rows_on_standard_arms(rows, proj, book)
     if not rows:
         return empty_cell(scope, proj)
-    return measure_cell(rows, proj, controls=controls, oracle_by_task=oracle_by_task)
+    return measure_cell(rows, proj, controls=controls, oracle_by_task=oracle_by_task, readings=book)
 
 
 def _grade_key(g: Grade) -> CellKey:
@@ -691,6 +780,16 @@ def cell_oracle_strength(
         by_task = oracle_by_task(session, repo)
     scored = sum(1 for tid in task_ids if by_task.get(tid) is not None)  # unscoreable = None
     return CellOracle(task_oracle_strength(rows, by_task), scored, len(task_ids))
+
+
+def cell_oracle(cell: CapabilityCell) -> CellOracle:
+    """The oracle evidence the cell was ROUTED under (ADR-0025 item 9: a sign-off reads the
+    ``OracleEvidence`` the route reads, never the rows' mean) — the commits the reading
+    counted, each at its minimum ``mutation.v2`` score at this apparatus."""
+    o = cell.oracle
+    if o is None:
+        return CellOracle(None, 0, 0)
+    return CellOracle(o.strength if o.measured else None, o.scored_tasks, o.n_tasks)
 
 
 def _subjects(session: Session, repo: str, task_ids: Iterable[str]) -> dict[str, str]:
@@ -1386,8 +1485,8 @@ def preview_signoff(
     rows = cell_rows(db, repo, scope, arm, posture)
     controls = latest_controls_verdict(db, repo)
     by_task = oracle_by_task(db, repo)
-    cell = measured_cell(rows, scope, controls, by_task)
-    oracle = cell_oracle_strength(db, repo, rows, by_task=by_task)
+    cell = measured_cell(rows, scope, controls, by_task, scope_book(db, repo, scope))
+    oracle = cell_oracle(cell)
     strength = resolve_oracle_strength(cell, oracle_strength=oracle.strength)
     attestation_out: AttestationOut | None = None
     attested: ResolvedAttestation | None = None
@@ -1466,6 +1565,7 @@ def preview_signoff(
                 lint_evaluated=cell.stats.n_lint_evaluated if cell.stats is not None else 0,
                 api=cell.stats.n_api if cell.stats is not None else 0,
                 outage=cell.n_outage,
+                outage_auth=cell.stats.n_outage_auth if cell.stats is not None else 0,
             ),
         ),
         route=SignoffRouteOut(route=cell.route, reason=cell.reason, reason_code=cell.reason_code),
@@ -1550,8 +1650,9 @@ def create_signoff(
     rows = cell_rows(db, body.repo, scope, arm, posture)
     controls = latest_controls_verdict(db, body.repo)
     by_task = oracle_by_task(db, body.repo)
-    cell = measured_cell(rows, scope, controls, by_task)
-    oracle = cell_oracle_strength(db, body.repo, rows, by_task=by_task)
+    book = scope_book(db, body.repo, scope)
+    cell = measured_cell(rows, scope, controls, by_task, book)
+    oracle = cell_oracle(cell)
     # 3. The attestation: the named row must be an accepted row of THIS cell — and the
     #    actors behind it and behind every accepted row, for the two-person rule.
     attested: ResolvedAttestation | None = None
@@ -1620,6 +1721,16 @@ def create_signoff(
         _EV_APPARATUS: ",".join(cell.stats.apparatus_versions),
         _EV_CHECKS: stamped.checks_arm,
         _EV_POSTURE: stamped.posture_class,
+        _EV_ARM: stamped.context_arm,
+        _EV_TAXONOMY: stamped.taxonomy,
+        _EV_READING: stamped.reading_id,
+        _EV_N_TASKS: str(stamped.n_tasks_at_signoff),
+        _EV_TASK_CLEAN: str(stamped.task_clean_at_signoff),
+        _EV_TASK_CI_LOW: f"{stamped.task_ci_low_at_signoff:.6f}",
+        _EV_TASK_CI_HIGH: f"{stamped.task_ci_high_at_signoff:.6f}",
+        _EV_ORACLE_SCORED: str(stamped.oracle_scored_tasks),
+        _EV_ORACLE_SHARE: f"{stamped.oracle_share:.6f}",
+        _CTL_APPARATUS: stamped.controls_apparatus,
         _EV_ORACLE: ""
         if stamped.oracle_strength_at_signoff is None
         else f"{stamped.oracle_strength_at_signoff:.6f}",
@@ -1765,6 +1876,7 @@ __all__ = [
     "CODE_POLICY_INVALID",
     "CODE_REFUSED",
     "FALSE_Q1_PREDICATE",
+    "SIGNOFF_ROW_EVENTS",
     "AttestationRefused",
     "CellOracle",
     "ResolvedAttestation",
@@ -1786,6 +1898,7 @@ __all__ = [
     "signoff_chain_intact",
     "signoff_hash",
     "signoff_out",
+    "signoff_rows_missing",
     "signoff_store_intact",
     "signoff_tampered",
     "to_record",

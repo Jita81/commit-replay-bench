@@ -72,6 +72,7 @@ from crb.server.flow_record import scope_key
 from crb.server.routes.signoffs import load_signoff_records
 from crb.store.ledger import DbLedger, DbReviewLedger
 from crb.store.models import Event, Grade, User
+from fixtures.posture import at_apparatus
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -282,10 +283,7 @@ class TestMeasure:
             dataclasses.replace(base, created=f"2026-09-01T10:{i:02d}:00+00:00") for i in range(10)
         ]
         assert measure(ten, {}, {}).counts["cells_at_bar"] == 1
-        split_version = [
-            dataclasses.replace(r, apparatus_version="2.2") if i % 2 else r
-            for i, r in enumerate(ten)
-        ]
+        split_version = [at_apparatus(r, "2.2") if i % 2 else r for i, r in enumerate(ten)]
         assert measure(split_version, {}, {}).counts["cells_at_bar"] == 0
         split_mode = [
             dataclasses.replace(r, mode="blind") if i % 2 else r for i, r in enumerate(ten)
@@ -345,6 +343,9 @@ def split_on(row: GradeRow, axis: str) -> GradeRow:
     assert axis in labelled or axis in fields, f"split_on cannot split a cell on {axis!r}"
     if axis in labelled:
         out = dataclasses.replace(row, labels={**row.labels, **labelled[axis]})
+    elif axis == "apparatus_version":
+        # a row moved to another apparatus keeps only that apparatus's labels (P-317)
+        out = at_apparatus(row, fields[axis])
     else:
         out = dataclasses.replace(row, **{axis: fields[axis]})
     assert getattr(out, axis) != getattr(row, axis), f"the split did not move {axis!r}"
@@ -413,12 +414,14 @@ def seconds_between(start: str, end: str) -> float:
 
 def add_factory_row(env: Env, *, cost: float) -> None:
     """One graded row the factory built — a copy of a seeded row with ``process_step``
-    ``factory`` — appended through the ledger, so it chains like any other."""
+    ``factory`` and a factory arm (a build on an authored test, ADR-0026 item 1) — appended
+    through the ledger, so it chains like any other."""
     base = env.info.succeeded_rows[0]
     row = dataclasses.replace(
         base,
         row_id="f" * 32,
         process_step="factory",
+        labels={**base.labels, "context_arm": "S1@claude-opus-5"},
         run_id="factory-run-1",
         cost_usd=cost,
         created="2026-09-02T12:00:00+00:00",

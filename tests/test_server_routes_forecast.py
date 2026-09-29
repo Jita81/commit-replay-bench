@@ -16,8 +16,8 @@ Works with:   src/crb/server/routes/forecast.py (under test), src/crb/core/forec
               numbers), tests/fixtures/server_seed.py, tests/fixtures/signoff_seed.py,
               tests/test_forecast.py (the core suite), docs/API.md
 Tested by:    tests/test_server_routes_forecast.py
-Touch when:   the mix grammar or a readiness gap kind changes (mirror tests/test_forecast.py
-              and ui/src/api/types.ts).
+Touch when:   never for a new repository; the mix grammar or a readiness gap kind changes (mirror
+              tests/test_forecast.py and ui/src/api/types.ts).
 """
 
 from __future__ import annotations
@@ -84,7 +84,9 @@ class TestBuild:
         ]
         assert f["components"] == 7 and f["measured_components"] == 6
         assert f["unmeasured"] == ["docs.update"]  # never priced, never routed
-        assert f["deliver"] == 4 and f["calibrate"] == 2 and f["human"] == 0
+        # routing.v2: the seed's rows were graded on the host and no reading is registered,
+        # so nothing delivers — the forecast routes as the map does (ADR-0025, ADR-0026)
+        assert f["deliver"] == 0 and f["calibrate"] == 6 and f["human"] == 0
         assert f["units_by_route"]["not_yet_measured"] == 1
         # 6 costed units at $0.012 each; 42 s each → 4.2 min
         assert f["cost_usd_mean"] == pytest.approx(0.072) and f["cost_usd_std"] == 0.0
@@ -96,10 +98,11 @@ class TestBuild:
         ] == pytest.approx(4.8)
         assert f["buildable_p_stddev"] > 0 and f["single_rep_band"] is False
         assert f["coverage"] == pytest.approx(6 / 7, abs=1e-4)
-        assert f["policy_version"] == "routing.v1"
+        assert f["policy_version"] == "routing.v2"
         per = {c["component"]: c for c in f["per_component"]}
-        assert per["bug.fix/S"]["route"] == "deliver" and per["bug.fix/S"]["n"] == 40
-        assert per["bug.fix/S"]["config"] == "editblock/gpt-oss-120b@cerebras"
+        assert per["bug.fix/S"]["route"] == "calibrate" and per["bug.fix/S"]["n"] == 40
+        assert "sealed posture" in per["bug.fix/S"]["why"]
+        assert per["bug.fix/S"]["config"] == ""  # no passing config to route to
         assert per["bug.fix/S"]["unit_cost_usd"] == pytest.approx(0.012)
         assert per["docs.update"]["route"] == "not_yet_measured" and per["docs.update"]["n"] == 0
         assert per["docs.update"]["why"] == "no rows for this cell"
@@ -132,11 +135,13 @@ class TestReadiness:
         gaps = "\n".join(d["gaps"])
         assert "under 5 trials" in gaps and "backend.route.add/M (n=4)" in gaps
         assert "not earned-trusted" in gaps and "bug.fix/S (automated-pass)" in gaps
-        assert d["buildable_units"] == 4 and d["buildable_frac"] == 0.8  # ≥ 80%: no gap
-        # sign off the deliver cell → the earned-tier gap for it closes. Under
-        # signoff-policy.v2 that needs a clean controls gate (the seed's has an escape),
-        # a measured strong oracle (the seed's is 0.58) and an attestation naming an
-        # accepted row of the cell.
+        # routing.v2: host rows and no registered reading — nothing is buildable yet
+        assert d["buildable_units"] == 0 and d["buildable_frac"] == 0.0
+        assert "buildable 0% < 80%" in gaps
+        # prove and sign off the deliver cell → its gaps close. Under signoff-policy.v4 that
+        # needs a registered reading that delivers in the sealed posture, a clean controls
+        # gate (the seed's has an escape), a measured strong oracle (the seed's is 0.58) and
+        # an attestation naming an accepted row of the cell.
         login(env.client, "approver")
         clear_policy(env)
         cell = {"capability_class": "bug.fix", "size": "S"}

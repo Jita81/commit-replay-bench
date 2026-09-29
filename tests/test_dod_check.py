@@ -986,6 +986,49 @@ def test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history(
     capsys.readouterr()
 
 
+def test_a_new_gap_never_reuses_an_id_the_bases_history_closed(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-463: Wave 2 defined G-945, G-946, G-963 and G-964 as new gaps,
+    but `feat/ns1` had used all four on 2026-09-25 for dependency-provisioning gaps it then
+    closed, so one id carried two meanings and nothing refused it. A gap this branch defines
+    that the base does not have open must not appear as a gap in the base's history at the
+    merge-base."""
+    mod, root = tree
+    plan = root / "docs/dod/PLAN.md"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
+    assert mod.main([]) == 0
+    _commit(root, "G-001 is a gap")
+    _write_all(root)
+    assert mod.main([]) == 0
+    base = _commit(root, "close G-001")
+    _git(root, "branch", "-q", "base-under-test", base)
+    capsys.readouterr()
+    # the branch opens a new gap under the closed id, with another meaning
+    other = "the map hides its filters"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page = root / "docs/dod/pages/results.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("non-goals not on the About block", other),
+        encoding="utf-8",
+    )
+    assert mod.main([]) == 0  # the default base (origin/main) does not exist here
+    assert mod.main(["--base", "base-under-test"]) == 1
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert "G-001" in said and "P-463" in said and "base-under-test" in said
+    # an id the history never used passes
+    page.write_text(page.read_text(encoding="utf-8").replace("G-001", "G-002"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-002, G-701"), encoding="utf-8")
+    assert mod.main(["--base", "base-under-test"]) == 0
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
+    capsys.readouterr()
+    # a gap the base still has open is the same gap, not a reuse
+    assert mod.reused_gap_ids(root, "base-under-test", {"G-002"}) == []
+    assert mod.reused_gap_ids(root, "no-such-base", {"G-001"}) == []
+
+
 def test_the_retired_list_never_reads_another_repositorys_history(tmp_path: Path) -> None:
     """``git -C <dir>`` walks up to the nearest repository; a tree that is not itself a work
     tree must not borrow an enclosing repository's history to vouch for its retired ids (the

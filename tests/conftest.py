@@ -5,9 +5,9 @@ Navigation
 ----------
 What it is:   The pytest conftest of the hermetic core suite — five function-scoped fixtures
               over the Python fixture repository, the setup gate for toolchain, docker and
-              network tests, one
-              autouse pin of a host fact, and the session finaliser that keeps the base
-              temporary directory deletable.
+              network tests, two autouse pins (a host fact and the builder login verify), one
+              autouse guard of the ``CRB_*`` environment, and the session finaliser that keeps
+              the base temporary directory deletable.
 What it does: Builds a fresh ``pyrepo`` (three commits) per test and derives from it the
               ``runner`` (a real ``PytestRunner``), a ``LocalExecutor``, the mined
               ``feat_task`` and a sighted ``trial`` worktree that is removed afterwards. Nothing
@@ -27,11 +27,16 @@ How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``t
               ``network`` marker's hosts to ``conftest_langs.require_network``.
               ``_no_host_claude_cli`` pins ``claude_cli_on_path`` to ``False`` for every test, so no
               test passes or fails on whether this machine has the ``claude`` CLI (P-037);
-              ``_no_host_endpoint_env`` clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*`` variables, so
-              no test builds against the endpoint this machine's shell names (P-277).
+              ``_no_real_builder_login`` pins the run preflight's claude_code login verify to a
+              fake ``ok`` (pilot D1); ``_no_host_endpoint_env`` clears the ``CRB_OPENAI_*`` /
+              ``CRB_AZURE_*`` variables, so no test builds against the endpoint this machine's
+              shell names (P-277); ``_no_crb_env_leak`` puts every ``CRB_*`` variable back after
+              each test, so no test (and no code under test that writes one) hands a home or a
+              setting to the next (P-310).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
+              tests/fixtures/env_guard.py (the environment guard),
               src/crb/core/runners/pytest_runner.py (``runner``), src/crb/core/execution.py
               (``executor``), src/crb/core/workspace.py (``trial``), tests/conftest_langs.py
               and tests/conftest_store.py (the deliberately separate helper modules),
@@ -40,7 +45,7 @@ Tested by:    tests/test_grade.py, tests/test_mine.py, tests/test_workspace.py (
               tests/test_conftest_langs.py (the toolchain, docker and network gates),
               tests/test_toolchain_gates.py (no test gates around them),
               tests/test_tmp_tree_hygiene.py (the finaliser), tests/test_endpoint_env_isolation.py
-              (the endpoint variables)
+              (the endpoint variables), tests/test_env_guard.py
 Touch when:   never for a new repository; add a fixture here only when three or more core test
               modules need the same object — language, store and server fixtures live in their
               own helper modules so this file stays the core suite's.
@@ -58,6 +63,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
+from fixtures.env_guard import crb_env_restored
 from fixtures.tmptree import restore_removable
 
 try:  # the same module object the test modules import (tests/ may or may not be a package)
@@ -136,6 +142,15 @@ def trial(pyrepo: pr.PyRepo, tmp_path: Path) -> Iterator[Workspace]:
 
 
 @pytest.fixture(autouse=True)
+def _no_crb_env_leak() -> Iterator[None]:
+    """Every test starts with the ``CRB_*`` environment the one before it started with: a
+    variable a test (or the code it drives) sets, changes or deletes is put back after it.
+    ``worker_main.settings_from_args`` sets ``CRB_HOME``; unguarded, one test's temporary
+    home reached every later test in the session (P-310)."""
+    yield from crb_env_restored()
+
+
+@pytest.fixture(autouse=True)
 def _no_host_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test runs as on a bare CI runner: no ``claude`` CLI on PATH. A test that needs
     the CLI present patches ``crb.builders.claude_code.claude_cli_on_path`` itself.
@@ -166,3 +181,31 @@ def _no_host_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
     endpoint sets the variables itself (tests/test_builders_endpoint.py)."""
     for name in _HOST_ENDPOINT_ENV:
         monkeypatch.delenv(name, raising=False)
+
+
+#: What the suite's fake login verify answers: a working login, from a labelled test source.
+FAKE_LOGIN_SOURCE = ("test", "")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_builder_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs with the claude_code login verify pinned to a fake that answers ``ok``:
+    the run preflight (src/crb/server/builder_login.py, pilot D1) verifies a login before a
+    build is queued, and no test may run the real ``claude`` CLI or call a model — nor pass or
+    fail on whether this machine has a working login (P-037). A test of the gate installs its
+    own verifier. Skipped where the server extra is not installed."""
+    try:
+        from crb.builders.claude_code import LoginCheck, default_auth
+        from crb.server import builder_login
+    except ImportError:  # pragma: no cover — a core-only environment
+        return
+
+    def verify(auth: str, binary: str) -> LoginCheck:
+        del auth, binary
+        return LoginCheck("ok", "pong", source=FAKE_LOGIN_SOURCE[0])
+
+    monkeypatch.setitem(
+        builder_login.LOGIN_VERIFIERS,
+        "claude_code",
+        builder_login.LoginVerifier(verify, lambda auth: FAKE_LOGIN_SOURCE, default_auth),
+    )

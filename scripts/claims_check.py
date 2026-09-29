@@ -132,7 +132,9 @@ What it does: Parses each allowlisted Markdown page into blocks, finds quantifie
               README, a guide or the factory's pull-request body template, in any shape the
               page renders (ADR-0026 item 11, P-245, P-246); reports a README
               ``[measured]`` tag that names no vendored rows, or rows
-              whose checksum manifest does not verify (G-660); --check exits non-zero.
+              whose checksum manifest does not verify (G-660); reports README's routing bar
+              when it differs from ``RoutingPolicy.describe()`` (ADR-0025 item 10, P-311);
+              --check exits non-zero.
 How:          Split the page into blocks (skipping headings, tables, fenced code) → keep the
               paragraph that introduces a list as the item's cover → strip code, links and
               comments → split into sentences → test each for a percentage or a cardinal
@@ -147,11 +149,16 @@ How:          Split the page into blocks (skipping headings, tables, fenced code
               mention and a conformity word that no verb in its clause denies. Then each
               README ``[measured]`` tag, in any rendered shape → its ``rows:`` locator →
               the manifest's hashes.
+              Then README's text between the ``routing-bar`` markers, whitespace joined ⇄
+              the code's ``RoutingPolicy.describe()`` (src/ on the path; the core is stdlib
+              only).
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
-ADRs:         docs/adr/0026-the-context-standard.md (item 11, the conformity rule)
+ADRs:         docs/adr/0026-the-context-standard.md (item 11, the conformity rule),
+              docs/adr/0025-routing-v2.md (item 10: the published bar is generated)
 Works with:   docs/EVIDENCE-AND-CLAIMS.md (the claim-tag rule it enforces the shape of; §9,
               the quality baseline), src/crb/core/quality_model.py (the table a page may
-              name), ui/src/help/docs.ts (the bundled guides), src/crb/factory/delivery.py
+              name), src/crb/core/routing.py (``RoutingPolicy.describe`` — the bar README
+              carries), ui/src/help/docs.ts (the bundled guides), src/crb/factory/delivery.py
               (the pull-request body template), data/ (the vendored rows a README
               ``[measured]`` tag names), tests/test_measured_claims.py (re-derives them),
               README.md, docs/*.md, docs/reviews/ and docs/dod/ (the pages on
@@ -1508,6 +1515,49 @@ def check_review_actions(root: Path) -> list[Finding]:
     return findings
 
 
+#: The markers README's "Not a licence to deploy" carries the published routing bar between.
+BAR_BEGIN = "<!-- routing-bar:begin -->"
+BAR_END = "<!-- routing-bar:end -->"
+BAR_PAGE = "README.md"
+
+
+def published_bar() -> str:
+    """``RoutingPolicy.describe()`` of the checkout this script belongs to (ADR-0025 item 10)."""
+    src = str(ROOT / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    from crb.core.routing import DEFAULT_POLICY  # noqa: PLC0415 — src/ joins the path above
+
+    return DEFAULT_POLICY.describe()
+
+
+def check_routing_bar(root: Path, bar: str | None = None) -> list[Finding]:
+    """README's routing bar is the code's, byte for byte once line wrapping is undone: the text
+    between :data:`BAR_BEGIN` and :data:`BAR_END` must equal ``RoutingPolicy.describe()``
+    (ADR-0025 item 10). The class of defect — the published bar drifting from the code's —
+    gets a gate, not a sentence (docs/PREVENTION.md P-311)."""
+    path = root / BAR_PAGE
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    if BAR_BEGIN not in text or BAR_END not in text:
+        return [Finding(BAR_PAGE, 0, "", "no routing-bar markers: README must carry the bar")]
+    line = text[: text.index(BAR_BEGIN)].count("\n") + 1
+    inside = text.split(BAR_BEGIN, 1)[1].split(BAR_END, 1)[0]
+    got = " ".join(inside.split())
+    want = " ".join((bar if bar is not None else published_bar()).split())
+    if got != want:
+        return [
+            Finding(
+                BAR_PAGE,
+                line,
+                got[:120],
+                "the routing bar differs from RoutingPolicy.describe() — regenerate it",
+            )
+        ]
+    return []
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--check", action="store_true", help="exit non-zero on any finding (CI)")
@@ -1531,6 +1581,8 @@ def main(argv: list[str] | None = None) -> int:
         + check_conformity(root, tuple(args.allow) if args.allow else None)
         + check_rows(root, tuple(p for p in pages if p in ROWS_PAGES))
     )
+    if not args.allow:  # the gate's own run: README carries the code's bar
+        findings += check_routing_bar(root)
     stream = sys.stderr if args.check else sys.stdout
     for f in findings:
         where = f"{f.path}:{f.line}" if f.line else f.path

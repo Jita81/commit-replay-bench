@@ -37,7 +37,10 @@ What it does: Creates a fresh worktree per attempt, overlays the tests in sighte
               patch before its pack is written, and skips tasks whose gold is known-bad. A
               builder crash is recorded and graded anyway; only a sandbox failure,
               cancellation or an attempt the ``admit`` hook refuses (the spend cap) stops the
-              run — the last before anything of that attempt exists.
+              run — the last before anything of that attempt exists. A task mined before the
+              miner stamped its change identity gets it here (``change_identity``), so every
+              row names the change it observed; each pack is written through a temporary name
+              of its own process.
 How:          ``run`` iterates tasks (checking ``stop`` and ``gold_clean``) → ``run_task``
               loops the ladder: ``Workspace.create`` → ``build_fn`` → ``grade`` →
               ``keep_patch`` → ``escalation_gate`` (not clean) → ``EvidencePack`` →
@@ -56,7 +59,8 @@ Works with:   src/crb/core/grade.py (the belts), src/crb/core/ledger.py (the row
               server's caller — a replay run's ``counts_json`` is the RunSummary; ``crb
               grade`` calls the same ``grade()`` over a worktree the operator supplies)
 Tested by:    tests/test_run.py, tests/test_builders_adapter.py, tests/test_worker.py,
-              tests/test_worker_budget_ladder.py, tests/test_patches.py, tests/test_worker_spend.py
+              tests/test_worker_budget_ladder.py, tests/test_patches.py, tests/test_worker_spend.py,
+              tests/test_write_pack.py, tests/test_mine_distinct_change.py
 Touch when:   never for a new repository (mode, ladder and budget are run settings); adding a
               stage between build and ledger, or a field to the pack or the row, changes the
               evidence every consumer reads — update src/crb/core/evidence.py, the store
@@ -66,23 +70,29 @@ Touch when:   never for a new repository (mode, ladder and budget are run settin
 from __future__ import annotations
 
 import json
+import os
+import secrets
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from crb.core import version as _version
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES, GradeContext, GradeResult, grade
 from crb.core.ledger import (
+    LABEL_CHANGE_ID,
     PROCESS_REPLAY,
     GradeRow,
     JsonlLedger,
     grade_row_from_result,
     is_environment_error,
+    is_v2_apparatus,
 )
+from crb.core.mine import change_identity
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
 from crb.core.runners.base import BaseRunner
@@ -248,13 +258,20 @@ def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
 def write_pack(pack: EvidencePack, evidence_dir: Path) -> Path:
     """Store the pack content-addressed (``<pack_hash>.json``). Written to a temp file
     and renamed so a crash mid-write cannot leave a half pack under the hash the
-    ledger row will cite; an existing pack with that hash is by definition identical."""
+    ledger row will cite; an existing pack with that hash is by definition identical.
+
+    The temporary name is the writer's own (``<hash>.json.<pid>.<8 hex>.tmp``, ADR-0025
+    item 13): two processes writing one pack never share a file, and the rename of either
+    leaves the same bytes under the hash (P-122)."""
     evidence_dir.mkdir(parents=True, exist_ok=True)
     p = evidence_dir / f"{pack.pack_hash}.json"
     if not p.exists():
-        tmp = p.with_suffix(".json.tmp")
-        tmp.write_text(pack.to_json(), encoding="utf-8")
-        tmp.replace(p)
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+        try:
+            tmp.write_text(pack.to_json(), encoding="utf-8")
+            tmp.replace(p)
+        finally:
+            tmp.unlink(missing_ok=True)
     return p
 
 
@@ -307,6 +324,12 @@ def run_task(
     ctx = spec.context_for(task)
     task = ctx.spec(task)
     halted = ""
+    if is_v2_apparatus(_version.APPARATUS_VERSION) and not task.labels.get(LABEL_CHANGE_ID):
+        # mined before the miner stamped it (G-954); a 2.4 replay row must carry it, and a
+        # row below 2.4 never does (DL-094 (2)), so it is computed only when it is written
+        task = task.with_(
+            labels={**task.labels, LABEL_CHANGE_ID: change_identity(repo, task.task_id)}
+        )
     for i, rung in enumerate(spec.ladder, start=1):
         trial = f"r{i}"
         if spec.admit is not None:

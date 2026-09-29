@@ -99,6 +99,7 @@ from crb.core.ledger import (
     GradeRow,
     group_by_cell,
 )
+from crb.core.reading import rule_looks
 from crb.core.redact import redact
 from crb.core.routing import (
     DEFAULT_POLICY,
@@ -1100,7 +1101,7 @@ def _item_for_task(
         labels={
             "source": "crb.core.learn",
             "cell": label,
-            "reason_code": cell.reason_code,
+            "reason_code": hold_reason(cell),
             "route": cell.route,
             "repo": score.repo,
             "task_id": score.task_id,
@@ -1141,7 +1142,7 @@ def _item_for_cell(cell: CapabilityCell, *, threshold: float, registered: str) -
         labels={
             "source": "crb.core.learn",
             "cell": label,
-            "reason_code": cell.reason_code,
+            "reason_code": hold_reason(cell),
             "route": cell.route,
             "oracle_strength": strength,
             "threshold": f"{threshold:.2f}",
@@ -1231,7 +1232,7 @@ def _item_for_held_strong_cell(
         labels={
             "source": "crb.core.learn",
             "cell": label,
-            "reason_code": cell.reason_code,
+            "reason_code": hold_reason(cell),
             "route": cell.route,
             "oracle_strength": strength,
             "threshold": f"{threshold:.2f}",
@@ -1240,6 +1241,46 @@ def _item_for_held_strong_cell(
         },
         registered=registered,
     )
+
+
+def held_by_oracle(cell: CapabilityCell) -> bool:
+    """Is the cell held by its oracle or its controls? routing.v2 lists EVERY clause a cell
+    fails (``RouteDecision.shortfalls``), so a cell still waiting for its reading is flagged
+    for strengthening work too — the oracle is measured before the commits are paid for."""
+    d = cell.decision
+    if d is None:
+        return False
+    return d.reason_code in STRENGTHEN_REASONS or any(
+        s.code in STRENGTHEN_REASONS for s in d.shortfalls
+    )
+
+
+def oracle_by_task_of(
+    scores: Iterable[OracleTaskScore | Mapping[str, Any]], *, apparatus: str = APPARATUS_VERSION
+) -> dict[str, float]:
+    """Each task's MINIMUM scoreable strength among ``scores`` — the CLI's twin of the
+    server's per-task reduction (``crb.server.routes.oracle.oracle_by_task``), so ``crb learn
+    strengthen`` routes the map on the same oracle the server does (ADR-0025 item 3: the rows'
+    own column is never read). A score stamped with another apparatus is history and left out;
+    an unstamped one (an export that carries no provenance) is read as the operator gave it."""
+    out: dict[str, float] = {}
+    for raw in scores:
+        s = raw if isinstance(raw, OracleTaskScore) else OracleTaskScore.from_dict(raw)
+        if s.strength is None or (s.apparatus_version and s.apparatus_version != apparatus):
+            continue
+        prior = out.get(s.task_id)
+        out[s.task_id] = s.strength if prior is None else min(prior, s.strength)
+    return out
+
+
+def hold_reason(cell: CapabilityCell) -> str:
+    """The oracle or controls clause that holds ``cell`` — its ``reason_code`` when that is one,
+    else the first such shortfall — so an item names the work it is for, never a clause (the
+    posture, a pending reading) no test can fix."""
+    d = cell.decision
+    if d is None or d.reason_code in STRENGTHEN_REASONS:
+        return cell.reason_code
+    return next((s.code for s in d.shortfalls if s.code in STRENGTHEN_REASONS), cell.reason_code)
 
 
 def strengthening_backlog(
@@ -1253,10 +1294,10 @@ def strengthening_backlog(
 ) -> StrengthenBacklog:
     """Turn every oracle-held cell of ``cmap`` into strengthening work.
 
-    A cell is *oracle-held* when its decision's ``reason_code`` is one of
-    :data:`STRENGTHEN_REASONS`. For each, one item per scored task that belongs to
-    the cell AND is weak (strength < ``policy.min_oracle_strength``, or unscoreable,
-    or has escaped mutants); a held cell with no per-task score gets ONE cell-level
+    A cell is *oracle-held* when its decision's ``reason_code``, or any of its shortfalls, is
+    one of :data:`STRENGTHEN_REASONS` (:func:`held_by_oracle`). For each, one item per scored
+    task that belongs to the cell AND is weak (strength < ``policy.min_oracle_strength``, or
+    unscoreable, or has escaped mutants); a held cell with no per-task score gets ONE cell-level
     item, and so does a held cell whose scored tasks are all strong (the controls hold it),
     so the flag is never dropped silently. ``since`` keeps only cells that
     carry evidence stamped with an apparatus ≥ ``since`` (and scores likewise, when
@@ -1281,7 +1322,7 @@ def strengthening_backlog(
     flagged: list[str] = []
     without: list[str] = []
     for cell in cmap.cells:
-        if cell.decision is None or cell.reason_code not in STRENGTHEN_REASONS:
+        if not held_by_oracle(cell):
             continue
         if since and cell.stats is not None:
             floor = _version_key(since)
@@ -1480,22 +1521,14 @@ class RemeasurePlan:
 
 
 def rows_to_clear_bar(clean: int, n: int, policy: RoutingPolicy, *, cap: int = 200) -> int:
-    """The smallest N ≥ ``policy.min_n`` at which a cell that keeps its OBSERVED clean
-    rate would clear the routing rule's Wilson-lower bar — the number a re-measurement
-    must reach, not just ``min_n``. Three cobra/koa cells sat at 10–11/10–11 clean on
-    2.2 and still read ``calibrate: ci_low_below_bar`` (2026-09-15): at 100 % the
-    lower bound reaches 0.80 only from n = 16. A cell with no rows yet plans for the
-    rate 1.0 (the optimistic case: the honest minimum). A rate that can never clear
-    the point bar returns ``min_n`` — more rows will not help, and the plan says so
-    through the cell's ``point``."""
-    rate = (clean / n) if n else 1.0
-    if rate < policy.min_point:
-        return policy.min_n
-    for total in range(max(policy.min_n, 1), cap + 1):
-        ok = round(rate * total)
-        if ok / total >= policy.min_point and wilson_interval(ok, total).low >= policy.min_ci_low:
-            return total
-    return cap
+    """The fewest first attempts a re-measurement must reach under routing.v2: the look
+    rule's FIRST look (20 distinct commits under ``look.v1``, ADR-0026 item 3) — a reading
+    is read only at its looks, so nothing short of the first can deliver, whatever the
+    observed rate. (routing.v1 solved for the smallest n whose Wilson lower bound cleared
+    0.80 at the observed rate; the look rule replaced that bar.) ``clean`` and ``n`` are
+    kept for the callers' shape; ``cap`` bounds a rule whose first look is larger."""
+    del clean, n
+    return min(*rule_looks(policy.rule), cap)
 
 
 def remeasure_plan(
@@ -1628,7 +1661,7 @@ def remeasure_plan(
         )
     return RemeasurePlan(
         current_apparatus=current_apparatus,
-        min_n=policy.min_n,
+        min_n=min(rule_looks(policy.rule)),
         policy_version=policy.version,
         cells=tuple(plan),
         up_to_date=tuple(fresh),

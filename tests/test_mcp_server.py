@@ -21,8 +21,8 @@ Works with:   src/crb/mcp/server.py, src/crb/mcp/client.py (under test),
               tests/fixtures/server_seed.py (the seeded app and accounts),
               src/crb/server/routes/*.py (what the tools wrap)
 Tested by:    tests/test_mcp_server.py
-Touch when:   a tool is added (add it to ``EXPECTED_TOOLS`` and one call); the seed's cells
-              change (the map assertions name the seeded cobra-like cell).
+Touch when:   never for a new repository; a tool is added (add it to ``EXPECTED_TOOLS`` and one
+              call); the seed's cells change (the map assertions name the seeded cobra-like cell).
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def test_reads_relay_the_api_with_method_fields(tmp_path: Path) -> None:
         who = call(server, "crb_whoami")
         assert who["role"] == "admin" and who["display_name"] == USERS["admin"]
         v = call(server, "crb_version")
-        assert v["crb"] and v["apparatus"] and v["policy"] == "routing.v1"
+        assert v["crb"] and v["apparatus"] and v["policy"] == "routing.v2"
         repos = call(server, "crb_repos")
         assert any(r["name"] == ALPHA for r in repos["items"])
         cmap = call(server, "crb_capability_map", repo=ALPHA)
@@ -149,9 +149,9 @@ def test_reads_relay_the_api_with_method_fields(tmp_path: Path) -> None:
             assert key in cell, key
         assert cell["apparatus_versions"] and cell["belt_sets"]
         routes = call(server, "crb_routes", repo=ALPHA)
-        assert routes["policy"]["version"] == "routing.v1"
+        assert routes["policy"]["version"] == "routing.v2"
         d = routes["decisions"][0]
-        assert d["policy_version"] == "routing.v1" and d["policy_thresholds"]["min_n"] == 10
+        assert d["policy_version"] == "routing.v2" and d["policy_thresholds"]["rule"] == "look.v1"
         verify = call(server, "crb_ledger_verify")
         assert verify["ok"] is True and verify["chain_ok"] is True and verify["false_q1_total"] == 0
         tasks = call(server, "crb_tasks", name=ALPHA, limit=5)

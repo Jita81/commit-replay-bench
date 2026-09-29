@@ -20,8 +20,9 @@ Works with:   src/crb/intake/draft.py (under test), src/crb/factory/backlog.py (
               regex and the item shape), src/crb/factory/readiness.py (the slot catalogue
               the facts must satisfy), tests/fixtures/intake.py (the ticket helper)
 Tested by:    tests/test_intake_draft.py
-Touch when:   a capability class is added to the readiness catalogue (give it cues here
-              first); the points → size mapping changes (it is published in the guide).
+Touch when:   never for a new repository; a capability class is added to the readiness catalogue
+              (give it cues here first); the points → size mapping changes (it is published in the
+              guide).
 """
 
 from __future__ import annotations
@@ -242,7 +243,7 @@ def test_an_unknown_class_tag_is_refused_rather_than_trusted() -> None:
 @pytest.mark.parametrize(
     ("points", "size"),
     [
-        (None, "S"),
+        (None, "unsized"),
         (0.5, "XS"),
         (1.0, "XS"),
         (2.0, "S"),
@@ -266,7 +267,8 @@ def test_story_points_map_to_a_size_tier_and_the_rule_is_stated(
 
 def test_a_negative_estimate_is_treated_as_no_estimate_rather_than_crashing() -> None:
     draft = d.draft_from(a_ticket(points=-3.0), tracker="ado")
-    assert draft.item.size_estimate == "S"
+    # ADR-0025 item 12: no estimate is `unsized`, never a tier the change might exceed
+    assert draft.item.size_estimate == "unsized"
     assert "no estimate" in draft.size_reason
 
 

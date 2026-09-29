@@ -15,7 +15,9 @@ What it does: Pins that the kind is registered, that every unlabelled task is la
               ``failed`` not ``succeeded``, cancel between tasks keeping partial counts, and that
               a run whose labels are all outage text is failed and relabels without ``relabel``
               (three live runs "succeeded" with every label reading the CLI's usage-limit
-              message).
+              message), and that a relabel run's ``label.task`` events name their class-set
+              version so the (task, version) table folds from them while a stored ledger row
+              keeps its class, version and hash (ADR-0026 item 9).
 How:          ``test_worker``'s harness plus a second task (the fixture's bad-gold commit);
               ``ScriptedLabeller`` returns the scripted label per call.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -25,8 +27,8 @@ Works with:   src/crb/server/worker.py (under test), src/crb/core/classify.py (t
               for), src/crb/store/models.py (the ``tasks`` row), tests/test_cli_tasks.py (the
               same labelling over the file workdir), tests/test_worker.py
 Tested by:    tests/test_worker_label.py
-Touch when:   the label event or the task row's label fields change; a new outage text shape
-              must be recognised as not-a-label.
+Touch when:   never for a new repository; the label event or the task row's label fields change; a
+              new outage text shape must be recognised as not-a-label.
 """
 
 from __future__ import annotations
@@ -359,3 +361,60 @@ def test_label_run_whose_labels_are_all_outage_text_is_failed_and_relabels_witho
     assert done2.counts_json["kept_labelled"] == 0 and done2.counts_json["labelled"] == 1
     spec = TaskSpec.from_dict(_task_row(h, h.pyrepo.feat_sha).spec_json)
     assert spec.capability_class == "feature.add" and spec.class_source == "intent"
+
+
+def test_a_relabel_run_records_the_class_per_task_and_version_and_never_rewrites_a_row(
+    h: Harness, scripted: dict[str, Any]
+) -> None:
+    """ADR-0026 item 9, product.truth.214: the label run's ``label.task`` events name the
+    class-set version they labelled under, so the (task, version) table is folded from the
+    product's own events; a stored ledger row keeps the class, version and hash it was graded
+    under while the task is relabelled."""
+    from crb.core.ledger import verify_chain
+    from crb.core.taxonomy import GLOBAL_CLASS_SET, ClassLabelTable
+    from crb.store.ledger import DbLedger
+    from fixtures.posture import posture_row
+
+    feat = h.pyrepo.feat_sha
+    ledger = DbLedger(h.factory)
+    ledger.append_many(
+        [
+            posture_row(
+                repo=pr.REPO_NAME,
+                task_id=feat,
+                clean=True,
+                tests_unmodified=True,
+                target_green=True,
+                no_new_failures=True,
+                source_changed=True,
+                evidence_pack_hash="e" * 64,
+                capability_class="bug.fix",
+                size="S",
+                language="python",
+                builder="fake",
+                model="m",
+                provider="p",
+            )
+        ]
+    )
+    (before,) = ledger.rows(repo=pr.REPO_NAME)
+    h.enqueue("label", builder="claude_code", model="claude-sonnet-5")
+    assert h.run_one().status == STATUS_SUCCEEDED
+    scripted["labeller"] = ScriptedLabeller([("perf", 0.95)])
+    run = h.enqueue(
+        "label", builder="claude_code", model="claude-sonnet-5", params_json={"relabel": True}
+    )
+    assert h.run_one().status == STATUS_SUCCEEDED
+    ev = [e for e in h.events(run.id) if e.action == "label.task"]
+    assert ev and all(e.payload["taxonomy"] == GLOBAL_CLASS_SET for e in ev)
+    # the event row carries the task; its payload the label and the version
+    table = ClassLabelTable.from_events({"task_id": e.task_id, **e.payload} for e in ev)
+    assert table.class_of(feat) == "perf" and table.class_of(feat, "acme/classes@v1") is None
+    assert _task_row(h, feat).capability_class == "perf"
+    (after,) = ledger.rows(repo=pr.REPO_NAME)
+    assert (after.capability_class, after.taxonomy, after.row_hash) == (
+        before.capability_class,
+        before.taxonomy,
+        before.row_hash,
+    )
+    assert after.capability_class == "bug.fix" and verify_chain([after]) == 1

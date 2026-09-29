@@ -72,6 +72,25 @@ describe('decisionsFor', () => {
     expect(rows[1]).toMatchObject({ role: 'viewer', href: '/routing?repo=alpha' })
   })
 
+  it('an item the entry gate did not build waits here: an approver may fund a calibration build; missing context is the operator’s (ADR-0026 item 8)', () => {
+    const rows = decisionsFor({
+      repo: 'alpha',
+      cells: [],
+      signoffs: [],
+      tasks: [
+        task({ id: 'I-5', title: 'No standard', status: 'no_proven_standard', route_hint: 'human', entry: { code: 'no_proven_standard', reason: 'r', reason_code: 'none', needs: [] }, way_forward: { action: 'fund_calibration', route: '/factory/alpha/items/I-5/calibration', supersedes: 'I-5' } }),
+        task({ id: 'I-6', title: 'Needs a test', status: 'needs_context', route_hint: 'human', entry: { code: 'needs_context', reason: 'r', reason_code: 'S2', needs: ['a failing test'] } }),
+        task({ id: 'I-7', title: 'Funded', status: 'no_proven_standard', route_hint: 'human', entry: { code: 'no_proven_standard', reason: 'r', reason_code: 'none', needs: [] }, calibration: { approver: 'ada', reason: 'measure', created: '', event: 'e' } }),
+      ],
+    })
+    expect(rows.map((r) => [r.kind, r.title])).toEqual([
+      ['not_built', 'I-5 No standard is not built — no proven standard'],
+      ['not_built', 'I-6 Needs a test is not built — needs context'],
+    ])
+    expect(rows[0]).toMatchObject({ role: 'approver', act: 'Fund a calibration build', href: '/factory?repo=alpha&item=I-5' })
+    expect(rows[1]).toMatchObject({ role: 'operator', act: 'Decide', evidence: 'bug.fix × XS · attach a failing test' })
+  })
+
   it('factory items: unsigned gaps, rework verdicts and a withheld delivery each become a row', () => {
     const rows = decisionsFor({
       repo: 'alpha',
