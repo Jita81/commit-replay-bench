@@ -21,28 +21,35 @@ What it does: Fails when a test skips on its own PATH or version lookup — ``sh
               ``require_tool`` / ``require_docker`` or wearing the marker; when a tool a test
               gates on is neither declared by the ``test-shard`` jobs nor named here as one CI
               does not provide; and when the fresh-clone shards declare anything but the
-              ``test-shard`` jobs' tools less ``NOT_GIVEN_TO_ROOT``. Each check also runs on
-              planted shapes so it cannot pass vacuously.
+              ``test-shard`` jobs' tools less ``NOT_GIVEN_TO_ROOT``; and when a Python package
+              a test skips on (``pytest.importorskip``) is not installed by the suite jobs'
+              ``uv sync`` extras nor named here as one CI does not install (P-707). Each check
+              also runs on planted shapes so it cannot pass vacuously.
 How:          ``ast`` over every ``tests/**/*.py`` except the gate's own module and its unit
               tests; PyYAML over ci.yml's ``env:`` blocks.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   tests/conftest_langs.py (the gate), tests/conftest.py (the setup hook that runs it
               for each marker), .github/workflows/ci.yml (``test-shard`` and
-              ``fresh-clone-shard``, which declare the tools they provide), docs/PREVENTION.md
-              (P-744, P-745, P-747, P-748)
+              ``fresh-clone-shard``, which declare the tools they provide and whose ``uv sync``
+              extras install the packages), pyproject.toml (the extras' packages),
+              docs/PREVENTION.md (P-707, P-744, P-745, P-747, P-748)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository's own tests (they are not in this suite); a runner
               for a new language adds a tool — gate on it with ``@pytest.mark.toolchain``, give
               it a probe in tests/conftest_langs.py if ``--version`` does not prove it works,
               and add it to the ``CRB_TEST_REQUIRE_TOOLS`` of every CI job that provides it, or
               to ``NOT_PROVIDED_BY_CI`` here with the reason; a tool the fresh-clone shards
-              cannot give root joins ``NOT_GIVEN_TO_ROOT`` with the reason.
+              cannot give root joins ``NOT_GIVEN_TO_ROOT`` with the reason; a test that skips on
+              a package (``pytest.importorskip``) needs that package in the extras the suite
+              jobs install, or an entry in ``NOT_INSTALLED_BY_CI`` with the reason.
 """
 
 from __future__ import annotations
 
 import ast
+import re
+import tomllib
 import warnings
 from pathlib import Path
 
@@ -325,6 +332,114 @@ def test_the_scan_leaves_the_gate_and_a_branch_alone() -> None:
 
 
 # --- what CI declares it provides -------------------------------------------------------------
+
+
+#: Packages a test skips on (``pytest.importorskip``) that no suite job installs, and why.
+#: Empty on purpose: a package a test needs is one the suite jobs install (P-707).
+NOT_INSTALLED_BY_CI: dict[str, str] = {}
+#: An import name whose distribution is called something else in pyproject.toml.
+DIST_OF = {"claude_agent_sdk": "claude-agent-sdk"}
+#: The jobs that run the hermetic suite; every package a test skips on is installed by both.
+SUITE_JOBS = ("test-shard", "fresh-clone-shard")
+
+
+def _importorskips_in(text: str, where: str) -> dict[str, str]:
+    """Every package ``text`` skips on (``pytest.importorskip("x")``, by top-level name) → where."""
+    out: dict[str, str] = {}
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Call) and _name(node.func) == "importorskip" and node.args:
+            arg = node.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                out.setdefault(arg.value.split(".")[0], f"{where}:{node.lineno}")
+    return out
+
+
+def _importorskips() -> dict[str, str]:
+    out: dict[str, str] = {}
+    for p in _test_sources():
+        for pkg, at in _importorskips_in(
+            p.read_text(encoding="utf-8"), str(p.relative_to(ROOT))
+        ).items():
+            out.setdefault(pkg, at)
+    return out
+
+
+def _dist(requirement: str) -> str:
+    """The distribution name a requirement string names, normalised as pyproject spells it."""
+    return re.split(r"[\[><=!~;@ ]", requirement.strip(), maxsplit=1)[0].lower().replace("_", "-")
+
+
+def _installed_by(job: str, ci_text: str | None = None) -> set[str]:
+    """The distributions ``job``'s ``uv sync`` installs: the project's dependencies and each
+    ``--extra`` it names, read from pyproject.toml (a self-reference such as
+    ``commit-replay-bench[openai]`` brings that extra's packages in)."""
+    text = CI.read_text(encoding="utf-8") if ci_text is None else ci_text
+    runs = "\n".join(
+        str(step.get("run") or "") for step in yaml.safe_load(text)["jobs"][job]["steps"]
+    )
+    sync = re.search(r"uv sync[^\n]*", runs)
+    assert sync, f"{job} has no `uv sync` step"
+    extras = list(re.findall(r"--extra (\S+)", sync.group(0)))
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    optional = project.get("optional-dependencies", {})
+    reqs = list(project.get("dependencies", []))
+    seen: set[str] = set()
+    while extras:
+        extra = extras.pop()
+        if extra in seen:
+            continue
+        seen.add(extra)
+        reqs += optional.get(extra, [])
+    names: set[str] = set()
+    for req in reqs:
+        if _dist(req) == _dist(project["name"]):
+            inner = re.search(r"\[([^\]]*)\]", req)
+            for extra in inner.group(1).split(",") if inner else []:
+                if extra.strip() not in seen:
+                    seen.add(extra.strip())
+                    reqs += optional.get(extra.strip(), [])
+            continue
+        names.add(_dist(req))
+    return names
+
+
+def importorskip_findings(skips: dict[str, str], ci_text: str | None = None) -> list[str]:
+    """Every package a test skips on that a suite job does not install and this file does not
+    name as not installed: a skip on every run there, so its tests never run where anyone
+    looks (P-707)."""
+    out: list[str] = []
+    for job in SUITE_JOBS:
+        installed = _installed_by(job, ci_text)
+        for pkg, at in sorted(skips.items()):
+            if (
+                pkg not in NOT_INSTALLED_BY_CI
+                and DIST_OF.get(pkg, pkg).replace("_", "-") not in installed
+            ):
+                out.append(f"{job} does not install {pkg!r}, which {at} skips on")
+    return out
+
+
+def test_every_package_a_test_skips_on_is_installed_by_the_suite_jobs() -> None:
+    """``pytest.importorskip`` is a skip on every run where the package is missing. The
+    endpoint suite — the evidence for product.truth.26 and .27 — skipped in every CI run
+    because ``openai`` is its own extra and no suite job installed it (P-707); a package a
+    test skips on is installed by both suite jobs, or named in ``NOT_INSTALLED_BY_CI``."""
+    skips = _importorskips()
+    assert "openai" in skips, "the endpoint suite's importorskip is the case this guards"
+    assert importorskip_findings(skips) == []
+    assert not set(NOT_INSTALLED_BY_CI) & _installed_by("test-shard"), "cannot be both"
+
+
+def test_a_package_the_suite_jobs_stop_installing_is_caught() -> None:
+    """The check is not vacuous: the real ci.yml with ``--extra openai`` removed from the
+    suite jobs' installs is refused, naming the job, the package and the test that skips."""
+    text = CI.read_text(encoding="utf-8")
+    assert text.count("--extra openai ") >= 2
+    findings = importorskip_findings(_importorskips(), text.replace("--extra openai ", ""))
+    assert findings and all("'openai'" in f for f in findings), findings
+    assert {f.split(" ")[0] for f in findings} == set(SUITE_JOBS)
+    planted = _importorskips_in('import pytest\npytest.importorskip("mystery.sub")\n', "planted.py")
+    assert planted == {"mystery": "planted.py:2"}
 
 
 def _gated_tools() -> dict[str, str]:

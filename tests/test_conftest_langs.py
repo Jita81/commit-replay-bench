@@ -167,6 +167,9 @@ def test_a_missing_daemon_is_a_skip_on_every_call_even_under_strict_warmup(
     *second* caller too: the daemon reason is memoised by ``docker_unavailable_reason``
     already, and must never be recorded against a tag, where a later caller would re-raise
     it through ``warmup_unavailable`` and FAIL under ``CRB_TEST_STRICT_WARMUP=1``."""
+    # a job that DECLARES docker turns a missing daemon into an error (P-742); this test is
+    # the undeclared case, so it must not inherit the shard job's declaration
+    monkeypatch.delenv(langs.REQUIRE_TOOLS_ENV, raising=False)
     monkeypatch.setattr(langs, "STRICT_WARMUP", True)
     monkeypatch.setattr(langs, "_IMAGES", {})
     monkeypatch.setattr(langs, "_DOCKER_REASON", {"reason": "docker daemon not reachable"})

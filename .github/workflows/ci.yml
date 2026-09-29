@@ -300,7 +300,7 @@ jobs:
       # test-postgres): the server and postgres extras are part of what is under test.
       - name: Install (server + postgres + dev extras)
         run: |
-          uv sync -q --locked --python ${{ matrix.python }} --extra server --extra postgres --extra mcp --extra dev
+          uv sync -q --locked --python ${{ matrix.python }} --extra server --extra postgres --extra mcp --extra openai --extra dev
       - name: Configure git identity for fixture repositories
         run: |
           git config --global user.email "ci@crb.invalid"
@@ -540,7 +540,7 @@ jobs:
           git fetch -q "$SRC" '+refs/remotes/origin/*:refs/remotes/origin/*'
           git fetch -q "$SRC" HEAD
           git checkout -q --detach "$(git -C "$SRC" rev-parse HEAD)"
-          uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
+          uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra openai --extra dev
           PYTHONPATH=scripts .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images" -p ci_test_shards --shard="$SHARD/8" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"
           GATES
           sudo --preserve-env=SRC,SHARD,CRB_TEST_REQUIRE_TOOLS,JAVA_HOME,PYTHONDONTWRITEBYTECODE \
