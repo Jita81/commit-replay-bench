@@ -45,8 +45,8 @@
  *               `useRegisterBacklog` (POST backlog, the form or JSON in a dialog),
  *               `useRegisterEvolution` (POST to `way_forward.route`), `useSyncOutcomes`
  *               (POST outcomes/sync), `useIntake` (the listener's state, folded by
- *               screens/Factory/intake.ts), `useCreateRun` (kind `factory`, `deliver` toggle gated by the backlog's
- *               delivery pre-flight; the sign-off override explained as a second
+ *               screens/Factory/intake.ts), `useCreateRun` (kind `factory`, `deliver` toggle
+ *               gated by the backlog's delivery pre-flight; the sign-off override explained as a second
  *               approver's act on the run's page); `EvidenceDrawer`
  *               opens the newest build's pack; `useNarrow` (matchMedia at Tailwind's `sm`)
  *               folds an item's six step cards behind a Details at phone width (J-FAC-14).

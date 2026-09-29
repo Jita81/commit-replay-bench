@@ -67,9 +67,8 @@
  *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
  *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
  *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead: with Connect
- *               and Results, the routes in ui/src/App.tsx),
- *               ui/src/screens/Factory/intake.ts (the intake line task 8 shares with it),
- *               ui/src/components/Help.tsx (`DocLink`, the probe banner's guide links),
+ *               and Results, the routes in ui/src/App.tsx; screens/Factory/intake.ts is the
+ *               intake line task 8 shares with it),
  *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile),
  *               src/crb/server/routes/repos.py (`baseline_read` on the repository — task 6)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
