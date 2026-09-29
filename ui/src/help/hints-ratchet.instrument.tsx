@@ -694,7 +694,7 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
   // G-180: a filter that arrives in a link and has no control of its own shows as a chip
   { name: '/ledger + filters from a link', route: '/ledger?repo=alpha&run_id=r1&task_id=t1&builder=fixture&language=python', path: '/ledger', element: <LedgerPage />, api: INSTRUMENT_SCREENS['/ledger']!.api, roles: ['viewer'] },
   // Routes with nothing decided yet: the empty state offers the replay run to an operator only (G-254)
-  { name: '/routing, no decisions yet', route: '/routing?repo=alpha', path: '/routing', element: <RoutingPage />, api: { 'GET /routes': { ...ROUTES, decisions: [] }, 'GET /repos': REPOS }, roles: ['viewer', 'operator'] },
+  { name: '/routing, no decisions yet', route: '/routing?repo=alpha', path: '/routing', element: <RoutingPage />, api: { 'GET /routes': { ...ROUTES, decisions: [] }, 'GET /repos': REPOS }, roles: ['viewer', 'operator'], minHints: 29 },
   {
     name: '/capability + open cell detail',
     route: '/capability?repo=alpha',

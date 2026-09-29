@@ -182,6 +182,10 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
     for (const a of rows) expect(a).toHaveAttribute('data-hint', 'button.routing.rows')
     for (const a of cells) expect(a).toHaveAttribute('data-hint', 'button.routing.map_cell')
     expect(screen.getByRole('columnheader', { name: /Doors/ }).querySelector('[data-hint="col.routing.doors"]')).not.toBeNull()
+    // the doors are the row's only navigation: never folded away below md as the data columns are
+    expect(screen.getByRole('columnheader', { name: /Doors/ }).className).not.toMatch(/\bhidden\b/)
+    for (const a of [...rows, ...cells]) expect(a.closest('td')!.className).not.toMatch(/\bhidden\b/)
+    expect(screen.getByRole('columnheader', { name: /Policy/ }).className).toMatch(/\bhidden\b/)
     // the hints say what the doors do not carry
     expect(hintText('button.routing.rows')).toMatch(/does not filter by provider or process step/)
     expect(hintText('button.routing.map_cell')).toContain('class × size aggregate')
@@ -219,6 +223,9 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
 
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'operator' }, 'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 }, 'GET /routes': none })
     renderApp(<RoutingPage />, { route: '/routing?repo=alpha' })
-    expect(await screen.findByRole('link', { name: 'Start a replay run' })).toHaveAttribute('href', '/runs?repo=alpha&new=replay')
+    const start = await screen.findByRole('link', { name: 'Start a replay run' })
+    expect(start).toHaveAttribute('href', '/runs?repo=alpha&new=replay')
+    // an outlined link is not one the hint collector requires, so its hint is pinned here (G-254)
+    expect(start).toHaveAttribute('data-hint', 'button.capability.start_replay')
   })
 })

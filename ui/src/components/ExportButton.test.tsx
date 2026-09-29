@@ -9,12 +9,16 @@
  *               renders the error envelope beside the button with Retry, and Retry fetches
  *               again; that a 200 hands the browser a blob named from Content-Disposition,
  *               revokes the URL afterwards and says "Downloaded <file> — <n> rows" with a
- *               CSV's header left out; and the two pure helpers on their edge cases.
+ *               CSV's header left out; that a CSV is counted by record, not by line; that a
+ *               click in flight is ignored; and the two pure helpers on their edge cases.
  * How:          `mockApi` answers `GET /ledger/export`; `URL.createObjectURL` / `revokeObjectURL`
  *               (absent in jsdom) and the anchor's `click` are stubbed; `renderApp`.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0007-abstract-cell-export-only.md
- * Works with:   ui/src/components/ExportButton.tsx (the code under test), ui/src/test/utils.tsx
+ * Works with:   ui/src/components/ExportButton.tsx (the code under test),
+ *               ui/src/test/utils.tsx (`mockApi`, `renderApp` and the error `envelope`),
+ *               src/crb/server/routes/ledger.py (the CSV writer whose quoted multi-line
+ *               cells the record count is pinned against)
  * Tested by:    ui/src/components/ExportButton.test.tsx
  * Touch when:   never for a new repository; the status wording or the row count rule changes.
  */
@@ -131,5 +135,32 @@ describe('ExportButton', () => {
     expect(countRows('', 'x.csv')).toBe(0)
     expect(countRows('{"a":1}\n{"a":2}\n\n', 'x.jsonl')).toBe(2)
     expect(countRows('{"a":1}\r\n{"a":2}\r\n', 'x.jsonl')).toBe(2)
+  })
+
+  it('countRows counts a CSV record whose quoted cell spans lines once, not per line', () => {
+    // an exported `error` or `dq_reason` may hold a traceback: csv.writer quotes it across lines
+    expect(countRows('a,b\n1,"x\ny"\n2,z\n', 'x.csv')).toBe(2)
+    expect(countRows('a,b\n1,"Traceback:\n  line 2\n  line 3"\n', 'x.csv')).toBe(1)
+    // a doubled quote inside a quoted cell does not end it
+    expect(countRows('a,b\n1,"say ""hi""\nthere"\n2,z\n', 'x.csv')).toBe(2)
+    expect(countRows('a,b\r\n1,"x\r\ny"\r\n', 'x.csv')).toBe(1)
+  })
+
+  it('a second click while the export is in flight is ignored: one fetch, one download', async () => {
+    const { clicked } = stubDownloads()
+    let release: (r: Response) => void = () => undefined
+    const api = mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /ledger/export': () => new Promise<Response>((r) => (release = r)) })
+    renderApp(<ExportButton path="/ledger/export?format=csv&repo=alpha" hint="button.ledger.export_csv">Export CSV</ExportButton>)
+    const link = await screen.findByRole('link', { name: 'Export CSV' })
+    await userEvent.dblClick(link)
+    await waitFor(() => expect(link).toHaveAttribute('aria-busy', 'true'))
+    await userEvent.click(link)
+    expect(api.calls.filter((c) => c.path === '/ledger/export')).toHaveLength(1)
+    release(csvResponse())
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Downloaded crb-ledger-alpha.csv — 2 rows'))
+    expect(clicked).toHaveLength(1)
+    // done: the button takes a click again
+    await userEvent.click(link)
+    await waitFor(() => expect(api.calls.filter((c) => c.path === '/ledger/export')).toHaveLength(2))
   })
 })

@@ -13,15 +13,17 @@
  *               (G-101, G-182). On 200 it builds a blob, names the file from
  *               Content-Disposition, clicks a temporary `<a download>` and revokes the URL
  *               once the browser has taken it; a `role="status"` line reads "Exporting…" and
- *               then "Downloaded <file> — <n> rows" (a CSV's count leaves out its header). It
- *               does not detect a stream cut short after a 200: that is what `crb ledger
- *               verify` on the export is for.
+ *               then "Downloaded <file> — <n> rows" (a CSV is counted by record, not by
+ *               line, and its header is not a row). A click while a fetch is in flight is
+ *               ignored, so a double-click is one download. It does not detect a stream cut
+ *               short after a 200: that is what `crb ledger verify` on the export is for.
  * How:          `fetchBounded` + `errorFromResponse` from the client; local state
  *               idle → exporting → done | error; `ErrorState compact` for the envelope.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0007-abstract-cell-export-only.md
  * Works with:   ui/src/api/client.ts (`fetchBounded`, `errorFromResponse`, `apiUrl`),
- *               ui/src/components/Button.tsx (`AnchorButton`), ui/src/components/ErrorState.tsx,
+ *               ui/src/components/Button.tsx (`AnchorButton`),
+ *               ui/src/components/ErrorState.tsx (`compact` — the envelope beside the button),
  *               ui/src/screens/Ledger/LedgerPage.tsx and
  *               ui/src/screens/Capability/CapabilityPage.tsx (the two callers),
  *               src/crb/server/routes/ledger.py (the export routes and their
@@ -32,7 +34,7 @@
  * Touch when:   never for a new repository; an export format is added — decide how its rows
  *               are counted in `countRows`.
  */
-import { useCallback, useState, type AnchorHTMLAttributes, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type AnchorHTMLAttributes, type ReactNode } from 'react'
 import { apiUrl, errorFromResponse, fetchBounded } from '../api/client'
 import type { HintId } from '../help/hints'
 import { AnchorButton, type ButtonSize } from './Button'
@@ -66,10 +68,27 @@ export function filenameFrom(disposition: string | null, path: string): string {
   return path.split('?')[0]!.split('/').filter(Boolean).pop() ?? 'export'
 }
 
-/** Non-empty lines; a CSV's header is not a row. */
+/**
+ * Rows in the export. JSONL is one record per line by construction. A CSV record may span
+ * lines — `csv.writer` quotes a free-text `error` or `dq_reason` that holds a newline across
+ * them — so a CSV is counted by record: a line break ends a record only outside quotes (a
+ * doubled `""` inside a quoted cell toggles twice, so it does not end the cell), and the
+ * header is not a row.
+ */
 export function countRows(text: string, filename: string): number {
-  const lines = text.split(/\r?\n/).filter((l) => l.length > 0).length
-  return filename.toLowerCase().endsWith('.csv') ? Math.max(0, lines - 1) : lines
+  if (!filename.toLowerCase().endsWith('.csv')) return text.split(/\r?\n/).filter((l) => l.length > 0).length
+  let records = 0
+  let quoted = false
+  let cur = ''
+  for (const ch of text) {
+    if (ch === '"') quoted = !quoted
+    if (ch === '\n' && !quoted) {
+      if (cur.replace(/\r$/, '').length > 0) records += 1
+      cur = ''
+    } else cur += ch
+  }
+  if (cur.replace(/\r$/, '').length > 0) records += 1
+  return Math.max(0, records - 1)
 }
 
 /** Hand `text` to the browser as a download named `file`. */
@@ -89,8 +108,13 @@ function download(text: string, file: string, type: string): void {
 /** The export link with its status line and, on a refusal, the envelope beside it. */
 export function ExportButton({ path, hint, size = 'md', children, ...rest }: ExportButtonProps) {
   const [state, setState] = useState<ExportState>({ state: 'idle' })
+  // a second click while a fetch is in flight would hand the browser a second download: a ref,
+  // because a double-click's two clicks land before the state has re-rendered
+  const inFlight = useRef(false)
 
   const run = useCallback(async () => {
+    if (inFlight.current) return
+    inFlight.current = true
     setState({ state: 'exporting' })
     try {
       const res = await fetchBounded(path, { method: 'GET' }, { timeoutMs: EXPORT_TIMEOUT_MS })
@@ -101,6 +125,8 @@ export function ExportButton({ path, hint, size = 'md', children, ...rest }: Exp
       setState({ state: 'done', file, rows: countRows(text, file) })
     } catch (error) {
       setState({ state: 'error', error })
+    } finally {
+      inFlight.current = false
     }
   }, [path])
 

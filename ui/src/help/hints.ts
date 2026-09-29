@@ -2093,10 +2093,10 @@ export const MIN_HINTS: Record<string, number> = {
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
   '/capability': 30,
-  '/routing': 20,
+  '/routing': 55,
   '/oracle': 22,
   '/learn': 44,
-  '/ledger': 26,
+  '/ledger': 47,
   // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
   // "Change my password" card; the admin's configuration and Users card (and the deeper
   // set-password dialog and account history) are held by the ratchet's variants

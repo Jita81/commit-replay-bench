@@ -297,7 +297,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/ledger',
-    purpose: `Every graded trial, append-only and hash-chained. The server re-checks the chain on every load; rows cut from the end show only against an earlier head. The false-Q1 total is the number everything else defends. ${OPERATE_PATH} The page does not verify on demand, repair a chain or filter beyond what the URL carries, each shown as a chip; verify an export with crb ledger verify (and the store itself with --store).`,
+    purpose: `Every graded trial, append-only and hash-chained. The server re-checks the chain on every load. If rows are removed from the end, only comparing with a head hash you recorded earlier shows it. The false-Q1 total is the number everything else defends. ${OPERATE_PATH} The page does not verify on demand, repair a chain or filter beyond what the URL carries — each as a control on the page or, where it has none, a chip; verify an export with crb ledger verify (and the store itself with --store).`,
     next: {
       viewer: 'Filter by repository, mode or clean; open a task or a pack. Export gives the rows as JSONL or CSV; the abstract export contains cells only, no code and no identifiers.',
       operator: 'A broken chain or a false-Q1 above 0 halts delivery; investigate the named row before anything else.',

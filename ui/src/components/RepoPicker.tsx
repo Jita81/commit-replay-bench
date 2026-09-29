@@ -19,9 +19,9 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useAllRepos`), ui/src/components/Field.tsx (`InlineSelect`),
- *               ui/src/screens/Results/ResultsPage.tsx,
- *               ui/src/screens/Signoff/SignoffPage.tsx,
- *               ui/src/screens/Capability/CapabilityPage.tsx and
+ *               ui/src/screens/Results/ResultsPage.tsx and
+ *               ui/src/screens/Signoff/SignoffPage.tsx (`defaultToLatest` — the two screens
+ *               the afternoon ends on), ui/src/screens/Capability/CapabilityPage.tsx and
  *               ui/src/screens/Routing/RoutingPage.tsx (`defaultToLatest` — reached from the
  *               journey or the instrument nav, they land on the latest repository, G-977),
  *               ui/src/screens/Home/HomePage.tsx (the same most-recently-updated rule),

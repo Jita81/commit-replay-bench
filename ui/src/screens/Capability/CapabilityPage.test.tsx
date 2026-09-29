@@ -288,7 +288,10 @@ describe('CapabilityPage', () => {
       'GET /capability-map': empty,
     })
     renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
-    expect(await screen.findByRole('link', { name: 'Start a replay run' })).toBeInTheDocument()
+    const start = await screen.findByRole('link', { name: 'Start a replay run' })
+    expect(start).toHaveAttribute('href', '/runs?repo=sqlalchemy&new=replay')
+    // an outlined link is not one the hint collector requires, so its hint is pinned here (G-254)
+    expect(start).toHaveAttribute('data-hint', 'button.capability.start_replay')
   })
 
   it('a viewer is offered Export CSV, and the About block and the hint say anyone signed in can take it (G-102)', async () => {

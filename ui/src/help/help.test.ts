@@ -156,8 +156,9 @@ describe('HELP ratchet', () => {
   it('every About block with a non-goal criterion says what its page does not do', () => {
     // the Ledger (G-185): what the server does and what the page does not, and where an operator verifies
     const ledger = helpFor('/ledger')!
-    expect(ledger.purpose).toContain('The server re-checks the chain on every load; rows cut from the end show only against an earlier head.')
-    expect(ledger.purpose).toContain('The page does not verify on demand, repair a chain or filter beyond what the URL carries, each shown as a chip; verify an export with crb ledger verify (and the store itself with --store).')
+    expect(ledger.purpose).toContain('The server re-checks the chain on every load. If rows are removed from the end, only comparing with a head hash you recorded earlier shows it.')
+    expect(ledger.purpose).toContain('The page does not verify on demand, repair a chain or filter beyond what the URL carries — each as a control on the page or, where it has none, a chip; verify an export with crb ledger verify (and the store itself with --store).')
+    expect(ledger.purpose).not.toContain('each shown as a chip')
     // the Operate journey (G-402): its non-goals where the person is — Runs and Deployment
     expect(OPERATE_NON_GOALS).toContain('No budget spans a deployment or a repository: every limit belongs to one run.')
     expect(OPERATE_NON_GOALS).toContain('There is no metrics dashboard and no view of the platform’s own logs (a run page streams that run’s log), and no crb doctor screen.')

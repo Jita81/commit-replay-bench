@@ -32,6 +32,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LedgerDisqualified, Principal } from '../../api/types'
+import { helpFor } from '../../help/help'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
 import { LedgerPage } from './LedgerPage'
 
@@ -176,6 +177,31 @@ describe('LedgerPage', () => {
     expect(screen.queryByTestId('ledger-linked-filters')).toBeNull()
     await waitFor(() => expect(screen.getByTestId('empty-state')).toHaveTextContent('The ledger is empty'))
     expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  })
+
+  it('every filter the URL carries is a control on the page or, where it has none, a chip — and the About block says exactly that', async () => {
+    const { gradeUrls } = setup(
+      { ...PRINCIPAL, role: 'viewer' },
+      VERIFY,
+      '/ledger?repo=alpha&clean=true&mode=blind&size=XS&capability_class=bug.fix&model=gold&run_id=r1&task_id=t1&builder=fixture&language=python',
+      { 'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 } },
+    )
+    await waitFor(() => expect(gradeUrls().at(-1)!.get('language')).toBe('python'))
+    // six filters have a control of their own: the picker, three selects and two inputs
+    await waitFor(() => expect(screen.getByTestId('repo-picker')).toHaveValue('alpha'))
+    expect(screen.getByLabelText('Clean')).toHaveValue('true')
+    expect(screen.getByLabelText('Mode')).toHaveValue('blind')
+    expect(screen.getByLabelText('Size')).toHaveValue('XS')
+    expect(screen.getByLabelText('Filter by capability class')).toHaveValue('bug.fix')
+    expect(screen.getByLabelText('Filter by model')).toHaveValue('gold')
+    // the four with none are chips, and nothing else is
+    const chips = within(screen.getByTestId('ledger-linked-filters')).getAllByRole('button')
+    expect(chips.map((b) => b.getAttribute('data-testid'))).toEqual(['ledger-filter-chip-run_id', 'ledger-filter-chip-task_id', 'ledger-filter-chip-builder', 'ledger-filter-chip-language'])
+    expect(chips.map((b) => b.getAttribute('aria-label'))).toEqual(['Remove the run filter r1', 'Remove the task filter t1', 'Remove the builder filter fixture', 'Remove the language filter python'])
+    // the About block's non-goal sentence says it as the page is: a control, or a chip where there is none
+    const about = helpFor('/ledger')!.purpose
+    expect(about).toContain('filter beyond what the URL carries — each as a control on the page or, where it has none, a chip')
+    expect(about).not.toContain('each shown as a chip')
   })
 
   it('an empty ledger says every graded trial appends one row and offers no Clear filters', async () => {

@@ -20,9 +20,10 @@
  *               is not OK stays on the closed Menu button as the probe's glyph and in its name. The
  *               instrument row offers every role the pages its API lets that role read
  *               (G-914), and its "Instrument" label is itself a hint trigger that names the
- *               Operate path — health → Runs → Ledger → Settings — so the path exists in the
- *               product, not only in the guide (G-396). `AboutThisScreen` is mounted once after the outlet so every screen
- *               carries its help with no wiring. A deep link lands on its target: the shell
+ *               Operate path — health → Runs → Ledger → Settings — so the path exists in
+ *               the product, not only in the guide (G-396). `AboutThisScreen` is mounted
+ *               once after the outlet so every screen carries its help with no wiring. A
+ *               deep link lands on its target: the shell
  *               scrolls to `location.hash` once the page renders it (`useScrollToHash`,
  *               P-399). The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs

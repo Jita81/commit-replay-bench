@@ -1375,10 +1375,11 @@ export interface ChainVerify {
 }
 
 /**
- * `GET /ledger/verify`'s `disqualified` (G-400): attempts disqualified in the last
- * `window_days`, counted per builder against `threshold`; `over` names the builders past it,
- * which is a stop condition (docs/OPERATOR.md#8-stop-conditions). Optional on the wire: a
- * server that does not serve it leaves the tile saying so.
+ * The `disqualified` figure the Ledger's tile reads (G-400): attempts disqualified in the
+ * last `window_days`, counted per builder against `threshold`; `over` names the builders past
+ * it, which is a stop condition (docs/OPERATOR.md#8-stop-conditions). `LedgerVerifyOut` does
+ * not serve it yet (G-400's server half), so it is NOT a field of the mirrored `LedgerVerify`
+ * — the page reads it as an extension and says so when it is absent.
  */
 export interface LedgerDisqualified {
   window_days: number
@@ -1402,8 +1403,6 @@ export interface LedgerVerify {
   /** The grade ledger's last `row_hash` (`""` when empty), to record outside the store. */
   head_row_hash: string
   events: EventsVerify
-  /** The disqualified count per builder over its window, when the server serves it (G-400). */
-  disqualified?: LedgerDisqualified
 }
 
 /** `GET /ledger/export?format=`. */

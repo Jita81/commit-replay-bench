@@ -15,23 +15,26 @@
  *               rows behind it (repo, class, size, and language, builder and model where the
  *               decision carries them — the ledger page filters by neither provider nor
  *               process step), and Map cell, to its class × size cell on the map with the
- *               detail open (`?cell=`). Reached without `?repo=`, the page shows the most
- *               recently updated repository, as Baseline does (G-977).
- * How:          `useRepoParam({ defaultToLatest })` → `useRoutesWithControls` → count decisions
- *               per route for the tiles → `DataTable` sorted by route. The interval bar's upper bound is
- *               synthesised symmetrically because a decision carries `ci_low` only (see the
- *               comment at the column).
+ *               detail open (`?cell=`); the doors stay visible at every width, as the row's
+ *               only navigation, while the data columns fold below md. Reached without
+ *               `?repo=`, the page shows the most recently updated repository, as Baseline
+ *               does (G-977).
+ * How:          `useRepoParam({ defaultToLatest })` → `useRoutesWithControls` → count
+ *               decisions per route for the tiles → `DataTable` sorted by route. The
+ *               interval bar's upper bound is synthesised symmetrically because a decision
+ *               carries `ci_low` only (see the comment at the column).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Capability/contract.ts (the extended decision type and the hook),
- *               ui/src/screens/Capability/ReasonCode.tsx (a reason code's sentence, inline),
- *               ui/src/screens/Capability/FailureSplit.tsx (controls pill, split, model point),
+ *               ui/src/screens/Capability/ReasonCode.tsx and
+ *               ui/src/screens/Capability/FailureSplit.tsx (a reason code's sentence inline;
+ *               the controls pill, split and model point),
  *               ui/src/lib/auth.tsx (`can` — the run action is an operator's),
  *               ui/src/components/RepoPicker.tsx (`useRepoParam`), ui/src/api/types.ts
  *               (`RouteDecision`, `ROUTES`), ui/src/screens/Ledger/LedgerPage.tsx and
  *               ui/src/screens/Capability/CapabilityPage.tsx (where the doors land),
- *               src/crb/core/routing.py (`route()` — the rule this page describes),
- *               src/crb/server/routes/capability.py (the `/routes` route),
+ *               src/crb/core/routing.py and src/crb/server/routes/capability.py (`route()` —
+ *               the rule this page describes — and the `/routes` route that serves it),
  *               ui/src/components/VerdictPill.tsx (the route pill with its sentence)
  * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
@@ -229,7 +232,7 @@ export function RoutingPage() {
             </LinkButton>
           </span>
         ),
-        hideBelowMd: true,
+        // never folded away below md: the doors are the row's only navigation (a phone has no other)
       },
     ],
     [repo],
