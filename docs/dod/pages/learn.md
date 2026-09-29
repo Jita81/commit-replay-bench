@@ -19,7 +19,7 @@ reports list refusals that should become guard tests, weak oracles that should b
 work, and evidence that has gone stale since the apparatus changed. The product decides nothing
 on its own: the register acts only under an operator's switch, and each report's decision is
 made here by an operator and recorded with their name." (`help.ts` About copy for `/learn`; the
-header purpose says the same and the eyebrow reads `Instrument · Learn`.)
+header purpose says the same and the eyebrow reads `Instrument · Learn`.) **[aspiration — this artefact's specification; its criteria state what is met]**
 
 **Entry → exit.** Arrive by the Instrument nav entry `Learn` (every role, like the three reads
 behind it: `INSTRUMENT` in `Layout.tsx`), from a Decisions `prevention` row, which opens
@@ -44,7 +44,7 @@ registered) after a registration, `Re-qualify`, `Re-score` and `Re-run controls`
 plan can also be read against a named apparatus version before a bump; that what-if plan
 offers no Queue control. With no repository chosen the body is the empty state `Pick a repository`,
 and it offers two ways forward: choose one in the picker in the header, or `Connect a repository`
-(`/connect`) from the body.
+(`/connect`) from the body **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** The page never decides on its own. The three reports write only when an operator
 makes one of the three decisions they hand off to — `Decide`, `Register` or `Queue runs` — and
@@ -56,7 +56,7 @@ item and the run from the ledger), spends nothing without confirming the estimat
 offers a viewer none of the three [measured — n = 5 tests at this commit: `tests/test_server_routes_learn.py::test_refusals_empty_then_one` (every class reads `unsure`), `tests/test_server_routes_learn.py::test_every_learn_write_refuses_a_field_it_does_not_name` (a request names ids and nothing else), and in `ui/src/screens/Learn/LearnPage.test.tsx` "a class already decided reads its verdict and who decided it, and is not offered the form again", "queueing a re-measurement confirms the plan’s own estimate before anything is sent (G-532)" and "offers a viewer none of the three decisions (they are operator acts at the API too)"; method: those tests; apparatus n/a, a property of the product's own code, not a graded row]. The register card writes only what an operator does with its
 controls, each a record naming the person; it never writes a grader key and never computes a
 verdict in the browser. No report derives a route in the browser (the held reason and the
-threshold are the served routing policy's) or blends a rate across apparatus versions.
+threshold are the served routing policy's) or blends a rate across apparatus versions **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 ## Definition of done
 

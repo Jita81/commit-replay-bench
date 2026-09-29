@@ -1,0 +1,22 @@
+{
+  "_source": "the check names of .github/workflows/ci.yml on main when the setting was read (main's head on 2026-09-27, the workflow the reading was compared with), by scripts/check_branch_protection.py job_contexts",
+  "commit": "50b0945863ac9c46a83becf183dd0dad69e6f2ba",
+  "jobs": [
+    "lint (ruff)",
+    "types (mypy --strict)",
+    "code-map (every file has a valid header; docs/CODE-MAP.md is current)",
+    "dod (every route, journey and stream has its definition of done; evidence resolves)",
+    "claims (every quantified sentence on a covered page carries its tag)",
+    "layers (import-linter)",
+    "test (py3.12)",
+    "test (py3.13)",
+    "ui-unit (tsc -b + vitest, the hint ratchet included)",
+    "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
+    "security (gitleaks + pip-audit)",
+    "sbom (CycloneDX)",
+    "test-postgres (store suite on PostgreSQL 16)",
+    "container (docker build + smoke + helm lint)",
+    "sandbox-images (build + hadolint + smoke each reference sandbox image)",
+    "walkthrough (browser, live stack, tier 1)"
+  ]
+}

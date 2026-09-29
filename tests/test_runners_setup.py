@@ -414,7 +414,7 @@ def test_pytest_venv_creation_failure_is_reported(pyrepo: pr.PyRepo, tmp_path: P
 
 
 @pytest.mark.network
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+@pytest.mark.toolchain("uv")
 def test_pytest_setup_builds_a_real_venv_and_the_command_uses_it(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -452,7 +452,7 @@ def test_pytest_setup_builds_a_real_venv_and_the_command_uses_it(
 
 
 @pytest.mark.network
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+@pytest.mark.toolchain("uv")
 def test_pytest_setup_real_pip_fallback(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     env_dir = tmp_path / "env"
     r = PytestRunner(
@@ -511,7 +511,6 @@ def test_node_setup_plan(tmp_path: Path) -> None:
 
 @pytest.mark.network("registry.npmjs.org")
 @pytest.mark.toolchain("npm")
-@pytest.mark.skipif(not langs.has_tool("npm"), reason="npm not on PATH")
 def test_node_setup_installs_node_modules_for_real(tmp_path: Path) -> None:
     root, _ = noderepo.build(tmp_path, "mocha")
     pkg = (root / "package.json").read_text(encoding="utf-8")
@@ -536,7 +535,6 @@ gorepo = langs.fixture_module("gorepo")
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 def test_go_setup_and_readiness(tmp_path: Path) -> None:
     root, _ = gorepo.build(tmp_path)
     r = get_runner(gorepo.config())
@@ -705,9 +703,7 @@ def test_maven_setup_plan(tmp_path: Path) -> None:
 
 
 @pytest.mark.network("repo.maven.apache.org")
-@pytest.mark.toolchain("mvn")
-@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
-@pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")
+@pytest.mark.toolchain("mvn", "jdk")
 def test_maven_setup_warms_the_local_repository(tmp_path: Path) -> None:
     root, _ = jvmrepo.build(tmp_path)
     r = get_runner(jvmrepo.config(offline=True))
@@ -851,9 +847,7 @@ def _add_launcher_listener(root: Path, marker: Path) -> None:
 
 
 @pytest.mark.network("repo.maven.apache.org")
-@pytest.mark.toolchain("mvn")
-@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
-@pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")
+@pytest.mark.toolchain("mvn", "jdk")
 def test_maven_setup_warms_a_cold_local_repository_without_running_tests(tmp_path: Path) -> None:
     """Regression for PR #57 (shard 1 of 6): ``test -DskipTests`` skips surefire before it
     resolves its test-framework provider, and the offline run had passed only because an
@@ -935,9 +929,7 @@ def _add_test_phase_exec(root: Path, marker: Path) -> None:
 
 
 @pytest.mark.network("repo.maven.apache.org")
-@pytest.mark.toolchain("mvn")
-@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
-@pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")
+@pytest.mark.toolchain("mvn", "jdk")
 def test_maven_setup_refuses_a_test_phase_plugin_the_probe_would_run(tmp_path: Path) -> None:
     """Regression for the provider probe (docs/SECURITY.md T1): it runs ``test`` without
     ``-DskipTests``, so in a module where surefire does not fork the stub, any other plugin at
@@ -975,7 +967,6 @@ rustrepo = langs.fixture_module("rustrepo")
 
 
 @pytest.mark.toolchain("cargo")
-@pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH")
 def test_cargo_setup_and_readiness(tmp_path: Path) -> None:
     root, _ = rustrepo.build(tmp_path)
     r = get_runner(rustrepo.config())

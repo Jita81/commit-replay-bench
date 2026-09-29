@@ -12,19 +12,22 @@ What it is:   ``crb ledger import-census | import-aggregates | verify | stats | 
 What it does: Imports the June-2026 census with honest classification (needs the task
               files and repo configs; packs are stored and rows re-chained); imports
               aggregate rows for reference only; walks the chain and re-derives false-Q1 =
-              0 (exit 1 on any break or violation); prints per-cell n / point / Wilson
-              interval / false-Q1 with the apparatus versions present; exports rows.
+              0 (exit 1 on any break or violation) — with ``--store``, the database's
+              grade ledger and its audit trail (``events``), printing both heads; prints
+              per-cell n / point / Wilson interval / false-Q1 with the apparatus versions
+              present; exports rows.
 How:          ``JsonlLedger`` reads; ``crb.core.legacy`` importers; ``group_by_cell`` +
               ``cell_stats`` for ``stats``; every command prints JSON or a plain table.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0007-abstract-cell-export-only.md
+              docs/adr/0007-abstract-cell-export-only.md,
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``JsonlLedger``, ``cell_stats``, ``false_q1_total``),
               src/crb/core/legacy.py (the census importers and their provenance stamp),
               src/crb/server/routes/ledger.py (the HTTP twin over the database),
               docs/REPRODUCING-THE-CENSUS.md (the procedure these verbs implement),
               docs/EVIDENCE-AND-CLAIMS.md#5-the-legacy-belt-caveat-on-the-census-ledger
-Tested by:    tests/test_cli.py
+Tested by:    tests/test_cli.py, tests/test_cli_ledger_store.py
 Touch when:   never for a new repository; when a ``stats`` grouping field is added
               (``GROUP_ALIASES`` here and ``BY_ALIASES`` in
               src/crb/server/routes/capability.py); ``export --abstract`` is the same export the API serves —
@@ -57,6 +60,7 @@ from crb.cli.commands import (
 )
 from crb.core.checks import ARMS
 from crb.core.federated import export_abstract
+from crb.core.grade import FalseQ1Violation, MisattributionViolation
 from crb.core.ledger import (
     CELL_FIELDS,
     GradeRow,
@@ -126,6 +130,13 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
 
     v = ls.add_parser("verify", help="walk the hash chain and re-check false-Q1 = 0")
     v.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
+    v.add_argument(
+        "--store",
+        action="store_true",
+        help="verify the database instead: the grade ledger AND the audit trail (events), "
+        "and print both heads to record outside the store",
+    )
+    v.add_argument("--database-url", default=None, help="with --store: overrides CRB_DATABASE_URL")
     add_common(v)
     v.set_defaults(func=cmd_verify)
 
@@ -309,7 +320,10 @@ def cmd_import_aggregates(args: argparse.Namespace) -> int:
 
 
 def cmd_verify(args: argparse.Namespace) -> int:
-    """Walk the chain and re-derive false-Q1 = 0; exit 1 on a break or a violation."""
+    """Walk the chain and re-derive false-Q1 = 0; exit 1 on a break or a violation.
+    ``--store`` verifies the database's grade ledger and its audit trail instead."""
+    if getattr(args, "store", False):
+        return _verify_store(args)
     ledger = _ledger(args)
     out: dict[str, Any] = {"ledger": str(ledger.path)}
     try:
@@ -343,6 +357,83 @@ def cmd_verify(args: argparse.Namespace) -> int:
     else:
         print_lines([f"{ledger.path}: CHAIN BROKEN — {out['error']}"])
     return EXIT_OK if out.get("ok") else EXIT_NEGATIVE
+
+
+def _verify_store(args: argparse.Namespace) -> int:
+    """The database twin of ``verify`` (the same walk ``GET /ledger/verify`` serves): the
+    ``grades`` chain and false-Q1 over its rows, the ``events`` chain (ADR-0029), and the
+    head ``row_hash`` of each — the values docs/DEPLOYMENT.md §8 records outside the store.
+    Exit 1 when either chain is broken or false-Q1 is not 0."""
+    from crb.store.db import database_url, make_engine, make_session_factory  # noqa: PLC0415
+    from crb.store.events import verify_events  # noqa: PLC0415
+    from crb.store.ledger import DbLedger  # noqa: PLC0415
+
+    url = database_url(getattr(args, "database_url", None))
+    engine = make_engine(url)
+    try:
+        factory = make_session_factory(engine)
+        ledger = DbLedger(factory)
+        out: dict[str, Any] = {"store": engine.dialect.name}
+        try:
+            n = ledger.verify()
+            rows = list(ledger.rows())
+            fq1 = false_q1_total(rows)
+            no_pack = sum(1 for r in rows if r.clean and not r.evidence_pack_hash)
+            out.update(
+                {
+                    "rows": n,
+                    "chain_ok": True,
+                    "false_q1": fq1,
+                    "clean_without_pack": no_pack,
+                    "head_row_hash": rows[-1].row_hash if rows else "",
+                }
+            )
+        except LedgerIntegrityError as e:
+            out.update({"chain_ok": False, "error": str(e), "head_row_hash": ""})
+        except (FalseQ1Violation, MisattributionViolation, ValueError, TypeError) as e:
+            # a stored row the reader refuses (edited underneath its triggers): reported,
+            # and the audit trail is still walked (P-702)
+            out.update(
+                {
+                    "chain_ok": False,
+                    "error": f"a stored row the reader refuses — {type(e).__name__}: {e}",
+                    "head_row_hash": "",
+                }
+            )
+        events = verify_events(factory)
+        out["events"] = events.to_dict()
+        out["ok"] = bool(
+            out.get("chain_ok")
+            and out.get("false_q1") == 0
+            and out.get("clean_without_pack") == 0
+            and events.ok
+        )
+    finally:
+        engine.dispose()
+    if args.json:
+        print_json(out)
+    else:
+        grades = (
+            f"{out['rows']} rows, chain OK, false-Q1 {out['false_q1']}, "
+            f"clean-without-pack {out['clean_without_pack']}"
+            if out.get("chain_ok")
+            else f"CHAIN BROKEN — {out['error']}"
+        )
+        ev = out["events"]
+        trail = (
+            f"{ev['rows']} events, events chain OK"
+            if ev["chain_ok"]
+            else f"events chain BROKEN — {ev['detail']}"
+        )
+        print_lines(
+            [
+                f"{out['store']} store: {grades}",
+                f"audit trail: {trail}",
+                f"heads to record outside the store: grades {out['head_row_hash'] or '-'} · "
+                f"events {ev['head_row_hash'] or '-'}",
+            ]
+        )
+    return EXIT_OK if out["ok"] else EXIT_NEGATIVE
 
 
 def _group_fields(by: str) -> tuple[str, ...]:

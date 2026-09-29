@@ -68,7 +68,9 @@ reviews:
       instructions: |
         Migrations may add nullable columns and indexes; they may never rewrite, drop or alter
         rows of an append-only table. Flag a migration without a real downgrade, and any schema
-        change without its Alembic revision.
+        change without its Alembic revision. One recorded exception, and only this one:
+        revision 0013 (v0013_events_hash_chain.py) fills the two chain columns it adds on
+        existing events rows, as ADR-0029 §3 records; flag any other migration that does so.
     - path: "tests/**"
       instructions: |
         Tests are the evidence that the instrument is honest. Flag: an assertion loosened or

@@ -7,6 +7,9 @@ one place that knows both sides:
 
 * :func:`ladder_from_spec` turns the labels a run carries (``runs.ladder_json``,
   ``--ladder`` on the CLI) into an :class:`~crb.builders.base.EscalationLadder`;
+* :func:`rungs_from_entries` is how a run's ladder entries (labels, ``r1`` and object
+  rungs via :func:`rung_from_object`) become rungs — the one reading the worker builds
+  from and ``POST /runs`` refuses at submit with;
 * :func:`ladder_labels` is the inverse — the labels the orchestrator will hand
   back, disambiguated so two rungs never share one;
 * :func:`build_fn_for` builds the callable: rung label → builder instance
@@ -251,6 +254,63 @@ def ladder_from_spec(labels: Sequence[str], default_provider: str = "") -> Escal
     if not rungs:
         raise ValueError("a ladder needs at least one rung label (builder:model[:provider])")
     return EscalationLadder(rungs)
+
+
+def rung_from_object(entry: Mapping[str, Any], *, default_provider: str = "") -> Rung:
+    """An object rung ``{builder, model, provider?, budget?}`` → :class:`Rung` whose
+    ``config`` carries ONLY the budget fields the rung set. ``builder_for_rung`` strips
+    those before constructing the builder and :func:`budget_for_rung` overlays them on the
+    run's budget — so a rung's budget overrides the run's, field by field, and nothing else
+    on the rung reaches a builder constructor (the API refuses other keys; the worker
+    refuses them again here because ``ladder_json`` is a stored document, not a request)."""
+    unknown = set(entry) - {"builder", "model", "provider", "budget"}
+    if unknown:
+        raise ValueError(f"object rung carries unknown field(s) {sorted(unknown)}")
+    budget = dict(entry.get("budget") or {})
+    foreign = set(budget) - set(Budget.__dataclass_fields__)
+    if foreign:
+        raise ValueError(f"rung budget carries unknown field(s) {sorted(foreign)}")
+    return Rung(
+        builder=str(entry.get("builder") or ""),
+        model=str(entry.get("model") or ""),
+        provider=str(entry.get("provider") or "") or default_provider,
+        config=budget,
+    )
+
+
+def rungs_from_entries(
+    entries: Sequence[Any], *, builder: str = "", model: str = "", provider: str = ""
+) -> list[Rung]:
+    """The rungs a run's ladder entries name — the ONE reading, used by the worker that
+    builds them and by ``POST /runs`` that refuses at submit what the worker would refuse
+    (P-284), so the two never disagree on which rung carries which provider.
+
+    An entry is an object rung (:func:`rung_from_object`), a ``builder:model[:provider]``
+    label, or a bare label (``r1``, no ``:``) meaning the run's own
+    ``builder:model[@provider]``; no entries at all is the run's own rung. ``provider`` is
+    every rung's default. A ``ValueError`` names what is missing."""
+    own = f"{builder}:{model}" + (f"@{provider}" if provider else "") if builder and model else ""
+    items: list[Any] = list(entries) or ([own] if own else [])
+    if not items:
+        raise ValueError("a replay run needs a ladder (rung labels) or builder + model")
+    rungs: list[Rung] = []
+    for entry in items:
+        if isinstance(entry, Mapping):
+            rungs.append(rung_from_object(entry, default_provider=provider))
+            continue
+        label = str(entry)
+        if not label.strip():
+            continue
+        if ":" not in label:
+            if not own:
+                raise ValueError(
+                    "a replay run with bare rung labels (r1, r2 …) needs builder + model on the run"
+                )
+            label = own
+        rungs.append(parse_rung_label(label, default_provider=provider))
+    if not rungs:
+        raise ValueError("a replay run needs at least one rung")
+    return rungs
 
 
 def _aliases(rung: Rung) -> tuple[str, ...]:
@@ -1208,7 +1268,9 @@ __all__ = [
     "ladder_labels",
     "note_unconfirmed_kills",
     "parse_rung_label",
+    "rung_from_object",
     "rung_index",
+    "rungs_from_entries",
     "sighted_test_command",
     "unconfirmed_kill_error",
 ]

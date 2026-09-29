@@ -9,12 +9,15 @@ What it does: Pins that a deployment with no ``CRB_FACTORY__TEST_AUTHOR`` has no
               state in which an item without an operator-authored test stops ``no_oracle``);
               that the setting produces an author whose identity is that rung label; that a
               run's ``params.test_author`` wins over the setting and that ``none`` in either
-              place declines one; that an unregistered builder name is refused with the run's
-              ladder named; and that the environment reaches ``WorkerSettings`` the way every
-              other shared key does.
+              place declines one; that the author stamps the configured endpoint's provider,
+              never the run's (a Claude ladder with a Cerebras author runs), and a provider
+              its own label names that the endpoint is not is refused (G-611); that an unregistered
+              builder name is refused with the run's ladder named; and that the environment
+              reaches ``WorkerSettings`` the way every other shared key does.
 How:          ``Worker.__new__`` with only ``settings`` set (the resolution reads nothing
               else) and a ``RunContext`` over the ``pyrepo`` fixture; ``settings_from_args``
-              for the environment path. No model call, no credential, no network.
+              for the environment path; ``monkeypatch`` for the endpoint variables. No model
+              call, no credential, no network.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/server/worker.py (``Worker._test_author``, ``_run_factory``),
@@ -23,7 +26,8 @@ Works with:   src/crb/server/worker.py (``Worker._test_author``, ``_run_factory`
               src/crb/factory/author.py (the author this builds),
               tests/test_factory_author.py (the invariant at the ``FactorySpec`` boundary)
 Tested by:    tests/test_worker_test_author.py
-Touch when:   another factory deployment setting is added; the label spelling changes.
+Touch when:   never for a new repository; another factory deployment setting is added; the label
+              spelling changes.
 """
 
 from __future__ import annotations
@@ -103,12 +107,29 @@ def test_a_rung_that_is_not_a_registered_builder_is_refused_with_the_ladder_name
     assert "editblock:gpt-oss-120b" in str(exc.value)
 
 
-def test_the_run_provider_is_the_authors_default_provider(pyrepo: pr.PyRepo) -> None:
+def test_the_author_stamps_the_endpoints_provider_never_the_runs(
+    pyrepo: pr.PyRepo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The run's provider belongs to its build ladder, not to the test author: a Claude
+    ladder (``claude_code@anthropic``) with a Cerebras-served author is the canonical
+    ADR-0021 set-up and must not be refused. The author stamps the provider of the endpoint
+    it calls (G-611); only a provider its own label names is checked against it."""
     sink = MemorySink()
     ctx = _ctx(pyrepo, sink)
-    ctx.run.provider = "azure"
+    ctx.run.builder, ctx.run.model, ctx.run.provider = "claude_code", "claude-sonnet-5", "anthropic"
+    claude = EscalationLadder((Rung("claude_code", "claude-sonnet-5", "anthropic"),))
+    author = _worker("editblock:gpt-oss-120b")._test_author(ctx, claude)
+    assert author is not None and author.provider == "cerebras"
+    # with Azure configured the same author calls Azure and stamps it, whatever the run says
+    monkeypatch.setenv("CRB_AZURE_ENDPOINT", "https://tenant.openai.azure.com")
+    monkeypatch.setenv("CRB_AZURE_DEPLOYMENT", "d1")
+    ctx.run.provider = "cerebras"
     author = _worker("editblock:m1")._test_author(ctx, LADDER)
     assert author is not None and author.provider == "azure"
+    # a provider the author's OWN label names that the endpoint is not is still refused
+    # before any call, naming the ladder
+    with pytest.raises(ValueError, match=r"names provider 'cerebras'.*this run's ladder"):
+        _worker("editblock:m1:cerebras")._test_author(ctx, LADDER)
 
 
 # --- the environment ------------------------------------------------------------------

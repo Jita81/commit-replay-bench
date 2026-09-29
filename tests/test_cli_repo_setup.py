@@ -21,14 +21,14 @@ Works with:   src/crb/cli/commands/repo.py (under test), src/crb/core/runners/ba
               (``venv_python``), tests/test_runners_setup.py (the phase's own suite),
               docs/OPERATOR.md (environment setup, §2.1)
 Tested by:    tests/test_cli_repo_setup.py
-Touch when:   the setup phase gains an option surfaced on the CLI (a flag case here and its
+Touch when:   never for a new repository (its setup is configuration, not a case here); the
+              setup phase gains an option surfaced on the CLI (a flag case here and its
               docs/OPERATOR.md entry).
 """
 
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -212,7 +212,7 @@ def test_probe_does_not_run_when_auto_setup_fails(
 
 
 @pytest.mark.network
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+@pytest.mark.toolchain("uv")
 def test_setup_builds_a_venv_and_probe_uses_it(run: Run, pyrepo: pr.PyRepo, workdir: Path) -> None:
     pyrepo.add_pyproject_commit()
     _register(run, pyrepo, "demo", f"uninstall={pr.DIST_NAME}")

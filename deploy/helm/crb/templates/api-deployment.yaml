@@ -97,12 +97,17 @@ spec:
             - name: data
               mountPath: /srv/crb
             {{- include "crb.secretsStore.mount" . | nindent 12 }}
+            {{- /* what the worker kept, served from the same claim (P-045) */}}
+            {{- include "crb.evidenceStore.mount" . | nindent 12 }}
       volumes:
         {{- include "crb.scratchVolumes" . | nindent 8 }}
         {{- /* the secrets store the worker reads (CRB_SECRETS_DIR): one claim for both pods */}}
         {{- include "crb.secretsStore.volume" . | nindent 8 }}
-        # Scratch for exports. Evidence lives in the database; the stored credentials live
-        # in the secrets store above, never here.
+        {{- /* the evidence store the worker writes: one claim for both pods */}}
+        {{- include "crb.evidenceStore.volume" . | nindent 8 }}
+        # Scratch for exports. Evidence rows live in the database, the kept patches and
+        # transcripts in the evidence store and the stored credentials in the secrets store
+        # above, never here.
         - name: data
           emptyDir:
             sizeLimit: 1Gi

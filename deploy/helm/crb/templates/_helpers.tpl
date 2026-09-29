@@ -136,6 +136,59 @@ and the store refuses a group-accessible directory; the first write creates it 0
 {{- end -}}
 
 {{/*
+The evidence store: the kept patches and the evidence packs ($CRB_HOME/evidence) and the
+retained transcripts ($CRB_HOME/transcripts). The worker WRITES them at grade time; the api
+SERVES them (/grades/{row_hash}/patch, /transcript). Both pods mount one claim at those two
+paths: an api emptyDir there could never find what the worker kept (docs/PREVENTION.md
+P-045, tests/test_deploy_evidence_store.py).
+*/}}
+{{- define "crb.evidenceStore.claim" -}}
+{{- default (printf "%s-evidence" (include "crb.fullname" .)) .Values.evidenceStore.existingClaim -}}
+{{- end -}}
+
+{{- define "crb.evidenceStore.mount" -}}
+- name: evidence-store
+  mountPath: /srv/crb/evidence
+  subPath: evidence
+- name: evidence-store
+  mountPath: /srv/crb/transcripts
+  subPath: transcripts
+{{- end -}}
+
+{{- define "crb.evidenceStore.volume" -}}
+{{- if not (has .Values.evidenceStore.accessMode (list "ReadWriteOnce" "ReadWriteMany")) }}
+{{- fail (printf "evidenceStore.accessMode must be ReadWriteOnce | ReadWriteMany (got %q): the api and the worker both mount the store" .Values.evidenceStore.accessMode) }}
+{{- end -}}
+- name: evidence-store
+  persistentVolumeClaim:
+    claimName: {{ include "crb.evidenceStore.claim" . }}
+{{- end -}}
+
+{{/*
+The stores both pods mount on a ReadWriteOnce claim, which attaches to one node and so needs
+the pin below: "secretsStore", "evidenceStore", both joined by " and ", or empty (no pin).
+Call with the chart's .Values.
+*/}}
+{{- define "crb.sharedStores.once" -}}
+{{- $once := list -}}
+{{- if eq .secretsStore.accessMode "ReadWriteOnce" }}{{ $once = append $once "secretsStore" }}{{ end -}}
+{{- if eq .evidenceStore.accessMode "ReadWriteOnce" }}{{ $once = append $once "evidenceStore" }}{{ end -}}
+{{- join " and " $once -}}
+{{- end -}}
+
+{{/* The refusals' first words and their way out, for the stores that need the pin. */}}
+{{- define "crb.sharedStores.why" -}}
+{{- $once := splitList " and " (include "crb.sharedStores.once" .) -}}
+{{- $modes := list -}}
+{{- $claims := list -}}
+{{- range $once }}
+{{- $modes = append $modes (printf "%s.accessMode=ReadWriteOnce" .) -}}
+{{- $claims = append $claims (printf "%s.existingClaim, %s.accessMode=ReadWriteMany" . .) -}}
+{{- end -}}
+{{- dict "modes" (join " and " $modes) "claims" (join "; " $claims) | toJson -}}
+{{- end -}}
+
+{{/*
 The pin puts the api on the worker's node (and the worker on the api's). A worker on a
 dedicated, tainted pool (docs/DEPLOYMENT.md §4.4) that the api does not tolerate would leave
 whichever pod is scheduled second pending for ever, so a ReadWriteOnce store refuses any
@@ -149,8 +202,9 @@ below, refuses that.
 {{- define "crb.secretsStore.samePlacement" -}}
 {{- $api := dict "nodeSelector" (.api.nodeSelector | default dict) "tolerations" (.api.tolerations | default list) "affinity" (.api.affinity | default dict) -}}
 {{- $worker := dict "nodeSelector" (.worker.nodeSelector | default dict) "tolerations" (.worker.tolerations | default list) "affinity" (.worker.affinity | default dict) -}}
+{{- $why := include "crb.sharedStores.why" . | fromJson -}}
 {{- if and .worker.enabled (ne (toJson $api) (toJson $worker)) }}
-{{- fail "secretsStore.accessMode=ReadWriteOnce puts the api and the worker on one node, so api.nodeSelector, api.tolerations and api.affinity must be the same as worker.nodeSelector, worker.tolerations and worker.affinity (a worker on a dedicated, tainted pool, by a selector or by node affinity, needs the api there too). Either give the api the worker's placement, or name a ReadWriteMany claim (secretsStore.existingClaim, secretsStore.accessMode=ReadWriteMany), which needs no pin — docs/DEPLOYMENT.md §3.1" }}
+{{- fail (printf "%s puts the api and the worker on one node, so api.nodeSelector, api.tolerations and api.affinity must be the same as worker.nodeSelector, worker.tolerations and worker.affinity (a worker on a dedicated, tainted pool, by a selector or by node affinity, needs the api there too). Either give the api the worker's placement, or name a ReadWriteMany claim (%s), which needs no pin — docs/DEPLOYMENT.md §3.1" $why.modes $why.claims) }}
 {{- end -}}
 {{- end -}}
 
@@ -220,14 +274,15 @@ Call with (dict "root" $ "affinity" <the operator's> "labels" <the pod's labels,
 {{- end }}
 {{- end }}
 {{- if $hit }}
-{{- fail (printf "secretsStore.accessMode=ReadWriteOnce puts every pod that mounts the store on one node, but %s.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[%d] (%s) selects the %s pod, which mounts the store. The pin puts every such pod on one node and the same term is on each pod, so it forbids that node and one pod would stay pending. Either remove the term (or make it preferred), or name a ReadWriteMany claim (secretsStore.existingClaim, secretsStore.accessMode=ReadWriteMany), which needs no pin — docs/DEPLOYMENT.md §3.1" $what $i (toJson $t) $what) }}
+{{- $why := include "crb.sharedStores.why" $.root.Values | fromJson -}}
+{{- fail (printf "%s puts every pod that mounts the store on one node, but %s.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution[%d] (%s) selects the %s pod, which mounts the store. The pin puts every such pod on one node and the same term is on each pod, so it forbids that node and one pod would stay pending. Either remove the term (or make it preferred), or name a ReadWriteMany claim (%s), which needs no pin — docs/DEPLOYMENT.md §3.1" $why.modes $what $i (toJson $t) $what $why.claims) }}
 {{- end }}
 {{- end }}
 {{- end -}}
 
 {{/*
 A pod's affinity: the operator's (api.affinity / worker.affinity), plus — for a
-ReadWriteOnce store, which attaches to one node — a required pod affinity that puts every
+ReadWriteOnce store (secrets or evidence), which attaches to one node — a required pod affinity that puts every
 pod carrying the store label on the node of the first one scheduled. Call with
 (dict "root" $ "affinity" .Values.<component>.affinity "labels" <the pod's labels, a map>
 "what" "<component>").
@@ -235,7 +290,7 @@ pod carrying the store label on the node of the first one scheduled. Call with
 {{- define "crb.secretsStore.affinity" -}}
 {{- $root := .root -}}
 {{- $aff := deepCopy (.affinity | default dict) -}}
-{{- if eq $root.Values.secretsStore.accessMode "ReadWriteOnce" -}}
+{{- if include "crb.sharedStores.once" $root.Values -}}
 {{- include "crb.secretsStore.samePlacement" $root.Values -}}
 {{- include "crb.secretsStore.noRepel" . -}}
 {{- $match := merge (include "crb.selectorLabels" $root | fromYaml) (include "crb.secretsStore.podLabel" $root | fromYaml) -}}

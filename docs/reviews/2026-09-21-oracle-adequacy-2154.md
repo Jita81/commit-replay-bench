@@ -9,7 +9,7 @@ what is left over when you stop?
 **[measured — pristine clones of `Jita81/cobra` at `9c0edca` (the fork's `main` after PR #2
 merged), Go 1.26.4, `go test -json -count=1 ./...` (the root package, where the authored file lives, plus `./doc`, which only adds its own passing tests — `./` alone yields the same authored ids), `gofmt -l`, `go vet ./`;
 each attack applied on a reset tree; n = 1 item, 5 revisions, 10 wrong builds; the proof notes
-and the attack patches' failing ids are in [2026-09-21-oracle-2154-v2/proof-notes.md](2026-09-21-oracle-2154-v2/proof-notes.md)]**.
+and the attack patches' failing ids are in [2026-09-21-oracle-2154-v2/proof-notes.md](2026-09-21-oracle-2154-v2/proof-notes.md); apparatus n/a — Go's own test runner, not crb's grader]**.
 The statements about *why* a family of wrong builds survives are **[hypothesis]** — reasoning
 from the code, not a census. No model was involved: the authors, the adversaries and the
 throwaway correct fix are all hand work.
@@ -21,12 +21,12 @@ issue's stated inputs but not two neighbouring paths: `DisableFlagParsing`, and 
 through the built-in `help` command. The independent review said *accept with edit —
 weak oracle*; the rework then produced a build that dropped an untested guard, and only a
 failed push kept it off the pull request. Rule (3) of DL-045 now stops that rebuild; this
-record is the other half — the strengthened oracle that the superseding item carries.
+record is the other half — the strengthened oracle that the superseding item carries **[hypothesis — from the proof runs this record cites; the wrong builds' patches were not kept, so the counts cannot be re-derived here]**.
 
 The oracle went through five revisions. Each revision was written by one agent, then attacked
 by a second whose brief was to pass the test with a *wrong* fix while keeping the package
 green (what the four belts would accept). Each round's survivors became the next round's
-pins.
+pins **[hypothesis — from the proof runs this record cites; the wrong builds' patches were not kept, so the counts cannot be re-derived here]**.
 
 | Rev | Added | RED ids at base | Wrong builds rejected | What still passed |
 |---|---|---|---|---|
@@ -39,14 +39,14 @@ pins.
 The correct fix stayed the same size throughout: 13 insertions, 3 deletions in `command.go`
 (**S**), green on all 44 authored tests and on `go test ./...` for the package and `./doc`.
 Build 1's fix was 7+3 lines; the rework's 4+3; the wrong builds that survived longest were
-24–35 lines — the same size band as the right answer.
+24–35 lines — the same size band as the right answer **[hypothesis — from the proof runs this record cites; the wrong builds' patches were not kept, so the counts cannot be re-derived here]**.
 
 ## What is left, and why we stopped
 
 Revision 5's residue, written into the proof notes before stopping:
 
 1. A faithful hand-rolled re-implementation of `pflag` on the help command. Walker D at 35
-   lines was rejected on four `pflag` corner cases **[measured — one build, 4 ids]**; that
+   lines was rejected on four `pflag` corner cases **[measured — n = 1 build, 4 ids; method: that build's run in the proof notes; apparatus n/a — Go's own test runner]**; that
    the next iteration which handles them lands at ≥ 45 source lines — **M** under
    `SIZE_TIERS`, which the route gate for an S item does not license — is **[hypothesis]**
    (no such build was written). Every row added only pushes this family's line count up; the size gate, not
@@ -62,7 +62,7 @@ Revision 5's residue, written into the proof notes before stopping:
 
 So the honest statement of what the oracle licenses is: *a change under 40 source lines that
 passes these 44 tests is the fix, or an equivalent of it*. Above 40 lines the oracle alone
-does not say, and the size gate says no.
+does not say, and the size gate says no **[hypothesis — from the proof runs this record cites; the wrong builds' patches were not kept, so the counts cannot be re-derived here]**.
 
 ## What this means for the product
 
@@ -82,7 +82,7 @@ The four points below are **[hypothesis]** — conclusions drawn from one item's
   exceeds the licensed cell).
 - **Process exits and panics hide ids.** Four of the ten wrong builds (the rework, attack 1,
   attack B and walker D) `os.Exit` or panic inside the test binary **[measured — the
-  proof notes' per-build runs, same method and apparatus as above]**, so a whole-package run reports only the failures before the exit. The RED
+  proof notes' per-build runs, as the opening of this record states; n = 10 wrong builds; apparatus n/a — Go's own test runner]**, so a whole-package run reports only the failures before the exit. The RED
   proof and the reviewer read attributable ids from one run; a build that exits should be
   classified as *harness error → not clean*, never as "fewer failures" (backlog: F50 — the
   grader treats a test-binary exit as a failed belt with the exit recorded).
@@ -95,7 +95,7 @@ The four points below are **[hypothesis]** — conclusions drawn from one item's
   **[aspiration]**, backlog F32), API-valid against `BacklogRegisterIn`.
 - [2026-09-21-oracle-2154-v2/help_func_args_issue2154_test.go](2026-09-21-oracle-2154-v2/help_func_args_issue2154_test.go)
   — sha256 `e3821bc1213ded3ace50b88dc260db53c0015970b7c8f238922be81542139f71`, 44 tests
-  (39 RED at `9c0edca`, 5 guards green at base).
+  (39 RED at `9c0edca`, 5 guards green at base) **[measured — n = 1 test file, 44 test ids (39 fail, 5 pass); method: *How to repeat it* below — the file at this sha256 on a pristine clone of `Jita81/cobra` at `9c0edca`, `go test -json -count=1 ./...`, Go 1.26.4, re-run 2026-09-28; apparatus n/a — Go's own test runner, not crb's grader]**.
 - [2026-09-21-oracle-2154-v2/proof-notes.md](2026-09-21-oracle-2154-v2/proof-notes.md) — every
   run, every attack's failing ids, the churn numbers, the residue. The throwaway correct fix is
   deliberately absent: the factory must earn it.

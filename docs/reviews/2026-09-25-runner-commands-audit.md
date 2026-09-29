@@ -46,4 +46,4 @@ and `lint_run.detected` records the new plan on every pack
   measures it]**.
 - The repository configurations that `PUT /repos/{name}` can write now include `checks`; the
   six live repositories carry none until the operator or the prevention loop writes one, so
-  nothing changes for them until then.
+  nothing changes for them until then **[hypothesis — recorded at the time; not re-checked since]**.

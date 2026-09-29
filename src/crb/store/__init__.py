@@ -17,7 +17,9 @@ What it is:   The ``crb.store`` package — its public surface (engine, session 
 What it does: Re-exports the five names the server, worker and CLI need to open a database
               and write to the ledger, so callers never import ``crb.store.models`` or
               ``crb.store.db`` directly for the common path.
-How:          Plain re-exports; no logic. The docstring above is the layer's contract.
+How:          Plain re-exports; no logic. Importing the package imports
+              ``crb.store.events``, whose import installs the flush hook that chains every
+              ``events`` row (ADR-0029) — so no writer of the table can run without it.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0008-stdlib-core-and-downward-layers.md
@@ -30,6 +32,7 @@ Touch when:   never for a new repository; only when a new store-level object bec
               the public surface (add the re-export and the name to ``__all__`` together).
 """
 
+from crb.store import events as _events  # noqa: F401 — installs the events chain's flush hook
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.ledger import DbLedger
 from crb.store.models import Base

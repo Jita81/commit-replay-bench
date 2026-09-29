@@ -413,6 +413,11 @@ export interface RunCounts {
   errors: number
   first_pass_clean: number
   rows: number
+  /** Why the run ended before its tasks did (`""` when it did not). */
+  stopped_reason?: string
+  /** The same as a code: `spend_cap` when the run stopped itself before an attempt or item
+   *  that could pass its `max_cost_usd` (F5b); `""` otherwise, absent on an older server. */
+  stopped_code?: string
   /** A non-build kind's own counters, verbatim (a mine run's examined / found /
    *  gold_clean / gold_dirty / skipped / known / pool; an oracle, controls or label
    *  run's raw counts object, which may nest); `{}` for build kinds, absent on an
@@ -490,6 +495,9 @@ export interface Run {
   ladder: LadderEntry[]
   /** Run-level budget overrides (`params.budget`; `{}` when the defaults apply). */
   budget?: RunBudget
+  /** The run's spend cap in USD (`params.max_cost_usd`, F5b): the most its attempts may cost
+   *  together; `null` without one, absent on an older server. */
+  max_cost_usd?: number | null
   executor: string
   timeout: number
   pool: string
@@ -533,6 +541,12 @@ export interface RunCreateRequest {
   ladder?: LadderEntry[]
   /** Run-level caps; only the fields set are sent, a rung's own budget overrides them. */
   budget?: RunBudget
+  /**
+   * Build kinds (F5b): the most the run's attempts may cost together, in USD. The worker stops
+   * the run before an attempt (a factory run: an item) that could pass it. Refused 422
+   * `spend_cap_unpriced` when a rung's model has no known price. @contract API.md "POST /runs".
+   */
+  max_cost_usd?: number
   task_ids?: string[]
   limit?: number
   pool?: string
@@ -1195,11 +1209,48 @@ export interface SignoffCreateRequest {
 // ---------------------------------------------------------------------------
 
 /** `GET /ledger/verify` — chain walk result; `broken_at` is the first bad seq. */
+/** The audit trail's chain inside `GET /ledger/verify` (`events`, ADR-0029): `broken_at` is an event id. */
+export interface EventsVerify {
+  rows: number
+  chain_ok: boolean
+  broken_at: number | null
+  detail: string
+  /** The last event's `row_hash` (`""` when there is none), to record outside the store. */
+  head_row_hash: string
+  /** `full` re-hashed every event; `tail` only those appended since the last clean walk (P-257). */
+  walk: 'full' | 'tail'
+  /** When the last full walk behind this answer ran (ISO 8601, UTC). */
+  full_walk_at: string
+}
+
+/** One hash-chained table walked from its stored columns (``ChainVerifyOut``). */
+export interface ChainVerify {
+  rows: number
+  chain_ok: boolean
+  broken_at: number | null
+  detail: string
+}
+
+/**
+ * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
+ * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
+ * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
+ */
 export interface LedgerVerify {
   rows: number
   ok: boolean
   false_q1_total: number
-  broken_at?: number | null
+  chain_ok: boolean
+  broken_at: number | null
+  detail: string
+  clean_without_pack: number
+  /** The sign-off and review chains, walked the same way (EI-6). */
+  signoffs: ChainVerify
+  reviews: ChainVerify
+  verified_at: string
+  /** The grade ledger's last `row_hash` (`""` when empty), to record outside the store. */
+  head_row_hash: string
+  events: EventsVerify
 }
 
 /** `GET /ledger/export?format=`. */

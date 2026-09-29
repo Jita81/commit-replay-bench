@@ -114,7 +114,9 @@ def test_the_summary_states_the_two_gaps_the_evidence_carries() -> None:
 
 
 def test_the_summary_is_on_the_claims_gate() -> None:
-    assert "docs/SUMMARY.md" in _claims_check().ALLOWLIST
+    cc = _claims_check()
+    pages, _ = cc.expand(ROOT, cc.ALLOWLIST)  # a folder joins the gate as a glob
+    assert "docs/SUMMARY.md" in pages
 
 
 def test_start_here_opens_with_the_summary_and_sends_nobody_off_site() -> None:

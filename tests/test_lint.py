@@ -690,10 +690,7 @@ def test_lint_fails_and_a_core_belt_fails_is_builder_red_not_lint(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.toolchain("go")
-@pytest.mark.skipif(
-    not (langs.has_tool("go") and langs.has_tool("gofmt")), reason="go/gofmt not on PATH"
-)
+@pytest.mark.toolchain("go", "gofmt")
 def test_go_gofmt_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     """cobra #1559 (critical-friend §3.2 finding 1): working code ``gofmt -l`` would
     reformat. The maintainers' own patch passes; the same patch with its indentation
@@ -727,7 +724,6 @@ def test_go_gofmt_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 def test_go_declared_lint_overrides_detection(tmp_path: Path) -> None:
     root, feat_sha = gorepo.build(tmp_path)
     repo = GitRepo(root)
@@ -742,28 +738,6 @@ def test_go_declared_lint_overrides_detection(tmp_path: Path) -> None:
     ws.remove()
 
 
-def _cargo_fmt_works() -> bool:
-    import subprocess
-
-    if not langs.has_tool("cargo"):
-        return False
-    try:
-        p = subprocess.run(
-            ["cargo", "fmt", "--version"], capture_output=True, text=True, timeout=60, check=False
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return p.returncode == 0
-
-
-def _ruff_binary() -> str | None:
-    sibling = Path(sys.executable).parent / "ruff"
-    if sibling.exists():
-        return str(sibling)
-    return shutil.which("ruff")
-
-
-@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
 def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     """click's apparatus: ``[tool.ruff]`` + the ``ruff-format`` hook. The gold passes;
     the gold with an unused import and un-formatted code does not."""
@@ -811,7 +785,6 @@ def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     ws.remove()
 
 
-@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
 def test_builder_cannot_rewrite_the_linters_configuration(tmp_path: Path) -> None:
     """Independent review pass (2026-09-14), finding 2: with the parent's
     ``[tool.ruff.lint] select = ["E", "F"]`` an unused import is ``repo_lint_clean=False``;
@@ -866,7 +839,6 @@ def test_builder_cannot_rewrite_the_linters_configuration(tmp_path: Path) -> Non
 
 
 @pytest.mark.toolchain("cargo")
-@pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH")
 def test_rust_missing_rustfmt_component_is_a_harness_error_not_a_verdict(tmp_path: Path) -> None:
     """The rustup proxy answers ``cargo fmt`` with rc 1 when rustfmt is not installed —
     the findings code. Belt 5 must read that as *not runnable* (harness), never as
@@ -879,7 +851,7 @@ def test_rust_missing_rustfmt_component_is_a_harness_error_not_a_verdict(tmp_pat
     ws.overlay_sources(task.src_files)
     res = _grade(ws, task, config)
     assert res.lint_run is not None and res.lint_run.detected == "cargo-fmt"
-    if _cargo_fmt_works():
+    if langs.tool_usable("cargo-fmt"):
         assert res.clean and res.belts.repo_lint_clean is True, res.to_dict()
     else:
         assert not res.clean and res.belts.repo_lint_clean is False
@@ -889,8 +861,7 @@ def test_rust_missing_rustfmt_component_is_a_harness_error_not_a_verdict(tmp_pat
     ws.remove()
 
 
-@pytest.mark.toolchain("cargo")
-@pytest.mark.skipif(not _cargo_fmt_works(), reason="cargo fmt (rustfmt component) not available")
+@pytest.mark.toolchain("cargo", "cargo-fmt")
 def test_rust_cargo_fmt_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     root, feat_sha = rustrepo.build(tmp_path, extra={"rustfmt.toml": 'edition = "2021"\n'})
     repo, config = GitRepo(root), rustrepo.config()
@@ -915,7 +886,6 @@ def test_rust_cargo_fmt_rejects_a_misformatted_gold_patch(tmp_path: Path) -> Non
 
 
 @pytest.mark.toolchain("node")
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 def test_node_standard_script_is_detected_and_graded(tmp_path: Path) -> None:
     """koa's shape: ``"lint": "standard"`` and the binary under ``node_modules/.bin`` — here
     a fake ``standard`` that rejects anything containing a double-quoted string."""
@@ -1228,7 +1198,6 @@ def _fake_tsc(bin_dir: Path, *, broken_files: tuple[str, ...], debt: tuple[str, 
 
 
 @pytest.mark.toolchain("node")
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 def test_node_tsc_type_error_in_a_changed_file_is_a_lint_failure(tmp_path: Path) -> None:
     """The NHS shape (``lint:types`` + ``tsconfig.json`` + ``node_modules/.bin/tsc``): a
     patch that leaves a type error in a file it touched grades ``repo_lint_clean=False``,
@@ -1263,7 +1232,6 @@ def test_node_tsc_type_error_in_a_changed_file_is_a_lint_failure(tmp_path: Path)
 
 
 @pytest.mark.toolchain("node")
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 def test_node_tsc_pre_existing_error_in_an_unchanged_file_is_not_attributed(tmp_path: Path) -> None:
     """The maintainers' type debt in a file the builder never touched: belt 5 stays
     ``True`` and the run's note records the debt — never the builder's ``lint``."""
@@ -1284,10 +1252,7 @@ def test_node_tsc_pre_existing_error_in_an_unchanged_file_is_not_attributed(tmp_
     ws.remove()
 
 
-@pytest.mark.toolchain("tsc")
-@pytest.mark.skipif(
-    not (langs.has_tool("node") and langs.has_tool("tsc")), reason="tsc not on PATH"
-)
+@pytest.mark.toolchain("node", "tsc")
 def test_real_tsc_attributes_type_errors_by_file(tmp_path: Path) -> None:
     """The real TypeScript compiler (whatever version is on PATH): its ``file(line,col):
     error TSnnnn`` lines parse under ``TSC_FINDINGS_RE``; a type error the builder

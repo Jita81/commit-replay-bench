@@ -34,8 +34,9 @@ Works with:   src/crb/core/oracle/controls_js.py (under test), src/crb/core/orac
               tests/fixtures/langs/negctrl/noderepo_fix.py (the fixtures), tests/conftest_langs.py
               (``npm_cache``), src/crb/core/runners/node_runners.py (the four runners)
 Tested by:    tests/test_oracle_controls_js.py
-Touch when:   a fifth JavaScript runner is added (its ``env_poison`` plan and both matrices); a
-              JS construct the scanner misses is found in a client repository.
+Touch when:   onboarding a JavaScript repository whose runner is not one of the four here
+              (a fifth runner needs its ``env_poison`` plan and both matrices); a JS construct
+              the scanner misses is found in a client repository.
 """
 
 from __future__ import annotations
@@ -420,7 +421,6 @@ def fix_matrix(fix):
 
 
 @pytest.mark.toolchain("node")
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 class TestNodeFixtureMatrix:
     """noderepo: the feat commit ADDS ``sub``. 6/7 constructible per tool (was 4/7)."""
 
@@ -469,7 +469,6 @@ class TestNodeFixtureMatrix:
 
 
 @pytest.mark.toolchain("node")
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 class TestNodeFixMatrix:
     """noderepo_fix: the feat commit FIXES ``mul``. 7/7 for jest / vitest / mocha; node
     --test has no hook so env_poison is honestly not constructible there."""

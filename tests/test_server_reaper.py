@@ -13,21 +13,23 @@ What it does: Pins the contract: a container whose kill went unconfirmed is queu
               health probe reports, and a pass under ``budget_s`` ends within the budget
               against a daemon that answers slowly (each call capped to the remainder, the
               entry it ran out on counting one attempt with the reason, the rest untouched).
-How:          A ``docker`` shell script whose ``inspect`` answers are scripted per call count
-              (optionally sleeping first); a reaper over a ``tmp_path`` state file.
+How:          A ``docker`` shell script whose ``inspect`` answers are scripted per call count,
+              and for the time budget a fake daemon on a fake clock (``_FakeDaemon``: no
+              spawn, no real time, P-014); a reaper over a ``tmp_path`` state file.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/server/reaper.py (under test), src/crb/server/worker.py (the loop that
               drives it — tests/test_worker.py covers the events it emits)
 Tested by:    tests/test_server_reaper.py
-Touch when:   the reap sequence or the bound changes — update docs/API.md's cancel row and
-              ADR-0012 with it.
+Touch when:   never for a new repository; the reap sequence or the bound changes — update
+              docs/API.md's cancel row and ADR-0012 with it.
 """
 
 from __future__ import annotations
 
 import json
 import stat
+import subprocess
 import time
 from pathlib import Path
 
@@ -36,12 +38,11 @@ import pytest
 from crb.server import reaper as rp
 
 
-def _docker(
-    dir_: Path, *, gone_after: int | None, rm_fails: bool = False, delay_s: float = 0.0
-) -> tuple[str, Path]:
+def _docker(dir_: Path, *, gone_after: int | None, rm_fails: bool = False) -> tuple[str, Path]:
     """A ``docker`` whose ``inspect`` says Running=true until ``gone_after`` inspect calls
     have been made (then "No such container"); ``None`` = never lets go. ``rm -f`` is
-    logged, and fails when asked. ``delay_s`` makes every call sleep first (a slow daemon)."""
+    logged, and fails when asked. A slow daemon is :class:`_FakeDaemon`, on a fake
+    clock: a real script that sleeps would time the machine, not the budget (P-014)."""
     dir_.mkdir(parents=True, exist_ok=True)
     calls = dir_ / "calls"
     calls.write_text("")
@@ -55,7 +56,7 @@ def _docker(
     rm = "exit 1" if rm_fails else ":"
     script = dir_ / "docker"
     script.write_text(
-        "#!/bin/sh\n" + (f"sleep {delay_s:g}\n" if delay_s else "") + 'case "$1" in\n'
+        '#!/bin/sh\ncase "$1" in\n'
         f'  inspect) echo inspect >> "{calls}"; {inspect} ;;\n'
         f'  rm) echo rm >> "{calls}"; {rm} ;;\n'
         "esac\n"
@@ -153,47 +154,127 @@ def test_docker_missing_counts_as_an_attempt_not_a_crash(tmp_path: Path) -> None
     assert res.reaped is False and res.attempts == 1
 
 
+class _FakeDaemon:
+    """A docker daemon on a fake clock: every question takes ``answer_s`` of fake time, or
+    — when that is longer than the call's timeout — runs to the timeout and is not answered
+    (``inspect`` reads unknown, ``rm -f`` raises ``TimeoutExpired``). Nothing is spawned and
+    no real time passes, so the budget arithmetic is tested without timing the machine
+    (docs/PREVENTION.md P-014)."""
+
+    def __init__(self, *, answer_s: float, running: bool = True, rm_fails: bool = False) -> None:
+        self.now = 1000.0
+        self.answer_s = answer_s
+        self.running = running
+        self.rm_fails = rm_fails
+        self.calls: list[tuple[str, float]] = []
+
+    def clock(self) -> float:
+        return self.now
+
+    def _spend(self, what: str, timeout: float) -> bool:
+        """Advance the clock by the answer or the timeout; ``True`` when it answered."""
+        self.calls.append((what, timeout))
+        if self.answer_s > timeout:
+            self.now += timeout
+            return False
+        self.now += self.answer_s
+        return True
+
+    def stopped(self, docker: str, name: str, *, timeout_s: float) -> bool | None:
+        if not self._spend("inspect", timeout_s):
+            return None
+        return not self.running
+
+    def runner(self, argv: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        timeout = float(kw["timeout"])  # type: ignore[arg-type]
+        if not self._spend(argv[1], timeout):
+            raise subprocess.TimeoutExpired(argv, timeout)
+        rc = 1 if self.rm_fails else 0
+        return subprocess.CompletedProcess(argv, rc, "", "refused" if rc else "")
+
+    def reaper(self, path: Path, **kw: object) -> rp.ContainerReaper:
+        return rp.ContainerReaper(
+            path,
+            docker="docker",
+            runner=self.runner,
+            clock=self.clock,
+            stopped=self.stopped,
+            **kw,  # type: ignore[arg-type]
+        )
+
+
 def test_reap_pass_ends_within_its_time_budget(tmp_path: Path) -> None:
     """Three entries against a daemon that takes 2 s per answer, under a 0.5 s budget: the
     pass ends inside the budget (the first inspect is capped to the remainder), the entry
     it ran out on carries ``pass budget exhausted`` as one attempt, the entries it never
-    reached are untouched — and an unbudgeted pass (``budget_s=None``) still asks every
-    question. Nothing is ever reported ``reaped`` on a question the daemon did not answer."""
-    docker, calls = _docker(tmp_path / "slow", gone_after=None, delay_s=2.0)
-    r = rp.ContainerReaper(tmp_path / "state.json", docker=docker, max_attempts=20)
+    reached are untouched. Nothing is ever reported ``reaped`` on a question the daemon did
+    not answer. The daemon and the clock are fakes: no real time is measured."""
+    daemon = _FakeDaemon(answer_s=2.0)
+    r = daemon.reaper(tmp_path / "state.json", max_attempts=20)
     for i in range(3):
         r.add(f"crb-build-slow-{i}", run_id=f"run-{i}", task_id=f"t{i}")
-    t0 = time.monotonic()
+    start = daemon.now
     assert r.reap_once(budget_s=0.5) == []
-    elapsed = time.monotonic() - t0
-    assert elapsed < 1.0, elapsed  # not 3 entries × (2 s + 2 s + 2 s)
+    assert daemon.now - start == pytest.approx(0.5)  # not 3 entries x (2 s + 2 s + 2 s)
+    assert daemon.calls == [("inspect", pytest.approx(0.5))]  # capped to the remainder
     first, second, third = r.pending()
     assert first.attempts == 1 and rp.BUDGET_EXHAUSTED in first.last_error
     assert (second.attempts, third.attempts) == (0, 0) and not second.last_error
-    assert calls.read_text().split() == []  # the capped inspect was cut before it answered
     # a zero budget reaches no entry at all: the queue is exactly as it was
     assert r.reap_once(budget_s=0.0) == []
     assert [e.attempts for e in r.pending()] == [1, 0, 0]
+    assert len(daemon.calls) == 1
+
+
+def test_an_unbudgeted_pass_asks_every_question_whatever_the_daemon_takes(
+    tmp_path: Path,
+) -> None:
+    """``budget_s=None`` caps each call at its own timeout only: a slow daemon is asked
+    inspect, rm -f and inspect again for every entry."""
+    daemon = _FakeDaemon(answer_s=2.0, rm_fails=True)
+    r = daemon.reaper(tmp_path / "state.json", max_attempts=20)
+    r.add("crb-build-a", run_id="ra", task_id="ta")
+    r.add("crb-build-b", run_id="rb", task_id="tb")
+    assert r.reap_once() == []
+    assert [w for w, _ in daemon.calls] == ["inspect", "rm", "inspect"] * 2
+    assert [t for _, t in daemon.calls] == [
+        rp.INSPECT_TIMEOUT_S,
+        rp.RM_TIMEOUT_S,
+        rp.INSPECT_TIMEOUT_S,
+    ] * 2
+    assert all("still running" in e.last_error for e in r.pending())
 
 
 def test_reap_pass_budget_caps_each_call_to_the_remainder(tmp_path: Path) -> None:
     """A daemon fast enough to answer inside the budget is not cut short: with 0.2 s per
     answer and a 1 s budget the first entry gets its full inspect / rm / inspect (three
-    calls, 0.6 s), the second is cut where the remainder runs out, the third (which the
-    remainder cannot reach: 0.6 s + at least one 0.2 s answer + a capped call) is
-    untouched, and the next pass (a fresh budget) continues from the first."""
-    docker, calls = _docker(tmp_path / "ok", gone_after=None, rm_fails=True, delay_s=0.2)
-    r = rp.ContainerReaper(tmp_path / "state.json", docker=docker, max_attempts=20)
+    calls, 0.6 s), the second is cut where the remainder runs out (its inspect, 0.2 s, then
+    an rm capped to the 0.2 s left and no second inspect), the third is untouched, and the
+    next pass (a fresh budget) continues from the first. The clock is a fake one the daemon
+    advances, so the arithmetic holds on any machine (P-014)."""
+    daemon = _FakeDaemon(answer_s=0.2, rm_fails=True)
+    r = daemon.reaper(tmp_path / "state.json", max_attempts=20)
     r.add("crb-build-a", run_id="ra", task_id="ta")
     r.add("crb-build-b", run_id="rb", task_id="tb")
     r.add("crb-build-c", run_id="rc", task_id="tc")
-    t0 = time.monotonic()
+    start = daemon.now
     assert r.reap_once(budget_s=1.0) == []
-    assert time.monotonic() - t0 < 2.0
-    log = calls.read_text().split()
-    assert log[:3] == ["inspect", "rm", "inspect"]  # entry a in full
-    a, _b, c = r.pending()
+    assert daemon.now - start == pytest.approx(1.0)
+    assert [w for w, _ in daemon.calls] == ["inspect", "rm", "inspect", "inspect", "rm"]
+    assert daemon.calls[-1][1] == pytest.approx(0.2)  # the last call got only the remainder
+    a, b, c = r.pending()
     assert a.attempts == 1 and "still running" in a.last_error
+    assert b.attempts == 1 and rp.BUDGET_EXHAUSTED in b.last_error
     assert c.attempts == 0 and not c.last_error  # never reached this pass
     assert r.reap_once(budget_s=1.0) == []  # the next pass carries on from a
     assert r.pending()[0].attempts == 2
+
+
+def test_the_reaper_reads_the_real_clock_and_the_strict_inspect_by_default(
+    tmp_path: Path,
+) -> None:
+    """The injection points default to what production uses: the monotonic clock and
+    ``container_stopped``'s strict question."""
+    r = rp.ContainerReaper(tmp_path / "state.json")
+    assert r._clock is time.monotonic
+    assert r._stopped is rp.container_stopped

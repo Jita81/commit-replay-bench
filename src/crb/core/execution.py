@@ -280,6 +280,32 @@ class Executor(Protocol):
 Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
+#: The one question every docker-daemon probe asks (the executor, ``/health`` and the test
+#: suite's gate): the version the daemon reports.
+DOCKER_VERSION_ARGV: tuple[str, ...] = ("info", "--format", "{{.ServerVersion}}")
+
+
+def docker_server_version(docker: str, *, timeout: float = 30, runner: Runner | None = None) -> str:
+    """The version the docker daemon reports; ``SandboxUnavailable`` when none answers.
+
+    A daemon answers only when ``docker info`` exits 0 AND names a version. A docker CLI
+    before 29 renders a ``--format`` template empty, prints the connection error on stderr
+    and exits 0 when its daemon is down, so the exit code alone reads a stopped daemon as
+    one that answers (the fresh-clone job's first run, 2026-09-28 — docs/PREVENTION.md
+    P-744). A command that cannot be run at all raises as ``subprocess.run`` does.
+    """
+    r = (runner or subprocess.run)(
+        [docker, *DOCKER_VERSION_ARGV], capture_output=True, text=True, timeout=timeout, check=False
+    )
+    version = (r.stdout or "").strip()
+    if r.returncode != 0 or not version:
+        said = (r.stderr or r.stdout or "").strip()[:400]
+        raise SandboxUnavailable(
+            f"docker daemon not reachable: {said or 'docker info named no server version'}"
+        )
+    return version
+
+
 # ---------------------------------------------------------------------------
 # Local
 # ---------------------------------------------------------------------------
@@ -519,19 +545,9 @@ class DockerExecutor:
         """One ``docker info`` at construction: a dead daemon is found before the first
         task, not by the first task."""
         try:
-            r = self._runner(
-                [self.docker, "info", "--format", "{{.ServerVersion}}"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
+            docker_server_version(self.docker, runner=self._runner)
         except (FileNotFoundError, subprocess.SubprocessError) as e:
             raise SandboxUnavailable(f"docker daemon probe failed: {e}") from e
-        if r.returncode != 0:
-            raise SandboxUnavailable(
-                f"docker daemon not reachable: {(r.stderr or r.stdout).strip()[:400]}"
-            )
 
     def tool(self, name: str, host_override: str | None = None) -> str:
         # Inside the image the toolchain is on PATH; host overrides never apply.

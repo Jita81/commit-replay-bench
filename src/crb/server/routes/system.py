@@ -14,10 +14,11 @@ store-level checks:
   down: complete, but unstamped until ``crb migrate`` runs.
 * ``append_only`` — every expected ledger trigger is LIVE (on its own table with the
   installer's whole definition; on PostgreSQL enabled and calling ``crb_append_only`` —
-  :func:`crb.store.db.expected_triggers`) AND an ``UPDATE`` on ``grades`` is refused, on
-  SQLite a ``REPLACE`` too (:func:`crb.store.ledger.assert_append_only`; on an empty
-  ``grades`` table none is tried and the detail says so). A missing, moved, disabled or
-  ``WHEN``-neutered trigger = ``down``, named in ``data.missing``.
+  :func:`crb.store.db.expected_triggers`) AND an ``UPDATE`` and a ``DELETE`` are refused in
+  the trigger's own words on every append-only table that holds a row, on SQLite a
+  ``REPLACE`` too (:func:`crb.store.ledger.assert_append_only`; on empty tables none is
+  tried and the detail says so; any other error is ``down``, never proof). A missing,
+  moved, disabled or ``WHEN``-neutered trigger = ``down``, named in ``data.missing``.
 * ``ledger``      — row count and ``false_q1`` computed in SQL with the same belt
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``; and
   the sign-off and review chains walked from their stored columns — a break = ``down``.
@@ -269,15 +270,26 @@ def probe_migrations(factory: sessionmaker[Session], *, request_id: str = "") ->
     return probes.run_probe("migrations", _read, request_id=request_id)
 
 
+#: What the ``append_only`` probe says when it passes and a write was tried.
+APPEND_ONLY_OK_DETAIL = (
+    "triggers live on every append-only table; UPDATE and DELETE refused on each that holds a row"
+)
+#: What it says when it passes on a store whose append-only tables are all empty: no write
+#: was tried, so it claims none was refused (P-216) — the live-trigger check is the proof.
+APPEND_ONLY_UNTRIED_DETAIL = "triggers live on every append-only table; no row to test a write on"
+
+
 def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
     """``append_only``: every expected trigger LIVE (present on its own table with the
-    installer's whole definition, enabled, and calling the append-only function) AND an
-    UPDATE on ``grades`` refused (on SQLite a ``REPLACE`` too) — counting names alone passed a
-    trigger that exists but does not fire. On an empty ``grades`` table no write is tried and
-    the ``ok`` detail says so ("no grades row to test the UPDATE on").
-    An accepted write is ``down`` in the ledger's own words (:class:`LedgerIntegrityError`
-    names no secret); a read that raises is ``down`` with the fixed ``failure_detail``. A
-    ``down`` names the missing triggers in ``data.missing``."""
+    installer's whole definition, enabled, and calling the append-only function) AND
+    :func:`crb.store.ledger.assert_append_only` — an UPDATE and a DELETE refused in the
+    trigger's own words on every table that holds a row, on SQLite a ``REPLACE`` too
+    (counting names alone passed a trigger that exists but does not fire). On a store whose
+    append-only tables are all empty no write is tried and the ``ok`` detail says so. An
+    accepted write is ``down`` in the ledger's own words (:class:`LedgerIntegrityError`
+    names no secret); any other error — the probe no longer reads one as proof (P-125) — is
+    ``down`` with the fixed ``failure_detail``. A ``down`` names the missing triggers in
+    ``data.missing``."""
 
     def _read() -> ProbeResult:
         with factory() as s:
@@ -288,10 +300,6 @@ def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -
         data: dict[str, Any] = {"triggers": expected - len(missing), "expected": expected}
         if missing:
             data["missing"] = missing
-        try:
-            tried = assert_append_only(factory)
-        except LedgerIntegrityError as exc:
-            return ProbeResult("append_only", DOWN, str(exc), data)
         if missing:
             return ProbeResult(
                 "append_only",
@@ -299,10 +307,14 @@ def probe_append_only(factory: sessionmaker[Session], *, request_id: str = "") -
                 f"{expected - len(missing)}/{expected} append-only triggers present",
                 data,
             )
-        # never claim an UPDATE that was not tried: an empty grades table has no row to try
-        # it on, and the live-trigger count above is then the whole proof
-        refused = "UPDATE on grades refused" if tried else "no grades row to test the UPDATE on"
-        return ProbeResult("append_only", OK, f"triggers present; {refused}", data)
+        try:
+            tried = assert_append_only(factory)
+        except LedgerIntegrityError as exc:
+            return ProbeResult("append_only", DOWN, str(exc), data)
+        # never claim a write that was not tried: on empty tables the live-trigger check is
+        # the whole proof
+        detail = APPEND_ONLY_OK_DETAIL if tried else APPEND_ONLY_UNTRIED_DETAIL
+        return ProbeResult("append_only", OK, detail, data)
 
     return probes.run_probe("append_only", _read, request_id=request_id)
 
@@ -879,7 +891,7 @@ def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Res
     if not metrics.available():
         raise ApiError(503, "metrics_unavailable", "prometheus_client is not installed")
     refresh_ledger_gauges(factory)
-    return Response(content=metrics.render(), media_type=CONTENT_TYPE_LATEST)
+    return Response(content=metrics.render_api(), media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/version", summary="Package, apparatus and routing-policy versions")

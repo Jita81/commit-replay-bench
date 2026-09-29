@@ -27,12 +27,12 @@ and apparatus; the licence sentence for the signed cell (what may be said and wh
 one cell's full evidence and its route decision with the reason code and the policy in force;
 and the decisions inbox with the act for your role — Attest (`/signoff`), Sign a gap or Decide
 (`/factory`), Read why (`/routing`), Investigate (`/ledger`) — or "<role> acts" when it is not
-yours.
+yours **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** No act is recorded on these four pages; each act is a link to the page that
 records it (sign-off, factory, ledger). Nothing is run from here except the operator's link to
 the run form from an empty map. No repository-wide rate, no "the AI can do X%", no throughput
-headline. The ledger (`/ledger`) belongs to the operate journey and is reached by its door.
+headline. The ledger (`/ledger`) belongs to the operate journey and is reached by its door **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 ## Definition of done
 

@@ -99,3 +99,57 @@ unless someone read the apparatus stamp's executor field.
   pull requests on a customer's repository — ran on the host, unmarked.
 - **Bump the apparatus.** Rejected: no verdict changes meaning; the executor was already on
   the stamp, and the override is an additional, explicit field.
+
+## Amendment 2026-09-27 — the override names who set it (DL-090, G-663)
+
+**Context.** Decision 3 made the override visible (a warning, `/health`, `/settings`, the
+Posture page, every run's apparatus) but not attributable: an environment variable carries no
+identity, so the record said *that* production ran unsealed and never *who* decided it.
+`product.posture.204` asks that "each use of the override is an event on the audit trail
+naming who set it".
+
+**Decision.**
+
+6. **The override needs a named acknowledgement in production.** `CRB_ALLOW_UNSEALED_PROD=1`
+   with `CRB_ENV=prod` is refused at start-up unless `CRB_ALLOW_UNSEALED_PROD_BY` names the
+   admin who set it (their username) and `CRB_ALLOW_UNSEALED_PROD_REASON` says why
+   (`crb.server.settings.unsealed_override_ack_refusal`, applied by `Settings` and by
+   `crb.server.worker_main.settings_from_args`). It is required whether or not the replay
+   posture is sealed, because the override also admits factory builds on the host
+   (decision 5). `dev` never asks.
+7. **The name is checked against the store at every start.** `crb serve` (in its lifespan,
+   before any request) and each `crb worker` (`announce_start`, before any run) resolve the
+   name to exactly one account — a local username, an identity-provider subject or an email
+   — that is an admin and active (`crb.server.unsealed_override.find_acknowledging_admin`).
+   No account, more than one, a non-admin or a deactivated admin refuses the start
+   (`OverrideRefused`; the worker exits 2) and writes nothing.
+8. **Each start is an audit event naming that person.** One `posture.unsealed_override`
+   system event per process start, on the trace `posture:unsealed_override`, whose actor is
+   the admin's account id and whose payload names the username, the reason, the process
+   (`api` | `worker`), the host, the process id and the posture it admits. The event is on
+   the hash-chained audit trail (ADR-0029), so it cannot be edited or removed unseen.
+9. **The name is stamped beside the override.** The worker's `unsealed_prod_override` stamp
+   carries `acknowledged_by` on every run it admits — replay and factory alike — so a row
+   produced under the override names, in its own evidence, who decided to produce it.
+
+**Consequences.** An operator who sets the override in production must also say who owns
+the decision and why, and that person must hold an admin account; a deployment whose only
+admin is the bootstrap account names it. The product cannot prove the named admin typed the
+variable — only that an existing, active admin was named, at every start, on a trail that
+cannot be rewritten unseen; the deployment's change control owns who may edit the
+environment.
+
+**Alternatives considered.**
+
+- **Record the operating-system user that started the process.** Rejected: in a container
+  it is the image's user (`10001`), never a person, and it names nobody the product knows.
+- **Accept any free-text name.** Rejected: a name that is no account cannot be held to a
+  role, deactivated or asked; checking it against the admins makes the name mean something.
+- **Record the override from the UI (an admin clicks "allow unsealed").** Rejected: the
+  refusal happens at start-up, before any session exists, and a setting that changes what a
+  process may execute belongs with the deployment's other environment, under its change
+  control. A UI switch would also let an admin turn the host builder on in a running
+  production process.
+- **One event per deployment instead of per start.** Rejected: each start is a fresh
+  decision to run unsealed — a restart after the admin was deactivated must be refused, and
+  a restart under a new reason must say so.

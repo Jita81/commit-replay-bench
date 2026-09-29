@@ -69,7 +69,6 @@ noderepo = langs.fixture_module("noderepo")
 
 pytestmark = [
     pytest.mark.toolchain("node"),
-    pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH"),
 ]
 
 
@@ -469,7 +468,7 @@ def _sealed_node_binding(tmp_path: Path, key: str) -> tuple[Path, DepsBinding]:
     return sealed, binding
 
 
-@pytest.mark.skipif(not langs.has_tool("npm"), reason="npm not on PATH")
+@pytest.mark.toolchain("npm")
 def test_a_local_sealed_run_links_the_set_into_a_worktree_with_no_node_modules(
     tmp_path: Path,
 ) -> None:
