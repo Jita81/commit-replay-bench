@@ -7,7 +7,7 @@ parent: dod.stream.connect-and-prove
 children: [dod.page.connect, dod.page.connect-name, dod.page.repos, dod.page.repos-name]
 persons: [operator, admin, viewer]
 owner: ui
-status: partial                # WRITTEN BY THE CHECKER — never by hand
+status: done                # WRITTEN BY THE CHECKER — never by hand
 updated: 2026-09-26
 ---
 
