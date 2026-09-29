@@ -22,8 +22,9 @@ What it is:   The known-answer gate over ``crb.server.flow.build_flow`` — the 
               pairing that pools what the map splits" recurring in a fold P-138 did not cover.
 What it does: Builds one store with chosen stamps (install, health, registration, controls,
               runs, graded rows, deliver stamps in and out of scope, reviews, a recovery, a
-              factory chain), folds it, and compares every served lead time and cost per unit
-              with ``KNOWN`` / ``KNOWN_PER_UNIT``.
+              factory chain, probes, qualifies, mine / oracle / controls runs and a prevention
+              register with a decoy verdict), folds it, and compares every served lead time
+              and cost per unit with ``KNOWN`` / ``KNOWN_PER_UNIT``.
 How:          ``make_factory`` + install events first (so the install is observed), then
               ``seed`` + ``add_users``; events, runs and reviews through the ORM and the review
               ledger; rows, sign-off records and factory events handed to ``build_flow``
@@ -51,7 +52,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.context_arm import LABEL_CONTEXT_ARM
 from crb.core.flow import LeadTime
-from crb.core.ledger import LABEL_COST_KNOWN, PROCESS_FACTORY, GradeRow, labels_at_apparatus
+from crb.core.ledger import (
+    FAILURE_PROTOCOL,
+    LABEL_COST_KNOWN,
+    LABEL_FAILURE_KIND,
+    PROCESS_FACTORY,
+    GradeRow,
+    labels_at_apparatus,
+)
+from crb.core.prevention import MemoryPreventionStore, PreventionRecord, Register, build_register
 from crb.core.review import ReviewRecord
 from crb.core.signoff import Attestation, SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -75,6 +84,24 @@ KNOWN: dict[str, tuple[int, float | None, float | None, float | None]] = {
     # registered 08:00 → the first PASSED controls report 09:00 (an escaped one at 08:30, an
     # unwitnessed controls.v2 one at 08:45)
     "registered_to_controls": (1, 3600.0, 3600.0, 3600.0),
+    # registered 08:00 → the first probe that finished GREEN at 08:40 (a failed one at 08:10,
+    # one that succeeded without green at 08:30, a later green one at 09:30)
+    "registered_to_probe_green": (1, 2400.0, 2400.0, 2400.0),
+    # step 2: the first red probe after registration 08:10 → the first qualify that qualified
+    # a task 09:10 (one that qualified nothing at 08:20; the seed's probe of 2026-08-25
+    # predates registration and never starts it)
+    "step_2_span": (1, 3600.0, 3600.0, 3600.0),
+    # two succeeded mine runs of 5 and 20 minutes, each timed from its start, not its queueing;
+    # a failed one of 2 hours and a succeeded one of 2 hours on apparatus 2.3 never count
+    "mine_run": (2, 750.0, 300.0, 1200.0),
+    # one succeeded oracle run of 30 minutes (the seed's has no start stamp: never timed)
+    "oracle_run": (1, 1800.0, 1800.0, 1800.0),
+    # one succeeded controls run of 10 minutes
+    "controls_run": (1, 600.0, 600.0, 600.0),
+    # the network class first seen 07:00 → its change's first decided look 11:00 (a decided
+    # record at 10:00 names it under a change that does not target it, and a later look at
+    # 12:00 is not the first)
+    "finding_to_remeasurement": (1, 14400.0, 14400.0, 14400.0),
     # run A queued 09:50, last row 10:11 (21 min); run B queued 10:15, last row 10:22 (7 min)
     "queued_to_graded": (2, 840.0, 420.0, 1260.0),
     # cell A's first row 10:00 → its TENTH 10:09 (it has twelve); the split cell never counts
@@ -110,6 +137,11 @@ DAY = "2026-09-01"
 POSTURE = "local/inplace/host-env"
 ARM = "off"
 RUN_A, RUN_B = "e1" * 16, "e2" * 16
+
+
+#: When each proving run was queued, well before it started (a run timed from its queueing
+#: would read 40 to 50 minutes longer).
+QUEUED = {"m1": "07:35", "m2": "07:40", "o1": "08:20", "c1": "08:00"}
 
 
 def at(hhmm: str) -> str:
@@ -217,6 +249,39 @@ def served(tmp_path: Path) -> dict[str, Any]:
         # the two measured runs, queued at chosen moments
         s.add(Run(id=RUN_A, repo=ALPHA, kind="replay", created=at("09:50")))
         s.add(Run(id=RUN_B, repo=ALPHA, kind="replay", created=at("10:15")))
+        # the proving runs: probes, qualifies, mines, an oracle and a controls run
+        for rid, kind, status, start, end, counts in (
+            ("p1", "probe", "failed", "08:05", "08:10", {"green": False}),
+            ("p2", "probe", "succeeded", "08:25", "08:30", {}),
+            ("p3", "probe", "succeeded", "08:35", "08:40", {"green": True}),
+            ("p4", "probe", "succeeded", "09:25", "09:30", {"green": True}),
+            ("q1", "qualify", "succeeded", "08:15", "08:20", {"qualified": 0}),
+            ("q2", "qualify", "succeeded", "09:05", "09:10", {"qualified": 2}),
+            ("q3", "qualify", "succeeded", "09:40", "09:45", {"qualified": 5}),
+            ("m1", "mine", "succeeded", "08:15", "08:20", {}),
+            ("m2", "mine", "succeeded", "08:25", "08:45", {}),
+            ("m3", "mine", "failed", "09:00", "11:00", {}),
+            # two hours on an older apparatus: another instrument's, never pooled with 2.4
+            ("m4", "mine", "succeeded", "05:00", "07:00", {"apparatus": "2.3"}),
+            ("o1", "oracle", "succeeded", "09:00", "09:30", {}),
+            ("c1", "controls", "succeeded", "08:50", "09:00", {}),
+        ):
+            stamped = str(counts.pop("apparatus", APPARATUS_VERSION))
+            proving = kind in ("mine", "oracle", "controls")
+            s.add(
+                Run(
+                    id=rid.ljust(32, "0"),
+                    repo=ALPHA,
+                    kind=kind,
+                    status=status,
+                    # the proving runs waited in the queue first: the wait is not the work
+                    created=at(QUEUED.get(rid, start)),
+                    started=at(start),
+                    finished=at(end),
+                    counts_json=counts,
+                    apparatus_json={"apparatus_version": stamped} if proving else {},
+                )
+            )
         # the true deliver stamp; every decoy is LATER and must never be the start
         stamp(s, n := n + 1, at("11:00"), ALPHA, "bug.fix")
         stamp(s, n := n + 1, at("11:10"), ALPHA, "docs.update")
@@ -285,9 +350,51 @@ def served(tmp_path: Path) -> dict[str, Any]:
     ]
     with factory() as s:
         reading = build_flow(
-            s, repo=ALPHA, rows=rows, signoffs=[record], factory_events=chain, admin=True
+            s,
+            repo=ALPHA,
+            rows=rows,
+            signoffs=[record],
+            factory_events=chain,
+            admin=True,
+            register=prevention_register(base),
         )
     return reading.to_dict()
+
+
+#: The prevention class the register below carries: the network guard refusing ``go mod``.
+NET_ERR = (
+    "protocol violation: network: 'go' is not allowed (no network access) (attempted: go mod tidy)"
+)
+NET_SIG = "protocol:network:go mod"
+
+
+def prevention_register(base: GradeRow) -> Register:
+    """A register whose one class was first seen at 07:00, with a change applied to it at
+    09:00 and decided at its first look at 11:00 — plus a decoy decided record at 10:00 that
+    names the class under a change that does not target it, and a later look at 12:00."""
+    refused = dataclasses.replace(
+        graded(base, hhmm="07:00", cost=0.1, run_id="e5" * 16),
+        clean=False,
+        target_green=False,
+        error=NET_ERR,
+        labels={**base.labels, "builder_error": NET_ERR, LABEL_FAILURE_KIND: FAILURE_PROTOCOL},
+        row_hash="net".ljust(64, "0"),
+    )
+    store = MemoryPreventionStore()
+    for kind, created, payload in (
+        (
+            "applied",
+            "09:00",
+            {"change_id": "c-net", "lever_id": "line:T-NET", "targets": [NET_SIG]},
+        ),
+        ("applied", "09:30", {"change_id": "c-other", "lever_id": "x", "targets": ["other:x"]}),
+        ("decided", "10:00", {"change_id": "c-other", "signature": NET_SIG, "verdict": "keep"}),
+        ("decided", "11:00", {"change_id": "c-net", "signature": NET_SIG, "verdict": "continue"}),
+        ("decided", "12:00", {"change_id": "c-net", "signature": NET_SIG, "verdict": "keep"}),
+    ):
+        store.append(PreventionRecord(kind=kind, repo=ALPHA, payload=payload, created=at(created)))
+    records = store.records()
+    return build_register([refused], records=records, repo=ALPHA)
 
 
 def lead_times(body: dict[str, Any]) -> dict[str, LeadTime]:

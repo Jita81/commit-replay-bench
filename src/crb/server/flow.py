@@ -12,14 +12,19 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 
 | stream | from → to |
 |---|---|
-| connect-and-prove | repository registered → its first controls report that passed |
+| connect-and-prove | repository registered → its first controls report that passed; |
+| | registered → its first probe that finished green (G-302); step 2's span, the |
+| | first failed probe or qualify → the first qualify that qualified a task, an |
+| | estimate of the developer's time (G-556); one succeeded mine, oracle and controls |
+| | run at the current apparatus, started → finished (G-430) |
 | measure | run queued → its last row graded; a cell's first row → its tenth |
 | decide-and-license | a cell first routed ``deliver`` in the sign-off's own scope (recorded, |
 | | ADR-0028 §6) → the cell signed; |
 | | the attested row graded clean (accepted) → the cell signed; and the |
 | | minutes each review took, as the reviewer stated them on ``POST /reviews`` |
 | manufacture-and-deliver | item registered → pull request opened → merged |
-| learn | a refusal raised → the strengthening item that supersedes it registered |
+| learn | a refusal raised → the strengthening item that supersedes it registered; a |
+| | class first seen → the first decided look of a change targeting it (G-536) |
 | run-the-platform | an admin set an account's password → that account signed in again; |
 | | the install → the first green ``/health`` (both recorded, ADR-0028) |
 
@@ -36,13 +41,16 @@ over a floor (DL-066).
 and its recovery lead time, which are an admin's (ADR-0028 §7): anyone else reads the lead time
 as unmeasured with :data:`ADMIN_ONLY` and no account count.
 
-**What it refuses to invent.** Two figures those criteria ask for are not recorded anywhere,
-so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap
-that would close them — and never derived from a neighbouring number: the developer hours of
-the guide's "real work" (G-556) and the guard's false-positive rate (G-536). A screen prints
-the absence; nobody can mistake it for a zero. How many go-live lines are proven, attested
-or unproven is read from the go-live checklist (:mod:`crb.server.golive`) the route passes
-in — ``golive_lines``, ``golive_proven``, ``golive_attested`` and ``golive_unproven``.
+**What it refuses to invent.** One figure those criteria ask for is not recorded anywhere, so
+it is served as a :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap that
+would close it — and never derived from a neighbouring number: the developer hours of the
+guide's "real work" as the developer spent them (G-556; step 2's span is timed and stands in
+for them, labelled as such). The guard's false positives are counted from the verdicts people
+recorded (``learn.refusal.accepted``), with the undecided rows kept apart and never counted as
+either verdict (G-536). A screen prints the absence; nobody can mistake it for a zero. How
+many go-live lines are proven, attested or unproven is read from the go-live checklist
+(:mod:`crb.server.golive`) the route passes in — ``golive_lines``, ``golive_proven``,
+``golive_attested`` and ``golive_unproven``.
 Three moments that were missing are now recorded when they happen (ADR-0028,
 :mod:`crb.server.flow_record`) and read back here: a cell first routing ``deliver``, the
 install and the first green ``/health``. A moment that passed before recording began is
@@ -52,8 +60,9 @@ Navigation
 ----------
 What it is:   The server-side gatherer behind ``GET /flow``: one function per stream that finds
               its milestone pairs in the stores, plus ``build_flow`` which assembles them.
-What it does: Reads runs, graded rows, system events, sign-offs, reviews, users and the
-              factory's evidence chain for one repository; reduces them through
+What it does: Reads runs, graded rows, system events, sign-offs, reviews, users, the refusal
+              verdicts, the prevention register and the factory's evidence chain for one
+              repository; reduces them through
               ``crb.core.flow`` into a lead time, a spend (an unknown cost never counted as
               zero), a cost per unit (never over a floor) and counts per stream; pairs a
               deliver stamp only with a signature of its own scope; serves the account
@@ -65,6 +74,10 @@ How:          SQLAlchemy selects over ``Run`` / ``Event`` / ``Signoff`` / ``Revi
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/flow.py (the arithmetic and the shapes this module fills),
+              src/crb/core/learn.py (``guard_false_positives`` over the verdicts
+              ``crb.server.routes.learn.accepted_decisions`` reads),
+              src/crb/core/prevention.py (``finding_to_remeasure`` — a class to its first
+              decided look),
               src/crb/server/routes/flow.py (the endpoint that calls ``build_flow``),
               src/crb/server/factory_state.py (``FactoryHome.events`` — the manufacture chain),
               src/crb/factory/evidence.py (the event kinds the manufacture and learn folds
@@ -73,10 +86,12 @@ Works with:   src/crb/core/flow.py (the arithmetic and the shapes this module fi
               src/crb/store/models.py (``Run``, ``Event``, ``Signoff``, ``Review``, ``User``)
 Tested by:    tests/test_server_routes_flow.py, tests/test_flow.py,
               tests/test_flow_known_answers.py (every served figure against a known answer)
-Touch when:   never for a new repository; a stream's milestone pair changes (change it here, in the
-              stream's MEASURE criterion and in tests/test_flow_known_answers.py's ``KNOWN``
-              together); a figure named in ``NOT_CAPTURED`` becomes recorded (remove it here, close
-              its gap, and flip the criterion in the same commit).
+Touch when:   never for a new repository — a repository's registration, probes and proving
+              runs are read as they are recorded; a stream's milestone pair changes (change
+              it here, in the stream's MEASURE criterion and in
+              tests/test_flow_known_answers.py's ``KNOWN`` together); a figure named in
+              ``NOT_CAPTURED`` becomes recorded (remove it here, close its gap, and flip the
+              criterion in the same commit).
 """
 
 from __future__ import annotations
@@ -101,8 +116,10 @@ from crb.core.flow import (
     spend_of_rows,
     stated_durations,
 )
+from crb.core.learn import FalsePositives, guard_false_positives, triage_refusals
 from crb.core.ledger import PROCESS_FACTORY, GradeRow, pool_scope
 from crb.core.oracle.controls import controls_verdict_of
+from crb.core.prevention import FindingToRemeasure, Register, finding_to_remeasure
 from crb.core.routing import DEFAULT_POLICY, ControlsVerdict
 from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -125,6 +142,15 @@ from crb.server.flow_record import (
     deliver_stamps,
     inherited_cells,
     install_moments,
+)
+from crb.server.routes.learn import accepted_decisions
+from crb.store.jobs import (
+    KIND_CONTROLS,
+    KIND_MINE,
+    KIND_ORACLE,
+    KIND_PROBE,
+    KIND_QUALIFY,
+    STATUS_SUCCEEDED,
 )
 from crb.store.models import Event, Repo, Review, Run, Task, User
 
@@ -192,6 +218,91 @@ def first_controls_pass(session: Session, repo: str) -> str:
     return ""
 
 
+def _finished_runs(session: Session, repo: str, kinds: Iterable[str]) -> list[Run]:
+    """Every finished run of ``kinds`` for ``repo``, in the order they finished (a run with
+    no finished stamp has not finished and is not here)."""
+    runs = session.execute(
+        select(Run).where(Run.repo == repo, Run.kind.in_(tuple(kinds)), Run.finished != "")
+    ).scalars()
+    return sorted(runs, key=lambda r: (_instant(r.finished), r.finished, r.id))
+
+
+def first_green_probe(session: Session, repo: str) -> str:
+    """When the repository's FIRST green probe finished, or ``""``: the earliest ``probe`` run
+    that succeeded with ``counts_json.green`` true, read at its finished stamp (the moment the
+    worker wrote ``probe.done`` with green). A failed probe never counts, and a later green
+    one never moves it (G-302)."""
+    for run in _finished_runs(session, repo, (KIND_PROBE,)):
+        if run.status == STATUS_SUCCEEDED and (run.counts_json or {}).get("green") is True:
+            return run.finished
+    return ""
+
+
+def step_2_span(session: Session, repo: str, registered: str) -> tuple[str, str, str]:
+    """Step 2 of the guide — making the oracle reproducible — as the product sees it:
+    ``(start, end, why)``. The start is the first probe or qualify after registration that
+    said the repository was not ready (a probe that failed or was not green; a qualify that
+    qualified no task); the end is the first qualify after that
+    start which qualified at least one task. This span is an estimate of the developer's time
+    (G-556), not a measure of it: the work itself happens outside the product. ``why`` names the missing end."""
+    start = ""
+    for run in _finished_runs(session, repo, (KIND_PROBE, KIND_QUALIFY)):
+        if registered and not _before(registered, run.finished):
+            continue
+        counts = dict(run.counts_json or {})
+        if run.kind == KIND_PROBE:
+            red = run.status != STATUS_SUCCEEDED or counts.get("green") is not True
+        else:
+            red = int(counts.get("qualified", 0) or 0) == 0
+        if red:
+            start = run.finished
+            break
+    if not start:
+        return (
+            "",
+            "",
+            (
+                "no probe or qualify of this repository has failed since it was registered, so "
+                "step 2 has not been needed or has not started"
+            ),
+        )
+    for run in _finished_runs(session, repo, (KIND_QUALIFY,)):
+        counts = dict(run.counts_json or {})
+        if (
+            run.status == STATUS_SUCCEEDED
+            and int(counts.get("qualified", 0) or 0) >= 1
+            and _before(start, run.finished)
+        ):
+            return start, run.finished, ""
+    return (
+        start,
+        "",
+        (
+            "step 2 started (a probe or qualify said the repository was not ready) and no qualify "
+            "since has qualified a task, so it has not ended"
+        ),
+    )
+
+
+def run_durations(
+    session: Session, repo: str, kind: str, *, apparatus: str = APPARATUS_VERSION
+) -> list[tuple[str, str]]:
+    """``(started, finished)`` of every SUCCEEDED run of ``kind`` the worker stamped with
+    ``apparatus`` — how long one such run takes on this repository at the apparatus the figure
+    is labelled with (G-430). Timed from the start, never from the queue: the wait before a
+    worker claims a run is not the work. A failed or cancelled run is not a duration of the
+    work; a run the worker never stamped as started (written before the stamp existed, or
+    imported) was never timed; and a run of another apparatus is another instrument's figure
+    — each is left out rather than guessed or pooled."""
+    return [
+        (run.started, run.finished)
+        for run in _finished_runs(session, repo, (kind,))
+        if run.status == STATUS_SUCCEEDED
+        and run.started
+        and str(dict(run.apparatus_json or {}).get("apparatus_version") or "") == apparatus
+    ]
+
+
 def _passed(verdict: ControlsVerdict) -> bool:
     return (
         verdict.state(
@@ -241,7 +352,9 @@ def partition_rows(
 
 
 def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> StreamFlow:
-    """Registration → a passed controls report, and what proving the instrument cost."""
+    """Registration → a passed controls report, registration → the first green probe, step 2's
+    span (standing in for the developer's hours), how long each proving run takes, and what
+    proving the instrument cost."""
     registered = repo_registered(session, repo)
     passed_at = first_controls_pass(session, repo)
     pairs = [(registered, passed_at)] if registered and passed_at else []
@@ -250,6 +363,13 @@ def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> 
         if not passed_at
         else "the registration moment is not on record for this repository"
     )
+    green_at = first_green_probe(session, repo)
+    probe_reason = (
+        "no probe of this repository has finished green yet, so there is nothing to measure"
+        if not green_at
+        else "the registration moment is not on record for this repository"
+    )
+    s2_start, s2_end, s2_reason = step_2_span(session, repo, registered)
     mined = int(
         session.execute(
             select(func.count()).select_from(Task).where(Task.repo == repo)
@@ -272,6 +392,46 @@ def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> 
                 pairs,
                 reason=reason,
             ),
+            lead_time(
+                "registered_to_probe_green",
+                "Registered → first green probe",
+                [(registered, green_at)] if registered and green_at else [],
+                reason=probe_reason,
+            ),
+            lead_time(
+                "step_2_span",
+                "Step 2: first failed probe or qualify → first qualified task (an estimate of "
+                "the developer's time on step 2, not a measure of it)",
+                [(s2_start, s2_end)] if s2_start and s2_end else [],
+                reason=s2_reason,
+            ),
+            lead_time(
+                "mine_run",
+                "One mine run, started → finished",
+                run_durations(session, repo, KIND_MINE),
+                reason=(
+                    "no mine run of this repository has succeeded at apparatus "
+                    f"{APPARATUS_VERSION} yet"
+                ),
+            ),
+            lead_time(
+                "oracle_run",
+                "One oracle run, started → finished",
+                run_durations(session, repo, KIND_ORACLE),
+                reason=(
+                    "no oracle run of this repository has succeeded at apparatus "
+                    f"{APPARATUS_VERSION} yet"
+                ),
+            ),
+            lead_time(
+                "controls_run",
+                "One controls run, started → finished",
+                run_durations(session, repo, KIND_CONTROLS),
+                reason=(
+                    "no controls run of this repository has succeeded at apparatus "
+                    f"{APPARATUS_VERSION} yet"
+                ),
+            ),
         ),
         spend=_costs(rows),
         spend_label=(
@@ -282,6 +442,7 @@ def connect_and_prove(session: Session, repo: str, rows: Sequence[GradeRow]) -> 
             "tasks_mined": mined,
             "tasks_gold_clean": gold,
             "controls_passed": 1 if passed_at else 0,
+            "probe_green": 1 if green_at else 0,
         },
         not_captured=(NOT_CAPTURED["developer_hours"],),
     )
@@ -557,8 +718,17 @@ def manufacture_and_deliver(events: Sequence[FactoryEvent], rows: Sequence[Grade
     )
 
 
-def learn(events: Sequence[FactoryEvent]) -> StreamFlow:
-    """A refusal raised → the strengthening item that supersedes it registered."""
+def learn(
+    events: Sequence[FactoryEvent],
+    *,
+    false_positives: FalsePositives | None = None,
+    findings: FindingToRemeasure | None = None,
+    findings_reason: str = "",
+) -> StreamFlow:
+    """A refusal raised → the strengthening item that supersedes it registered; a class's
+    finding → its first re-measurement under a prevention (``findings``, G-536); and the
+    guard's false positives as counts, the undecided rows among them (``false_positives``,
+    G-536 — the rate by apparatus and month is ``GET /learn/refusals``'s)."""
     refused_at: dict[str, str] = {}
     strengthened: list[tuple[str, str]] = []
     evolutions = 0
@@ -570,6 +740,31 @@ def learn(events: Sequence[FactoryEvent]) -> StreamFlow:
             supersedes = str(ev.payload.get("supersedes") or "")
             if supersedes in refused_at:
                 strengthened.append((refused_at[supersedes], ev.created))
+    fp = false_positives
+    counts: dict[str, int] = {
+        "refusals": len(refused_at),
+        "evolutions": evolutions,
+        "refusals_answered": len(strengthened),
+    }
+    if fp is not None:
+        # the guard's verdicts, as counts: a false positive is a row every class of which a
+        # person decided honest; the undecided rows stay visible and are never either verdict
+        counts.update(
+            {
+                "guard_rows_refused": fp.rows_protocol,
+                "guard_false_positives": fp.honest,
+                "guard_right_refusals": fp.refuse,
+                "guard_rows_undecided": fp.undecided,
+            }
+        )
+    if findings is not None:
+        counts.update(
+            {
+                "classes_found": findings.classes,
+                "classes_with_a_change": findings.with_change,
+                "classes_remeasured": findings.decided,
+            }
+        )
     return StreamFlow(
         stream="learn",
         name=STREAM_NAMES["learn"],
@@ -580,15 +775,21 @@ def learn(events: Sequence[FactoryEvent]) -> StreamFlow:
                 strengthened,
                 reason="no refusal of this repository has been answered by an evolution yet",
             ),
+            lead_time(
+                "finding_to_remeasurement",
+                "Class found → first re-measured under a change",
+                [(start, end) for _, start, end in findings.pairs] if findings else [],
+                reason=findings_reason
+                or (
+                    "no class of this repository has had a change applied and decided at its "
+                    "first look yet"
+                ),
+            ),
         ),
         spend=Spend(),
         spend_label="no model spend: learning reads what other streams already paid for",
-        counts={
-            "refusals": len(refused_at),
-            "evolutions": evolutions,
-            "refusals_answered": len(strengthened),
-        },
-        not_captured=(NOT_CAPTURED["guard_false_positives"],),
+        counts=counts,
+        not_captured=(),
     )
 
 
@@ -683,17 +884,13 @@ def run_the_platform(
 #: the gap that would close it, so the screen states an absence instead of deriving a number.
 NOT_CAPTURED: dict[str, NotCaptured] = {
     "developer_hours": NotCaptured(
-        figure="the developer hours of the guide's “real work”",
+        figure="the developer hours of step 2 (the guide's “real work”), as the developer spent them",
         why=(
-            "making a repository's oracle reproducible is work a person does outside this "
-            "product, and nothing here times it"
+            "the work happens outside this product; the span from the first failed probe or "
+            "qualify to the first qualified task is timed above as an estimate of it, but "
+            "nobody marks when the developer started and stopped"
         ),
         gap="G-556",
-    ),
-    "guard_false_positives": NotCaptured(
-        figure="the guard's false-positive rate and how often a defect class comes back",
-        why="a refusal is recorded, and whether it was right is not",
-        gap="G-536",
     ),
 }
 
@@ -708,9 +905,14 @@ def build_flow(
     apparatus: str = APPARATUS_VERSION,
     admin: bool = False,
     golive: Mapping[str, int] | None = None,
+    register: Register | None = None,
+    register_reason: str = "",
 ) -> FlowReading:
     """Every stream's numbers for ``repo``, folded from what the stores already hold;
-    ``admin`` says whether the caller may read the deployment's account figures."""
+    ``admin`` says whether the caller may read the deployment's account figures;
+    ``register`` is the repository's prevention register (its chain in ``records``), which
+    the learn stream times a finding to its re-measurement from — without it that lead time
+    reads unmeasured with ``register_reason``."""
     runs = list(session.execute(select(Run).where(Run.repo == repo)).scalars())
     run_kinds = {r.id: r.kind for r in runs}
     run_created = {r.id: r.created for r in runs}
@@ -721,7 +923,16 @@ def build_flow(
         measure(parts[PART_MEASURE], run_kinds, run_created, repository=total),
         decide_and_license(session, repo, signoffs, rows),
         manufacture_and_deliver(factory_events, parts[PART_MANUFACTURE]),
-        learn(factory_events),
+        learn(
+            factory_events,
+            false_positives=guard_false_positives(
+                triage_refusals(rows), accepted_decisions(session, repo)
+            ),
+            findings=(
+                finding_to_remeasure(register, register.records) if register is not None else None
+            ),
+            findings_reason=register_reason,
+        ),
         run_the_platform(session, admin=admin, golive=golive),
     )
     return FlowReading(

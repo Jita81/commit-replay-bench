@@ -274,7 +274,7 @@ These are not wave items; each unblocks the work named beside it.
 
 | theme | gaps |
 |---|---|
-| each stream's own numbers and automation | G-535, G-500, G-536, G-556, G-565, G-534, G-564, G-548 |
+| each stream's own numbers and automation | G-535, G-500, G-536, G-556, G-565, G-534, G-564, G-548, G-770, G-771, G-772 |
 | honest actions and failure states | G-397, G-976, G-101, G-117, G-127, G-128, G-132, G-134, G-181, G-182, G-205, G-206, G-237, G-254, G-294, G-368, G-400, G-920, F32, F6 |
 | doors and wayfinding | G-907, G-977, G-236, G-444, G-253, G-260, G-293, G-366, G-228, G-396, G-979 |
 | proof through each journey's own doors | G-428, G-300, G-380, G-399, G-446, G-109, G-119, G-125, G-133, G-238, G-256, G-268, G-183 |

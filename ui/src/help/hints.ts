@@ -135,6 +135,18 @@ export const HINTS = {
     'From the pull request opening to a person merging it, taking the merge time the host itself reported. A pull request nobody has merged is not counted, so this is the wait of the ones that landed.',
   'flow.registered_to_merged':
     'The whole of manufacture: from the item being registered to its pull request being merged. This is the number a delivery team feels, and it includes every wait on a person inside it.',
+  'flow.registered_to_probe_green':
+    'From registering the repository to the first probe that finished green: how long it took to prove the toolchain, dependencies and layout right. A failed probe does not count, and a later green one does not move it.',
+  'flow.step_2_span':
+    'From the first probe or qualify after registration that said the repository was not ready to the first qualify that qualified a task. It is an estimate of the developer’s time on making the oracle reproducible, which happens outside the product: elapsed time, not effort.',
+  'flow.mine_run':
+    'How long one mine run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. A failed run is not counted, because it did not do the work.',
+  'flow.oracle_run':
+    'How long one oracle run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. It grows with the number of tasks and the size of the test suite.',
+  'flow.controls_run':
+    'How long one negative-controls run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. A failed run is not counted.',
+  'flow.finding_to_remeasurement':
+    'From a bug class first appearing in the ledger to the first time the loop measured a change aimed at it and recorded what the change did. A class with no change, or one not yet read at its first look, is counted below and not timed.',
   'flow.refusal_to_strengthening':
     'From a refusal being raised to a strengthening item being registered that supersedes what was refused. It says how quickly a stop becomes work, and a refusal nobody has answered is not counted.',
   'flow.installed_to_healthy':
@@ -151,6 +163,20 @@ export const HINTS = {
     'The product refused to fold these figures, and the message says why — most often a graded row that fails its own belts, which the ledger will not load. Nothing is shown rather than a number built on rows the product does not trust.',
   'flow.counts':
     'The plain counts behind the durations above: what entered this stream, what came out and what stopped. They are counts, not rates — no interval belongs on them.',
+  'flow.learn.guard_rows_refused':
+    'How many graded rows the guard stopped as a protocol violation in this repository, whatever anyone has decided about them.',
+  'flow.learn.guard_false_positives':
+    'Refused rows in which every class they fell into was decided honest by a person: the guard was wrong to stop them.',
+  'flow.learn.guard_right_refusals':
+    'Refused rows with at least one class a person decided should stay refused: the guard was right to stop them.',
+  'flow.learn.guard_rows_undecided':
+    'Refused rows with a class nobody has decided yet, or no class at all. They are counted as neither verdict.',
+  'flow.learn.classes_found':
+    'How many bug classes the prevention register holds for this repository: each kind of failure the loop has seen at least once.',
+  'flow.learn.classes_with_a_change':
+    'How many of those classes a prevention change has been applied to, so the loop can measure whether it helped.',
+  'flow.learn.classes_remeasured':
+    'How many of those classes have had a change measured again at its first look, with what the change did recorded. These are the classes the lead time above is timed over.',
   'flow.not_captured':
     'Figures this stream’s definition of done asks for that nothing in the product records. They are named here with the gap that would close them, so their absence is never read as a zero.',
 
@@ -1600,15 +1626,15 @@ export const HINTS = {
   'stat.learn.stale_rows':
     'Rows older than the current apparatus out of every row for this repository. Stale evidence is kept as history and licenses nothing.',
   'stat.learn.needed':
-    'Commits still needed on the current apparatus to bring every stale cell to the look rule’s first look (routing.v2), over the cells that are stale. A reading is read only at its looks.',
+    'Commits the registered readings still need before their next looks, summed over the readings waiting on a look (routing.v2). A cell with no registered reading is not counted here: it needs a reading registered first.',
   'stat.learn.remeasure_cost':
-    'Each stale cell’s own mean row cost times the rows it still needs, summed over the cells with a known cost. A dash means no cost is known.',
+    'Each cell’s own mean row cost times the commits its runs ask for, times up to 3 attempts per commit for a blind cell (the ladder’s rungs), summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
-    'The class and size whose rows predate the current apparatus.',
+    'The cell: its process step, class, size, language, builder, model and provider, then the mode and the context arm it is about. Two arms are never pooled.',
   'col.learn_remeasure.counts':
-    'Rows on older apparatus versions (named), rows on the current one, and how many more the rule needs.',
+    'Rows on older apparatus versions (named); the distinct commits read so far (by the registered reading, or, with none, the commits with a first attempt); and how many more commits are needed, with the reason and what to do next under it.',
   'col.learn_remeasure.cost':
-    'The cell’s mean row cost times the rows needed; a question mark when no cost is known.',
+    'The cell’s mean row cost times the commits its runs ask for (times up to 3 for a blind cell). It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
   'col.learn_remeasure.runs':
     'How many run requests the plan lists to close the gap.',
   'link.learn.oracle':
@@ -1663,6 +1689,22 @@ export const HINTS = {
   // the three decisions beside the reports (G-532), each one a named operator's decision
   'pill.learn.decided':
     'The verdict a named person recorded for this class, and the corpus the line was written into: honest allows the command, refused keeps the guard refusing it.',
+  'col.learn_refusals.fp_apparatus':
+    'The apparatus version the refused rows were graded under. Rates of two versions are never blended, because a change to the guard changes what it refuses.',
+  'col.learn_refusals.fp_month':
+    'The calendar month the refused rows were graded in, so a change in the rate over time can be seen.',
+  'col.learn_refusals.fp_rows':
+    'How many rows the guard refused in this version and month: the n the rate is taken over.',
+  'col.learn_refusals.fp_honest':
+    'Refused rows in which every class they fell into was decided honest by a person: the guard stopped a command it should have allowed. These are its false positives.',
+  'col.learn_refusals.fp_refuse':
+    'Refused rows with a class a person decided refused: the guard was right to stop them.',
+  'col.learn_refusals.fp_undecided':
+    'Refused rows nobody has judged yet. They are counted as neither verdict, so the rate beside them is a range until someone decides their class.',
+  'col.learn_refusals.fp_rate':
+    'False positives divided by the rows refused. While rows are undecided it shows the range: the low end counts every undecided row as a right refusal, the high end as a false positive.',
+  'text.learn.fp_undecided':
+    'How many refused rows no person has judged yet, in how many classes, and how many fell into no class at all. When an operator decides a class above, the range of the rate in the table narrows; a row in no class keeps its part of the range open.',
   'col.learn_refusals.decide':
     'Records your verdict on this class. Only an operator sees this column, and the decision is stored with the name of whoever made it.',
   'button.learn.decide_refusal':
@@ -1691,12 +1733,26 @@ export const HINTS = {
     'What the registration did: the item id, the backlog it is on now, and the item it replaced if any.',
   'link.learn.factory':
     'The factory for this repository, where the backlog is read and a run that builds the item is queued.',
+  'col.learn_remeasure.reason':
+    'Why the cell is in the plan: look pending when its registered reading still needs commits before its next look; stale or thin when it has rows but no reading is registered on it at this apparatus, so none of them can count yet.',
+  'pill.learn.remeasure_reason':
+    'Look pending means a registered reading waits for first attempts on commits it has not read. Stale means the cell’s evidence expired when the apparatus changed; thin means its rows are current. Neither of those two has a reading to count rows.',
+  'text.learn.remeasure_short':
+    'Why this cell needs what it needs, and what to do next: queue the commits its reading still needs, register a reading first, or queue a run by hand because this plan cannot compose one the reading would count.',
+  'text.learn.remeasure_cannot_clear':
+    'Cells whose registered reading has decided against them: insufficient at its third miss (never read again), or undecided because its pool is too small for the next look. No further attempt on that reading can bring them to deliver.',
   'col.learn_remeasure.queue':
     'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
   'button.learn.queue_remeasure':
     'Shows what queueing this cell would run and cost before anything is sent.',
   'link.learn.remeasure_in_flight':
     'The runs already queued for this cell and not yet finished. Queue comes back once they have graded, so the same estimate is never spent twice.',
+  'text.learn.remeasure_register':
+    'This cell has rows but no registered reading at this apparatus. Rows graded before a reading is registered never count, so nothing is queued here: register a reading of the cell first (crb reading register, or POST /readings).',
+  'link.learn.remeasure_by_hand':
+    'The runs page for this repository. The reading waits on an arm this plan cannot compose a replay for (another test author, the loop switch, a factory arm or another posture), so the run is queued there by hand.',
+  'link.learn.remeasure_mine':
+    'The mine runs of this repository. New commits count only in a new reading, once they are labelled into the cell and qualified.',
   'button.learn.cancel_queue':
     'Closes the confirmation. Nothing is queued and nothing is spent.',
   'button.learn.confirm_queue':
@@ -2045,6 +2101,12 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.pr_to_merged',
   'flow.registered_to_merged',
   'flow.refusal_to_strengthening',
+  'flow.registered_to_probe_green',
+  'flow.step_2_span',
+  'flow.mine_run',
+  'flow.oracle_run',
+  'flow.controls_run',
+  'flow.finding_to_remeasurement',
   'flow.password_set_to_signed_in',
   'flow.installed_to_healthy',
   'flow.spend',
@@ -2083,7 +2145,9 @@ export const MIN_HINTS: Record<string, number> = {
   '/capability': 30,
   '/routing': 20,
   '/oracle': 22,
-  '/learn': 44,
+  // a viewer's Learn page under the ratchet's fixtures: the reports, the remeasure plan's four
+  // kinds of entry and the learn stream's FlowPanel with each of its counts explained (G-536)
+  '/learn': 87,
   '/ledger': 26,
   // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
   // "Change my password" card; the admin's configuration and Users card (and the deeper

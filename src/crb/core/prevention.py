@@ -29,6 +29,9 @@ pure and standard-library only:
 7. **The snapshot** (:func:`snapshot`): what one run is given — the overlay the loop's
    switches add under the team's own configuration, and the lines, held out by task and
    leak-gated at injection.
+8. **A finding to its re-measurement** (:func:`finding_to_remeasure`): each class's first
+   sighting paired with the first ``decided`` record of a change that targets it — the learn
+   stream's own lead time (G-536).
 
 The one rule it keeps: **the loop changes how a change is made, never how it is judged.**
 :func:`check_writable` refuses every configuration key outside :data:`WRITABLE`.
@@ -42,8 +45,9 @@ What it does: Computes every class of a repository from its rows, reviews and fa
               events; picks the strongest admissible lever; decides keep / retire / harm /
               closed / reopened / displaced / inconclusive on the first attempts whose labels
               name the change, against a before window frozen when the change was applied;
-              writes nothing but chained records, and refuses any grader key. Serves stream
-              S's register seam (``PreventionRegister``).
+              writes nothing but chained records, and refuses any grader key; pairs each
+              class's first sighting with its change's first decided look (the learn stream's
+              lead time). Serves stream S's register seam (``PreventionRegister``).
 How:          ``signatures`` (failure kind → family table) → ``build_register`` (per-class
               aggregates, stratum, key, actionable, folds of the chain → ``choose_lever`` →
               ``measure`` → status) → ``tick`` (``due_decisions`` → ``reverted`` → apply /
@@ -59,7 +63,8 @@ Works with:   src/crb/core/ledger.py (the rows, the failure rule the signatures 
               closed templates a line is rendered from), src/crb/core/review.py (the standing
               review a ``review:`` class reads), src/crb/server/prevention_state.py (the events
               store, the snapshot and the tick on a live stack), src/crb/builders/adapter.py
-              (injects the lines and stamps the labels)
+              (injects the lines and stamps the labels), src/crb/server/flow.py (times a
+              finding to its re-measurement with ``finding_to_remeasure``)
 Tested by:    tests/test_prevention_signatures.py, tests/test_prevention_store.py,
               tests/test_prevention_rule.py, tests/test_prevention_gaming.py,
               tests/test_prevention_register_seam.py, tests/test_playbook_leakage.py,
@@ -2960,6 +2965,59 @@ def build_register(
 
 
 # ===========================================================================
+# 7b. A finding to its re-measurement — the learn stream's own lead time (G-536)
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class FindingToRemeasure:
+    """Each class's finding paired with its first re-measurement: ``pairs`` is
+    ``(signature, first_seen, decided_at)`` for every class a change was applied to and then
+    decided on; ``classes`` counts every class in the register, ``with_change`` those a change
+    targets, ``decided`` those paired. A class with no change, or whose change has not reached
+    its first look, is counted and never timed."""
+
+    pairs: tuple[tuple[str, str, str], ...]
+    classes: int
+    with_change: int
+
+    @property
+    def decided(self) -> int:
+        return len(self.pairs)
+
+
+def finding_to_remeasure(
+    register: Register, records: Iterable[PreventionRecord]
+) -> FindingToRemeasure:
+    """Pair each class's ``first_seen`` (the first row or factory event that carried it)
+    with the FIRST ``decided`` record of a change that targets it — the moment the loop read
+    the class again under a prevention and said what the change did. Pure; chain order;
+    a ``decided`` record of a change that does not target the class never pairs."""
+    recs = [r for r in records if r.repo == register.repo]
+    chs = changes(recs)
+    first: dict[str, str] = {}
+    for r in recs:
+        if r.kind != "decided":
+            continue
+        sig = str(r.payload.get("signature", ""))
+        ch = chs.get(str(r.payload.get("change_id", "")))
+        if ch is None or sig not in ch.targets:
+            continue
+        first.setdefault(sig, r.created)
+    targeted = {sig for ch in chs.values() for sig in ch.targets}
+    pairs = tuple(
+        (e.signature, e.first_seen, first[e.signature])
+        for e in sorted(register.entries, key=lambda e: e.signature)
+        if e.signature in first and e.first_seen
+    )
+    return FindingToRemeasure(
+        pairs=pairs,
+        classes=len(register.entries),
+        with_change=sum(1 for e in register.entries if e.signature in targeted),
+    )
+
+
+# ===========================================================================
 # 8. The tick — what the loop would append now
 # ===========================================================================
 
@@ -3555,6 +3613,7 @@ __all__ = [
     "WRITABLE",
     "W_SECTION",
     "Change",
+    "FindingToRemeasure",
     "JsonlPreventionStore",
     "LearningSnapshot",
     "Lever",
@@ -3590,6 +3649,7 @@ __all__ = [
     "due_decisions",
     "empty_snapshot",
     "factory_signatures",
+    "finding_to_remeasure",
     "harness_cause",
     "in_force",
     "is_first_attempt",

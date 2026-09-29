@@ -427,6 +427,19 @@ const REFUSALS = {
   apparatus_versions: ['2.2'],
   groups: [{ group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl https://…', truncated: false, n: 3, cost_usd: 1.2, verdict: 'unsure', candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:' }],
   decisions: [],
+  // the guard's false positives by apparatus and month (G-536): one undecided row, so the
+  // rate reads as a range and the undecided line renders
+  false_positives: {
+    periods: [{ apparatus_version: '2.2', month: '2026-09', rows_protocol: 3, honest: 1, refuse: 1, undecided: 1, rate_low: 0.3333, rate_high: 0.6667 }],
+    rows_protocol: 3,
+    honest: 1,
+    refuse: 1,
+    undecided: 1,
+    decided_groups: 1,
+    undecided_groups: 1,
+    unclassed: 0,
+    note: 'a row is a false positive when every class it fell into was decided honest',
+  },
   note: '',
 }
 const STRENGTHEN = {
@@ -440,16 +453,22 @@ const STRENGTHEN = {
 const REMEASURE = {
   repo: 'alpha',
   current_apparatus: '2.2',
-  min_n: 10,
+  min_n: 20,
   rows_total: 40,
   rows_stale: 12,
   cells: [
-    { label: 'bug.fix · XS', mode: 'sighted', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }], in_flight_run_ids: [] },
-    // a cell whose runs are queued and unfinished: the page shows them in place of Queue
-    { label: 'bug.fix · S', mode: 'sighted', capability_class: 'bug.fix', size: 'S', n_stale: 3, stale_versions: ['2.1'], n_current: 0, n_needed: 10, est_cost_usd: 1.1, cost_known: true, requests: [{ kind: 'replay', limit: 10 }], in_flight_run_ids: ['r1'] },
+    // a registered reading waiting on its look: its pending commits, priced, with Queue
+    { label: 'bug.fix · XS', key: 'bug.fix · XS|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_1', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 14, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 6, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay', limit: 6 }], note: '', in_flight_run_ids: [] },
+    // a reading whose runs are queued and unfinished: the page shows them in place of Queue
+    { label: 'bug.fix · S', key: 'bug.fix · S|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_2', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 10, n_needed: 10, n_requested: 10, short_by: 0, est_cost_usd: 1.1, est_minutes: 5, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay', limit: 10 }], note: '', in_flight_run_ids: ['r1'] },
+    // a reading this plan cannot compose a replay for: queued by hand from Runs
+    { label: 'feature.add · M', key: 'feature.add · M|blind|S1@claude-opus-5', reason: 'look_pending', next_act: 'runs', arm: 'S1@claude-opus-5', reading_id: 'rdg_3', next_look: 20, mode: 'blind', n_stale: 0, stale_versions: [], n_current: 0, n_needed: 20, n_requested: 0, short_by: 20, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'S1@claude-opus-5 counts only rows whose failing test claude-opus-5 wrote; this deployment’s test author is not configured', in_flight_run_ids: [] },
+    // a stale cell with no reading: register one first, nothing to queue
+    { label: 'test.add · XS', key: 'test.add · XS|sighted|', reason: 'stale', next_act: 'register', arm: '', reading_id: '', next_look: null, mode: 'sighted', n_stale: 12, stale_versions: ['2.1'], n_current: 0, n_needed: 20, n_requested: 0, short_by: 0, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'register a reading of this cell at apparatus 2.2 first', in_flight_run_ids: [] },
   ],
   up_to_date: [],
-  summary: { cells_stale: 1, n_needed_total: 6, est_cost_usd_total: 2.4, est_minutes_total: 20, cost_known_cells: 1 },
+  cannot_clear: [{ label: 'docs.update · S', mode: 'sighted', arm: 'S3', state: 'undecided', reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_4' }],
+  summary: { cells_pending: 3, cells_stale: 1, cells_thin: 0, n_needed_total: 36, n_requested_total: 16, short_by_total: 20, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 3 },
   note: '',
 }
 
@@ -480,10 +499,10 @@ const USER_EVENTS = {
 const SECRETS = { items: [{ name: 'claude_code_oauth_token', present: true, fingerprint: 'GOOD', set_at: '2026-09-13T10:00:00+00:00', set_by: 'root' }], secrets_dir: '/srv/crb/secrets' }
 
 // ── the flow reading every screen shows its own stream's numbers from (G-925)
-const flowStream = (stream: string, name: string, key: string) => ({
+const flowStream = (stream: string, name: string, keys: string[]) => ({
   stream,
   name,
-  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  lead_times: keys.map((key) => ({ key, label: `${name} lead time ${key}`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' })),
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   spend_label: 'the replay and blind attempts graded for this repository',
   per_unit: null,
@@ -492,7 +511,7 @@ const flowStream = (stream: string, name: string, key: string) => ({
   per_unit_units: 0,
   per_unit_reason: 'no merged pull request yet to divide by',
   counts: { graded_rows: 44 },
-  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
+  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of step 2 (the guide’s “real work”), as the developer spent them', why: 'the work happens outside this product; the span from the first red probe or qualify to the first qualified task is timed above and stands in for it', gap: 'G-556' }] : [],
 })
 const FLOW = {
   repo: 'alpha',
@@ -501,12 +520,16 @@ const FLOW = {
   method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   streams: [
-    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
-    flowStream('measure', 'Measure', 'queued_to_graded'),
-    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
-    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
-    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
-    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+    flowStream('connect-and-prove', 'Connect & prove', ['registered_to_controls', 'registered_to_probe_green', 'step_2_span', 'mine_run', 'oracle_run', 'controls_run']),
+    flowStream('measure', 'Measure', ['queued_to_graded']),
+    flowStream('decide-and-license', 'Decide & license', ['accepted_to_signed']),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', ['registered_to_pr']),
+    {
+      ...flowStream('learn', 'Learn', ['refusal_to_strengthening', 'finding_to_remeasurement']),
+      // the learn stream's own counts, each explained on hover (G-536)
+      counts: { refusals: 2, guard_rows_refused: 5, guard_false_positives: 1, guard_right_refusals: 2, guard_rows_undecided: 2, classes_found: 3, classes_with_a_change: 1, classes_remeasured: 1 },
+    },
+    flowStream('run-the-platform', 'Run the platform', ['password_set_to_signed_in']),
   ],
 }
 
@@ -638,7 +661,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/learn?repo=alpha',
     path: '/learn',
     element: <LearnPage />,
-    api: { 'GET /learn/register': REGISTER, 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS },
+    api: { 'GET /learn/register': REGISTER, 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS, 'GET /flow': FLOW },
     // a viewer sees the register and the reports with no control; an operator gets the
     // switch, revert and register, and the three decisions the reports hand off to (G-532)
     roles: ['viewer', 'operator'],

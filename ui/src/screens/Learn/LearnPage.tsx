@@ -13,12 +13,17 @@
  *               and status; its switch, revert and register controls are operator-only —
  *               ui/src/screens/Learn/PreventionSection.tsx), then `GET /learn/refusals`
  *               (protocol rows grouped by guard, reason and command shape, every verdict
- *               "unsure", with the decisions a person has already made), `/learn/strengthen`
- *               (cells withheld from deliver for a weak oracle, as frozen-backlog-shaped items)
- *               and `/learn/remeasure` (cells whose rows predate the current apparatus, with the
- *               rows and spend still needed). An operator decides from the report that computed
- *               the thing: accept a refusal class into the guard corpus, register a
- *               strengthening item onto the backlog, queue a cell's re-measurement runs — and a
+ *               "unsure", with the decisions a person has already made, and the guard's
+ *               false-positive rate by apparatus and month that those decisions give, a range
+ *               while rows are undecided — G-536), `/learn/strengthen` (cells withheld from
+ *               deliver for a weak oracle, as frozen-backlog-shaped items) and
+ *               `/learn/remeasure` (each registered reading waiting on its look, with the
+ *               commits it still needs and what they cost, and each cell with rows but no
+ *               reading, offered registration first — G-565, ADR-0026 item 2); then the learn
+ *               stream's own flow figures (`FlowPanel`, each count explained on hover). An
+ *               operator decides from the report that computed the thing: accept a refusal
+ *               class into the guard corpus, register a strengthening item onto the backlog,
+ *               queue the commits a cell's reading still needs — and a
  *               cell whose queued runs are unfinished shows them in place of Queue (the server
  *               refuses a second queue). The product still decides nothing — every one of the
  *               three is a person's act, recorded with their name, and each reports back what
@@ -43,13 +48,15 @@
  *               ui/src/components/Dialog.tsx and ui/src/components/govuk.tsx
  *               (`NotificationBanner`, `WarningButton` — the money action), ui/src/lib/auth.tsx
  *               (`can('operator')` — the actions are role-gated in the UI as at the API),
- *               ui/src/screens/Oracle/OraclePage.tsx (where the strengthen report sends you)
+ *               ui/src/screens/Oracle/OraclePage.tsx (where the strengthen report sends you),
+ *               ui/src/components/FlowPanel.tsx (the learn stream's lead times and counts)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx (plain eyebrows, the intro sentences,
  *               the terms, the register card and its operator controls, each action's
  *               success state, the viewer who is offered none); the derivations are pinned in
  *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
- * Touch when:   never for a new repository; a report gains a field (src/crb/core/learn.py — mirror
- *               the interface here) or a fourth play is added to docs/LEARNING-LOOP.md.
+ * Touch when:   never for a new repository — every report reads the chosen repository's own
+ *               rows; a report gains a field (src/crb/core/learn.py — mirror the interface
+ *               here) or a fourth play is added to docs/LEARNING-LOOP.md.
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -60,6 +67,7 @@ import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
+import { FlowPanel } from '../../components/FlowPanel'
 import { ErrorState } from '../../components/ErrorState'
 import { SelectField, TextField } from '../../components/Field'
 import { NotificationBanner, WarningButton } from '../../components/govuk'
@@ -112,6 +120,39 @@ export interface RefusalReport {
   groups: RefusalGroup[]
   /** What a named person HAS decided, folded from the `learn.refusal.accepted` events. */
   decisions: RefusalDecisionRecord[]
+  /** The guard's false-positive rate per apparatus and month, from those decisions (G-536). */
+  false_positives: FalsePositives
+  note: string
+}
+
+/** One apparatus version in one calendar month: its protocol rows by what a person decided. */
+export interface FalsePositivePeriod {
+  apparatus_version: string
+  month: string
+  rows_protocol: number
+  /** Rows in which every class they fell into was decided honest by a person: the guard was wrong. */
+  honest: number
+  /** Rows with a class a person decided refuse: the guard was right. */
+  refuse: number
+  /** Rows nobody has judged: never counted as either verdict. */
+  undecided: number
+  /** honest ÷ rows — the rate if every undecided row was a right refusal. */
+  rate_low: number
+  /** (honest + undecided) ÷ rows — the rate if every undecided row was a false positive. */
+  rate_high: number
+}
+
+/** `false_positives` of `GET /learn/refusals` — mirrors `crb.core.learn.FalsePositives.to_dict()`. */
+export interface FalsePositives {
+  periods: FalsePositivePeriod[]
+  rows_protocol: number
+  honest: number
+  refuse: number
+  undecided: number
+  decided_groups: number
+  undecided_groups: number
+  /** Undecided rows whose text named no class: no decision can ever reach them. */
+  unclassed: number
   note: string
 }
 
@@ -189,25 +230,60 @@ export interface StrengthenReport {
   note: string
 }
 
-/** One cell with rows older than the current apparatus: how many are stale, how many current, how many still needed to reach the look rule’s first look (routing.v2), and the estimated spend. */
+/**
+ * One entry of the re-measurement plan (ADR-0026 item 2): a (cell, mode, context arm) whose
+ * evidence cannot yet license it. A registered reading waiting on its look (`look_pending`) is
+ * topped up on exactly the commits it still needs; a cell with rows and no reading at this
+ * apparatus (`stale` or `thin`) is offered registration, never a replay. Mirrors
+ * `crb.core.learn.RemeasureCell.to_dict()`.
+ */
 export interface RemeasureCell {
   label: string
+  /** `label|mode|arm` — one entry per (cell, mode, context arm), never two arms pooled. */
+  key: string
+  reason: 'look_pending' | 'stale' | 'thin'
+  /** `replay` — queue the requests; `register` — register a reading first; `runs` — queue by hand from the Runs page. */
+  next_act: 'replay' | 'register' | 'runs'
+  /** The context arm: the reading's arm it waits on, or the rows' own ('' before apparatus 2.4). */
+  arm: string
+  reading_id: string
+  next_look: number | null
   /** The mode this cell is planned for: the map never pools sighted and blind, so nor does the plan. */
   mode: string
   stale_versions: string[]
   n_stale: number
+  /** Distinct commits: those the reading's look has read, or (no reading) those with a first attempt. */
   n_current: number
+  /** Commits the reading still needs before its next look; for a cell with no reading, the rule’s first look. */
   n_needed: number
+  /** The commits the requests ask for — what the estimate prices. */
+  n_requested: number
+  /** How many of `n_needed` no request asks for, and `note` says why. */
+  short_by: number
   est_cost_usd: number
   est_minutes: number
   cost_known: boolean
   repos: string[]
   requests: Array<Record<string, unknown>>
+  /** What to do and why, in words — shown to every role. */
+  note: string
   /** Runs an earlier queue of this cell put on the queue that have not finished: shown in place of Queue. */
   in_flight_run_ids: string[]
 }
 
-/** `GET /learn/remeasure` — evidence expires with the apparatus (EVIDENCE-AND-CLAIMS §4). */
+/** A cell whose registered reading has decided against it: no further attempt on it can help. */
+export interface CannotClear {
+  label: string
+  mode: string
+  arm: string
+  state: 'insufficient' | 'undecided'
+  reason: string
+  /** `new_reading` or `mine` — the routing rule’s own next act. */
+  next_act: string
+  reading_id: string
+}
+
+/** `GET /learn/remeasure` — evidence expires with the apparatus (EVIDENCE-AND-CLAIMS §4); a cell is licensed only by a registered reading. */
 export interface RemeasurePlan {
   repo: string
   current_apparatus: string
@@ -215,8 +291,20 @@ export interface RemeasurePlan {
   rows_total: number
   rows_stale: number
   cells: RemeasureCell[]
+  /** `label|arm` of each cell whose reading has delivered at this apparatus. */
   up_to_date: string[]
-  summary: { cells_stale: number; n_needed_total: number; est_cost_usd_total: number; est_minutes_total: number; cost_known_cells: number }
+  cannot_clear: CannotClear[]
+  summary: {
+    cells_pending: number
+    cells_stale: number
+    cells_thin: number
+    n_needed_total: number
+    n_requested_total: number
+    short_by_total: number
+    est_cost_usd_total: number
+    est_minutes_total: number
+    cost_known_cells: number
+  }
   note: string
 }
 
@@ -569,8 +657,64 @@ function RefusalsSection({ repo }: { repo: string }) {
         empty={<EmptyState compact title="No protocol rows" reason="Nothing was refused by a guard in this repo's ledger." />}
       />
       <p className="text-xs text-on-surface-muted">{r.note}</p>
+      <FalsePositivesTable fp={r.false_positives} />
       {deciding && r.groups.some((g) => g.group_id === deciding) && (
         <DecideDialog repo={repo} group={r.groups.find((g) => g.group_id === deciding)!} onClose={() => setDeciding('')} />
+      )}
+    </div>
+  )
+}
+
+/**
+ * An apparatus version and a month as one key that sorts as the versions do: each part of the
+ * version zero-padded, so 2.10 sorts after 2.4 (a string compare would put it first), then the
+ * month, so a version's months stay in order.
+ */
+function versionSortKey(version: string, month = ''): string {
+  const parts = version.split('.').map((x) => (/^\d+$/.test(x) ? x.padStart(6, '0') : x))
+  return `${parts.join('.')}|${month}`
+}
+
+/** A rate as a bound: one figure once nothing is undecided, else the low and the high end. */
+function rateBound(p: FalsePositivePeriod): string {
+  return p.undecided === 0 ? fmtPct(p.rate_low) : `${fmtPct(p.rate_low)} to ${fmtPct(p.rate_high)}`
+}
+
+const FP_COLUMNS: Column<FalsePositivePeriod>[] = [
+  { key: 'apparatus', header: 'Apparatus', hint: 'col.learn_refusals.fp_apparatus', mono: true, sortValue: (p) => versionSortKey(p.apparatus_version, p.month), cell: (p) => p.apparatus_version },
+  { key: 'month', header: 'Month', hint: 'col.learn_refusals.fp_month', sortValue: (p) => p.month, cell: (p) => p.month },
+  { key: 'rows', header: 'Rows refused', hint: 'col.learn_refusals.fp_rows', numeric: true, sortValue: (p) => p.rows_protocol, cell: (p) => fmtInt(p.rows_protocol) },
+  { key: 'honest', header: 'False positives', hint: 'col.learn_refusals.fp_honest', numeric: true, sortValue: (p) => p.honest, cell: (p) => fmtInt(p.honest) },
+  { key: 'refuse', header: 'Right refusals', hint: 'col.learn_refusals.fp_refuse', numeric: true, sortValue: (p) => p.refuse, cell: (p) => fmtInt(p.refuse) },
+  { key: 'undecided', header: 'Undecided', hint: 'col.learn_refusals.fp_undecided', numeric: true, sortValue: (p) => p.undecided, cell: (p) => fmtInt(p.undecided) },
+  { key: 'rate', header: 'False-positive rate', hint: 'col.learn_refusals.fp_rate', numeric: true, sortValue: (p) => p.rate_low, cell: (p) => rateBound(p) },
+]
+
+/**
+ * G-536 — the guard's false-positive rate over time: per apparatus version (never blended)
+ * and calendar month, from the verdicts people recorded. A row nobody has judged is counted
+ * apart and never as either verdict, so the rate is shown as a bound until every row is decided.
+ */
+function FalsePositivesTable({ fp }: { fp: FalsePositives }) {
+  return (
+    <div className="space-y-2" data-testid="learn-false-positives">
+      <DataTable
+        rows={fp.periods}
+        columns={FP_COLUMNS}
+        rowKey={(p) => `${p.apparatus_version}|${p.month}`}
+        caption="The guard's false positives, by apparatus"
+        dense
+        initialSort={{ key: 'apparatus', dir: 'asc' }}
+        empty={<EmptyState compact title="No refused rows" reason="The guard has refused nothing in this repo's ledger, so it has had nothing to get wrong." />}
+      />
+      {fp.rows_protocol > 0 && (
+        <Hint as="p" id="text.learn.fp_undecided" className="m-0 text-xs text-on-surface-muted">
+          {fp.undecided === 0
+            ? `Every one of the ${fmtInt(fp.rows_protocol)} refused rows is in a class a person has decided, so each rate above is exact.`
+            : `${fmtInt(fp.undecided)} of ${fmtInt(fp.rows_protocol)} refused rows are undecided (${fmtInt(fp.undecided_groups)} class(es) nobody has judged). They are counted as neither verdict, so each rate is shown as the range it could still take. When an operator decides a class above, this range narrows.${
+                fp.unclassed > 0 ? ` ${fmtInt(fp.unclassed)} of the undecided rows fell into no class (their text named no command), so no decision can narrow that part of the range.` : ''
+              }`}
+        </Hint>
       )}
     </div>
   )
@@ -729,7 +873,7 @@ function StrengthenSection({ repo }: { repo: string }) {
 function queuedSentence(d: RemeasureQueued): string {
   const runs = d.run_ids.length === 1 ? '1 run' : `${d.run_ids.length} runs`
   const cost = d.cost_known ? `The plan estimated ${fmtUsd(d.est_cost_usd)}.` : 'The cost is not known: no row of this cell recorded one.'
-  return `Queued ${runs} for ${d.cell} (${d.mode}), for the ${fmtInt(d.n_needed)} row(s) the rule still needs. ${cost}`
+  return `Queued ${runs} for ${d.cell} (${d.mode}), for the ${fmtInt(d.n_needed)} commit(s) its reading still needs. ${cost}`
 }
 
 /**
@@ -775,19 +919,25 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
         ) : (
           <>
             <p className="m-0 text-sm text-on-surface-muted">
-              This spends the deployment’s budget. The bodies are the plan’s own, on the same commits the stale rows were graded on; nothing is sent until you press the button below.
+              This spends the deployment’s budget. The bodies are the plan’s own: the commits this cell’s registered reading still needs before its next look, in the reading’s own order, so every attempt is one the reading counts. Nothing is sent until you press the button below.
             </p>
             <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm" data-testid="learn-queue-summary">
               <dt className="font-semibold">Cell</dt>
               <dd className="m-0 font-mono text-xs">{cell.label}</dd>
-              <dt className="font-semibold">Mode</dt>
-              <dd className="m-0">{cell.mode}</dd>
+              <dt className="font-semibold">Mode and arm</dt>
+              <dd className="m-0">{`${cell.mode} · ${cell.arm}`}</dd>
               <dt className="font-semibold">Runs to queue</dt>
               <dd className="m-0">{fmtInt(cell.requests.length)}</dd>
-              <dt className="font-semibold">Rows still needed</dt>
-              <dd className="m-0">{fmtInt(cell.n_needed)}</dd>
+              <dt className="font-semibold">Commits still needed</dt>
+              <dd className="m-0">{cell.next_look ? `${fmtInt(cell.n_needed)}, before the look at ${fmtInt(cell.next_look)}` : fmtInt(cell.n_needed)}</dd>
+              {cell.short_by > 0 && (
+                <>
+                  <dt className="font-semibold">Commits these runs ask for</dt>
+                  <dd className="m-0">{`${fmtInt(cell.n_requested)} — ${fmtInt(cell.short_by)} short: ${cell.note}`}</dd>
+                </>
+              )}
               <dt className="font-semibold">Estimated spend</dt>
-              <dd className="m-0">{cell.cost_known ? fmtUsd(cell.est_cost_usd) : 'not known — no row of this cell recorded a cost'}</dd>
+              <dd className="m-0">{cell.cost_known ? `${fmtUsd(cell.est_cost_usd)}${cell.mode === 'blind' ? ' (up to 3 attempts per commit on the blind ladder)' : ''}` : 'not known — no row of this cell recorded a cost'}</dd>
             </dl>
             {queue.isError && <ErrorState error={queue.error} />}
           </>
@@ -800,7 +950,22 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
 /** An apparatus version as the API takes it: digits and dots, as `2.3` or `3.0.1`. */
 const APPARATUS_RE = /^\d+(\.\d+){0,3}$/
 
-/** Stale evidence → the runs to queue; the spend tile is a dash when no cell has a known cost. */
+/** The words on each reason pill: why the cell is in the plan. */
+const REASON_LABEL: Record<RemeasureCell['reason'], string> = {
+  look_pending: 'Waiting on its look: a registered reading still needs these commits',
+  stale: 'Stale: its rows predate the current apparatus, and no reading is registered on it',
+  thin: 'No reading: its rows are current, but no reading is registered to count them',
+}
+const REASON_TONE: Record<RemeasureCell['reason'], 'amber' | 'blue' | 'muted'> = { look_pending: 'blue', stale: 'amber', thin: 'muted' }
+
+/** Why the table is empty, in words that are true of this plan (never "reached the look" when some cannot). */
+function emptyReason(p: RemeasurePlan): string {
+  if (p.cannot_clear.length > 0) return 'No cell can be helped by more attempts: the ones listed below have a reading that has decided against them.'
+  if (p.up_to_date.length > 0) return 'Every registered reading of this repo has delivered at the current apparatus, and no other cell has rows to count.'
+  return 'This repo has no graded rows on this apparatus and no registered reading waiting on its look.'
+}
+
+/** A registered reading's pending commits → the runs to queue; a cell with no reading → register one first. */
 function RemeasureSection({ repo }: { repo: string }) {
   // G-983 — a what-if plan: what re-measuring would cost if the apparatus moved to this
   // version (the CLI's `crb learn remeasure --apparatus`). Blank = the running version.
@@ -814,11 +979,59 @@ function RemeasureSection({ repo }: { repo: string }) {
   const [queueing, setQueueing] = useState('')
   const columns = useMemo<Column<RemeasureCell>[]>(
     () => [
-      { key: 'cell', header: 'Cell', hint: 'col.learn_remeasure.cell', mono: true, sortValue: (c) => c.label, cell: (c) => <span className="text-xs">{c.label}</span> },
-      { key: 'stale', header: 'Stale', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_stale, cell: (c) => `${fmtInt(c.n_stale)} (${c.stale_versions.join(', ')})` },
-      { key: 'current', header: 'Current', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_current, cell: (c) => fmtInt(c.n_current) },
-      { key: 'needed', header: 'Needed', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_needed, cell: (c) => fmtInt(c.n_needed) },
-      { key: 'cost', header: 'Est. $', hint: 'col.learn_remeasure.cost', numeric: true, sortValue: (c) => (c.cost_known ? c.est_cost_usd : -1), cell: (c) => (c.cost_known ? fmtUsd(c.est_cost_usd) : '?') },
+      {
+        key: 'cell',
+        header: 'Cell',
+        hint: 'col.learn_remeasure.cell',
+        mono: true,
+        sortValue: (c) => c.key,
+        cell: (c) => (
+          <span className="text-xs">
+            {c.label}
+            <span className="block text-on-surface-muted">{`${c.mode} · ${c.arm || 'no arm (before 2.4)'}`}</span>
+          </span>
+        ),
+      },
+      {
+        key: 'reason',
+        header: 'Reason',
+        hint: 'col.learn_remeasure.reason',
+        sortValue: (c) => c.reason,
+        cell: (c) => (
+          <Pill tone={REASON_TONE[c.reason]} size="xs" label={REASON_LABEL[c.reason]} hint="pill.learn.remeasure_reason" tabStop={false}>
+            {c.reason === 'look_pending' ? 'look pending' : c.reason}
+          </Pill>
+        ),
+      },
+      { key: 'stale', header: 'Stale', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_stale, cell: (c) => (c.n_stale ? `${fmtInt(c.n_stale)} (${c.stale_versions.join(', ')})` : '0') },
+      { key: 'current', header: 'Commits read', hint: 'col.learn_remeasure.counts', numeric: true, sortValue: (c) => c.n_current, cell: (c) => fmtInt(c.n_current) },
+      {
+        key: 'needed',
+        header: 'Needed',
+        hint: 'col.learn_remeasure.counts',
+        numeric: true,
+        sortValue: (c) => c.n_needed,
+        cell: (c) => (
+          <span data-testid={`learn-needed-${c.key}`}>
+            {fmtInt(c.n_needed)}
+            {c.next_act === 'replay' && c.short_by > 0 && <span className="block text-xs text-on-surface-muted">{`${fmtInt(c.n_requested)} can be queued; ${fmtInt(c.short_by)} short`}</span>}
+            {/* the reason and the way forward, for every role — never a bare state */}
+            {c.note && (
+              <Hint as="span" id="text.learn.remeasure_short" className="block max-w-xs text-left text-xs text-on-surface-muted">
+                {c.note}
+              </Hint>
+            )}
+          </span>
+        ),
+      },
+      {
+        key: 'cost',
+        header: 'Est. $',
+        hint: 'col.learn_remeasure.cost',
+        numeric: true,
+        sortValue: (c) => (c.cost_known ? c.est_cost_usd : -1),
+        cell: (c) => (!c.requests.length ? '—' : c.cost_known ? fmtUsd(c.est_cost_usd) : 'not known'),
+      },
       { key: 'requests', header: 'Runs to queue', hint: 'col.learn_remeasure.runs', numeric: true, sortValue: (c) => c.requests.length, cell: (c) => fmtInt(c.requests.length), hideBelowMd: true },
       ...(operator
         ? [
@@ -827,14 +1040,24 @@ function RemeasureSection({ repo }: { repo: string }) {
               header: 'Queue',
               hint: 'col.learn_remeasure.queue' as const,
               cell: (c: RemeasureCell) =>
-                c.in_flight_run_ids.length ? (
+                c.next_act === 'register' ? (
+                  // no reading: a replay's rows could never count, so the server refuses the
+                  // queue too (reading_unregistered); the page names the act that comes first
+                  <Hint as="span" id="text.learn.remeasure_register" className="text-xs text-on-surface-muted">
+                    Register a reading first
+                  </Hint>
+                ) : !c.requests.length ? (
+                  <Hint as={Link} id="link.learn.remeasure_by_hand" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
+                    Queue from Runs
+                  </Hint>
+                ) : c.in_flight_run_ids.length ? (
                   // queued already and not finished: the server refuses a second queue
                   // (remeasure_already_queued), so the page offers the runs instead
                   <Hint as={Link} id="link.learn.remeasure_in_flight" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
                     {c.in_flight_run_ids.length === 1 ? '1 run queued' : `${c.in_flight_run_ids.length} runs queued`}
                   </Hint>
                 ) : (
-                  <Button size="sm" hint="button.learn.queue_remeasure" onClick={() => setQueueing(`${c.label}|${c.mode}`)}>
+                  <Button size="sm" hint="button.learn.queue_remeasure" onClick={() => setQueueing(c.key)}>
                     Queue runs
                   </Button>
                 ),
@@ -882,6 +1105,7 @@ function RemeasureSection({ repo }: { repo: string }) {
       </div>
     )
   const p = q.data
+  const unregistered = p.summary.cells_stale + p.summary.cells_thin
   return (
     <div className="space-y-4">
       {whatIfControls}
@@ -891,17 +1115,23 @@ function RemeasureSection({ repo }: { repo: string }) {
         </Hint>
       )}
       <p className="m-0 text-sm text-on-surface-muted">
-        Cells whose rows predate the current <Term id="apparatus">apparatus</Term>. <Term id="stale">Stale</Term> evidence is kept as history and licenses nothing; the plan lists the runs to queue and what they would cost. {operator ? 'Queue runs sends one cell’s runs, after showing you the estimate it will spend.' : 'An operator queues the runs.'}
+        A cell is licensed only by a reading registered before its first attempt, and only rows graded after it count. So a cell whose reading waits on its look is offered exactly the commits that reading still needs, in the reading’s own order, priced; a <Term id="stale">stale</Term> cell (its rows predate the current <Term id="apparatus">apparatus</Term>) or one with current rows but no reading is offered registration first, never a replay whose rows could not count. {operator ? 'Queue runs sends one cell’s runs, after showing you the estimate it will spend.' : 'An operator queues the runs.'}
       </p>
       <div className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Stale rows" hint="stat.learn.stale_rows" value={p.rows_total ? fmtInt(p.rows_stale) : '—'} n={p.rows_total} apparatus={`older than apparatus ${p.current_apparatus}`} tone={p.rows_stale ? 'amber' : 'green'} />
-        <StatTile label="Rows still needed" hint="stat.learn.needed" value={p.cells.length ? fmtInt(p.summary.n_needed_total) : '—'} n={p.cells.length} apparatus={`first look at n = ${p.min_n} per cell · ${fmtInt(p.summary.cells_stale)} cell(s)`} />
+        <StatTile
+          label="Commits the readings still need"
+          hint="stat.learn.needed"
+          value={p.summary.cells_pending ? fmtInt(p.summary.n_needed_total) : '—'}
+          n={p.summary.cells_pending}
+          apparatus={`before each reading’s next look · ${fmtInt(unregistered)} other cell(s) need a reading registered first`}
+        />
         <StatTile
           label="Estimated spend"
           hint="stat.learn.remeasure_cost"
           value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'}
           n={p.summary.cost_known_cells}
-          apparatus="each cell's own mean row cost × n needed"
+          apparatus="each cell’s own mean row cost × the commits requested (× up to 3 attempts each for a blind cell)"
           footer={
             <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
               Queue runs
@@ -912,16 +1142,36 @@ function RemeasureSection({ repo }: { repo: string }) {
       <DataTable
         rows={p.cells}
         columns={columns}
-        rowKey={(c) => c.label}
-        caption="Cells whose evidence predates the current apparatus"
+        rowKey={(c) => c.key}
+        caption="Cells to top up, or to register a reading on"
         dense
         initialSort={{ key: 'needed', dir: 'desc' }}
-        empty={<EmptyState compact title="Nothing stale" reason="Every row of this repo carries the current apparatus version." />}
+        empty={<EmptyState compact title="Nothing to top up or register" reason={emptyReason(p)} />}
       />
-      <p className="text-xs text-on-surface-muted">{p.note}</p>
-      {queueing && p.cells.some((c) => `${c.label}|${c.mode}` === queueing) && (
-        <QueueDialog repo={repo} cell={p.cells.find((c) => `${c.label}|${c.mode}` === queueing)!} onClose={() => setQueueing('')} />
+      {p.cannot_clear.length > 0 && (
+        <div className="space-y-1" data-testid="learn-cannot-clear">
+          <Hint as="p" id="text.learn.remeasure_cannot_clear" className="m-0 text-xs text-on-surface-muted">
+            Not offered, because the cell’s registered reading has decided against it and no further attempt on that reading can bring it to the bar:
+          </Hint>
+          <ul className="m-0 list-disc pl-5 text-xs text-on-surface-muted">
+            {p.cannot_clear.map((x) => (
+              <li key={`${x.label}|${x.mode}|${x.arm}`}>
+                <span className="font-mono">{x.label}</span> ({x.arm}, {x.state}): {x.reason}
+                {x.next_act === 'mine' && (
+                  <>
+                    {' '}
+                    <Hint as={Link} id="link.learn.remeasure_mine" to={`/runs?repo=${enc(repo)}&kind=mine`} className="underline underline-offset-4">
+                      Mine runs
+                    </Hint>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
+      <p className="text-xs text-on-surface-muted">{p.note}</p>
+      {queueing && p.cells.some((c) => c.key === queueing) && <QueueDialog repo={repo} cell={p.cells.find((c) => c.key === queueing)!} onClose={() => setQueueing('')} />}
     </div>
   )
 }
@@ -991,9 +1241,10 @@ export function LearnPage() {
           <Card eyebrow="Weak oracles" title="Weak oracles → strengthening backlog" id="strengthen">
             <StrengthenSection repo={repo} />
           </Card>
-          <Card eyebrow="Stale evidence" title="Apparatus change → re-measurement plan" id="remeasure">
+          <Card eyebrow="Stale or thin evidence" title="Cells short of the bar → re-measurement and top-up plan" id="remeasure">
             <RemeasureSection repo={repo} />
           </Card>
+          <FlowPanel stream="learn" repo={repo} />
         </>
       )}
     </div>
