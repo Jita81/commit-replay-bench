@@ -236,7 +236,7 @@ third derivation, recorded on the version). A version is proposed by a sponsor a
 different approver (the library's two-person rule), and **routes nothing** until it is signed and
 its **validity report** passes. The acts are append-only and hash-chained in `class_set_acts`;
 the rule's labels and people's labels are appended to `class_labels`, the label table
-(`crb.core.class_sets`, `crb.store.class_sets`, revision 0047). Every act is a
+(`crb.core.class_sets`, `crb.store.class_sets`, revision 0017). Every act is a
 `system/class_set.*` event naming the actor.
 
 | Method | Path | Role | Notes |

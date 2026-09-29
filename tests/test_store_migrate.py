@@ -73,9 +73,9 @@ try:
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
 
-#: The packaged head: 0047, an organisation's class sets and the label table (north-star
-#: Wave 4b, stream CLS; reserved as 0047, renumbered by the integration).
-HEAD = "0047"
+#: The packaged head: 0017, an organisation's class sets and the label table (north-star
+#: Wave 4b, stream CLS reserved it as 0047; the integration numbered it 0017).
+HEAD = "0017"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -1298,8 +1298,8 @@ def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
     assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
 
 
-def test_0047_adds_the_class_set_acts_and_the_label_table_append_only(backend: Backend) -> None:
-    """Revision 0047 (ADR-0026 item 9) adds ``class_set_acts`` — an organisation's class sets,
+def test_0017_adds_the_class_set_acts_and_the_label_table_append_only(backend: Backend) -> None:
+    """Revision 0017 (ADR-0026 item 9) adds ``class_set_acts`` — an organisation's class sets,
     hash-chained — and ``class_labels`` — the label table a relabel writes instead of a ledger
     row — both append-only; a downgrade is refused while either holds a row (a signature or a
     person's label is never dropped) and otherwise drops both."""
@@ -1323,7 +1323,7 @@ def test_0047_adds_the_class_set_acts_and_the_label_table_append_only(backend: B
         c.execute(text("UPDATE class_labels SET capability_class = 'cli-fix'"))
     cfg = migrate.alembic_config(backend.url)
     with (
-        pytest.raises(RuntimeError, match="refusing to downgrade 0047"),
+        pytest.raises(RuntimeError, match="refusing to downgrade 0017"),
         backend.engine.begin() as connection,
     ):
         cfg.attributes["connection"] = connection
@@ -1336,7 +1336,7 @@ def test_0047_adds_the_class_set_acts_and_the_label_table_append_only(backend: B
         command.downgrade(cfg, "0016")
     assert migrate.current(backend.url) == "0016"
     assert not {"class_set_acts", "class_labels"} & set(inspect(fresh).get_table_names())
-    # a create_all schema from before the class sets adopts at 0016 and 0047 adds the tables
+    # a create_all schema from before the class sets adopts at 0016 and 0017 adds the tables
     fresh = _reset(backend)
     init_db(fresh)
     with fresh.begin() as c:

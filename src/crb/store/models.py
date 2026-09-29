@@ -26,7 +26,7 @@ task_qualifications — APPEND-ONLY: each task's qualification per posture (ADR-
 library_acts — APPEND-ONLY, hash-chained: every act on a repository's context library —
              propose, sponsor, sign, stale, revoke, retire (ADR-0026 item 10; revision 0016);
              ``class_set_acts`` and ``class_labels`` — an organisation's class sets and the
-             label table (ADR-0026 item 9; revision 0047)
+             label table (ADR-0026 item 9; revision 0017)
 
 Navigation
 ----------
@@ -571,7 +571,7 @@ class ClassSetActRow(Base):
     """APPEND-ONLY. One act on an organisation's class sets (ADR-0026 item 9) — the
     :class:`crb.core.class_sets.ClassSetAct` column for column, chained on its own
     ``prev_hash`` / ``row_hash``. A proposal, a signature and a revocation are each a new
-    row; nothing is edited (revision 0047)."""
+    row; nothing is edited (revision 0017)."""
 
     __tablename__ = "class_set_acts"
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -595,7 +595,7 @@ class ClassLabelRow(Base):
     version — a person's label of a derivation commit (``source = person``), or the version's
     rule applied to a commit (``source = rule``, a relabel). A relabel writes here and never
     touches a stored ledger row; the latest row per (version, repo, task, source, labeller)
-    is the one read (revision 0047)."""
+    is the one read (revision 0017)."""
 
     __tablename__ = "class_labels"
     seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

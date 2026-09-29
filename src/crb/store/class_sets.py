@@ -22,7 +22,7 @@ ADRs:         docs/adr/0026-the-context-standard.md (item 9),
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/core/class_sets.py (the act, the rule and the fold),
               src/crb/store/models.py (``ClassSetActRow``, ``ClassLabelRow``),
-              src/crb/store/migrations/versions/v0047_class_sets.py (the tables),
+              src/crb/store/migrations/versions/v0017_class_sets.py (the tables),
               src/crb/server/routes/classes.py (the only writer over HTTP)
 Tested by:    tests/test_store_class_sets.py, tests/test_server_routes_classes.py
 Touch when:   never for a new repository; a new reading of the acts or labels is added here,

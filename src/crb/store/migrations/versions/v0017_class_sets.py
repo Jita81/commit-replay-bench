@@ -2,7 +2,7 @@
 
 Navigation
 ----------
-What it is:   Revision 0047: the append-only ``class_set_acts`` table (every act on an
+What it is:   Revision 0017: the append-only ``class_set_acts`` table (every act on an
               organisation's class-set versions — propose, sign, revoke — hash-chained) and the
               append-only ``class_labels`` table (a task's class under one version: a person's
               label of a derivation commit, or the version's rule applied to a commit).
@@ -19,11 +19,11 @@ ADRs:         docs/adr/0026-the-context-standard.md (item 9),
               docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/models.py (``ClassSetActRow``, ``ClassLabelRow``;
               ``APPEND_ONLY_TABLES``), src/crb/store/migrate.py (``REVISION_TABLES`` carries
-              both tables at 0047; the trigger helper), src/crb/store/class_sets.py (appends
+              both tables at 0017; the trigger helper), src/crb/store/class_sets.py (appends
               and reads them), src/crb/core/class_sets.py (the act a row holds)
 Tested by:    tests/test_store_migrate.py, tests/test_store_class_sets.py
 Touch when:   never for a new repository; never — a released revision is immutable (stream CLS
-              of north-star Wave 4b; reserved as 0047, renumbered by the integration).
+              of north-star Wave 4b reserved it as 0047; the integration numbered it 0017).
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from alembic import context, op
 
 from crb.store.migrate import install_append_only_triggers_on
 
-revision: str = "0047"
+revision: str = "0017"
 down_revision: str | None = "0016"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -43,7 +43,7 @@ depends_on: str | Sequence[str] | None = None
 ACTS = "class_set_acts"
 LABELS = "class_labels"
 #: The append-only tables that exist once this revision is applied (pinned; see 0001).
-APPEND_ONLY_AT_0047: tuple[str, ...] = (
+APPEND_ONLY_AT_0017: tuple[str, ...] = (
     "grades",
     "events",
     "signoffs",
@@ -106,7 +106,7 @@ def upgrade() -> None:
         op.create_index(
             "ix_class_labels_version_repo", LABELS, ["taxonomy", "repo", "seq"], unique=False
         )
-    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0047)
+    install_append_only_triggers_on(op.get_bind(), APPEND_ONLY_AT_0017)
 
 
 def downgrade() -> None:
@@ -125,7 +125,7 @@ def downgrade() -> None:
                 n: int = op.get_bind().execute(sa.text(query)).scalar_one()
                 if n:
                     raise RuntimeError(
-                        f"refusing to downgrade 0047: {n} row(s) in {table} — signatures and "
+                        f"refusing to downgrade 0017: {n} row(s) in {table} — signatures and "
                         "labels are never dropped"
                     )
     for table in (LABELS, ACTS):
