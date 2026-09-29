@@ -56,7 +56,7 @@ except ImportError:  # pragma: no cover — layout-dependent
 
 gorepo = langs.fixture_module("gorepo")
 
-needs_go = pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
+needs_go = pytest.mark.toolchain("go")
 
 #: A test in ``util`` that is red at the parent and stays red: a named baseline failure.
 _RED_AT_BASE = (

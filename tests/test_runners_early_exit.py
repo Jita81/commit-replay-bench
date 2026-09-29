@@ -61,7 +61,7 @@ except ImportError:  # pragma: no cover — layout-dependent
 
 gorepo = langs.fixture_module("gorepo")
 
-needs_go = pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
+needs_go = pytest.mark.toolchain("go")
 
 
 def _go_parse(events: list[dict[str, str]], rc: int = 1):
