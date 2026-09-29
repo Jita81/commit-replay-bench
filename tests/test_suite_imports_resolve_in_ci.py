@@ -11,11 +11,12 @@ Navigation
 ----------
 What it is:   The gate between the suite's imports and the packages CI installs.
 What it does: Resolves, from ``uv.lock``, every distribution the extras of the jobs that run
-              the whole suite (``test-shard`` and ``fresh-clone`` in ``.github/workflows/
-              ci.yml``) reach, and fails when a module under ``tests/`` imports a third-party
-              package outside that set without a guard (``pytest.importorskip`` of it, or a
-              ``try`` whose handler catches ``ImportError``). The check runs on a planted
-              bare import so it cannot pass vacuously.
+              the whole suite (``test-shard`` and ``fresh-clone-shard`` in
+              ``.github/workflows/ci.yml``) reach, and fails when a module under ``tests/``
+              imports a third-party package outside that set without a guard
+              (``pytest.importorskip`` of it, or a ``try`` whose handler catches
+              ``ImportError``). The check runs on a planted bare import so it cannot pass
+              vacuously.
 How:          ``tomllib`` reads the lock and walks each package's dependencies and the extras
               named on each edge; PyYAML reads the jobs' ``uv sync`` lines; ``ast`` finds every
               import in every test module; ``importlib.metadata.packages_distributions`` maps
@@ -46,7 +47,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 #: The jobs that run the whole suite; the extras every one of them installs are what a test
 #: may import unguarded.
-SUITE_JOBS = ("test-shard", "fresh-clone")
+SUITE_JOBS = ("test-shard", "fresh-clone-shard")
 PROJECT = "commit-replay-bench"
 
 
