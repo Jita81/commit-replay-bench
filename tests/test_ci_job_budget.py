@@ -24,7 +24,8 @@ What it does: Pins the guard's arithmetic, its summary and annotation, its exit 
               every persona; the required ``walkthrough`` job keeps its exact name as an
               aggregator that ``needs`` every job running ``scripts/walkthrough.sh``, runs
               ``if: always()`` and passes only when every part succeeded (its jq program is
-              run against success, failure, cancelled, skipped and empty ``needs``).
+              run against success, failure, cancelled, skipped and empty ``needs``). Also that every guarded job checks out before any
+              step that can fail, so the guard can run on the failure path (P-708).
 How:          Calls ``main`` with a fake clock and environment; reads ``ci.yml`` as text,
               job by job (no YAML dependency), and the spec's ``PERSONAS`` list; runs ``jq``
               (on every hosted runner) over sample ``needs`` objects.
@@ -235,6 +236,24 @@ def test_each_guarded_job_starts_the_clock_first_and_ends_with_the_guard_on_its_
         )
         assert f"--mode {mode}" in last, f"{job}: the guard must run in {mode} mode"
         assert sum("ci_job_budget.py" in s for s in steps) == 1
+
+
+def test_each_guarded_job_checks_out_before_any_step_that_can_fail() -> None:
+    """The guard is a script in the checkout. An aggregator whose "every part passed" gate
+    ran BEFORE ``actions/checkout`` failed that gate, then its guard failed too — exit 2,
+    ``can't open file scripts/ci_job_budget.py`` — so the failure path was never measured
+    and every red aggregator carried a second, meaningless error (P-708). After the clock,
+    the checkout comes before any step that can fail."""
+    jobs = _jobs(CI.read_text("utf-8"))
+    for job in GUARDED:
+        steps = _steps(jobs[job])
+        checkout = next((i for i, s in enumerate(steps) if "actions/checkout@" in s), None)
+        assert checkout is not None, f"{job}: no checkout, so the guard can never run"
+        for i, step in enumerate(steps[1:checkout], 1):
+            assert "run:" not in step, (
+                f"{job}: step {i} runs before the checkout and can fail — the guard would then "
+                "find no script; move the checkout to right after the clock"
+            )
 
 
 def test_every_job_that_runs_the_guard_is_guarded_and_none_only_warns() -> None:
