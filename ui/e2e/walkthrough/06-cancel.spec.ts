@@ -30,8 +30,9 @@
  *               ui/src/screens/Ledger/LedgerPage.tsx (the gate and Export JSONL),
  *               src/crb/server/worker.py (the cancel token between tasks)
  * Tested by:    ui/e2e/walkthrough/06-cancel.spec.ts
- * Touch when:   the cancel semantics or the 30 s bound change (docs/API.md
- *               "/runs/{id}/cancel"); the health pill's label or the Runs page's button changes.
+ * Touch when:   never for a new repository (the primary fixture is the walkthrough's own); the
+ *               cancel semantics or the 30 s bound change (docs/API.md "/runs/{id}/cancel"); the
+ *               health pill's label or the Runs page's button changes.
  */
 import { expect, expectLogAction, exportAndVerifyLedger, primary, runStatus, stackHealth, startRun, test, waitForRun } from './support'
 

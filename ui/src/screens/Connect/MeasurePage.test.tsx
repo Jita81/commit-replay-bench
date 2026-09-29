@@ -39,6 +39,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HELP } from '../../help/help'
+import { HINTS } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
 import { FIXTURE_LABEL } from '../../lib/builder'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
@@ -396,6 +397,43 @@ describe('MeasurePage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
     const post = calls.find((c) => c.method === 'POST')!
     expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', builder: 'fixture_gold', model: 'gold', limit: 30, retain: { worktrees: false, transcripts: false }, max_cost_usd: 1 })
+  })
+
+  it('with the fixture, a map that cannot be read is still said with Retry and the button waits (G-108 holds for every builder)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': () => envelope(503, 'ledger_unavailable', 'ledger is locked'),
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'ok', detail: 'local', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false, fixture_gold: true } }] },
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const err = await screen.findByTestId('measure-estimate-error')
+    expect(err).toHaveTextContent('Could not read this repository’s measured cost')
+    expect(within(err).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    // the known $0 is not quoted over a map that could not be read, and the button waits
+    expect(screen.getByTestId('before-you-start')).not.toHaveTextContent('at a known $0.00 each')
+    expect(screen.getByRole('button', { name: 'Start the run — no estimate yet' })).toBeDisabled()
+  })
+
+  it('the estimate’s hover, the About block’s numbers and the cap’s note say the known-price and $1-floor cases the fixture makes visible', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': { ...MAP, economics: econ(22, 0, null, NONE_KNOWN) },
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'ok', detail: 'local', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false, fixture_gold: true } }] },
+    })
+    const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('at a known $0.00 each'))
+    // the hover on the number describes the number: the third pricing mode is named
+    const estimate = container.querySelector('[data-hint="stat.measure.estimate"]')!
+    await expectHintOpens(estimate, 'stat.measure.estimate')
+    expect(HINTS['stat.measure.estimate']).toMatch(/known price per attempt — only the test-only fixture, at \$0 — is priced at that price/)
+    expect(HELP.find((h) => h.route === '/connect/:name/measure')?.numbers).toMatch(/known price per attempt — only the test-only fixture, at \$0/)
+    // the cap's words agree with its $1 floor
+    expect(HINTS['field.measure.spend_cap']).toMatch(/or at \$1 when the estimate is \$0/)
+    expect(container.textContent).toMatch(/It starts at the top of the estimate, or at \$1 when the estimate is \$0\./)
+    expect(screen.getByRole('button', { name: 'Start the run — estimated $0.00 to $0.00, stops at $1.00' })).toBeEnabled()
   })
 
   it('the About block says what this page does not do (G-908)', () => {

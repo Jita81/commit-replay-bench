@@ -16,12 +16,15 @@ impossible to do by accident:
 
 1. **Registration is opt-in, and never in production.** :mod:`crb.builders`
    registers the name only when ``CRB_ENABLE_FIXTURE_BUILDER=1`` is set in the
-   worker's environment AND ``CRB_ENV`` does not name production (``prod`` /
-   ``production`` — the belt, :mod:`crb.core.fixture_builder_switch`); without
-   that ``get_builder("fixture_gold")`` is an unknown-builder ``ValueError`` exactly
-   like any other typo. Production deployments (``deploy/``) never set the switch,
-   and the belt holds even if one did. The ``builders`` health probe reports
-   ``fixture_gold`` through the same function, so ``/health`` and the worker agree.
+   worker's environment AND ``CRB_ENV`` names a non-production environment
+   (``dev``); production is the default posture — ``CRB_ENV`` unset or empty is
+   ``prod`` to ``crb.server.settings`` and to this belt alike, and ``prod`` /
+   ``production`` by name deny the switch (:mod:`crb.core.fixture_builder_switch`).
+   Without that ``get_builder("fixture_gold")`` is an unknown-builder ``ValueError``
+   exactly like any other typo. Production deployments (``deploy/``) never set the
+   switch, and the belt holds even if one did, on the documented single-host path
+   too. The ``builders`` health probe reports ``fixture_gold`` through the same
+   function, so ``/health`` and the worker agree.
 2. **The identity is unmistakable.** ``name`` is ``fixture_gold``, the model is
    forced to ``gold`` whatever the rung says, ``provider`` is ``fixture`` and
    ``describe()`` / ``BuildOutcome.extra`` carry ``fixture: true`` and a
@@ -43,9 +46,10 @@ What it does: Overlays the commit's non-test files onto the parent worktree and 
               outcome that names itself unmistakably (builder ``fixture_gold``, model
               ``gold``, provider ``fixture``, ``extra.fixture: true``), spends nothing and
               claims nothing (``done=False``). It is registered only under
-              ``CRB_ENABLE_FIXTURE_BUILDER=1`` and never under a production ``CRB_ENV``
-              (the switch is ``crb.core.fixture_builder_switch``, which the ``builders``
-              health probe reads too). With ``builder_config {"attempt": cmd}`` it
+              ``CRB_ENABLE_FIXTURE_BUILDER=1`` with ``CRB_ENV`` naming a non-production
+              environment — unset is production (the switch is
+              ``crb.core.fixture_builder_switch``, which the ``builders`` health probe reads
+              too). With ``builder_config {"attempt": cmd}`` it
               first asks the real shell guard about ``cmd`` (never running it); a refusal is
               recorded as a protocol violation and the attempt stops with no patch — how
               the Learn walkthrough gets a real refusal row on a hermetic stack.
@@ -59,7 +63,8 @@ Works with:   src/crb/builders/__init__.py (the opt-in registration),
               (``overlay_sources``), src/crb/core/oracle/controls.py (the ``gold`` control
               does the same overlay — the two must agree), scripts/walkthrough.sh and
               tests/fixtures/builders_repo.py (the hermetic drivers), src/crb/core/federated.py
-              (the abstract export that must never carry these rows)
+              (the abstract export never carries these rows: ``export_abstract`` keeps every
+              row whose provider is ``PROVIDER`` inside the tenant, P-665)
 Tested by:    tests/test_builders_fixture_gold.py, tests/test_probe_fixture_builder.py
 Touch when:   never for a new repository and never in production — the switch stays unset
               in deploy/ (docs/DEPLOYMENT.md); a change to what ``gold`` means is a change

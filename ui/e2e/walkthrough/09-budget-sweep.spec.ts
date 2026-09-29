@@ -15,14 +15,14 @@
  *    ladder climbs only on a red attempt, rungs 2 and 3 never run — clean 100 %, $0.00;
  *  - the run's Evidence drawer opens on the r1 attempt with the verified badge.
  *
- * Runs LAST: it adds rows to the primary repo's only cell, whose `n = 2` 05 and 08 assert
+ * Runs LAST: it adds rows to the primary repo's cell, whose n (read from the map) 05 and 08 assert
  * on (thin-cell refusal, observed 2 vs threshold 10). Tier 2 skips it — a real sweep spends
  * up to three rungs per task and is a deliberate, priced run, not a walkthrough side effect.
  *
  * Navigation
  * ----------
  * What it is:   Walkthrough spec 09 (budget sweep), run LAST because it adds rows to the
- *               primary cell that 05 and 08 assert on (n = 2).
+ *               primary cell that 05 and 08 assert on (n read from the map).
  * What it does: Pins, from the UI alone, that the run dialog's "Blind budget sweep 25 → 50 →
  *               100 tool calls" preset queues the SAME builder + model as three object rungs;
  *               that the run header names the three declared rungs with their caps; that the
@@ -39,7 +39,8 @@
  *               ui/src/api/types.ts (`ladderEntryLabel`), src/crb/server/worker.py (stamps
  *               `labels.budget_tier` per attempt)
  * Tested by:    ui/e2e/walkthrough/09-budget-sweep.spec.ts
- * Touch when:   the preset's caps or the rung label format change (docs/API.md "POST /runs:
+ * Touch when:   never for a new repository (the primary fixture is the walkthrough's own); the
+ *               preset's caps or the rung label format change (docs/API.md "POST /runs:
  *               ladder", "The budget is a measured variable").
  */
 import type { Locator } from '@playwright/test'

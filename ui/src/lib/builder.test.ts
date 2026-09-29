@@ -7,9 +7,11 @@
  * What it does: Pins that an Anthropic key gives Claude Code in production auth with an empty
  *               config; that only a Claude Code CLI login gives `{auth: "cli"}` and says it is
  *               a development posture; that a stack with no credentialed builder but the
- *               test-only `fixture_gold` registered measures with the fixture, named test-only
- *               and never a builder measurement, at a known $0 per attempt — and that any
- *               credentialed builder outranks it; that no usable builder, no builders probe or
+ *               test-only `fixture_gold` registered measures with the fixture when the screen
+ *               asks for the instrument check (`{instrumentCheck: true}`, the money page),
+ *               named test-only and never a builder measurement, at a known $0 per attempt —
+ *               that any credentialed builder outranks it, and that a screen that does not
+ *               ask (the Factory) never gets it; that no usable builder, no builders probe or
  *               no health at all gives `null`; and that the key wins over the login when both
  *               are present.
  * How:          Plain calls with hand-built `Health` values.
@@ -18,7 +20,8 @@
  * Works with:   ui/src/lib/builder.ts, ui/src/screens/Connect/MeasurePage.test.tsx (the page
  *               that posts the choice)
  * Tested by:    ui/src/lib/builder.test.ts
- * Touch when:   a builder is added to the deployment's probe.
+ * Touch when:   never for a new repository; a builder is added to the deployment's probe, or a
+ *               screen starts asking for the instrument check.
  */
 import { describe, expect, it } from 'vitest'
 import type { Health } from '../api/types'
@@ -49,7 +52,7 @@ describe('builderChoice', () => {
   })
 
   it('a stack that registered the fixture builder measures with it, named test-only, at $0', () => {
-    const c = builderChoice(health({ anthropic: false, claude_code_cli: false, fixture_gold: true }))
+    const c = builderChoice(health({ anthropic: false, claude_code_cli: false, fixture_gold: true }), { instrumentCheck: true })
     expect(c).toEqual({ builder: 'fixture_gold', model: 'gold', builder_config: {}, label: FIXTURE_LABEL, production: false, cost_per_attempt_usd: 0 })
     // the label says what it is and what it is not, in words a reader of the money page needs
     expect(c?.label).toMatch(/test-only instrument check/)
@@ -58,9 +61,16 @@ describe('builderChoice', () => {
     expect(c?.cost_per_attempt_usd).toBe(0)
   })
 
+  it('a screen that does not ask for the instrument check never gets it: the Factory on a hermetic stack has no builder to default to', () => {
+    const hermetic = health({ anthropic: false, claude_code_cli: false, fixture_gold: true })
+    expect(builderChoice(hermetic)).toBeNull()
+    expect(builderChoice(hermetic, {})).toBeNull()
+    expect(builderChoice(hermetic, { instrumentCheck: false })).toBeNull()
+  })
+
   it('a credentialed builder outranks the fixture: the instrument check never prices the money page while a real builder is available', () => {
-    expect(builderChoice(health({ anthropic: true, fixture_gold: true }))?.builder).toBe('claude_code')
-    const cli = builderChoice(health({ anthropic: false, claude_code_cli: true, fixture_gold: true }))
+    expect(builderChoice(health({ anthropic: true, fixture_gold: true }), { instrumentCheck: true })?.builder).toBe('claude_code')
+    const cli = builderChoice(health({ anthropic: false, claude_code_cli: true, fixture_gold: true }), { instrumentCheck: true })
     expect(cli?.builder).toBe('claude_code')
     expect(cli?.builder_config).toEqual({ auth: 'cli' })
     expect(cli?.cost_per_attempt_usd).toBeNull()
@@ -68,7 +78,7 @@ describe('builderChoice', () => {
 
   it('nothing usable, no builders probe, or no health → null', () => {
     expect(builderChoice(health({ anthropic: false, claude_code_cli: false }))).toBeNull()
-    expect(builderChoice(health({ anthropic: false, claude_code_cli: false, fixture_gold: false }))).toBeNull()
+    expect(builderChoice(health({ anthropic: false, claude_code_cli: false, fixture_gold: false }), { instrumentCheck: true })).toBeNull()
     expect(builderChoice(health({}))).toBeNull()
     expect(builderChoice(health(null))).toBeNull()
     expect(builderChoice(undefined)).toBeNull()

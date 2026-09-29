@@ -29,7 +29,8 @@
  *               price per attempt — only the test-only `fixture_gold`, offered by `builderChoice`
  *               when no real builder is credentialed and named a test-only instrument check —
  *               prices the estimate from that price ($0.00), never from the map's mean or the
- *               planning range (G-380); a last replay that
+ *               planning range (G-380) — the map is still waited for and a failed read still
+ *               said; a last replay that
  *               stopped itself at its cap is said in a banner with its reason and its run,
  *               the posture is the real sandbox mode, and nothing is queued until the red
  *               button. A reader without the operator role is told so under the title and
@@ -162,7 +163,9 @@ export function MeasurePage() {
   // request all use the SAME capped number, never the radio's face value
   const runLimit = gold > 0 ? Math.min(limit, gold) : limit
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
-  const choice = builderChoice(health.data)
+  // the money page is the ONE screen that asks for the instrument check: on a hermetic stack
+  // with no credentialed builder the red button measures with the test-only fixture at $0
+  const choice = builderChoice(health.data, { instrumentCheck: true })
   // a builder whose price per attempt is KNOWN before any attempt (the test-only fixture, $0)
   // is priced from that price — the map's mean and the planning range describe real builders
   const knownPrice = choice?.cost_per_attempt_usd ?? null
@@ -183,19 +186,15 @@ export function MeasurePage() {
   const unpriced = create.error instanceof ApiError && create.error.code === 'spend_cap_unpriced' ? unpricedModels(create.error.detail) : null
   const posture = posturePhrase(sandbox)
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
-  // G-108: the estimate prices from the map's measured mean, so it waits for the map to
-  // answer; a failed read is said, with Retry, and nothing is priced from the fallback range.
-  // A known price needs no map: it is the builder's, not a measurement of this repository.
-  const priced = knownPrice !== null || map.isSuccess
+  // G-108: the estimate waits for the map to answer and a failed read is said, with Retry,
+  // while nothing is priced — whatever the builder: a known price ($0, the fixture) is then
+  // quoted from the builder's price and the map's mean is not read for it, but the page never
+  // hides that the map could not be read, and the button waits for it like any other run.
+  const priced = map.isSuccess
   const estimate: SummaryRow = {
     key: 'Estimated cost',
     hint: 'stat.measure.estimate',
-    value: knownPrice !== null ? (
-      <>
-        {usd(lo)} to {usd(hi)} for {runLimit} attempts, at a known {usd(knownPrice)} each — the test-only fixture builder spends nothing; this is an instrument check, never a builder measurement, and the map's measured mean is not read for it.{' '}
-        <DocLink to="ONBOARDING-A-REPO#step-4--measure-operator-the-money-step">Measure: the money step</DocLink>
-      </>
-    ) : map.isError ? (
+    value: map.isError ? (
       <span data-testid="measure-estimate-error" className="block">
         <ErrorState compact title="Could not read this repository’s measured cost" error={map.error} onRetry={() => void map.refetch()}>
           <p className="m-0 text-xs">The estimate comes from the capability map, so nothing is priced until it answers. Retry, or come back when the map is available.</p>
@@ -203,6 +202,11 @@ export function MeasurePage() {
       </span>
     ) : !priced ? (
       <span data-testid="measure-estimate-pending">Reading this repository’s measured cost…</span>
+    ) : knownPrice !== null ? (
+      <>
+        {usd(lo)} to {usd(hi)} for {runLimit} attempts, at a known {usd(knownPrice)} each — the test-only fixture builder spends nothing; this is an instrument check, never a builder measurement, and the map's measured mean is not read for it.{' '}
+        <DocLink to="ONBOARDING-A-REPO#step-4--measure-operator-the-money-step">Measure: the money step</DocLink>
+      </>
     ) : (
       <>
         {usd(lo)} to {usd(hi)} for {runLimit} attempts
@@ -322,7 +326,7 @@ export function MeasurePage() {
               />
             </Hint>
             <p id="measure-cap-note" className="m-0 mt-2 text-[16px] text-on-surface-muted">
-              The run stops before an attempt that could take its spend past this amount. An attempt with no cost cap of its own is counted at the dearest attempt so far (nothing before the first), so the run can pass this amount by up to one attempt; it then stops and says so. It starts at the top of the estimate.
+              The run stops before an attempt that could take its spend past this amount. An attempt with no cost cap of its own is counted at the dearest attempt so far (nothing before the first), so the run can pass this amount by up to one attempt; it then stops and says so. It starts at the top of the estimate, or at $1 when the estimate is $0.
             </p>
             {!capOk && (
               <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="cap-invalid">
@@ -331,7 +335,7 @@ export function MeasurePage() {
             )}
           </>
         ) : (
-          <SummaryList label="Spend cap" rows={[{ key: 'Stop the run at', value: `${usd(capOk ? cap : 0)}, the top of the estimate unless the operator sets another`, hint: 'field.measure.spend_cap' }]} />
+          <SummaryList label="Spend cap" rows={[{ key: 'Stop the run at', value: `${usd(capOk ? cap : 0)}, the top of the estimate ($1 when the estimate is $0) unless the operator sets another`, hint: 'field.measure.spend_cap' }]} />
         )}
       </div>
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Retention</h2>

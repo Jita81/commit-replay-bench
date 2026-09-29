@@ -87,7 +87,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Only an operator can start a measurement.',
       operator: 'Pick a number of attempts, check the spend cap the run will keep, decide whether to keep worktrees for failed attempts, then confirm. You can cancel the run from Runs while it is in flight and you pay only for attempts made.',
     },
-    numbers: 'The estimate is a planning band, not a measurement: with no measured mean for this repository it uses the per-attempt range from earlier repositories and carries no apparatus. Once this repository has measured attempts the estimate uses their mean (n shown) with ±20 % around it.',
+    numbers: 'The estimate is a planning band, not a measurement: with no measured mean for this repository it uses the per-attempt range from earlier repositories and carries no apparatus. Once this repository has measured attempts the estimate uses their mean (n shown) with ±20 % around it. A builder with a known price per attempt — only the test-only fixture, at $0 — is priced at that price and reads neither the band nor the mean.',
     terms: ['sighted', 'apparatus', 'evidence_pack', 'cell'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-4--measure-operator-the-money-step', label: 'Measure: the money step' },

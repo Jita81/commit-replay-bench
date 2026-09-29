@@ -14,13 +14,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Proof through each journey's own doors (Wave 6, stream prf)**
   ([the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-prf)).
-  The walk's own Run now watches the run it queued: the repository is read again on success.
-  The money page offers the test-only fixture only when no real builder is credentialed, at a
-  known $0 and never in production (`CRB_ENV=prod` denies the switch; `/health` reads the same
-  switch as the worker); it gains a Pre-flight switch, off by default, and states the outage
-  stop. Walkthrough 04b walks Connect by URL, the probe, mine, oracle and controls from the
-  walk on a fixture of its own; 05 presses the red button, reads the map through its four
-  doors and downloads every export; 06 is one operator's journey; 07 sweeps `/routing`.
+  The walk's Run watches the run it queued; its probe line is the runner's own summary.
+  The money page offers the test-only fixture only with no real builder credentialed, at a
+  known $0, never in production: `CRB_ENV` unset is production, as the server reads it; Factory
+  never defaults to it. A Pre-flight switch, off by default; the outage stop stated.
+  Tier 1 of `scripts/walkthrough.sh` hides `claude` and the builder keys from its stack. 04b
+  walks Connect from the walk; 05 presses the red button and downloads every export — the
+  abstract keeps fixture rows in; 06c reads the map's doors after 06b; 07 sweeps routing.
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
