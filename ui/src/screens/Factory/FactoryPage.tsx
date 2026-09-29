@@ -26,7 +26,10 @@
  *               route the API serves as `way_forward` (DL-049), one sentence naming what must
  *               be different, and that replacement item already drafted from the stop's own
  *               reason (G-904) — and the freeze form for a
- *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
+ *               revised backlog (a new hash) starts from the active one (J-FAC-15). A funded
+ *               calibration build links to its held-out acceptance tests and says whether they
+ *               are written; the run preview counts the funded builds that have none yet
+ *               (ADR-0026 item 8). Every act goes through the API under its role; the
  *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
  *               folded view of it (`task_views`).
  * How:          `useRepoParam({ defaultToLatest: true })` (as the Baseline: reached from the
@@ -50,7 +53,8 @@
  *               that),
  *               ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`, `useSignGap`,
  *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
- *               `useCapabilityMap`, `useAllRepos`), ui/src/api/types.ts (`FactoryTask`,
+ *               `useCapabilityMap`, `useAllRepos`, `useAcceptance`),
+ *               ui/src/api/types.ts (`FactoryTask`,
  *               `FactoryBacklog`), ui/src/lib/builder.ts (`builderChoice`, shared with
  *               Measure), ui/src/lib/amount.ts (the spend cap's text, read as typed),
  *               ui/src/components/RepoPicker.tsx (`defaultToLatest`, as the
@@ -69,8 +73,8 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useFundCalibration, useRegisterBacklog, useRuns, useSignGap, useWaiveProbe } from '../../api/hooks'
-import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
+import { useAcceptance, useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useFundCalibration, useRegisterBacklog, useRuns, useSignGap, useWaiveProbe } from '../../api/hooks'
+import { isRunTerminal, type AcceptanceAssignment, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Dialog } from '../../components/Dialog'
@@ -468,6 +472,12 @@ export function FactoryPage() {
   const activeRun = runs.data?.items.find((r) => !isRunTerminal(r.status)) ?? null
   const lastRun = !activeRun ? (runs.data?.items[0] ?? null) : null
   const tasks = useFactoryTasks(repo, { poll: activeRun !== null })
+  // ADR-0026 item 8 — a funded calibration build's held-out tests: read only when one is funded
+  const funded = (tasks.data ?? []).some((t) => t.calibration)
+  const acceptance = useAcceptance(repo, funded)
+  const assignments = useMemo(() => new Map((acceptance.data?.assignments ?? []).map((a) => [a.item_id, a])), [acceptance.data])
+  // a failed read is said on the item, never shown as "nothing to warn about" (P-369)
+  const acceptanceFailed = acceptance.isError ? acceptance.error.message || 'the read failed' : ''
   const [registerOpen, setRegisterOpen] = useState(false)
   const [dialogKey, setDialogKey] = useState(0)
   const [prefill, setPrefill] = useState<FactoryBacklog | null>(null)
@@ -588,7 +598,7 @@ export function FactoryPage() {
                   {activeRun && <ActiveRunBanner run={activeRun} tasks={tasks.data ?? []} canCancel={can('operator')} />}
                 </div>
                 {!activeRun && lastRun && <LastRunLine run={lastRun} />}
-                {!activeRun && can('operator') && <BeforeYouStart repo={repo} backlog={backlog.data} tasks={tasks.data} canOverride={can('approver')} />}
+                {!activeRun && can('operator') && <BeforeYouStart repo={repo} backlog={backlog.data} tasks={tasks.data} canOverride={can('approver')} assignments={assignments} />}
               </div>
             )}
           </Card>
@@ -609,6 +619,8 @@ export function FactoryPage() {
                     canFreeze={can('operator') && activeRun === null}
                     onFreeze={(evolution) => openFreeze(backlog.data ?? null, evolution)}
                     onEvidence={(p, row) => setPack({ pack: p, row })}
+                    assignment={assignments.get(t.id)}
+                    acceptanceFailed={acceptanceFailed}
                   />
                 ))}
               </ul>
@@ -687,7 +699,19 @@ function LastRunLine({ run }: { run: Run }) {
  * the estimated spend with the n and apparatus it rests on, where a pull request would
  * go (or why delivery is not possible), and one red button that names the amount.
  */
-function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; backlog: FactoryBacklog; tasks: FactoryTask[] | undefined; canOverride: boolean }) {
+function BeforeYouStart({
+  repo,
+  backlog,
+  tasks,
+  canOverride,
+  assignments,
+}: {
+  repo: string
+  backlog: FactoryBacklog
+  tasks: FactoryTask[] | undefined
+  canOverride: boolean
+  assignments: ReadonlyMap<string, AcceptanceAssignment>
+}) {
   const health = useHealth()
   const map = useCapabilityMap(repo, ['capability_class', 'size'])
   const run = useCreateRun()
@@ -723,6 +747,9 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   // ADR-0026 item 8 — only an item the entry gate lets in is built: its cell's standard is
   // proven (the map routes deliver) or an approver funded a calibration build of it
   const funded = list.filter((t) => t.dor_gaps.length === 0 && t.calibration && !t.cell_route?.deliverable).length
+  // verify_fwd_user — a funded calibration build whose held-out tests are not written yet is
+  // built without them: its first attempt is not graded on them and no forward reading counts it
+  const untested = list.filter((t) => t.calibration && assignments.get(t.id)?.status === 'open').length
   const worked = list.filter((t) => t.dor_gaps.length === 0 && (t.cell_route?.deliverable || t.calibration)).length
   const lo = measured ? measured.mean * 0.8 * worked : RANGE_LOW * worked
   const hi = measured ? measured.mean * 1.2 * worked : RANGE_HIGH * worked
@@ -765,7 +792,7 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
           {
             key: 'Items',
             hint: 'summary.factory.items',
-            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell this deployment would deliver from${funded ? `, ${funded} as a funded calibration build` : ''}; the rest open no pull request`,
+            value: `${worked} of ${total} can be built${gapped ? ` (${gapped} wait${gapped === 1 ? 's' : ''} on a signed gap)` : ''}; ${deliverable} sit${deliverable === 1 ? 's' : ''} in a cell this deployment would deliver from${funded ? `, ${funded} as a funded calibration build` : ''}; the rest open no pull request${untested ? `. ${untested} funded calibration build${untested === 1 ? ' has' : 's have'} no held-out tests yet: built now, ${untested === 1 ? 'its' : 'their'} first attempt is not graded on them and no forward reading counts ${untested === 1 ? 'it' : 'them'}` : ''}`,
             note: 'Readiness and the entry gate are assessed again at the run: an item whose cell has no proven context standard, or with an unsigned structural gap, is not built and nothing is spent on it.',
           },
           {
@@ -862,6 +889,13 @@ function BeforeYouStart({ repo, backlog, tasks, canOverride }: { repo: string; b
   )
 }
 
+/** A funded calibration build's held-out tests, in words, on its item (verify_fwd_user). */
+const ACCEPTANCE_STATE: Partial<Record<AcceptanceAssignment['status'], string>> = {
+  open: 'Held-out tests are not written yet: if a run builds it now, its first attempt is not graded on them and no forward reading counts it.',
+  written: 'Held-out tests are written: the next run grades its first attempt on them.',
+  cannot_grade: 'This ticket was attempted before, so its next attempt is never graded on held-out tests.',
+}
+
 function ItemRow({
   repo,
   task: t,
@@ -870,9 +904,15 @@ function ItemRow({
   canFreeze,
   onFreeze,
   onEvidence,
+  assignment,
+  acceptanceFailed = '',
 }: {
   repo: string
   task: FactoryTask
+  /** The item's held-out acceptance-test assignment, when its calibration build has one. */
+  assignment?: AcceptanceAssignment | undefined
+  /** Why the held-out assignments could not be read ("" when they were). */
+  acceptanceFailed?: string
   focused: boolean
   canSign: boolean
   canFreeze: boolean
@@ -974,6 +1014,16 @@ function ItemRow({
             Held-out acceptance tests
           </LinkButton>
         </p>
+      )}
+      {t.calibration && assignment && ACCEPTANCE_STATE[assignment.status] && (
+        <Hint as="p" id="item.factory.acceptance_state" className="m-0 mt-2 text-xs" data-testid={`acceptance-state-${t.id}`}>
+          {ACCEPTANCE_STATE[assignment.status]}
+        </Hint>
+      )}
+      {t.calibration && !assignment && acceptanceFailed && (
+        <Hint as="p" id="item.factory.acceptance_state" className="m-0 mt-2 text-xs" data-testid={`acceptance-state-${t.id}`}>
+          Whether its held-out tests are written could not be read ({acceptanceFailed}): open them to check before a run builds it.
+        </Hint>
       )}
       {t.way_forward?.action === 'fund_calibration' && canSign && <CalibrationForm repo={repo} task={t} />}
       {t.status === 'oracle_not_scoreable' && canSign && t.test_sha256 && <WaiverForm repo={repo} task={t} />}

@@ -211,15 +211,16 @@ re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read m
 | V · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
 | LIB · the context library · new, after S | G-673, G-677, G-675, G-676, G-735, G-737 | the entry record and its two-person sign-off ledger; the miner registry and its miners over a pinned commit; entry sets registered as arms and kept or retired by the look rule and the harm clause, the brief switch off by default; `/library/:repo` with one page per work type |
 | CLS · the organisation's classes · new, after S | G-672 | class-set versions per organisation with the global classes as parents; the derivation and confirmation split by commit; one rule over ticket-time fields at replay and at intake, with the linked-ticket reader; the validity report with its size-agreement clause; the two-person sign-off; the class set as a DL-044 seam |
-| FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling. Built on `feat/ns4b-fwd` (DL-334, DL-335, P-690): G-679 closed and `product.truth.215` met; `/factory/acceptance` is its page |
+| FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling. Built on `feat/ns4b-fwd` (DL-334, DL-335, P-690 to P-696), then attacked and fixed: G-679 closed and `product.truth.215` met; `/factory/acceptance` is its page, and a ceiling's forward reading is registered on the work type's library page |
 | CL · claims on the decision records · new | G-945, G-946 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
 
 **Status on `feat/ns4`.** Built and verified, then attacked and fixed (DL-119, DL-120, P-391 to
 P-403): S (all but G-478, and G-477 carried from Wave 2 closed), P (all but G-321), V as stream T4
 (all but G-143, G-992 and G-993) and LIB as streams L and M (G-673, G-676, G-677 and G-736 closed;
 G-735 and G-737 open). Not built, and carried to the list after Wave 4: LIB's entry sets as arms
-(G-675, so `product.truth.212` stays unmet), CLS (G-672, so `product.truth.208` stays unmet), FWD
-(G-679, so `product.truth.215` stays unmet) and CL (G-945, G-946). The seams the integration moved
+(G-675, so `product.truth.212` stays unmet), CLS (G-672, so `product.truth.208` stays unmet) and
+CL (G-945, G-946); FWD was built after the base, on `feat/ns4b-fwd` (G-679 closed,
+`product.truth.215` met — see its row above). The seams the integration moved
 to later work are there too: the Decisions inbox reading the entry gate's own sign-off (G-738),
 the read-then-insert ratchet (G-720), the failed-read ratchet's per-read rule and its list
 (G-732), and the controls still disabled while their request runs (G-739).

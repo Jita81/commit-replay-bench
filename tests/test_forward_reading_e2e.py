@@ -46,11 +46,13 @@ from crb.builders.base import Rung
 from crb.core import reading as reading_mod
 from crb.core.acceptance import (
     ACCEPTANCE_HELD_OUT,
+    EVENT_ACTION,
     LABEL_ACCEPTANCE,
     LABEL_ACCEPTANCE_RESULT,
     RESULT_PASS,
     HeldOutTests,
     held_out_labels,
+    trace_for,
 )
 from crb.core.execution import LocalExecutor
 from crb.core.library import CALIBRATION_NEEDS
@@ -63,11 +65,11 @@ from crb.factory.standard import CellRef
 from crb.observability.events import Emitter
 from crb.server.acceptance import held_out_reader, write_held_out
 from crb.server.factory_state import FactoryHome
-from crb.store.events import DbEventSink
+from crb.store.events import DbEventSink, append_event_checked
 from crb.store.ledger import DbLedger
 from fixtures import pyrepo as pr
 from fixtures.posture import posture_row
-from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, Env, login, make_env
+from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, Env, envelope, login, make_env
 from test_factory_loop import MultiBuilder, _creds
 from test_governed_delivery_e2e import CELL_S, CELL_XS, FIRST_LOOK, Forge, _prove, _readers
 
@@ -181,12 +183,13 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
     assert r.status_code == 201, r.text
     monkeypatch.undo()
     assert r.json()["pool_rule"] == "calibration-builds" and r.json()["promotes"] == ceiling_id
+    forward_id = r.json()["reading_id"]
     # the ceiling's page says so, and what a calibration build needs
     login(env.client, "viewer")
     page = env.get(f"/library/{ALPHA}/work-types/bug.fix").json()
     xs = next(s for s in page["sizes"] if s["size"] == "XS")
     assert xs["standard"]["arm"] == "S3" and xs["standard"]["ceiling"] is True
-    assert xs["next"] == CALIBRATION_NEEDS and "forward-unvalidated" in xs["next"]
+    assert xs["next"] == CALIBRATION_NEEDS and "calibration build" in xs["next"]
     assert xs["standard"]["forward"]["state"] == "look_pending"
     assert xs["standard"]["forward"]["counted"] == 0
 
@@ -212,6 +215,9 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
     )
     assert r.status_code == 201, r.text
     record_sha = r.json()["sha256"]
+    # the second person is told which forward reading will count their tests
+    (a,) = env.get(f"/factory/{ALPHA}/acceptance").json()["assignments"]
+    assert a["forward_reading"] == forward_id and a["counted_by"] == forward_id
 
     # (5) the factory builds it: first attempt graded on the held-out tests, stamped S2
     forge = Forge()
@@ -241,6 +247,31 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
     login(env.client, "admin")
     (a,) = env.get(f"/factory/{ALPHA}/acceptance").json()["assignments"]
     assert a["status"] == "graded" and a["result"] == RESULT_PASS
+    # a stored record whose content no longer re-hashes enrols nothing (operations.11)
+    forged = HeldOutTests(
+        repo=ALPHA,
+        item_id="I-99",
+        grant="grant-forged",
+        files=(("tests/test_forged.py", "def test_it():\n    assert True\n"),),
+        author="operator:someone-else",
+        written_at=row.created,
+        capability_class="bug.fix",
+        size="XS",
+        language="python",
+    )
+    append_event_checked(
+        env.factory,
+        trace_id=trace_for(ALPHA),
+        stage="system",
+        action=EVENT_ACTION,
+        build=lambda _s: {**forged.to_dict(), "files": [["tests/test_forged.py", "x = 1\n"]]},
+        actor="someone-else",
+        repo=ALPHA,
+    )
+    login(env.client, "viewer")
+    page = env.get(f"/library/{ALPHA}/work-types/bug.fix").json()
+    xs = next(s for s in page["sizes"] if s["size"] == "XS")
+    assert xs["standard"]["forward"]["enrolled"] == 1
 
     # (7) nineteen more calibration builds pass their held-out tests: the ceiling is promoted
     rows = []
@@ -290,3 +321,30 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
     xs = next(s for s in page["sizes"] if s["size"] == "XS")
     assert xs["standard"]["arm"] == "S2" and xs["standard"]["ceiling"] is False
     assert xs["next"] == ""
+
+
+def test_the_forward_reading_route_refuses_what_it_must(env: Env) -> None:
+    """verify_fwd_evidence: the route's refusals were tested nowhere. A viewer may not register
+    one (403); an unknown reading is 404; a reading that is not a ceiling is 409
+    ``not_a_ceiling``; a second forward reading that would overspend the ceiling's one budget
+    is 409 ``budget_spent``."""
+    from crb.server.routes.readings import load_readings
+
+    # the XS cell is a ceiling (S1 misses three); the S cell proves S1 outright: a standard
+    _prove(env, CELL_XS, s3=[True] * FIRST_LOOK, s1=[True] * 17 + [False] * 3, prefix="xs")
+    _prove(env, CELL_S, s3=[True] * FIRST_LOOK, s1=[True] * FIRST_LOOK, prefix="s")
+    with env.factory() as s:
+        by_cell = {r.cell["size"]: r.reading_id for r in load_readings(s, ALPHA)}
+    ceiling_id, standard_id = by_cell["XS"], by_cell["S"]
+    body = {"repo": ALPHA, "builder": BUILDER, "model": MODEL, "provider": PROVIDER}
+    login(env.client, "viewer")
+    r = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
+    assert r.status_code == 403, r.text
+    login(env.client, "operator")
+    r = env.post("/readings/forward", json={**body, "promotes": "rdg_nope"})
+    assert r.status_code == 404 and envelope(r)["code"] == "not_found"
+    r = env.post("/readings/forward", json={**body, "promotes": standard_id})
+    assert r.status_code == 409 and envelope(r)["code"] == "not_a_ceiling", r.text
+    assert env.post("/readings/forward", json={**body, "promotes": ceiling_id}).status_code == 201
+    r = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
+    assert r.status_code == 409 and envelope(r)["code"] == "budget_spent", r.text

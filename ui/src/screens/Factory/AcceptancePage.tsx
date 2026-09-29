@@ -7,12 +7,16 @@
  *               needs, or has, held-out acceptance tests a second person writes (ADR-0026
  *               item 8), and the form that writes them.
  * What it does: Shows each ticket as it was written — title, description, acceptance
- *               criteria, kind and size, who funded the build and when — and never its own
- *               failing test; there is no build to see yet. A person with the operator role or
- *               above who is not the ticket's author and not the approver who funded it writes
- *               the tests here, once per build; anyone else is told why they may not. A written
- *               record shows who wrote it, when and its digest — never the tests. After the
- *               build, the row says whether its first attempt passed them.
+ *               criteria, kind and size, who funded the build (by name) and when — and never its
+ *               own failing test; there is no build to see yet. A person with the operator role
+ *               or above who is not the ticket's author and not the approver who funded it
+ *               writes the tests here, once per build, starting from a path the repository's
+ *               runner accepts; anyone else is told why they may not. Before the tests are
+ *               written it says whether a forward reading will count them. A written record
+ *               shows who wrote it (by name), when and its digest — never the tests. After the
+ *               build, the row says whether its first attempt passed them and whether a forward
+ *               reading counts it; a build that ran without them reads "built, not graded" with
+ *               why, and a ticket attempted before reads "cannot be graded".
  * How:          `useRepoParam` → `useAcceptance` (GET, viewer) → one card per ticket →
  *               `useWriteAcceptance` (POST, operator) with the file path and the test text;
  *               a refusal is shown in the API's words beside the form.
@@ -48,12 +52,28 @@ const STATUS: Record<AcceptanceAssignment['status'], { tone: TagTone; label: str
   written: { tone: 'green', label: 'tests written' },
   building: { tone: 'amber', label: 'being built' },
   graded: { tone: 'grey', label: 'graded' },
+  not_graded: { tone: 'grey', label: 'built, not graded' },
+  cannot_grade: { tone: 'grey', label: 'cannot be graded' },
 }
 
 const RESULT: Record<string, string> = {
   pass: 'Its first attempt passed the held-out tests.',
-  fail: 'Its first attempt did not pass the held-out tests: a miss for the forward reading.',
-  error: 'The held-out tests could not be run: the ticket leaves the forward reading, never a miss.',
+  fail: 'Its first attempt did not pass the held-out tests.',
+  error: 'The held-out tests could not be run.',
+}
+
+/** Whether a forward reading counts this ticket's result, in words (verify_fwd_user). */
+function counted(a: AcceptanceAssignment): string {
+  if (!a.counted_by) return 'No forward reading counts it: none was registered on this kind and size before these tests were written.'
+  const how = a.result === 'fail' ? ' as a miss' : a.result === 'error' ? ': the ticket leaves it, never a miss' : ''
+  return `The forward reading ${a.counted_by} counts it${how}.`
+}
+
+/** Before the tests are written: will a forward reading count them? */
+function forwardFor(a: AcceptanceAssignment): string {
+  return a.forward_reading
+    ? `Registered (${a.forward_reading}): tests written now are counted by it.`
+    : 'None is registered on this kind and size: your tests will grade the build, but no reading will count the result. An operator registers one on the work type’s library page.'
 }
 
 function refusal(err: unknown): string {
@@ -62,9 +82,10 @@ function refusal(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-function who(id: string): string {
-  const bare = id.replace(/^(operator|approver|user):/, '')
-  return bare.length > 12 ? `${bare.slice(0, 8)}…` : bare || '—'
+/** A person as the page names them: their display name, else their whole id — never cut
+ *  (the two-person rule rests on telling the people apart). */
+function who(id: string, name: string): string {
+  return name || id.replace(/^(operator|approver|user):/, '') || '—'
 }
 
 /** The saved state, kept by the page: saving refetches the list, the ticket then reads
@@ -81,7 +102,7 @@ function Saved({ item }: { item: string }) {
 
 function WriteForm({ repo, a, onSaved }: { repo: string; a: AcceptanceAssignment; onSaved: (item: string) => void }) {
   const write = useWriteAcceptance()
-  const [path, setPath] = useState(`tests/test_${a.item_id.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_held_out.py`)
+  const [path, setPath] = useState(a.suggested_path)
   const [content, setContent] = useState('')
   const [asked, setAsked] = useState(false)
   function submit(e: FormEvent) {
@@ -94,7 +115,11 @@ function WriteForm({ repo, a, onSaved }: { repo: string; a: AcceptanceAssignment
     <form onSubmit={submit} aria-label={`Write the held-out tests for ${a.item_id}`} className="mt-4 space-y-3">
       <TextField
         label="Test file"
-        description="A path inside the repository that its test runner treats as a test, and not the ticket’s own test file."
+        description={
+          a.suggested_path
+            ? `A path inside the repository that its test runner treats as a test, for example ${a.suggested_path}, and not the ticket’s own test file.`
+            : 'A path inside the repository that its test runner treats as a test, and not the ticket’s own test file.'
+        }
         value={path}
         onChange={(e) => setPath(e.target.value)}
         error={asked && !path.trim() ? 'Name the test file.' : undefined}
@@ -150,18 +175,19 @@ function Assignment({ repo, a, saved, onSaved }: { repo: string; a: AcceptanceAs
               ),
               hint: 'stat.acceptance.criteria',
             },
-            { key: 'Calibration build funded by', value: who(a.funded_by), note: a.funded_at ? fmtDate(a.funded_at) : undefined, hint: 'stat.acceptance.funded' },
+            { key: 'Calibration build funded by', value: who(a.funded_by, a.funded_by_name), note: a.funded_at ? fmtDate(a.funded_at) : undefined, hint: 'stat.acceptance.funded' },
             ...(a.record
               ? [
                   {
                     key: 'Held-out tests',
-                    value: `written by ${who(a.record.author)} on ${fmtDate(a.record.written_at)}`,
+                    value: `written by ${who(a.record.author, a.author_name)} on ${fmtDate(a.record.written_at)}`,
                     note: `digest ${a.record.sha256.slice(0, 12)}… · ${a.record.paths.join(', ')}`,
                     hint: 'stat.acceptance.record' as const,
                   },
                 ]
               : []),
-            ...(a.result ? [{ key: 'First attempt', value: RESULT[a.result] ?? a.result, hint: 'stat.acceptance.result' as const }] : []),
+            ...(a.status === 'open' || a.status === 'written' ? [{ key: 'Forward reading', value: forwardFor(a), hint: 'stat.acceptance.forward' as const }] : []),
+            ...(a.result ? [{ key: 'First attempt', value: `${RESULT[a.result] ?? a.result} ${counted(a)}`, hint: 'stat.acceptance.result' as const }] : []),
           ]}
         />
         {saved ? (
@@ -195,9 +221,10 @@ export function AcceptancePage() {
         title="Held-out acceptance tests"
         purpose={
           <>
-            Where a cell’s standard is only a ceiling, a ticket is built only as a calibration build, and a second person writes the tests its build is graded on. You see the ticket as it
-            was written — not its own failing test, and no build, because none exists yet. The build’s first attempt is run against your tests after it finishes; a registered forward
-            reading counts those results, and only it can turn the ceiling into a standard.
+            A calibration build is how a ticket is built where no proven standard lets it through — for example where a cell’s standard is only a ceiling. A second person writes the tests
+            its build is graded on. You see the ticket as it was written — not its own failing test, and no build, because none exists yet. The build’s first attempt is run against your
+            tests after it finishes. A forward reading registered on the ticket’s kind and size before your tests are written counts the result, and only it can turn a ceiling into a
+            standard.
           </>
         }
         actions={<RepoPicker value={repo} onChange={setRepo} />}

@@ -530,8 +530,10 @@ def run_held_out(
     """Run a second person's held-out acceptance tests against the BUILT tree, after the
     builder has finished and the attempt is graded (ADR-0026 item 8), and take them out again
     — so they never enter the builder's tree while it works, and the kept tree a review reads
-    holds only what the builder wrote. ``pass`` when the run is green, ``fail`` when it is red,
-    ``error`` when the tests could not be run (a timeout, an unparseable report or a failure
+    holds only what the builder wrote. ``pass`` when the run is green; ``fail`` when it is red
+    OR timed out — a build that hangs on the held-out cases is the build's behaviour, a miss,
+    as the grader reads a target run that times out (P-693); ``error`` only when the tests
+    could not be run (the environment failed, the report could not be parsed, or a failure
     around them): an instrument failure, never a miss."""
     saved: dict[str, bytes | None] = {}
     made: list[Path] = []
@@ -564,8 +566,10 @@ def run_held_out(
                 target.write_bytes(old)
         for d in reversed(made):
             shutil.rmtree(d, ignore_errors=True)
-    if run.env_error or run.timed_out or run.parse_error:
+    if run.env_error or run.parse_error:
         return RESULT_ERROR
+    if run.timed_out:
+        return RESULT_FAIL
     return RESULT_PASS if run.green else RESULT_FAIL
 
 
@@ -949,13 +953,16 @@ def build_ladder(
     learning: LearningSnapshot | None = None,
     author_stamp: str = "",
     held_out: HeldOutTests | None = None,
+    on_result: Callable[[BuildResult], None] | None = None,
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
     rung is clean or an attempt is disqualified. Every rung's label is checked
     against the oracle's author identity before it runs. Workspaces of
     non-final attempts are removed; the final attempt's is kept for delivery.
     ``held_out`` grades the FIRST rung only: a later attempt is never an ``S2`` reading's
-    row (ADR-0026 item 8)."""
+    row (ADR-0026 item 8). ``on_result`` is called with each attempt as it is graded, before
+    the next rung starts — so a ladder that dies on a later rung has its earlier attempts
+    on the record (P-692)."""
     if not rungs:
         raise ValueError("ladder must have at least one rung")
     for r in rungs:
@@ -994,6 +1001,8 @@ def build_ladder(
             held_out=held_out if i == 1 else None,
         )
         results.append(res)
+        if on_result is not None:
+            on_result(res)
         if res.clean or res.disqualified:
             break
     return results

@@ -480,7 +480,15 @@ export const HINTS = {
   'col.library.next':
     'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go. For a ceiling, what a calibration build needs and where its forward reading stands.',
   'item.library.forward':
-    'The forward reading of this ceiling: calibration builds graded on held-out acceptance tests a second person wrote, counted in the order their tests were written. n is how many first attempts it has read; it delivers only under the look rule, and only then does the ceiling become a standard.',
+    'The forward reading of this ceiling: calibration builds graded on held-out acceptance tests a second person wrote after it was registered, counted in the order their tests were written. n is how many tickets’ first attempts it has read, and how many of them passed; “collecting” means it has not reached its next look yet. It delivers only under the look rule, and only then does the ceiling become a standard.',
+  'field.library.forward_builder':
+    'The builder the calibration builds run on, as a factory run’s ladder names it. A ticket built by another builder leaves the forward reading instead of counting.',
+  'field.library.forward_model':
+    'The model the calibration builds run on. A ticket built by another model leaves the forward reading instead of counting.',
+  'field.library.forward_provider':
+    'The provider that serves the model, as the factory records it on each row. A ticket built through another provider leaves the forward reading instead of counting.',
+  'button.library.register_forward':
+    'Register the forward reading now, under your name. It spends from this cell’s one error budget and cannot be withdrawn; it counts only calibration builds whose held-out tests are written after this moment.',
   'col.library.characteristic':
     'One of the nine product quality characteristics of ISO/IEC 25010:2023. Named, never claimed: the product does not certify conformity.',
   'col.library.checks':
@@ -814,7 +822,9 @@ export const HINTS = {
   'banner.acceptance.second_person':
     'The two-person rule for held-out tests (ADR-0026 item 8): the person who writes them is never the ticket’s author, never the approver who funded the calibration build and never the person whose run builds it.',
   'tag.acceptance.status':
-    'Tests needed: nobody has written them yet. Tests written: stored, waiting for the build. Being built: a run has claimed the build, so tests written now could not be held out. Graded: the first attempt has been run against them.',
+    'Where the held-out tests stand: tests needed (none written), tests written (waiting for the build), being built (a run claimed it, so tests written now could not be held out) or graded (its first attempt was run against them). Built, not graded means the build ran without them, and the sentence below says why; cannot be graded means the ticket was attempted before, so no later attempt is graded on them.',
+  'stat.acceptance.forward':
+    'Whether a forward reading will count this ticket. A forward reading counts only tickets whose held-out tests were written after it was registered on this kind and size; without one, the tests still grade the build, but no reading counts the result.',
   'stat.acceptance.cell':
     'The kind of change and its estimated size — the cell whose ceiling this calibration build helps to test forward.',
   'stat.acceptance.description':
@@ -822,21 +832,23 @@ export const HINTS = {
   'stat.acceptance.criteria':
     'The ticket’s acceptance criteria as written. The ticket’s own failing test is deliberately not shown: your tests must be independent of it.',
   'stat.acceptance.funded':
-    'The approver who funded this calibration build, and when. They may not write its held-out tests.',
+    'The approver who funded this calibration build, by name, and when. They may not write its held-out tests.',
   'stat.acceptance.record':
     'Who wrote the held-out tests, when, the SHA-256 digest of the files and their paths. The tests themselves are stored whole and never shown again.',
   'stat.acceptance.result':
-    'Whether the build’s first attempt passed your tests. Only a first attempt is ever graded on them; a later attempt never counts.',
+    'Whether the build’s first attempt passed your tests, and whether a forward reading counts it. Only a first attempt is ever graded on them; a later attempt never counts. A build that hangs on your tests fails them.',
   'item.acceptance.why_not':
-    'Why you cannot write held-out tests for this build: you wrote the ticket or funded the build, your role cannot write tests, they are already written, or the build has started.',
+    'Why you cannot write held-out tests for this build, or why they were not used: you wrote the ticket or funded the build, your role cannot write tests, they are already written, the build has started or ran without them, or the ticket was attempted before.',
   'field.acceptance.path':
-    'Where the test file goes in the repository. It must be a file the repository’s test runner treats as a test, and not the ticket’s own test file.',
+    'Where the test file goes in the repository. It is filled in with a path this repository’s test runner treats as a test; it must not be the ticket’s own test file.',
   'field.acceptance.content':
     'The held-out tests: what a correct change must do, written from the ticket alone. They are run against the build only after the builder has finished, and the builder never sees them.',
   'button.acceptance.save':
     'Store your held-out tests under your name, with the time and their digest. One set per calibration build; it cannot be changed afterwards.',
   'link.factory.acceptance':
-    'Open the held-out acceptance tests for this calibration build: a second person writes them from the ticket alone, before it is built.',
+    'Open the held-out acceptance tests for this calibration build: who may write them, whether they are written, and the first attempt’s result once it is built.',
+  'item.factory.acceptance_state':
+    'Whether a second person’s held-out acceptance tests are ready for this calibration build. Without them, the build’s first attempt is graded on the ticket’s own test only, and no forward reading counts it.',
   'button.intake.switch_on':
     'Start reading the watched column on this repository. This is the consent to read that board and to comment and label on its tickets; it is recorded under your name.',
   'button.intake.switch_off':

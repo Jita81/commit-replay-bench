@@ -1198,11 +1198,11 @@ export function useIntake(repo: string): UseQueryResult<Intake, ApiError> {
 /** `GET /factory/{repo}/acceptance` (viewer) — the tickets whose calibration build needs a
  *  second person's held-out acceptance tests, and whether the signed-in person may write them
  *  (ADR-0026 item 8). Never a ticket's own failing test, never a build. */
-export function useAcceptance(repo: string): UseQueryResult<AcceptanceAssignments, ApiError> {
+export function useAcceptance(repo: string, enabled = true): UseQueryResult<AcceptanceAssignments, ApiError> {
   return useQuery({
     queryKey: keys.acceptance(repo),
     queryFn: () => api<AcceptanceAssignments>(`/factory/${enc(repo)}/acceptance`),
-    enabled: repo.length > 0,
+    enabled: enabled && repo.length > 0,
     retry: false,
   })
 }

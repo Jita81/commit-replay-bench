@@ -194,7 +194,9 @@ def test_tests_are_refused_once_the_build_has_started_or_the_ticket_was_built(en
     _fund(env)  # a second grant, on a ticket already built
     login(env.client, "admin")
     (a,) = env.get(LIST).json()["assignments"]
-    assert a["status"] == "open" and a["can_write"] is False and "built before" in a["why_not"]
+    # the ticket cannot be graded again: its tag says so, not "tests needed" (verify_fwd_user)
+    assert a["status"] == "cannot_grade" and a["can_write"] is False
+    assert "attempted before" in a["why_not"]
     r = env.post(URL, json=BODY)
     assert r.status_code == 409 and envelope(r)["code"] == "already_built"
 
@@ -219,3 +221,120 @@ def test_a_file_that_cannot_hold_a_held_out_test_is_refused(
     assert r.status_code == 422, r.text
     assert why in envelope(r)["message"]
     assert _stored(env) == []
+
+
+def test_a_claimed_grant_makes_the_ticket_attempted_even_with_no_build(env: Env) -> None:
+    """verify_fwd_attack: a run that claimed its grant and died before recording a build left
+    the chain with no ``build.graded``, and a second grant's tests were accepted (201) — its
+    build's first attempt, the ticket's second, would have been stamped S2. The write route,
+    the list and the loop now share one predicate (``attempted_before``, P-692)."""
+    _register(env)
+    first = _fund(env)
+    login(env.client, "admin")
+    assert env.post(URL, json=BODY).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    assert home.evidence(actor="worker").claim_calibration("I-1", first, run_id="died")
+    _fund(env)  # a second grant: the first is spent
+    login(env.client, "admin")
+    (a,) = env.get(LIST).json()["assignments"]
+    assert a["status"] == "cannot_grade" and a["can_write"] is False
+    r = env.post(URL, json=BODY)
+    assert r.status_code == 409 and envelope(r)["code"] == "already_built"
+    assert len(_stored(env)) == 1
+
+
+@pytest.mark.parametrize("record", ["freeze", "evolve"])
+def test_whoever_froze_or_evolved_the_backlog_may_not_write_them(env: Env, record: str) -> None:
+    """verify_fwd_evidence F7b: the ticket's author is also whoever froze a backlog naming it
+    or registered it as an evolution — here the admin, not the operator whose test it carries."""
+    _register(env)
+    _fund(env)
+    home = FactoryHome(env.settings.home, ALPHA)
+    by_root = home.evidence(actor=f"operator:{user_id('root')}")
+    if record == "freeze":
+        by_root.record_freeze(backlog_hash="b" * 64, item_ids=["I-1"], frozen_at="2026-01-01")
+    else:
+        by_root.record_evolution(
+            item_id="I-1", supersedes="I-0", backlog_hash="b" * 64, evolutions_hash="e"
+        )
+    login(env.client, "admin")
+    (a,) = env.get(LIST).json()["assignments"]
+    assert a["can_write"] is False and "author" in a["why_not"]
+    r = env.post(URL, json=BODY)
+    assert r.status_code == 403 and envelope(r)["code"] == "acceptance_same_person"
+    assert _stored(env) == []
+
+
+def test_a_record_that_does_not_re_hash_is_left_out(env: Env) -> None:
+    """factory-acceptance.operations.11: a stored record whose content no longer matches its
+    digest grades nothing and enrols nothing — ``load_held_out`` leaves it out, so the list
+    still reads ``tests needed`` and the loop's reader finds no tests."""
+    from crb.server.acceptance import held_out_reader, load_held_out
+    from crb.store.events import append_event_checked
+
+    _register(env)
+    grant = _fund(env)
+    rec = HeldOutTests(
+        repo=ALPHA,
+        item_id="I-1",
+        grant=grant,
+        files=(("tests/test_multiply_held_out.py", HELD_OUT),),
+        author="operator:someone",
+        written_at="2026-01-01T00:00:00+00:00",
+    )
+    forged = {**rec.to_dict(), "files": [["tests/test_multiply_held_out.py", "assert True\n"]]}
+    append_event_checked(
+        env.factory,
+        trace_id=trace_for(ALPHA),
+        stage="system",
+        action=EVENT_ACTION,
+        build=lambda _s: forged,
+        actor="someone",
+        repo=ALPHA,
+    )
+    assert len(_stored(env)) == 1
+    with env.factory() as s:
+        assert load_held_out(s, ALPHA) == []
+    assert held_out_reader(env.factory, ALPHA)("I-1", grant) is None
+    login(env.client, "admin")
+    (a,) = env.get(LIST).json()["assignments"]
+    assert a["status"] == "open" and a["record"] is None and a["can_write"] is True
+
+
+def test_an_assignment_ends_when_its_build_ran_without_the_tests(env: Env) -> None:
+    """verify_fwd_user: the tag read "being built" for ever after a run built without the tests.
+    ``acceptance.not_graded`` (recorded before the build) ends it with why."""
+    _register(env)
+    grant = _fund(env)
+    home = FactoryHome(env.settings.home, ALPHA)
+    ev = home.evidence(actor="worker")
+    assert ev.claim_calibration("I-1", grant, run_id="run-1")
+    ev.record_acceptance_not_graded("I-1", grant=grant, why="no_held_out_tests")
+    login(env.client, "admin")
+    (a,) = env.get(LIST).json()["assignments"]
+    assert a["status"] == "not_graded" and a["can_write"] is False
+    assert "before any held-out tests were written" in a["why_not"]
+
+
+def test_the_list_names_people_suggests_a_path_and_says_no_reading_counts_it(env: Env) -> None:
+    """verify_fwd_user: the page cut every identity to 8 characters, pre-filled a Python path
+    on every repository and promised a miss for a reading that did not exist."""
+    _register(env)
+    _fund(env)
+    login(env.client, "admin")
+    (a,) = env.get(LIST).json()["assignments"]
+    assert a["funded_by_name"] == "appr1" and a["author_name"] == ""
+    assert a["suggested_path"] == "tests/test_i_1_held_out.py"
+    assert a["forward_reading"] == "" and a["counted_by"] == ""
+    assert env.post(URL, json=BODY).status_code == 201
+    (a,) = env.get(LIST).json()["assignments"]
+    assert a["author_name"] == "root"
+
+
+def test_a_path_that_is_not_a_test_is_answered_with_one_that_is(env: Env) -> None:
+    _register(env)
+    _fund(env)
+    login(env.client, "admin")
+    r = env.post(URL, json={"files": [{"path": "src/calc_extra.py", "content": HELD_OUT}]})
+    assert r.status_code == 422
+    assert "for example, 'tests/test_i_1_held_out.py'" in envelope(r)["message"]

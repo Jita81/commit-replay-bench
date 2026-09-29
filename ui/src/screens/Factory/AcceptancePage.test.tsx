@@ -26,7 +26,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AcceptanceAssignments } from '../../api/types'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { AcceptancePage } from './AcceptancePage'
-import { ACCEPTANCE } from './acceptance.fixture'
+import { ACCEPTANCE, WRITER_ID } from './acceptance.fixture'
 
 const REPOS = { items: [{ name: 'alpha', language: 'python', runner: 'pytest', url: '', created: '2026-09-01T10:00:00+00:00' }], total: 1, limit: 50, offset: 0 }
 const OPERATOR = { ...PRINCIPAL, role: 'operator' }
@@ -46,8 +46,12 @@ describe('AcceptancePage', () => {
     expect(card).toHaveTextContent('calc needs a multiply(a, b) function.')
     expect(card).toHaveTextContent('multiply(3, 4) == 12')
     expect(card).toHaveTextContent('bug.fix · XS')
-    expect(card).toHaveTextContent('approver-1')
+    expect(card).toHaveTextContent('Ada Approver')
     expect(within(card).getByTestId('acceptance-status-I-1')).toHaveTextContent('tests needed')
+    // the form starts from a path this repository's runner accepts, served by the API
+    expect(within(card).getByLabelText('Test file')).toHaveValue('tests/test_i_1_held_out.py')
+    // and says which forward reading will count the tests written now
+    expect(card).toHaveTextContent('Registered (rdg_forward): tests written now are counted by it.')
     expect(document.body.textContent).not.toContain('def test_')
   })
 
@@ -115,9 +119,47 @@ describe('AcceptancePage', () => {
     setup()
     const card = await screen.findByTestId('acceptance-I-2')
     expect(within(card).getByTestId('acceptance-status-I-2')).toHaveTextContent('graded')
-    expect(card).toHaveTextContent('written by second-p…')
+    // a whole name, never an id cut to eight characters (verify_fwd_user)
+    expect(card).toHaveTextContent('written by Bea Second')
+    expect(card).not.toHaveTextContent(`${WRITER_ID.slice(0, 8)}…`)
     expect(card).toHaveTextContent(`digest ${'a'.repeat(12)}…`)
     expect(card).toHaveTextContent('tests/test_divide_held_out.py')
-    expect(card).toHaveTextContent('Its first attempt passed the held-out tests.')
+    expect(card).toHaveTextContent('Its first attempt passed the held-out tests. The forward reading rdg_forward counts it.')
+  })
+
+  it('a result no forward reading counts says so, and a fail is a miss only where one counts it', async () => {
+    const graded = ACCEPTANCE.assignments[1]!
+    setup({
+      ...ACCEPTANCE,
+      assignments: [
+        { ...graded, item_id: 'I-8', counted_by: '', result: 'fail' },
+        { ...graded, item_id: 'I-9', result: 'fail' },
+      ],
+    })
+    expect(await screen.findByTestId('acceptance-I-8')).toHaveTextContent(
+      'Its first attempt did not pass the held-out tests. No forward reading counts it: none was registered on this kind and size before these tests were written.',
+    )
+    expect(screen.getByTestId('acceptance-I-9')).toHaveTextContent('The forward reading rdg_forward counts it as a miss.')
+  })
+
+  it('a build that ran without the tests ends its assignment and says why', async () => {
+    setup()
+    const card = await screen.findByTestId('acceptance-I-3')
+    expect(within(card).getByTestId('acceptance-status-I-3')).toHaveTextContent('built, not graded')
+    expect(within(card).getByTestId('acceptance-why-I-3')).toHaveTextContent('the build started before any held-out tests were written')
+    expect(within(card).queryByRole('form')).not.toBeInTheDocument()
+  })
+
+  it('an open ticket with no forward reading on its cell is told no reading will count it', async () => {
+    setup({ ...ACCEPTANCE, assignments: [{ ...ACCEPTANCE.assignments[0]!, forward_reading: '' }] })
+    expect(await screen.findByTestId('acceptance-I-1')).toHaveTextContent('your tests will grade the build, but no reading will count the result')
+  })
+
+  it('a ticket attempted before reads “cannot be graded”, not “tests needed”', async () => {
+    setup({
+      ...ACCEPTANCE,
+      assignments: [{ ...ACCEPTANCE.assignments[0]!, status: 'cannot_grade', can_write: false, why_not: 'the ticket was attempted before: its next attempt is never graded on held-out tests' }],
+    })
+    expect(await screen.findByTestId('acceptance-status-I-1')).toHaveTextContent('cannot be graded')
   })
 })

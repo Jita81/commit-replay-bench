@@ -46,17 +46,25 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.acceptance import (
     EVENT_ACTION,
+    WHY_NO_TESTS,
+    WHY_NOT_FIRST,
+    WHY_SAME_PERSON,
     HeldOutTests,
     person,
     trace_for,
     writer_refusal,
 )
+from crb.core.reading import Reading
 from crb.factory.backlog import BacklogItem
 from crb.factory.evidence import (
     EV_ACCEPTANCE_GRADED,
+    EV_ACCEPTANCE_NOT_GRADED,
     EV_BUILD,
+    EV_CALIBRATION_CLAIMED,
     EV_CALIBRATION_FUNDED,
+    EV_ITEM_OUTCOME,
     FactoryEvent,
+    attempted_before,
     spent_grants,
     ticket_authors,
 )
@@ -72,6 +80,11 @@ STATUS_OPEN = "open"
 STATUS_WRITTEN = "written"
 STATUS_BUILDING = "building"
 STATUS_GRADED = "graded"
+#: The build ran and its first attempt was NOT graded on held-out tests (the chain's
+#: ``acceptance.not_graded`` says why, recorded before the build).
+STATUS_NOT_GRADED = "not_graded"
+#: The ticket was attempted before this grant: its next attempt is never graded on them.
+STATUS_CANNOT_GRADE = "cannot_grade"
 
 
 class AcceptanceRefused(ValueError):
@@ -147,6 +160,62 @@ def latest_grant(events: Sequence[FactoryEvent]) -> FactoryEvent | None:
     return grants[-1] if grants else None
 
 
+#: Why a calibration build's first attempt was not graded on the held-out tests, in words.
+NOT_GRADED_WHY: dict[str, str] = {
+    WHY_NO_TESTS: (
+        "the build started before any held-out tests were written, so its first attempt was "
+        "graded on the ticket's own test only"
+    ),
+    WHY_NOT_FIRST: (
+        "the ticket was attempted before, so this build was not its first attempt and was not "
+        "graded on the held-out tests"
+    ),
+    WHY_SAME_PERSON: (
+        "the tests were not used: whoever wrote them is the ticket's author, the approver who "
+        "funded the build or the person who ran it"
+    ),
+}
+
+
+def _state(
+    events: Sequence[FactoryEvent], grant: FactoryEvent, rec: HeldOutTests | None
+) -> tuple[str, str]:
+    """The assignment's state and why it cannot be written, read from the item's chain."""
+    gid = grant.event_id
+    if any(e.kind == EV_ACCEPTANCE_GRADED and e.payload.get("grant") == gid for e in events):
+        return STATUS_GRADED, "the build's first attempt has been graded on the held-out tests"
+    refused = next(
+        (e for e in events if e.kind == EV_ACCEPTANCE_NOT_GRADED and e.payload.get("grant") == gid),
+        None,
+    )
+    if refused is not None:
+        why = str(refused.payload.get("why", ""))
+        return STATUS_NOT_GRADED, NOT_GRADED_WHY.get(why, why or "the build was not graded")
+    if gid in spent_grants(events):
+        claim = next(
+            (
+                i
+                for i, e in enumerate(events)
+                if e.kind == EV_CALIBRATION_CLAIMED and e.payload.get("grant") == gid
+            ),
+            None,
+        )
+        after = events[claim + 1 :] if claim is not None else ()
+        if claim is None or any(e.kind in (EV_BUILD, EV_ITEM_OUTCOME) for e in after):
+            # built, or ended, and never graded on held-out tests (a chain from before
+            # ``acceptance.not_graded`` existed, or a run that ended without building)
+            return STATUS_NOT_GRADED, "the build ran without being graded on held-out tests"
+        return STATUS_BUILDING, "the build has started: tests written now could not be held out"
+    if attempted_before(events, grant.item_id, grant=gid):
+        return (
+            STATUS_CANNOT_GRADE,
+            "the ticket was attempted before: its next attempt is never graded on held-out tests",
+        )
+    if rec is not None:
+        return STATUS_WRITTEN, "held-out acceptance tests are already written for this build"
+    return STATUS_OPEN, ""
+
+
 def assignment(
     item: BacklogItem,
     chain: Sequence[FactoryEvent],
@@ -155,11 +224,16 @@ def assignment(
     *,
     viewer: str,
     viewer_may_write: bool,
+    language: str = "",
+    forwards: Sequence[Reading] = (),
+    path: str = "",
 ) -> dict[str, Any] | None:
     """One ticket's assignment as the page shows it to ``viewer``, or ``None`` when it has
     none: a ticket with no person's failing test, or no calibration grant. ``chain`` is the
     repository's whole factory chain. Never the failing test, never a build — the second
-    person writes from the ticket alone."""
+    person writes from the ticket alone. ``forwards`` are the repository's registered forward
+    readings (enrolled), so the page can say whether one will count this ticket; ``path`` is a
+    test path the runner accepts."""
     if authored is None or not authored.operator_authored:
         return None
     events = [e for e in chain if e.item_id == item.id]
@@ -175,33 +249,29 @@ def assignment(
         ),
         None,
     )
-    built = any(e.kind == EV_BUILD for e in events)
-    claimed = grant.event_id in spent_grants(events)
-    if graded is not None:
-        status = STATUS_GRADED
-    elif claimed:
-        status = STATUS_BUILDING
-    elif rec is not None:
-        status = STATUS_WRITTEN
-    else:
-        status = STATUS_OPEN
-    why = ""
-    if status != STATUS_OPEN:
-        why = {
-            STATUS_WRITTEN: "held-out acceptance tests are already written for this build",
-            STATUS_BUILDING: "the build has started: tests written now could not be held out",
-            STATUS_GRADED: "the build's first attempt has been graded on the held-out tests",
-        }[status]
-    elif built:
-        why = "the ticket was built before: its next attempt is never graded on held-out tests"
-    elif not viewer_may_write:
-        why = "writing held-out acceptance tests needs the operator role or above"
-    else:
-        why = writer_refusal(
-            viewer,
-            ticket_authors=ticket_authors(chain, item.id, authored.author),
-            sponsor=str(grant.payload.get("approver", "")),
+    status, why = _state(events, grant, rec)
+    if status == STATUS_OPEN:
+        if not viewer_may_write:
+            why = "writing held-out acceptance tests needs the operator role or above"
+        else:
+            why = writer_refusal(
+                viewer,
+                ticket_authors=ticket_authors(chain, item.id, authored.author),
+                sponsor=str(grant.payload.get("approver", "")),
+            )
+    funded_by = str(grant.payload.get("approver", ""))
+    cell = (item.capability_class, item.size_estimate, language)
+    on_cell = [
+        r
+        for r in forwards
+        if (
+            r.cell.get("capability_class", ""),
+            r.cell.get("size", ""),
+            r.cell.get("language", ""),
         )
+        == cell
+    ]
+    counted_by = next((r.reading_id for r in on_cell if item.id in r.pool), "")
     return {
         "item_id": item.id,
         "title": item.title,
@@ -210,20 +280,26 @@ def assignment(
         "capability_class": item.capability_class,
         "size": item.size_estimate,
         "grant": grant.event_id,
-        "funded_by": str(grant.payload.get("approver", "")),
+        "funded_by": funded_by,
         "funded_at": grant.created,
         "status": status,
         "can_write": not why,
         "why_not": why,
         "record": rec.public() if rec is not None else None,
         "result": str(graded.payload.get("result", "")) if graded is not None else "",
+        "forward_reading": on_cell[-1].reading_id if on_cell else "",
+        "counted_by": counted_by,
+        "suggested_path": path,
     }
 
 
 __all__ = [
     "CODE_WRITTEN",
+    "NOT_GRADED_WHY",
     "STATUS_BUILDING",
+    "STATUS_CANNOT_GRADE",
     "STATUS_GRADED",
+    "STATUS_NOT_GRADED",
     "STATUS_OPEN",
     "STATUS_WRITTEN",
     "AcceptanceRefused",

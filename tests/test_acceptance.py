@@ -36,8 +36,10 @@ from crb.core.acceptance import (
     leaked,
     none_labels,
     path_refusal,
+    suggested_path,
     writer_refusal,
 )
+from crb.core.spec import RepoConfig
 
 SRC = "def test_the_held_out_case_one():\n    assert compute(7, 6) == 42\n"
 
@@ -116,3 +118,40 @@ def test_the_leak_check_finds_the_records_own_lines_and_ignores_known_ones() -> 
     assert leaked("x\n    assert compute(7, 6) == 42\n", rec) == ["tests/test_a.py"]
     known = "    assert compute(7, 6) == 42\n"
     assert leaked(known, rec, known=known) == []
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        (
+            {"language": "python", "test_prefix": "tests/", "ext": ".py"},
+            "tests/test_i_1_held_out.py",
+        ),
+        ({"language": "go", "ext": ".go"}, "i_1_held_out_test.go"),
+        ({"language": "rust", "ext": ".rs"}, "tests/i_1_held_out.rs"),
+        (
+            {"language": "jvm", "test_prefix": "src/test/java/", "ext": ".java"},
+            "src/test/java/HeldOutI1Test.java",
+        ),
+        (
+            {
+                "language": "javascript",
+                "test_mode": "suffix",
+                "test_suffix": ".test.ts",
+                "ext": ".ts",
+            },
+            "i_1_held_out.test.ts",
+        ),
+        ({"language": "python", "test_prefix": "", "ext": ".py"}, ""),
+    ],
+)
+def test_the_suggested_path_is_one_each_layouts_runner_collects(
+    config: dict[str, str], expected: str
+) -> None:
+    """verify_fwd_user: the page pre-filled a Python path on every repository — on a Go one,
+    the default was refused and the refusal named no pattern. The suggestion is now one the
+    repository's own layout rule (``RepoConfig.is_test``) accepts, or none."""
+    repo = RepoConfig.from_dict("r", config)
+    path = suggested_path(repo, "I-1")
+    assert path == expected
+    assert not path or repo.is_test(path)

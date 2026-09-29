@@ -24,7 +24,8 @@ What it does: Hashes a record's files into one digest and its body into an id; r
               writer who is the ticket's author, the funding approver or the run's submitter;
               stamps ``acceptance: held_out`` with the record's id, digest and result (``pass``,
               ``fail`` or ``error``), or ``acceptance: none`` with why; finds a record's lines in
-              any text (the leak check the tests apply to briefs and workspaces).
+              any text (the leak check the tests apply to briefs and workspaces); suggests a
+              path the repository's runner treats as a test.
 How:          Pure functions and one frozen dataclass over ``crb.core.evidence``'s canonical
               JSON and SHA-256; identities compare after the ``operator:`` / ``approver:``
               prefixes are removed.
@@ -48,12 +49,14 @@ Claims:       A held-out result says whether the build passed tests a second per
 from __future__ import annotations
 
 import posixpath
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
 from crb.core.context_arm import BASE_S2, LABEL_CONTEXT_ARM, is_arm, parse_arm
 from crb.core.evidence import canonical_json, sha256_text
+from crb.core.spec import Language, RepoConfig
 
 SCHEMA = "crb.acceptance.v1"
 #: The event a record is written as, on the repository's ``acceptance:<repo>`` trace.
@@ -73,8 +76,9 @@ LABEL_ACCEPTANCE_WHY = "acceptance_why"
 
 RESULT_PASS = "pass"  # noqa: S105 — a test result, not a credential
 RESULT_FAIL = "fail"
-#: The tests could not be run (a timeout, an unparseable report, the instrument failed):
-#: an instrument failure, never a miss — the forward reading lets the ticket leave its pool.
+#: The tests could not be run (the environment failed, an unparseable report, the instrument
+#: failed around them): an instrument failure, never a miss — the forward reading lets the
+#: ticket leave its pool. A run that TIMES OUT is the build's behaviour: ``fail`` (P-693).
 RESULT_ERROR = "error"
 RESULTS: tuple[str, ...] = (RESULT_PASS, RESULT_FAIL, RESULT_ERROR)
 
@@ -292,6 +296,28 @@ def leaked(text: str, record: HeldOutTests, *, known: str = "") -> list[str]:
     return out
 
 
+def suggested_path(config: RepoConfig, item_id: str) -> str:
+    """A path for ``item_id``'s held-out tests that ``config``'s runner treats as a test — Go
+    ``<item>_held_out_test.go``, Rust ``tests/<item>_held_out.rs``, a suffix layout's own
+    suffix, JVM ``HeldOut<Item>Test`` under the test prefix, else ``test_<item>_held_out``
+    under it — or ``""`` when the layout admits none of them (the page then asks for one)."""
+    slug = re.sub(r"[^a-z0-9]+", "_", (item_id or "item").lower()).strip("_") or "item"
+    ext = config.exts[0] if config.exts else ""
+    tp = config.test_prefix
+    if config.test_mode == "suffix" and config.test_suffixes:
+        cand = f"{tp}{slug}_held_out{config.test_suffixes[0]}"
+    elif config.language is Language.GO:
+        cand = f"{slug}_held_out_test.go"
+    elif config.language is Language.RUST:
+        cand = f"tests/{slug}_held_out.rs"
+    elif config.language is Language.JVM:
+        camel = "".join(p.capitalize() for p in slug.split("_"))
+        cand = f"{tp}HeldOut{camel}Test{ext}"
+    else:
+        cand = f"{tp}test_{slug}_held_out{ext}"
+    return cand if config.is_test(cand) else ""
+
+
 def trace_for(repo: str) -> str:
     """The event trace a repository's held-out records are written on."""
     return TRACE_PREFIX + repo
@@ -327,6 +353,7 @@ __all__ = [
     "none_labels",
     "path_refusal",
     "person",
+    "suggested_path",
     "trace_for",
     "writer_refusal",
 ]

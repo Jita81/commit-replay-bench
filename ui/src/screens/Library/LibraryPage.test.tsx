@@ -72,16 +72,52 @@ describe('LibraryPage', () => {
     expect(unhinted(container)).toEqual([])
   })
 
-  it('a ceiling says "ceiling only — forward-unvalidated", what a calibration build needs, and its forward reading with its n', async () => {
+  it('a ceiling says “ceiling only — forward-unvalidated”, what a calibration build needs, and its forward reading with its n', async () => {
     mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, ...LIBRARY_API })
     const { container } = renderApp(<LibraryPage />, AT)
     await screen.findByRole('heading', { name: 'Work type: bug.fix' })
     const sizes = screen.getByRole('table', { name: 'Proven standard per size for bug.fix' })
     const l = within(sizes).getByText('L').closest('tr')!
     expect(l).toHaveTextContent('S3 (ceiling only — forward-unvalidated)')
+    // the phrase is said once, in the standard's column; the next column says what a build needs
+    expect(l.textContent?.split('forward-unvalidated').length).toBe(2)
     expect(within(l).getByTestId('ceiling-L')).toHaveTextContent('built only as a calibration build, which never opens a pull request')
-    expect(within(l).getByTestId('forward-L')).toHaveTextContent('Forward reading: reading · n = 1 (1 passed the held-out tests) · 19 more to its look at 20')
+    // n (tickets read) and the passes differ in the fixture, so a swap would be caught
+    expect(within(l).getByTestId('forward-L')).toHaveTextContent('Forward reading: collecting · n = 3 (2 passed the held-out tests) · 17 more tickets before its look at 20')
     expect(within(l).getByTestId('forward-L')).toHaveAttribute('data-hint', 'item.library.forward')
+    // a ceiling with no forward reading says so — and a viewer is told who registers one
+    expect(within(sizes).getByTestId('forward-XL')).toHaveTextContent('No forward reading is registered yet: a person with the operator role registers one on this page')
+    expect(screen.queryByRole('form', { name: /Register the forward reading/ })).not.toBeInTheDocument()
+    expect(unhinted(container)).toEqual([])
+  })
+
+  it('an operator registers the forward reading of a ceiling that has none, and a refusal is said in the API’s words', async () => {
+    let refuse = true
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      ...LIBRARY_API,
+      'POST /readings/forward': () =>
+        refuse
+          ? envelope(409, 'budget_spent', 'the ceiling’s cell has an error budget of 5.00%; 5.00% is spent')
+          : json({ reading_id: 'rdg_fwd_new', pool_rule: 'calibration-builds' }, 201),
+    })
+    const { container } = renderApp(<LibraryPage />, AT)
+    await screen.findByRole('heading', { name: 'Work type: bug.fix' })
+    const sizes = screen.getByRole('table', { name: 'Proven standard per size for bug.fix' })
+    expect(within(sizes).getByTestId('forward-XL')).toHaveTextContent('No forward reading is registered yet: register one under this table')
+    // only the ceiling with no forward reading offers the form
+    expect(screen.queryByTestId('forward-form-L')).not.toBeInTheDocument()
+    const form = screen.getByRole('form', { name: 'Register the forward reading of the XL ceiling' })
+    await userEvent.type(within(form).getByLabelText(/^Builder/), 'claude_code')
+    await userEvent.type(within(form).getByLabelText(/^Model/), 'claude-sonnet-5')
+    await userEvent.type(within(form).getByLabelText(/^Provider/), 'anthropic')
+    await userEvent.click(within(form).getByRole('button', { name: 'Register the forward reading' }))
+    expect(await within(form).findByTestId('forward-refused-XL')).toHaveTextContent('error budget of 5.00%')
+    refuse = false
+    await userEvent.click(within(form).getByRole('button', { name: 'Register the forward reading' }))
+    await waitFor(() => expect(within(form).getByTestId('forward-registered-XL')).toHaveTextContent('Registered rdg_fwd_new.'))
+    const post = calls.filter((c) => c.method === 'POST' && c.path === '/readings/forward').at(-1)
+    expect(JSON.parse(String(post?.init?.body))).toEqual({ repo: 'alpha', promotes: 'r5', builder: 'claude_code', model: 'claude-sonnet-5', provider: 'anthropic' })
     expect(unhinted(container)).toEqual([])
   })
 

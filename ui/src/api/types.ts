@@ -1983,15 +1983,28 @@ export interface AcceptanceAssignment {
   size: string
   grant: string
   funded_by: string
+  /** The approver's display name; empty when the store does not know them. */
+  funded_by_name: string
   funded_at: string
-  /** `open` (tests needed), `written`, `building` (the grant is claimed), `graded`. */
-  status: 'open' | 'written' | 'building' | 'graded'
+  /** `open` (tests needed), `written`, `building` (the grant is claimed), `graded`,
+   *  `not_graded` (built without them — `why_not` says why) or `cannot_grade` (the ticket was
+   *  attempted before this build). */
+  status: 'open' | 'written' | 'building' | 'graded' | 'not_graded' | 'cannot_grade'
   can_write: boolean
   /** Why the signed-in person may not write them; empty when they may. */
   why_not: string
   record: HeldOutRecord | null
+  /** The display name of the person who wrote the record; empty with no record. */
+  author_name: string
   /** `pass`, `fail` or `error` once the first attempt is graded; else empty. */
   result: string
+  /** The latest forward reading registered on this ticket's kind, size and language; empty for none. */
+  forward_reading: string
+  /** The forward reading whose pool enrols this ticket (its tests were written after it was
+   *  registered); empty when none does — the ticket is then graded but never counted. */
+  counted_by: string
+  /** A test path this repository's runner accepts for the ticket; empty when none is known. */
+  suggested_path: string
 }
 
 export interface AcceptanceAssignments {
@@ -2412,6 +2425,16 @@ export interface LibraryStandard {
   /** For a ceiling: the forward (`S2`) reading registered to promote it, or null when none is
    *  (ADR-0026 items 4 and 8). Absent on a server from before stream FWD. */
   forward?: ForwardReadingState | null
+}
+
+/** `POST /readings/forward` — register the forward (`S2`) reading of a ceiling (operator). */
+export interface ForwardReadingRequest {
+  repo: string
+  /** The ceiling's reading id. */
+  promotes: string
+  builder: string
+  model: string
+  provider: string
 }
 
 /** A ceiling's forward reading, as the work type's page serves it. */

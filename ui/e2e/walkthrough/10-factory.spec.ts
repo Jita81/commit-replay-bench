@@ -173,6 +173,8 @@ test.describe('10 factory (fixture_gold)', () => {
     await ensureApprover(page)
     // the admin wrote the ticket and funded the build: the page says why they may not
     await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-1`)
+    // before anyone writes them, the item says a run now would build it without them
+    await expect(page.getByTestId('acceptance-state-I-1')).toContainText('Held-out tests are not written yet')
     await page.getByTestId('acceptance-link-I-1').click()
     await expect(page).toHaveURL(/\/factory\/acceptance\?repo=/)
     await expect(page.getByTestId('acceptance-why-I-1')).toContainText(/ticket.s author/)
@@ -186,6 +188,8 @@ test.describe('10 factory (fixture_gold)', () => {
       await expect(second.getByTestId('acceptance-status-I-1')).toContainText('tests needed')
       // the ticket's own failing test is never on the page
       await expect(card).not.toContainText('assert multiply(3, 4) == 12')
+      // no forward reading is registered on this cell in the walk: the page says none will count them
+      await expect(card).toContainText('no reading will count the result')
       const form = card.getByRole('form', { name: 'Write the held-out tests for I-1' })
       await form.getByLabel('Test file').fill('tests/test_multiply_held_out.py')
       await form.getByLabel('Held-out acceptance tests').fill('from calc import multiply\n\n\ndef test_multiply_held_out():\n    assert multiply(7, 6) == 42\n')
@@ -263,6 +267,7 @@ test.describe('10 factory (fixture_gold)', () => {
     await page.goto(`/factory/acceptance?repo=${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('acceptance-status-I-1')).toContainText('graded')
     await expect(page.getByTestId('acceptance-I-1')).toContainText('First attempt')
+    await expect(page.getByTestId('acceptance-I-1')).toContainText('No forward reading counts it')
     await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-2`)
 
     // I-2: the entry gate stopped it before any spend — NOT BUILT, and the sentence says the

@@ -38,6 +38,7 @@ from crb.core.acceptance import (
     RESULT_FAIL,
     RESULT_PASS,
     WHY_NOT_FIRST,
+    WHY_SAME_PERSON,
     HeldOutTests,
     held_out_labels,
     none_labels,
@@ -46,6 +47,7 @@ from crb.core.ledger import GradeRow, first_attempts
 from crb.core.reading import (
     LEFT_HARNESS,
     LEFT_HELD_OUT_ERROR,
+    LEFT_NOT_GRADED,
     LEFT_OTHER_CELL,
     OUTCOME_CEILING,
     OUTCOME_STANDARD,
@@ -337,3 +339,50 @@ def test_routing_first_attempts_read_the_same_held_out_rule() -> None:
     assert fa["oracle-T-0"].gold_checked and fa["oracle-T-0"].clean
     assert fa["oracle-T-1"].gold_checked and not fa["oracle-T-1"].clean
     assert not fa["oracle-T-2"].gold_checked
+
+
+# --- a count bound to the record that enrolled the ticket (P-694) ----------------------------
+
+
+def test_a_row_graded_on_a_record_that_did_not_enrol_its_ticket_is_never_counted() -> None:
+    """verify_fwd_attack: enrolment went by item and time only, so a ticket could be enrolled
+    AFTER its outcome — tests R1 written before registration graded the build, the result was
+    seen, then R2 (after registration) enrolled the ticket and the R1-graded row was counted.
+    A row now counts only when graded on the record that enrolled its ticket."""
+    _reading, _rows, ceiling = _ceiling()
+    fwd = _forward(ceiling)
+    before = _record(0, written_at="2026-09-27T11:00:00+00:00", grant="grant-early")
+    after = _record(0, written_at="2026-09-27T15:00:00+00:00", grant="grant-late")
+    assert with_enrolment(fwd, [before]).pool == ()
+    enrolled = with_enrolment(fwd, [before, after])
+    assert enrolled.pool == ("T-0",) and enrolled.enrolled == (("T-0", after.record_id),)
+    arm = evaluate(enrolled, [_s2_row(before, result=RESULT_PASS)]).arms["S2"]
+    assert arm.look.counted == 0 and arm.commits[0].left == LEFT_NOT_GRADED
+    # the row graded on the enrolling record is the one that counts
+    arm = evaluate(enrolled, [_s2_row(after, result=RESULT_PASS)]).arms["S2"]
+    assert arm.look.counted == 1 and arm.commits[0].outcome is True
+    # enrolment is read, never registered: the enrolled records are not in the hash
+    assert enrolled.reading_id == fwd.reading_id and "enrolled" not in enrolled.to_dict()
+
+
+def test_an_enrolled_ticket_whose_first_attempt_was_not_graded_leaves_the_pool() -> None:
+    """verify_fwd_attack: one enrolled ticket that never gets a held-out-graded first attempt
+    (its tests were refused, it was attempted before) held the reading at ``look_pending``
+    for ever. Its first attempt after registration, stamped ``acceptance: none`` before its
+    build, now makes it leave the pool — decided without its result."""
+    _reading, _rows, ceiling = _ceiling()
+    recs = [_record(i) for i in range(21)]
+    fwd = with_enrolment(_forward(ceiling), recs)
+    refused = _s2_row(recs[0], labels=none_labels(WHY_SAME_PERSON), clean=False)
+    rows = [refused, *(_s2_row(r) for r in recs[1:])]
+    arm = evaluate(fwd, rows).arms["S2"]
+    assert arm.commits[0].left == LEFT_NOT_GRADED and arm.commits[0].outcome is None
+    assert arm.look.state == STATE_DELIVER and arm.look.counted == 20
+    # a later attempt of a counted ticket never replaces its first: the first decides
+    retry = _s2_row(recs[0], created="2026-09-27T16:00:00+00:00")
+    again = evaluate(fwd, [*rows, retry]).arms["S2"]
+    assert again.commits[0].left == LEFT_NOT_GRADED
+    # a ticket with no attempt yet is still pending: the reading waits for it
+    waiting = evaluate(fwd, rows[1:5]).arms["S2"]
+    assert waiting.commits[0].outcome is None and waiting.commits[0].left == ""
+    assert waiting.look.state == STATE_LOOK_PENDING and waiting.look.counted == 0

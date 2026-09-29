@@ -38,7 +38,9 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   ``not_a_ceiling`` unless the named reading reads ``ceiling`` — spending from the CEILING's
   budget. Its pool (:data:`POOL_RULE_CALIBRATION`) is every calibration build whose held-out
   acceptance tests were written after it, in the order written (:func:`with_enrolment`); it
-  counts one held-out-graded ``r1`` row per ticket, and it alone can make a ceiling a standard.
+  reads each ticket's first factory attempt after registration, counts it only when it was
+  graded on the record that enrolled the ticket and otherwise lets the ticket leave the pool
+  (``not_graded``), and it alone can make a ceiling a standard.
 
 Navigation
 ----------
@@ -92,6 +94,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from crb.core.acceptance import (
+    LABEL_ACCEPTANCE_ID,
     RESULT_ERROR,
     RESULT_PASS,
     HeldOutTests,
@@ -175,6 +178,12 @@ LEFT_UNOBSERVED = "unobserved"
 LEFT_OTHER_CELL = "other_cell"
 #: A forward reading's ticket whose held-out tests could not be run: an instrument failure.
 LEFT_HELD_OUT_ERROR = "held_out_error"
+#: A forward reading's ticket whose first attempt after registration was not graded on the
+#: record that enrolled it — stamped ``acceptance: none`` before its build (its tests were
+#: refused, or it was attempted before), graded on another record, or outside the reading's
+#: scope. Decided without reading its result, so it leaves the pool rather than holding the
+#: reading open for an attempt that can never come (DL-334, P-694).
+LEFT_NOT_GRADED = "not_graded"
 
 # --- registration refusals ---------------------------------------------------------
 REFUSAL_POOL_SEEN = "pool_seen"
@@ -393,6 +402,10 @@ class Reading:
     #: cell key whose ONE error budget it spends from (ADR-0026 item 5) — hashed when present.
     promotes: str = ""
     budget_cell: str = ""
+    #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
+    #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
+    #: row counts only when it was graded on the record that enrolled its ticket (P-694).
+    enrolled: tuple[tuple[str, str], ...] = field(default=(), compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
@@ -803,8 +816,10 @@ def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading
     """A forward reading with its pool filled (DL-334): the tickets whose held-out tests were
     written strictly after the registration, of the reading's class, size and language, in
     the order the records are given (the order they were written — the caller passes them
-    oldest first); a ticket counts once. Any other reading is returned unchanged. The id and
-    the registered pool digest are kept: enrolment is read, never registered."""
+    oldest first); a ticket counts once, by the record that enrolled it (``enrolled``: a row
+    graded on any other record is never counted, so no ticket is enrolled after its outcome
+    is known — P-694). Any other reading is returned unchanged. The id and the registered
+    pool digest are kept: enrolment is read, never registered."""
     if not reading.prospective:
         return reading
     registered = reading.registered
@@ -814,6 +829,7 @@ def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading
         reading.cell.get("language", ""),
     )
     items: list[str] = []
+    enrolled: list[tuple[str, str]] = []
     for rec in records:
         written = _parse_ts(rec.written_at)
         if registered is None or written is None or written <= registered:
@@ -822,7 +838,8 @@ def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading
             continue
         if rec.item_id and rec.item_id not in items:
             items.append(rec.item_id)
-    return replace(reading, pool=tuple(items))
+            enrolled.append((rec.item_id, rec.record_id))
+    return replace(reading, pool=tuple(items), enrolled=tuple(enrolled))
 
 
 # ---------------------------------------------------------------------------
@@ -916,6 +933,19 @@ def _counts_for(reading: Reading, arm: str, row: GradeRow) -> bool:
     return row.posture_class == reading.posture_class and row.sealed
 
 
+def _forward_attempt(reading: Reading, row: GradeRow) -> bool:
+    """Is ``row`` a ticket's FIRST factory attempt a forward reading reads — rung ``r1`` of a
+    factory run on the reading's repository, graded after the registration, never imported —
+    whatever it was graded on? The first such row per ticket decides it (P-694)."""
+    if row.imported or row.repo != reading.repo or row.process_step != PROCESS_FACTORY:
+        return False
+    if row.trial.strip().lower() != RUNG_R1:
+        return False
+    registered = reading.registered
+    created = _parse_ts(row.created)
+    return registered is not None and created is not None and created > registered
+
+
 def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
     """Is ``row`` one a FORWARD reading's ``arm`` may count? A factory ``S2`` row graded on
     held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`), rung ``r1``, on
@@ -942,16 +972,21 @@ def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
 
 def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmReading:
     """A forward reading's arm over ``rows``: each enrolled ticket, in enrolment order, read by
-    its one held-out-graded first attempt. The held-out tests are run once, so there is no
-    re-run: an attempt the instrument could not observe (``harness``, ``outage``) or whose
-    held-out tests could not be run (``error``) leaves the pool with its reason, never a miss;
-    ``fail`` is a miss; ``pass`` on a clean build is clean."""
+    its FIRST factory attempt after registration. That attempt counts only when it is graded
+    on held-out tests — the record that enrolled the ticket (P-694) — within the reading's
+    scope; otherwise the ticket leaves the pool (:data:`LEFT_NOT_GRADED`), decided without its
+    result, so one ticket that can never be graded does not hold the reading open. The
+    held-out tests are run once, so there is no re-run: an attempt the instrument could not
+    observe (``harness``, ``outage``) or whose held-out tests could not be run (``error``)
+    leaves the pool with its reason, never a miss; ``fail`` is a miss; ``pass`` on a clean
+    build is clean. A ticket with no attempt yet is pending."""
     first: dict[str, GradeRow] = {}
     pool = set(reading.pool)
     for r in rows:
         item = r.labels.get("item_id", "")
-        if item in pool and item not in first and _counts_forward(reading, arm, r):
+        if item in pool and item not in first and _forward_attempt(reading, r):
             first[item] = r
+    by_item = dict(reading.enrolled)
     fields = ("builder", "model", "provider")
     out: list[CommitReading] = []
     for item in reading.pool:
@@ -960,7 +995,11 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
             out.append(CommitReading(item, item, None))
             continue
         r = got
-        if any(getattr(r, f) != reading.cell.get(f, "") for f in fields):
+        if not _counts_forward(reading, arm, r) or (
+            r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(item, "")
+        ):
+            out.append(CommitReading(item, item, None, LEFT_NOT_GRADED, r.row_hash))
+        elif any(getattr(r, f) != reading.cell.get(f, "") for f in fields):
             out.append(CommitReading(item, item, None, LEFT_OTHER_CELL, r.row_hash))
         elif r.failure_kind == FAILURE_HARNESS:
             out.append(CommitReading(item, item, None, LEFT_HARNESS, r.row_hash))
@@ -1363,6 +1402,7 @@ __all__ = [
     "ARM_STATES",
     "CELL_ERROR_BUDGET",
     "LEFT_HELD_OUT_ERROR",
+    "LEFT_NOT_GRADED",
     "LEFT_OTHER_CELL",
     "POOL_RULE_ALL",
     "POOL_RULE_CALIBRATION",

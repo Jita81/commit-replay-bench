@@ -41,7 +41,9 @@ What it does: Appends ``FactoryEvent`` rows (freeze, evolution, sign-off, readin
               edit already on the record, and records a pull request's outcome at most
               once; claims a calibration grant for one run only (``claim_calibration``, a
               conditional append — P-298); records a first attempt graded on held-out tests
-              (``acceptance.graded``) and names who put an item forward (``ticket_authors``);
+              (``acceptance.graded``) or, before the build, that it will not be
+              (``acceptance.not_graded``); names who put an item forward (``ticket_authors``)
+              and whether it was attempted before (``attempted_before``);
               ``verify`` proves the chain.
 How:          ``FactoryEvidence.record_*`` → ``FactoryStore.append`` (``JsonlFactoryStore``
               fsyncs a line per event; ``MemoryFactoryStore`` for tests) → ``chained`` with
@@ -126,6 +128,12 @@ EV_CALIBRATION_CLAIMED = "calibration.claimed"
 #: tests (ADR-0026 item 8): the record's id and digest, its author, the result and the row —
 #: never the tests themselves, which stay in the store and out of every brief.
 EV_ACCEPTANCE_GRADED = "acceptance.graded"
+#: A calibration build's first attempt will NOT be graded on held-out acceptance tests, and
+#: why (none were written, the ticket was attempted before, or their writer is the ticket's
+#: author, the funding approver or the run's submitter) — recorded BEFORE the build, so the
+#: second person's assignment ends with the reason, and a forward reading can let the ticket
+#: leave its pool for a reason no outcome chose (ADR-0026 item 8, DL-334).
+EV_ACCEPTANCE_NOT_GRADED = "acceptance.not_graded"
 #: Intake (ADR-0017): what the listener did with a ticket. These sit on the SAME chain as
 #: the manufacture steps on purpose — "who read this ticket, when, at which revision, and
 #: what it wrote back" is evidence of the same kind as "who built it", and a reader
@@ -175,6 +183,7 @@ EVENT_KINDS: tuple[str, ...] = (
     EV_CALIBRATION_FUNDED,
     EV_CALIBRATION_CLAIMED,
     EV_ACCEPTANCE_GRADED,
+    EV_ACCEPTANCE_NOT_GRADED,
     *INTAKE_EVENT_KINDS,
 )
 #: The two ways a delivered pull request ends; the sync records exactly one of them.
@@ -386,6 +395,18 @@ def spent_grants(events: Iterable[FactoryEvent]) -> set[str]:
         elif ev.kind == EV_ITEM_OUTCOME and ev.payload.get("calibration_event"):
             spent.add(str(ev.payload["calibration_event"]))
     return spent
+
+
+def attempted_before(events: Iterable[FactoryEvent], item_id: str, grant: str = "") -> bool:
+    """Whether ``item_id`` was attempted before the calibration grant ``grant``: any build of
+    it is on the chain, or any OTHER grant of it was claimed (or spent by an outcome). A claim
+    is written before any spend, so a run that died mid-ladder — before the loop recorded its
+    builds — still makes the ticket attempted (P-692). THE predicate the loop, the write
+    route and the assignment list share: a later attempt is never graded on held-out tests."""
+    mine = [e for e in events if e.item_id == item_id]
+    if any(e.kind == EV_BUILD for e in mine):
+        return True
+    return bool(spent_grants(mine) - {grant})
 
 
 def ticket_authors(
@@ -685,6 +706,20 @@ class FactoryEvidence:
             grant=grant,
         )
 
+    def record_acceptance_not_graded(
+        self, item_id: str, *, grant: str, why: str, record_id: str = "", reason: str = ""
+    ) -> FactoryEvent:
+        """A calibration build's first attempt will not be graded on held-out tests, and why —
+        recorded before the build."""
+        return self.append(
+            EV_ACCEPTANCE_NOT_GRADED,
+            item_id,
+            grant=grant,
+            why=why,
+            record_id=record_id,
+            reason=reason,
+        )
+
     # --- queries -----------------------------------------------------------------
     def verdict_for(self, item_id: str, pack_hash: str = "") -> FactoryEvent | None:
         """The LATEST verdict for the item (optionally for one build)."""
@@ -730,6 +765,7 @@ class FactoryEvidence:
 __all__ = [
     "EVENT_KINDS",
     "EV_ACCEPTANCE_GRADED",
+    "EV_ACCEPTANCE_NOT_GRADED",
     "EV_BACKLOG_EVOLVED",
     "EV_BACKLOG_FROZEN",
     "EV_BUILD",
@@ -762,6 +798,7 @@ __all__ = [
     "JsonlFactoryStore",
     "MemoryFactoryStore",
     "VerdictBeforeEditViolation",
+    "attempted_before",
     "spent_grants",
     "ticket_authors",
     "verify_events",

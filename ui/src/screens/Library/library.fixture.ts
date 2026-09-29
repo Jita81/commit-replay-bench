@@ -156,11 +156,18 @@ export const WORK_TYPE: WorkTypePage = {
         state: 'deliver',
         ceiling: true,
         reading_id: 'r3',
-        forward: { reading_id: 'rf', rule: 'look.v1', registered_at: '2026-09-28T10:00:00+00:00', state: 'look_pending', counted: 1, clean: 1, enrolled: 2, next_look: 20, needed: 19 },
+        // n differs from the passes, so a screen that swapped them would be caught
+        forward: { reading_id: 'rf', rule: 'look.v1', registered_at: '2026-09-28T10:00:00+00:00', state: 'look_pending', counted: 3, clean: 2, enrolled: 4, next_look: 20, needed: 17 },
       },
-      next: 'Ceiling only — forward-unvalidated: only the commit’s own tests delivered, so a ticket here is built only as a calibration build, which never opens a pull request.',
+      next: 'Measured only against each commit’s own tests, so a ticket here is built only as a calibration build, which never opens a pull request.',
     },
-    { size: 'XL', tasks: 0, standard: null, next: 'Register a reading.' },
+    // a ceiling with no forward reading yet: an operator registers one on this page
+    {
+      size: 'XL',
+      tasks: 21,
+      standard: { arm: 'S3', n: 20, clean: 20, ci_low: 0.839, ci_high: 1, apparatus: '2.4', state: 'deliver', ceiling: true, reading_id: 'r5', forward: null },
+      next: 'Measured only against each commit’s own tests, so a ticket here is built only as a calibration build, which never opens a pull request.',
+    },
   ],
   quality: {
     served: true,

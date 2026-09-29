@@ -14,13 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **The forward reading: a second person's held-out tests are the only way past a ceiling**
   (north-star Wave 4, stream FWD; [the branch](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4b-fwd)).
-  A second person writes held-out acceptance tests on `/factory/acceptance`, from the ticket
-  alone and before the build. The calibration build's first attempt is graded on them after
-  the builder finishes and stamped `S2` inside its row; it never opens a pull request.
-  `POST /readings/forward` registers the forward reading of a ceiling, spending that cell's
-  budget. Only its delivery promotes the ceiling, and the work type's page shows its state and
-  n. One label now means "graded on held-out tests" for writer and readers (DL-334, DL-335,
-  P-690, P-691).
+  A second person writes held-out acceptance tests on `/factory/acceptance` from the ticket
+  alone; the calibration build's first attempt is graded on them and stamped `S2`, and it opens
+  no pull request. An operator registers a ceiling's forward reading on the work type's page;
+  only its delivery promotes the ceiling. After attack: a ticket attempted before, even by a run
+  that died, is never graded again; a hang is a miss; a reading counts only the record that
+  enrolled a ticket; an ungradable ticket leaves the pool (DL-334, DL-335, P-690 to P-696).
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).

@@ -997,13 +997,12 @@ def standard_for(repo: str, capability_class: str, size: str) -> ProvenStandard 
 #: (ADR-0026 items 4 and 8): calibration builds graded on a second person's held-out tests,
 #: counted by a registered forward reading.
 CALIBRATION_NEEDS = (
-    "Ceiling only — forward-unvalidated: only the commit's own tests delivered, so a ticket "
-    "here is built only as a calibration build, which never opens a pull request. Each "
-    "calibration build needs a failing test a person attached to the ticket, an approver who "
-    "funds it, and held-out acceptance tests a second person writes from the ticket alone "
-    "before it is built. A forward reading registered on this cell counts the first attempts "
-    "graded on those tests; when it delivers under the look rule, the ceiling becomes a "
-    "standard."
+    "Measured only against each commit's own tests, so a ticket here is built only as a "
+    "calibration build, which never opens a pull request. Each calibration build needs a "
+    "failing test a person attached to the ticket, an approver who funds it, and held-out "
+    "acceptance tests a second person writes from the ticket alone before it is built. A "
+    "forward reading registered on this cell before those tests are written counts the first "
+    "attempts graded on them; when it passes its look, the ceiling becomes a standard."
 )
 
 

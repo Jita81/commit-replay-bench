@@ -5,14 +5,17 @@ on its first attempt, on held-out acceptance tests a second person writes from t
 
 * ``GET /factory/{repo}/acceptance`` (viewer) — every ticket that needs held-out tests or has
   them: its title, description, acceptance criteria, class and size, the grant and who funded
-  it, the state (``open``, ``written``, ``building``, ``graded``) and the result once graded,
-  and whether the signed-in person may write the tests (``can_write``) or why not
-  (``why_not``). Never the ticket's failing test and never a build.
+  it (with display names), the state (``open``, ``written``, ``building``, ``graded``,
+  ``not_graded`` with why, ``cannot_grade``) and the result once graded, whether a forward
+  reading is registered on the ticket's cell and whether it enrols this ticket, a test path the
+  runner accepts, and whether the signed-in person may write the tests (``can_write``) or why
+  not (``why_not``). Never the ticket's failing test and never a build.
 * ``POST /factory/{repo}/items/{item_id}/acceptance`` (operator) — write them: ``{files:
   [{path, content}]}`` → **201** the record's public view (author, time, digest, paths).
   Refused **409** ``acceptance_not_needed`` (the ticket carries no person's failing test),
   ``no_calibration_build`` (no grant), ``build_started`` (the grant is claimed),
-  ``already_built`` (the ticket was built before) or ``acceptance_written`` (one record per
+  ``already_built`` (the ticket was attempted before: built, or another grant of it claimed)
+  or ``acceptance_written`` (one record per
   grant); **403** ``acceptance_same_person`` (the ticket's author or the funding approver);
   **422** for a path outside the repository, a file its runner does not treat as a test, the
   ticket's own test file, too many or too large files, or content the redaction would change.
@@ -50,13 +53,15 @@ from crb.core.acceptance import (
     MAX_FILES,
     HeldOutTests,
     path_refusal,
+    person,
+    suggested_path,
     writer_refusal,
 )
 from crb.core.evidence import utc_now_iso
 from crb.core.redact import redact
 from crb.core.spec import RepoConfig
 from crb.factory.backlog import BacklogItem
-from crb.factory.evidence import EV_BUILD, spent_grants, ticket_authors
+from crb.factory.evidence import attempted_before, spent_grants, ticket_authors
 from crb.server.acceptance import (
     AcceptanceRefused,
     assignment,
@@ -67,6 +72,8 @@ from crb.server.acceptance import (
 from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
+from crb.server.routes.library import display_names
+from crb.server.routes.readings import load_readings
 from crb.server.routes.repos import get_repo_or_404
 from crb.server.settings import ROLE_RANK
 
@@ -107,13 +114,26 @@ class AssignmentOut(BaseModel):
     grant: str
     funded_by: str
     funded_at: str
-    #: ``open`` (tests needed), ``written``, ``building`` (the grant is claimed), ``graded``.
+    #: The approver's display name ("" when the store does not know them).
+    funded_by_name: str = ""
+    #: ``open`` (tests needed), ``written``, ``building`` (the grant is claimed), ``graded``,
+    #: ``not_graded`` (built without them — ``why_not`` says why) or ``cannot_grade`` (the
+    #: ticket was attempted before this grant).
     status: str
     can_write: bool
     why_not: str
     record: HeldOutRecordOut | None = None
+    #: The display name of the person who wrote the record ("" with no record).
+    author_name: str = ""
     #: ``pass`` / ``fail`` / ``error`` once the build's first attempt is graded; else "".
     result: str = ""
+    #: The latest forward reading registered on this ticket's class, size and language, or "".
+    forward_reading: str = ""
+    #: The forward reading whose pool enrols this ticket (its tests were written after it was
+    #: registered), or "" — a ticket no forward reading enrols is graded but never counted.
+    counted_by: str = ""
+    #: A test path this repository's runner accepts for the ticket, or "".
+    suggested_path: str = ""
 
 
 class AssignmentsOut(BaseModel):
@@ -139,13 +159,15 @@ def _config(repo_row: Any) -> RepoConfig:
 def list_assignments(
     repo: str, viewer: ViewerDep, db: DbDep, settings: SettingsDep
 ) -> AssignmentsOut:
-    get_repo_or_404(db, repo)
+    repo_row = get_repo_or_404(db, repo)
+    config = _config(repo_row)
     home = FactoryHome(settings.home, repo)
     events = home.events()
     authored = home.authored()
     records = load_held_out(db, repo)
+    forwards = [r for r in load_readings(db, repo) if r.prospective]
     may_write = ROLE_RANK.get(viewer.role, -1) >= ROLE_RANK["operator"]
-    out: list[AssignmentOut] = []
+    found: list[dict[str, Any]] = []
     for item in _items(home):
         a = assignment(
             item,
@@ -154,9 +176,31 @@ def list_assignments(
             records,
             viewer=viewer.id,
             viewer_may_write=may_write,
+            language=config.language.value,
+            forwards=forwards,
+            path=suggested_path(config, item.id),
         )
         if a is not None:
-            out.append(AssignmentOut(**a))
+            found.append(a)
+    people = display_names(
+        db,
+        [
+            person(x)
+            for a in found
+            for x in (a["funded_by"], (a["record"] or {}).get("author", ""))
+            if x
+        ],
+    )
+    out = [
+        AssignmentOut(
+            **{
+                **a,
+                "funded_by_name": people.get(person(a["funded_by"]), ""),
+                "author_name": people.get(person((a["record"] or {}).get("author", "")), ""),
+            }
+        )
+        for a in found
+    ]
     return AssignmentsOut(repo=repo, assignments=out)
 
 
@@ -204,11 +248,12 @@ def write_assignment(  # noqa: PLR0917 — FastAPI dependencies + path/body
             "build_started",
             "the calibration build has started: tests written now could not be held out",
         )
-    if any(e.kind == EV_BUILD for e in events):
+    if attempted_before(events, item_id, grant=grant.event_id):
         raise ApiError(
             409,
             "already_built",
-            "the ticket was built before, so its next attempt is never graded on held-out tests",
+            "the ticket was attempted before (built, or another calibration build of it "
+            "started), so its next attempt is never graded on held-out tests",
         )
     refused = writer_refusal(
         operator.id,
@@ -218,7 +263,7 @@ def write_assignment(  # noqa: PLR0917 — FastAPI dependencies + path/body
     if refused:
         raise ApiError(403, "acceptance_same_person", refused)
     config = _config(repo_row)
-    files = _checked_files(body, config, authored.path)
+    files = _checked_files(body, config, authored.path, suggested_path(config, item_id))
     record = HeldOutTests(
         repo=repo,
         item_id=item_id,
@@ -237,8 +282,11 @@ def write_assignment(  # noqa: PLR0917 — FastAPI dependencies + path/body
     return HeldOutRecordOut(**record.public())
 
 
-def _checked_files(body: HeldOutIn, config: RepoConfig, ticket_test: str) -> list[tuple[str, str]]:
-    """The files as written, or 422 naming the first that cannot hold a held-out test."""
+def _checked_files(
+    body: HeldOutIn, config: RepoConfig, ticket_test: str, example: str = ""
+) -> list[tuple[str, str]]:
+    """The files as written, or 422 naming the first that cannot hold a held-out test — a
+    path the runner does not treat as a test is answered with one it does (``example``)."""
     seen: set[str] = set()
     out: list[tuple[str, str]] = []
     for f in body.files:
@@ -249,7 +297,9 @@ def _checked_files(body: HeldOutIn, config: RepoConfig, ticket_test: str) -> lis
         if not why and path == ticket_test:
             why = f"{path!r} is a file the ticket already carries: choose another name"
         if not why and not config.is_test(path):
-            why = f"{path!r} is not a test file under this repository's layout"
+            why = f"{path!r} is not a test file under this repository's layout" + (
+                f": a path its test runner accepts is, for example, {example!r}" if example else ""
+            )
         if not why and redact(f.content) != f.content:
             why = f"{path!r} holds text shaped like a credential: remove it"
         if why:

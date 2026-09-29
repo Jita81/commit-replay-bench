@@ -166,7 +166,6 @@ from crb.factory.delivery import (
 )
 from crb.factory.evidence import (
     EV_BACKLOG_FROZEN,
-    EV_BUILD,
     EV_CALIBRATION_CLAIMED,
     EV_CALIBRATION_FUNDED,
     EV_DELIVERY,
@@ -175,6 +174,7 @@ from crb.factory.evidence import (
     OUTCOME_CLOSED,
     FactoryEvent,
     FactoryEvidence,
+    attempted_before,
     spent_grants,
     ticket_authors,
 )
@@ -857,9 +857,11 @@ class FactoryLoop:
         """The held-out acceptance tests this build's first attempt is graded on (ADR-0026
         item 8), or ``None`` and why the ``S2`` row is stamped ``acceptance: none``: not a
         calibration build; no record for the grant this run claimed, one that does not
-        verify, or one written after the claim; the ticket was built before (a later attempt
-        is never an ``S2`` reading's row); or its writer is the ticket's author, the funding
-        approver or this run's submitter. Read before any build."""
+        verify, or one written after the claim; the ticket was attempted before — a build of
+        it is on the chain, or another of its grants was claimed, even by a run that died
+        before recording a build (``attempted_before``, P-692): a later attempt is never an
+        ``S2`` reading's row; or its writer is the ticket's author, the funding approver or
+        this run's submitter. Read before any build."""
         s = self.spec
         cal = entry.calibration
         if cal is None:
@@ -882,7 +884,7 @@ class FactoryLoop:
             or not _not_after(rec.written_at, claimed.created)
         ):
             return None, WHY_NO_TESTS
-        if any(e.kind == EV_BUILD for e in events):
+        if attempted_before(events, item.id, grant=cal.event_id):
             return None, WHY_NOT_FIRST
         refused = writer_refusal(
             rec.author,
@@ -1018,12 +1020,43 @@ class FactoryLoop:
         labels: Mapping[str, str] | None = None,
         arm: str = "",
         held_out: HeldOutTests | None = None,
+        grant: str = "",
     ) -> list[BuildResult]:
-        """Step 3: the build ladder; every attempt is recorded, the final one's tree kept.
-        ``labels`` go on every row: the context arm the brief carried, a calibration
-        build's stamp (ADR-0026 items 1 and 8). ``held_out`` grades the first rung only."""
+        """Step 3: the build ladder; every attempt is recorded AS IT IS GRADED, the final one's
+        tree kept — a ladder that dies on a later rung leaves its earlier attempts on the
+        chain (P-692). ``labels`` go on every row: the context arm the brief carried, a
+        calibration build's stamp (ADR-0026 items 1 and 8). ``held_out`` grades the first
+        rung only; that grading is on the chain (``acceptance.graded``, naming ``grant``) as
+        soon as the first rung is graded."""
         s = self.spec
-        results = build_ladder(
+
+        def recorded(res: BuildResult) -> None:
+            s.evidence.record_build(
+                item.id,
+                pack_hash=res.pack_hash,
+                row_id=res.row.row_id if res.row else "",
+                row_hash=res.row.row_hash if res.row else "",
+                clean=res.clean,
+                belts=res.grade.belts.to_dict(),
+                rung=res.rung,
+                trial=res.trial,
+                oracle_commit=res.oracle.sha,
+                test_sha256=res.oracle.test_sha256,
+                disqualified=res.disqualified,
+                error=res.error or res.grade.error,
+            )
+            if held_out is not None and res.labels.get(LABEL_ACCEPTANCE_RESULT):
+                s.evidence.record_acceptance_graded(
+                    item.id,
+                    record_id=held_out.record_id,
+                    sha256=held_out.sha256,
+                    author=held_out.author,
+                    result=res.labels[LABEL_ACCEPTANCE_RESULT],
+                    row_hash=res.row.row_hash if res.row else "",
+                    grant=grant,
+                )
+
+        return build_ladder(
             self.repo,
             item,
             authored,
@@ -1053,23 +1086,8 @@ class FactoryLoop:
             learning=s.learning if arm_carries_loop(arm) else None,
             author_stamp=self._author_stamp(proof),
             held_out=held_out,
+            on_result=recorded,
         )
-        for res in results:
-            s.evidence.record_build(
-                item.id,
-                pack_hash=res.pack_hash,
-                row_id=res.row.row_id if res.row else "",
-                row_hash=res.row.row_hash if res.row else "",
-                clean=res.clean,
-                belts=res.grade.belts.to_dict(),
-                rung=res.rung,
-                trial=res.trial,
-                oracle_commit=res.oracle.sha,
-                test_sha256=res.oracle.test_sha256,
-                disqualified=res.disqualified,
-                error=res.error or res.grade.error,
-            )
-        return results
 
     def _delivered_cell_sign_off(
         self,
@@ -1625,6 +1643,12 @@ class FactoryLoop:
             if arm_base(arm) == ARM_S2:
                 held, why = self._held_out(item, entry, authored)
                 labels.update(none_labels(why or WHY_NOT_FIRST))
+                if held is None and entry.calibration is not None:
+                    # before the build: the assignment ends with why, and a forward reading
+                    # lets the ticket leave its pool for a reason no outcome chose (DL-334)
+                    s.evidence.record_acceptance_not_graded(
+                        item.id, grant=entry.calibration.event_id, why=why
+                    )
             proof = self._prove(item, readiness, oracle)
             results = self._build(
                 item,
@@ -1635,18 +1659,8 @@ class FactoryLoop:
                 labels=labels,
                 arm=arm,
                 held_out=held,
+                grant=entry.calibration.event_id if entry.calibration is not None else "",
             )
-            if held is not None and entry.calibration is not None:
-                first = results[0]
-                s.evidence.record_acceptance_graded(
-                    item.id,
-                    record_id=held.record_id,
-                    sha256=held.sha256,
-                    author=held.author,
-                    result=first.labels.get(LABEL_ACCEPTANCE_RESULT, ""),
-                    row_hash=first.row.row_hash if first.row else "",
-                    grant=entry.calibration.event_id,
-                )
             builds += [b.summary() for b in results]
             final = results[-1]
             keep.append(final)
