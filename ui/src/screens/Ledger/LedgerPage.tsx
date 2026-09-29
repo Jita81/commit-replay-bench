@@ -30,8 +30,8 @@
  *               docs/adr/0007-abstract-cell-export-only.md,
  *               docs/adr/0029-the-audit-trail-is-hash-chained.md
  * Works with:   ui/src/api/hooks.ts (`useLedgerVerify`, `useGrades`), ui/src/api/types.ts
- *               (`GradeRow`, `LedgerVerify`, `LedgerDisqualified` — read as an extension of
- *               the verify until the server serves it, `beltsOf`),
+ *               (`GradeRow`, `LedgerVerify` and its served `disqualified` block,
+ *               `LedgerDisqualified`, `beltsOf`),
  *               ui/src/components/ExportButton.tsx (the three exports),
  *               ui/src/components/GateBanner.tsx (the
  *               gate), ui/src/components/BeltPills.tsx and ui/src/components/Provenance.tsx
@@ -54,7 +54,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { useGrades, useLedgerVerify } from '../../api/hooks'
-import { beltsOf, type GradeListParams, type GradeRow, type LedgerDisqualified, type LedgerVerify } from '../../api/types'
+import { beltsOf, type GradeListParams, type GradeRow, type LedgerDisqualified } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
 import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
@@ -95,12 +95,6 @@ const SELECT_FILTERS: ReadonlyArray<{ key: 'clean' | 'mode' | 'size'; label: str
   { key: 'size', label: 'Size', options: ['XS', 'S', 'M', 'L', 'XL'] },
 ]
 const SIZES = SELECT_FILTERS[2]!.options
-
-/**
- * `disqualified` is not yet a field of `GET /ledger/verify` (G-400's server half), so it is read
- * as an extension of the mirrored `LedgerVerify`, never added to it (tests/test_ui_type_mirrors.py).
- */
-type VerifyWithDisqualified = LedgerVerify & { disqualified?: LedgerDisqualified }
 
 /**
  * The Disqualified tile: the served window, threshold and per-builder count, red when a
@@ -261,7 +255,7 @@ export function LedgerPage() {
         <StatTile label="Rows" hint="stat.ledger.rows" value={verify.data ? fmtInt(verify.data.rows) : '—'} n={verify.data?.rows ?? 0} apparatus="whole ledger, all repos" />
         <StatTile label="false-Q1 total" hint="stat.ledger.false_q1" value={verify.data ? String(verify.data.false_q1_total) : '—'} n={verify.data?.rows ?? 0} apparatus="enforced at write; re-checked at read" tone={verify.data ? (verify.data.false_q1_total === 0 ? 'green' : 'red') : undefined} data-testid="tile-false-q1-total" />
         <StatTile label="Matching rows" hint="stat.ledger.matching" value={grades.data ? fmtInt(grades.data.total) : '—'} n={grades.data?.total ?? 0} apparatus="current filters" />
-        <DisqualifiedTile figure={(verify.data as VerifyWithDisqualified | undefined)?.disqualified} served={Boolean(verify.data)} />
+        <DisqualifiedTile figure={verify.data?.disqualified} served={Boolean(verify.data)} />
       </div>
 
       <Card
