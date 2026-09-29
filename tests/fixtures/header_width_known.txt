@@ -58,7 +58,6 @@ ui/src/screens/Oracle/OraclePage.tsx#a6feb8110606
 ui/src/screens/Posture/PosturePage.tsx#b2944462cbeb
 ui/src/screens/Repos/ListEditors.tsx#7249ed9e8cad
 ui/src/screens/Repos/RepoConfigTab.tsx#fe74f8641e28
-ui/src/screens/Repos/RepoDetail.tsx#c9af99c48d00
 ui/src/screens/Repos/repoFixtures.ts#454aeb9025ba
 ui/src/screens/Repos/repoFixtures.ts#b1658603a09a
 ui/src/screens/Results/MapTable.test.tsx#2db09058057a

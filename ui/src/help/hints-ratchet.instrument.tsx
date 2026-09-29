@@ -34,6 +34,7 @@ import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
 import type { Role } from '../api/types'
 import { CapabilityPage } from '../screens/Capability/CapabilityPage'
+import { ConnectRepoPage } from '../screens/Connect/ConnectPage'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
@@ -52,6 +53,7 @@ import { RunsPage } from '../screens/Runs/RunsPage'
 import { TaskDetailPage } from '../screens/Runs/TaskDetailPage'
 import { SettingsPage } from '../screens/Settings/SettingsPage'
 import { envelope } from '../test/utils'
+import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
 
 export interface InstrumentScreen {
   route: string
@@ -879,6 +881,44 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
       await screen.findByTestId('account-history-list')
     },
     minHints: 61,
+  },
+  {
+    // G-117: Cancel the run asks before it posts — the question's two buttons are a state of
+    // their own the one-entry table cannot reach (the fixture's walk has a replay in flight)
+    name: '/connect/:name + Cancel the run confirm',
+    route: '/connect/alpha',
+    path: '/connect/:name',
+    element: <ConnectRepoPage />,
+    api: ONRAMP_SCREENS['/connect/:name']!.api,
+    roles: ['operator'],
+    open: async () => {
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel the run' }))
+      await screen.findByTestId('cancel-confirm')
+    },
+    minHints: 20,
+  },
+  {
+    // DL-316: the mine stage's candidate lines, Accept and Reject are a state the fixture's
+    // walk (whose notes imply nothing) cannot reach; a viewer reads them, an operator decides
+    name: '/connect/:name + config candidates',
+    route: '/connect/alpha',
+    path: '/connect/:name',
+    element: <ConnectRepoPage />,
+    api: {
+      ...ONRAMP_SCREENS['/connect/:name']!.api,
+      'GET /repos/alpha/config-candidates': {
+        repo: 'alpha',
+        items: [
+          { id: 'raise_test_timeout:runner_opts.timeout:1800', kind: 'raise_test_timeout', scope: 'repo', field: 'runner_opts.timeout', observed: 900, proposed: 1800, reason: '2 commits hit the test wall clock at the parent, the baseline or the gold; the limit in force is 900 s, and raising it lets them qualify', sources: ['a'.repeat(40), 'b'.repeat(40)] },
+          { id: 'provisioning_on:CRB_PROVISION__ENABLED:True', kind: 'provisioning_on', scope: 'deployment', field: 'CRB_PROVISION__ENABLED', observed: null, proposed: true, reason: '1 commit could not load its dependencies offline; switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md §3.4), then qualify again', sources: ['c'.repeat(40)] },
+        ],
+      },
+    },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByTestId('config-candidates')
+    },
+    minHints: 20,
   },
   {
     name: '/repos + Add a repository dialog',

@@ -64,6 +64,8 @@ import {
 import { api, ApiError, qs } from './client'
 import { RunEventStream, type EventSourceFactory, type SseSnapshot } from './sse'
 import type {
+  CandidateDecision,
+  ConfigCandidates,
   Intake,
   GitHubAppInfo,
   GitHubConnectRequest,
@@ -152,6 +154,7 @@ export const keys = {
   me: ['auth', 'me'] as const,
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
+  configCandidates: (name: string) => ['repos', name, 'config-candidates'] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
   repoPool: (name: string) => ['repos', name, 'pool'] as const,
   /** Every executor's posture reading for `name` — the prefix a finished run invalidates. */
@@ -376,6 +379,34 @@ export function useRecordBaselineRead(repo: string, ready: boolean): void {
       .then(() => qc.invalidateQueries({ queryKey: keys.repo(repo) }))
       .catch(() => undefined)
   }, [repo, ready, qc])
+}
+
+/**
+ * `GET /repos/{name}/config-candidates` — the config changes the mine's gold notes and skips
+ * imply, not yet decided (DL-316). Read on the walk's mine stage; a viewer reads, an operator
+ * decides.
+ */
+export function useConfigCandidates(name: string): UseQueryResult<ConfigCandidates, ApiError> {
+  return useQuery({
+    queryKey: keys.configCandidates(name),
+    queryFn: () => api<ConfigCandidates>(`/repos/${enc(name)}/config-candidates`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/**
+ * `POST /repos/{name}/config-candidates/{id}/accept|reject` — the session decides one
+ * candidate. Accept goes through the same merge, re-validation and `repo.updated` event as a
+ * hand edit; reject records the decision and changes nothing. The repository, its candidates
+ * and its audit trail (one key prefix) are re-read either way.
+ */
+export function useDecideCandidate(): UseMutationResult<CandidateDecision, ApiError, { name: string; id: string; decision: 'accept' | 'reject' }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, id, decision }) => api<CandidateDecision>(`/repos/${enc(name)}/config-candidates/${enc(id)}/${decision}`, { method: 'POST' }),
+    onSuccess: (_d, { name }) => qc.invalidateQueries({ queryKey: keys.repo(name) }),
+  })
 }
 
 /** `POST /repos`; invalidates the list. */
@@ -1167,7 +1198,14 @@ export function useSyncGitHubInstallations(): UseMutationResult<GitHubInstallati
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => api<GitHubInstallation[]>('/github/installations/sync', { method: 'POST' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.githubApp }),
+    // G-128: the response IS the installation list, so the app query is seeded from it
+    // before the refetch — a caller's onSuccess (the dialog's select-the-landed-installation)
+    // then reads the recorded installation at once — and the invalidation is RETURNED, so
+    // the mutation is pending until the app has been re-read, never racing the refetch
+    onSuccess: (rows) => {
+      qc.setQueryData<GitHubAppInfo>(keys.githubApp, (old) => (old ? { ...old, installations: rows } : old))
+      return qc.invalidateQueries({ queryKey: keys.githubApp })
+    },
   })
 }
 

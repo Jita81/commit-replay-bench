@@ -62,16 +62,24 @@ How:          ``iter_candidates`` (git log + changed files + layout rules, one c
               (``Workspace.create`` → ``overlay_tests`` → target run → belt-scope run →
               ``TaskSpec``) → ``gold_check`` (``overlay_sources`` → target → belt → lint) →
               ``mine`` drives the loop to ``target_count`` and emits ``mine.*`` events.
+              ``config_candidates`` (pure, DL-316) reads the gold notes and the skip events
+              back into the config changes they imply — a timed-out target, belt or gold
+              → ``runner_opts.timeout``; a timed-out lint plan → ``lint.timeout``;
+              ``QUAL_ENV_UNLOADABLE`` → provisioning on — and nothing else: lint debt
+              (``gold fails belt 5``) is the maintainers' own and is never a candidate.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0019-qualification-is-posture-relative.md; DL-093 (a distinct commit
-              is a distinct change); ADR-0025 item 13 (the unattributed baseline, stream G)
+              is a distinct change); ADR-0025 item 13 (the unattributed baseline, stream G);
+              DL-316 (a gold note is offered as a named config change, never applied)
 Works with:   src/crb/core/spec.py (RepoConfig layout rules, TaskSpec, size tiers, path
               class), src/crb/core/workspace.py (the worktree and overlays),
               src/crb/core/runners/base.py (target scope, belt scope, oracle validity, lint
               plan), src/crb/core/git.py (log, changed files, churn), src/crb/core/grade.py
               (applies the same belts to a builder's patch), src/crb/core/lint.py (belt 5 on
-              the gold), src/crb/cli/commands/mine.py (the ``crb mine`` command)
+              the gold), src/crb/cli/commands/mine.py (the ``crb mine`` command),
+              src/crb/server/routes/repos.py (serves ``config_candidates`` and applies an
+              accepted one through the audited config update)
 Tested by:    tests/test_mine.py, tests/test_mine_distinct_change.py, tests/test_runners_go.py,
               tests/test_runners_jvm.py, tests/test_runners_node.py, tests/test_runners_cargo.py
 Touch when:   onboarding a repository whose commits do not fit the pool caps (``pool_caps``)
@@ -94,12 +102,13 @@ from typing import Any
 from crb.core.deps import SCOPE_RUN, DepsProvider, NullDepsProvider, ProvisionRefused, TaskDeps
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitError, GitRepo
-from crb.core.lint import LintRun, run_plan
+from crb.core.lint import DEFAULT_LINT_TIMEOUT_S, LintRun, run_plan
 from crb.core.posture import Posture, resolve_posture
 from crb.core.qualify import (
     QUAL_BASELINE_TIMEOUT,
     QUAL_BASELINE_UNATTRIBUTED,
     QUAL_ENV_UNLOADABLE,
+    QUAL_HEADROOM,
     QUAL_NOT_RED,
     QUAL_RED_TIMEOUT,
     QUAL_TREE_COPY_FAILED,
@@ -843,3 +852,181 @@ def mine(
                 "provisioning on and qualify"
             )
     _emit(on_event, "mine.done", repo=config.name, pool=pool, found=found, examined=examined)
+
+
+# ---------------------------------------------------------------------------
+# The config changes the notes imply (DL-316)
+# ---------------------------------------------------------------------------
+
+#: The qualification codes that mean "the configured wall clock was hit".
+_TIMEOUT_CODES: frozenset[str] = frozenset({QUAL_RED_TIMEOUT, QUAL_BASELINE_TIMEOUT, QUAL_HEADROOM})
+#: The words a ``mine.skip`` event and a legacy gold note use for the same facts.
+_TIMEOUT_WORDS: tuple[str, ...] = (
+    "target timeout at parent",
+    "baseline timeout",
+    "gold target timed out",
+    "gold belt timed out",
+)
+#: The runner's own default wall clock when the config names none (``BaseRunner``).
+DEFAULT_TEST_TIMEOUT_S = 900
+
+CANDIDATE_RAISE_TEST_TIMEOUT = "raise_test_timeout"
+CANDIDATE_RAISE_LINT_TIMEOUT = "raise_lint_timeout"
+CANDIDATE_PROVISIONING_ON = "provisioning_on"
+SCOPE_REPO = "repo"
+SCOPE_DEPLOYMENT = "deployment"
+
+
+@dataclass(frozen=True)
+class ConfigCandidate:
+    """One config change the mine notes imply, offered to a person — never applied by the
+    miner. ``field`` is the dotted config path (``runner_opts.timeout``, ``lint.timeout``)
+    or, for the ``deployment`` scope, the variable an operator sets; ``observed`` is the
+    configured limit that was hit (not a measured duration: a timed-out run has none);
+    ``sources`` are the task ids and skipped shas that imply it."""
+
+    kind: str
+    scope: str
+    field: str
+    observed: Any
+    proposed: Any
+    reason: str
+    sources: tuple[str, ...] = ()
+
+    @property
+    def id(self) -> str:
+        """Stable while the config it reads is unchanged: the same note offers the same id,
+        so a decision on it (accepted, rejected) is remembered by id."""
+        return f"{self.kind}:{self.field}:{self.proposed}".replace(" ", "")
+
+    def update(self, config: RepoConfig) -> dict[str, Any]:
+        """The ``PUT /repos/{name}`` body that applies it (``{}`` for a deployment scope)."""
+        if self.scope != SCOPE_REPO:
+            return {}
+        section, _, key = self.field.partition(".")
+        block = dict(getattr(config, section))
+        block[key] = self.proposed
+        return {section: block}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "scope": self.scope,
+            "field": self.field,
+            "observed": self.observed,
+            "proposed": self.proposed,
+            "reason": self.reason,
+            "sources": list(self.sources),
+        }
+
+
+def _n(count: int, noun: str) -> str:
+    """``1 commit`` / ``2 commits`` — a real plural, never ``commit(s)`` (GOV.UK plain English)."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _note_code(task: TaskSpec) -> str:
+    """The qualification code a task's note carries (``<CODE>: …``) or its label."""
+    code = str(task.labels.get("qualification_code") or "")
+    if code:
+        return code
+    head, sep, _ = task.gold_note.partition(":")
+    return head.strip() if sep and head.strip().startswith("QUAL_") else ""
+
+
+def _is_lint_timeout(note: str) -> bool:
+    """``gold fails belt 5 (<tool>): <tool> timed out`` — the plan's wall clock, not lint
+    debt: every other belt-5 note is the maintainers' own and implies no change."""
+    return note.startswith("gold fails belt 5") and note.rstrip().endswith("timed out")
+
+
+def config_candidates(
+    tasks: Iterable[TaskSpec],
+    config: RepoConfig,
+    *,
+    skips: Iterable[Mapping[str, Any]] = (),
+    default_timeout: int = DEFAULT_TEST_TIMEOUT_S,
+) -> list[ConfigCandidate]:
+    """The config changes the mine's notes imply, one per change, with the tasks and skipped
+    shas that imply it. Pure: reads ``gold_note`` / ``labels.qualification_code`` on each
+    task, the ``mine.skip`` payloads (``{sha, reason, code?}``: a timeout at mine is a skip
+    with no task and no note) and the config; maps ONLY notes that name a concrete change:
+
+    * a target, baseline, belt or gold that hit the wall clock (``QUAL_RED_TIMEOUT``,
+      ``QUAL_BASELINE_TIMEOUT``, ``QUAL_HEADROOM``, or the skip words) →
+      ``runner_opts.timeout`` doubled from the configured limit (``default_timeout`` when
+      the config names none);
+    * a lint plan that timed out → ``lint.timeout`` doubled;
+    * ``QUAL_ENV_UNLOADABLE`` → dependency provisioning on (a deployment setting: named,
+      not applied by ``PUT /repos``).
+
+    Everything else — ``gold fails belt 5`` (ADR-0011: lint debt), a green target, a gold
+    that failed its own test — implies no config change and yields nothing.
+    """
+    test_sources: list[str] = []
+    lint_sources: list[str] = []
+    env_sources: list[str] = []
+    for t in tasks:
+        note = t.gold_note or ""
+        code = _note_code(t)
+        if code in _TIMEOUT_CODES or note in _TIMEOUT_WORDS:
+            test_sources.append(t.task_id)
+        elif _is_lint_timeout(note):
+            lint_sources.append(t.task_id)
+        elif code == QUAL_ENV_UNLOADABLE:
+            env_sources.append(t.task_id)
+    for skip in skips:
+        sha = str(skip.get("sha") or "")
+        code = str(skip.get("code") or "")
+        reason = str(skip.get("reason") or "")
+        if code in _TIMEOUT_CODES or reason in _TIMEOUT_WORDS:
+            test_sources.append(sha)
+        elif code == QUAL_ENV_UNLOADABLE or reason.startswith(f"{QUAL_ENV_UNLOADABLE}:"):
+            env_sources.append(sha)
+    out: list[ConfigCandidate] = []
+    if test_sources:
+        observed = int(config.runner_opts.get("timeout") or default_timeout)
+        out.append(
+            ConfigCandidate(
+                CANDIDATE_RAISE_TEST_TIMEOUT,
+                SCOPE_REPO,
+                "runner_opts.timeout",
+                observed,
+                observed * 2,
+                f"{_n(len(test_sources), 'commit')} hit the test wall clock at the parent, "
+                f"the baseline or the gold; the limit in force is {observed} s, and raising "
+                "it lets them qualify",
+                tuple(dict.fromkeys(s for s in test_sources if s)),
+            )
+        )
+    if lint_sources:
+        observed_lint = int(config.lint.get("timeout") or DEFAULT_LINT_TIMEOUT_S)
+        out.append(
+            ConfigCandidate(
+                CANDIDATE_RAISE_LINT_TIMEOUT,
+                SCOPE_REPO,
+                "lint.timeout",
+                observed_lint,
+                observed_lint * 2,
+                f"{_n(len(lint_sources), 'gold')} timed out in belt 5; the lint wall clock "
+                f"in force is {observed_lint} s, and raising it lets the linter finish",
+                tuple(dict.fromkeys(lint_sources)),
+            )
+        )
+    if env_sources:
+        out.append(
+            ConfigCandidate(
+                CANDIDATE_PROVISIONING_ON,
+                SCOPE_DEPLOYMENT,
+                "CRB_PROVISION__ENABLED",
+                None,
+                True,
+                f"{_n(len(env_sources), 'commit')} could not load "
+                f"{'its' if len(env_sources) == 1 else 'their'} dependencies offline; "
+                "switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md "
+                "§3.4), then qualify again",
+                tuple(dict.fromkeys(s for s in env_sources if s)),
+            )
+        )
+    return out

@@ -105,7 +105,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The six stages that take one repository from registered to measured. Each stage says what it proves and whether it spends money; the first five involve no model.',
     next: {
       viewer: 'Read each stage’s status and detail line. The Baseline button opens the baseline once any stage has produced rows; a stage that reads Done, with a finding names what deliver is waiting on.',
-      operator: 'Press Run on the next stage that reads Not started. A Failed stage says so; open run gives the log and the error, fix the cause, then Retry. Measure… is the only stage that spends.',
+      operator: 'Press Run on the next stage that reads Not started, or switch on Chain the free stages so each stage that passes queues the next up to the controls. A Failed stage says so; open run gives the log and the error, fix the cause, then Retry. Under the mine stage, Accept or Reject each configuration change the notes imply. Measure… is the only stage that spends, and it always waits for you.',
     },
     numbers: 'Stage detail lines carry counts (tasks mined, controls constructed, mutants killed). They are counts, not rates: the rates, with n and a Wilson interval, appear on the Baseline. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['negative_controls', 'oracle_strength', 'sighted', 'wilson', 'apparatus', 'belt', 'cell'],

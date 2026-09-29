@@ -60,6 +60,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   the product cannot see; OPERATOR §8.1 tables every factory stop with its way forward and
   §6.1 states the routine and the costs (G-400, G-401, G-920, G-978; P-640 to P-643).
 
+- **Connection: the £0 stages chain from one act, mine notes become decisions, every door
+  on the walk is a door** (Wave 6, stream cnx;
+  [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-cnx)).
+  The walk's "Chain the free stages" switch queues the next free stage once the last passed
+  its fact, under the person who switched it on, never a stage that spends or one already
+  done (DL-315). A note naming a hit wall clock or an unloadable parent is offered on the
+  mine stage to accept, through the audited config update, or reject; an accepted note is
+  held until re-qualified; lint debt is never proposed (DL-316). Cancel the run asks in the
+  app's dialog, Measure… posts nothing, and an unknown repository offers Connection.
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

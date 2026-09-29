@@ -13,6 +13,8 @@
  *               `blocked` (so the walk never offers step 4 before step 3); that the first
  *               measurement is the only stage that spends; that a failed or cancelled
  *               measurement with no rows reads as such, never "not started" (J-ONR-6); that
+ *               the proving stages' lines say no model is involved and the measure stage is
+ *               the only one that spends (G-429); that
  *               the polled run turns the ellipsis lines into k of n, counters and spend, and
  *               a queued run into its place in the queue (J-TEL-6); and the GitHub-URL →
  *               name rule.
@@ -116,6 +118,25 @@ describe('stagesFor', () => {
     const s = stagesFor({ repo: r, oracle: null, controls: null })
     expect(s[3]?.status).toBe('todo')
     expect(s[4]?.status).toBe('blocked')
+  })
+})
+
+describe('stagesFor — the £0 non-goal is in the stage lines (G-429)', () => {
+  it('the proving stages say no model is involved and spend nothing; measure is the only stage that spends', () => {
+    const fresh = repo()
+    const s = stagesFor({ repo: fresh, oracle: null, controls: null })
+    // each stage's "to do" line names the cost: no model involved
+    expect(s[1]?.detail).toBe('run the probe (a few seconds; no model involved)')
+    expect(s[2]?.detail).toBe('mine the history (minutes; no model involved)')
+    expect(s[3]?.detail).toBe('score the oracle (minutes to an hour; no model involved)')
+    expect(s[4]?.detail).toBe('run the controls (minutes to an hour; no model involved)')
+    for (const id of ['register', 'probe', 'mine', 'oracle', 'controls']) expect(s.find((x) => x.id === id)?.spends, id).toBe(false)
+    // and the money step is the next one: the sixth stage, and only it, spends
+    expect(s[5]?.detail).toBe('start a small sighted replay (spends model budget)')
+    expect(s.filter((x) => x.spends).map((x) => x.id)).toEqual(['measure'])
+    // the same holds once the stages are done: nothing but measure ever spends
+    const done = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 31 })
+    expect(done.filter((x) => x.spends).map((x) => x.id)).toEqual(['measure'])
   })
 })
 

@@ -7,7 +7,7 @@ parent: dod.journey.connect-a-repository
 children: []
 persons: [viewer, operator, approver, admin]
 owner: ui
-status: partial                # WRITTEN BY THE CHECKER — never by hand
+status: done                # WRITTEN BY THE CHECKER — never by hand
 updated: 2026-09-25
 updated: 2026-09-26
 ---
@@ -18,8 +18,8 @@ updated: 2026-09-26
 The journey's Connection page is the same list with the walk beside it." (About block,
 `help.ts`; eyebrow `Journey · 1 of 4 · Connection · shape`, derived from the route.)
 
-**Entry → exit.** No nav link or in-app link leads here: the route is reached by URL only
-(the walkthroughs and the GitHub-App-less onboarding guide use it). Leave by clicking a row or
+**Entry → exit.** Arrive from Connection's *All repositories* button (every role), or by URL
+(the walkthroughs and the GitHub-App-less onboarding guide print it). Leave by clicking a row or
 its name (`/repos/:name`), or by *Add repo*, which registers the repository and opens its
 page (`/repos/:name`), not its walk.
 
@@ -31,7 +31,7 @@ probe, mine or measure; does not edit configuration (the repository's Configurat
 | id | category | criterion | evidence | state | gap |
 |---|---|---|---|---|---|
 | repos.purpose.1 | PURPOSE | The About block states the job in one sentence and says the Connection page is the same list with the walk beside it | `hint:about:/repos` · `vitest:ui/src/components/Help.test.tsx::"says, on each screen whose definition of done quotes it, the sentence that record quotes"` | met | |
-| repos.entry-exit.2 | ENTRY-EXIT | The page is reachable from the product (a link on Connection or on the repository page), every row opens its repository, and Add repo lands on the new repository's page; the empty state tells a viewer to ask an operator | `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"Add repo via URL with a preset and runner options"` | partial | G-228 |
+| repos.entry-exit.2 | ENTRY-EXIT | The page is reachable from the product (a link on Connection or on the repository page), every row opens its repository, and Add repo lands on the new repository's page; the empty state tells a viewer to ask an operator | `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"Add repo via URL with a preset and runner options"` · `vitest:ui/src/screens/Connect/ConnectPage.test.tsx::"the Connection header offers All repositories to every role (G-228)"` · `hint:id:button.connect.all_repos` | met | |
 | repos.truth.3 | TRUTH | Each row's probe, tasks, gold-clean, hard and last-run cells show the same values `GET /repos` returns for that repository, the probe pill's accessible label names its state, and the list is not silently truncated beyond the default page: each repository is listed once, a list that changed while it was read is read again, and "All" is said only of a read that saw one unchanging list | `route:GET /repos` · `hint:about:/repos` · `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"back on the repo page the probe pill is OK with the runner summary"` · `vitest:ui/src/screens/Repos/ReposPage.test.tsx::"each row shows the served name, runner, probe state and counts"` · `vitest:ui/src/screens/Repos/ReposPage.test.tsx::"a deployment past one page lists every repository and says all are listed (G-229)"` · `vitest:ui/src/screens/Repos/ReposPage.test.tsx::"a list that changed while it was read says how many of the total it shows (G-229)"` · `vitest:ui/src/screens/Repos/ReposPage.test.tsx::"a repository added ahead of the read while the pages are walked is neither missed nor listed twice: the list is read again (G-229)"` · `vitest:ui/src/screens/Repos/ReposPage.test.tsx::"a list that keeps changing while it is read is never called whole (G-229)"` · `hint:id:summary.repos.count` | met |  |
 | repos.actions.4 | ACTIONS | Add repo: a preset fills language, runner, layout and belt scope; invalid runner-options JSON, a bad URL and an empty explicit belt list are refused client-side with the reason; a 422 renders the server envelope; on 201 the new repository's page opens | `vitest:ui/src/screens/Repos/RepoNewDialog.test.tsx::"a preset fills the layout, runner options and belt scope"` · `vitest:ui/src/screens/Repos/RepoNewDialog.test.tsx::"refuses invalid runner-options JSON and a non-object, then recovers"` · `vitest:ui/src/screens/Repos/RepoNewDialog.test.tsx::"renders the server error envelope on a 422"` · `spec:ui/e2e/walkthrough/02-repo-onboard.spec.ts::"Add repo via URL with a preset and runner options"` · `route:POST /repos` | met | |
 | repos.explanation.5 | EXPLANATION | Every column header, pill and button carries a hint the ratchet enforces (floor 8; the open Add dialog floor 20); the probe column's hint opens on hover with the registry copy; the About block links Configure a repository and Register a repository | `hint:ratchet:/repos` · `hint:about:/repos` · `vitest:ui/src/help/hints-hover.instrument.test.tsx::"names one element on every instrument screen"` · `doc:docs/OPERATOR.md#2-configure-a-repository` | met | |
@@ -42,4 +42,3 @@ probe, mine or measure; does not edit configuration (the repository's Configurat
 | repos.non-goals.10 | NON-GOALS | The About block says the walk lives on the Connection page, so this list is not asked to show stages | `hint:about:/repos` · `vitest:ui/src/components/Help.test.tsx::"says, on each screen whose definition of done quotes it, the sentence that record quotes"` | met | |
 
 ## Gaps
-- **G-228** — nothing in the product links to /repos (no to="/repos" in ui/src); help.ts says "Add a repository here or from Connection" but only a typed URL reaches "here" · add a "All repositories" LinkButton on the Connection page header (or retire the route into Connection and redirect) · ui
