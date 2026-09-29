@@ -151,3 +151,114 @@ def test_the_chain_never_queues_a_kind_that_spends_model_money(
     assert done.status == STATUS_SUCCEEDED, done.error
     assert [r.kind for r in _runs(h)] == ["probe"]
     assert _chain_events(h) == []
+
+
+def _finished(h: Harness, kind: str, status: str = STATUS_SUCCEEDED, **counts: object) -> Run:
+    """A run of ``kind`` that already finished with ``status`` (a stage the walk holds)."""
+    run = h.enqueue(kind)
+    with h.factory() as s:
+        row = s.get(Run, run.id)
+        assert row is not None
+        row.status = status
+        row.finished = "2026-09-29T08:00:00+00:00"
+        row.counts_json = dict(counts)
+        s.commit()
+        s.refresh(row)
+        s.expunge(row)
+        return row
+
+
+def test_a_succeeded_stage_without_its_pass_fact_chains_nothing(h: Harness) -> None:
+    """DL-315 (2): succeeded is not enough — the stage's OWN pass fact must hold. A mine
+    that found no gold-clean task, a probe whose counts say not green, chain nothing; the
+    same call with the fact present chains (the positive control proves the path is live)."""
+    h.add_repo(auto_stages=True)
+    _switched_on(h)
+    mine = _finished(h, "mine", gold_clean=0, tasks=3)
+    h.worker._chain_next_stage(mine, mine.counts_json)
+    assert [r.kind for r in _runs(h)] == ["mine"]
+    assert _chain_events(h) == []
+    probe = _finished(h, "probe", green=False)
+    h.worker._chain_next_stage(probe, probe.counts_json)
+    assert sorted(r.kind for r in _runs(h)) == ["mine", "probe"]
+    assert _chain_events(h) == []
+    # the positive control: the same mine with one gold-clean task chains the qualify
+    h.worker._chain_next_stage(mine, {"gold_clean": 1, "tasks": 3})
+    assert sorted(r.kind for r in _runs(h)) == ["mine", "probe", "qualify"]
+    assert [e.payload_json["kind"] for e in _chain_events(h)] == ["qualify"]
+
+
+def test_the_seam_itself_refuses_a_build_kind_and_says_so(
+    h: Harness, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """DL-315 (4): the refusal is the seam's own, observed as its error line — not
+    ``RunCreateRequest`` refusing a builderless replay further down (which would be logged
+    as a failed queueing, never as a refusal)."""
+    monkeypatch.setattr(worker_mod, "FREE_CHAIN", ("probe", "replay"))
+    h.add_repo(auto_stages=True)
+    _switched_on(h)
+    probe = _finished(h, "probe", green=True)
+    with caplog.at_level("ERROR", logger=worker_mod._LOG.name):
+        h.worker._chain_next_stage(probe, probe.counts_json)
+    refusals = [
+        r for r in caplog.records if "a stage that spends is never chained" in r.getMessage()
+    ]
+    assert len(refusals) == 1 and refusals[0].levelname == "ERROR"
+    assert not [r for r in caplog.records if "queuing the next stage" in r.getMessage()]
+    assert [r.kind for r in _runs(h)] == ["probe"]
+    assert _chain_events(h) == []
+
+
+def test_the_chain_never_re_walks_a_stage_already_done_or_in_flight(h: Harness) -> None:
+    """DL-315 (5): a re-run of a free stage on a walked repository queues nothing the walk
+    already holds — a next stage that succeeded, or is queued or running, is left alone; a
+    failed one is chained again (it is the walk's Retry)."""
+    h.add_repo(auto_stages=True)
+    _switched_on(h)
+    done_mine = _finished(h, "mine", gold_clean=2)
+    probe = _finished(h, "probe", green=True)
+    h.worker._chain_next_stage(probe, probe.counts_json)
+    assert sorted(r.kind for r in _runs(h)) == ["mine", "probe"]
+    assert _chain_events(h) == []
+    # a next stage in flight (queued) is not doubled
+    with h.factory() as s:
+        row = s.get(Run, done_mine.id)
+        assert row is not None
+        row.status = STATUS_QUEUED
+        s.commit()
+    probe2 = _finished(h, "probe", green=True)
+    h.worker._chain_next_stage(probe2, probe2.counts_json)
+    assert sorted(r.kind for r in _runs(h)) == ["mine", "probe", "probe"]
+    assert _chain_events(h) == []
+    # a failed next stage is chained again: that is the walk's Retry
+    with h.factory() as s:
+        row = s.get(Run, done_mine.id)
+        assert row is not None
+        row.status = STATUS_FAILED
+        s.commit()
+    probe3 = _finished(h, "probe", green=True)
+    h.worker._chain_next_stage(probe3, probe3.counts_json)
+    assert sorted(r.kind for r in _runs(h)) == ["mine", "mine", "probe", "probe", "probe"]
+    assert [e.payload_json["chained_from"] for e in _chain_events(h)] == [probe3.id]
+
+
+def test_a_switch_set_at_registration_names_the_registrar_as_the_actor(h: Harness) -> None:
+    """``POST /repos`` accepts ``auto_stages`` too, recorded as ``repo.created`` — the person
+    who registered the repository with the switch on is the chain's actor, not the run's."""
+    h.add_repo(auto_stages=True)
+    with h.factory() as s:
+        append_system_event(
+            s,
+            trace_id=system_trace_id("repo", pr.REPO_NAME),
+            action="repo.created",
+            repo=pr.REPO_NAME,
+            actor="registrar-3",
+            payload={"config": {**h.pyrepo.config.to_dict(), "auto_stages": True}},
+        )
+        s.commit()
+    probe = _finished(h, "probe", green=True)
+    h.worker._chain_next_stage(probe, probe.counts_json)
+    runs = _runs(h)
+    assert [r.kind for r in runs] == ["probe", "mine"]
+    assert runs[1].actor == "registrar-3"
+    assert _chain_events(h)[0].actor == "registrar-3"

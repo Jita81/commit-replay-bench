@@ -37,6 +37,7 @@ import subprocess
 import sys
 import types
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -397,11 +398,37 @@ class TestConfigCandidates:
         assert events[0].payload_json["fields"] == ["runner_opts"]
         assert events[0].payload_json["candidate"]["id"] == timeout["id"]
         assert events[1].payload_json["candidate"]["kind"] == "raise_test_timeout"
-        # decided: it is gone from the list; the same note now implies the NEXT doubling
+        assert events[1].payload_json["held_until"] == "re-qualify"
+        # decided: it is gone from the list, and the commits it named are HELD — the same
+        # unre-qualified note must not offer the next doubling with a limit nobody ran at
+        # (DL-316 (4)); the lint candidate, undecided, still stands
         items = env.get(f"/repos/{ALPHA}/config-candidates").json()["items"]
-        assert [c["id"] for c in items] != [timeout["id"], lint["id"]]
+        assert [c["kind"] for c in items] == ["raise_lint_timeout"]
+        # a qualify run that finished after the accept lifts the hold: the note that still
+        # stands offers the next doubling from the limit now in force, and says so
+        with env.factory() as s:
+            accepted_at = datetime.fromisoformat(events[1].timestamp)
+            s.add(
+                Run(
+                    id="q" * 32,
+                    repo=ALPHA,
+                    kind="qualify",
+                    mode="sighted",
+                    status="succeeded",
+                    actor=events[1].actor,
+                    finished=(accepted_at + timedelta(minutes=1)).isoformat(),
+                )
+            )
+            s.commit()
+        items = env.get(f"/repos/{ALPHA}/config-candidates").json()["items"]
         assert [c["kind"] for c in items] == ["raise_test_timeout", "raise_lint_timeout"]
-        assert items[0]["observed"] == timeout["proposed"]
+        assert (items[0]["observed"], items[0]["proposed"]) == (
+            timeout["proposed"],
+            2 * timeout["proposed"],
+        )
+        assert items[0]["id"] != timeout["id"] and items[0]["sources"] == [task_id(1)]
+        assert f"limit in force is {timeout['proposed']} s" in items[0]["reason"]
+        assert "1 commit hit" in items[0]["reason"]
         # a decided or unknown id is 404
         assert (
             env.post(f"/repos/{ALPHA}/config-candidates/{timeout['id']}/accept").status_code == 404

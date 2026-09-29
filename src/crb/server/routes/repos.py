@@ -611,23 +611,61 @@ def _decided_candidate_ids(db: Session, name: str) -> set[str]:
     return {str((e.payload_json or {}).get("candidate", {}).get("id") or "") for e in rows} - {""}
 
 
+#: What an accept's event says about its sources: they are held until re-qualified.
+HELD_UNTIL_REQUALIFY = "re-qualify"
+
+
+def _held_sources(db: Session, name: str) -> set[str]:
+    """The task ids and skipped shas an ACCEPTED candidate named whose notes nobody has
+    re-qualified since: no ``mine`` or ``qualify`` run of the repository has finished after
+    the accept. Held sources imply nothing — the same unre-qualified note must not offer
+    the next doubling with a limit no run ever ran at (DL-316 (4)); once a later run
+    finishes, the notes that still stand are read again under the limit then in force."""
+    accepts = db.execute(
+        select(Event).where(Event.repo == name, Event.action == CANDIDATE_ACCEPTED)
+    ).scalars()
+    finished = [
+        f
+        for f in db.execute(
+            select(Run.finished).where(
+                Run.repo == name,
+                Run.kind.in_(("mine", "qualify")),
+                Run.status.in_(("succeeded", "failed")),
+            )
+        ).scalars()
+        if f
+    ]
+    held: set[str] = set()
+    for e in accepts:
+        # both stamps are ISO-8601 UTC; the second is the shared precision (the run's stamp)
+        since = str(e.timestamp or "")[:19]
+        if any(str(f)[:19] > since for f in finished):
+            continue
+        held.update(
+            str(s) for s in ((e.payload_json or {}).get("candidate") or {}).get("sources") or []
+        )
+    return held
+
+
 def candidates_for(
     db: Session, repo: Repo, *, undecided_only: bool = True
 ) -> list[ConfigCandidate]:
     """The candidates the stored tasks and the latest mine run imply, with the ones a person
-    already decided left out (``undecided_only``)."""
+    already decided left out and the sources of an accepted one held until re-qualified
+    (``undecided_only``)."""
     config = _config_of(repo)
     try:
         default_timeout = int(get_runner(config).default_timeout)
     except ValueError:  # a runner the registry does not know: the base default stands
         default_timeout = 900
+    held = _held_sources(db, repo.name) if undecided_only else set()
     tasks = [
         TaskSpec.from_dict(t.spec_json)
         for t in db.execute(select(Task).where(Task.repo == repo.name)).scalars()
+        if t.task_id not in held
     ]
-    found = config_candidates(
-        tasks, config, skips=_mine_skips(db, repo.name), default_timeout=default_timeout
-    )
+    skips = [s for s in _mine_skips(db, repo.name) if str(s.get("sha") or "") not in held]
+    found = config_candidates(tasks, config, skips=skips, default_timeout=default_timeout)
     if not undecided_only:
         return found
     decided = _decided_candidate_ids(db, repo.name)
@@ -696,7 +734,7 @@ def accept_config_candidate(
         action=CANDIDATE_ACCEPTED,
         repo=name,
         actor=operator.id,
-        payload={"candidate": c.to_dict()},
+        payload={"candidate": c.to_dict(), "held_until": HELD_UNTIL_REQUALIFY},
     )
     db.commit()
     return CandidateDecisionOut(

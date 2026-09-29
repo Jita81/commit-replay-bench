@@ -36,39 +36,44 @@
  *               run?", Keep it running / Cancel the run — so the question is hinted, reachable
  *               and axe-checked, never `window.confirm` (G-117). An unknown repository name
  *               renders `UnknownRepo` ("No repository called <name>", Open Connection) under a
- *               header that reads Not found, never a bare retry (G-979). Under the mine stage,
- *               the config changes the mine's notes imply (`GET /repos/{name}/config-candidates`,
- *               DL-316) are listed with Accept and Reject for an operator; nothing changes
- *               until one decides. Every element a reader meets — the connect buttons, each
- *               column header, the stage-summary pill and row action, each stage's title, status
- *               pill, "spends" pill, detail line, run link and action, each candidate and its
- *               two acts, the in-flight panel's counters and Cancel, and the question's two
- *               buttons — is a hint trigger (`button.connect.*`, `col.connect.*`,
- *               `pill.connect.*`, `stage.walk.*`, `pill.walk.*`, `stat.walk.*`, `link.walk.*`,
- *               `button.walk.*`) so what each shows opens on hover, focus and tap and is listed in
- *               the About block.
+ *               header that reads Not found, never a bare retry, and nothing else — no flow
+ *               card folds figures for a name that is not a repository (G-979). Under the mine
+ *               stage, the config changes the mine's notes imply
+ *               (`GET /repos/{name}/config-candidates`, DL-316) are listed with Accept and
+ *               Reject for an operator; nothing changes until one decides. "Chain the free
+ *               stages" (DL-315) is the repository's `auto_stages` switch, thrown here by an
+ *               operator through the same audited `PUT /repos/{name}` a configuration edit
+ *               makes and read as a sentence by everyone else. Every element a reader meets —
+ *               the connect buttons, each column header, the stage-summary pill and row
+ *               action, the switch, each stage's title, status pill, "spends" pill, detail
+ *               line, run link and action, each candidate and its two acts, the in-flight
+ *               panel's counters and Cancel, and the question's two buttons — is a hint
+ *               trigger (`button.connect.*`, `col.connect.*`, `pill.connect.*`,
+ *               `toggle.walk.*`, `stage.walk.*`, `pill.walk.*`, `stat.walk.*`, `link.walk.*`,
+ *               `button.walk.*`) so what each shows opens on hover, focus and tap and is listed
+ *               in the About block.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
  *               `useCapabilityMap` + `useConfigCandidates` (+ the polled `useRun` while a stage
  *               runs, and `useQueuedRuns` only for an older server that sends no
  *               `queue_position`) → `stagesFor` → the stage list; actions are the existing
  *               mutations (`useProbeRepo`, `useCreateRun`, `useCancelRun` behind the `Dialog`,
- *               `useDecideCandidate`), the `RepoNewDialog`, and `navigate` to the Measure page;
+ *               `useDecideCandidate`, `useUpdateRepo` for the switch), the `RepoNewDialog`, and
+ *               `navigate` to the Measure page;
  *               the watched run's end refetches the inputs. The eyebrow is `PageHeader`'s
  *               default (`journeyEyebrow`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/screens/Connect/connection.ts (the derivation), ui/src/api/hooks.ts
- *               (`useRun`, `useQueuedRuns`, `useCancelRun`, `useConfigCandidates`,
- *               `useDecideCandidate`), ui/src/components/Help.tsx
- *               (`Term`), ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers
- *               and their copy), ui/src/components/Dialog.tsx (the cancel question),
- *               ui/src/components/UnknownRepo.tsx (the 404 state), ui/src/screens/Repos/*
- *               (registration and config live there; this screen links to them),
+ * Works with:   ui/src/screens/Connect/connection.ts (the derivation), ui/src/api/hooks.ts +
+ *               ui/src/api/repoConfig.ts (`useRun`, `useQueuedRuns`, `useCancelRun`,
+ *               `useConfigCandidates`, `useDecideCandidate`, `useUpdateRepo` for the
+ *               auto_stages switch), ui/src/components/* (`Term`, `Hint` + ui/src/help/hints.ts
+ *               for the triggers and their copy, `Dialog` for the cancel question,
+ *               `UnknownRepo` for the 404 state, `FlowPanel` for the stream's own numbers
+ *               under a known repository), ui/src/screens/Repos/* (registration and config
+ *               live there; this screen links to them),
  *               ui/src/screens/Connect/MeasurePage.tsx (where Measure… lands),
- *               ui/src/screens/Results/ResultsPage.tsx (the baseline,
- *               where the walk ends), ui/src/components/FlowPanel.tsx (the connect stream's own
- *               lead time and spend under the walk), docs/ONBOARDING-A-REPO.md (the same steps
- *               for the CLI)
+ *               ui/src/screens/Results/ResultsPage.tsx (the baseline, where the walk ends),
+ *               docs/ONBOARDING-A-REPO.md (the same steps for the CLI)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
  *               (every element on /connect and /connect/:name resolves to a registry id, the
  *               cancel question included)
@@ -95,6 +100,7 @@ import {
   useRun,
 } from '../../api/hooks'
 import { isApiError } from '../../api/client'
+import { useUpdateRepo } from '../../api/repoConfig'
 import type { ConfigCandidate, RepoSummary, Run } from '../../api/types'
 import type { HintId } from '../../help/hints'
 import { Button, LinkButton } from '../../components/Button'
@@ -389,6 +395,9 @@ export function ConnectRepoPage() {
   const createRun = useCreateRun()
   const cancel = useCancelRun()
   const candidates = useConfigCandidates(name)
+  // DL-315: the one act that sequences the £0 stages, written through the audited update
+  const update = useUpdateRepo(name)
+  const autoStages = Boolean(repo.data?.config.auto_stages)
   const navigate = useNavigate()
   // G-117: the run whose cancel is being asked about; the question is the app's own dialog
   const [confirming, setConfirming] = useState<Run | null>(null)
@@ -492,6 +501,34 @@ export function ConnectRepoPage() {
       )}
       {repo.data && !failed && (
         <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
+          {/* DL-315: the switch lives where the chain is seen; an operator throws it, a reader
+              reads its state; the write is the same audited PUT a configuration edit makes */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="auto-stages">
+            {can('operator') ? (
+              <label className="flex items-center gap-2">
+                <Hint
+                  as="input"
+                  id="toggle.walk.auto_stages"
+                  type="checkbox"
+                  className="h-4 w-4 accent-[var(--trust)]"
+                  data-testid="auto-stages-switch"
+                  checked={autoStages}
+                  onChange={(e: { target: { checked: boolean } }) => update.mutate({ auto_stages: e.target.checked })}
+                />
+                Chain the free stages
+              </label>
+            ) : (
+              <Hint id="toggle.walk.auto_stages" data-testid="auto-stages-state">
+                {autoStages ? 'The free stages chain: each one that passes queues the next.' : 'An operator runs each free stage, or switches the chain on.'}
+              </Hint>
+            )}
+            <span className="text-xs text-on-surface-muted">
+              {autoStages
+                ? 'Each stage that passes queues the next, up to the controls, and never a stage already done. Measure… is still yours to confirm.'
+                : 'Off: each stage waits for Run. On: each stage that passes queues the next, up to the controls; Measure… is still yours to confirm.'}
+            </span>
+          </div>
+          {update.isError && <ErrorState compact error={update.error} />}
           <ol className="m-0 list-none space-y-3 p-0" aria-label="Connection stages">
             {stages.map((s, i) => {
               const d = s.queued ? QUEUED_DISPLAY : STATUS_DISPLAY[s.status]
@@ -556,8 +593,9 @@ export function ConnectRepoPage() {
           {actionError && <ErrorState compact error={actionError} />}
         </Card>
       )}
-      {/* the connect stream's own numbers (docs/dod/streams/connect-and-prove.md MEASURE) */}
-      <FlowPanel stream="connect-and-prove" repo={name} />
+      {/* the connect stream's own numbers (docs/dod/streams/connect-and-prove.md MEASURE) — for
+          a repository the API knows; a Not found state is the whole page (G-979) */}
+      {repo.data && <FlowPanel stream="connect-and-prove" repo={name} />}
       {/* G-117: the cancel question is the app's own dialog (hinted, reachable, axe-checked) */}
       <Dialog
         open={confirming !== null}
@@ -622,9 +660,7 @@ function Candidates({ repo, query, canDecide }: { repo: string; query: ReturnTyp
             <li key={c.id} className="flex flex-wrap items-start gap-x-3 gap-y-1" data-testid={`candidate-${c.kind}`}>
               <Hint id="stat.walk.candidate" as="div" className="min-w-0 flex-1">
                 <span className="font-mono text-xs">{candidateChange(c)}</span>
-                <span className="block text-xs text-on-surface-muted">
-                  {c.reason} ({c.sources.length === 1 ? '1 commit' : `${c.sources.length} commits`})
-                </span>
+                <span className="block text-xs text-on-surface-muted">{c.reason}</span>
               </Hint>
               {canDecide ? (
                 <span className="flex gap-2">

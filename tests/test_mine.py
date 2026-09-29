@@ -1132,9 +1132,16 @@ def test_a_timed_out_gold_is_offered_a_named_timeout_candidate_and_a_lint_debt_g
     assert (t.field, t.observed, t.proposed, t.scope) == ("runner_opts.timeout", 900, 1800, "repo")
     assert t.sources == ("a" * 40, "b" * 40, "f" * 40)
     assert t.update(cfg) == {"runner_opts": {**cfg.runner_opts, "timeout": 1800}}
+    # plain English: a real plural, and the limit named as the one IN FORCE — a note written
+    # under an earlier limit never reads as if it hit the current one
+    assert t.reason.startswith("3 commits hit the test wall clock")
+    assert "limit in force is 900 s" in t.reason and "(s)" not in t.reason
     lint = by_kind["raise_lint_timeout"]
     assert (lint.field, lint.observed, lint.proposed) == ("lint.timeout", 600, 1200)
     assert lint.sources == ("d" * 40,)
+    assert (
+        lint.reason.startswith("1 gold timed out in belt 5") and "in force is 600 s" in lint.reason
+    )
     env = by_kind["provisioning_on"]
     assert (env.scope, env.field, env.proposed) == ("deployment", "CRB_PROVISION__ENABLED", True)
     assert env.update(cfg) == {}  # not a repository setting: named, never applied by PUT
@@ -1145,4 +1152,5 @@ def test_a_timed_out_gold_is_offered_a_named_timeout_candidate_and_a_lint_debt_g
     raised = RepoConfig.from_dict(cfg.name, {**cfg.to_dict(), "runner_opts": {"timeout": 1800}})
     again = m.config_candidates([headroom], raised)
     assert (again[0].observed, again[0].proposed) == (1800, 3600)
+    assert "1 commit hit" in again[0].reason and "limit in force is 1800 s" in again[0].reason
     assert again[0].id != t.id and t.id == m.config_candidates([legacy], cfg)[0].id

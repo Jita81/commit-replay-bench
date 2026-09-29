@@ -362,6 +362,7 @@ from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, events_of_action, last_seq
 from crb.store.jobs import (
+    ACTIVE_STATUSES,
     KIND_BLIND,
     KIND_CONTROLS,
     KIND_FACTORY,
@@ -2687,8 +2688,12 @@ class Worker:
         run; the ``connect.stage.chained`` event records it on the repository's trace.
         Idempotent per finished run (a reclaimed run's second finish chains nothing more),
         made and refused exactly as ``POST /runs`` would (``new_run``, ``submit_refusals``),
-        and never a kind in ``BUILD_KINDS``. Observability of the walk, never a verdict: a
-        failure is logged and the finished run stands."""
+        never a kind in ``BUILD_KINDS``, and never a re-walk: a next stage the repository
+        already holds — a run of it succeeded, or is queued or running — is left alone, so
+        re-running one free stage on a walked repository queues nothing a person did not
+        ask for (a failed next stage is chained again: that is the walk's Retry).
+        Observability of the walk, never a verdict: a failure is logged and the finished run
+        stands."""
         try:
             nxt = self._next_free_stage(run.kind)
             if nxt is None or not stage_passed(run.kind, counts):
@@ -2705,6 +2710,16 @@ class Worker:
                 if repo is None or not bool((repo.config_json or {}).get("auto_stages")):
                     return
                 if self._already_chained(db, run):
+                    return
+                if self._stage_held(db, run.repo, nxt):
+                    _LOG.info(
+                        "chain: %s after %s not queued — %s already holds a %s run that "
+                        "succeeded or is in flight",
+                        nxt,
+                        run.id[:8],
+                        run.repo,
+                        nxt,
+                    )
                     return
                 actor = self._auto_stages_actor(db, run.repo) or run.actor
                 body = RunCreateRequest(repo=run.repo, kind=nxt)
@@ -2749,15 +2764,35 @@ class Worker:
         return any((e.payload_json or {}).get("chained_from") == run.id for e in rows)
 
     @staticmethod
+    def _stage_held(db: Session, repo: str, kind: str) -> bool:
+        """``True`` when the repository already holds a run of ``kind`` that succeeded or is
+        queued or running — the chain never re-walks and never doubles a stage in flight."""
+        rows = db.execute(
+            select(Run.status).where(
+                Run.repo == repo,
+                Run.kind == kind,
+                Run.status.in_((STATUS_SUCCEEDED, *ACTIVE_STATUSES)),
+            )
+        ).scalars()
+        return any(True for _ in rows)
+
+    @staticmethod
     def _auto_stages_actor(db: Session, repo: str) -> str:
-        """The actor of the latest ``repo.updated`` whose diff switched ``auto_stages`` on."""
+        """The actor of the latest record that switched ``auto_stages`` on: a
+        ``repo.updated`` whose diff turned it on, or a ``repo.created`` whose config carried
+        it (``POST /repos`` accepts the switch too). Empty when no record says who."""
         rows = db.execute(
             select(Event)
-            .where(Event.repo == repo, Event.action == "repo.updated")
+            .where(Event.repo == repo, Event.action.in_(("repo.updated", "repo.created")))
             .order_by(Event.seq.desc(), Event.id.desc())
         ).scalars()
         for e in rows:
-            change = ((e.payload_json or {}).get("diff") or {}).get("auto_stages") or {}
+            payload = e.payload_json or {}
+            if e.action == "repo.created":
+                if (payload.get("config") or {}).get("auto_stages") is True:
+                    return str(e.actor or "")
+                continue
+            change = (payload.get("diff") or {}).get("auto_stages") or {}
             if change.get("to") is True:
                 return str(e.actor or "")
         return ""

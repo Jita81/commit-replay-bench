@@ -14,8 +14,9 @@
  * How:          `isApiError` + `status === 404` → `EmptyState`; else `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/components/EmptyState.tsx, ui/src/components/ErrorState.tsx (the two
- *               states; never confused), ui/src/api/client.ts (`isApiError`),
+ * Works with:   ui/src/components/EmptyState.tsx (the 404 state's shape),
+ *               ui/src/components/ErrorState.tsx (every other failure, with Retry; the two
+ *               are never confused), ui/src/api/client.ts (`isApiError`),
  *               ui/src/screens/Connect/ConnectPage.tsx (`ConnectRepoPage`) and
  *               ui/src/screens/Repos/RepoDetail.tsx (the two screens that render it),
  *               ui/src/help/hints.ts (`button.shared.unknown_repo`)

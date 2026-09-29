@@ -24,9 +24,11 @@
  *               state (G-126); that the header offers every role All repositories (G-228);
  *               that the walk's Measure… opens the Measure page and posts nothing (G-907);
  *               that an unknown name says so and offers Connection while a 500 offers Retry
- *               (G-979); and that the mine stage lists the config candidates the notes imply
- *               with Accept and Reject for an operator only (DL-316). No test stubs
- *               `window.confirm`: the product has none.
+ *               (G-979) with no flow card under it; that the mine stage lists the config
+ *               candidates the notes imply with Accept and Reject for an operator only
+ *               (DL-316); and that "Chain the free stages" is a hinted switch an operator
+ *               throws through one `PUT /repos/{name} {auto_stages}` while a viewer reads its
+ *               state (DL-315). No test stubs `window.confirm`: the product has none.
  * How:          `mockApi` + `renderApp` with `path` set so `useParams` resolves; the Measure
  *               door is proved with a second route mounted beside the walk.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -468,6 +470,10 @@ describe('ConnectPage', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
     expect(screen.queryByRole('list', { name: 'Connection stages' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Configuration' })).toBeNull()
+    // the Not found state is the whole page: no flow card folds figures for a name that is
+    // not a repository (its read would only echo the same 404)
+    expect(screen.queryByTestId('flow-refused-connect-and-prove')).toBeNull()
+    expect(container).not.toHaveTextContent('How this flows')
     expect(unhinted(container)).toEqual([])
   })
 
@@ -497,8 +503,8 @@ describe('ConnectPage', () => {
   const CANDIDATES = {
     repo: 'alpha',
     items: [
-      { id: 'raise_test_timeout:runner_opts.timeout:1800', kind: 'raise_test_timeout', scope: 'repo', field: 'runner_opts.timeout', observed: 900, proposed: 1800, reason: '2 commit(s) hit the 900 s test wall clock at the parent, the baseline or the gold; raising it lets them qualify', sources: ['a'.repeat(40), 'b'.repeat(40)] },
-      { id: 'provisioning_on:CRB_PROVISION__ENABLED:True', kind: 'provisioning_on', scope: 'deployment', field: 'CRB_PROVISION__ENABLED', observed: null, proposed: true, reason: '1 commit(s) could not load their dependencies offline; switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md §3.4), then qualify again', sources: ['c'.repeat(40)] },
+      { id: 'raise_test_timeout:runner_opts.timeout:1800', kind: 'raise_test_timeout', scope: 'repo', field: 'runner_opts.timeout', observed: 900, proposed: 1800, reason: '2 commits hit the test wall clock at the parent, the baseline or the gold; the limit in force is 900 s, and raising it lets them qualify', sources: ['a'.repeat(40), 'b'.repeat(40)] },
+      { id: 'provisioning_on:CRB_PROVISION__ENABLED:True', kind: 'provisioning_on', scope: 'deployment', field: 'CRB_PROVISION__ENABLED', observed: null, proposed: true, reason: '1 commit could not load its dependencies offline; switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md §3.4), then qualify again', sources: ['c'.repeat(40)] },
     ],
   }
 
@@ -524,7 +530,9 @@ describe('ConnectPage', () => {
     expect(panel).toHaveTextContent('The mine notes imply 2 configuration changes. Nothing changes until an operator decides.')
     const timeout = within(panel).getByTestId('candidate-raise_test_timeout')
     expect(timeout).toHaveTextContent('runner_opts.timeout: 900 s → 1800 s')
-    expect(timeout).toHaveTextContent('(2 commits)')
+    // the reason carries the count in plain English once; the screen does not repeat it
+    expect(timeout).toHaveTextContent('2 commits hit the test wall clock')
+    expect(timeout).not.toHaveTextContent('(2 commits)')
     expect(within(timeout).getByRole('button', { name: 'Accept' })).toHaveAttribute('data-hint', 'button.walk.candidate_accept')
     expect(within(timeout).getByRole('button', { name: 'Reject' })).toHaveAttribute('data-hint', 'button.walk.candidate_reject')
     // a deployment setting is named, never applied from here
@@ -541,6 +549,59 @@ describe('ConnectPage', () => {
     await waitFor(() => expect(within(panel).queryByTestId('candidate-raise_test_timeout')).toBeNull())
     expect(panel).toHaveTextContent('The mine notes imply a configuration change.')
     expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it('Chain the free stages is a hinted switch on the walk for an operator that writes auto_stages through the audited update (DL-315)', async () => {
+    let config: Record<string, unknown> = {}
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': () => json({ ...MEASURED, config }),
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
+      'PUT /repos/alpha': (_url: string, init: RequestInit | undefined) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        config = body.auto_stages === true ? { auto_stages: true } : {}
+        return json({ ...MEASURED, config })
+      },
+    })
+    const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const sw = await screen.findByTestId('auto-stages-switch')
+    expect(sw).not.toBeChecked()
+    expect(sw).toHaveAttribute('data-hint', 'toggle.walk.auto_stages')
+    expect(screen.getByLabelText('Chain the free stages')).toBe(sw)
+    expect(screen.getByTestId('auto-stages')).toHaveTextContent('Off: each stage waits for Run.')
+    expect(unhinted(container)).toEqual([])
+    await expectHintOpens(sw, 'toggle.walk.auto_stages')
+    // reading posts nothing; the switch is one PUT with the one field, true then false
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+    await userEvent.click(sw)
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT' && c.path === '/repos/alpha')).toHaveLength(1))
+    expect(JSON.parse(String(calls.find((c) => c.method === 'PUT')!.init?.body))).toEqual({ auto_stages: true })
+    await waitFor(() => expect(screen.getByTestId('auto-stages-switch')).toBeChecked())
+    expect(screen.getByTestId('auto-stages')).toHaveTextContent('Each stage that passes queues the next')
+    await userEvent.click(screen.getByTestId('auto-stages-switch'))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(2))
+    expect(JSON.parse(String(calls.filter((c) => c.method === 'PUT')[1]!.init?.body))).toEqual({ auto_stages: false })
+    await waitFor(() => expect(screen.getByTestId('auto-stages-switch')).not.toBeChecked())
+  })
+
+  it('a viewer reads whether the free stages chain and is offered no switch (DL-315)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos/alpha': { ...MEASURED, config: { auto_stages: true } },
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const state = await screen.findByTestId('auto-stages-state')
+    expect(state).toHaveTextContent('The free stages chain: each one that passes queues the next.')
+    expect(state).toHaveAttribute('data-hint', 'toggle.walk.auto_stages')
+    expect(screen.queryByTestId('auto-stages-switch')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
   })
 
   it('a viewer reads the candidates and is told an operator decides; a failed read is said with Retry (DL-316)', async () => {

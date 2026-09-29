@@ -921,6 +921,11 @@ class ConfigCandidate:
         }
 
 
+def _n(count: int, noun: str) -> str:
+    """``1 commit`` / ``2 commits`` — a real plural, never ``commit(s)`` (GOV.UK plain English)."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _note_code(task: TaskSpec) -> str:
     """The qualification code a task's note carries (``<CODE>: …``) or its label."""
     code = str(task.labels.get("qualification_code") or "")
@@ -989,8 +994,9 @@ def config_candidates(
                 "runner_opts.timeout",
                 observed,
                 observed * 2,
-                f"{len(test_sources)} commit(s) hit the {observed} s test wall clock at the "
-                "parent, the baseline or the gold; raising it lets them qualify",
+                f"{_n(len(test_sources), 'commit')} hit the test wall clock at the parent, "
+                f"the baseline or the gold; the limit in force is {observed} s, and raising "
+                "it lets them qualify",
                 tuple(dict.fromkeys(s for s in test_sources if s)),
             )
         )
@@ -1003,8 +1009,8 @@ def config_candidates(
                 "lint.timeout",
                 observed_lint,
                 observed_lint * 2,
-                f"{len(lint_sources)} gold(s) timed out in belt 5 at {observed_lint} s; "
-                "raising the lint wall clock lets the linter finish",
+                f"{_n(len(lint_sources), 'gold')} timed out in belt 5; the lint wall clock "
+                f"in force is {observed_lint} s, and raising it lets the linter finish",
                 tuple(dict.fromkeys(lint_sources)),
             )
         )
@@ -1016,7 +1022,8 @@ def config_candidates(
                 "CRB_PROVISION__ENABLED",
                 None,
                 True,
-                f"{len(env_sources)} commit(s) could not load their dependencies offline; "
+                f"{_n(len(env_sources), 'commit')} could not load "
+                f"{'its' if len(env_sources) == 1 else 'their'} dependencies offline; "
                 "switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md "
                 "§3.4), then qualify again",
                 tuple(dict.fromkeys(s for s in env_sources if s)),

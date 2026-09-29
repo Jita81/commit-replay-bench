@@ -816,6 +816,29 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
     minHints: 20,
   },
   {
+    // DL-316: the mine stage's candidate lines, Accept and Reject are a state the fixture's
+    // walk (whose notes imply nothing) cannot reach; a viewer reads them, an operator decides
+    name: '/connect/:name + config candidates',
+    route: '/connect/alpha',
+    path: '/connect/:name',
+    element: <ConnectRepoPage />,
+    api: {
+      ...ONRAMP_SCREENS['/connect/:name']!.api,
+      'GET /repos/alpha/config-candidates': {
+        repo: 'alpha',
+        items: [
+          { id: 'raise_test_timeout:runner_opts.timeout:1800', kind: 'raise_test_timeout', scope: 'repo', field: 'runner_opts.timeout', observed: 900, proposed: 1800, reason: '2 commits hit the test wall clock at the parent, the baseline or the gold; the limit in force is 900 s, and raising it lets them qualify', sources: ['a'.repeat(40), 'b'.repeat(40)] },
+          { id: 'provisioning_on:CRB_PROVISION__ENABLED:True', kind: 'provisioning_on', scope: 'deployment', field: 'CRB_PROVISION__ENABLED', observed: null, proposed: true, reason: '1 commit could not load its dependencies offline; switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md §3.4), then qualify again', sources: ['c'.repeat(40)] },
+        ],
+      },
+    },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByTestId('config-candidates')
+    },
+    minHints: 20,
+  },
+  {
     name: '/repos + Add a repository dialog',
     route: '/repos',
     path: '/repos',

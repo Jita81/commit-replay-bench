@@ -76,7 +76,6 @@ ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
 ui/e2e/walkthrough/06-cancel.spec.ts
 ui/e2e/walkthrough/09-budget-sweep.spec.ts
 ui/e2e/walkthrough/09-review.spec.ts
-ui/src/api/repoConfig.ts
 ui/src/api/sse.ts
 ui/src/api/types.test.ts
 ui/src/components/BeltPills.test.tsx

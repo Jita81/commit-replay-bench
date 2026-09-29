@@ -321,10 +321,12 @@ export const HINTS = {
     'This stage calls a model and costs money. Every other stage is free.',
   'button.walk.run_stage':
     'Queue this stage’s run. Run and Retry cost nothing; Measure… opens the Measure page — the estimate and the confirm for the one stage that spends — and posts nothing itself. A queued run can be cancelled from Runs.',
+  'toggle.walk.auto_stages':
+    'Chain the free stages. On, each £0 stage that passes queues the next — probe, mine, qualify, oracle, controls — under your name, never a stage already done or in flight, and never Measure…, which always waits for a person. It is the repository’s auto_stages setting, recorded as a configuration change.',
   'stat.walk.candidate':
-    'A configuration change the mine’s notes imply: the setting, the limit that was hit and the value Accept would apply, with the commits that imply it. Nothing changes until an operator decides.',
+    'A configuration change the mine’s notes imply: the setting, the limit in force and the value Accept would apply, with how many commits imply it. Nothing changes until an operator decides.',
   'button.walk.candidate_accept':
-    'Apply this change to the repository’s configuration under your name, validated and recorded exactly as a hand edit. Re-check the gold of the named commits afterwards.',
+    'Apply this change to the repository’s configuration under your name, validated and recorded exactly as a hand edit. The commits it names are held — not offered again — until a later mine or qualify run finishes; re-qualify them to see whether it helped.',
   'button.walk.candidate_reject':
     'Decline this change and record that you did. The configuration is untouched, and the same note is not offered again.',
   'stat.walk.stage_detail':

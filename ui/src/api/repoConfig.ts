@@ -28,9 +28,9 @@
  *               `StepEvent`, the config field types), src/crb/server/routes/repos.py (the PUT
  *               and the events route)
  * Tested by:    ui/src/screens/Repos/RepoConfigTab.test.tsx, ui/e2e/walkthrough/repo-config.spec.ts
- * Touch when:   a field is added to `RepoConfig` (src/crb/core/spec.py, docs/API.md "Repos") —
- *               add it to `RepoUpdateRequest` here and to ui/src/api/types.ts; never for a new
- *               repository (its configuration is edited through this surface, not by code).
+ * Touch when:   never for a new repository (its configuration is edited through this surface,
+ *               not by code); a field is added to `RepoConfig` (src/crb/core/spec.py, docs/API.md
+ *               "Repos") — add it to `RepoUpdateRequest` here and to ui/src/api/types.ts.
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -61,6 +61,15 @@ export interface RepoUpdateRequest {
   mining?: Partial<MiningConfig>
 }
 
+/**
+ * DL-315: the free-stage chain switch the Connection walk throws (`false` clears it; the
+ * server stores the key only while on). Its own shape, not a `RepoUpdateRequest` field: the
+ * configuration form never sends it, and `requestOf` promises every form field.
+ */
+export interface RepoSwitchRequest {
+  auto_stages: boolean
+}
+
 export const repoConfigKeys = {
   events: (name: string, p?: PageParams) => ['repos', name, 'events', p ?? {}] as const,
 }
@@ -68,7 +77,7 @@ export const repoConfigKeys = {
 const enc = encodeURIComponent
 
 /** `PUT /repos/{name}`; the response is the fresh detail and replaces the cached one. */
-export function useUpdateRepo(name: string): UseMutationResult<RepoDetail, ApiError, RepoUpdateRequest> {
+export function useUpdateRepo(name: string): UseMutationResult<RepoDetail, ApiError, RepoUpdateRequest | RepoSwitchRequest> {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body) => api<RepoDetail>(`/repos/${enc(name)}`, { method: 'PUT', body }),

@@ -105,23 +105,15 @@ that could not load its dependencies offline — the mine stage on the Connectio
 it as a candidate: the setting, the limit that was hit, the value proposed and the commits
 that imply it (`GET /repos/{name}/config-candidates`). An operator presses Accept, which
 applies it through the same validated, recorded config update as a hand edit, or Reject,
-which records the decision and changes nothing; then re-qualify the named commits. Lint
-debt (`gold fails belt 5`) is never proposed: it is the maintainers' own. With the
-repository's `auto_stages` switch on (Configuration, or `PUT /repos/{name}`), a passing
-probe queues the mine, a mine with a gold-clean task queues the qualify, and so on to the
-controls — the free stages only; the money step is always a person's confirm.
-
-**The notes become proposals, not edits.** Where a note names a concrete change — a
-target, baseline or gold that hit the test wall clock, a linter that timed out, a parent
-that could not load its dependencies offline — the mine stage on the Connection walk lists
-it as a candidate: the setting, the limit that was hit, the value proposed and the commits
-that imply it (`GET /repos/{name}/config-candidates`). An operator presses Accept, which
-applies it through the same validated, recorded config update as a hand edit, or Reject,
-which records the decision and changes nothing; then re-qualify the named commits. Lint
-debt (`gold fails belt 5`) is never proposed: it is the maintainers' own. With the
-repository's `auto_stages` switch on (Configuration, or `PUT /repos/{name}`), a passing
-probe queues the mine, a mine with a gold-clean task queues the qualify, and so on to the
-controls — the free stages only; the money step is always a person's confirm.
+which records the decision and changes nothing. After an Accept the named commits are held
+— not offered again — until a later mine or qualify run of the repository finishes: re-qualify
+them, and only a commit that still hits the new limit is offered the next one. Lint debt
+(`gold fails belt 5`) is never proposed: it is the maintainers' own. With the repository's
+`auto_stages` switch on (the "Chain the free stages" switch on the Connection walk, or
+`PUT /repos/{name}`), a passing probe queues the mine, a mine with a gold-clean task queues
+the qualify, and so on to the controls — the free stages only, each only while no run of it
+has succeeded or is in flight (a re-run never re-walks the repository); the money step is
+always a person's confirm.
 
 ## Step 3 — Prove the instrument on this repository (operator, £0)
 

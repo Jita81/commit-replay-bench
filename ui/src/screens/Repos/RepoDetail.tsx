@@ -29,12 +29,13 @@
  *               `ProfileCell`), ui/src/screens/Repos/RepoConfigTab.tsx (the fourth tab),
  *               ui/src/screens/Runs/RunNewDialog.tsx (start a run),
  *               ui/src/components/UnknownRepo.tsx (the 404 state),
- *               ui/src/screens/Connect/ConnectPage.tsx (`ConnectRepoPage`) and ui/src/screens/Factory/FactoryPage.tsx
- *               (where Next steps lead), src/crb/server/routes/repos.py (detail, profile,
- *               tasks, probe)
+ *               ui/src/screens/Connect/ConnectPage.tsx (`ConnectRepoPage`) and
+ *               ui/src/screens/Factory/FactoryPage.tsx (where Next steps lead),
+ *               src/crb/server/routes/repos.py (detail, profile, tasks, probe)
  * Tested by:    ui/src/screens/Repos/RepoDetail.test.tsx (Next steps, `?tab=`, the operator-only
- *               run button, the unknown-name state), ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK
- *               with the runner's summary), ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab
+ *               run button, the unknown-name state), ui/e2e/walkthrough/02-repo-onboard.spec.ts
+ *               (probe pill reads OK with the runner's summary),
+ *               ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab
  *               lists a mined task), ui/e2e/walkthrough/repo-config.spec.ts
  * Touch when:   never for a new repository; a field is added to `GET /repos/{name}` or the
  *               profile (docs/API.md "Repos") — type it in ui/src/api/types.ts first.
