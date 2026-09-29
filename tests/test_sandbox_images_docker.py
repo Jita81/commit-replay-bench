@@ -222,9 +222,7 @@ def lang(request: pytest.FixtureRequest) -> Lang:
 @pytest.fixture(scope="module")
 def image(lang: Lang) -> str:
     """The image's tag, present in the daemon (skipped with the reason otherwise)."""
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     return langs.ensure_shipped_sandbox_image(lang.name)
 
 
@@ -526,11 +524,8 @@ def test_a_test_that_writes_its_package_reads_the_same_on_the_host_and_in_the_co
     * on the ``readonly`` tree it fails; measured in that posture it sits in the baseline,
       so the gold graded in that posture has no new failure — and only a baseline measured
       somewhere else (the host) would have charged it as one: the D5 defect, reproduced."""
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
-    if not langs.has_tool("go"):
-        pytest.skip("go not on PATH (the host posture needs it)")
+    langs.require_docker()
+    langs.require_tool("go")  # the host posture needs it
     import importlib
 
     from crb.core.execution import LocalExecutor

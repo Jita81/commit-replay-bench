@@ -1319,11 +1319,6 @@ export interface EventsVerify {
   full_walk_at: string
 }
 
-/**
- * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
- * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
- * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
- */
 /** One hash-chained table walked from its stored columns (``ChainVerifyOut``). */
 export interface ChainVerify {
   rows: number
@@ -1332,6 +1327,11 @@ export interface ChainVerify {
   detail: string
 }
 
+/**
+ * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
+ * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
+ * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
+ */
 export interface LedgerVerify {
   rows: number
   ok: boolean

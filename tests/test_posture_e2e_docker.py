@@ -81,9 +81,7 @@ pytestmark = [pytest.mark.docker, pytest.mark.slow, pytest.mark.sandbox_images]
 
 @pytest.fixture
 def scratch() -> Iterator[Path]:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     langs.require_docker_image(DEFAULT_GO_IMAGE, "the pinned Go fetch image")
     root = langs.CACHE_DIR / "provision" / f"e2e-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)

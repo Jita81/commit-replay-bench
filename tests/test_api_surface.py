@@ -27,7 +27,6 @@ Touch when:   never for a new repository; an extractor learns a new declaration 
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -138,7 +137,6 @@ def test_go_parameter_names_and_formatting_are_not_api() -> None:
     assert a == b == {"F": "func(int,int)error"}
 
 
-@pytest.mark.skipif(shutil.which("go") is None, reason="go not on PATH")
 @pytest.mark.toolchain("go")
 def test_go_scanner_agrees_with_go_ast_on_which_names_are_exported(tmp_path: Path) -> None:
     """The oracle: ``go/ast`` lists the exported top-level declarations (methods as

@@ -32,7 +32,7 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
-import type { Role } from '../api/types'
+import type { LedgerVerify, Role } from '../api/types'
 import { CapabilityPage } from '../screens/Capability/CapabilityPage'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
@@ -123,7 +123,7 @@ const VERSION = { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_e
 const INSTALLATION = { id: 77, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: 'https://github.com/organizations/acme/settings/installations/77', suspended: false, permissions: { contents: 'read', metadata: 'read' }, can_deliver: false, recorded_by: 'admin', updated: '2026-09-15T10:00:00+00:00' }
 const GITHUB_APP = { configured: true, app_slug: 'crb', api_url: 'https://api.github.com', install_url: 'https://github.com/apps/crb/installations/new', installations: [INSTALLATION, { ...INSTALLATION, id: 78, account_login: 'beta', permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' }, can_deliver: true }] }
 const SETTINGS = { sandbox_mode: 'local', ledger_backend: 'sqlite', builders: [{ name: 'claude_code_cli', configured: true }], retention: { worktrees: false, transcripts: false }, oidc_enabled: false, apparatus_version: '2.2', policy_version: 'routing.v1', raw: { builder: { executor: 'docker', egress_network: 'none' }, sandbox: { executor: 'local' } } }
-const LEDGER_VERIFY = { rows: 3, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '3 rows, chain intact, false_q1=0', clean_without_pack: 0, verified_at: '2026-09-27T00:00:00Z', head_row_hash: 'h'.repeat(64), events: { rows: 2, chain_ok: true, broken_at: null, detail: '2 events, chain intact', head_row_hash: 'e'.repeat(64) } }
+const LEDGER_VERIFY = { rows: 3, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '3 rows, chain intact, false_q1=0', clean_without_pack: 0, signoffs: { rows: 1, chain_ok: true, broken_at: null, detail: '1 rows, chain intact' }, reviews: { rows: 0, chain_ok: true, broken_at: null, detail: '0 rows, chain intact' }, verified_at: '2026-09-27T00:00:00Z', head_row_hash: 'h'.repeat(64), events: { rows: 2, chain_ok: true, broken_at: null, detail: '2 events, chain intact', head_row_hash: 'e'.repeat(64), walk: 'full', full_walk_at: '2026-09-27T00:00:00Z' } } satisfies LedgerVerify
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, route: 'deliver', reason: 'n=40 point=0.95 ci_low=0.835 false_q1=0 oracle=0.9', reason_code: 'deliver', cost_usd_mean: 0.34, latency_s_mean: 200, verification_tier: 'automated-pass', apparatus_versions: ['2.2'], belt_set: 'v5', oracle_strength_mean: 0.9, n_tasks: 12, n_builder_red: 2, n_budget: 0, n_protocol: 0, n_harness: 0, n_disqualified: 0, failure_split: { builder_red: 2, lint: 0, budget: 0, protocol: 0, harness: 0, disqualified: 0 }, model_point: 0.95, model_n: 40, model_ci_low: 0.835, model_ci_high: 0.985 }
 const MAP = {

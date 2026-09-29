@@ -238,19 +238,25 @@ def test_a_matrix_the_scan_cannot_read_fails_closed_never_drops_the_job(ci_text:
 
 
 def test_the_real_workflow_requires_its_aggregators_and_none_of_their_parts() -> None:
-    """Main's CI splits the suite into shards and the walkthrough into a story and screens
-    shards; the required contexts stay on the `test` and `walkthrough` aggregators."""
+    """Main's CI splits the suite into shards, the walkthrough into a story and screens
+    shards, and the fresh-clone check into its gates and the suite's shards (P-743); the
+    contexts to require stay on the `test`, `walkthrough` and `fresh-clone` aggregators."""
     mod = _load()
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     parts = mod.aggregated_parts(ci)
-    assert set(parts.values()) == {"test", "walkthrough"}
-    assert sum(1 for c in parts if c.startswith("test shard (py")) == 12
+    assert set(parts.values()) == {"test", "walkthrough", "fresh-clone"}
+    assert sum(1 for c in parts if c.startswith("test shard (py")) == 16
     assert "walkthrough story (browser, live stack, tier 1)" in parts
     assert sum(1 for c in parts if c.startswith("walkthrough screens (")) == 4
+    assert "fresh-clone gates (from uv.lock, as root, no docker daemon)" in parts
+    assert sum(1 for c in parts if c.startswith("fresh-clone shard (")) == 8
     gating = mod.gating_contexts(ci)
-    assert {"test (py3.12)", "test (py3.13)", "walkthrough (browser, live stack, tier 1)"} <= set(
-        gating
-    )
+    assert {
+        "test (py3.12)",
+        "test (py3.13)",
+        "walkthrough (browser, live stack, tier 1)",
+        "fresh-clone (every gate from uv.lock, as root, no docker daemon)",
+    } <= set(gating)
     assert not set(gating) & set(parts)
 
 

@@ -88,7 +88,8 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
               src/crb/factory/review.py + src/crb/factory/delivery.py (the steps, in order),
               src/crb/observability/events.py (``Emitter`` for the step events),
               src/crb/server/routes/factory.py (serves the chain and the task view)
-Tested by:    tests/test_factory_loop.py
+Tested by:    tests/test_factory_loop.py, tests/test_factory_loop_rework.py,
+              tests/test_factory_loop_pull_requests.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
               docs/API.md#factory-phase-p6; changing the step order is a governance change

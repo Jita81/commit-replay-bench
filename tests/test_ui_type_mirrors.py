@@ -28,8 +28,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
+from pydantic import BaseModel
 
 from crb.server import schemas
 
@@ -39,6 +41,7 @@ TYPES = Path(__file__).resolve().parent.parent / "ui" / "src" / "api" / "types.t
 MIRRORS: dict[str, str] = {
     "LedgerVerifyOut": "LedgerVerify",
     "EventsVerifyOut": "EventsVerify",
+    "ChainVerifyOut": "ChainVerify",
     "AdequacyPolicyOut": "AdequacyPolicy",
     "RoutingPolicyOut": "RoutingPolicy",
     "RunFactoryOut": "RunFactory",
@@ -67,3 +70,28 @@ def test_the_ratchet_reads_a_field_it_would_miss() -> None:
     source = "export interface LedgerVerify {\n  rows: number\n  ok: boolean\n}\n"
     assert interface_fields(source, "LedgerVerify") == {"rows", "ok"}
     assert "events" in set(schemas.LedgerVerifyOut.model_fields)
+
+
+def _nested_models(annotation: object) -> set[str]:
+    """The pydantic models an annotation names, through ``X | None``, ``list[X]`` and the like."""
+    found: set[str] = set()
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        found.add(annotation.__name__)
+    for arg in get_args(annotation):
+        found |= _nested_models(arg)
+    return found
+
+
+def test_every_model_a_mirrored_response_nests_is_mirrored_too() -> None:
+    """A mirrored response is mirrored whole: a model it carries as a field (``signoffs`` /
+    ``reviews`` → ``ChainVerifyOut``, ``events`` → ``EventsVerifyOut``) is registered as
+    well, or a field added to the nested model would reach no screen and fail nothing
+    (P-703)."""
+    missing = {
+        f"{model}.{name} → {nested}"
+        for model in MIRRORS
+        for name, field in getattr(schemas, model).model_fields.items()
+        for nested in _nested_models(field.annotation)
+        if nested not in MIRRORS
+    }
+    assert missing == set(), f"register in MIRRORS: {sorted(missing)}"

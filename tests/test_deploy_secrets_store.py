@@ -44,9 +44,7 @@ Touch when:   never for a new repository; a pod that reads or writes the secrets
 
 from __future__ import annotations
 
-import os
 import posixpath
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -61,10 +59,9 @@ CHART = ROOT / "deploy" / "helm" / "crb"
 BASE = ["--set", "networkPolicy.postgres.cidrs={10.0.0.0/8}"]
 HOSTNAME = "kubernetes.io/hostname"
 
-if shutil.which("helm") is None:
-    if os.environ.get("CI"):
-        pytest.fail("helm is not on PATH on CI: the chart's secrets store would go unchecked")
-    pytest.skip("helm not on PATH", allow_module_level=True)
+# helm must WORK: a skip with the reason locally, a failure on every CI job that declares helm
+# in CRB_TEST_REQUIRE_TOOLS — the chart's secrets store never goes unchecked there (P-043, P-745)
+pytestmark = pytest.mark.toolchain("helm")
 
 
 class _StrictLoader(yaml.SafeLoader):

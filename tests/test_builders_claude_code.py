@@ -55,6 +55,11 @@ if str(_FIXTURES) not in sys.path:
     sys.path.insert(0, str(_FIXTURES))
 from builders_repo import FIXED_CALC, make_fixture  # noqa: E402
 
+try:  # tests/ is a package only if the conftest owner made it one
+    from tests import conftest_langs as langs
+except ImportError:  # pragma: no cover — layout-dependent
+    import conftest_langs as langs  # type: ignore[no-redef]
+
 # ---------------------------------------------------------------------------
 # Canned stream-json (shapes as emitted by `claude -p --output-format stream-json`)
 # ---------------------------------------------------------------------------
@@ -976,8 +981,9 @@ def test_stream_stats_claim_and_write_path_inspection(tmp_path: Path) -> None:
 
 @pytest.mark.live
 def test_live_claude_code(tmp_path: Path) -> None:
-    if not os.environ.get("ANTHROPIC_API_KEY") or not shutil.which("claude"):
-        pytest.skip("ANTHROPIC_API_KEY not set or claude CLI not on PATH")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        pytest.skip("ANTHROPIC_API_KEY not set")
+    langs.require_tool("claude")  # asked only once a key is set: the probe is `claude --version`
     fx = make_fixture(tmp_path)
     ws = fx.workspace(tmp_path / "wt")
     brief = base.BuildBrief.from_task(
@@ -999,8 +1005,6 @@ def _cli_logged_in() -> bool:
     """``claude auth status`` under the adapter's own cli-mode environment."""
     import subprocess
 
-    if not shutil.which("claude"):
-        return False
     try:
         p = subprocess.run(
             ["claude", "auth", "status"],
@@ -1024,8 +1028,9 @@ def test_live_claude_code_cli_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     the default suite on a developer machine."""
     if os.environ.get("CRB_LIVE_CLAUDE_CLI") != "1":
         pytest.skip("set CRB_LIVE_CLAUDE_CLI=1 to run the cli-auth live test")
+    langs.require_tool("claude")  # the gate asks whether the CLI works; this, the login
     if not _cli_logged_in():
-        pytest.skip("claude CLI not on PATH or not logged in (run `claude login`)")
+        pytest.skip("claude CLI not logged in (run `claude login`)")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fx = make_fixture(tmp_path)
     ws = fx.workspace(tmp_path / "wt")

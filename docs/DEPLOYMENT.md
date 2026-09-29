@@ -430,10 +430,11 @@ resolve plugins offline yet (README §6).
 container never has a network, so a repository's dependencies cannot be installed in it —
 and an image that bakes them in serves one commit's lockfile only. Before this, the docker
 posture could not build a Go repository with a third-party module and graded every attempt
-against the model **[measured — n = 3 or 4 rows of run `0c44ff24…` (cobra), each
-`builder_red` with the target red; method: the run's grade rows as read on 2026-09-25;
-apparatus 2.2. The count is disputed: 3 rows were observed when the run was cancelled, and
-stream D read 4 from the deployment's ledger export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
+against the model **[hypothesis, recorded as measured — n = 3 or 4 rows of run `0c44ff24…`
+(cobra), each `builder_red` with the target red; method: the run's grade rows as read on
+2026-09-25, neither read in this repository; apparatus 2.2. The count is disputed: 3 rows
+were observed when the run was cancelled, and stream D read 4 from the deployment's ledger
+export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
 
 - the lockfiles at the parent and at the gold are read from git objects; a fetch container
   (the pinned toolchain image, the worker's non-root uid, read-only, no capabilities) fetches
@@ -530,7 +531,7 @@ JSON
 
 `test (py3.12)`, `test (py3.13)` and `walkthrough (browser, live stack, tier 1)` are
 aggregators — each a job that `needs` its parts and runs `if: always()`: the work runs in
-parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough story and its screens
+parallel parts (`test shard (py3.12, 1 of 8)` …, the walkthrough story and its screens
 shards) and the aggregator passes only when every part passed (a failed, cancelled or skipped
 part fails it), the suite's parts together ran every test exactly once, and the union's
 coverage is at least 70 % (P-051, P-053) **[measured — n = 3 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes

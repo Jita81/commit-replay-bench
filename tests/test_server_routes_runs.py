@@ -584,6 +584,19 @@ class TestCredentialPresence:
         assert r.status_code == 422 and envelope(r)["code"] == "builder_credential_missing"
         assert jobs.enqueued == []
 
+    def test_a_run_level_builder_no_rung_calls_is_not_checked(
+        self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ladder with no bare rung never calls the run's own builder — the worker builds
+        only the rungs ``rungs_from_entries`` names — so its missing credential does not
+        refuse the run; a bare rung calls it, and does (P-706)."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        r = self._post(env, ladder=["openai_agent:gpt-oss-120b"])
+        assert r.status_code == 201, r.text
+        r = self._post(env, ladder=["r1", "openai_agent:gpt-oss-120b"])
+        assert r.status_code == 422 and envelope(r)["code"] == "builder_credential_missing"
+        assert len(jobs.enqueued) == 1
+
     def test_present_credentials_are_accepted_and_never_echoed(
         self, env: Env, jobs: FakeJobs, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
