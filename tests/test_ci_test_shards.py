@@ -707,10 +707,16 @@ def test_the_fresh_clone_shards_fit_their_budget_as_root() -> None:
     m = _shards()
     n = _shard_count()
     weights = m.load_weights()
-    parts = m.partition(dict.fromkeys(weights.files, 1), n, weights)
+    # every test file on disk, as the test-shard budget test partitions them (P-740): a file
+    # the table does not list weighs its test count at the default, never nothing
+    counts = {
+        str(f.relative_to(ROOT)): max(1, f.read_text("utf-8").count("\ndef test_"))
+        for f in sorted((ROOT / "tests").glob("test_*.py"))
+    }
+    parts = m.partition(counts, n, weights)
     budget_s = _timeout(_jobs(CI.read_text("utf-8"))["fresh-clone-shard"]) * 60
     heaviest = SETUP_ALLOWANCE_S + ROOT_SLOWDOWN * max(
-        sum(weights.files[f] for f in p) for p in parts
+        sum(weights.cost(f, counts[f]) for f in p) / 100 for p in parts
     )
     assert heaviest <= budget_s / 2, (
         f"the heaviest fresh-clone shard is predicted at {heaviest / 60:.1f} min, over half of "

@@ -14,7 +14,9 @@ What it does: Pins that ``tests/conftest.py``'s autouse ``_no_host_endpoint_env`
               nothing) could not see it.
 How:          ``subprocess.run`` of ``python -m pytest`` on each module in turn (one child per
               module, so each has its own time limit), with the parent's environment plus the
-              hostile variables; the child's output is shown on failure.
+              hostile variables; the child's output is shown on failure, and a child that ran
+              no tests (exit 5: the module skipped whole) fails by name rather than proving
+              nothing.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   tests/conftest.py (``_no_host_endpoint_env`` — the fixture under test),
@@ -87,4 +89,7 @@ def test_the_suite_ignores_the_shells_endpoint_variables(module: str) -> None:
         timeout=300,
         check=False,
     )
+    # exit 5 is "no tests ran": the module skipped whole (an importorskip on a package the
+    # job did not install, P-707), which proves nothing about the endpoint variables
+    assert proc.returncode != 5, f"{module} ran no tests — skipped whole:\n" + proc.stdout[-2000:]
     assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]
