@@ -108,8 +108,22 @@ def golive_events(c: TestClient) -> list[Event]:
         return rows
 
 
-YESTERDAY = (_dt.datetime.now(_dt.UTC).date() - _dt.timedelta(days=1)).isoformat()
-TOMORROW = (_dt.datetime.now(_dt.UTC).date() + _dt.timedelta(days=2)).isoformat()
+def day(offset: int) -> str:
+    """The UTC calendar day ``offset`` days from now, read when the test runs — never at import.
+    A module constant froze the suite's first day: a run that crossed 00:00 UTC then dated an act
+    two days before the install (refused, six tests) and its "future" day one day ahead
+    (accepted, the refusal test) — P-770."""
+    return (_dt.datetime.now(_dt.UTC).date() + _dt.timedelta(days=offset)).isoformat()
+
+
+def yesterday() -> str:
+    """One day before the server's today: inside every bound :func:`golive._check_day` sets."""
+    return day(-1)
+
+
+def beyond_tomorrow() -> str:
+    """Two days on: the first day the server refuses as the future everywhere."""
+    return day(2)
 
 
 def test_every_signed_in_role_reads_every_line_with_its_state_and_source(
@@ -139,7 +153,7 @@ def test_only_an_admin_records_an_attestation_and_it_is_one_event(client: TestCl
     login(client)
     create(client, "op", "operator")
     login(client, "op", USER_PW)
-    body = {"statement": "egress to 1.1.1.1 from worker-0 timed out", "performed_on": YESTERDAY}
+    body = {"statement": "egress to 1.1.1.1 from worker-0 timed out", "performed_on": yesterday()}
     r = client.put(f"{API_PREFIX}/settings/attestations/egress-denied", json=body)
     assert r.status_code == 403
     login(client)
@@ -148,13 +162,13 @@ def test_only_an_admin_records_an_attestation_and_it_is_one_event(client: TestCl
     got = line(r.json(), "egress-denied")
     assert got["state"] == "attested"
     a = got["attestation"]
-    assert (a["by"], a["performed_on"], a["statement"]) == ("root", YESTERDAY, body["statement"])
+    assert (a["by"], a["performed_on"], a["statement"]) == ("root", yesterday(), body["statement"])
     evs = golive_events(client)
     assert [e.action for e in evs] == ["golive.attested"]
     assert evs[0].payload_json == {
         "line": "egress-denied",
         "by": "root",
-        "performed_on": YESTERDAY,
+        "performed_on": yesterday(),
         "statement": body["statement"],
     }
     assert evs[0].actor == a["actor"] and evs[0].stage == "system"
@@ -173,7 +187,7 @@ def test_a_withdrawal_is_an_event_and_the_line_reads_unproven_again(client: Test
     assert r.status_code == 409 and err(r) == "not_attested"
     client.put(
         f"{API_PREFIX}/settings/attestations/doctor",
-        json={"statement": "both hosts ok", "performed_on": YESTERDAY},
+        json={"statement": "both hosts ok", "performed_on": yesterday()},
     )
     r = client.delete(f"{API_PREFIX}/settings/attestations/doctor")
     assert r.status_code == 200 and line(r.json(), "doctor")["state"] == "unproven"
@@ -182,24 +196,24 @@ def test_a_withdrawal_is_an_event_and_the_line_reads_unproven_again(client: Test
 
 def test_the_refusals(client: TestClient) -> None:
     login(client)
-    ok = {"statement": "done", "performed_on": YESTERDAY}
+    ok = {"statement": "done", "performed_on": yesterday()}
     r = client.put(f"{API_PREFIX}/settings/attestations/health-green", json=ok)
     assert r.status_code == 409 and err(r) == "proven_by_product"
     r = client.put(f"{API_PREFIX}/settings/attestations/made-up", json=ok)
     assert r.status_code == 404 and err(r) == "unknown_line"
     r = client.put(
         f"{API_PREFIX}/settings/attestations/doctor",
-        json={"statement": "   ", "performed_on": YESTERDAY},
+        json={"statement": "   ", "performed_on": yesterday()},
     )
     assert r.status_code == 422 and err(r) == "invalid_attestation"
     r = client.put(
         f"{API_PREFIX}/settings/attestations/doctor",
-        json={"statement": "done", "performed_on": TOMORROW},
+        json={"statement": "done", "performed_on": beyond_tomorrow()},
     )
     assert r.status_code == 422 and err(r) == "invalid_attestation"
     r = client.put(
         f"{API_PREFIX}/settings/attestations/doctor",
-        json={"statement": "x" * 501, "performed_on": YESTERDAY},
+        json={"statement": "x" * 501, "performed_on": yesterday()},
     )
     assert r.status_code == 422
     assert golive_events(client) == []
@@ -223,7 +237,7 @@ def test_the_platform_stream_counts_the_lines_as_golive_reads_them(client: TestC
         s.commit()
     client.put(
         f"{API_PREFIX}/settings/attestations/doctor",
-        json={"statement": "both hosts ok", "performed_on": YESTERDAY},
+        json={"statement": "both hosts ok", "performed_on": yesterday()},
     )
     want = client.get(f"{API_PREFIX}/golive").json()["counts"]
     r = client.get(f"{API_PREFIX}/flow", params={"repo": "calc"})
@@ -238,7 +252,7 @@ def test_below_admin_nobody_withdraws_an_attestation(client: TestClient) -> None
     """``settings.actions.15``: the API refuses both writes below admin — the withdrawal too,
     which would otherwise let an operator turn an attested line back to unproven."""
     login(client)
-    body = {"statement": "egress to 1.1.1.1 from worker-0 timed out", "performed_on": YESTERDAY}
+    body = {"statement": "egress to 1.1.1.1 from worker-0 timed out", "performed_on": yesterday()}
     assert (
         client.put(f"{API_PREFIX}/settings/attestations/egress-denied", json=body).status_code
         == 200
@@ -313,7 +327,7 @@ def test_the_flow_reading_does_not_run_the_deep_probes_on_every_read(
     # an attestation is in the next /flow reading at once: the write refreshes the reading
     client.put(
         f"{API_PREFIX}/settings/attestations/doctor",
-        json={"statement": "both hosts ok", "performed_on": YESTERDAY},
+        json={"statement": "both hosts ok", "performed_on": yesterday()},
     )
     r = client.get(f"{API_PREFIX}/flow", params={"repo": "calc"})
     platform = next(s for s in r.json()["streams"] if s["stream"] == "run-the-platform")
