@@ -175,6 +175,7 @@ export const HELP: ScreenHelp[] = [
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },
       { to: 'GITHUB-APP#5-what-happens-at-clone-and-at-delivery', label: 'What happens at delivery' },
+      { to: 'OPERATOR#81-factory-stop-conditions', label: 'Factory stop conditions' },
     ],
   },
   {

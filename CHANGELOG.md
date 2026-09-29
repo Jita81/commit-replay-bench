@@ -50,6 +50,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   links its task page. Home names every degraded or down probe in words. The Baseline's oracle
   tile and its door back to the walk are one reading (DL-309, DL-310, P-631 to P-638).
 
+- **Every stop condition has a surface, and the operator guide says what operating costs**
+  (north-star Wave 6, stream ops; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-ops)).
+  `/health` gains a `redaction` probe over the newest stored evidence packs (down naming the
+  pack, never the value; an approver's acknowledgement after rotation is the way back —
+  DL-313); `/metrics` carries each repository's controls verdict; a sealed build's denied
+  egress is read from the whole proxy log, evented, metered and alerted; `/ledger/verify`
+  serves the disqualified count per builder (DL-312). DEPLOYMENT §9 has the rules and what
+  the product cannot see; OPERATOR §8.1 tables every factory stop with its way forward and
+  §6.1 states the routine and the costs (G-400, G-401, G-920, G-978; P-640 to P-643).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

@@ -959,8 +959,15 @@ def build_fn_for(
             try:
                 task_deps = deps_for(task) if deps_for is not None else None
                 deps_kw = {"deps": task_deps} if task_deps is not None else {}
+                # the RAW callback (not builder_on_event): the session names its own
+                # ``builder.egress_denied`` action when the sidecar denied a host (G-400)
                 with session_factory(
-                    container, sealed, cancel=cancel, label=ws.root.name, **deps_kw
+                    container,
+                    sealed,
+                    cancel=cancel,
+                    label=ws.root.name,
+                    on_event=on_event,
+                    **deps_kw,
                 ) as session:
                     # the session supplies the container-bound spawn / executor; an
                     # explicit override (a test's fake binary) still wins
