@@ -278,7 +278,7 @@ jobs:
       CRB_TEST_STRICT_WARMUP: "1"
       # The tools this job provides (the runner image, setup-helm and setup-uv): a test that
       # needs one of them fails instead of skipping when it does not work, so an image that
-      # drops or breaks a toolchain turns the build red, not quietly smaller (P-742).
+      # drops or breaks a toolchain turns the build red, not quietly smaller (P-745).
       # tests/test_toolchain_gates.py fails when a toolchain marker names a tool neither
       # listed here nor named as one CI does not provide.
       CRB_TEST_REQUIRE_TOOLS: "go gofmt node npm mvn jdk cargo cargo-fmt helm uv jq bash docker"
@@ -484,8 +484,9 @@ jobs:
     # (scripts/ci_test_shards.py, tests/test_ci_test_shards.py holds the two equal), run as
     # root on a fresh clone with no daemon. CRB_TEST_REQUIRE_TOOLS names what this job
     # provides as root, so a test that needs one of them fails instead of skipping when it
-    # does not work (P-742). Not provided here, so skipped with the reason: docker (the daemon
-    # is stopped) and cargo (the runner's rustup has no toolchain for root).
+    # does not work (P-745). Not provided here, so skipped with the reason: docker (the daemon
+    # is stopped) and cargo (the runner's rustup has no toolchain for root). The list is
+    # test-shard's less exactly those (tests/test_toolchain_gates.py, P-748).
     name: fresh-clone shard (${{ matrix.shard }} of 6, as root, no docker daemon)
     runs-on: ubuntu-latest
     timeout-minutes: 30

@@ -1005,8 +1005,6 @@ def _cli_logged_in() -> bool:
     """``claude auth status`` under the adapter's own cli-mode environment."""
     import subprocess
 
-    if not shutil.which("claude"):
-        return False
     try:
         p = subprocess.run(
             ["claude", "auth", "status"],
@@ -1030,8 +1028,9 @@ def test_live_claude_code_cli_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     the default suite on a developer machine."""
     if os.environ.get("CRB_LIVE_CLAUDE_CLI") != "1":
         pytest.skip("set CRB_LIVE_CLAUDE_CLI=1 to run the cli-auth live test")
+    langs.require_tool("claude")  # the gate asks whether the CLI works; this, the login
     if not _cli_logged_in():
-        pytest.skip("claude CLI not on PATH or not logged in (run `claude login`)")
+        pytest.skip("claude CLI not logged in (run `claude login`)")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     fx = make_fixture(tmp_path)
     ws = fx.workspace(tmp_path / "wt")

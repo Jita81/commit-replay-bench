@@ -130,7 +130,7 @@ def probe_docker(timeout: int = 10, *, request_id: str = "") -> ProbeResult:
             return ProbeResult(
                 "sandbox", DOWN, "docker binary not on PATH — sandboxed runs will fail closed"
             )
-        try:  # exit 0 with no version is a stopped daemon too (docs/PREVENTION.md P-741)
+        try:  # exit 0 with no version is a stopped daemon too (docs/PREVENTION.md P-744)
             version = docker_server_version(binary, timeout=timeout)
         except SandboxUnavailable:
             return ProbeResult(

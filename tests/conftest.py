@@ -71,9 +71,9 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     fixtures is built.
 
     ``@pytest.mark.toolchain(*tools)``: each tool must WORK (``langs.require_tool``: a
-    bounded probe, not a PATH lookup — P-741); ``@pytest.mark.docker``: a daemon must answer
+    bounded probe, not a PATH lookup — P-744); ``@pytest.mark.docker``: a daemon must answer
     with its version (``langs.require_docker``). Either is a skip with the reason, or a
-    failure when the job names the tool in ``CRB_TEST_REQUIRE_TOOLS`` (P-742).
+    failure when the job names the tool in ``CRB_TEST_REQUIRE_TOOLS`` (P-745).
     ``@pytest.mark.network``: the hosts it names must answer; offline, or behind a proxy that
     refuses, it is skipped with the host and the reason instead of failing on an install the
     host could never complete; under strict warm-up (CI, where the network is there) it

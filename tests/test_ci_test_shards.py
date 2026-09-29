@@ -24,7 +24,8 @@ What it does: Pins that ``partition`` puts every file in exactly one shard, dete
               and coverage-data options, the matrix lists 1..N, the name states N, and N
               leaves no shard empty. The fresh-clone suite is split the same N ways: its
               aggregator needs the gates job and every shard, passes only when every part did
-              and proves the partition, and each shard fits its budget as root (P-743).
+              and proves the partition, and each shard fits its budget as root (P-743). No
+              step of either aggregator may carry an ``if:`` but ``always()`` (P-746).
 How:          Pure calls with synthetic ids and weights; one pytest subprocess per shard over a
               suite written to ``tmp_path``; ``ci.yml`` read as text with the job parser of
               tests/test_ci_job_budget.py.
@@ -55,6 +56,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 
 from test_ci_job_budget import ALL_PASSED_JQ, _jobs, _needs, _steps
 
@@ -416,6 +418,39 @@ def test_the_aggregator_proves_the_partition_over_every_shards_report() -> None:
     )
     assert "name: test-shard-py${{ matrix.python }}-${{ matrix.shard }}" in upload
     assert "continue-on-error" not in upload
+
+
+def aggregator_step_findings(ci_text: str) -> list[str]:
+    """Each step of a sharded suite's aggregator that can be skipped: an ``if:`` other than
+    ``always()`` — ``if: false`` on the every-shard-passed step or the partition proof leaves
+    the aggregator green over failed shards (P-746)."""
+    jobs = yaml.safe_load(ci_text)["jobs"]
+    return [
+        f"{agg}: step {step.get('name') or step.get('uses')!r} runs only if {step['if']!r}"
+        for agg in SHARDED
+        for step in jobs[agg].get("steps", [])
+        if str(step.get("if", "always()")).strip() not in ("always()", "${{ always() }}")
+    ]
+
+
+def test_no_aggregator_step_can_be_skipped() -> None:
+    assert aggregator_step_findings(CI.read_text("utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        "      - name: Every shard passed (both Python versions)\n",
+        "      - name: Every test ran in exactly one shard (the partition proof)\n",
+        "      - name: coverage >= 70 on the union of the shards\n",
+        "      - name: Every part passed (the gates and every shard)\n",
+    ],
+)
+def test_the_step_check_refuses_an_aggregator_step_that_never_runs(step: str) -> None:
+    text = CI.read_text("utf-8")
+    assert step in text, step
+    planted = text.replace(step, f"{step}        if: false\n")
+    assert aggregator_step_findings(planted) != [], step
 
 
 def test_coverage_is_enforced_at_70_percent_or_more_on_the_union() -> None:

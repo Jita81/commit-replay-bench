@@ -22,7 +22,8 @@ What it does: Fails when a job in any workflow, or the product image's Dockerfil
               ``fresh-clone`` check — ``fresh-clone-gates``, the ``fresh-clone-shard`` jobs and
               the ``fresh-clone`` aggregator over them — stops running a gate, stops running
               as root in its own clone, stops proving the docker daemon is gone, stops proving
-              the shards' partition, or declares a tool root is not given (P-742, P-743). Each check
+              the shards' partition, lets an aggregator step be skipped (P-746), or declares a
+              tool root is not given (P-745, P-743). Each check
               is also run on a planted regression so it cannot pass vacuously.
 How:          PyYAML reads the workflows; the Dockerfile's ``RUN`` instructions are joined
               across continuations; ``tomllib`` reads ``uv.lock`` and ``pyproject.toml``;
@@ -316,11 +317,11 @@ def fresh_clone_findings(ci_text: str) -> list[str]:
 
     The jobs are parsed, not searched (P-346): a gate counts only as an exact line of a gates
     script (so ``|| true``, ``--co``, ``-k`` or ``--deselect`` on it is a finding), each
-    script runs only as ``bash -euo pipefail`` of the file, and no part or step carries an
-    ``if:`` other than ``always()`` or a ``continue-on-error``. The aggregator runs
+    script runs only as ``bash -euo pipefail`` of the file, and no part, aggregator or step of
+    either carries an ``if:`` other than ``always()`` or a ``continue-on-error``. The aggregator runs
     ``always()``, needs every part, passes only when every part passed and proves the
     shards' partition; each shard declares the tools it provides as root, and never docker —
-    its daemon is stopped (P-742)."""
+    its daemon is stopped (P-745)."""
     jobs = yaml.safe_load(ci_text)["jobs"]
     agg = jobs.get("fresh-clone")
     if agg is None:
@@ -336,6 +337,9 @@ def fresh_clone_findings(ci_text: str) -> list[str]:
         findings.append("the fresh-clone aggregator does not fail when a part did not pass")
     if agg.get("continue-on-error") or any(s.get("continue-on-error") for s in agg["steps"]):
         findings.append("the fresh-clone aggregator may fail without failing the check")
+    for step in agg.get("steps", []):  # an ``if: false`` step is green without running (P-746)
+        if str(step.get("if", "always()")).strip() not in _ALWAYS:
+            findings.append(f"a fresh-clone aggregator step can be skipped: {step.get('name')!r}")
     scripts: dict[str, list[str]] = {}
     for name in FRESH_CLONE_PARTS:
         job = jobs.get(name)
@@ -578,6 +582,21 @@ def _planted_job(edit: Any) -> str:
             "an aggregator that does not wait for the shards",
             lambda j: j.replace(
                 "needs: [fresh-clone-gates, fresh-clone-shard]", "needs: [fresh-clone-gates]"
+            ),
+        ),
+        (
+            "an aggregator whose every-part-passed step never runs",
+            lambda j: j.replace(
+                "      - name: Every part passed (the gates and every shard)\n",
+                "      - name: Every part passed (the gates and every shard)\n        if: false\n",
+            ),
+        ),
+        (
+            "an aggregator whose partition proof never runs",
+            lambda j: j.replace(
+                "      - name: Every test ran in exactly one shard (the partition proof)\n",
+                "      - name: Every test ran in exactly one shard (the partition proof)\n"
+                "        if: false\n",
             ),
         ),
         (

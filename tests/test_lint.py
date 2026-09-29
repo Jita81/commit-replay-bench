@@ -738,14 +738,6 @@ def test_go_declared_lint_overrides_detection(tmp_path: Path) -> None:
     ws.remove()
 
 
-def _ruff_binary() -> str | None:
-    sibling = Path(sys.executable).parent / "ruff"
-    if sibling.exists():
-        return str(sibling)
-    return shutil.which("ruff")
-
-
-@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
 def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     """click's apparatus: ``[tool.ruff]`` + the ``ruff-format`` hook. The gold passes;
     the gold with an unused import and un-formatted code does not."""
@@ -793,7 +785,6 @@ def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     ws.remove()
 
 
-@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
 def test_builder_cannot_rewrite_the_linters_configuration(tmp_path: Path) -> None:
     """Independent review pass (2026-09-14), finding 2: with the parent's
     ``[tool.ruff.lint] select = ["E", "F"]`` an unused import is ``repo_lint_clean=False``;

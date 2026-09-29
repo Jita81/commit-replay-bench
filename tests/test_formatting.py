@@ -25,7 +25,7 @@ Touch when:   never for a new repository; a formatter is added to ``FORMATTER_WR
 
 from __future__ import annotations
 
-import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,9 @@ try:
 except ImportError:  # pragma: no cover
     import conftest_langs as langs  # type: ignore[no-redef]
 
-RUFF = shutil.which("ruff") or str(Path(__file__).resolve().parents[1] / ".venv" / "bin" / "ruff")
+#: ruff is a locked dev dependency (uv.lock): the one installed beside the interpreter that
+#: runs the suite, never a skip when it is missing (P-747).
+RUFF = str(Path(sys.executable).parent / "ruff")
 
 
 @pytest.mark.toolchain("go", "gofmt")
@@ -100,7 +102,6 @@ def _python_repo(tmp_path: Path, pyproject: str) -> Path:
     return root
 
 
-@pytest.mark.skipif(not Path(RUFF).exists(), reason="ruff not available")
 def test_ruff_format_runs_only_where_the_repository_configures_it(tmp_path: Path) -> None:
     cfg = RepoConfig(
         name="pyfix",
@@ -124,7 +125,6 @@ def test_ruff_format_runs_only_where_the_repository_configures_it(tmp_path: Path
     assert detected is not None and "ruff-format" in {t.name for t in detected.tools}
 
 
-@pytest.mark.skipif(not Path(RUFF).exists(), reason="ruff not available")
 def test_a_ruff_outside_the_repositorys_pin_never_formats_and_says_so(tmp_path: Path) -> None:
     """Belt 5 refuses to judge with a ruff the repository's pin forbids; the format step
     and the preflight's fixers must not rewrite files with it either (P-031)."""

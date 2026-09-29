@@ -45,7 +45,6 @@ tests/fixtures/oracle_repo.py
 tests/fixtures/pyrepo.py
 tests/fixtures/remote.py
 tests/fixtures/signoff_seed.py
-tests/test_builders_labeller.py
 tests/test_classify.py
 tests/test_cli_repo_url.py
 tests/test_cli_tasks.py

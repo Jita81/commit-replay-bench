@@ -60,7 +60,7 @@ BASE = ["--set", "networkPolicy.postgres.cidrs={10.0.0.0/8}"]
 HOSTNAME = "kubernetes.io/hostname"
 
 # helm must WORK: a skip with the reason locally, a failure on every CI job that declares helm
-# in CRB_TEST_REQUIRE_TOOLS — the chart's secrets store never goes unchecked there (P-043, P-742)
+# in CRB_TEST_REQUIRE_TOOLS — the chart's secrets store never goes unchecked there (P-043, P-745)
 pytestmark = pytest.mark.toolchain("helm")
 
 

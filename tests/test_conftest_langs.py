@@ -11,7 +11,7 @@ the reason locally, and a failure under strict warm-up. And it pins the toolchai
 gates: a tool must answer, not merely be on PATH (a rustup proxy with no toolchain is on
 PATH), a daemon must name its version (a docker CLI before 29 exits 0 without one), and a
 tool the job declares in ``CRB_TEST_REQUIRE_TOOLS`` fails the test instead of skipping it
-(P-741, P-742).
+(P-744, P-745).
 
 Navigation
 ----------
@@ -284,7 +284,7 @@ def test_the_setup_hook_probes_only_network_marked_tests_and_their_named_hosts(
 
 
 # ---------------------------------------------------------------------------
-# ``@pytest.mark.toolchain`` / ``@pytest.mark.docker``: the tool must WORK (P-741, P-742)
+# ``@pytest.mark.toolchain`` / ``@pytest.mark.docker``: the tool must WORK (P-744, P-745)
 # ---------------------------------------------------------------------------
 
 #: What a rustup proxy answers for a user with no toolchain (root on the fresh-clone job).

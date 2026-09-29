@@ -321,7 +321,7 @@ def test_docker_daemon_probe_failure_fails_closed() -> None:
 
 #: What a docker CLI before 29 answers a formatted ``docker info`` with when its daemon is
 #: down: the template rendered empty, the error on stderr, and exit 0 (the fresh-clone job's
-#: first run, 2026-09-28 — docs/PREVENTION.md P-741).
+#: first run, 2026-09-28 — docs/PREVENTION.md P-744).
 _EMPTY_INFO = subprocess.CompletedProcess(
     [],
     0,

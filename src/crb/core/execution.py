@@ -292,7 +292,7 @@ def docker_server_version(docker: str, *, timeout: float = 30, runner: Runner | 
     before 29 renders a ``--format`` template empty, prints the connection error on stderr
     and exits 0 when its daemon is down, so the exit code alone reads a stopped daemon as
     one that answers (the fresh-clone job's first run, 2026-09-28 — docs/PREVENTION.md
-    P-741). A command that cannot be run at all raises as ``subprocess.run`` does.
+    P-744). A command that cannot be run at all raises as ``subprocess.run`` does.
     """
     r = (runner or subprocess.run)(
         [docker, *DOCKER_VERSION_ARGV], capture_output=True, text=True, timeout=timeout, check=False

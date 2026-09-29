@@ -113,7 +113,7 @@ DOCKER_BUILD_TIMEOUT_S = 900
 #: commas or spaces — the names ``@pytest.mark.toolchain`` takes, and ``docker`` for the
 #: daemon). A tool it names that does not work fails the test that needs it instead of
 #: skipping it, so a runner image that drops or breaks a toolchain turns the build red
-#: instead of quietly running fewer tests (docs/PREVENTION.md P-742).
+#: instead of quietly running fewer tests (docs/PREVENTION.md P-745).
 REQUIRE_TOOLS_ENV = "CRB_TEST_REQUIRE_TOOLS"
 
 #: How a tool proves it works: the argv (and stdin) of a quick, offline command that exits
@@ -136,7 +136,7 @@ def tool_unusable_reason(name: str) -> str:
     """'' when ``name`` WORKS; else why not (memoised per process).
 
     On PATH is not enough: a rustup proxy is on PATH for a user with no toolchain (root on
-    the fresh-clone job, whose ``cargo`` answered every call with exit 1 — P-741), so the
+    the fresh-clone job, whose ``cargo`` answered every call with exit 1 — P-744), so the
     tool must answer its probe (:data:`TOOL_PROBES`) with exit 0 within
     :data:`TOOL_PROBE_TIMEOUT_S`.
     """
@@ -209,7 +209,7 @@ _DOCKER_REASON: dict[str, str] = {}
 def docker_unavailable_reason() -> str:
     """'' when a daemon answers ``docker info`` with its version; else why not (memoised
     per process). The question is :func:`crb.core.execution.docker_server_version`'s, so
-    a CLI that exits 0 with its daemon stopped is not an answer (P-741)."""
+    a CLI that exits 0 with its daemon stopped is not an answer (P-744)."""
     if "reason" in _DOCKER_REASON:
         return _DOCKER_REASON["reason"]
     docker = shutil.which("docker")

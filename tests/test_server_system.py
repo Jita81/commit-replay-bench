@@ -1009,7 +1009,7 @@ def test_the_sandbox_probe_is_down_when_docker_info_names_no_server_version(
 ) -> None:
     """A docker CLI before 29 exits 0 on a formatted ``docker info`` with its daemon down and
     prints the template empty; ``/health`` must say ``down``, not ``ok`` with no version
-    (the fresh-clone job's first run, 2026-09-28 — docs/PREVENTION.md P-741)."""
+    (the fresh-clone job's first run, 2026-09-28 — docs/PREVENTION.md P-744)."""
     import subprocess
 
     from crb.observability import probes
