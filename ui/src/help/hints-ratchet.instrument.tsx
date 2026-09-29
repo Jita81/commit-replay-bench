@@ -51,6 +51,7 @@ import { RunDetailPage } from '../screens/Runs/RunDetailPage'
 import { RunsPage } from '../screens/Runs/RunsPage'
 import { TaskDetailPage } from '../screens/Runs/TaskDetailPage'
 import { SettingsPage } from '../screens/Settings/SettingsPage'
+import { envelope } from '../test/utils'
 
 export interface InstrumentScreen {
   route: string
@@ -655,7 +656,8 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     path: '/oracle',
     element: <OraclePage />,
     api: { 'GET /oracle/alpha': ORACLE, 'GET /oracle/alpha/controls': CONTROLS_REPORT, 'GET /repos': REPOS },
-    roles: ['viewer'],
+    // the operator's branch too (G-206); its Run oracle / Run controls render in the variant below
+    roles: ['viewer', 'operator'],
   },
   '/learn': {
     route: '/learn?repo=alpha',
@@ -712,6 +714,20 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
   { name: '/repos/:name tab=profile', route: '/repos/alpha?tab=profile', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer'] },
   { name: '/repos/:name tab=tasks', route: '/repos/alpha?tab=tasks', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer'] },
   { name: '/repos/:name tab=config', route: '/repos/alpha?tab=config', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer', 'operator'] },
+  // G-206: nothing scored and no controls report — the state where Run oracle and Run controls render for an operator
+  {
+    name: '/oracle, nothing measured yet',
+    route: '/oracle?repo=alpha',
+    path: '/oracle',
+    element: <OraclePage />,
+    api: { 'GET /oracle/alpha': { ...ORACLE, tasks: [], cells: [] }, 'GET /oracle/alpha/controls': () => envelope(404, 'not_measured', 'no controls report'), 'GET /repos': REPOS },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByText('No controls report yet')
+    },
+  },
+  // G-269: more runs match than the page reads — the "newest 200 of n" line
+  { name: '/runs, more runs than the page', route: '/runs', path: '/runs', element: <RunsPage />, api: { ...INSTRUMENT_SCREENS['/runs']!.api, 'GET /runs': { ...RUNS, total: 437 } }, roles: ['viewer', 'operator'], open: async () => void (await screen.findByTestId('runs-limit')) },
   // G-180: a filter that arrives in a link and has no control of its own shows as a chip
   { name: '/ledger + filters from a link', route: '/ledger?repo=alpha&run_id=r1&task_id=t1&builder=fixture&language=python', path: '/ledger', element: <LedgerPage />, api: INSTRUMENT_SCREENS['/ledger']!.api, roles: ['viewer'] },
   {

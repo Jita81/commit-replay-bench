@@ -22,6 +22,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   probe, step 2 and each proving run. Reading the Baseline costs £0 (DL-300 to DL-302, P-600 to
   P-609).
 
+- **One served Decisions inbox, and honest run, task and oracle pages**
+  (north-star Wave 6, stream Decisions; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-dec)).
+  `GET /decisions` derives every row once and fits each act to the reader's role; `?count=1`
+  feeds the nav badge in one request. Every act re-reads both, one broken repository no longer
+  blanks the inbox, and the Results panel reads the same rows. A held cell and a stale cell
+  each become a row. ADR-0003 says merge outcomes and review verdicts feed no routing clause.
+  A cancel that fails says why, an unknown task says so, and task rows link to their pages,
+  by keyboard too (DL-303, DL-304, P-610 to P-619).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

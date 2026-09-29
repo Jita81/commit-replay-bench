@@ -296,7 +296,7 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
 from crb.server import factory_standard
-from crb.server.decisions import record_due
+from crb.server.decisions import IDLE_KEEPS_OPEN, record_due
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
@@ -962,8 +962,10 @@ class Worker:
                         self.settings,
                         name,
                         cells=self._served_map(name)[0].cells,
+                        posture_class=self._deployment_posture_class(name),
                     )
-                    record_due(db, name, rows)
+                    # F6: an item no run has reached is GET /decisions's to resolve
+                    record_due(db, name, rows, keep_open=IDLE_KEEPS_OPEN)
                     db.commit()
                 done += 1
             except Exception:  # the idle loop must survive a repository it cannot read

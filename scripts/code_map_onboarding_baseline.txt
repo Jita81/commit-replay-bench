@@ -79,7 +79,6 @@ ui/src/api/types.test.ts
 ui/src/components/BeltPills.test.tsx
 ui/src/components/BeltPills.tsx
 ui/src/components/CiBar.tsx
-ui/src/components/DataTable.tsx
 ui/src/components/Field.tsx
 ui/src/components/Hint.test.tsx
 ui/src/components/Hint.tsx
@@ -100,7 +99,6 @@ ui/src/lib/jsonObject.test.ts
 ui/src/lib/jsonObject.ts
 ui/src/lib/theme.ts
 ui/src/lib/verdict.test.ts
-ui/src/main.tsx
 ui/src/screens/Capability/FailureSplit.tsx
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Connect/GitHubConnectDialog.test.tsx
@@ -120,4 +118,3 @@ ui/src/screens/Runs/telemetry.test.ts
 ui/src/screens/Runs/telemetry.ts
 ui/src/screens/Settings/claudeCodeLogin.ts
 ui/src/test/setup.ts
-ui/src/test/utils.tsx

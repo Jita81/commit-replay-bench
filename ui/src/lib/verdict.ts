@@ -235,7 +235,7 @@ export const ACTION_HELP: Record<string, string> = {
   'qualify.done': 'The qualify run finished: how many tasks are proven in this posture and why the others are not.',
   'run.start': 'The run started.',
   'run.done': 'The run completed its work.',
-  'run.cancel_requested': 'Someone asked for the run to stop; it ends after the attempt in flight.',
+  'run.cancel_requested': 'Someone asked for the run to stop; it ends between tasks, and the command in flight is killed.',
   'run.deliver_override': 'A second approver lifted this factory run’s sign-off clause for the run; the route gate still decides every delivery, the person who queued the run cannot grant it, and it never lifts a cell with a wrong clean verdict.',
   'run.kill_unconfirmed': 'The build container was told to stop but the daemon did not confirm it within the bound; it may still be running and the worker will reap it.',
   'run.kill_reaped': 'The worker removed a container whose stop had not been confirmed; it is gone.',

@@ -6,7 +6,9 @@
  * What it is:   The generic `DataTable<T>` and its `Column<T>` descriptor.
  * What it does: Renders rows through per-column cell renderers with client-side sorting
  *               (`sortValue`), numeric right-alignment with tabular numerals, `hideBelowMd`
- *               columns, keyboard-operable clickable rows, `<th scope="col">` + `aria-sort`, a
+ *               columns, keyboard-operable clickable rows (Enter or Space on the row opens it;
+ *               a key pressed on a link or button inside the row is that control's own —
+ *               P-614), `<th scope="col">` + `aria-sort`, a
  *               required caption, and a designed empty slot — a table is never blank. A
  *               column's `hint` (a registry id — the ratchet requires one on every column with
  *               a header) makes the header the hover / focus / tap trigger for what the
@@ -23,12 +25,13 @@
  *               ui/src/screens/Runs/RunDetailPage.tsx
  *               (a typical column set with sort accessors), ui/src/screens/Ledger/LedgerPage.tsx
  *               and ui/src/screens/Repos/ReposPage.tsx (dense list screens)
- * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract),
+ * Tested by:    ui/src/components/DataTable.test.tsx (the row's keyboard contract),
+ *               ui/src/help/hints-ratchet.test.tsx (the hint contract),
  *               ui/src/screens/Runs/RunDetailPage.test.tsx,
  *               ui/src/screens/Routing/RoutingPage.test.tsx
  *               and ui/src/screens/Signoff/SignoffPage.test.tsx (rows and captions as rendered),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (axe: headers, captions)
- * Touch when:   a screen needs a column type the descriptor lacks; never for a new repository.
+ * Touch when:   never for a new repository; a screen needs a column type the descriptor lacks.
  */
 import { useMemo, useState, type ReactNode } from 'react'
 import type { HintId } from '../help/hints'
@@ -186,6 +189,10 @@ export function DataTable<T>({
                   onKeyDown={
                     clickable
                       ? (e) => {
+                          // a key pressed on a link or button inside the row is that control's
+                          // own: preventing it here would cancel the link or open the row's
+                          // target instead of the one chosen (P-614)
+                          if (e.target !== e.currentTarget) return
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault()
                             onRowClick?.(row)

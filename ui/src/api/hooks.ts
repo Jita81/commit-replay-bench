@@ -182,7 +182,6 @@ export const keys = {
   users: ['users'] as const,
   userEvents: (id: string, p?: PageParams) => ['users', id, 'events', p ?? {}] as const,
   invitations: ['invitations'] as const,
-  decisionAges: ['decisions', 'ages'] as const,
   twoPerson: ['two-person-readiness'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
@@ -543,6 +542,8 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
   return useMutation({
     mutationFn: (id) => api<Run>(`/runs/${enc(id)}/cancel`, { method: 'POST' }),
     onSuccess: (_r, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
+    // a refused cancel (409: the run already ended) means the page's copy is stale: read it again (G-976)
+    onError: (_e, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
   })
 }
 

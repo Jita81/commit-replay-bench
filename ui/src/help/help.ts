@@ -130,10 +130,10 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Everything that is waiting on a person, across every repository. A cell the policy would refuse anyway is never listed; it stays on the map with its reason.',
     next: {
       viewer: 'Read why each row is here; the evidence line names the cell, n, interval and reason code.',
-      operator: 'Rows marked “approver acts” are not yours — a Sign a gap row needs an approver. Decide and Review rows on factory items are yours; Read opens the rest.',
+      operator: 'Rows marked “approver acts” are not yours — a Sign a gap row needs an approver. Decide and Review rows on factory items are yours, and so are Strengthen the tests (a cell held until its tests are stronger) and Queue re-measurement (a cell measured on an earlier apparatus), which open Learn; Read opens the rest.',
       approver: 'Attest opens the sign-off form with the cell chosen; Sign a gap opens the item on the Factory. Decline by doing nothing: an unsigned cell keeps its route.',
     },
-    numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
+    numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. On a re-measurement row, the rows needed are those that reach the rule’s first look, the dollar figure is an estimate at the cell’s own cost per row (or “cost not known”), and builder/model@provider is what it is re-measured on. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
     terms: ['cell', 'wilson', 'reason_code', 'signoff', 'stale', 'apparatus', 'false_q1'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-6--before-anyone-signs-anything', label: 'Before anyone signs anything' },
@@ -205,10 +205,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/runs/:id',
-    purpose: 'One run: its progress, live log, per-task rows and their evidence packs. Cancel stops after the attempt in flight; nothing already graded is lost.',
+    purpose: 'One run: its progress, live log, per-task rows and their evidence packs. Cancel ends a queued run at once; a running one stops between tasks and the command in flight is killed; nothing already graded is lost. This page does not start a run, does not change a graded row and never talks to the worker: it reads what the API serves, and Cancel is a request to the API.',
     next: {
-      viewer: 'Read the rows and open a pack; the pack hash is the row’s permanent reference.',
-      operator: 'Watch the log; open a row’s pack to see every belt and the diff; cancel if the spend is wrong.',
+      viewer: 'Read the rows and open a pack; the pack hash is the row’s permanent reference. A pack’s Review tab shows the verdicts recorded on the patch; recording one is an operator’s act.',
+      operator: 'Watch the log; open a row’s pack to see every belt and the diff; cancel if the spend is wrong. Record your review of the patch on the pack’s Review tab — the operator role records reviews, once the patch has loaded.',
     },
     numbers: 'A row is clean only when every evaluated belt holds; the “why not clean” split is red, budget, protocol and harness. Instrument rows (protocol, harness) count against the builder until the instrument is fixed.',
     terms: ['belt', 'clean', 'evidence_pack', 'false_q1', 'wilson', 'apparatus', 'oracle_strength', 'cell'],
@@ -266,7 +266,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'The gate rows name what held and what did not; escapes are findings about the tests, not failures of the grader.',
       operator: 'If the controls gate is not open, run the controls. If a task is weak, the strengthen report on Learn turns it into test work.',
     },
-    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong at or above the policy’s deliver floor, adequate at or above its adequate floor, weak below it; the Strong and Adequate tiles name the floors this deployment serves.',
+    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong at or above the policy’s deliver floor, adequate at or above its adequate floor, weak below it; the Strong and Adequate tiles name the floors this deployment serves. This page queues nothing — Run oracle and Run controls open the Runs form — and the gate on each row is the server’s verdict, not arithmetic done here. A strength compares only within one language and one mutator family: a strength measured on Go tests is not comparable with one measured on Python tests, or with one from another family of mutators.',
     terms: ['oracle_strength', 'negative_controls', 'controls_escape', 'wilson', 'human', 'cell', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#31-oracle-adequacy--mutation-scoring', label: 'Oracle adequacy: mutation scoring' },

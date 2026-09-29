@@ -283,6 +283,7 @@ These are not wave items; each unblocks the work named beside it.
 | what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
 | what Wave 4 left open: the Decisions inbox's sign-off reader, the read-then-insert ratchet, the failed-read ratchet, controls disabled while pending, and the streams not built (LIB's arms, CLS, FWD, CL) | G-738, G-720, G-732, G-739, G-675, G-672, G-679, G-945, G-946 |
 | the product | F43, G-604, F21, G-600 |
+| what Wave 6's Decisions stream left open: the browser's inbox fold, which no screen reads now | G-775 |
 
 ## What each wave must do to its own artefacts
 

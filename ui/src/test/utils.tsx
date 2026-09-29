@@ -19,19 +19,21 @@
  * ADRs:         none
  * Works with:   ui/src/api/client.ts (the fetch calls this intercepts), ui/src/lib/auth.tsx
  *               (`AuthProvider` — `/auth/me` is usually mocked with `PRINCIPAL`),
- *               ui/src/main.tsx (the provider stack this mirrors), ui/src/help/hints.ts
+ *               ui/src/main.tsx (the provider stack this mirrors), ui/src/api/queryClient.ts
+ *               (the client both build), ui/src/help/hints.ts
  *               (`hintText` — what `expectHintOpens` asserts), ui/src/components/Hint.tsx
  *               (the bubble it finds through `aria-describedby`),
  *               ui/src/screens/Capability/CapabilityPage.test.tsx (a typical consumer)
  * Tested by:    every `*.test.tsx` under ui/src/screens (they all render through this)
- * Touch when:   the API prefix or the provider stack changes; never for a new repository.
+ * Touch when:   never for a new repository; the API prefix or the provider stack changes.
  */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { render, waitFor, type RenderOptions } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement, ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { expect, vi } from 'vitest'
+import { makeQueryClient } from '../api/queryClient'
 import type { Principal } from '../api/types'
 import { hintText, type HintId } from '../help/hints'
 import { AuthProvider } from '../lib/auth'
@@ -98,7 +100,8 @@ export async function expectHintOpens(trigger: Element, id: HintId): Promise<HTM
 }
 
 export function renderApp(ui: ReactElement, opts: Opts = {}) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } })
+  // the app's own client (every act re-reads the decisions inbox), with nothing cached across tests
+  const qc = makeQueryClient({ queries: { retry: false, gcTime: 0 }, mutations: { retry: false } })
   const route = opts.route ?? '/'
   const path = opts.path ?? '*'
   const wrapper = ({ children }: { children: ReactNode }) => (

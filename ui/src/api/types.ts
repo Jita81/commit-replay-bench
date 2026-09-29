@@ -2439,3 +2439,49 @@ export interface LibraryProposeRequest {
   check?: string
   parent_class?: string
 }
+
+/**
+ * One row of `GET /decisions` (F6): a due decision as the person reading it may act on it, with the
+ * server's clock. `act` is the row's verb when `can_act`, else `Read`; `signoff` rides on a
+ * `signoff_stale` row. src/crb/server/routes/decisions.py `DecisionOut`.
+ */
+export interface DecisionRowOut {
+  repo: string
+  kind: string
+  key: string
+  title: string
+  role: 'approver' | 'operator' | 'viewer'
+  evidence: string
+  reason_code: string
+  act: string
+  href: string
+  can_act: boolean
+  signoff: Signoff | null
+  due_since: string
+  age_s: number
+}
+
+/** A repository whose inbox inputs could not be read: the count is incomplete while one is listed. */
+export interface DecisionReadError {
+  repo: string
+  status: number
+  code: string
+  message: string
+}
+
+/** `GET /decisions[?repo=]`. `measured` = the repositories with at least one measured cell. */
+export interface DecisionList {
+  items: DecisionRowOut[]
+  total: number
+  as_of: string
+  repos: string[]
+  measured: string[]
+  errors: DecisionReadError[]
+}
+
+/** `GET /decisions?count=1` — the nav badge's reading; it never writes the clock. */
+export interface DecisionCount {
+  total: number
+  by_role: Record<string, number>
+  errors: string[]
+}

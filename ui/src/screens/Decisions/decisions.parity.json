@@ -1,0 +1,557 @@
+{
+  "about": "One repository's inputs, and the rows both derivations must produce from them: src/crb/server/decisions.py (tests/test_server_decisions.py::test_server_rows_match_the_ui_fixture) and decisions.ts's decisionsFor (decisions.test.ts). Change it only with both.",
+  "repo": "alpha",
+  "cells": [
+    {
+      "capability_class": "feature.add",
+      "size": "S",
+      "n": 10,
+      "n_tasks": 5,
+      "point": 0.9,
+      "ci_low": 0.596,
+      "ci_high": 0.982,
+      "route": "do_not_ship",
+      "reason": "false-Q1 in the cell",
+      "reason_code": "false_q1",
+      "verification_tier": "automated-pass",
+      "shortfalls": []
+    },
+    {
+      "capability_class": "bug.fix",
+      "size": "XS",
+      "n": 22,
+      "n_tasks": 9,
+      "point": 1,
+      "ci_low": 0.851,
+      "ci_high": 1,
+      "route": "deliver",
+      "reason": "every clause holds",
+      "reason_code": "deliver",
+      "verification_tier": "automated-pass",
+      "shortfalls": []
+    },
+    {
+      "capability_class": "bug.fix",
+      "size": "L",
+      "n": 30,
+      "n_tasks": 20,
+      "point": 1,
+      "ci_low": 0.886,
+      "ci_high": 1,
+      "route": "deliver",
+      "reason": "every clause holds",
+      "reason_code": "deliver",
+      "verification_tier": "human-verified",
+      "shortfalls": []
+    },
+    {
+      "capability_class": "bug.fix",
+      "size": "M",
+      "n": 20,
+      "n_tasks": 20,
+      "point": 0.95,
+      "ci_low": 0.764,
+      "ci_high": 0.991,
+      "route": "human",
+      "reason": "oracle strength 0.58 < 0.80 — green cannot license auto-delivery",
+      "reason_code": "oracle_weak",
+      "verification_tier": "automated-pass",
+      "shortfalls": []
+    },
+    {
+      "capability_class": "docs.update",
+      "size": "S",
+      "n": 4,
+      "n_tasks": 4,
+      "point": 1,
+      "ci_low": 0.51,
+      "ci_high": 1,
+      "route": "calibrate",
+      "reason": "no registered reading for the arm",
+      "reason_code": "reading_unregistered",
+      "verification_tier": "automated-pass",
+      "shortfalls": [
+        {
+          "code": "reading_unregistered",
+          "route": "calibrate",
+          "observed": null,
+          "threshold": null,
+          "next": "register"
+        },
+        {
+          "code": "controls_thin",
+          "route": "calibrate",
+          "observed": 0.2,
+          "threshold": 0.5,
+          "next": "controls"
+        }
+      ]
+    },
+    {
+      "capability_class": "refactor",
+      "size": "S",
+      "n": 8,
+      "n_tasks": 8,
+      "point": 0.125,
+      "ci_low": 0.035,
+      "ci_high": 0.36,
+      "route": "human",
+      "reason": "the reading decided against the arm",
+      "reason_code": "insufficient",
+      "verification_tier": "automated-pass",
+      "shortfalls": []
+    },
+    {
+      "capability_class": "chore",
+      "size": "XS",
+      "n": 0,
+      "n_tasks": 0,
+      "point": 0,
+      "ci_low": 0,
+      "ci_high": 1,
+      "route": "calibrate",
+      "reason": "no rows",
+      "reason_code": "n_below_min",
+      "verification_tier": "automated-pass",
+      "shortfalls": []
+    }
+  ],
+  "signoffs": [
+    {
+      "id": "s-1",
+      "repo": "alpha",
+      "cell": {
+        "capability_class": "bug.fix",
+        "size": "L"
+      },
+      "revoked": false,
+      "stale": false
+    }
+  ],
+  "tasks": [
+    {
+      "id": "I-1",
+      "title": "Divide",
+      "capability_class": "bug.fix",
+      "size": "XS",
+      "status": "pending",
+      "dor_gaps": [],
+      "route_hint": "build",
+      "build_status": "not_started",
+      "pr_url": null,
+      "review_verdict": null,
+      "last_event": "readiness.assessed",
+      "entry": {
+        "code": "no_proven_standard",
+        "reason": "no proven standard",
+        "reason_code": "none",
+        "needs": []
+      },
+      "calibration": null,
+      "way_forward": {
+        "action": "fund_calibration",
+        "route": "/factory/alpha/items/I-1/calibration",
+        "supersedes": "I-1",
+        "what_to_change": "Measure the cell, or an approver funds one calibration build."
+      }
+    },
+    {
+      "id": "I-2",
+      "title": "Paginate",
+      "capability_class": "feature.add",
+      "size": "S",
+      "status": "pending",
+      "dor_gaps": [],
+      "route_hint": "build",
+      "build_status": "not_started",
+      "pr_url": null,
+      "review_verdict": null,
+      "last_event": "readiness.assessed",
+      "entry": {
+        "code": "needs_context",
+        "reason": "the standard needs S1",
+        "reason_code": "S1",
+        "needs": [
+          "method_path",
+          "response_shape"
+        ]
+      },
+      "calibration": null,
+      "way_forward": null
+    },
+    {
+      "id": "I-3",
+      "title": "Rename",
+      "capability_class": "refactor",
+      "size": "S",
+      "status": "blocked",
+      "dor_gaps": [
+        "method_path",
+        "response_shape"
+      ],
+      "route_hint": "human",
+      "build_status": "not_started",
+      "pr_url": null,
+      "review_verdict": null,
+      "last_event": "readiness.blocked",
+      "entry": null,
+      "calibration": null,
+      "way_forward": null
+    },
+    {
+      "id": "I-4",
+      "title": "Retry",
+      "capability_class": "bug.fix",
+      "size": "M",
+      "status": "pending",
+      "dor_gaps": [],
+      "route_hint": "human",
+      "build_status": "not_started",
+      "pr_url": null,
+      "review_verdict": null,
+      "last_event": "readiness.assessed",
+      "entry": null,
+      "calibration": null,
+      "way_forward": null
+    },
+    {
+      "id": "I-5",
+      "title": "Parse",
+      "capability_class": "bug.fix",
+      "size": "XS",
+      "status": "rejected",
+      "dor_gaps": [],
+      "route_hint": "build",
+      "build_status": "clean",
+      "pr_url": null,
+      "review_verdict": "reject",
+      "last_event": "review.recorded",
+      "entry": null,
+      "calibration": null,
+      "way_forward": null
+    },
+    {
+      "id": "I-6",
+      "title": "Format",
+      "capability_class": "bug.fix",
+      "size": "XS",
+      "status": "accepted",
+      "dor_gaps": [],
+      "route_hint": "build",
+      "build_status": "clean",
+      "pr_url": null,
+      "review_verdict": "accept",
+      "last_event": "delivery.refused",
+      "entry": null,
+      "calibration": null,
+      "way_forward": null
+    }
+  ],
+  "register": {
+    "entries": [
+      {
+        "signature": "protocol:network:go mod",
+        "stratum": {
+          "mode": "blind",
+          "n": 41,
+          "k": 12
+        },
+        "tasks": 8,
+        "status": "applied",
+        "qualifiers": [
+          "reopened"
+        ],
+        "history": [
+          {
+            "kind": "decided",
+            "summary": "harm"
+          }
+        ],
+        "proposals": [
+          {
+            "item_id": "P-1",
+            "title": "Pin the module proxy",
+            "scope": "repo",
+            "level": "advisory",
+            "registered": null
+          },
+          {
+            "item_id": "P-2",
+            "title": "Record a command",
+            "scope": "product",
+            "level": "construction",
+            "registered": null
+          }
+        ]
+      }
+    ]
+  },
+  "library": {
+    "entries": [
+      {
+        "entry_id": "convention/lint-rules",
+        "status": "proposed",
+        "sponsor": "",
+        "sponsor_name": "",
+        "approver": "",
+        "approver_name": "",
+        "stale": null,
+        "retired": null,
+        "entry": {
+          "kind": "convention",
+          "title": "Lint rules",
+          "proposed_by": "miner:lint"
+        }
+      },
+      {
+        "entry_id": "convention/context-first",
+        "status": "proposed",
+        "sponsor": "u-ada",
+        "sponsor_name": "Ada",
+        "approver": "",
+        "approver_name": "",
+        "stale": null,
+        "retired": null,
+        "entry": {
+          "kind": "convention",
+          "title": "Pass context first",
+          "proposed_by": "u-ada"
+        }
+      },
+      {
+        "entry_id": "convention/lint",
+        "status": "stale",
+        "sponsor": "u-ada",
+        "sponsor_name": "Ada",
+        "approver": "u-ben",
+        "approver_name": "Ben",
+        "stale": {
+          "path": ".golangci.yml",
+          "head_commit": "2222222222222222222222222222222222222222"
+        },
+        "retired": null,
+        "entry": {
+          "kind": "convention",
+          "title": "Lint",
+          "proposed_by": "u-ada"
+        }
+      },
+      {
+        "entry_id": "convention/old",
+        "status": "retired",
+        "sponsor": "u-ada",
+        "sponsor_name": "Ada",
+        "approver": "u-ben",
+        "approver_name": "Ben",
+        "stale": null,
+        "retired": {
+          "by": "measurement",
+          "reading_id": "R-1",
+          "reason": "harm"
+        },
+        "entry": {
+          "kind": "convention",
+          "title": "Old",
+          "proposed_by": "u-ada"
+        }
+      },
+      {
+        "entry_id": "convention/errors-wrap",
+        "status": "signed",
+        "sponsor": "u-ada",
+        "sponsor_name": "Ada",
+        "approver": "u-ben",
+        "approver_name": "Ben",
+        "stale": null,
+        "retired": null,
+        "entry": {
+          "kind": "convention",
+          "title": "Wrap errors",
+          "proposed_by": "u-ada"
+        }
+      }
+    ]
+  },
+  "expected": [
+    {
+      "kind": "do_not_ship",
+      "key": "feature.add|S",
+      "title": "feature.add × S must not ship — false-Q1 in the cell",
+      "role": "viewer",
+      "evidence": "n=10 on 5 tasks · 90% [60%, 98%] · false_q1",
+      "reason_code": "false_q1",
+      "act": "Investigate",
+      "href": "/ledger?repo=alpha"
+    },
+    {
+      "kind": "gap_unsigned",
+      "key": "I-3",
+      "title": "I-3 Rename is blocked on 2 structural gaps",
+      "role": "approver",
+      "evidence": "method_path, response_shape",
+      "reason_code": "",
+      "act": "Sign a gap",
+      "href": "/factory?repo=alpha&item=I-3"
+    },
+    {
+      "kind": "not_built",
+      "key": "I-1",
+      "title": "I-1 Divide is not built — no proven standard",
+      "role": "approver",
+      "evidence": "bug.fix × XS",
+      "reason_code": "",
+      "act": "Fund a calibration build",
+      "href": "/factory?repo=alpha&item=I-1"
+    },
+    {
+      "kind": "not_built",
+      "key": "I-2",
+      "title": "I-2 Paginate is not built — needs context",
+      "role": "operator",
+      "evidence": "feature.add × S · attach method_path, response_shape",
+      "reason_code": "",
+      "act": "Decide",
+      "href": "/factory?repo=alpha&item=I-2"
+    },
+    {
+      "kind": "signoff_due",
+      "key": "bug.fix|XS",
+      "title": "bug.fix × XS clears the bar — attest it or decline",
+      "role": "approver",
+      "evidence": "n=22 on 9 tasks · 100% [85%, 100%] · deliver",
+      "reason_code": "deliver",
+      "act": "Attest",
+      "href": "/signoff?repo=alpha&cell=bug.fix%7CXS"
+    },
+    {
+      "kind": "rework",
+      "key": "I-5",
+      "title": "I-5 Parse — the review said reject",
+      "role": "operator",
+      "evidence": "build clean · rejected",
+      "reason_code": "",
+      "act": "Review",
+      "href": "/factory?repo=alpha&item=I-5"
+    },
+    {
+      "kind": "delivery_withheld",
+      "key": "I-6",
+      "title": "I-6 Format built clean — delivery withheld by the route",
+      "role": "approver",
+      "evidence": "bug.fix × XS",
+      "reason_code": "",
+      "act": "See the route",
+      "href": "/factory?repo=alpha&item=I-6"
+    },
+    {
+      "kind": "prevention",
+      "key": "protocol:network:go mod|harm",
+      "title": "A change for protocol:network:go mod was retired for harm",
+      "role": "viewer",
+      "evidence": "12 of 41 blind first attempts on 8 tasks · applied",
+      "reason_code": "",
+      "act": "Read why",
+      "href": "/learn?repo=alpha&class=protocol%3Anetwork%3Ago%20mod#prevention"
+    },
+    {
+      "kind": "prevention",
+      "key": "protocol:network:go mod|owner|P-1",
+      "title": "A prevention needs an owner — protocol:network:go mod: Pin the module proxy",
+      "role": "operator",
+      "evidence": "12 of 41 blind first attempts on 8 tasks · applied · advisory",
+      "reason_code": "",
+      "act": "Register",
+      "href": "/learn?repo=alpha&class=protocol%3Anetwork%3Ago%20mod#prevention"
+    },
+    {
+      "kind": "prevention",
+      "key": "protocol:network:go mod|reopened",
+      "title": "protocol:network:go mod reopened after it was closed",
+      "role": "viewer",
+      "evidence": "12 of 41 blind first attempts on 8 tasks · applied",
+      "reason_code": "",
+      "act": "Read why",
+      "href": "/learn?repo=alpha&class=protocol%3Anetwork%3Ago%20mod#prevention"
+    },
+    {
+      "kind": "entry_stale",
+      "key": "convention/lint",
+      "title": "convention/lint went stale: .golangci.yml changed or went",
+      "role": "approver",
+      "evidence": "at 222222222222 · signed by Ben",
+      "reason_code": "",
+      "act": "Sign again or retire",
+      "href": "/library/alpha#index"
+    },
+    {
+      "kind": "entry_to_sign",
+      "key": "convention/context-first",
+      "title": "convention/context-first waits for a second person to sign it",
+      "role": "approver",
+      "evidence": "sponsored by Ada · Pass context first",
+      "reason_code": "",
+      "act": "Sign",
+      "href": "/library/alpha#index"
+    },
+    {
+      "kind": "entry_to_sign",
+      "key": "convention/lint-rules",
+      "title": "convention/lint-rules was proposed by miner:lint and needs a person to sponsor it",
+      "role": "operator",
+      "evidence": "convention · Lint rules",
+      "reason_code": "",
+      "act": "Sponsor",
+      "href": "/library/alpha#index"
+    },
+    {
+      "kind": "item_human",
+      "key": "I-4",
+      "title": "I-4 Retry routed to a human",
+      "role": "operator",
+      "evidence": "bug.fix × M · pending",
+      "reason_code": "",
+      "act": "Decide",
+      "href": "/factory?repo=alpha&item=I-4"
+    },
+    {
+      "kind": "strengthen",
+      "key": "bug.fix|M",
+      "title": "bug.fix × M is held until its tests are stronger",
+      "role": "operator",
+      "evidence": "n=20 on 20 tasks · 95% [76%, 99%] · oracle_weak",
+      "reason_code": "oracle_weak",
+      "act": "Strengthen the tests",
+      "href": "/learn?repo=alpha#strengthen"
+    },
+    {
+      "kind": "strengthen",
+      "key": "docs.update|S",
+      "title": "docs.update × S is held until its tests are stronger",
+      "role": "operator",
+      "evidence": "n=4 on 4 tasks · 100% [51%, 100%] · controls_thin",
+      "reason_code": "controls_thin",
+      "act": "Strengthen the tests",
+      "href": "/learn?repo=alpha#strengthen"
+    },
+    {
+      "kind": "routed_human",
+      "key": "refactor|S",
+      "title": "refactor × S routed to a human — the reading decided against the arm",
+      "role": "viewer",
+      "evidence": "n=8 on 8 tasks · 13% [4%, 36%] · insufficient",
+      "reason_code": "insufficient",
+      "act": "Read why",
+      "href": "/routing?repo=alpha"
+    },
+    {
+      "kind": "entry_retired",
+      "key": "convention/old",
+      "title": "convention/old was retired by measurement",
+      "role": "viewer",
+      "evidence": "reading R-1 · harm",
+      "reason_code": "",
+      "act": "Read why",
+      "href": "/library/alpha#index"
+    }
+  ]
+}
