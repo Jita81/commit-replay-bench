@@ -12,6 +12,17 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Exports the page reports, doors from every route decision, and the Operate path named**
+  (Wave 6, stream pgs; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-pgs)).
+  Every export — the ledger's three and the map's CSV — says "Downloaded <file> — <n> rows"
+  or shows the refusal beside the button with Retry; the abstract export's 409 is no longer a
+  raw response in a new tab. A filtered empty ledger offers Clear filters. A decision on
+  Routes opens its ledger rows and its map cell; Map grid and Routes land on the latest
+  repository. The Ledger's Disqualified tile reads the served window and threshold, or says
+  the figure is not served. The instrument row names the Operate path, and Runs, Ledger and
+  Deployment say what operating does not include. The stop-condition banner is now proven
+  by tests (DL-306, P-620 to P-622).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

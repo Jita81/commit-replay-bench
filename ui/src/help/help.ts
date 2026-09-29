@@ -47,6 +47,12 @@ export interface ScreenHelp {
   readMore: Array<{ to: DocAnchor; label: string }>
 }
 
+/** The Operate path, named on each of its stops (G-396). */
+export const OPERATE_PATH = 'One stop on the Operate path: health → Runs → Ledger → Settings.'
+
+/** What operating this product does not include, said where the person is (G-402). */
+export const OPERATE_NON_GOALS = 'No budget spans a deployment or a repository: every limit belongs to one run. There is no metrics dashboard and no view of the platform’s own logs (a run page streams that run’s log), and no crb doctor screen.'
+
 export const HELP: ScreenHelp[] = [
   {
     route: '/home',
@@ -188,7 +194,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/posture',
-    purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
+    purpose: `A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source. ${OPERATE_NON_GOALS}`,
     next: {
       viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin. The page changes nothing: its one button prints it. It shows the go-live checklist’s state, line by line, but it is not the checklist and ticks nothing — an admin records the operator’s own acts on Settings.',
       admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence. Record each go-live act only you can do on Settings, under Go-live attestations.',
@@ -219,7 +225,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/runs',
-    purpose: 'Every run the worker has executed or queued: mine, replay, blind, oracle, controls and factory. A run’s rows are what the ledger and the map are made of.',
+    purpose: `Every run the worker has executed or queued: mine, replay, blind, oracle, controls and factory. A run’s rows are what the ledger and the map are made of. ${OPERATE_PATH} ${OPERATE_NON_GOALS}`,
     next: {
       viewer: 'Open a run to read its progress and the evidence pack of any row.',
       operator: 'Press Start a run, or open one to watch its live log and cancel it. The kind’s hint says what it produces and whether it spends.',
@@ -291,7 +297,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/ledger',
-    purpose: 'Every graded trial, append-only and hash-chained. Verify proves nothing was edited, reordered or removed; the false-Q1 total is the number everything else defends.',
+    purpose: `Every graded trial, append-only and hash-chained. The server re-checks the chain on every load; rows cut from the end show only against an earlier head. The false-Q1 total is the number everything else defends. ${OPERATE_PATH} The page does not verify on demand, repair a chain or filter beyond what the URL carries, each shown as a chip; verify an export with crb ledger verify (and the store itself with --store).`,
     next: {
       viewer: 'Filter by repository, mode or clean; open a task or a pack. Export gives the rows as JSONL or CSV; the abstract export contains cells only, no code and no identifiers.',
       operator: 'A broken chain or a false-Q1 above 0 halts delivery; investigate the named row before anything else.',

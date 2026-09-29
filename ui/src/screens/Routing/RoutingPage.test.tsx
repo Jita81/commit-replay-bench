@@ -8,8 +8,10 @@
  * What it does: Pins that the policy card states the amended rule with the controls
  *               thresholds, that the repo's controls verdict pill is rendered as served
  *               (an `escaped` verdict here), that every decision shows its `reason_code`
- *               and its failure split next to the model point, and that the route pills
- *               carry the reason in their accessible label.
+ *               and its failure split next to the model point, that the route pills
+ *               carry the reason in their accessible label, that each decision row links to
+ *               its ledger rows and to its class × size cell on the map (G-253), and that no
+ *               `?repo=` shows the most recently updated repository (G-977).
  * How:          `mockApi` with a `RoutesWithControls` fixture; `renderApp` at
  *               `/routing?repo=…`; assertions on `reason-code`, `controls-*` and the policy
  *               rule text.
@@ -25,6 +27,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { helpFor } from '../../help/help'
+import { hintText } from '../../help/hints'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import type { ControlsVerdict, RouteDecisionWithControls, RoutesWithControls } from '../Capability/contract'
 import { RoutingPage } from './RoutingPage'
@@ -155,6 +158,47 @@ describe('RoutingPage — reason codes, the controls verdict and the split (A2)'
     expect(within(note).getByRole('link', { name: 'glossary' })).toHaveAttribute('href', '/help#reason_code')
     await userEvent.keyboard('{Escape}')
     expect(button).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('each decision row links to its ledger rows and to its class × size cell on the map (G-253)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      // the second decision is projected by provider and process step only: neither is a ledger filter
+      'GET /routes': { ...ROUTES_BODY, decisions: [ROUTES_BODY.decisions[0]!, { ...ROUTES_BODY.decisions[1]!, cell: { process_step: 'replay', capability_class: 'backend.route.add', size: 'M', language: '*', builder: '*', model: '*', provider: 'cerebras' } }] },
+    })
+    renderApp(<RoutingPage />, { route: '/routing?repo=alpha' })
+    await waitFor(() => expect(screen.getAllByTestId('reason-code').length).toBe(2))
+    const rows = screen.getAllByRole('link', { name: 'Rows' })
+    const cells = screen.getAllByRole('link', { name: 'Map cell' })
+    expect(rows).toHaveLength(2)
+    expect(cells).toHaveLength(2)
+    // the ledger door carries what the ledger filters by — language, builder and model when the decision has them ...
+    expect(rows.map((a) => a.getAttribute('href'))).toEqual(
+      expect.arrayContaining(['/ledger?repo=alpha&capability_class=bug.fix&size=S&language=python&builder=editblock&model=gpt-oss-120b', '/ledger?repo=alpha&capability_class=backend.route.add&size=M']),
+    )
+    // ... and the map door carries the class × size cell, whatever the decision was projected by
+    expect(cells.map((a) => a.getAttribute('href'))).toEqual(expect.arrayContaining(['/capability?repo=alpha&cell=bug.fix%7CS', '/capability?repo=alpha&cell=backend.route.add%7CM']))
+    for (const a of rows) expect(a).toHaveAttribute('data-hint', 'button.routing.rows')
+    for (const a of cells) expect(a).toHaveAttribute('data-hint', 'button.routing.map_cell')
+    expect(screen.getByRole('columnheader', { name: /Doors/ }).querySelector('[data-hint="col.routing.doors"]')).not.toBeNull()
+    // the hints say what the doors do not carry
+    expect(hintText('button.routing.rows')).toMatch(/does not filter by provider or process step/)
+    expect(hintText('button.routing.map_cell')).toContain('class × size aggregate')
+  })
+
+  it("with no ?repo= the most recently updated repository's decisions are shown (G-977)", async () => {
+    const repo = (name: string, updated: string) => ({ name, language: 'python', runner: 'pytest', url: '', last_run: null, created: '2026-09-01T00:00:00Z', updated, config: {} })
+    const api = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [repo('older', '2026-09-02T00:00:00Z'), repo('alpha', '2026-09-10T00:00:00Z')], total: 2, limit: 500, offset: 0 },
+      'GET /routes': ROUTES_BODY,
+    })
+    renderApp(<RoutingPage />, { route: '/routing' })
+    await waitFor(() => expect(api.calls.some((c) => c.path === '/routes' && new URL(c.url, 'http://x').searchParams.get('repo') === 'alpha')).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('repo-picker')).toHaveValue('alpha'))
+    expect(await screen.findByTestId('policy-rule')).toBeInTheDocument()
+    expect(api.calls.filter((c) => c.path === '/routes').every((c) => new URL(c.url, 'http://x').searchParams.get('repo') === 'alpha')).toBe(true)
   })
 
   it('empty states: no repo sends every role to Connection; no decisions offers the run only to an operator (J-FAC-12)', async () => {

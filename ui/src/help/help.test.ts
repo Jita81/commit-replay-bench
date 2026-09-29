@@ -19,7 +19,12 @@
  *               threshold is the served policy's, which a deployment may tighten, so the
  *               copy points at the card that shows it (G-255, G-204); the matcher is pinned
  *               on its own strings, and the one non-policy number (the password floor) is on
- *               a list that only shrinks.
+ *               a list that only shrinks; (7) every About block with a non-goal criterion
+ *               says what its page does not do — the Ledger's (no verify on demand, no
+ *               repair, filters only what the URL carries, G-185), the Operate journey's on
+ *               Runs and Deployment (no deployment-wide budget, no dashboard, no doctor
+ *               screen, G-402) — the Operate path is named on its stops (G-396), and "Verify
+ *               proves", which read as a button that is not there, is gone.
  * How:          Reads `ui/src/App.tsx` and the nine guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -34,7 +39,7 @@ import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'
 import { docPath, isDocName, slugify, type DocAnchor } from './docs'
 import { TERMS, type TermId } from './glossary'
-import { HELP, helpFor } from './help'
+import { HELP, OPERATE_NON_GOALS, OPERATE_PATH, helpFor } from './help'
 
 /** The guides' text, eagerly, keyed by file name — the same files ui/src/help/docs.ts bundles. */
 const DOC_TEXT = import.meta.glob(['../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', '../../../docs/reviews/human-review-guide.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
@@ -146,6 +151,24 @@ describe('HELP ratchet', () => {
     const h = helpFor('/signoff')!
     expect(h.readMore.map((r) => r.to)).toContain('HUMAN-REVIEW-GUIDE')
     expect(h.next.approver).toContain('run’s Review panel')
+  })
+
+  it('every About block with a non-goal criterion says what its page does not do', () => {
+    // the Ledger (G-185): what the server does and what the page does not, and where an operator verifies
+    const ledger = helpFor('/ledger')!
+    expect(ledger.purpose).toContain('The server re-checks the chain on every load; rows cut from the end show only against an earlier head.')
+    expect(ledger.purpose).toContain('The page does not verify on demand, repair a chain or filter beyond what the URL carries, each shown as a chip; verify an export with crb ledger verify (and the store itself with --store).')
+    // the Operate journey (G-402): its non-goals where the person is — Runs and Deployment
+    expect(OPERATE_NON_GOALS).toContain('No budget spans a deployment or a repository: every limit belongs to one run.')
+    expect(OPERATE_NON_GOALS).toContain('There is no metrics dashboard and no view of the platform’s own logs (a run page streams that run’s log), and no crb doctor screen.')
+    for (const route of ['/runs', '/posture']) expect(helpFor(route)!.purpose, route).toContain(OPERATE_NON_GOALS)
+    // the path itself is named on its stops (G-396)
+    expect(OPERATE_PATH).toBe('One stop on the Operate path: health → Runs → Ledger → Settings.')
+    for (const route of ['/runs', '/ledger']) expect(helpFor(route)!.purpose, route).toContain(OPERATE_PATH)
+    // "Verify proves …" read as a button that is not there: the server verifies on read
+    for (const h of HELP) {
+      for (const s of [h.purpose, ...Object.values(h.next), h.numbers ?? '']) expect(s, h.route).not.toContain('Verify proves')
+    }
   })
 
   it('copy lint: a term word appears only when the term is on the screen; plain English throughout', () => {

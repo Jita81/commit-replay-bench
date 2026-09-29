@@ -625,7 +625,9 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     path: '/routing',
     element: <RoutingPage />,
     api: { 'GET /routes': ROUTES, 'GET /repos': REPOS },
-    roles: ['viewer'],
+    // an operator's branch is the empty state's replay link (the variant below); the table
+    // and the doors render the same for both (G-254)
+    roles: ['viewer', 'operator'],
   },
   '/oracle': {
     route: '/oracle?repo=alpha',
@@ -691,6 +693,8 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
   { name: '/repos/:name tab=config', route: '/repos/alpha?tab=config', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer', 'operator'] },
   // G-180: a filter that arrives in a link and has no control of its own shows as a chip
   { name: '/ledger + filters from a link', route: '/ledger?repo=alpha&run_id=r1&task_id=t1&builder=fixture&language=python', path: '/ledger', element: <LedgerPage />, api: INSTRUMENT_SCREENS['/ledger']!.api, roles: ['viewer'] },
+  // Routes with nothing decided yet: the empty state offers the replay run to an operator only (G-254)
+  { name: '/routing, no decisions yet', route: '/routing?repo=alpha', path: '/routing', element: <RoutingPage />, api: { 'GET /routes': { ...ROUTES, decisions: [] }, 'GET /repos': REPOS }, roles: ['viewer', 'operator'] },
   {
     name: '/capability + open cell detail',
     route: '/capability?repo=alpha',

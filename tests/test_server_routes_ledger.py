@@ -15,7 +15,10 @@ What it does: Pins that verify reports ok, ``broken_at`` on a tampered row and a
               malformed bodies with 422; and that every export records one
               ``ledger.exported`` event with the actor, the format and the filter (G-184),
               that an export whose recording fails every retry is refused with a 500 and no
-              byte of the ledger, and that a refused abstract export records nothing.
+              byte of the ledger, that a refused abstract export records nothing, and that the
+              refusal the Ledger page reports beside its button (G-182) is a 409
+              ``false_q1_refused`` envelope with a message and no file — while one false-Q1
+              row exists, written past the ledger's own gate.
 How:          ``make_env`` over the seed; triggers dropped deliberately for the tamper cases.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
@@ -369,6 +372,33 @@ class TestExport:
         assert len(tries) == 3  # it re-reads the next seq and tries again, then gives up
         with env.factory() as s:
             assert s.execute(select(Event).where(Event.action == LEDGER_EXPORTED)).first() is None
+
+    def test_abstract_export_409_while_a_false_q1_row_exists(self, env: Env) -> None:
+        """The server proof behind the Ledger page's refusal state (G-182): one false-Q1 row
+        anywhere — here a clean row whose recorded belt is false, written past the ledger's
+        write-time gate — and the abstract export answers 409 ``false_q1_refused`` with a
+        message the page can show, the refusing exception named in ``detail``, and no
+        file (no Content-Disposition, no row)."""
+        _drop_triggers(env)
+        with env.factory() as s:
+            s.execute(
+                text(
+                    "UPDATE grades SET target_green = 0 "
+                    "WHERE seq = (SELECT MIN(seq) FROM grades WHERE clean = 1)"
+                )
+            )
+            s.commit()
+        login(env.client, "operator")
+        r = env.get("/ledger/export/abstract")
+        assert r.status_code == 409
+        body = envelope(r)
+        assert body["code"] == "false_q1_refused"
+        assert body["message"].strip()
+        assert body["detail"] == {"exception": "FalseQ1Violation"}
+        assert "content-disposition" not in r.headers
+        assert "row_hash" not in r.text and "capability_class" not in r.text
+        # the row is what the ledger reports, so the page's gate and the refusal agree
+        assert env.get("/ledger/verify").json()["false_q1_total"] == 1
 
     def test_a_refused_abstract_export_records_nothing(self, env: Env) -> None:
         """A ledger holding a false-Q1 row refuses the abstract export (409): nothing was
