@@ -534,7 +534,9 @@ export function ClassesPage() {
   const routing = all.filter((v) => v.route.routes).length
   const pick = (next: Record<string, string>) => setParams(next)
   const versions: Column<ClassSetVersionSummary>[] = [
-    { key: 'id', header: 'Version', hint: 'col.classes.version', mono: true, cell: (v) => v.version_id },
+    // at 375 px only Version, Routes and Open show: the id breaks and the tag wraps, so the
+    // Open button (the only way to switch version) stays on screen (P-687)
+    { key: 'id', header: 'Version', hint: 'col.classes.version', mono: true, cell: (v) => <span className="break-all" data-testid="version-id">{v.version_id}</span> },
     {
       key: 'status',
       header: 'Status',
@@ -553,7 +555,7 @@ export function ClassesPage() {
       header: 'Routes',
       hint: 'col.classes.routes',
       cell: (v) => (
-        <Tag tone={v.route.routes ? 'green' : 'grey'} hint="tag.classes.routes">
+        <Tag tone={v.route.routes ? 'green' : 'grey'} hint="tag.classes.routes" wrap data-testid="version-routes">
           {v.route.routes ? 'Routes' : 'Routes nothing'}
         </Tag>
       ),

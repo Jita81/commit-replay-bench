@@ -47,6 +47,10 @@ describe('ClassesPage', () => {
     const { container } = renderApp(<ClassesPage />, AT)
     await screen.findByRole('heading', { name: 'Class set acme/classes@v1' })
     expect(screen.getAllByText('Routes nothing').length).toBeGreaterThan(0)
+    // at 375 px the versions table keeps Open on screen: the id breaks, the route tag wraps
+    const versions = screen.getByRole('table', { name: 'Class-set versions' })
+    expect(within(versions).getAllByTestId('version-id')[0]).toHaveClass('break-all')
+    expect(within(versions).getAllByTestId('version-routes')[0]!.className).not.toContain('whitespace-nowrap')
     expect(container).toHaveTextContent('No approver other than its sponsor has signed it, so it routes nothing.')
     const report = screen.getByRole('table', { name: 'Validity report of acme/classes@v1' })
     const agreement = within(report).getByText('Agreement with a person (κ)').closest('tr')!
