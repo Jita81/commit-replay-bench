@@ -79,6 +79,8 @@ describe('the walk’s Cancel', () => {
       'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': MAP,
+      // the walk lists the mine stage's config candidates (DL-316); none here
+      'GET /repos/alpha/config-candidates': { repo: 'alpha', items: [] },
       'GET /runs/r9': RUN,
       'POST /runs/r9/cancel': () => envelope(409, 'run_terminal', 'run is already succeeded', { status: 'succeeded' }),
     })
@@ -86,6 +88,9 @@ describe('the walk’s Cancel', () => {
     await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('In progress'))
     expect(screen.queryByRole('alert')).toBeNull()
     await userEvent.click(within(screen.getByTestId('in-flight')).getByRole('button', { name: 'Cancel the run' }))
+    // G-117: the walk asks first in its own dialog; the refusal is shown on the walk once it closes
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel the run' }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('run is already succeeded')
     expect(alert).toHaveTextContent('HTTP 409 · run_terminal')
