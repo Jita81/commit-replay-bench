@@ -1002,3 +1002,28 @@ def test_the_intake_line_is_degraded_when_the_deployment_has_no_public_address(
     assert r.status == "degraded"
     assert "CRB_PUBLIC_URL" in r.detail
     assert r.data["public_url_set"] is False
+
+
+def test_the_sandbox_probe_is_down_when_docker_info_names_no_server_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A docker CLI before 29 exits 0 on a formatted ``docker info`` with its daemon down and
+    prints the template empty; ``/health`` must say ``down``, not ``ok`` with no version
+    (the fresh-clone job's first run, 2026-09-28 — docs/PREVENTION.md P-744)."""
+    import subprocess
+
+    from crb.observability import probes
+
+    answers = {
+        "": subprocess.CompletedProcess([], 0, "\n", "Cannot connect to the Docker daemon\n"),
+        "27.5.1": subprocess.CompletedProcess([], 0, "27.5.1\n", ""),
+    }
+    monkeypatch.setattr(probes.shutil, "which", lambda _name: "/fake/docker")
+    for version, answer in answers.items():
+        monkeypatch.setattr(subprocess, "run", lambda *_a, _r=answer, **_k: _r)
+        got = probes.probe_docker()
+        if version:
+            assert (got.status, got.detail) == (probes.OK, f"docker {version}")
+        else:
+            assert got.status == probes.DOWN
+            assert got.detail == "docker daemon not reachable — sandboxed runs will fail closed"

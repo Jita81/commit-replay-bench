@@ -60,7 +60,6 @@ gorepo = langs.fixture_module("gorepo")
 
 pytestmark = [
     pytest.mark.toolchain("go"),
-    pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH"),
 ]
 
 

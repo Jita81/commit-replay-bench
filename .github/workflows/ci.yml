@@ -24,8 +24,11 @@
 #                  same data. It ran as one job per version until py3.13 took 58 of its 60
 #                  minutes on PR #57 (docs/PREVENTION.md P-053)
 #   fresh-clone  every gate above plus the UI's, on a clone made by root, installed from
-#             uv.lock, with the runner's docker daemon stopped (product.evidence.205, G-664).
-#             Not on main's required-checks list until an administrator adds it (DL-101)
+#             uv.lock, with the runner's docker daemon stopped (product.evidence.205, G-664):
+#             an aggregator over `fresh-clone-gates` (every gate but the suite) and the N
+#             `fresh-clone-shard` jobs (the suite, split as `test-shard` is), which proves the
+#             partition like `test`. Not on main's required-checks list until an administrator
+#             adds it (DL-101)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
@@ -62,16 +65,18 @@
 #   walkthrough-screens  11-screens (every route x persona x width) split four ways by persona
 #                  (CRB_E2E_SCREENS_SHARD=k/4), each shard on a stack of its own that the
 #                  spec seeds through the API; the four run in parallel beside the story
-#   job budget     `test-shard`, `test`, `walkthrough-story` and `walkthrough-screens` start a
-#                  clock in their first step and end with scripts/ci_job_budget.py: past 80 % of
+#   job budget     `test-shard`, `test`, `walkthrough-story`, `walkthrough-screens` and the three
+#                  `fresh-clone` jobs start a clock in their first step and end with
+#                  scripts/ci_job_budget.py: past 80 % of
 #                  the job's own timeout-minutes it writes an alarm into the job summary and the
 #                  job fails — a job that creeps to its timeout blocks every merge, so it is
 #                  split before it gets there (docs/PREVENTION.md P-051, P-053). No guard only
 #                  warns: tests/test_ci_job_budget.py fails the build if one does
 #
-# Required contexts: every job in this file except `test-shard`, `walkthrough-story` and
-# `walkthrough-screens` (the parts behind the `test` and `walkthrough` aggregators) is on main's
-# required-checks list — lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13),
+# Required contexts: every job in this file except `test-shard`, `walkthrough-story`,
+# `walkthrough-screens`, `fresh-clone-gates` and `fresh-clone-shard` (the parts behind the
+# `test`, `walkthrough` and `fresh-clone` aggregators) and `fresh-clone` itself, which awaits
+# an administrator (DL-101), is on main's required-checks list — lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13),
 # ui-unit, ui-smoke, security, sbom, test-postgres, container, sandbox-images and walkthrough:
 # 16 contexts, read from the repository setting on 2026-09-27. The list is a repository setting
 # only an administrator can change (docs/DEPLOYMENT.md §3.4 names the call); a part of a split
@@ -272,6 +277,12 @@ jobs:
       # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
       # is a repository defect, not missing infrastructure: fail, never skip.
       CRB_TEST_STRICT_WARMUP: "1"
+      # The tools this job provides (the runner image, setup-helm and setup-uv): a test that
+      # needs one of them fails instead of skipping when it does not work, so an image that
+      # drops or breaks a toolchain turns the build red, not quietly smaller (P-745).
+      # tests/test_toolchain_gates.py fails when a toolchain marker names a tool neither
+      # listed here nor named as one CI does not provide.
+      CRB_TEST_REQUIRE_TOOLS: "go gofmt node npm mvn jdk cargo cargo-fmt helm uv jq bash docker"
     steps:
       - name: Start the job-budget clock
         run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
@@ -407,20 +418,24 @@ jobs:
 
   # product.evidence.205 (G-664): every gate passes on a fresh clone of the tree under test,
   # installed from uv.lock, as root and with no docker daemon — the conditions of a fresh
-  # machine, a root container and a laptop without docker. The runner's daemon is stopped
-  # first and the step fails if one still answers; the gates run in a clone made by root,
-  # with root's own git identity. The docker-marked tests skip with their reason here; the
-  # test and sandbox-images jobs run them with a daemon.
-  fresh-clone:
-    name: fresh-clone (every gate from uv.lock, as root, no docker daemon)
+  # machine, a root container and a laptop without docker. Every part stops the runner's
+  # daemon first and fails if one still answers; its gates run in a clone made by root, with
+  # root's own git identity. The docker-marked tests skip with their reason here; the test and
+  # sandbox-images jobs run them with a daemon. It ran as one job until its first run took
+  # 65.9 of its 75 minutes (P-051, P-743): the suite is split into the same N shards as
+  # `test-shard`, beside one job for the other gates, and the aggregator `fresh-clone` keeps
+  # the one name an administrator will require (DL-101).
+  fresh-clone-gates:
+    name: fresh-clone gates (from uv.lock, as root, no docker daemon)
     runs-on: ubuntu-latest
-    # the full suite is the long pole (the test job's budget is 60 minutes for the same run)
-    timeout-minutes: 75
+    timeout-minutes: 20
     steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-          fetch-depth: 0 # dod reads the history and the base branch; mining tests walk it
+          fetch-depth: 0 # dod reads the history and the base branch
       # no cache: root fills its own, and a root-owned cache is one the runner could not save
       - uses: astral-sh/setup-uv@v7
         with:
@@ -429,14 +444,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
-      - uses: azure/setup-helm@v5
-        with:
-          version: v3.16.4
       - name: Stop the docker daemon, and prove none answers
         run: |
           sudo systemctl stop docker.socket docker.service
           if docker info >/dev/null 2>&1; then echo "::error::a docker daemon still answers"; exit 1; fi
-      - name: Every gate on a fresh clone, installed from uv.lock, as root
+      - name: Every gate but the suite, on a fresh clone installed from uv.lock, as root
         env:
           DOD_BASE: origin/${{ github.base_ref || 'main' }}
           SRC: ${{ github.workspace }}
@@ -462,10 +474,124 @@ jobs:
           .venv/bin/python scripts/dod_check.py --check
           .venv/bin/python scripts/claims_check.py --check
           (cd ui && npm ci --no-audit --no-fund --legacy-peer-deps && npm run typecheck && npx vitest run)
-          .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images"
           GATES
           sudo --preserve-env=DOD_BASE,SRC,PYTHONDONTWRITEBYTECODE \
             env "PATH=$PATH" HOME=/root bash -euo pipefail "$RUNNER_TEMP/gates.sh" < /dev/null
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 20 --mode fail
+
+  fresh-clone-shard:
+    # One of N parts of the suite, the same N and the same partition as `test-shard`
+    # (scripts/ci_test_shards.py, tests/test_ci_test_shards.py holds the two equal), run as
+    # root on a fresh clone with no daemon. CRB_TEST_REQUIRE_TOOLS names what this job
+    # provides as root, so a test that needs one of them fails instead of skipping when it
+    # does not work (P-745). Not provided here, so skipped with the reason: docker (the daemon
+    # is stopped) and cargo (the runner's rustup has no toolchain for root). The list is
+    # test-shard's less exactly those (tests/test_toolchain_gates.py, P-748).
+    name: fresh-clone shard (${{ matrix.shard }} of 6, as root, no docker daemon)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      CRB_TEST_REQUIRE_TOOLS: "go gofmt node npm mvn jdk helm uv jq bash"
+    steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # mining tests walk the history
+      # no cache: root fills its own, and a root-owned cache is one the runner could not save
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.3"
+          enable-cache: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.4
+      - name: Stop the docker daemon, and prove none answers
+        run: |
+          sudo systemctl stop docker.socket docker.service
+          if docker info >/dev/null 2>&1; then echo "::error::a docker daemon still answers"; exit 1; fi
+      - name: This shard of the suite, on a fresh clone installed from uv.lock, as root
+        env:
+          SRC: ${{ github.workspace }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # the script is a file, not stdin: a gate that reads stdin must not eat the rest
+          cat > "$RUNNER_TEMP/gates.sh" <<'GATES'
+          test "$(id -u)" = 0
+          git config --global --add safe.directory '*'
+          git config --global user.email "ci@crb.invalid"
+          git config --global user.name "crb ci"
+          git config --global init.defaultBranch main
+          git clone -q --no-local "$SRC" /root/fresh
+          cd /root/fresh
+          git fetch -q "$SRC" '+refs/remotes/origin/*:refs/remotes/origin/*'
+          git fetch -q "$SRC" HEAD
+          git checkout -q --detach "$(git -C "$SRC" rev-parse HEAD)"
+          uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
+          PYTHONPATH=scripts .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images" -p ci_test_shards --shard="$SHARD/6" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"
+          GATES
+          sudo --preserve-env=SRC,SHARD,CRB_TEST_REQUIRE_TOOLS,JAVA_HOME,PYTHONDONTWRITEBYTECODE \
+            env "PATH=$PATH" HOME=/root bash -euo pipefail "$RUNNER_TEMP/gates.sh" < /dev/null
+      # the aggregator proves the partition from every shard's report: without one it fails
+      - name: Upload this shard's report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fresh-clone-shard-${{ matrix.shard }}
+          path: fresh-clone-report
+          if-no-files-found: error
+          retention-days: 1
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 30 --mode fail
+
+  fresh-clone:
+    # The one context an administrator adds to main's required checks (DL-101, G-930): it
+    # passes only when the gates job and every shard passed — a failed, cancelled or skipped
+    # part fails it — and the N reports prove every collected test ran in exactly one shard.
+    # `if: always()` so it runs, and fails, when a part failed: a skipped required check does
+    # not block a merge.
+    name: fresh-clone (every gate from uv.lock, as root, no docker daemon)
+    needs: [fresh-clone-gates, fresh-clone-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Start the job-budget clock
+        run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Every part passed (the gates and every shard)
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | length > 0 and all(.value.result == "success")'
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download every shard's report
+        uses: actions/download-artifact@v8
+        with:
+          pattern: fresh-clone-shard-*
+          path: shards
+          merge-multiple: true
+      - name: Every test ran in exactly one shard (the partition proof)
+        run: >-
+          python3 scripts/ci_test_shards.py verify --shards 6 --python 3.12
+          shards/shard-1.json shards/shard-2.json shards/shard-3.json
+          shards/shard-4.json shards/shard-5.json shards/shard-6.json
+      - name: Job budget (fails past 80 % of timeout-minutes)
+        if: always()
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 10 --mode fail
 
   ui-unit:
     name: ui-unit (tsc -b + vitest, the hint ratchet included)
