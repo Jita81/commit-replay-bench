@@ -701,15 +701,10 @@ CREDENTIAL_EXEMPT: dict[str, str] = {
 
 
 def run_builders(run: Run) -> list[str]:
-    """Every builder the run can call: the run's own and each rung's (a ``builder:model``
-    label or an object rung; ``rN`` labels are the run's own builder)."""
-    names = [run.builder] if run.builder else []
-    for entry in run.ladder_json or []:
-        if isinstance(entry, Mapping):
-            names.append(str(entry.get("builder", "")))
-        elif isinstance(entry, str) and ":" in entry:
-            names.append(entry.split(":", 1)[0])
-    return list(dict.fromkeys(n for n in names if n))
+    """Every builder the run can call: each rung's, as :func:`run_rungs` reads the ladder
+    the worker builds (``rN`` labels, or no ladder, are the run's own builder) — never the
+    run's own builder when no rung calls it (P-706)."""
+    return list(dict.fromkeys(builder for builder, _model in run_rungs(run)))
 
 
 def credential_refusal(run: Run, settings: Any) -> None:
@@ -745,10 +740,11 @@ def run_rungs(run: Run) -> list[tuple[str, str]]:
     """Every ``(builder, model)`` the run can call: its own and each rung's, read as the
     worker reads them — ``params.ladder`` over ``ladder_json``, through
     ``rungs_from_entries`` / ``parse_rung_label`` — so the price check prices the model the
-    run calls (``vendor:model`` for ``builder:vendor:model@provider``; P-700). A ladder that
-    does not parse leaves the run's own rung: the worker refuses it before any call."""
+    run calls (``vendor:model`` for ``builder:vendor:model@provider``; P-700). The run's own
+    pair is priced only where a rung calls it — a bare rung, or no ladder at all — since the
+    worker builds no other (P-706). A ladder that does not parse leaves the run's own rung:
+    the worker refuses it before any call."""
     params = dict(run.params_json or {})
-    out: list[tuple[str, str]] = [(run.builder, run.model)] if run.builder else []
     try:
         rungs = rungs_from_entries(
             list(params.get("ladder") or run.ladder_json or []),
@@ -758,7 +754,7 @@ def run_rungs(run: Run) -> list[tuple[str, str]]:
         )
     except ValueError:
         rungs = []
-    out += [(r.builder, r.model) for r in rungs]
+    out = [(r.builder, r.model) for r in rungs] or [(run.builder or "", run.model or "")]
     return list(dict.fromkeys(pair for pair in out if pair[0]))
 
 

@@ -187,7 +187,35 @@ def test_the_cap_prices_the_rungs_the_worker_would_call() -> None:
         ("editblock", "m2"),
     ]
     run.params_json = {"ladder": ["openai_agent:acme:coder-1@p"]}
-    assert run_rungs(run) == [("editblock", "gpt-oss-120b"), ("openai_agent", "acme:coder-1")]
+    assert run_rungs(run) == [("openai_agent", "acme:coder-1")]
+
+
+def test_the_cap_does_not_price_the_run_s_own_pair_no_rung_calls(env: Env, jobs: FakeJobs) -> None:
+    """A ladder with no bare rung never calls the run's own ``builder:model`` — the worker
+    builds only the rungs ``rungs_from_entries`` names — so an unpriced run-level model
+    under priced explicit rungs is queued capped, not refused ``spend_cap_unpriced``. A
+    bare rung still resolves to that pair and is priced (P-706)."""
+    from crb.server.routes.runs import run_rungs
+
+    run = Run(
+        repo=ALPHA,
+        kind="replay",
+        builder="editblock",
+        model="mystery-model",
+        ladder_json=["editblock:gpt-oss-120b"],
+        params_json={},
+    )
+    assert run_rungs(run) == [("editblock", "gpt-oss-120b")]
+    run.ladder_json = ["r1", "editblock:gpt-oss-120b"]
+    assert run_rungs(run) == [("editblock", "mystery-model"), ("editblock", "gpt-oss-120b")]
+    login(env.client, "operator")
+    body = {**PRICED, "model": "mystery-model", "max_cost_usd": 5}
+    r = env.post("/runs", json={**body, "ladder": ["editblock:gpt-oss-120b"]})
+    assert r.status_code == 201, r.text
+    r = env.post("/runs", json={**body, "ladder": ["r1", "editblock:gpt-oss-120b"]})
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == "spend_cap_unpriced", r.text
+    assert len(jobs.enqueued) == 1
 
 
 def test_a_capped_rung_priced_under_its_whole_model_id_is_queued(
