@@ -24,8 +24,9 @@ What it does: Pins the guard's arithmetic, its summary and annotation, its exit 
               every persona; the required ``walkthrough`` job keeps its exact name as an
               aggregator that ``needs`` every job running ``scripts/walkthrough.sh``, runs
               ``if: always()`` and passes only when every part succeeded (its jq program is
-              run against success, failure, cancelled, skipped and empty ``needs``). Also that every guarded job checks out before any
-              step that can fail, so the guard can run on the failure path (P-708).
+              run against success, failure, cancelled, skipped and empty ``needs``).
+              Also that every guarded job checks out before any step that can fail, so the
+              guard can run on the failure path (P-708).
 How:          Calls ``main`` with a fake clock and environment; reads ``ci.yml`` as text,
               job by job (no YAML dependency), and the spec's ``PERSONAS`` list; runs ``jq``
               (on every hosted runner) over sample ``needs`` objects.
