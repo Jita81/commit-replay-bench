@@ -5,8 +5,10 @@
  * ----------
  * What it is:   Walkthrough spec 15 (an organisation's class sets, ADR-0026 item 9) on the tier-1
  *               stack, after 02/03 have onboarded and mined the primary repository.
- * What it does: The admin follows the door from the repository's context library to Classes of
- *               work and proposes a class set through the form, becoming its sponsor; the version
+ * What it does: The admin mines enough of the repository's history for a sample to label
+ *               (`CLASS_SAMPLE_MINE`), follows the door from the repository's context library
+ *               to Classes of work and proposes a class set through the form, becoming its
+ *               sponsor; the version
  *               reads "Routes nothing" because nobody has signed it, the sponsor's own Sign button
  *               is disabled with the reason and the API refuses their signature (409
  *               `class_set_refused`, `same_person`), and the page's back link goes to the
@@ -34,7 +36,7 @@
  *               two-person rule change.
  */
 import { axeViolations } from '../axe'
-import { csrf, ensurePersona, env, expect, field, personaPassword, primary, signIn, test } from './support'
+import { csrf, ensurePersona, env, expect, field, personaPassword, primary, signIn, startRunApi, test } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -42,11 +44,20 @@ const OPERATOR = 'walk-operator'
 const APPROVER = 'walk-approver'
 const ORG = `walk${Date.now().toString(36)}`
 const VERSION = `${ORG}/classes@v1`
+/**
+ * Commits the spec mines before proposing, so the labelling screen has a sample. The fixture's
+ * commit ids change every run, and so do the split and the set-aside examples: over the 3 to 5
+ * commits earlier specs mine, about 1 run in 5 offered nothing to label. At 30, the chance is
+ * below 1 in 1,000 (tests/test_walkthrough_routes.py holds that bound; P-687).
+ */
+const CLASS_SAMPLE_MINE = 30
 
 test('a sponsor proposes a class set, a person labels a sample, a second person signs, and it routes nothing until its report passes', async ({ page }) => {
   const repo = primary().name
   await ensurePersona(page, OPERATOR, 'operator')
   await ensurePersona(page, APPROVER, 'approver')
+  // a sample to label: the split is by commit id, so more history is more derivation commits
+  await startRunApi(page, { repo, kind: 'mine', limit: CLASS_SAMPLE_MINE }, 10 * 60_000)
 
   // the door: a repository's context library links to the organisation's classes
   await page.goto(`/library/${encodeURIComponent(repo)}`)
@@ -151,7 +162,8 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
   // the class's page, in plain words
   await page.getByRole('row').filter({ hasText: 'op-add' }).getByRole('button', { name: 'Read its page' }).click()
   await expect(page.getByRole('heading', { name: 'Class: Add an operation' })).toBeVisible()
-  await expect(page.getByText('A change that adds a new operation to the calculator')).toBeVisible()
+  // the definition read on the class's own card (the label form, open beside it, repeats it)
+  await expect(page.locator('#class').getByText('A change that adds a new operation to the calculator')).toBeVisible()
   await expect(page.getByTestId('class-rule')).toContainText('A ticket is in this class when the ticket’s text says “add” or “op”.')
   await expect(page.getByRole('table', { name: 'Proven standard per size for op-add' })).toContainText('No proven standard')
   await expect(page.getByRole('link', { name: new RegExp(`the ${repo} library’s feature.add page`) })).toBeVisible()
