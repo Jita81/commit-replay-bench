@@ -583,6 +583,39 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     expect(alert).toHaveTextContent('Cancelling a run needs the operator role or higher.')
   })
 
+  it('a cancel that failed on the server, or never reached it, says which, not that it was refused', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const cases: Array<[() => Response, string, string, string | null]> = [
+      [() => envelope(500, 'internal_error', 'boom'), 'The cancel failed on the server', 'the cancel may not have been recorded and the run may still be going', 'HTTP 500 · internal_error'],
+      [() => envelope(401, 'unauthenticated', 'sign in'), 'The cancel was refused', 'Your session has ended. Sign in again', 'HTTP 401 · unauthenticated'],
+      [
+        () => {
+          throw new TypeError('Failed to fetch')
+        },
+        'The cancel did not reach the server',
+        'No answer came back, so the run may still be going',
+        null,
+      ],
+    ]
+    for (const [answer, title, next, line] of cases) {
+      mockApi({
+        'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+        'GET /runs/run-1': RUN,
+        'GET /runs/run-1/tasks': tasksPage([]),
+        'POST /runs/run-1/cancel': answer,
+      })
+      const view = renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel run' }))
+      const alert = await screen.findByRole('alert')
+      expect(alert, title).toHaveTextContent(title)
+      expect(alert, title).toHaveTextContent(next)
+      if (line) expect(alert).toHaveTextContent(line)
+      expect(alert).not.toHaveTextContent('did not reach the server or was not answered')
+      view.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('each task row links to its task page, and the row still opens the pack (G-260)', async () => {
     const { default: userEvent } = await import('@testing-library/user-event')
     const taskId = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
@@ -601,6 +634,37 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     expect(screen.queryByRole('dialog')).toBeNull()
     await userEvent.click(within(row).getByText('bug.fix'))
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  })
+
+  it('a keyboard user follows the task link with Enter, and Enter on a trial opens that trial’s pack, not the row’s (G-260, P-614)', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event')
+    const taskId = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2'
+    const [first, last] = ['a'.repeat(64), 'b'.repeat(64)]
+    const row = { task_id: taskId, capability_class: 'bug.fix', size: 'XS', pool: 'standard', language: 'go', trials: 2, clean: true, first_pass_clean: false, disqualified: false, error: '', cost_usd: 0.1, latency_s: 3, pack_hashes: [first, last], row_ids: ['row-1', 'row-2'], belt_set: 'v5', belts: { tests_unmodified: true, target_green: true, no_new_failures: true, source_changed: true, repo_lint_clean: true } }
+    const routes = {
+      'GET /auth/me': PRINCIPAL,
+      'GET /runs/run-1': { ...RUN, status: 'succeeded', finished: '2026-09-13T09:30:00Z' },
+      'GET /runs/run-1/tasks': { items: [row], total: 1, limit: 500, offset: 0 },
+    }
+    // Enter on the first trial's button opens THAT pack; the row's own Enter would open the last
+    const { calls } = mockApi(routes)
+    const view = renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const r1 = await screen.findByRole('button', { name: /^r1 / })
+    r1.focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(calls.some((c) => c.path === `/evidence/${first}`)).toBe(true))
+    expect(calls.some((c) => c.path === `/evidence/${last}`)).toBe(false)
+    view.unmount()
+    vi.unstubAllGlobals()
+    // Enter on the task link follows the link: the page is left, and no pack opens
+    const again = mockApi(routes)
+    renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
+    const link = await screen.findByRole('link', { name: /^a1b2c3d4e5/ })
+    link.focus()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(screen.queryByRole('link', { name: /^a1b2c3d4e5/ })).toBeNull())
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(again.calls.some((c) => c.path.startsWith('/evidence/'))).toBe(false)
   })
 
   it('the About block names the Review tab and who records a review, and what the page does not do (G-262, G-263)', () => {

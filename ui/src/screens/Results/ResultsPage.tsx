@@ -37,15 +37,18 @@
  *               what a number counts and what its value means opens on hover, focus and tap.
  * How:          `useRepoParam({ defaultToLatest })` + `RepoPicker`; `useCapabilityMap`
  *               (summary + cells), `useOracleControls`, `useOracle`, `useRepoPool` (where
- *               the tasks come from — the miner's recency bias, shown), `useSignoffs`,
- *               `useFactoryTasks` → `decisionsFor` for the "waiting on a person" panel;
+ *               the tasks come from — the miner's recency bias, shown), `useSignoffs` (the
+ *               licence), `useDecisions(repo)` — the server's inbox for this repository, the
+ *               rows and count the Decisions page's card shows — for the "waiting on a
+ *               person" panel;
  *               `useRepo` → `last_run` + `useRun` (polling) for the in-flight banner;
  *               `StatTile`s for the headline; links to the existing detail screens.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Results/MapTable.tsx (the grid; `canSign`),
- *               ui/src/screens/Decisions/decisions.ts (the rows and the role rule reused
- *               here), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
+ *               ui/src/screens/Decisions/useDecisionCount.ts (`useDecisions` — the served
+ *               rows, each with whether this person can act; the kind labels are `KIND_LABEL`
+ *               in decisions.ts beside it), ui/src/components/RepoPicker.tsx (`defaultToLatest`),
  *               ui/src/components/StatTile.tsx (the tile anatomy, fed for cost and latency by
  *               ui/src/lib/economics.ts from the served fold — F35), ui/src/components/Help.tsx +
  *               ui/src/help/hints.ts (`Term` on the route tiles and the `stat.results.*` copy;
@@ -61,9 +64,9 @@
 
 import { useMemo, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { currentData, useCapabilityMap, useFactoryTasks, useOracle, useOracleControls, useRecordBaselineRead, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
+import { currentData, useCapabilityMap, useOracle, useOracleControls, useRecordBaselineRead, useRepo, useRepoPool, useRun, useSignoffs } from '../../api/hooks'
 import { isApiError } from '../../api/client'
-import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type FactoryTask, type RepoPool } from '../../api/types'
+import { NOT_YET_MEASURED, isRunTerminal, type CapabilityCell, type RepoPool } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { EmptyState } from '../../components/EmptyState'
@@ -80,7 +83,8 @@ import { useAuth } from '../../lib/auth'
 import { economicsTile } from '../../lib/economics'
 import { kOfN, wilson } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
-import { KIND_LABEL, decisionsFor } from '../Decisions/decisions'
+import { KIND_LABEL } from '../Decisions/decisions'
+import { useDecisions } from '../Decisions/useDecisionCount'
 import { InsetText, NotificationBanner, WarningCallout } from '../../components/govuk'
 import { MapTable, licenseSentence } from './MapTable'
 
@@ -115,8 +119,6 @@ const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, str
 
 /** A tile's value when its request failed: said as a failure, never as "unknown" (PR #54 review). */
 const NOT_LOADED = 'not loaded'
-/** A 404 on the factory's tasks is "no backlog yet": an empty list, not a failure. */
-const NO_TASKS: FactoryTask[] = []
 
 /**
  * The line under a tile whose request failed, with the retry: a failed request is not the
@@ -215,7 +217,9 @@ export function ResultsPage() {
   const oracle = useOracle(repo)
   const pool = useRepoPool(repo)
   const signoffs = useSignoffs(repo)
-  const tasks = useFactoryTasks(repo)
+  // what waits on a person here: the server's inbox for this repository — the same rows, and
+  // the same count, as its card on the Decisions page (one derivation, P-611)
+  const inbox = useDecisions(repo)
   const repoDetail = useRepo(repo)
   // a request that failed after an earlier success keeps the earlier data: every query on
   // this page — the numbers, the sign-offs that allow delivery, the backlog and the run — is
@@ -229,11 +233,10 @@ export function ResultsPage() {
   const oracleData = currentData(oracle)
   const poolData = currentData(pool)
   const signoffsData = currentData(signoffs)
-  const tasksNoBacklog = tasks.isError && isApiError(tasks.error) && tasks.error.status === 404
-  const tasksData = tasksNoBacklog ? NO_TASKS : currentData(tasks)
   const repoData = currentData(repoDetail)
-  // without the sign-offs or the backlog the page cannot say what waits on a person
-  const decisionsFailed = signoffs.isError || (tasks.isError && !tasksNoBacklog)
+  // an inbox that did not load, or whose repository the server could not read, is said as a
+  // failure — never as "nothing is waiting"
+  const decisionsFailed = inbox.error !== null || inbox.repoErrors.length > 0
   // a replay still queued or running: the numbers below move as each attempt is graded
   const lastRun = repoData?.last_run
   const activeReplayId = lastRun && lastRun.kind === 'replay' && !isRunTerminal(lastRun.status) ? lastRun.id : ''
@@ -261,12 +264,8 @@ export function ResultsPage() {
     }
     return out
   }, [measured])
-  // null until the map, the sign-offs and the backlog have all loaded: "nothing is waiting"
-  // is said only when it is known
-  const decisions = useMemo(
-    () => (mapData && signoffsData && tasksData ? decisionsFor({ repo, cells: mapData.cells, signoffs: signoffsData.items, tasks: tasksData }) : null),
-    [repo, mapData, signoffsData, tasksData],
-  )
+  // null until the inbox has answered: "nothing is waiting" is said only when it is known
+  const decisions = inbox.ready ? inbox.decisions : null
   const licence = useMemo(() => (mapData && signoffsData ? licenseSentence(repo, mapData, signoffsData.items) : null), [repo, mapData, signoffsData])
   const economics = useMemo(() => {
     const n = measured.reduce((a, c) => a + c.n, 0)
@@ -451,12 +450,11 @@ export function ResultsPage() {
               <FailedNotice
                 testId="decisions-failed"
                 title="What is waiting on a person did not load"
-                onRetry={() => {
-                  if (signoffs.isError) void signoffs.refetch()
-                  if (tasks.isError && !tasksNoBacklog) void tasks.refetch()
-                }}
+                onRetry={inbox.refetch}
               >
-                The sign-offs or the factory&rsquo;s backlog did not load, so this list is not shown rather than shown out of date.
+                {inbox.error
+                  ? `The inbox did not load (HTTP ${inbox.error.status} · ${inbox.error.code}), so this list is not shown rather than shown out of date.`
+                  : 'The server could not read this repository’s inputs, so this list is not shown rather than shown incomplete.'}
               </FailedNotice>
             ) : !decisions ? (
               <p className="m-0 text-sm text-on-surface-muted">Loading what is waiting on a person…</p>
@@ -465,8 +463,8 @@ export function ResultsPage() {
             ) : (
               <ul className="m-0 list-none divide-y divide-border p-0" aria-label={`Decisions for ${repo}`}>
                 {decisions.slice(0, 6).map((d, i) => {
-                  // Decisions' rule: the act only for the role that can take it; everyone else reads, and sees who acts
-                  const allowed = d.role === 'viewer' || can(d.role)
+                  // the server fitted the row to this person: the act only for a role that can take it; everyone else reads, and sees who acts
+                  const allowed = d.canAct === true
                   return (
                     <li key={`${d.kind}-${i}`} className="flex flex-wrap items-center gap-2 py-2 text-sm">
                       <Pill tone={d.kind === 'signoff_due' ? 'primary' : d.kind === 'do_not_ship' ? 'red' : 'amber'} size="xs" hint="pill.results.decision_kind">
@@ -475,7 +473,7 @@ export function ResultsPage() {
                       <span className="min-w-0 flex-1">{d.title}</span>
                       <span className="text-right">
                         <LinkButton size="sm" to={d.href} hint="button.results.decision_act">
-                          {allowed ? d.act : 'Read'}
+                          {d.act}
                         </LinkButton>
                         {!allowed && <span className="block text-[13px] text-on-surface-muted">{d.role} acts</span>}
                       </span>

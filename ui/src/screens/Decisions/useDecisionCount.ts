@@ -15,29 +15,37 @@
  *               and so does each repository the server could not read (G-134): the page says
  *               the count is incomplete and offers a retry, and the badge shows no number
  *               rather than a smaller one.
- * How:          One `useQuery` each. The badge's reading may be held 30 s (the server says so
- *               too, `Cache-Control: private, max-age=30`); the page's list is re-read whenever
- *               the page mounts, because a person who has just acted must not see the act
- *               still waiting. Both are revalidated with the server's `ETag`.
+ * How:          One `useQuery` each, both under `DECISIONS_PREFIX`, which every settled act
+ *               invalidates (ui/src/api/queryClient.ts, P-613): a person who has just acted
+ *               must not see the act still waiting. The badge's reading is held 30 s between
+ *               acts and the server makes the browser revalidate it every time
+ *               (`private, no-cache` with an `ETag`, so an unchanged count is a 304); the
+ *               list is re-read whenever a page that shows it mounts, and served fresh
+ *               (`no-store` — it carries its clock). `useDecisions(repo)` reads one
+ *               repository's rows (`?repo=`), the Results page's panel.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Decisions/decisions.ts (the row type and labels),
  *               ui/src/screens/Decisions/DecisionsPage.tsx, ui/src/components/Layout.tsx (the
- *               badge), src/crb/server/routes/decisions.py (both readings)
+ *               badge), ui/src/screens/Results/ResultsPage.tsx (one repository's rows),
+ *               ui/src/api/queryClient.ts (every act re-reads both),
+ *               src/crb/server/routes/decisions.py (both readings)
  * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx,
- *               ui/src/screens/Decisions/useDecisionCount.test.tsx
+ *               ui/src/screens/Decisions/useDecisionCount.test.tsx,
+ *               ui/src/screens/Results/ResultsPage.test.tsx
  * Touch when:   never for a new repository; the served row gains a field the page shows.
  */
 
 import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { ApiError, api } from '../../api/client'
+import { ApiError, api, qs } from '../../api/client'
+import { DECISIONS_PREFIX } from '../../api/queryClient'
 import type { DecisionCount, DecisionList, DecisionRowOut } from '../../api/types'
 import type { Decision, DecisionKind } from './decisions'
 
-/** The page's reading and the badge's: one prefix, so an act anywhere can re-read both. */
-export const decisionsKey = ['decisions', 'list'] as const
-export const decisionCountKey = ['decisions', 'count'] as const
+/** The page's reading (one repository's, or every one's) and the badge's: one prefix, which every settled act invalidates (P-613). */
+export const decisionsKey = (repo = '') => [...DECISIONS_PREFIX, 'list', repo] as const
+export const decisionCountKey = [...DECISIONS_PREFIX, 'count'] as const
 
 /** A repository the server could not read, as the error it answered — never a bare string. */
 export interface RepoReadError {
@@ -86,9 +94,17 @@ function asApiError(e: unknown): ApiError {
   return e instanceof ApiError ? e : new ApiError(0, 'network', e instanceof Error ? e.message : String(e))
 }
 
-/** `GET /decisions` — the inbox, its clock and each row's act for this person. */
-export function useDecisions(): DecisionsState {
-  const q = useQuery({ queryKey: decisionsKey, queryFn: () => api<DecisionList>('/decisions'), retry: false })
+/**
+ * `GET /decisions[?repo=]` — the inbox, its clock and each row's act for this person; with
+ * `repo`, that repository's rows only. Re-read whenever a page that shows it mounts.
+ */
+export function useDecisions(repo = ''): DecisionsState {
+  const q = useQuery({
+    queryKey: decisionsKey(repo),
+    queryFn: () => api<DecisionList>(`/decisions${qs({ repo: repo || undefined })}`),
+    retry: false,
+    refetchOnMount: 'always',
+  })
   const { refetch } = q
   return useMemo(() => {
     const again = () => void refetch()

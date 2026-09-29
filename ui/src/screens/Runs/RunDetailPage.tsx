@@ -160,21 +160,30 @@ function Header({ run }: { run: Run }) {
       />
       {/* G-976: a refused cancel is said, with the server's envelope; the run is read again (useCancelRun) */}
       {cancel.isError && (
-        <ErrorState compact error={cancel.error} title="The cancel was refused">
-          <p className="text-sm">{cancelRefusedNext(cancel.error)}</p>
+        <ErrorState compact error={cancel.error} title={cancelRefusal(cancel.error).title}>
+          <p className="text-sm">{cancelRefusal(cancel.error).next}</p>
         </ErrorState>
       )}
     </>
   )
 }
 
-/** What a refused cancel means for the person who pressed it, by the refusal's status. */
-function cancelRefusedNext(error: unknown): string {
+/**
+ * What a cancel that did not go through means for the person who pressed it, by the status:
+ * a refusal (409, 403, 404, 401) names why and what to do; a server error says the server
+ * answered with an error; no status at all says the request never reached the server — never
+ * one sentence for all three, since the envelope line under the title shows the status.
+ */
+function cancelRefusal(error: unknown): { title: string; next: string } {
   const status = error instanceof ApiError ? error.status : 0
-  if (status === 409) return 'The run had already finished, so there was nothing to cancel. The page shows its final state.'
-  if (status === 403) return 'Cancelling a run needs the operator role or higher. Ask an operator, or an admin for the role.'
-  if (status === 404) return 'This run no longer exists.'
-  return 'The request did not reach the server or was not answered. The run may still be going; try again.'
+  const refused = 'The cancel was refused'
+  if (status === 0) return { title: 'The cancel did not reach the server', next: 'No answer came back, so the run may still be going. Check the connection, then press Cancel run again.' }
+  if (status === 409) return { title: refused, next: 'The run had already finished, so there was nothing to cancel. The page shows its final state.' }
+  if (status === 403) return { title: refused, next: 'Cancelling a run needs the operator role or higher. Ask an operator, or an admin for the role.' }
+  if (status === 404) return { title: refused, next: 'This run no longer exists.' }
+  if (status === 401) return { title: refused, next: 'Your session has ended. Sign in again, then press Cancel run again.' }
+  if (status >= 500) return { title: 'The cancel failed on the server', next: 'The server answered with an error, so the cancel may not have been recorded and the run may still be going. Press Cancel run again; if it fails again, give the platform team the status above.' }
+  return { title: refused, next: 'The server refused the request; its reason is above. The run may still be going.' }
 }
 
 /**

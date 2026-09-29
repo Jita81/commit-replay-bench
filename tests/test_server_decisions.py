@@ -604,8 +604,9 @@ def test_server_rows_match_the_ui_fixture() -> None:
 def test_count_mode_does_not_write_the_clock_and_honours_the_etag(env: Env) -> None:
     """The nav badge reads ``?count=1`` on every screen: the total and the count per acting
     role, the same number the full list has, and NO clock row — a badge is not an observation.
-    Both readings carry a strong ETag; sending it back is a 304 with no body. The count may be
-    kept 30 seconds by the browser that asked; the list is revalidated every time."""
+    The count carries a strong ETag; sending it back is a 304 with no body, and it is
+    revalidated on every read so an act is seen at once. The list carries its clock, so it has
+    no ETag that could never match: it is served fresh (``no-store``)."""
     clear_policy(env)
     login(env.client, "viewer")
     r = env.get("/decisions", params={"count": "1"})
@@ -613,17 +614,17 @@ def test_count_mode_does_not_write_the_clock_and_honours_the_etag(env: Env) -> N
     counted = r.json()
     assert set(counted) == {"total", "by_role", "errors"}
     assert counted["total"] >= 1 and counted["total"] == sum(counted["by_role"].values())
-    assert r.headers["Cache-Control"] == "private, max-age=30"
+    assert r.headers["Cache-Control"] == "private, no-cache"
     tag = r.headers["ETag"]
     assert tag.startswith('"') and tag.endswith('"') and not tag.startswith("W/")
     with env.factory() as db:
         assert dec.due_records(db) == []  # the badge wrote nothing
     same = env.get("/decisions", params={"count": "1"}, headers={"If-None-Match": tag})
     assert same.status_code == 304 and same.content == b"" and same.headers["ETag"] == tag
-    # the list: the same total, the clock stamped, and revalidated on every read
+    # the list: the same total, the clock stamped, and served fresh with no ETag to revalidate
     full = env.get("/decisions")
     assert full.json()["total"] == counted["total"]
-    assert full.headers["Cache-Control"] == "private, no-cache" and full.headers["ETag"]
+    assert full.headers["Cache-Control"] == "private, no-store" and "ETag" not in full.headers
     with env.factory() as db:
         assert len(dec.due_records(db)) == counted["total"]
 
@@ -697,3 +698,110 @@ def test_the_idle_pass_never_resolves_a_row_it_cannot_see(env: Env) -> None:
         db.commit()
         assert _due(db)[("not_built", "I-9")].resolved == "2026-09-03T09:00:00+00:00"
     assert frozenset({"not_built"}) == dec.IDLE_KEEPS_OPEN
+
+
+# --- the served inbox's own wiring (verifier findings on F6, G-535) --------------------
+
+
+def test_the_served_inbox_raises_a_stale_cell_until_its_runs_are_queued(env: Env) -> None:
+    """G-535 through the route, not the derivation: the seed holds a cell graded under an
+    earlier apparatus, so ``GET /decisions`` (and its count) serve a ``remeasure`` row for it
+    with the link to Learn's plan and the rows needed and cost on its evidence line. While the
+    runs an operator queued for that cell have not finished, the served inbox raises no row for
+    it — the queue already answered it."""
+    from crb.core.version import APPARATUS_VERSION
+    from crb.server.routes.learn import ACTION_REMEASURE_QUEUED
+    from crb.server.routes.runs import append_system_event
+    from crb.store.models import Run
+
+    clear_policy(env)
+    login(env.client, "operator")
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    assert plan["cells"], "the seed must hold a stale cell"
+    stale = plan["cells"][0]
+    key = f"{stale['label']}|{stale['mode']}"
+
+    def served() -> dict[str, Any]:
+        body = env.get("/decisions", params={"repo": ALPHA}).json()
+        return {r["key"]: r for r in body["items"] if r["kind"] == "remeasure"}
+
+    rows = served()
+    assert key in rows, sorted(rows)
+    row = rows[key]
+    assert row["href"] == f"/learn?repo={ALPHA}#remeasure"
+    assert (row["role"], row["act"], row["can_act"]) == ("operator", "Queue re-measurement", True)
+    needed = int(stale["n_needed"])
+    assert row["evidence"].startswith(f"{needed} row{'' if needed == 1 else 's'} needed · ")
+    assert ("est. $" in row["evidence"]) or ("cost not known" in row["evidence"])
+    counted = env.get("/decisions", params={"count": "1"}).json()
+    listed = env.get("/decisions").json()
+    assert counted["total"] == listed["total"]
+
+    # an operator queues the cell's runs: while they are unfinished the row is gone
+    run_id = "cd" * 16
+    with env.factory() as s:
+        s.add(Run(id=run_id, repo=ALPHA, kind="replay", status="queued", mode=stale["mode"]))
+        append_system_event(
+            s,
+            trace_id="learn-remeasure-test",
+            action=ACTION_REMEASURE_QUEUED,
+            repo=ALPHA,
+            payload={
+                "cell": stale["label"],
+                "mode": stale["mode"],
+                "apparatus": APPARATUS_VERSION,
+                "run_ids": [run_id],
+            },
+        )
+        s.commit()
+    assert key not in served()
+    assert env.get("/decisions", params={"count": "1"}).json()["total"] == counted["total"] - 1
+
+
+def test_a_thin_cell_in_the_plan_raises_no_row() -> None:
+    """The inbox raises a re-measurement for a STALE cell only. A plan cell that carries another
+    reason (``thin``: its current rows do not reach the rule's first look, G-565's top-up) is
+    not a Decisions row; a cell with no reason is read as stale, the plan's only kind today."""
+    base = {
+        "cell": {"capability_class": "bug.fix", "size": "S", "builder": "b", "model": "m"},
+        "mode": "sighted",
+        "stale_versions": ["2.2"],
+        "n_needed": 3,
+        "cost_known": False,
+    }
+    plan = {
+        "current_apparatus": "2.4",
+        "cells": [
+            {**base, "label": "stale-no-reason"},
+            {**base, "label": "stale-said", "reason": "stale"},
+            {**base, "label": "thin", "reason": "thin"},
+        ],
+    }
+    keys = [r.key for r in dec.decision_rows(remeasure=plan)]
+    assert keys == ["stale-no-reason|sighted", "stale-said|sighted"]
+
+
+def test_a_repository_that_fails_for_any_reason_is_named_and_the_rest_are_served(
+    env: Env,
+) -> None:
+    """One repository's inputs failing with something other than a refusal (a factory backlog
+    that no longer parses) is named in ``errors`` as a 500 ``internal_error`` and every other
+    repository is still served, in the list and in the count: one broken repository must never
+    blank everyone's inbox (P-612)."""
+    from crb.server.factory_state import FactoryHome
+
+    path = FactoryHome(env.settings.home, BETA).backlog_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    clear_policy(env)
+    login(env.client, "viewer")
+    r = env.get("/decisions")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [(e["repo"], e["status"], e["code"]) for e in body["errors"]] == [
+        (BETA, 500, "internal_error")
+    ]
+    assert "could not be read" in body["errors"][0]["message"]
+    assert {i["repo"] for i in body["items"]} == {ALPHA}
+    c = env.get("/decisions", params={"count": "1"})
+    assert c.status_code == 200 and c.json()["errors"] == [BETA]

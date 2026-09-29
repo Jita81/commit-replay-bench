@@ -31,7 +31,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { OracleReport, Principal } from '../../api/types'
 import { helpFor } from '../../help/help'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { OraclePage } from './OraclePage'
 
 const VIEWER: Principal = { ...PRINCIPAL, role: 'viewer' }
@@ -168,8 +168,15 @@ describe('OraclePage', () => {
 
   it('an operator with nothing measured yet is offered Run oracle and Run controls; the About block says the page queues nothing (G-206, G-207)', async () => {
     setup(OPERATOR, EMPTY)
-    expect(await screen.findByRole('link', { name: 'Run oracle' })).toHaveAttribute('href', '/runs?repo=alpha&new=oracle')
-    expect(await screen.findByRole('link', { name: 'Run controls' })).toHaveAttribute('href', '/runs?repo=alpha&new=controls')
+    const runOracle = await screen.findByRole('link', { name: 'Run oracle' })
+    const runControls = await screen.findByRole('link', { name: 'Run controls' })
+    expect(runOracle).toHaveAttribute('href', '/runs?repo=alpha&new=oracle')
+    expect(runControls).toHaveAttribute('href', '/runs?repo=alpha&new=controls')
+    // each link explains itself on hover: the ratchet's collector requires a hint on filled
+    // buttons only, and these are outlined, so the hint is pinned here (P-615)
+    expect(runOracle).toHaveAttribute('data-hint', 'button.oracle.run_oracle')
+    expect(runControls).toHaveAttribute('data-hint', 'button.oracle.run_controls')
+    await expectHintOpens(runOracle, 'button.oracle.run_oracle')
     const about = helpFor('/oracle')!
     expect(about.numbers).toMatch(/This page queues nothing — Run oracle and Run controls open the Runs form/)
     expect(about.numbers).toMatch(/the gate on each row is the server’s verdict, not arithmetic done here/)

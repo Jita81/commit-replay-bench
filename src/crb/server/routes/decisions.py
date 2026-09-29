@@ -13,12 +13,17 @@ It is also the clock. The full reading stamps ``decisions_due`` and serves each 
 observation, and a deployment where nobody opens the page still has its clock kept by the
 worker's idle pass (:meth:`crb.server.worker.Worker.refresh_decisions`), which calls exactly
 this derivation. ``?count=1`` is the nav badge's reading: the total and the count per acting
-role, and it never writes the clock — a badge on every screen must not be an observation. Both
-carry a strong ``ETag`` and honour ``If-None-Match``; the count may be kept by the browser for
-30 seconds, the list is revalidated on every read.
+role, and it never writes the clock — a badge on every screen must not be an observation. The
+count carries a strong ``ETag``, honours ``If-None-Match`` and is revalidated on every read
+(``no-cache``): a person who has just acted must see the new number, and an unchanged count
+costs a ``304``. The list carries its clock (``as_of``, each row's ``age_s``), so no two
+readings are the same bytes: it has no ``ETag`` and is served fresh (``no-store``) — only the
+count can be revalidated.
 
 A repository whose inputs cannot be read (its library's acts no longer fold, say) is named in
-``errors`` with the refusal's status, code and message, and the rest are served: one broken
+``errors`` with the refusal's status, code and message — or, for any other fault (a backlog
+that no longer parses), as ``500 internal_error``, logged with the request id, as the worker's
+idle pass isolates it (P-612) — and the rest are served: one broken
 repository must not blank everyone's inbox, and the count is marked incomplete rather than
 read as smaller.
 
@@ -36,7 +41,7 @@ How:          ``inbox_for`` → ``rows_for_mode`` → ``rows_for_apparatus`` →
               ``filter_posture`` → ``signed_map``; ``list_tasks``, ``register_for``,
               ``library_index``, ``signoff_out`` and ``derive_remeasure`` (each route's own
               function, so a row reads what that page reads) → ``decision_rows`` →
-              ``record_due`` → ``for_viewer`` → the response and its ``ETag``.
+              ``record_due`` → ``for_viewer`` → the response (the count's with its ``ETag``).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md,
               docs/adr/0015-signoffs-expire-with-the-apparatus.md
@@ -56,6 +61,7 @@ Touch when:   never for a new repository (``?repo=`` names any connected one); a
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -66,6 +72,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityCell
+from crb.core.redact import redact
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.decisions import (
@@ -83,6 +90,7 @@ from crb.server.deps import (
     Principal,
     SessionFactoryDep,
     SettingsDep,
+    request_id,
 )
 from crb.server.factory_state import FactoryHome
 from crb.server.prevention_state import register_for
@@ -110,6 +118,7 @@ from crb.server.settings import ROLE_RANK
 from crb.store.ledger import DbLedger
 from crb.store.models import Repo
 
+log = logging.getLogger("crb.server.decisions")
 router = APIRouter(tags=["decisions"])
 _ERR = {"model": ErrorEnvelope}
 
@@ -117,10 +126,11 @@ _ERR = {"model": ErrorEnvelope}
 #: it (each ``del``s it), and the idle pass has no person. A viewer — never a wider role.
 _READER = Principal(id="", display_name="the decisions inbox", email="", role="viewer", issuer="")
 
-#: The badge's reading may be kept this long by the browser that asked for it; the list is
-#: revalidated on every read (``no-cache``) because a person who has just acted must not see
-#: the act still waiting.
-COUNT_MAX_AGE_S = 30
+#: The count is revalidated on every read (its ETag makes an unchanged one a 304): a browser
+#: that kept it would show a person who has just acted the act still waiting.
+COUNT_CACHE_CONTROL = "private, no-cache"
+#: The list carries its clock, so no reading repeats another's bytes: served fresh, no ETag.
+LIST_CACHE_CONTROL = "private, no-store"
 
 
 class DecisionOut(BaseModel):
@@ -352,7 +362,7 @@ def _conditional(request: Request, body: BaseModel, cache_control: str) -> Respo
     "/decisions",
     response_model=DecisionList | DecisionCount,
     responses={
-        304: {"description": "Not modified: the ETag sent still holds"},
+        304: {"description": "Not modified (the count only): the ETag sent still holds"},
         401: _ERR,
         404: _ERR,
     },
@@ -382,6 +392,28 @@ def list_decisions(
             errors.append(
                 DecisionError(repo=name, status=exc.status_code, code=exc.code, message=exc.message)
             )
+        except Exception as exc:  # one repository's fault stays its own (P-612)
+            # The worker's idle pass isolates each repository the same way. Anything but a
+            # refusal is logged with the request id, as the app's own 500 handler logs it, and
+            # the repository is named: the rest of the inbox is still served.
+            db.rollback()
+            log.error(
+                "decisions: %s's inputs could not be read: %s (request_id=%s): %s",
+                name,
+                type(exc).__name__,
+                request_id(request),
+                redact(str(exc)),
+                exc_info=exc,
+            )
+            errors.append(
+                DecisionError(
+                    repo=name,
+                    status=500,
+                    code="internal_error",
+                    message="this repository's inputs could not be read; the error is logged "
+                    "with the request id",
+                )
+            )
 
     if count:
         by_role: dict[str, int] = {}
@@ -392,7 +424,7 @@ def list_decisions(
         counted = DecisionCount(
             total=sum(by_role.values()), by_role=by_role, errors=[e.repo for e in errors]
         )
-        return _conditional(request, counted, f"private, max-age={COUNT_MAX_AGE_S}")
+        return _conditional(request, counted, COUNT_CACHE_CONTROL)
 
     items: list[DecisionOut] = []
     as_of = ""
@@ -430,4 +462,8 @@ def list_decisions(
         measured=[n for n, i in inboxes if i.measured],
         errors=errors,
     )
-    return _conditional(request, listed, "private, no-cache")
+    return Response(
+        content=listed.model_dump_json().encode(),
+        media_type="application/json",
+        headers={"Cache-Control": LIST_CACHE_CONTROL},
+    )
