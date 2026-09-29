@@ -23,20 +23,24 @@ seconds. The required ``test (py…)`` job then runs ``verify`` over the N repor
 unless there are exactly N, each kept at least one test, all N collected the same suite, and
 the kept sets are disjoint and together are that suite — so a test that runs in no shard, or
 in two, fails the build on the run where it happens, not in a review. ``weights`` turns the
-reports' seconds into a fresh weights file when the suite has moved.
+reports' seconds into a fresh weights file when the suite has moved — each file's largest
+measurement across every report given, never their sum.
 
 Navigation
 ----------
 What it is:   The shard plugin (pytest hooks, loaded with ``-p ci_test_shards``) and its
               stdlib CLI: ``verify`` (the partition proof the required ``test`` jobs run),
               ``weights`` (refresh ``scripts/ci_test_weights.json`` from shard reports) and
-              ``plan`` (predicted seconds per shard for node ids read from stdin).
+              ``plan`` (predicted seconds per shard for node ids read from stdin); ``verify``
+              also fails when the run's measured seconds say the weights are stale.
 What it does: ``partition(counts, n, weights)`` assigns every test file to one of ``n``
               shards (LPT over integer centiseconds, ties by path) and raises ``ShardError``
               when a shard would be empty; the plugin deselects every item outside its shard
               (after ``-m``, via ``pytest_deselected``), records each file's setup + call +
               teardown seconds and writes the report at session end; ``verify_reports``
-              returns every way N reports fail to be one exact partition of one suite.
+              returns every way N reports fail to be one exact partition of one suite;
+              ``stale_weights`` every file whose measured seconds left its weight far behind,
+              or the share of the run the table does not list at all.
 How:          Pure functions over node ids and ``{file: count}``; the pytest hooks are thin
               wrappers, and ``pytest`` is imported only when the plugin runs, so ``verify``
               needs nothing but the standard library.
@@ -49,8 +53,9 @@ Works with:   .github/workflows/ci.yml (the ``test-shard`` jobs load the plugin;
 Tested by:    tests/test_ci_test_shards.py
 Touch when:   never for a new repository (it splits this repository's own suite); the shard
               count changes (the matrix, the job names and ``--shards`` move together —
-              tests/test_ci_test_shards.py holds them equal); a shard nears its budget
-              (refresh the weights with ``weights``, or raise N).
+              tests/test_ci_test_shards.py holds them equal); a shard nears its budget or
+              ``verify`` says the weights are stale (refresh them with ``weights``, then raise
+              N or split the heaviest test file — files are the unit, P-740).
 """
 
 from __future__ import annotations
@@ -197,18 +202,71 @@ def verify_reports(reports: Sequence[Mapping[str, Any]], n: int) -> list[str]:
 
 
 def refreshed_weights(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """A weights table from shard reports' measured per-file seconds."""
+    """A weights table from shard reports' measured per-file seconds: each file's LARGEST
+    measurement. Files are the shard unit, so a file runs in one shard of a run; a second report
+    of it is another run or the other Python version — a second measurement of the same work,
+    which a sum would count twice (P-741)."""
     files: dict[str, float] = {}
-    tests = 0
+    tests: set[str] = set()
     for r in reports:
         for f, s in r.get("durations", {}).items():
-            files[f] = round(files.get(f, 0.0) + float(s), 1)
-        tests += len(r.get("selected", []))
+            files[f] = max(files.get(f, 0.0), round(float(s), 1))
+        tests.update(r.get("selected", []))
     total = sum(files.values())
     return {
-        "per_test_seconds_default": round(total / tests, 2) if tests else 1.0,
+        "per_test_seconds_default": round(total / len(tests), 2) if tests else 1.0,
         "files": dict(sorted(files.items())),
     }
+
+
+#: How to refresh the table — printed by ``verify`` when it is stale and stated, word for word,
+#: in ``scripts/ci_test_weights.json``'s ``_about`` (tests/test_ci_test_shards.py holds them
+#: equal, so the two can never give different recipes again: P-741).
+REFRESH_RECIPE = (
+    "download the test-shard-py* artifacts of one or more CI runs, both Python versions, and "
+    "run `python3 scripts/ci_test_shards.py weights <every shard-*.json>`: it keeps each file's "
+    "largest measurement, never a sum"
+)
+
+
+#: The committed weights are STALE — the partition and the budget test are planning on numbers
+#: the suite no longer has — when a listed file took more than ``STALE_FACTOR`` times its weight
+#: plus ``STALE_SLACK_S`` seconds in this run, or when the files the table does not list took
+#: more than ``UNLISTED_SHARE`` of the run's seconds. Runners differ by far more than a quarter:
+#: tests/test_worker_fetch.py ran the same 7 tests in 35 s and in 133 s, 3.7 times [measured,
+#: n = 6 shard reports of that file, both Python versions of main run 36443202051, PR #68 run
+#: 36476128848 and PR #69 run 36476376620; method: per-file seconds from the ``test-shard``
+#: artifacts; apparatus n/a, a finding about the product's own CI]. So the margin holds only
+#: because the table is each file's LARGEST measurement over several runs and both versions
+#: (``REFRESH_RECIPE``): a fast run under a slow run's weight never trips it, while a table
+#: months old, which moves a file by five, does (P-740, P-741).
+STALE_FACTOR = 2.0
+STALE_SLACK_S = 60.0
+UNLISTED_SHARE = 0.10
+
+
+def stale_weights(reports: Sequence[Mapping[str, Any]], weights: Weights) -> list[str]:
+    """Every way this run's measured per-file seconds say ``weights`` has gone stale. Empty
+    means the table still describes the suite."""
+    measured = refreshed_weights(reports)["files"]
+    total = sum(measured.values())
+    if total <= 0:
+        return []
+    errors: list[str] = []
+    unlisted = {f: s for f, s in measured.items() if f not in weights.files}
+    share = sum(unlisted.values()) / total
+    if share > UNLISTED_SHARE:
+        heaviest = max(unlisted, key=lambda f: unlisted[f])
+        errors.append(
+            f"{len(unlisted)} test file(s) the weights do not list took {share:.0%} of this "
+            f"run's seconds (at most {UNLISTED_SHARE:.0%}), the heaviest {heaviest} at "
+            f"{unlisted[heaviest]:.0f} s"
+        )
+    for f, secs in sorted(measured.items()):
+        w = weights.files.get(f)
+        if w is not None and secs > STALE_FACTOR * w + STALE_SLACK_S:
+            errors.append(f"{f} took {secs:.0f} s against its weight of {w:.0f} s")
+    return errors
 
 
 # --- the pytest plugin ------------------------------------------------------------------------
@@ -319,8 +377,11 @@ def main(argv: Sequence[str], environ: Mapping[str, str] | None = None) -> int:
     v = sub.add_parser("verify", help="prove N shard reports are one exact partition")
     v.add_argument("--shards", type=int, required=True)
     v.add_argument("--python", default=None, help="every report must be from this version")
+    v.add_argument("--weights", default=None, help="the per-file seconds to check (JSON)")
     v.add_argument("reports", nargs="*")
-    w = sub.add_parser("weights", help="a fresh weights table from shard reports")
+    w = sub.add_parser(
+        "weights", help="a fresh weights table: each file's largest seconds across the reports"
+    )
     w.add_argument("reports", nargs="+")
     p = sub.add_parser("plan", help="predicted seconds per shard for node ids on stdin")
     p.add_argument("--shards", type=int, required=True)
@@ -362,6 +423,16 @@ def main(argv: Sequence[str], environ: Mapping[str, str] | None = None) -> int:
         if not errors
         else "## SHARDS DO NOT PARTITION THE SUITE\n\n" + "\n".join(f"- {e}" for e in errors)
     )
+    stale = stale_weights(reports, load_weights(Path(args.weights) if args.weights else None))
+    if stale:
+        verdict += (
+            "\n\n## THE SHARD WEIGHTS ARE STALE\n\n"
+            + "\n".join(f"- {e}" for e in stale)
+            + "\n\nRefresh scripts/ci_test_weights.json: "
+            + REFRESH_RECIPE
+            + ". Then run tests/test_ci_test_shards.py: it says whether the shard count still "
+            "fits the budget (P-740)."
+        )
     text = verdict + "\n\n" + "\n".join(lines) + "\n"
     summary_path = env.get("GITHUB_STEP_SUMMARY", "")
     if summary_path:
@@ -370,7 +441,9 @@ def main(argv: Sequence[str], environ: Mapping[str, str] | None = None) -> int:
     print(text, end="")
     for e in errors:
         print(f"::error title=test shards::{e}")
-    return 1 if errors else 0
+    for e in stale:
+        print(f"::error title=stale shard weights::{e}")
+    return 1 if errors or stale else 0
 
 
 if __name__ == "__main__":

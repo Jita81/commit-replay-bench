@@ -54,7 +54,7 @@ Works with:   src/crb/server/worker.py (queues on ``run.kill_unconfirmed``, runs
               src/crb/builders/adapter.py (``on_kill_unconfirmed`` — how the signal reaches
               the worker), src/crb/server/routes/system.py (the probe that reports
               ``unconfirmed_containers``)
-Tested by:    tests/test_server_reaper.py, tests/test_worker.py
+Tested by:    tests/test_server_reaper.py, tests/test_worker_reaper.py
 Touch when:   never for a new repository; the reap sequence or the bound changes (docs/API.md's
               cancel row and ADR-0012 state them).
 """

@@ -20,6 +20,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   and the unsealed override names who set it (ADR-0029, DL-090 to DL-092): stop the API and the
   worker to upgrade across revision 0013. CI installs from `uv.lock`; a build run keeps its spend
   cap (ADR-0030, DL-101, DL-102). The configured endpoint is the one called (DL-103, DL-104).
+  Stale shard weights fail CI (P-740 to P-742).
 
 - **A pull request title is measured as the squash merge writes it**
   ([#67](https://github.com/Jita81/commit-replay-bench/pull/67)). The commit-subject gate now
