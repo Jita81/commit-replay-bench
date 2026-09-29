@@ -37,8 +37,9 @@
  *               under its role; the chain (`/factory/{repo}/evidence`) is the record, and this
  *               screen renders the folded view of it (`task_views`).
  * How:          `useRepoParam({ defaultToLatest: true })` (as the Baseline: reached from the
- *               nav, the latest repository is chosen) → `useFactoryBacklog` + `useFactoryTasks` (polled while `useRuns` lists an
- *               active factory run) → `stepsFor(task)` → `<StepList>`; `builderChoice(health)`
+ *               nav, the latest repository is chosen) → `useFactoryBacklog` + `useFactoryTasks`
+ *               (polled while `useRuns` lists an active factory run) → `stepsFor(task)` →
+ *               `<StepList>`; `builderChoice(health)`
  *               picks the builder exactly as Measure does (an operator may name another —
  *               the factory has no "every knob" form); `estimateFromMap` is Measure's
  *               reading of the map's economics fold; `useSignGap` (POST signoff-gap),
@@ -46,8 +47,8 @@
  *               `useRegisterEvolution` (POST to `way_forward.route`), `useSyncOutcomes`
  *               (POST outcomes/sync), `useIntake` (the listener's state, folded by
  *               screens/Factory/intake.ts), `useCreateRun` (kind `factory`, `deliver` toggle
- *               gated by the backlog's delivery pre-flight; the sign-off override explained as a second
- *               approver's act on the run's page); `EvidenceDrawer`
+ *               gated by the backlog's delivery pre-flight; the sign-off override explained as
+ *               a second approver's act on the run's page); `EvidenceDrawer`
  *               opens the newest build's pack; `useNarrow` (matchMedia at Tailwind's `sm`)
  *               folds an item's six step cards behind a Details at phone width (J-FAC-14).
  *               A 404 = no backlog registered: the instruction, not an error. `?item=`
