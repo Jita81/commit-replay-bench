@@ -269,6 +269,10 @@ export const HINTS = {
     'Where the factory is: blocked before any measurement, waiting for a backlog, frozen and ready to run, in progress item k of n, or Completed once an item has a pull request or was accepted.',
   'button.home.continue':
     'Go to the first task you can act on now. Nothing spends money until a run you can see and cancel is queued.',
+  'stat.home.intake_state':
+    'Where task 8’s work comes from: the enterprise’s own board, read through intake. The state says whether the repository’s listener is on and which column it watches; a ready ticket still waits for an operator’s Register act.',
+  'banner.home.probe':
+    'A health probe that is degraded or down, with the detail the probe reported. The link opens the guide section that says what to do; the pill in the header shows the same status on every screen.',
 
   // ── /connect (screens/Connect/ConnectPage.tsx · ConnectPage)
   'button.connect.github':
@@ -465,6 +469,10 @@ export const HINTS = {
     'Every decision waiting on a person, across every repository.',
   'stat.results.waiting_count':
     'How many decisions are waiting on a person for this repository alone — the same rows, and the same number, as its card on the Decisions page. A sign-off gone stale is listed there in its own section.',
+  'stat.results.waiting_more':
+    'How many of this repository’s decisions the card is not showing: it lists the first six, and the full list is on Decisions.',
+  'button.results.back_to_walk':
+    'Go back to the connection walk, where the controls and the oracle run and a measurement is queued: the step that produces the gate that is not green here.',
 
   // ── /library/:repo (screens/Library/LibraryPage.tsx) — the context library, ADR-0026 item 10
   'link.library.back':
@@ -823,6 +831,54 @@ export const HINTS = {
     'Drop this item from the backlog being frozen. Ids of removed items are not reused.',
   'button.factory.item_add':
     'Add a further item with the next free id.',
+  'stat.factory.intake_state':
+    'Where the work comes from: the enterprise’s own board, read through intake. The state says whether this repository’s listener is on and which column it watches; a ready ticket still waits for an operator’s Register act, and nothing here means a ticket will be built.',
+  'button.factory.item_task':
+    'Open the item’s task page: its specification, the authored failing test, the belt scope, the source files and every graded trial against it.',
+  'stat.factory.outcomes':
+    'The pull requests the factory delivered on this repository and how they ended, by count: delivered, merged, closed without merging, and still open. A merge is a person’s act, so this is never a rate; the time is when the newest outcome was read from GitHub.',
+  'button.factory.sync_outcomes':
+    'Read each delivered pull request’s state from GitHub now and record a merge or a close on the evidence chain. An open pull request records nothing; a refused read records nothing and says why.',
+  'note.factory.viewer_outcomes':
+    'Reading the outcomes back from GitHub is an operator’s act; the counts here are the record as it stands.',
+  'stat.factory.sync_report':
+    'What the last sync did: how many pull requests it checked, how many it recorded as merged or closed, how many are still open, and any it could not read, which the next sync tries again.',
+  'pill.factory.outcome':
+    'This item’s delivered pull request and its fate as last read from GitHub: open, merged (and by whom), or closed without merging. Opens the pull request.',
+  'button.factory.register_evolution':
+    'Open the drafted replacement item to check it and register it: a new item chained onto the frozen backlog that supersedes this one. The frozen hash stays and the old chain is kept; nothing is registered until you press Register.',
+  'note.factory.viewer_registers':
+    'Registering the evolution is an operator’s act; the drafted item is shown so anyone can read what would be registered.',
+  'item.factory.superseded':
+    'This item was replaced by an evolution: its own chain stays on the record, and the next factory run works the evolution instead.',
+  'field.factory.evolution_id':
+    'The id the evolution is registered under: the next free one, served by the API. A frozen record never reuses an id, so it cannot be changed here.',
+  'field.factory.evolution_supersedes':
+    'The item this evolution replaces. The record refuses an item that was already superseded, so it cannot be changed here.',
+  'field.factory.evolution_title':
+    'The evolution’s title, prefilled from the item it replaces.',
+  'field.factory.evolution_class':
+    'The kind of change, which decides the structural questions readiness asks and the cell the route gate reads.',
+  'field.factory.evolution_size':
+    'The estimated size, which with the class names the cell whose measured route decides whether a pull request may open.',
+  'field.factory.evolution_kind':
+    'What is being changed: code, infrastructure or an operator act.',
+  'field.factory.evolution_level':
+    'The level of change the item claims; the entry gate reads it with the class and size.',
+  'field.factory.evolution_description':
+    'What and why, in the item’s own words, followed by why the last attempt stopped. A description is never a diff.',
+  'field.factory.evolution_facts':
+    'The structural facts, one per line as slot: fact. A structural slot left empty is the gap the next run stops on until an approver signs it.',
+  'field.factory.evolution_criteria':
+    'Acceptance criteria, one per line: what a reviewer checks the change against. Optional.',
+  'field.factory.evolution_depends':
+    'The items this evolution waits on, by id; the loop works items in dependency order.',
+  'field.factory.evolution_test_path':
+    'Where the failing test lives inside the repository. A stop about the test cannot be registered without one.',
+  'field.factory.evolution_test_content':
+    'The test itself: it must fail today and pass once the change is made. The RED proof checks the first half before any build is paid for.',
+  'button.factory.evolution_submit':
+    'Register the evolution onto the frozen backlog under your name. Refused while a factory run is active, for an id already on the record, or for an item already superseded.',
 
   // ── /factory/intake — work arriving from the team's own board (ADR-0017)
   'stat.intake.listener':

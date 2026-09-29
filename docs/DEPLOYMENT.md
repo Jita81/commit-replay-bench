@@ -985,12 +985,17 @@ The `worker` probe reads the `workers` table: every worker upserts its row every
 `heartbeat_s` (default 10 s) whether or not it holds a run, with the interval it promised,
 so the probe judges a worker alive when it checked in within 3 × its own `heartbeat_s`. The
 UI reads the same probe: the Deployment page lists the workers with their last check-in. The
-`ledger` and `sandbox` probes raise a banner **[measured — n = 2, the two named; method: every
-UI reader of a probe classified in `tests/test_health_probe_docs.py`'s `BANNERS`; apparatus
-n/a, a property of the product's own code, not a graded row]**. The shell raises the red "Delivery halted" banner above every screen,
+`ledger` and `sandbox` probes each raise a banner of their own **[measured — n = 2, the two
+named; method: every UI reader of a probe by name classified in
+`tests/test_health_probe_docs.py`'s `BANNERS`; apparatus n/a, a property of the product's own
+code, not a graded row]**. The shell raises the red "Delivery halted" banner above every screen,
 Home included, while the `ledger` probe reports a false-Q1 row; Home adds its own banner when
-the `sandbox` probe says the sandbox cannot run. Any other probe that is not `ok` shows only as
-the one-word pill in the header, so read `/health` itself when that pill is not `ok`.
+the `sandbox` probe says the sandbox cannot run. Home also raises one Important banner that
+lists any other probe reading `degraded` or `down` (G-397; `probesNeedingAttention` in
+`ui/src/screens/Home/HomePage.tsx`), each with the probe's detail line and a link to the
+guide section that says what to do; a probe that was skipped is silent. The header pill shows
+the same status on every screen, so read `/health` itself when that pill is not `ok` and you
+are not on Home.
 
 ### 9.4 Logs
 

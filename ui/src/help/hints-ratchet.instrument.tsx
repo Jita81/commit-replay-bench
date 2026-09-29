@@ -305,11 +305,31 @@ const BACKLOG = {
     { id: 'I-1', title: 'Multiply', kind: 'code', capability_class: 'bug.fix', size: 'XS', level: 'L1', depends_on: [], structural_facts: ['reproduction: x'], has_authored_test: true, description: 'calc needs multiply' },
     { id: 'I-2', title: 'Divide', kind: 'code', capability_class: 'feature.add', size: 'S', level: 'L1', depends_on: ['I-1'], structural_facts: [], has_authored_test: false, description: '' },
   ],
+  // G-368 — the delivered pull requests by outcome, and when the newest was read
+  outcomes: { delivered: 1, merged: 1, closed: 0, open: 0, last_synced: '2026-09-16T08:00:00+00:00' },
 }
 const FACTORY_TASKS = [
-  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64) },
+  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64), outcome: { state: 'merged', pr_number: 7, pr_url: 'https://github.invalid/acme/alpha/pull/7', merged_at: '2026-09-16T07:59:00+00:00', merged_by: 'ada', merge_sha: 'm'.repeat(40), closed_at: '', synced_at: '2026-09-16T08:00:00+00:00' } },
   { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'not_ready', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: NO_ROUTE, ...UNTOUCHED, refusal: { step: 'readiness', reason: 'two structural gaps are unsigned', reason_code: '', measured_route: '' } },
 ]
+/** DL-310 / F32 — a stop whose way forward is `register_evolution`, with the served draft: the
+ *  state that opens the evolution dialog (an operator) or the "an operator registers" note (a viewer). */
+const FACTORY_WEAK_TEST_STOP = {
+  ...FACTORY_TASKS[0]!,
+  status: 'oracle_needs_strengthening',
+  pr_url: null,
+  review_verdict: null,
+  outcome: null,
+  refusal: { step: 'review', reason: 'the reviewer found the oracle weak: strengthen the test and register a superseding item', reason_code: '', measured_route: '' },
+  way_forward: {
+    action: 'register_evolution',
+    route: '/factory/alpha/backlog/evolutions',
+    supersedes: 'I-1',
+    what_to_change: 'Strengthen the test so it fails for the reason the review gave, then register this item with the stronger test attached.',
+    needs_authored_test: true,
+    prefill: { id: 'I-1-v2', title: 'Multiply', kind: 'code', description: 'calc needs multiply', capability_class: 'bug.fix', size_estimate: 'XS', structural_facts: ['reproduction: x'], acceptance_criteria: ['multiply(3, 4) == 12'], depends_on: [], level: 'L1', supersedes: 'I-1' },
+  },
+}
 const INTAKE = {
   repo: 'alpha',
   listener: { enabled: true, column: 'Ready for manufacture', switched_by: 'Ada', switched_at: '2026-09-22T09:00:00Z', since: '2026-09-22T09:00:00Z' },
@@ -584,6 +604,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
       'GET /factory/alpha/backlog': BACKLOG,
       'GET /factory/alpha/tasks': FACTORY_TASKS,
       'GET /factory/catalogue': CATALOGUE,
+      'GET /factory/alpha/intake': INTAKE,
       'GET /health': HEALTH,
       'GET /version': VERSION,
       'GET /capability-map': MAP,
@@ -734,6 +755,24 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
   { name: '/ledger + filters from a link', route: '/ledger?repo=alpha&run_id=r1&task_id=t1&builder=fixture&language=python', path: '/ledger', element: <LedgerPage />, api: INSTRUMENT_SCREENS['/ledger']!.api, roles: ['viewer'] },
   // Routes with nothing decided yet: the empty state offers the replay run to an operator only (G-254)
   { name: '/routing, no decisions yet', route: '/routing?repo=alpha', path: '/routing', element: <RoutingPage />, api: { 'GET /routes': { ...ROUTES, decisions: [] }, 'GET /repos': REPOS }, roles: ['viewer', 'operator'], minHints: 29 },
+  {
+    // DL-310 / F32: the evolution dialog on the served draft, reached only from a stop whose way
+    // forward is `register_evolution` — an operator opens it; a viewer reads the note instead
+    name: '/factory + Register this evolution… (the dialog on the served draft)',
+    route: '/factory?repo=alpha',
+    path: '/factory',
+    element: <FactoryPage />,
+    api: { ...INSTRUMENT_SCREENS['/factory']!.api, 'GET /factory/alpha/tasks': [FACTORY_WEAK_TEST_STOP, FACTORY_TASKS[1]!] },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByTestId('prefill-I-1')
+      const button = screen.queryByTestId('register-evolution-I-1')
+      if (button) {
+        await userEvent.click(button)
+        await screen.findByTestId('evolution-form')
+      }
+    },
+  },
   {
     name: '/capability + open cell detail',
     route: '/capability?repo=alpha',

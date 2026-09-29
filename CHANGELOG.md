@@ -41,6 +41,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   Operate path; Runs, Ledger and Deployment say what operating does not include
   (DL-306, DL-307, P-620 to P-627).
 
+- **Factory, Home and Baseline: the stream starts at the board, the loop closes on the screen**
+  (north-star Wave 6, stream fac; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-fac)).
+  The Factory head, Home's task 8 and both About blocks say work enters from your board and
+  whether intake is being read, listening or off. An operator registers a stopped item's served
+  evolution from a dialog on the draft, a failing test required where the stop was the
+  test. The backlog card counts delivered pull requests; an operator syncs them. A built item
+  links its task page. Home names every degraded or down probe in words. The Baseline's oracle
+  tile and its door back to the walk are one reading (DL-309, DL-310, P-631 to P-638).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

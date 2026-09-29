@@ -48,14 +48,14 @@
  * Touch when:   never for a new repository; a headline fact or the deliver wording changes.
  */
 
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { helpFor } from '../../help/help'
 import { unhinted } from '../../help/hints-collector'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
-import { ResultsPage } from './ResultsPage'
+import { ResultsPage, gateOpen, oracleTone } from './ResultsPage'
 import pageSource from './ResultsPage.tsx?raw'
 import testSource from './ResultsPage.test.tsx?raw'
 
@@ -636,5 +636,97 @@ describe('ResultsPage', () => {
     await waitFor(() => expect(empty.calls.some((c) => c.path === '/capability-map')).toBe(true))
     await new Promise((r) => setTimeout(r, 50))
     expect(empty.calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+  it('the oracle tile’s tone and the door back to the walk are one reading, never two rules (P-403)', () => {
+    // a scored oracle with no bar to read it against is not amber: nothing says it is under the bar
+    expect(oracleTone(0.7, null)).toBe('muted')
+    expect(oracleTone(null, 0.8)).toBe('muted')
+    expect(oracleTone(0.7, 0.8)).toBe('amber')
+    expect(oracleTone(0.8, 0.8)).toBe('green')
+    // the gate reads the tile's tone, so the two cannot disagree on any pair
+    for (const [mean, bar] of [
+      [0.7, null],
+      [null, 0.8],
+      [0.7, 0.8],
+      [0.8, 0.8],
+      [null, null],
+    ] as const) {
+      const tone = oracleTone(mean, bar)
+      expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleTone: tone })).toBe(tone === 'amber')
+    }
+  })
+  it('an amber or not-run gate offers one click back to the walk; all-green gates and a failed read do not (G-236, G-444)', async () => {
+    // all green: controls passed, the oracle mean (0.8) meets the bar (0.8) — no door in the gates card
+    mockApi(ROUTES)
+    const green = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('80%')).toBeInTheDocument())
+    expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
+    green.unmount()
+    vi.unstubAllGlobals()
+    // not run: the controls 404 — the door is there, to the walk that runs them
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'not run') })
+    const notRun = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('not run'))
+    const door = await screen.findByTestId('gates-back-to-walk')
+    expect(door).toHaveAttribute('href', '/connect/alpha')
+    expect(door).toHaveAttribute('data-hint', 'button.results.back_to_walk')
+    expect(door).toHaveTextContent('Back to the walk')
+    notRun.unmount()
+    vi.unstubAllGlobals()
+    // amber: the oracle mean under the bar
+    mockApi({ ...ROUTES, 'GET /oracle/alpha': { ...ORACLE, tasks: [{ task_id: 't1', strength: 0.7 }, { task_id: 't2', strength: 0.7 }] } })
+    const amber = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('70%')).toBeInTheDocument())
+    expect(await screen.findByTestId('gates-back-to-walk')).toHaveAttribute('href', '/connect/alpha')
+    amber.unmount()
+    vi.unstubAllGlobals()
+    // a thin verdict is amber too
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': { ...CONTROLS, verdict: { ...CONTROLS.verdict, state: 'thin', complete: false } } })
+    const thin = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('thin'))
+    expect(await screen.findByTestId('gates-back-to-walk')).toBeInTheDocument()
+    thin.unmount()
+    vi.unstubAllGlobals()
+    // a failed read is not an open gate: its way forward is Retry, not the walk
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': () => envelope(500, 'internal', 'controls unreadable') })
+    const failed = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('not loaded'))
+    expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
+    failed.unmount()
+    vi.unstubAllGlobals()
+    // a red escape is not either: stronger tests, on Learn, are its way forward
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': { ...CONTROLS, escapes: 1, passed: false, verdict: { ...CONTROLS.verdict, state: 'escaped', passed: false, escapes: 1 } } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('escaped'))
+    expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
+    // the empty state's own door carries the same hint
+    expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleTone: oracleTone(0.9, 0.8) })).toBe(false)
+    expect(gateOpen({ controlsNotRun: false, verdictState: 'unmeasured', oracleNotRun: false, oracleTone: oracleTone(0.9, 0.8) })).toBe(true)
+  })
+
+  it('the Waiting on a person card says how many rows it is not showing when it cuts the list', async () => {
+    // eight human-routed cells → eight decisions; the card shows six and says "and 2 more"
+    const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXS', 'XXL', 'XXXL']
+    const cells = sizes.map((size, i) => ({ ...HUMAN, size, n: 10 + i }))
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, sizes, cells, summary: { ...MAP.summary, total_cells: 8, measured_cells: 8, deliver_cells: 0 } } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
+    expect(within(screen.getByRole('list', { name: 'Decisions for alpha' })).getAllByRole('listitem')).toHaveLength(6)
+    const more = screen.getByTestId('decisions-more')
+    expect(more).toHaveTextContent('and 2 more — All decisions')
+    expect(within(more).getByRole('link', { name: 'All decisions' })).toHaveAttribute('href', '/decisions')
+    expect(more).toHaveAttribute('data-hint', 'stat.results.waiting_more')
+    // the eyebrow still counts them all
+    expect(screen.getByText('8 for this repository')).toBeInTheDocument()
+    // G-238 — each route tile carries a test id the walkthrough can read
+    expect(screen.getByTestId('tile-route-human')).toHaveTextContent('8')
+    expect(screen.getByTestId('tile-route-deliver')).toHaveTextContent('0')
+    vi.unstubAllGlobals()
+    cleanup()
+    // a list of six or fewer says nothing about more
+    mockApi(ROUTES)
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
+    expect(screen.queryByTestId('decisions-more')).toBeNull()
   })
 })

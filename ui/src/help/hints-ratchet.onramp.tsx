@@ -233,6 +233,8 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /users': { items: [], total: 0, limit: 50, offset: 0 },
       'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
       'GET /factory/alpha/tasks': [],
+      // G-548 — task 8's note reads the listener's state
+      'GET /factory/alpha/intake': { repo: 'alpha', listener: { enabled: false, column: '', switched_by: '', switched_at: '', since: '' }, connection: { tracker: 'ado', url: 'https://dev.azure.invalid/contoso', project: 'Widgets', column: 'Ready for manufacture', poll_s: 300, outcome_map: {}, configured: true, credential_set: true, credential_fingerprint: 'AB12' }, last_poll: null, rows: [] },
       'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
       'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
     },

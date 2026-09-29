@@ -25,20 +25,30 @@
  *               stopped item says the way forward — an evolution that supersedes it, the
  *               route the API serves as `way_forward` (DL-049), one sentence naming what must
  *               be different, and that replacement item already drafted from the stop's own
- *               reason (G-904) — and the freeze form for a
- *               revised backlog (a new hash) starts from the active one (J-FAC-15). Every act goes through the API under its role; the
- *               chain (`/factory/{repo}/evidence`) is the record, and this screen renders the
- *               folded view of it (`task_views`).
+ *               reason (G-904), which an operator registers from the row through a dialog
+ *               that posts to the served route (F32; never automatically) — and the freeze
+ *               form for a revised backlog (a new hash) starts from the active one
+ *               (J-FAC-15). The head says the stream starts at the enterprise's board and
+ *               whether intake is listening, in the same words as Home's task 8 (G-548); the
+ *               freeze dialog says where work comes from and what the form does not take
+ *               (G-140); a built item links its task page beside its evidence (G-366); the
+ *               backlog card counts the delivered pull requests by outcome with when they were
+ *               last read, and an operator syncs them (G-368). Every act goes through the API
+ *               under its role; the chain (`/factory/{repo}/evidence`) is the record, and this
+ *               screen renders the folded view of it (`task_views`).
  * How:          `useRepoParam({ defaultToLatest: true })` (as the Baseline: reached from the
- *               nav, the latest repository is chosen) → `useFactoryBacklog` + `useFactoryTasks` (polled while `useRuns` lists an
- *               active factory run) → `stepsFor(task)` → `<StepList>`; `builderChoice(health)`
+ *               nav, the latest repository is chosen) → `useFactoryBacklog` + `useFactoryTasks`
+ *               (polled while `useRuns` lists an active factory run) → `stepsFor(task)` →
+ *               `<StepList>`; `builderChoice(health)`
  *               picks the builder exactly as Measure does (an operator may name another —
  *               the factory has no "every knob" form); `estimateFromMap` is Measure's
  *               reading of the map's economics fold; `useSignGap` (POST signoff-gap),
  *               `useRegisterBacklog` (POST backlog, the form or JSON in a dialog),
- *               `useCreateRun` (kind `factory`, `deliver` toggle gated by the backlog's
- *               delivery pre-flight; the sign-off override explained as a second
- *               approver's act on the run's page); `EvidenceDrawer`
+ *               `useRegisterEvolution` (POST to `way_forward.route`), `useSyncOutcomes`
+ *               (POST outcomes/sync), `useIntake` (the listener's state, folded by
+ *               screens/Factory/intake.ts), `useCreateRun` (kind `factory`, `deliver` toggle
+ *               gated by the backlog's delivery pre-flight; the sign-off override explained as
+ *               a second approver's act on the run's page); `EvidenceDrawer`
  *               opens the newest build's pack; `useNarrow` (matchMedia at Tailwind's `sm`)
  *               folds an item's six step cards behind a Details at phone width (J-FAC-14).
  *               A 404 = no backlog registered: the instruction, not an error. `?item=`
@@ -47,7 +57,8 @@
  * ADRs:         docs/adr/0003-one-routing-rule.md (amendment 2026-09-16: the route gate)
  * Works with:   ui/src/screens/Factory/IntakePage.tsx (the work arriving from the team's own
  *               board — this screen is its only door, and ui/src/App.reachability.test.ts holds
- *               that),
+ *               that), ui/src/screens/Factory/intake.ts (the intake line shared with Home),
+ *               ui/src/screens/Runs/TaskDetailPage.tsx (where an item's Task link lands),
  *               ui/src/api/hooks.ts (`useFactoryBacklog`, `useFactoryTasks`, `useSignGap`,
  *               `useRegisterBacklog`, `useCreateRun`, `useCancelRun`, `useRuns`, `useHealth`,
  *               `useCapabilityMap`, `useAllRepos`), ui/src/api/types.ts (`FactoryTask`,
@@ -69,8 +80,8 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useFundCalibration, useRegisterBacklog, useRuns, useSignGap, useWaiveProbe } from '../../api/hooks'
-import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryPreflight, type FactoryEvolutionPrefill, type FactoryTask, type Run } from '../../api/types'
+import { useAllRepos, useCancelRun, useCapabilityMap, useCreateRun, useFactoryBacklog, useFactoryCatalogue, useFactoryTasks, useHealth, useFundCalibration, useIntake, useRegisterBacklog, useRegisterEvolution, useRuns, useSignGap, useSyncOutcomes, useWaiveProbe } from '../../api/hooks'
+import { isRunTerminal, type CapabilityMap, type FactoryBacklog, type FactoryBacklogItem, type FactoryCatalogue, type FactoryDeliveryOutcome, type FactoryDeliveryPreflight, type FactoryEvolutionBody, type FactoryEvolutionPrefill, type FactoryOutcomesSummary, type FactoryTask, type FactoryWayForward, type Run } from '../../api/types'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { Dialog } from '../../components/Dialog'
@@ -93,6 +104,7 @@ import { measuredCostPerAttempt, noMeasuredCostReason, type MeasuredCost } from 
 import { fmtDate, fmtInt, kOfN, shortId } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { EvidenceDrawer } from '../Runs/EvidenceDrawer'
+import { INTAKE_LEAD, intakeState, intakeWords } from './intake'
 
 type StepStatus = 'done' | 'current' | 'todo' | 'failed' | 'skipped'
 
@@ -148,6 +160,8 @@ const STATUS_LABEL: Record<string, string> = {
   size_exceeds_licence: 'Larger than its licence',
   cell_not_licensed: 'Its own cell is not licensed',
   calibration_build: 'Calibration build — never delivered',
+  // F32 — replaced by an evolution; the row names it
+  superseded: 'Superseded',
 }
 
 const FAILED_STATUSES = ['rejected', 'rework_exhausted', 'disqualified', 'delivery_failed', 'error', 'not_clean', 'oracle_not_scoreable', 'size_exceeds_licence', 'cell_not_licensed']
@@ -382,6 +396,7 @@ export function refusalSentence(t: FactoryTask): string {
   if (t.status === 'oracle_needs_strengthening' || r?.step === 'review')
     return `The review found the test too weak to rebuild against${t.outcome_reason || r?.reason ? `: ${findingOf(t.outcome_reason || r?.reason || '')}` : ''}. ${evolve('strengthen the test')}`
   if (r?.step === 'red') return `The factory could not prove the test: ${r.reason}. ${evolve('author a test that fails today')}`
+  if (t.status === 'not_clean') return `The build under the belts was not clean${t.outcome_reason || t.error ? `: ${t.outcome_reason || t.error}` : ''}, so nothing was reviewed or pushed. Read the evidence, then ${evolve('add the fact the belts found missing').replace(/^To bring it back into the factory, /, '')}`
   if (t.status === 'rejected' || t.status === 'rework_exhausted')
     return `The review said ${t.review_verdict?.replace(/_/g, ' ') ?? t.status.replace(/_/g, ' ')}. Read the evidence, then ${evolve('add the fact the review asked for').replace(/^To bring it back into the factory, /, '')}`
   if (t.status === 'no_oracle' || t.status === 'not_red')
@@ -435,6 +450,11 @@ const EVENT_PHRASE: Record<string, string> = {
 
 const noBacklog = (e: unknown) => e !== null && typeof e === 'object' && 'status' in e && (e as { status: number }).status === 404
 
+/** G-140 — where work comes from (the freeze dialog and the no-backlog state both say it). */
+const WORK_SOURCES = 'Work comes from a backlog typed here or pasted as JSON, or from board tickets that arrive through intake.'
+/** G-140 — what the per-item form does not take, and the two ways an item still gets its test. */
+const FORM_LIMITS = 'The form takes no acceptance criteria, labels or authored test: paste JSON to attach a test, or the test author writes one if it is switched on.'
+
 /** Tailwind's `sm` breakpoint: below it the six step cards sit behind a Details (J-FAC-14). */
 const NARROW = '(max-width: 639px)'
 const narrowQuery = () => (typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(NARROW) : null)
@@ -462,6 +482,8 @@ export function FactoryPage() {
   const focus = params.get('item') ?? ''
   const { can } = useAuth()
   const backlog = useFactoryBacklog(repo)
+  // G-548 — the listener's state, for the line under the header; a failed read is said as not known
+  const intake = useIntake(repo)
   // J-FAC-5 / J-TEL-9 — the newest factory runs of this repository: an active one means
   // the chain is moving, so the items poll and the banner names the run
   const runs = useRuns({ repo, kind: 'factory', limit: 10 })
@@ -508,12 +530,22 @@ export function FactoryPage() {
         title="Factory"
         purpose={
           <>
-            New work under the same governance as replay: a frozen backlog, structural gaps signed by an approver, a <Term id="red_proof">RED proof</Term> before any build, a build under the belts, a branch and pull request only where the
-            map routes <Term id="deliver">deliver</Term> (the <Term id="route_gate">route gate</Term>), an independent review — every step on the evidence chain.
+            New work from your own board, under the same governance as replay: a ticket in the watched column becomes a frozen backlog item, structural gaps are signed by an approver, a <Term id="red_proof">RED proof</Term> comes before any build, the build runs under the belts, a branch and pull request open only where the
+            map routes <Term id="deliver">deliver</Term> (the <Term id="route_gate">route gate</Term>), and an independent review follows — every step on the evidence chain.
           </>
         }
         actions={<RepoPicker value={repo} onChange={setRepo} />}
       />
+      {repo && (
+        // G-548 — the stream starts at the board, and this line says whether the product is
+        // listening to it: the same words Home's task 8 shows (screens/Factory/intake.ts)
+        <Hint as="p" id="stat.factory.intake_state" className="mb-4 mt-0 text-sm text-on-surface-body" data-testid="factory-intake-state">
+          {INTAKE_LEAD}{' '}
+          <Link to={`/factory/intake?repo=${encodeURIComponent(repo)}`} className="underline underline-offset-4">
+            {intakeWords(intakeState(intake.data, intake.isError, intake.isPending))}
+          </Link>
+        </Hint>
+      )}
       {!repo && repos.data && repos.data.items.length === 0 && (
         <EmptyState
           title="No repository connected yet"
@@ -551,8 +583,8 @@ export function FactoryPage() {
                   title="No backlog registered for this repository"
                   reason={
                     can('operator')
-                      ? 'Freeze one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order.'
-                      : 'An operator freezes one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order.'
+                      ? `Freeze one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order. ${WORK_SOURCES}`
+                      : `An operator freezes one: the items are validated, hashed and recorded as the first event of the evidence chain; a factory run then works them in dependency order. ${WORK_SOURCES}`
                   }
                   action={
                     can('operator') ? (
@@ -581,6 +613,8 @@ export function FactoryPage() {
                     {fmtInt(backlog.data.items.length)} items
                   </Hint>
                 </div>
+                {/* G-368 — the delivered pull requests and how they ended, by count, with when they were last read */}
+                <OutcomesRow repo={repo} outcomes={backlog.data.outcomes} canSync={can('operator')} />
                 {/* a live region that is ALWAYS on the page, so the banner a starting run brings in is
                     announced to a screen-reader user who pressed Run from the keyboard: a live region
                     that arrives together with its content is not reliably read (G-905) */}
@@ -607,6 +641,7 @@ export function FactoryPage() {
                     focused={t.id === focus}
                     canSign={can('approver')}
                     canFreeze={can('operator') && activeRun === null}
+                    canRegister={can('operator')}
                     onFreeze={(evolution) => openFreeze(backlog.data ?? null, evolution)}
                     onEvidence={(p, row) => setPack({ pack: p, row })}
                   />
@@ -657,6 +692,71 @@ function ActiveRunBanner({ run, tasks, canCancel }: { run: Run; tasks: FactoryTa
       {canCancel && <p className="mb-0 mt-2 text-[16px] text-on-surface-muted">Cancelling stops the loop after the item in hand. Items already built are still charged.</p>}
       {cancel.isError && <ErrorState compact error={cancel.error} />}
     </NotificationBanner>
+  )
+}
+
+/**
+ * G-368 (B-9 / F30) — the loop closed, in counts: the pull requests the factory delivered on
+ * this repository and how they ended, read from GitHub by the outcome sync and recorded as
+ * `delivery.merged` / `delivery.closed`. Counts, never a rate (DL-049: a merge is a human act).
+ * "last read" is the newest outcome's record time; "never read" when no sync has recorded one.
+ * An operator syncs from here; the report says what one sync did and names each pull request
+ * GitHub could not serve. A refused sync (409 `outcome_sync_unavailable`, 502 `github_error`)
+ * is shown with the server's reason and changes nothing.
+ */
+function OutcomesRow({ repo, outcomes, canSync }: { repo: string; outcomes: FactoryOutcomesSummary | undefined; canSync: boolean }) {
+  const sync = useSyncOutcomes(repo)
+  const o = outcomes
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="factory-outcomes">
+      <Hint as="span" id="stat.factory.outcomes" data-testid="factory-outcomes-counts">
+        {o
+          ? `Delivered pull requests: ${fmtInt(o.delivered)} delivered · ${fmtInt(o.merged)} merged · ${fmtInt(o.closed)} closed · ${fmtInt(o.open)} open · ${o.last_synced ? `last read ${fmtDate(o.last_synced)}` : 'never read'}`
+          : 'Delivered pull requests: this API did not report the outcomes summary. Update the API, then reload.'}
+      </Hint>
+      {canSync ? (
+        <Button size="sm" onClick={() => sync.mutate()} pending={sync.isPending} hint="button.factory.sync_outcomes" data-testid="factory-sync-outcomes">
+          Sync outcomes
+        </Button>
+      ) : (
+        <Hint as="span" id="note.factory.viewer_outcomes" className="text-xs text-on-surface-muted">
+          an operator reads the outcomes
+        </Hint>
+      )}
+      {sync.data && (
+        <Hint as="span" id="stat.factory.sync_report" className="basis-full text-xs" data-testid="factory-sync-report">
+          Read from GitHub: checked {fmtInt(sync.data.checked)} · merged {fmtInt(sync.data.merged)} · closed {fmtInt(sync.data.closed)} · still open {fmtInt(sync.data.open)}
+          {sync.data.errors.length > 0 ? ` · ${sync.data.errors.length} could not be read: ${sync.data.errors.join('; ')}` : ''}
+        </Hint>
+      )}
+      {sync.isError && (
+        <div className="basis-full" data-testid="factory-sync-error">
+          <ErrorState compact error={sync.error} title={sync.error.status === 502 ? 'GitHub refused the read — nothing was recorded' : sync.error.code === 'outcome_sync_unavailable' ? 'The outcomes cannot be read for this repository — nothing was recorded' : undefined} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The tone and the words of a delivered pull request's fate. */
+const OUTCOME_DISPLAY: Record<string, { tone: Tone; glyph: string; label: string }> = {
+  merged: { tone: 'green', glyph: '✓', label: 'merged' },
+  closed: { tone: 'muted', glyph: '✕', label: 'closed without merging' },
+  open: { tone: 'blue', glyph: '◐', label: 'open' },
+}
+
+/** G-368 — one item's delivered pull request and its fate, linking the pull request, with when it was read. */
+function OutcomePill({ outcome: o, itemId }: { outcome: FactoryDeliveryOutcome; itemId: string }) {
+  const d = OUTCOME_DISPLAY[o.state] ?? { tone: 'muted' as Tone, glyph: '○', label: o.state.replace(/_/g, ' ') }
+  const read = o.synced_at ? `read ${fmtDate(o.synced_at)}` : 'not read yet'
+  const by = o.state === 'merged' && o.merged_by ? ` by ${o.merged_by}` : ''
+  return (
+    <a href={o.pr_url} target="_blank" rel="noreferrer" className="no-underline" data-testid={`outcome-${itemId}`}>
+      <Pill tone={d.tone} glyph={d.glyph} size="xs" label={`Pull request #${o.pr_number} ${d.label}${by} · ${read}`} hint="pill.factory.outcome">
+        PR #{o.pr_number} {d.label}
+        {by} · {read}
+      </Pill>
+    </a>
   )
 }
 
@@ -868,6 +968,7 @@ function ItemRow({
   focused,
   canSign,
   canFreeze,
+  canRegister,
   onFreeze,
   onEvidence,
 }: {
@@ -876,6 +977,9 @@ function ItemRow({
   focused: boolean
   canSign: boolean
   canFreeze: boolean
+  /** An operator: may register the served evolution of a stopped item (F32). Not gated on an
+   *  active run here — the record's own 409 is shown beside the form. */
+  canRegister: boolean
   /** Called with the replacement item the API already drafted for this stop, when there is
    *  one, so the freeze form starts from it rather than from a blank of the active backlog. */
   onFreeze: (evolution?: FactoryEvolutionPrefill | null) => void
@@ -910,11 +1014,19 @@ function ItemRow({
             Evidence
           </Button>
         )}
+        {t.task_id && (
+          // G-366 — the journey's next page: the item's specification (its authored RED test,
+          // belt scope, source files) and every graded trial against it, beside the evidence
+          <LinkButton size="sm" to={`/tasks/${encodeURIComponent(repo)}/${encodeURIComponent(t.task_id)}`} data-testid={`task-${t.id}`} hint="button.factory.item_task">
+            Task
+          </LinkButton>
+        )}
         {t.pr_url && (
           <Hint as="a" id="link.factory.pr" href={t.pr_url} className="text-xs" target="_blank" rel="noreferrer">
             PR ↗
           </Hint>
         )}
+        {t.outcome && <OutcomePill outcome={t.outcome} itemId={t.id} />}
       </div>
       {sentence && (
         <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-border bg-surface p-2 text-sm" data-testid={`refusal-${t.id}`}>
@@ -926,7 +1038,7 @@ function ItemRow({
               Freeze a revised backlog…
             </Button>
           )}
-          <PrefilledEvolution t={t} />
+          <PrefilledEvolution repo={repo} t={t} canRegister={canRegister} />
           {t.status === 'oracle_needs_strengthening' && (
             // G-348 — a weak-test stop is the strengthen report's work: it links there
             <Hint as={Link} id="link.factory.learn" to={`/learn?repo=${encodeURIComponent(repo)}#strengthen`} className="text-xs underline underline-offset-4">
@@ -954,6 +1066,12 @@ function ItemRow({
       ) : (
         <StepGrid t={t} steps={steps} />
       )}
+      {t.superseded_by && (
+        // F32 — the record's own word: this item was replaced by an evolution, and its chain stays
+        <Hint as="p" id="item.factory.superseded" className="m-0 mt-2 text-xs font-semibold" data-testid={`superseded-${t.id}`}>
+          Superseded by {t.superseded_by} — this item's chain stays on the record; the evolution is worked instead.
+        </Hint>
+      )}
       {t.entry && (
         // ADR-0026 item 8 — the gate's stop by its code, and what the ticket must carry
         <Hint as="p" id="item.factory.entry_stop" className="m-0 mt-2 text-xs" data-testid={`entry-${t.id}`}>
@@ -975,22 +1093,57 @@ function ItemRow({
 }
 
 /**
- * G-904 — the replacement item, already drafted. A stopped item's way forward is not only a
- * route: the API serves the superseding item pre-filled from the item that stopped and from
- * the stop's own reason (for a weak-test stop, the review's finding), so the next step is a
- * read of a draft rather than retyping what the product already knows. Nothing is registered
- * here — the draft is shown, and the operator posts it from the freeze form or the API.
+ * G-904 / F32 — the replacement item, already drafted, and the act that registers it. A stopped
+ * item's way forward is not only a route: the API serves the superseding item pre-filled from
+ * the item that stopped and from the stop's own reason (for a weak-test stop, the review's
+ * finding), so the next step is a read of a draft rather than retyping what the product already
+ * knows. An operator registers it from here — "Register this evolution…" opens the dialog on the
+ * draft and posts to the SERVED `way_forward.route` (DL-049: the frozen hash stays; the old
+ * chain is kept) — and only from here: nothing is registered without a person's press. A viewer
+ * reads who acts. "Freeze a revised backlog…" (a new hash) stays the heavier, secondary path.
  */
-function PrefilledEvolution({ t }: { t: FactoryTask }) {
+function PrefilledEvolution({ repo, t, canRegister }: { repo: string; t: FactoryTask; canRegister: boolean }) {
   const wf = t.way_forward
   const pre = wf?.prefill
+  const [open, setOpen] = useState(false)
+  const [dialogKey, setDialogKey] = useState(0)
+  // the id the evolution was registered under, from this screen's own post (the tasks are
+  // re-read after it, and the server then folds the item as superseded)
+  const [registered, setRegistered] = useState('')
   if (!wf || !pre) return null
+  const evolution = wf.action === 'register_evolution'
   return (
     <div className="basis-full" data-testid={`prefill-${t.id}`}>
       <Hint as="p" id="banner.factory.what_to_change" className="m-0 mb-1 text-xs">
         {wf.what_to_change}
         {wf.needs_authored_test ? ' Attach the failing test with the item.' : ''}
       </Hint>
+      {evolution && registered && (
+        <Hint as="p" id="item.factory.superseded" className="m-0 mb-1 text-xs font-semibold" data-testid={`superseded-${t.id}`}>
+          Superseded by {registered} — registered on the chain; the next factory run works the evolution.
+        </Hint>
+      )}
+      {evolution && !registered && canRegister && (
+        <div className="mb-1">
+          <Button
+            size="sm"
+            variant="filled"
+            onClick={() => {
+              setDialogKey((k) => k + 1)
+              setOpen(true)
+            }}
+            hint="button.factory.register_evolution"
+            data-testid={`register-evolution-${t.id}`}
+          >
+            Register this evolution…
+          </Button>
+        </div>
+      )}
+      {evolution && !registered && !canRegister && (
+        <Hint as="p" id="note.factory.viewer_registers" className="m-0 mb-1 text-xs text-on-surface-muted">
+          An operator registers the evolution; the draft below is what they would register.
+        </Hint>
+      )}
       <Details summary="The replacement item, drafted" className="mb-0 text-sm">
         <Hint as="div" id="item.factory.prefill" className="min-w-0">
           <p className="m-0">
@@ -1009,7 +1162,149 @@ function PrefilledEvolution({ t }: { t: FactoryTask }) {
           )}
         </Hint>
       </Details>
+      {evolution && canRegister && (
+        <EvolutionDialog
+          key={dialogKey}
+          open={open}
+          repo={repo}
+          wayForward={wf}
+          prefill={pre}
+          onClose={() => setOpen(false)}
+          onRegistered={(id) => {
+            setRegistered(id)
+            setOpen(false)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/** The lines of a textarea as a list: one per line, blanks dropped. */
+const lines = (text: string): string[] =>
+  text
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+
+/**
+ * F32 — the evolution as the operator registers it: the draft's fields, the id and what it
+ * supersedes read-only (the server refuses an id that exists and an item already superseded),
+ * and — when the stop was about the test (`needs_authored_test`) — the authored failing test's
+ * path and content, required. The refusals the record makes (409 `factory_run_active`,
+ * `item_exists`, `already_superseded`; 422) are shown beside the form that made them.
+ */
+function EvolutionDialog({ open, repo, wayForward, prefill: pre, onClose, onRegistered }: { open: boolean; repo: string; wayForward: FactoryWayForward; prefill: FactoryEvolutionPrefill; onClose: () => void; onRegistered: (id: string) => void }) {
+  const register = useRegisterEvolution(repo)
+  const catalogue = useFactoryCatalogue(open)
+  const cat = catalogue.data
+  const [title, setTitle] = useState(pre.title)
+  const [description, setDescription] = useState(pre.description)
+  const [cls, setCls] = useState(pre.capability_class)
+  const [size, setSize] = useState(pre.size_estimate)
+  const [kind, setKind] = useState(pre.kind)
+  const [level, setLevel] = useState(pre.level)
+  const [facts, setFacts] = useState(pre.structural_facts.join('\n'))
+  const [criteria, setCriteria] = useState(pre.acceptance_criteria.join('\n'))
+  const [depends, setDepends] = useState(pre.depends_on.join(', '))
+  const [testPath, setTestPath] = useState('')
+  const [testContent, setTestContent] = useState('')
+  const needsTest = Boolean(wayForward.needs_authored_test)
+  const testGiven = testPath.trim().length > 0 && testContent.trim().length > 0
+  const valid = title.trim().length > 0 && (!needsTest || testGiven)
+  const submit = () => {
+    const body: FactoryEvolutionBody = {
+      item: {
+        id: pre.id,
+        title: title.trim(),
+        kind,
+        description: description.trim(),
+        capability_class: cls,
+        size_estimate: size,
+        structural_facts: lines(facts),
+        acceptance_criteria: lines(criteria),
+        depends_on: depends
+          .split(',')
+          .map((x) => x.trim())
+          .filter(Boolean),
+        level,
+        supersedes: pre.supersedes,
+      },
+      ...(testGiven ? { authored: { path: testPath.trim(), content: testContent } } : {}),
+    }
+    register.mutate({ route: wayForward.route, body }, { onSuccess: () => onRegistered(pre.id) })
+  }
+  const options = (given: string[] | undefined, current: string) => (given && given.length > 0 ? given : [current])
+  return (
+    <Dialog
+      open={open}
+      title={`Register an evolution of ${pre.supersedes}`}
+      onClose={onClose}
+      width="lg"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="filled" pending={register.isPending} disabled={!valid} onClick={submit} hint="button.factory.evolution_submit" data-testid="evolution-submit">
+            Register {pre.id}
+          </Button>
+        </>
+      }
+    >
+      <p className="mt-0 text-sm text-on-surface-body">
+        The evolution is a new item chained onto the frozen hash: <span className="font-mono text-xs">{pre.id}</span> supersedes <span className="font-mono text-xs">{pre.supersedes}</span>, whose chain stays on the record. Refused while a factory run is active, for an id already on the record, and for an item already superseded.
+        {needsTest ? ' This stop was about the test, so the evolution must carry a failing test of its own.' : ''}
+      </p>
+      <div className="space-y-3" data-testid="evolution-form">
+        <div className="grid gap-3 sm:grid-cols-[14ch_1fr]">
+          <TextField label="Id" value={pre.id} readOnly description="the next free id, served" hint="field.factory.evolution_id" />
+          <TextField label="Title" required value={title} onChange={(e) => setTitle(e.target.value)} hint="field.factory.evolution_title" />
+        </div>
+        <TextField label="Supersedes" value={pre.supersedes} readOnly description="the item this evolution replaces" hint="field.factory.evolution_supersedes" />
+        <div className="grid gap-3 sm:grid-cols-4">
+          <SelectField label="Class" hint="field.factory.evolution_class" value={cls} onChange={(e) => setCls(e.target.value)}>
+            {options(cat?.classes.map((c) => c.capability_class), cls).map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField label="Size" hint="field.factory.evolution_size" value={size} onChange={(e) => setSize(e.target.value)}>
+            {options(cat?.sizes, size).map((sz) => (
+              <option key={sz} value={sz}>
+                {sz}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField label="Kind" hint="field.factory.evolution_kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+            {options(cat?.kinds, kind).map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField label="Level" hint="field.factory.evolution_level" value={level} onChange={(e) => setLevel(e.target.value)}>
+            {options(cat?.levels, level).map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </SelectField>
+        </div>
+        <TextArea label="Description" hint="field.factory.evolution_description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} description="The item's own words, then why the last attempt stopped. Never a diff." />
+        <TextArea label="Structural facts" hint="field.factory.evolution_facts" rows={3} value={facts} onChange={(e) => setFacts(e.target.value)} description="one slot: fact per line" className="font-mono text-xs" />
+        <TextArea label="Acceptance criteria" hint="field.factory.evolution_criteria" rows={2} value={criteria} onChange={(e) => setCriteria(e.target.value)} description="one per line, optional" />
+        <TextField label="Depends on" hint="field.factory.evolution_depends" value={depends} onChange={(e) => setDepends(e.target.value)} description="item ids, comma-separated" className="max-w-[28ch]" />
+        <fieldset className="m-0 rounded-[var(--radius-control)] border border-border p-3" data-testid="evolution-test">
+          <legend className="px-1 text-xs font-semibold text-on-surface-muted">{needsTest ? 'The failing test (required for this stop)' : 'A failing test (optional)'}</legend>
+          <TextField label="Test path" required={needsTest} value={testPath} onChange={(e) => setTestPath(e.target.value)} description="inside the repository, for example tests/test_multiply.py" hint="field.factory.evolution_test_path" />
+          <div className="mt-3">
+            <TextArea label="Test content" required={needsTest} rows={6} value={testContent} onChange={(e) => setTestContent(e.target.value)} className="font-mono text-xs" description="must fail today and pass once the change is made; the RED proof checks the first half before any build" hint="field.factory.evolution_test_content" />
+          </div>
+        </fieldset>
+        {needsTest && !testGiven && <p className="m-0 text-xs text-on-surface-muted">The path and the content of the failing test are needed before this evolution can be registered.</p>}
+      </div>
+      {register.isError && <ErrorState compact error={register.error} />}
+    </Dialog>
   )
 }
 
@@ -1370,6 +1665,11 @@ function RegisterBacklogDialog({ open, repo, from, onClose }: { open: boolean; r
         The items are validated, hashed and recorded as the first event of the chain. Each class asks for the facts a good test needs; a <strong>structural</strong> fact left empty is the gap the run will stop on until an approver signs it.
         Refused with 409 while a factory run is active.
         {from ? ' This form starts from the active backlog: change what you need and keep the rest; the freeze records a new hash and the old chain stays.' : ''}
+      </p>
+      {/* G-140 — where work comes from, and what this form does not take: said on the dialog,
+          not left to the JSON tab's description */}
+      <p className="mt-0 text-sm text-on-surface-body" data-testid="freeze-sources">
+        {WORK_SOURCES} {FORM_LIMITS}
       </p>
       {mode === 'json' ? (
         <>

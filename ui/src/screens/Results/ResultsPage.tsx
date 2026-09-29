@@ -7,7 +7,11 @@
  *               standing on the repository (controls, oracle, false-Q1), the routes the rule
  *               produced (how many cells deliver / calibrate / human, with n), the decisions
  *               waiting on a person for this repository, and the doors into the full map,
- *               the routes with their reasons, the oracle and the ledger.
+ *               the routes with their reasons, the oracle and the ledger. When a gate is amber
+ *               or not run, the gates card offers one click back to the walk step that
+ *               produces it (`oracleTone` → `gateOpen`, one reading for the tile and the
+ *               door, G-236 / G-444, P-634); the "Waiting on a person" card
+ *               lists the first `SHOWN` rows and says how many more there are (G-237).
  * What it does: Gives an enterprise reader the answer in the order they need it — is the
  *               instrument trustworthy here, what may the builder be trusted to do, what is
  *               waiting on me — before any grid. Every number keeps its n, an interval or an
@@ -119,6 +123,31 @@ const POOL_UNAVAILABLE: Record<Exclude<RepoPool['history_unavailable'], ''>, str
 
 /** A tile's value when its request failed: said as a failure, never as "unknown" (PR #54 review). */
 const NOT_LOADED = 'not loaded'
+/** G-237 — how many "Waiting on a person" rows the card shows before it says how many more there are. */
+const SHOWN = 6
+
+/**
+ * The Oracle strength tile's tone, read once for the tile and the gate (P-403: one rule, one
+ * reader): muted until a mean is scored and a bar is loaded to read it against, green at or
+ * over the bar, amber under it.
+ */
+export function oracleTone(oracleMean: number | null, oracleBar: number | null): 'muted' | 'green' | 'amber' {
+  if (oracleMean === null || oracleBar === null) return 'muted'
+  return oracleMean >= oracleBar ? 'green' : 'amber'
+}
+
+/**
+ * G-236 / G-444 — whether a gate is not green, so the page offers one click back to the walk
+ * step that produces it: the controls were not run, their verdict is thin or unmeasured, the
+ * oracle is not scored, or its tile reads amber (`oracleTone`: the mean under the policy's
+ * bar). A read that FAILED is not an open gate (its way forward is Retry), and a red escape
+ * or a failed verdict is not either (its way forward is stronger tests, on Learn).
+ */
+export function gateOpen(input: { controlsNotRun: boolean; verdictState: string | undefined; oracleNotRun: boolean; oracleTone: 'muted' | 'green' | 'amber' }): boolean {
+  if (input.controlsNotRun || input.oracleNotRun) return true
+  if (input.verdictState === 'thin' || input.verdictState === 'unmeasured') return true
+  return input.oracleTone === 'amber'
+}
 
 /**
  * The line under a tile whose request failed, with the retry: a failed request is not the
@@ -297,6 +326,11 @@ export function ResultsPage() {
   const oracleFailed = oracle.isError && !oracleNotRun
   const poolView = poolTile(poolData, pool.isPending, pool.isError)
   const oracleApparatus = oracleData ? `apparatus ${oracleData.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
+  // G-236 / G-444 — computed from the current data (never `<query>.data`, which the source
+  // ratchet refuses): the door back to the walk when a gate is amber or not run
+  const oracleToneNow = oracleTone(oracleMean, oracleBar)
+  const walkOpen = gateOpen({ controlsNotRun, verdictState: verdict?.state, oracleNotRun, oracleTone: oracleToneNow })
+  const walk = `/connect/${encodeURIComponent(repo)}`
 
   return (
     <>
@@ -331,7 +365,17 @@ export function ResultsPage() {
               The repository did not load, so this page cannot say whether the numbers below are still moving.
             </FailedNotice>
           )}
-          <Card title="Is the instrument trustworthy here?" eyebrow="the gates every number below stands under">
+          <Card
+            title="Is the instrument trustworthy here?"
+            eyebrow="the gates every number below stands under"
+            actions={
+              walkOpen ? (
+                <LinkButton size="sm" to={walk} hint="button.results.back_to_walk" data-testid="gates-back-to-walk">
+                  Back to the walk
+                </LinkButton>
+              ) : undefined
+            }
+          >
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <StatTile
                 label="Negative controls"
@@ -349,7 +393,7 @@ export function ResultsPage() {
                 n={oracleData?.tasks.length ?? null}
                 ci={null}
                 apparatus={oracleApparatus}
-                tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
+                tone={oracleToneNow}
                 hint="stat.results.oracle_strength"
                 footer={oracleFailed ? <RetryLine onRetry={() => void oracle.refetch()} /> : 'no interval: a mean of per-task scores, not a rate'}
                 data-testid="tile-oracle-strength"
@@ -381,7 +425,7 @@ export function ResultsPage() {
 
           <Card title="What may the builder be trusted to do?" eyebrow="the routes, with n" actions={<LinkButton size="sm" to={`/capability?${q}`} hint="button.results.full_map">Open the full map</LinkButton>}>
             {measured.length === 0 ? (
-              <EmptyState compact glyph="◌" title="Nothing measured yet" reason="A first sighted replay puts rows on the map." action={<LinkButton size="sm" to={`/connect/${encodeURIComponent(repo)}`}>Back to the walk</LinkButton>} />
+              <EmptyState compact glyph="◌" title="Nothing measured yet" reason="A first sighted replay puts rows on the map." action={<LinkButton size="sm" to={walk} hint="button.results.back_to_walk">Back to the walk</LinkButton>} />
             ) : (
               <>
                 <div className="grid gap-3 sm:grid-cols-4">
@@ -394,6 +438,7 @@ export function ResultsPage() {
                       apparatus={`${mapApparatus} · ${byRoute[r]?.cells ?? 0} of ${measured.length} measured cells`}
                       tone={r === 'deliver' ? 'green' : r === 'human' ? 'amber' : 'muted'}
                       hint={ROUTE_TILE_HINT[r]}
+                      data-testid={`tile-route-${r}`}
                     />
                   ))}
                 </div>
@@ -462,7 +507,7 @@ export function ResultsPage() {
               <EmptyState compact glyph="✓" title="Nothing is waiting on a person here" />
             ) : (
               <ul className="m-0 list-none divide-y divide-border p-0" aria-label={`Decisions for ${repo}`}>
-                {decisions.slice(0, 6).map((d, i) => {
+                {decisions.slice(0, SHOWN).map((d, i) => {
                   // the server fitted the row to this person: the act only for a role that can take it; everyone else reads, and sees who acts
                   const allowed = d.canAct === true
                   return (
@@ -481,6 +526,12 @@ export function ResultsPage() {
                   )
                 })}
               </ul>
+            )}
+            {decisions && decisions.length > SHOWN && (
+              // G-237 — the card says how many rows it is not showing, beside the door to all of them
+              <Hint as="p" id="stat.results.waiting_more" className="m-0 mt-2 text-sm text-on-surface-muted" data-testid="decisions-more">
+                and {decisions.length - SHOWN} more — <Link to="/decisions">All decisions</Link>
+              </Hint>
             )}
           </Card>
           {/* the measure stream's own numbers (docs/dod/streams/measure.md MEASURE) */}
