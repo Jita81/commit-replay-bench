@@ -35,6 +35,7 @@ import { INSTRUMENT_SCREENS } from './hints-ratchet.instrument'
 const HOVER: Record<string, HintId> = {
   '/factory': 'pill.factory.frozen',
   '/factory/intake': 'pill.intake.queued',
+  '/factory/acceptance': 'tag.acceptance.status',
   '/posture': 'summary.posture.apparatus',
   '/repos': 'col.repos.probe',
   '/repos/:name': 'stat.repo.gold',

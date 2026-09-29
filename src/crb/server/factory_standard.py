@@ -24,7 +24,7 @@ What it does: Reads every registered reading of the repository and the ledger's 
               factory's :class:`~crb.factory.standard.Standard`, signed only by an active
               sign-off bound to its arm, class-set version and reading; a licence read of an
               arm answers only a standard of that arm. The arms' look states feed the ticket
-              comment.
+              comment; ``forward_states`` serves each ceiling's forward reading with its n.
 How:          ``readers_in`` / ``bind_readers`` → one read of readings, rows and sign-offs →
               closures over them; ``crb.core.reading.outcomes_for_cell`` per matching reading cell →
               ``latest_outcome`` → ``Standard``.
@@ -39,7 +39,7 @@ Works with:   src/crb/factory/standard.py (the gate, ``Readers``, ``CellRef``),
               src/crb/server/worker.py (binds it once per run and per intake pass),
               src/crb/server/routes/factory.py (the task preview, calibration and polls)
 Tested by:    tests/test_factory_standard_binding.py,
-              tests/test_governed_delivery_e2e.py
+              tests/test_governed_delivery_e2e.py, tests/test_forward_reading_e2e.py
 Touch when:   never for a new repository; a new scope a reading counts on (bind it here,
               beside the checks arm and the posture class); the sign-off's binding changes.
 """
@@ -47,16 +47,19 @@ Touch when:   never for a new repository; a new scope a reading counts on (bind 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import WILDCARD
+from crb.core.context_arm import BASE_S2
 from crb.core.ledger import GradeRow
 from crb.core.reading import (
     OUTCOME_CEILING,
     OUTCOME_STANDARD,
     Reading,
     ReadingOutcome,
+    evaluate,
     latest_outcome,
     outcomes_for_cell,
 )
@@ -245,6 +248,35 @@ def readers_over(
     )
 
 
+def forward_states(session: Session, repo: str) -> dict[str, dict[str, Any]]:
+    """Each ceiling's forward reading, keyed by the ceiling's reading id (ADR-0026 items 4 and
+    8): the latest registered forward reading promoting it, evaluated over the repository's
+    rows — its id, rule, look state, the tickets it counted and the clean ones, the tickets
+    enrolled, the next look and the tickets still needed to it."""
+    readings = load_readings(session, repo)
+    forwards = [r for r in readings if r.prospective and r.promotes]
+    if not forwards:
+        return {}
+    rows = rows_in(session, repo)
+    out: dict[str, dict[str, Any]] = {}
+    for r in forwards:  # registration order: a later forward reading of one ceiling wins
+        arm = evaluate(r, rows).arms.get(BASE_S2)
+        if arm is None:
+            continue
+        out[r.promotes] = {
+            "reading_id": r.reading_id,
+            "rule": r.rule,
+            "registered_at": r.registered_at,
+            "state": arm.state,
+            "counted": arm.look.counted,
+            "clean": arm.look.clean,
+            "enrolled": len(r.pool),
+            "next_look": arm.look.next_look,
+            "needed": arm.look.needed,
+        }
+    return out
+
+
 def readers_in(session: Session, repo: str, *, checks_arm: str, posture_class: str) -> Readers:
     """The gate's readers for ``repo``, read ONCE in ``session`` (the pre-run map): its
     registered readings, its rows and its sign-offs — none when the sign-off chain is broken."""
@@ -292,6 +324,7 @@ def bind_readers(
 __all__ = [
     "arm_readings_of",
     "bind_readers",
+    "forward_states",
     "outcome_for",
     "readers_in",
     "readers_over",

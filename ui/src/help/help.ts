@@ -187,6 +187,18 @@ export const HELP: ScreenHelp[] = [
     ],
   },
   {
+    route: '/factory/acceptance',
+    purpose: 'A calibration build is measured, never delivered: a second person writes the held-out acceptance tests its first attempt is graded on — from the ticket alone, before the build, never seeing the ticket’s own failing test. A forward reading registered on the ticket’s kind and size before the tests are written counts the result; only it can turn a ceiling into a standard.',
+    next: {
+      viewer: 'Read each ticket’s state: tests needed, written, being built, graded with the first attempt’s result, built without them (and why), or cannot be graded because the ticket was attempted before.',
+      operator: 'If you did not write the ticket, did not fund its build and will not run it, write the tests a correct change must pass and save them. They are stored under your name and never shown to the builder.',
+      approver: 'Fund a calibration build on the Factory page; someone else writes its held-out tests here.',
+    },
+    numbers: 'A digest is the SHA-256 of the test files as written. A result is the first attempt’s run against them: pass, fail (a miss where a forward reading counts it — so is a build that hangs on them) or error (the tests could not be run, so the ticket leaves the reading — never a miss).',
+    terms: ['cell', 'deliver', 'signoff', 'apparatus'],
+    readMore: [{ to: 'OPERATOR#16-calibration-builds-held-out-tests-and-forward-readings', label: 'Calibration builds, held-out tests and forward readings' }],
+  },
+  {
     route: '/posture',
     purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
     next: {

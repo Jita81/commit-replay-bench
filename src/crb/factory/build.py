@@ -32,7 +32,10 @@ What it does: Commits ONLY the RED-proven test on a throwaway branch parented at
               at the parent with the test overlaid exactly as replay does, grades with the
               ordinary grader so belt 1 is the real belt 1, writes the evidence pack and a
               ``process_step="factory"`` ledger row; ``build_ladder`` climbs the escalation
-              rungs until clean or disqualified, refusing any rung that authored the oracle.
+              rungs until clean or disqualified, refusing any rung that authored the oracle; a
+              calibration build's first rung is also run against a second person's held-out
+              acceptance tests after the builder finishes (``run_held_out``), stamped inside
+              its row and taken out of the tree again.
 How:          ``stage_oracle_commit`` → ``Workspace.create(repo, oracle_sha)`` + ``overlay_tests`` →
               baseline → ``factory_brief`` (THE composer, from the item's context arm; the loop's
               lines only on a ``+L`` arm) → builder → ``grade`` → ``EvidencePack`` + ``write_pack``
@@ -40,14 +43,16 @@ How:          ``stage_oracle_commit`` → ``Workspace.create(repo, oracle_sha)``
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md, docs/adr/0011-repo-lint-belt.md
-Works with:   src/crb/builders/brief.py (the one composer), src/crb/core/grade.py (the grader,
+Works with:   src/crb/builders/brief.py (the one composer and the held-out stamp's
+              vocabulary, from crb.core.acceptance), src/crb/core/grade.py (the grader,
               unchanged), src/crb/core/workspace.py (the trial tree), src/crb/factory/testfirst.py
               (``RedProof`` / identity check), src/crb/builders/base.py (``Builder``,
               ``BuildBrief``, ``Rung``), src/crb/core/ledger.py (``GradeRow`` with
               ``PROCESS_FACTORY``; its labels from ``row_labels_at_write``, the helper replay
               rows use too), src/crb/factory/delivery.py (commits the kept workspace),
               src/crb/factory/review.py (replays the edits it recorded)
-Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py
+Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py,
+              tests/test_factory_held_out.py
 Touch when:   never for a new repository; when ``GradeRow`` gains a field (``factory_row``
               maps it — keep it in step with ``grade_row_from_result`` in the core); when
               the oracle-commit convention changes (the review probes read the same branch).
@@ -79,6 +84,15 @@ from crb.builders.brief import (
     context_arm_for,
 )
 from crb.core import version as _version
+from crb.core.acceptance import (
+    LABEL_ACCEPTANCE,
+    LABEL_ACCEPTANCE_WHY,
+    RESULT_ERROR,
+    RESULT_FAIL,
+    RESULT_PASS,
+    HeldOutTests,
+    held_out_labels,
+)
 from crb.core.checks import LABEL_CHECKS, RepoChecks, ResolvedChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.deps import NullDepsProvider, TaskDeps
@@ -504,6 +518,61 @@ def _apply_checks(
     return labels
 
 
+def run_held_out(
+    ws: Workspace,
+    record: HeldOutTests,
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    timeout: int,
+    deps: TaskDeps,
+) -> str:
+    """Run a second person's held-out acceptance tests against the BUILT tree, after the
+    builder has finished and the attempt is graded (ADR-0026 item 8), and take them out again
+    — so they never enter the builder's tree while it works, and the kept tree a review reads
+    holds only what the builder wrote. ``pass`` when the run is green; ``fail`` when it is red
+    OR timed out — a build that hangs on the held-out cases is the build's behaviour, a miss,
+    as the grader reads a target run that times out (P-693); ``error`` only when the tests
+    could not be run (the environment failed, the report could not be parsed, or a failure
+    around them): an instrument failure, never a miss."""
+    saved: dict[str, bytes | None] = {}
+    made: list[Path] = []
+    try:
+        for path, content in record.files:
+            target = ws.root / path
+            saved[path] = target.read_bytes() if target.is_file() else None
+            missing = [d for d in reversed(target.parents) if not d.exists()]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            made.extend(missing)
+            target.write_text(content, encoding="utf-8")
+        run = runner.run_for(
+            executor,
+            ws.root,
+            runner.target_scope(record.paths),
+            timeout=timeout,
+            authored=None,
+            deps=deps.parent,
+        )
+    except SandboxUnavailable:
+        raise
+    except Exception:  # the instrument, not the build: never a miss
+        return RESULT_ERROR
+    finally:
+        for path, old in saved.items():
+            target = ws.root / path
+            if old is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(old)
+        for d in reversed(made):
+            shutil.rmtree(d, ignore_errors=True)
+    if run.env_error or run.parse_error:
+        return RESULT_ERROR
+    if run.timed_out:
+        return RESULT_FAIL
+    return RESULT_PASS if run.green else RESULT_FAIL
+
+
 def build_item(
     repo: GitRepo,
     item: BacklogItem,
@@ -533,8 +602,14 @@ def build_item(
     arm: str = "",
     learning: LearningSnapshot | None = None,
     author_stamp: str = "",
+    held_out: HeldOutTests | None = None,
 ) -> BuildResult:
     """Stage the oracle, build at the parent with it overlaid, grade, pack, ledger.
+
+    ADR-0026 item 8: ``held_out`` — a second person's acceptance tests for a calibration
+    build's FIRST attempt — are run on the built tree only after the builder has finished and
+    the attempt is graded (:func:`run_held_out`); the row carries ``acceptance: held_out``, the
+    record's id, digest and result inside its hash. They never reach the brief.
 
     Never returns a clean result it did not observe: a builder exception is
     recorded and the (unchanged) worktree is still graded — it fails belts 2/4.
@@ -727,6 +802,21 @@ def build_item(
             evaluate_api=checks.api_stable,
             api_forward=True,
         )
+        held_labels: dict[str, str] = {}
+        if held_out is not None:
+            held_result = run_held_out(
+                ws, held_out, runner=runner, executor=executor, timeout=timeout, deps=deps
+            )
+            held_labels = held_out_labels(held_out, held_result)
+            _emit(
+                on_event,
+                "build.held_out_graded",
+                item=item.id,
+                trial=trial,
+                record=held_out.record_id,
+                sha256=held_out.sha256,
+                result=held_result,
+            )
         apparatus = ApparatusStamp(
             runner=runner.name,
             executor=executor.describe(),
@@ -759,11 +849,17 @@ def build_item(
                 "test_author": authored.author,
                 "builder_error": error,
                 **({PATCH_NOTE_KEY: kept} if kept is not None else {}),
+                **({"held_out": dict(held_labels)} if held_labels else {}),
             },
         )
         pack_path = write_pack(pack, evidence_dir)
         # ``labels`` — what the loop knows about the attempt that the build does not: the
         # context arm the brief carried (ADR-0026 item 1), a calibration build's stamp
+        loop_labels = dict(labels or {})
+        if held_labels:
+            # the loop's "not graded on held-out tests" default gives way to the grade
+            loop_labels.pop(LABEL_ACCEPTANCE, None)
+            loop_labels.pop(LABEL_ACCEPTANCE_WHY, None)
         row_labels = {
             "item_id": item.id,
             "test_author": authored.author,
@@ -771,7 +867,8 @@ def build_item(
             **check_labels,
             **dict(composed.labels),
             **learn_labels,
-            **dict(labels or {}),
+            **loop_labels,
+            **held_labels,
         }
         row = (
             ledger.append(
@@ -855,11 +952,17 @@ def build_ladder(
     arm: str = "",
     learning: LearningSnapshot | None = None,
     author_stamp: str = "",
+    held_out: HeldOutTests | None = None,
+    on_result: Callable[[BuildResult], None] | None = None,
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
     rung is clean or an attempt is disqualified. Every rung's label is checked
     against the oracle's author identity before it runs. Workspaces of
-    non-final attempts are removed; the final attempt's is kept for delivery."""
+    non-final attempts are removed; the final attempt's is kept for delivery.
+    ``held_out`` grades the FIRST rung only: a later attempt is never an ``S2`` reading's
+    row (ADR-0026 item 8). ``on_result`` is called with each attempt as it is graded, before
+    the next rung starts — so a ladder that dies on a later rung has its earlier attempts
+    on the record (P-692)."""
     if not rungs:
         raise ValueError("ladder must have at least one rung")
     for r in rungs:
@@ -895,8 +998,11 @@ def build_ladder(
             arm=arm,
             learning=learning,
             author_stamp=author_stamp,
+            held_out=held_out if i == 1 else None,
         )
         results.append(res)
+        if on_result is not None:
+            on_result(res)
         if res.clean or res.disqualified:
             break
     return results
@@ -915,6 +1021,7 @@ __all__ = [
     "factory_brief",
     "factory_row",
     "oracle_branch",
+    "run_held_out",
     "stage_oracle_commit",
     "worktree_at",
 ]

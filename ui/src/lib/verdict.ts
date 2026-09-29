@@ -348,6 +348,8 @@ export const ACTION_HELP: Record<string, string> = {
   'delivery.override': 'A second approver lifted the sign-off clause for this run — and only that; the override is on the chain under their name.',
   'delivery.override_refused': 'The override was refused: it named this run’s own actor, or the cell has a false-Q1 row. The gate decided as if nobody had named it.',
   'entry.refused': 'The item was not built: its cell has no proven context standard, the standard carries no sign-off where a signed one is required (ADR-0018), or it lacks what that standard needs. Nothing was spent.',
+  'build.held_out_graded': 'The calibration build’s first attempt was run against a second person’s held-out acceptance tests after the builder finished; the result is on its row. The builder never saw the tests.',
+  'acceptance.refused': 'The held-out acceptance tests were not used: whoever wrote them is the ticket’s author, the approver who funded the build or the person running it. The row is not counted by a forward reading.',
   'calibration.started': 'This run builds the item as an approver’s calibration build: it is measured, and it never opens a pull request.',
   'builder.author_test.start': 'The test author began writing one failing test in a sealed copy of the parent that holds one commit and no later history.',
   'builder.author_test.failed': 'The test author produced no test that fails before the change, so nothing was built; this counts against the arm, never the builder.',

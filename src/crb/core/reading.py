@@ -33,6 +33,14 @@ qualified commits with its SHA-256. Only rows graded after registration count.
 * **The budget.** One error budget per (repository, cell key, apparatus, class-set version),
   :data:`CELL_ERROR_BUDGET` unless the operator fixed another value; every registration spends
   its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend.
+* **The forward reading** (ADR-0026 items 4 and 8, DL-334). :func:`register_forward` registers
+  ``S2`` on the factory's cell of a ceiling's class, size and language — refused
+  ``not_a_ceiling`` unless the named reading reads ``ceiling`` — spending from the CEILING's
+  budget. Its pool (:data:`POOL_RULE_CALIBRATION`) is every calibration build whose held-out
+  acceptance tests were written after it, in the order written (:func:`with_enrolment`); it
+  reads each ticket's first factory attempt after registration, counts it only when it was
+  graded on the record that enrolled the ticket and otherwise lets the ticket leave the pool
+  (``not_graded``), and it alone can make a ceiling a standard.
 
 Navigation
 ----------
@@ -48,7 +56,8 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
               the ledger's rows in the seeded order; stops the hierarchy at the first arm that
               does not deliver; names the standard, a ceiling or no proven standard, and the
-              commits still needed.
+              commits still needed; registers a ceiling's forward reading and enrols its
+              calibration builds.
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
               taking each commit's first observed ``r1`` attempt this deployment graded after
               registration on the reading's checks arm (never an imported row) →
@@ -58,13 +67,16 @@ Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 6),
               docs/adr/0025-routing-v2.md (items 1, 2 and 8 as ADR-0026 amends them)
 Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
+              src/crb/core/acceptance.py (the held-out records a forward reading enrols and
+              the one rule for a held-out-graded row),
               src/crb/core/ledger.py (the rows; ``GradeRow.context_arm``, ``taxonomy``,
               ``change_id``, ``sealed``), src/crb/core/routing.py (routes a cell on its
               reading), src/crb/core/capability.py (serves every arm's reading),
               src/crb/core/signoff.py (a sign-off stamps the reading's id),
               src/crb/server/routes/readings.py (the events store and ``POST /readings``),
               src/crb/cli/commands/reading.py (``crb reading register``)
-Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py
+Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py,
+              tests/test_forward_reading.py, tests/test_forward_reading_e2e.py
 Touch when:   never for a new repository; a rule is added (a row in ``RULES`` with its exact
               P(deliver | 0.80) — an ADR amending ADR-0026 item 5 first); the counting rule changes
               (an apparatus bump); the operator fixes another budget
@@ -83,13 +95,21 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from crb.core.acceptance import (
+    LABEL_ACCEPTANCE_ID,
+    RESULT_ERROR,
+    RESULT_PASS,
+    HeldOutTests,
+    held_out_graded,
+    held_out_result,
+)
 from crb.core.context_arm import BASE_S2, parse_arm
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     CELL_FIELDS,
     FAILURE_HARNESS,
     FAILURE_OUTAGE,
-    LABEL_HELD_OUT,
+    PROCESS_FACTORY,
     lint_could_change,
 )
 from crb.core.stats import Interval, wilson_interval
@@ -155,6 +175,17 @@ LEFT_HARNESS = "harness"
 LEFT_GOLD = "gold_not_clean"
 LEFT_LINT_DISABLED = "lint_disabled"
 LEFT_UNOBSERVED = "unobserved"
+#: A forward reading's ticket whose first attempt was built by another builder, model or
+#: provider than the reading's cell names — decided before the build, so outcome-blind.
+LEFT_OTHER_CELL = "other_cell"
+#: A forward reading's ticket whose held-out tests could not be run: an instrument failure.
+LEFT_HELD_OUT_ERROR = "held_out_error"
+#: A forward reading's ticket whose first attempt after registration was not graded on the
+#: record that enrolled it — stamped ``acceptance: none`` before its build (its tests were
+#: refused, or it was attempted before), graded on another record, or outside the reading's
+#: scope. Decided without reading its result, so it leaves the pool rather than holding the
+#: reading open for an attempt that can never come (DL-334, P-694).
+LEFT_NOT_GRADED = "not_graded"
 
 # --- registration refusals ---------------------------------------------------------
 REFUSAL_POOL_SEEN = "pool_seen"
@@ -162,11 +193,14 @@ REFUSAL_BUDGET_SPENT = "budget_spent"
 REFUSAL_INVALID = "invalid_reading"
 #: A pool named as a list the pool rule does not give (DL-097, P-320).
 REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
+#: A forward reading names a reading that does not read ``ceiling`` (DL-334).
+REFUSAL_NOT_A_CEILING = "not_a_ceiling"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
     REFUSAL_INVALID,
     REFUSAL_POOL_NOT_BLIND,
+    REFUSAL_NOT_A_CEILING,
 )
 
 # --- the pool rule (DL-097) --------------------------------------------------------------
@@ -174,6 +208,11 @@ REFUSAL_CODES: tuple[str, ...] = (
 POOL_RULE_ALL = "all-qualified"
 #: Every qualified commit of the cell authored at or after a date (``qualified-since:<iso>``).
 POOL_RULE_SINCE = "qualified-since"
+#: A FORWARD reading's pool (DL-334): every calibration build of the cell whose held-out
+#: acceptance tests were written after the registration, in the order they were written —
+#: fixed before any build, so blind to every outcome. Its tickets do not exist when it is
+#: registered; :func:`with_enrolment` fills the pool from the held-out records.
+POOL_RULE_CALIBRATION = "calibration-builds"
 
 
 class ReadingRefused(ValueError):
@@ -259,7 +298,7 @@ class LookState:
         }
 
 
-def look_state(outcomes: Sequence[bool | None], rule: str) -> LookState:
+def look_state(outcomes: Sequence[bool | None], rule: str, *, open_pool: bool = False) -> LookState:
     """Apply ``rule`` to ``outcomes`` — one entry per commit still in the pool, in the seeded
     order: ``True`` clean, ``False`` a miss, ``None`` pending (no observed attempt yet).
 
@@ -268,7 +307,9 @@ def look_state(outcomes: Sequence[bool | None], rule: str) -> LookState:
     ``insufficient`` at the miss that puts the last look out of reach and ``deliver`` at the
     first look it meets. Otherwise the next reachable look is ``look_pending`` with the
     commits among its first ``n`` still pending — or ``undecided`` when the pool holds fewer
-    commits than that look needs.
+    commits than that look needs. An ``open_pool`` (a forward reading's, which enrols tickets
+    as their held-out tests are written) never ends, so it is never ``undecided``: the
+    commits still needed count the ones not yet enrolled.
     """
     looks = rule_looks(rule)
     last_m = looks[max(looks)]
@@ -287,6 +328,9 @@ def look_state(outcomes: Sequence[bool | None], rule: str) -> LookState:
             return LookState(STATE_DELIVER, k, clean, misses, None, 0, decided_at=k)
     reachable = [n for n in sorted(looks) if n > k and misses <= looks[n]]
     nxt = reachable[0]  # the last look stays reachable while misses ≤ its allowance
+    if open_pool:
+        needed = sum(1 for o in outcomes[:nxt] if o is None) + max(0, nxt - len(outcomes))
+        return LookState(STATE_LOOK_PENDING, k, clean, misses, nxt, needed, None)
     if len(outcomes) < nxt:
         return LookState(STATE_UNDECIDED, k, clean, misses, nxt, nxt - len(outcomes), None)
     needed = sum(1 for o in outcomes[:nxt] if o is None)
@@ -368,6 +412,14 @@ class Reading:
     #: cell key keeps the global parent, and this splits it. ``""`` for the global vocabulary
     #: — hashed when present, so a global reading's id never moves.
     org_class: str = ""
+    #: A forward reading's ceiling: the reading whose ``S3`` ceiling it may promote, and the
+    #: cell key whose ONE error budget it spends from (ADR-0026 item 5) — hashed when present.
+    promotes: str = ""
+    budget_cell: str = ""
+    #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
+    #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
+    #: row counts only when it was graded on the record that enrolled its ticket (P-694).
+    enrolled: tuple[tuple[str, str], ...] = field(default=(), compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
@@ -388,8 +440,15 @@ class Reading:
 
     @property
     def budget_key(self) -> tuple[str, str, str, str]:
-        """What one error budget is kept per (ADR-0026 item 5)."""
-        return (self.repo, self.cell_key, self.apparatus, self.taxonomy)
+        """What one error budget is kept per (ADR-0026 item 5): the cell — for a forward
+        reading, the cell of the ceiling it promotes, so a forward reading spends from the
+        same budget as the reading that found the ceiling, never a fresh one."""
+        return (self.repo, self.budget_cell or self.cell_key, self.apparatus, self.taxonomy)
+
+    @property
+    def prospective(self) -> bool:
+        """A forward reading: its pool is the calibration builds enrolled after registration."""
+        return self.pool_rule == POOL_RULE_CALIBRATION
 
     @property
     def arms(self) -> tuple[str, ...]:
@@ -423,6 +482,8 @@ class Reading:
             "actor": self.actor,
             **({"pool_rule": self.pool_rule} if self.pool_rule else {}),
             **({"org_class": self.org_class} if self.org_class else {}),
+            **({"promotes": self.promotes} if self.promotes else {}),
+            **({"budget_cell": self.budget_cell} if self.budget_cell else {}),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -453,6 +514,8 @@ class Reading:
             reading_id=str(d.get("reading_id", "")),
             pool_rule=str(d.get("pool_rule", "") or ""),
             org_class=str(d.get("org_class", "") or ""),
+            promotes=str(d.get("promotes", "") or ""),
+            budget_cell=str(d.get("budget_cell", "") or ""),
         )
 
     def verify(self) -> bool:
@@ -531,9 +594,11 @@ def _validate(
     rule: str,
     pool: Sequence[str],
     author_model: str,
+    prospective: bool = False,
 ) -> str:
     """Why the shape of a registration is refused, or ``""``. Returns the author model too
-    via the caller (the S1 arms name it)."""
+    via the caller (the S1 arms name it). A forward reading (``prospective``) has no pool yet:
+    its tickets are enrolled after registration (:func:`with_enrolment`)."""
     missing = [f for f in CELL_FIELDS if not cell.get(f) or cell.get(f) == "*"]
     if missing:
         return f"a reading names its full cell key; missing {missing}"
@@ -541,7 +606,7 @@ def _validate(
         return "a reading names at least one arm in its hierarchy"
     if rule not in RULES:
         return f"unknown rule {rule!r}; expected one of {sorted(RULES)}"
-    if not pool:
+    if not pool and not prospective:
         return "a reading freezes a non-empty pool of qualified commits"
     arms = [*hierarchy, *(a for a, _ in descriptive)]
     if len(set(arms)) != len(arms):
@@ -683,6 +748,118 @@ def register(
     )
 
 
+def register_forward(
+    *,
+    ceiling: ReadingOutcome,
+    builder: str,
+    model: str,
+    provider: str,
+    actor: str,
+    existing: Iterable[Reading] = (),
+    rule: str = RULE_LOOK_V1,
+    budget: float | None = None,
+    now: str = "",
+) -> Reading:
+    """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
+    :class:`ReadingRefused`.
+
+    ``ceiling`` must read ``ceiling`` (``S3`` delivered and no leaner arm did) —
+    ``not_a_ceiling`` otherwise. The reading reads the ``S2`` arm alone on the factory's cell
+    of the same class, size and language, built by ``builder`` / ``model`` / ``provider``; it
+    inherits the ceiling's apparatus, class-set version, posture class and checks arm, so the
+    factory's gate reads the two in one scope, and it spends its rule's P(deliver | 0.80) from
+    the CEILING's cell budget (``budget_spent`` when that cannot cover it). Its pool is the
+    rule :data:`POOL_RULE_CALIBRATION`: the calibration builds whose held-out tests are
+    written after it — no ticket is chosen by a person, and none exists yet."""
+    if ceiling.state != OUTCOME_CEILING:
+        raise ReadingRefused(
+            f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
+            f"{ceiling.state} — only a cell whose standard is S3 alone needs one (ADR-0026 item 4)",
+            code=REFUSAL_NOT_A_CEILING,
+            detail={"reading_id": ceiling.reading.reading_id, "state": ceiling.state},
+        )
+    base = ceiling.reading
+    cell = {
+        **dict(base.cell),
+        "process_step": PROCESS_FACTORY,
+        "builder": builder.strip(),
+        "model": model.strip(),
+        "provider": provider.strip(),
+    }
+    hier = (BASE_S2,)
+    why = _validate(
+        cell=cell,
+        hierarchy=hier,
+        descriptive=(),
+        rule=rule,
+        pool=(),
+        author_model="",
+        prospective=True,
+    )
+    if why:
+        raise ReadingRefused(why, code=REFUSAL_INVALID)
+    cap = cell_error_budget() if budget is None else budget
+    spend = rule_spend(rule)
+    spent = budget_spent(list(existing), base.budget_key)
+    if spent + spend > cap + 1e-12:
+        raise ReadingRefused(
+            f"the ceiling's cell has an error budget of {cap:.2%}; {spent:.2%} is spent and "
+            f"{rule} would spend {spend:.2%} more — a forward reading spends from the same "
+            "budget as the reading that found the ceiling (ADR-0026 item 5)",
+            code=REFUSAL_BUDGET_SPENT,
+            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
+        )
+    return Reading(
+        repo=base.repo,
+        cell=cell,
+        apparatus=base.apparatus,
+        taxonomy=base.taxonomy,
+        posture_class=base.posture_class,
+        checks_arm=base.checks_arm,
+        hierarchy=hier,
+        rule=rule,
+        spend=spend,
+        budget=cap,
+        pool=(),
+        pool_sha256=pool_digest(()),
+        registered_at=now or utc_now_iso(),
+        actor=actor,
+        pool_rule=POOL_RULE_CALIBRATION,
+        promotes=base.reading_id,
+        budget_cell=base.budget_key[1],
+    )
+
+
+def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading:
+    """A forward reading with its pool filled (DL-334): the tickets whose held-out tests were
+    written strictly after the registration, of the reading's class, size and language, in
+    the order the records are given (the order they were written — the caller passes them
+    oldest first); a ticket counts once, by the record that enrolled it (``enrolled``: a row
+    graded on any other record is never counted, so no ticket is enrolled after its outcome
+    is known — P-694). Any other reading is returned unchanged. The id and the registered
+    pool digest are kept: enrolment is read, never registered."""
+    if not reading.prospective:
+        return reading
+    registered = reading.registered
+    want = (
+        reading.cell.get("capability_class", ""),
+        reading.cell.get("size", ""),
+        reading.cell.get("language", ""),
+    )
+    items: list[str] = []
+    enrolled: list[tuple[str, str]] = []
+    for rec in records:
+        written = _parse_ts(rec.written_at)
+        if registered is None or written is None or written <= registered:
+            continue
+        if rec.repo != reading.repo or (rec.capability_class, rec.size, rec.language) != want:
+            continue
+        if rec.item_id and rec.item_id not in items:
+            items.append(rec.item_id)
+            enrolled.append((rec.item_id, rec.record_id))
+    return replace(reading, pool=tuple(items), enrolled=tuple(enrolled))
+
+
 # ---------------------------------------------------------------------------
 # Counting one arm
 # ---------------------------------------------------------------------------
@@ -770,8 +947,89 @@ def _counts_for(reading: Reading, arm: str, row: GradeRow) -> bool:
     if registered is None or created is None or created <= registered:
         return False  # graded before (or as) the reading was registered: never counts
     if parse_arm(arm).prospective_only:
-        return row.labels.get(LABEL_HELD_OUT) == "true"
+        return held_out_graded(row.labels)
     return row.posture_class == reading.posture_class and row.sealed
+
+
+def _forward_attempt(reading: Reading, row: GradeRow) -> bool:
+    """Is ``row`` a ticket's FIRST factory attempt a forward reading reads — rung ``r1`` of a
+    factory run on the reading's repository, graded after the registration, never imported —
+    whatever it was graded on? The first such row per ticket decides it (P-694)."""
+    if row.imported or row.repo != reading.repo or row.process_step != PROCESS_FACTORY:
+        return False
+    if row.trial.strip().lower() != RUNG_R1:
+        return False
+    registered = reading.registered
+    created = _parse_ts(row.created)
+    return registered is not None and created is not None and created > registered
+
+
+def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` one a FORWARD reading's ``arm`` may count? A factory ``S2`` row graded on
+    held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`), rung ``r1``, on
+    the reading's repository, apparatus, class-set version and checks arm, graded after the
+    registration and never imported. The ticket (``labels.item_id``) is the pool's unit; its
+    class, size and language were fixed when it was enrolled, and a builder, model or
+    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`)."""
+    if (
+        row.imported
+        or row.repo != reading.repo
+        or row.process_step != PROCESS_FACTORY
+        or row.context_arm != arm
+        or row.apparatus_version != reading.apparatus
+        or row.taxonomy != reading.taxonomy
+        or row.checks_arm != reading.checks_arm
+        or row.trial.strip().lower() != RUNG_R1
+        or not held_out_graded(row.labels)
+    ):
+        return False
+    registered = reading.registered
+    created = _parse_ts(row.created)
+    return registered is not None and created is not None and created > registered
+
+
+def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmReading:
+    """A forward reading's arm over ``rows``: each enrolled ticket, in enrolment order, read by
+    its FIRST factory attempt after registration. That attempt counts only when it is graded
+    on held-out tests — the record that enrolled the ticket (P-694) — within the reading's
+    scope; otherwise the ticket leaves the pool (:data:`LEFT_NOT_GRADED`), decided without its
+    result, so one ticket that can never be graded does not hold the reading open. The
+    held-out tests are run once, so there is no re-run: an attempt the instrument could not
+    observe (``harness``, ``outage``) or whose held-out tests could not be run (``error``)
+    leaves the pool with its reason, never a miss; ``fail`` is a miss; ``pass`` on a clean
+    build is clean. A ticket with no attempt yet is pending."""
+    first: dict[str, GradeRow] = {}
+    pool = set(reading.pool)
+    for r in rows:
+        item = r.labels.get("item_id", "")
+        if item in pool and item not in first and _forward_attempt(reading, r):
+            first[item] = r
+    by_item = dict(reading.enrolled)
+    fields = ("builder", "model", "provider")
+    out: list[CommitReading] = []
+    for item in reading.pool:
+        got = first.get(item)
+        if got is None:
+            out.append(CommitReading(item, item, None))
+            continue
+        r = got
+        if not _counts_forward(reading, arm, r) or (
+            r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(item, "")
+        ):
+            out.append(CommitReading(item, item, None, LEFT_NOT_GRADED, r.row_hash))
+        elif any(getattr(r, f) != reading.cell.get(f, "") for f in fields):
+            out.append(CommitReading(item, item, None, LEFT_OTHER_CELL, r.row_hash))
+        elif r.failure_kind == FAILURE_HARNESS:
+            out.append(CommitReading(item, item, None, LEFT_HARNESS, r.row_hash))
+        elif r.failure_kind == FAILURE_OUTAGE:
+            out.append(CommitReading(item, item, None, LEFT_UNOBSERVED, r.row_hash))
+        elif held_out_result(r.labels) == RESULT_ERROR:
+            out.append(CommitReading(item, item, None, LEFT_HELD_OUT_ERROR, r.row_hash))
+        else:
+            clean = r.clean and not r.disqualified and held_out_result(r.labels) == RESULT_PASS
+            out.append(CommitReading(item, item, clean, "", r.row_hash))
+    kept = [c.outcome for c in out if not c.left]
+    return ArmReading(arm, look_state(kept, reading.rule, open_pool=True), tuple(out))
 
 
 def arm_reading(
@@ -783,7 +1041,10 @@ def arm_reading(
     after registration: the first eligible row whose failure kind is not ``harness``. Two
     commits of one change count once (the first in the order). A commit without an observed
     attempt is pending; one the instrument cannot grade leaves the pool with its reason before
-    its outcome is read. ``limit`` caps a descriptive arm at its fixed count."""
+    its outcome is read. ``limit`` caps a descriptive arm at its fixed count. A forward
+    reading's arm is read by ticket (:func:`_arm_forward`)."""
+    if reading.prospective:
+        return _arm_forward(reading, arm, rows)
     by_commit: dict[str, list[GradeRow]] = {}
     pool = set(reading.pool)
     for r in rows:
@@ -1162,12 +1423,16 @@ def describe_rules() -> str:
 __all__ = [
     "ARM_STATES",
     "CELL_ERROR_BUDGET",
-    "LABEL_HELD_OUT",
+    "LEFT_HELD_OUT_ERROR",
+    "LEFT_NOT_GRADED",
+    "LEFT_OTHER_CELL",
     "POOL_RULE_ALL",
+    "POOL_RULE_CALIBRATION",
     "POOL_RULE_SINCE",
     "READING_EVENT_ACTION",
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
+    "REFUSAL_NOT_A_CEILING",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
     "RULES",
@@ -1201,9 +1466,11 @@ __all__ = [
     "reading_cell_key",
     "refuse_unless_blind",
     "register",
+    "register_forward",
     "rule_spend",
     "seed_of",
     "seeded_order",
     "standard_of",
     "verdict_for",
+    "with_enrolment",
 ]

@@ -211,19 +211,20 @@ re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read m
 | V · truth on the instrument screens · new | G-102, G-124, G-126, G-108, G-143, G-184, G-180, G-204, G-229, G-255, G-952, G-992, G-993 | honest failure states and role gates on Capability, Connect, Measure, Factory, Ledger, Oracle, Repos and Routing; `ledger.exported` events; a gold witness beside each caught control; the walkthrough presses Sign off, Revoke sign-off, Freeze and Run by Tab and Enter |
 | LIB · the context library · new, after S | G-673, G-677, G-675, G-676, G-735, G-737 | the entry record and its two-person sign-off ledger; the miner registry and its miners over a pinned commit; entry sets registered as arms and kept or retired by the look rule and the harm clause, the brief switch off by default; `/library/:repo` with one page per work type |
 | CLS · the organisation's classes · new, after S | G-672 | class-set versions per organisation with the global classes as parents; the derivation and confirmation split by commit; one rule over ticket-time fields at replay and at intake, with the linked-ticket reader; the validity report with its size-agreement clause; the two-person sign-off; the class set as a DL-044 seam |
-| FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling |
+| FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling. Built on `feat/ns4b-fwd` (DL-334, DL-335, P-690 to P-696), then attacked and fixed: G-679 closed and `product.truth.215` met; `/factory/acceptance` is its page, and a ceiling's forward reading is registered on the work type's library page |
 | CL · claims on the decision records · new | G-945, G-946 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
 
 **Status on `feat/ns4`.** Built and verified, then attacked and fixed (DL-119, DL-120, P-391 to
 P-403): S (all but G-478, and G-477 carried from Wave 2 closed), P (all but G-321), V as stream T4
 (all but G-143, G-992 and G-993) and LIB as streams L and M (G-673, G-676, G-677 and G-736 closed;
 G-735 and G-737 open). Not built, and carried to the list after Wave 4: LIB's entry sets as arms
-(G-675, so `product.truth.212` stays unmet), FWD (G-679, so `product.truth.215` stays unmet) and
-CL (G-945, G-946). CLS was then built as stream CLS of Wave 4b on `feat/ns4b-cls` (DL-330 to
-DL-333, P-680 to P-689): G-672 closed, `product.truth.208` partial on G-761 (the linked-ticket
-reader, a replay pool keyed by the rule's class alone, and the factory's own-cell licence),
-`product.extensibility.220` met, and the class page's own gaps G-762, G-763 and G-764 (merge,
-split and the separation test) open. The seams the integration moved
+(G-675, so `product.truth.212` stays unmet) and CL (G-945, G-946). CLS and FWD were then built as
+Wave 4b, on `feat/ns4b-cls` and `feat/ns4b-fwd`: CLS (DL-330 to DL-333, P-680 to P-689) closed
+G-672, `product.truth.208` partial on G-761 (the linked-ticket reader, a replay pool keyed by the
+rule's class alone, and the factory's own-cell licence), `product.extensibility.220` met, and the
+class page's own gaps G-762, G-763 and G-764 (merge, split and the separation test) open; FWD
+(DL-334, DL-335, P-690 to P-696) closed G-679 and `product.truth.215` reads met — see its row
+above. The seams the integration moved
 to later work are there too: the Decisions inbox reading the entry gate's own sign-off (G-738),
 the read-then-insert ratchet (G-720), the failed-read ratchet's per-read rule and its list
 (G-732), and the controls still disabled while their request runs (G-739).
@@ -234,8 +235,8 @@ roles.209, extensibility.213, truth.212, explanation.211, truth.208 and truth.21
 only open product criteria are go-live.16 (F43), release.22 (G-604), extensibility.25 (F21) and
 identity.11 (G-600). **Not met on `feat/ns4`:** truth.208, truth.212 and truth.215 are unmet
 (CLS, LIB's arms and FWD were not built), and the walkthrough stack cannot show a person signing a
-cell (G-956); roles.209, extensibility.213 and explanation.211 read met. On `feat/ns4b-cls`
-`product.truth.208` reads partial (G-761).
+cell (G-956); roles.209, extensibility.213 and explanation.211 read met. On `feat/ns4b` (Wave
+4b) `product.truth.208` reads partial (G-761) and `product.truth.215` reads met.
 
 ## Wave 5 — the library and the organisation's classes, measured (needs the operator)
 
@@ -286,7 +287,7 @@ These are not wave items; each unblocks the work named beside it.
 | time, cost and non-goals in words | G-302, G-401, G-430, G-447, G-978, G-908, G-382, G-402, G-429, G-140, G-185, G-207, G-262, G-263, G-269 |
 | what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-963, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
 | what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
-| what Wave 4 left open: the Decisions inbox's sign-off reader, the read-then-insert ratchet, the failed-read ratchet, controls disabled while pending, and the streams not built (LIB's arms, FWD, CL) | G-738, G-720, G-732, G-739, G-675, G-679, G-945, G-946 |
+| what Wave 4 left open: the Decisions inbox's sign-off reader, the read-then-insert ratchet, the failed-read ratchet, controls disabled while pending, and the streams not built (LIB's arms, CL; CLS and FWD are built as Wave 4b) | G-738, G-720, G-732, G-739, G-675, G-945, G-946 |
 | what stream CLS left open: the linked-ticket reader, a replay pool keyed by the rule's class alone and the factory's own-cell licence for an organisation's class, class sets on Decisions, the map's organisation cells, and the merge, split and separation-test tools | G-761, G-762, G-763, G-764 |
 | the product | F43, G-604, F21, G-600 |
 

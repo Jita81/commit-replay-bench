@@ -12,15 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **An organisation's own classes of work, held out by commit and signed by two people**
-  (north-star Wave 4b, stream CLS; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4b-cls)).
-  Classes of work (`/classes`) lets an organisation propose its own class set, each class a
-  child of a global class, with one rule that reads only what a ticket carries. Commits are
-  split into derivation and confirmation sets before any class exists. People other than the
-  sponsor label a derivation sample, never shown the rule's answer; the validity report
-  checks the rule against them; a second person signs. Until then the set routes nothing at
-  intake, at the entry gate, in runs or readings. One organisation owns a repository's classes
-  (DL-330 to DL-333, P-680 to P-689).
+- **An organisation's own classes of work, and calibration builds graded on a second person's
+  held-out tests** (Wave 4b, streams CLS and FWD;
+  [the pull request](https://github.com/Jita81/commit-replay-bench/pull/70)). `/classes` lets an
+  organisation propose its own class set: each a child of a global class with one rule
+  reading only what a ticket carries; commits held out by derivation and
+  confirmation sets; other people label a sample blind; a second person signs; until then the
+  set routes nothing. On `/factory/acceptance` a second person writes held-out tests from the
+  ticket alone; the calibration build's first attempt is graded on them, stamped `S2`, and opens
+  no pull request; only a forward reading's delivery promotes a ceiling (DL-330 to DL-335,
+  P-680 to P-696).
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).

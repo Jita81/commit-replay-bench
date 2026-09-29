@@ -38,6 +38,7 @@ import { DecisionsPage } from './screens/Decisions/DecisionsPage'
 import { LibraryPage } from './screens/Library/LibraryPage'
 import { ClassesPage } from './screens/Classes/ClassesPage'
 import { FactoryPage } from './screens/Factory/FactoryPage'
+import { AcceptancePage } from './screens/Factory/AcceptancePage'
 import { IntakePage } from './screens/Factory/IntakePage'
 import { DocPage } from './screens/Help/DocPage'
 import { HelpPage } from './screens/Help/HelpPage'
@@ -97,6 +98,7 @@ export function App() {
           <Route path="/signoff" element={<SignoffPage />} />
           <Route path="/factory" element={<FactoryPage />} />
           <Route path="/factory/intake" element={<IntakePage />} />
+          <Route path="/factory/acceptance" element={<AcceptancePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/help" element={<HelpPage />} />
           <Route path="/help/docs/:name" element={<DocPage />} />

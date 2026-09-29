@@ -1154,7 +1154,7 @@ with local sign-in off does not count — that sign-in keeps the admin role and 
 
 ## 10. The factory's test author
 
-Forward mode has no held-out test, so nothing can be built until one failing test exists. An
+Forward mode builds nothing until the item carries one failing test. An
 item whose oracle you pasted in when you registered the backlog has one. An item without one
 stops `no_oracle` and waits for a person — unless this deployment configures a **test-author
 rung**.
@@ -1581,3 +1581,58 @@ repository's library and then proposing the next version from the library
 keeps the previous one's classes and adds each signed work type that is not yet a class. It is
 still proposed by one person and signed by another. Adding a global class still changes the
 instrument and bumps the apparatus; an organisation's classes never do.
+
+## 16. Calibration builds, held-out tests and forward readings
+
+A cell whose only standard is a **ceiling** — `S3` delivered, meaning each commit passed its own
+tests, but no leaner arm did — reads **ceiling only — forward-unvalidated** on the work type's
+library page. Nothing in it is delivered. A ticket in it is built only as a **calibration build**:
+a measurement that never opens a pull request (ADR-0026 items 4 and 8, DL-334).
+
+**What a calibration build needs.** Four things, in this order:
+
+1. **A forward reading, registered first.** On the work type's library page, an operator
+   registers the ceiling's forward reading under the size table (or `POST /readings/forward`),
+   naming the builder, model and provider the calibration builds will run on. It spends from the
+   ceiling's own error budget and cannot be withdrawn. It is the only reading that can turn the
+   ceiling into a standard: more `S3` rows never do.
+2. **A person's failing test on the ticket**, attached when the backlog is registered.
+3. **An approver who funds one calibration build** of the ticket, on the Factory page.
+4. **Held-out acceptance tests from a second person**, written on **Held-out acceptance tests**
+   (`/factory/acceptance`) from the ticket alone — its title, description and acceptance
+   criteria, never its own failing test and never a build. The second person is not the
+   ticket's author (whoever attached its failing test, froze a backlog naming it or registered
+   it as an evolution), not the approver who funded the build and not the person whose run
+   builds it. The tests are stored whole with their author, time and digest, and never reach a
+   builder's brief or tree. The page fills in a test path the repository's runner accepts.
+
+The next factory run builds the ticket. Its **first attempt** is run against the held-out tests
+after the builder has finished, and its row is stamped `S2` with `acceptance: held_out`, the
+record's digest and the result inside the row hash.
+
+**What the result means.** `pass` counts as clean for the forward reading; `fail` is a miss — so
+is a build that hangs until the tests time out. `error` means the tests could not be run at all
+(the environment failed, or their report could not be read): the ticket leaves the reading,
+never a miss.
+
+**When the tests are not used.** The loop records `acceptance.not_graded` on the chain, with why,
+before it builds: no tests were written before the run claimed the build; the ticket was
+attempted before (a build of it is on the chain, or another of its calibration builds started —
+even one that died); or the tests' writer is one of the people above. The assignment then reads
+**built, not graded** with that reason, or **cannot be graded** for a ticket attempted before,
+and the forward reading lets the ticket leave its pool rather than wait for an attempt that can
+never come. A ticket enrolled in the reading but not built yet — one superseded before it was
+built included — keeps the reading waiting at its place in the order: build it, or the look waits.
+
+**What a forward reading counts.** Only tickets whose held-out tests were written *after* it was
+registered, on its class, size and language, in the order the tests were written; and for each,
+only the first attempt graded on the record that enrolled it. A ticket built by another builder,
+model or provider leaves the pool. The library page shows the reading's state — *collecting*,
+*delivered* or *insufficient* — with n (the tickets read) and how many passed. When it delivers
+under the look rule, the ceiling becomes an `S2` standard, which then needs its sign-off like any
+other.
+
+**Failure cases, in brief.** A held-out test file the runner would not collect is refused when
+it is written, with a path it would. A record whose stored content no longer matches its digest
+is ignored: it grades nothing and enrols nothing. Writing tests after the build was claimed is
+refused (`build_started`), and after the ticket was attempted before (`already_built`).

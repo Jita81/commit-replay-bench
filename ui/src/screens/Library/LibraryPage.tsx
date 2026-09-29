@@ -6,7 +6,9 @@
  * What it is:   The screen at /library/:repo (`?type=` picks the work type): the page for one
  *               kind of change — what it is and example commits, what a ticket must carry, the
  *               signed context with sponsor, signer, date, provenance and effect, what is proven
- *               per size (or "no proven standard" and the next measurement), which switched-on
+ *               per size (or "no proven standard" and the next measurement; for a ceiling, "ceiling
+ *               only — forward-unvalidated", what a calibration build needs and its forward
+ *               reading's state with its n), which switched-on
  *               checks evidence which ISO/IEC 25010 characteristic — then the nomenclature index
  *               of every entry with its status and the act due on it, the miners' card and the
  *               proposal form.
@@ -20,12 +22,15 @@
  *               the field it names (P-397); a revocation or retirement says what it did and
  *               clears its form, and an empty press asks at the fields. The page says, in the
  *               lede and on its tag, that nothing here reaches a builder's brief until an arm
- *               measures it.
- * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct` + `useLibraryMine`; tables
+ *               measures it. An operator registers a ceiling's forward reading under the size
+ *               table (`POST /readings/forward`), naming the builder, model and provider its
+ *               calibration builds run on; a refusal is said in the API's words.
+ * How:          `useLibrary` + `useWorkTypePage` + `useLibraryAct` + `useLibraryMine` +
+ *               `useRegisterForward`; tables
  *               through `DataTable` with a hint on every column; forms through `Field`; every
  *               element a reader meets is a hint trigger (`*.library.*`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0026-the-context-standard.md (item 10),
+ * ADRs:         docs/adr/0026-the-context-standard.md (items 4, 8 and 10),
  *               docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md
  * Works with:   ui/src/screens/Library/useLibrary.ts (the reads and acts), ui/src/api/types.ts
  *               (`LibraryIndex`, `WorkTypePage`), ui/src/help/hints.ts (the copy),
@@ -40,7 +45,7 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { isApiError } from '../../api/client'
-import type { LibraryEntry, LibraryKind, LibraryMineRun, LibraryStatus, WorkTypePage } from '../../api/types'
+import type { LibraryEntry, LibraryKind, LibraryMineRun, LibraryStandard, LibraryStatus, WorkTypePage } from '../../api/types'
 import { Card } from '../../components/Card'
 import { type Column, DataTable } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
@@ -50,7 +55,7 @@ import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { BackLink, InsetText, Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone, WarningButton } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
-import { type LibraryAct, useLibrary, useLibraryAct, useLibraryMine, useWorkTypePage } from './useLibrary'
+import { type LibraryAct, useLibrary, useLibraryAct, useLibraryMine, useRegisterForward, useWorkTypePage } from './useLibrary'
 
 const STATUS_TONE: Record<LibraryStatus, TagTone> = { proposed: 'blue', signed: 'green', stale: 'amber', retired: 'grey', revoked: 'red' }
 const KIND_LABEL: Record<LibraryKind, string> = {
@@ -105,7 +110,76 @@ function fieldRefusal(error: unknown, field: RegExp): string | undefined {
   return words && field.test(words) ? words : undefined
 }
 
-function WorkTypeSection({ page }: { page: WorkTypePage }) {
+const FORWARD_STATE: Record<string, string> = {
+  look_pending: 'collecting',
+  deliver: 'delivered',
+  insufficient: 'insufficient — the ceiling stands',
+}
+
+/** A ceiling's forward reading (ADR-0026 items 4 and 8): its state with its n, or that none
+ *  is registered yet and where one is registered. */
+function Forward({ std, size, canOperate }: { std: LibraryStandard; size: string; canOperate: boolean }) {
+  const f = std.forward
+  const more = f && f.state === 'look_pending' && f.next_look ? ` · ${f.needed} more ticket${f.needed === 1 ? '' : 's'} before its look at ${f.next_look}` : ''
+  return (
+    <Hint as="p" id="item.library.forward" className="m-0 mt-1 text-xs" data-testid={`forward-${size}`}>
+      {f ? (
+        `Forward reading: ${FORWARD_STATE[f.state] ?? f.state} · n = ${f.counted} (${f.clean} passed the held-out tests)${more}`
+      ) : (
+        canOperate ? (
+          <>
+            No forward reading is registered yet: register one{' '}
+            <a href={`#forward-${size}`} className="underline underline-offset-4">
+              under this table
+            </a>
+            , before the first calibration build.
+          </>
+        ) : (
+          'No forward reading is registered yet: a person with the operator role registers one on this page, before the first calibration build.'
+        )
+      )}
+    </Hint>
+  )
+}
+
+/** Register the forward reading of one ceiling (operator; ADR-0026 items 4 and 8): the builder,
+ *  model and provider its calibration builds run on. A refusal is said in the API's words. */
+function ForwardForm({ repo, size, std }: { repo: string; size: string; std: LibraryStandard }) {
+  const register = useRegisterForward(repo)
+  const [builder, setBuilder] = useState('')
+  const [model, setModel] = useState('')
+  const [provider, setProvider] = useState('')
+  const [done, setDone] = useState('')
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (register.isPending) return
+    setDone('')
+    register.mutate(
+      { repo, promotes: std.reading_id, builder: builder.trim(), model: model.trim(), provider: provider.trim() },
+      { onSuccess: (r) => setDone(`Registered ${r.reading_id}. It counts the calibration builds whose held-out tests are written from now on.`) },
+    )
+  }
+  return (
+    <form onSubmit={submit} id={`forward-${size}`} className="mt-4 space-y-3" aria-label={`Register the forward reading of the ${size} ceiling`} data-testid={`forward-form-${size}`}>
+      <h4 className="m-0 text-base font-bold">Register the forward reading of the {size} ceiling</h4>
+      <p className="m-0 text-sm">
+        It is the only reading that can turn this ceiling into a standard. It spends from the ceiling’s own error budget and counts only calibration builds whose held-out tests are written after you register it, run by the builder, model and provider you name here.
+      </p>
+      <Refused error={register.error} testId={`forward-refused-${size}`} />
+      <TextField label="Builder" value={builder} onChange={(e) => setBuilder(e.target.value)} required hint="field.library.forward_builder" description="As the factory run’s ladder names it, for example claude_code." />
+      <TextField label="Model" value={model} onChange={(e) => setModel(e.target.value)} required hint="field.library.forward_model" description="For example claude-sonnet-5." />
+      <TextField label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)} required hint="field.library.forward_provider" description="The provider the model is served by, for example anthropic." />
+      <WarningButton type="submit" pending={register.isPending} hint="button.library.register_forward">
+        Register the forward reading
+      </WarningButton>
+      <p role="status" aria-live="polite" className="m-0 text-sm" data-testid={`forward-registered-${size}`}>
+        {done}
+      </p>
+    </form>
+  )
+}
+
+function WorkTypeSection({ page, canOperate }: { page: WorkTypePage; canOperate: boolean }) {
   const context: Column<WorkTypePage['context'][number]>[] = [
     { key: 'entry', header: 'Entry', hint: 'col.library.entry', cell: (c) => <span className="font-mono text-xs">{c.entry_id}</span> },
     { key: 'statement', header: 'What it says', hint: 'col.library.statement', cell: (c) => c.statement },
@@ -121,11 +195,26 @@ function WorkTypeSection({ page }: { page: WorkTypePage }) {
       key: 'standard',
       header: 'Proven standard',
       hint: 'col.library.standard',
-      cell: (s) => (s.standard ? `${s.standard.arm}${s.standard.ceiling ? ' (ceiling, forward-unvalidated)' : ''}` : <span>No proven standard</span>),
+      cell: (s) => (s.standard ? `${s.standard.arm}${s.standard.ceiling ? ' (ceiling only — forward-unvalidated)' : ''}` : <span>No proven standard</span>),
     },
     { key: 'commits', header: 'Distinct commits', hint: 'col.library.commits', numeric: true, cell: (s) => (s.standard ? `${s.standard.clean} of ${s.standard.n}` : `${s.tasks} mined`) },
     { key: 'interval', header: 'Interval', hint: 'col.library.interval', cell: (s) => (s.standard ? `${pct(s.standard.ci_low)} to ${pct(s.standard.ci_high)}` : '—') },
-    { key: 'next', header: 'Apparatus, or the next measurement', hint: 'col.library.next', cell: (s) => (s.standard ? `apparatus ${s.standard.apparatus}` : s.next) },
+    {
+      key: 'next',
+      header: 'Apparatus, or the next measurement',
+      hint: 'col.library.next',
+      cell: (s) =>
+        s.standard?.ceiling ? (
+          <div data-testid={`ceiling-${s.size}`}>
+            <p className="m-0">{s.next}</p>
+            <Forward std={s.standard} size={s.size} canOperate={canOperate} />
+          </div>
+        ) : s.standard ? (
+          `apparatus ${s.standard.apparatus}`
+        ) : (
+          s.next
+        ),
+    },
   ]
   const quality: Column<WorkTypePage['quality']['rows'][number]>[] = [
     { key: 'char', header: 'ISO/IEC 25010 characteristic', hint: 'col.library.characteristic', cell: (q) => q.characteristic },
@@ -194,6 +283,10 @@ function WorkTypeSection({ page }: { page: WorkTypePage }) {
       <DataTable rows={page.context} columns={context} rowKey={(c) => c.entry_id} caption={`Signed context for ${page.title}`} empty="No signed entry is scoped to this work type yet." dense />
       <h3 className="mt-6 text-lg font-bold">What is proven, per size</h3>
       <DataTable rows={page.sizes} columns={sizes} rowKey={(s) => s.size} caption={`Proven standard per size for ${page.title}`} empty="No size." dense />
+      {canOperate &&
+        page.sizes.map((s) =>
+          s.standard?.ceiling && !s.standard.forward ? <ForwardForm key={s.size} repo={page.repo} size={s.size} std={s.standard} /> : null,
+        )}
       <h3 className="mt-6 text-lg font-bold">Which checks evidence which quality</h3>
       <p className="text-sm">Switched on here: {page.quality.switched_on.join(', ') || 'none'}. Named, never claimed: a clean row is not a claim that code conforms to ISO/IEC 25010.</p>
       {page.quality.served ? (
@@ -523,7 +616,7 @@ export function LibraryPage() {
             )}
           </Card>
           {page.isError && <ErrorState error={page.error} compact />}
-          {page.data && <WorkTypeSection page={page.data} />}
+          {page.data && <WorkTypeSection page={page.data} canOperate={can('operator')} />}
           {chosen && !pageable && types.some((t) => t.slug === chosen) && <p>This work type has no page until it is signed.</p>}
           <IndexSection repo={repo} entries={lib.data.entries} meId={me?.id ?? ''} />
           {can('operator') && <MineCard repo={repo} />}
