@@ -96,9 +96,11 @@ from crb.builders.openai_client import ProviderMismatch, resolve_endpoint, resol
 from crb.builders.openai_client import credential_missing as openai_credential_missing
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
+from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
+from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
@@ -618,6 +620,29 @@ def active_backlog_hash(settings: Any, repo: str, expected: str | None) -> tuple
     return str(backlog.backlog_hash), str(backlog.evolutions_hash)
 
 
+def refuse_class_set(db: Session, body: RunCreateRequest) -> None:
+    """A run stamps its rows with an organisation's class set only when it is a replay of a
+    repository the version covers and the version routes (signed by two people, its validity
+    report passing — ADR-0026 item 9): rows graded under a version that routes nothing could
+    never count toward a reading of it."""
+    if not body.taxonomy or body.taxonomy == GLOBAL_CLASS_SET:
+        return
+    if body.kind not in ("replay", "blind"):
+        raise ApiError(422, "validation_error", "taxonomy applies to replay and blind runs only")
+    if not is_class_set_version(body.taxonomy):
+        raise ApiError(422, "validation_error", f"{body.taxonomy!r} is not a class-set version")
+    state, verdict = class_set_verdict(db, body.taxonomy)
+    if state is None or body.repo not in state.version.repos:
+        raise ApiError(
+            409,
+            "class_set_not_routing",
+            f"{body.taxonomy} does not cover {body.repo}",
+            detail={"route": verdict.code},
+        )
+    if not verdict.ok:
+        raise ApiError(409, "class_set_not_routing", verdict.words, detail={"route": verdict.code})
+
+
 def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     """A ``queued`` Run row from a validated request (id assigned here so the response
     can name it even if the queue does not). A build kind without a model gets the
@@ -669,6 +694,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["checks"] = body.checks.overrides()
     if body.learning is not None:
         params["learning"] = body.learning
+    if body.taxonomy:
+        params["taxonomy"] = body.taxonomy
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
@@ -960,6 +987,7 @@ def create_run(
             "it, then another approver grants it with POST /runs/{id}/deliver-override",
             detail={"grant": "POST /runs/{id}/deliver-override"},
         )
+    refuse_class_set(db, body)
     api = require_jobs()
     run = new_run(body, actor=operator.id)
     if s1:

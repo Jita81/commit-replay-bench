@@ -669,6 +669,18 @@ def _need_person(actor: str, what: str) -> None:
         )
 
 
+def refuse_same_person(thing: str, *, sponsor: str, approver: str) -> None:
+    """THE two-person rule (ADR-0026 item 10, DESIGN §9.3), for every library entry and every
+    class-set version (``crb.core.class_sets``): the approver can never be the sponsor.
+    Raises :class:`LibraryRefused` ``same_person``."""
+    if approver == sponsor:
+        raise LibraryRefused(
+            f"the sponsor cannot sign their own {thing} — a second person must sign it "
+            "(the two-person rule, ADR-0026 item 10; cannot be relaxed)",
+            code=REFUSAL_SAME_PERSON,
+        )
+
+
 def _need_version(state: EntryState, act: LibraryAct) -> None:
     if act.version != state.entry.version:
         raise LibraryRefused(
@@ -790,12 +802,7 @@ def apply(state: EntryState | None, act: LibraryAct) -> EntryState:
                 "person: a person must sponsor it before another person signs it",
                 code=REFUSAL_NO_SPONSOR,
             )
-        if act.actor == state.sponsor:
-            raise LibraryRefused(
-                "the sponsor cannot sign their own entry — a second person must sign it "
-                "(the two-person rule, ADR-0026 item 10; cannot be relaxed)",
-                code=REFUSAL_SAME_PERSON,
-            )
+        refuse_same_person("entry", sponsor=state.sponsor, approver=act.actor)
         if state.entry.provenance.kind == PROVENANCE_ROWS:
             _need_independent_of_rows(state, act)
         # a re-signature of a stale entry acknowledges the file as it now reads at head
@@ -1209,6 +1216,7 @@ __all__ = [
     "is_person",
     "next_measurement",
     "quality_rows",
+    "refuse_same_person",
     "signed_context",
     "split_entry_id",
     "stale_candidates",

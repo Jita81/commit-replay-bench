@@ -20,7 +20,10 @@ What it is:   The readings route module and the store readers the capability map
               write path and the factory share (``load_readings``, ``reading_book``,
               ``standard_for``).
 What it does: Registers a reading (operator): freezes the pool by rule from the repository's
-              qualified tasks (``pool_by_rule``; a list the rule does not give is refused),
+              qualified tasks (``pool_by_rule``; a list the rule does not give is refused) —
+              under an organisation's class set, only the confirmation commits its rule puts in
+              the reading's ``org_class``, on that class's parent's cell, and only while the set
+              routes (ADR-0026 item 9),
               refuses an unsealed posture for a replayed arm, reads the rows and the readings
               already registered under the lock, and writes the event; lists readings with
               every arm's state and the budget per cell; answers a cell's proven standard on
@@ -53,7 +56,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import ReadingBook
+from crb.core.class_sets import CONFIRMATION, is_org_class_set, refuse_reading_pool
 from crb.core.context_arm import parse_arm
+from crb.core.evidence import utc_now_iso
 from crb.core.ledger import (
     CELL_FIELDS,
     LABEL_CHANGE_ID,
@@ -78,10 +83,12 @@ from crb.core.reading import (
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import current_checks_arm
 from crb.server.routes.repos import get_repo_or_404
+from crb.store.class_sets import DbClassSets
 from crb.store.events import append_event_checked
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Repo, Task
@@ -199,8 +206,12 @@ class ReadingIn(BaseModel):
     rule: str = RULE_LOOK_V1
     descriptive: list[tuple[str, int]] = Field(default_factory=list, max_length=4)
     author_model: str = Field(default="", max_length=128)
-    taxonomy: str = GLOBAL_CLASS_SET
+    taxonomy: str = Field(default=GLOBAL_CLASS_SET, max_length=96)
     posture_class: str = Field(default="", max_length=64)
+    #: Under an organisation's class set (``taxonomy`` other than the global vocabulary): the
+    #: organisation's class this reading reads — its pool is the confirmation commits the
+    #: version's rule puts in that class (ADR-0026 item 9). Empty for the global vocabulary.
+    org_class: str = Field(default="", max_length=64)
 
 
 class ReadingsOut(BaseModel):
@@ -273,8 +284,48 @@ def register_reading(
     except ValueError as exc:
         raise ApiError(422, REFUSAL_INVALID, str(exc)) from exc
 
+    org = is_org_class_set(body.taxonomy)
+    if org != bool(body.org_class):
+        raise ApiError(
+            422,
+            REFUSAL_INVALID,
+            "an organisation's class set is read one class at a time: name org_class with an "
+            "organisation's taxonomy, and neither with the global vocabulary",
+        )
+
     def build(s: Session) -> dict[str, Any]:
         qualified = _qualified(s, body.repo, body.cell)
+        if org:
+            # the class the version's rule gave each commit (the label table), and only its
+            # confirmation commits: a commit that derived the class never licenses it
+            state, _verdict = verdict_for(s, body.taxonomy)
+            klass = state.version.class_of(body.org_class) if state is not None else None
+            parent = klass.parent if klass is not None else ""
+            if parent and body.cell.get("capability_class", "") != parent:
+                # the organisation's class splits its parent's cell and no other: a reading on
+                # another global class's cell would be an orphan cell no gate reads (P-682)
+                raise ReadingRefused(
+                    f"{body.org_class} is a child of {parent}: a reading of it sits on a "
+                    f"{parent} cell, never on {body.cell.get('capability_class', '')!r}",
+                    code=REFUSAL_INVALID,
+                )
+            labelled = DbClassSets(factory).rule_labels(body.taxonomy, body.repo)
+            qualified = {
+                c: t
+                for c, t in qualified.items()
+                if labelled.get((body.repo, c)) == body.org_class
+                and state is not None
+                and state.version.split(body.repo, c) == CONFIRMATION
+            }
+            report = report_for(s, state) if state is not None and state.signed else None
+            refuse_reading_pool(
+                state,
+                report,
+                repo=body.repo,
+                org_class=body.org_class,
+                pool=list(qualified),
+                now=utc_now_iso(),
+            )
         pool, pool_rule = pool_by_rule(
             {c: str(t.authored or "") for c, t in qualified.items()}, since=body.since
         )
@@ -303,6 +354,7 @@ def register_reading(
             changes={c: _change_of(qualified[c]) for c in pool},
             budget=budget,
             pool_rule=pool_rule,
+            org_class=body.org_class,
         )
         return reading.to_dict()
 

@@ -74,6 +74,7 @@ const SEGMENT_ROUTE: Record<string, string | null> = {
   cell: '/results',
   decisions: '/decisions',
   library: '/library/:repo',
+  classes: '/classes',
   signoff: '/signoff',
   factory: '/factory',
   intake: '/factory/intake',

@@ -551,6 +551,16 @@ def _facts_from(
     return tuple(facts), tuple(prose), tuple(unused)
 
 
+def facts_for(
+    lines: tuple[str, ...], capability_class: str
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """``(facts, prose, lines that named another class's slot)`` of acceptance-criteria
+    ``lines`` read for ``capability_class`` — the draft's own reading, for a caller that
+    classifies the ticket again (an organisation's class set, ADR-0026 item 9) and must
+    re-derive everything the class decides."""
+    return _facts_from(lines, capability_class)
+
+
 def draft_from(
     ticket: Ticket,
     *,
@@ -645,6 +655,7 @@ __all__ = [
     "content_revision",
     "content_tags",
     "draft_from",
+    "facts_for",
     "html_to_text",
     "item_id_for",
     "kind_for",

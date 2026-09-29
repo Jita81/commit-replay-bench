@@ -17,7 +17,9 @@ What it is:   The server-side binding of the factory entry gate's readers to the
 What it does: Reads every registered reading of the repository and the ledger's rows once;
               for a cell, evaluates the readings registered on a cell of that class and size
               (and, for a licence, that builder, model and provider) at the current apparatus
-              and the global class set, on the repository's checks arm and the deployment's posture
+              and the item's class-set version (the global one, or an organisation's routing version
+              and class — a version that does not route licenses nothing), on the repository's
+              checks arm and the deployment's posture
               class, and answers the latest proven standard (or its ``S3`` ceiling) as the
               factory's :class:`~crb.factory.standard.Standard`, signed only by an active
               sign-off bound to its arm, class-set version and reading; a licence read of an
@@ -62,6 +64,7 @@ from crb.core.signoff import SignoffRecord, active_signoffs
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.standard import ArmReading, CellRef, Readers, Standard, points_agreement_passed
+from crb.server.class_set_state import routing_versions, size_agreement_passed
 from crb.server.routes.readings import load_readings
 from crb.server.routes.signoffs import load_signoff_records
 from crb.store.ledger import rows_in
@@ -95,10 +98,18 @@ def outcome_for(
     """The reading that speaks for ``cell`` (a proven standard over a ceiling over one still
     reading, the latest registration breaking ties), over every reading registered on a cell
     that matches it, at one apparatus, class-set version, checks arm and posture class."""
+    # an item an organisation's class set classified is read on that version and class only
+    # (ADR-0026 item 9); a global item never reads an organisation's reading, nor the reverse
+    taxonomy = cell.taxonomy or taxonomy
     outcomes: list[ReadingOutcome] = []
     seen: set[str] = set()
     for r in readings:
-        if r.repo != repo or not _matches(r.cell, cell) or r.cell_key in seen:
+        if (
+            r.repo != repo
+            or not _matches(r.cell, cell)
+            or r.org_class != cell.org_class
+            or r.cell_key in seen
+        ):
             continue
         seen.add(r.cell_key)
         outcomes += outcomes_for_cell(
@@ -110,6 +121,7 @@ def outcome_for(
             taxonomy=taxonomy,
             checks_arm=checks_arm,
             posture_class=posture_class,
+            org_class=r.org_class,
         )
     return latest_outcome(outcomes)
 
@@ -172,7 +184,8 @@ def signed_by(
         stamped = {v.strip() for v in rec.apparatus_version.split(",") if v.strip()}
         if apparatus not in stamped:
             continue
-        if (rec.context_arm, rec.taxonomy, rec.reading_id) != (arm, taxonomy, reading_id):
+        want = cell.taxonomy or taxonomy
+        if (rec.context_arm, rec.taxonomy, rec.reading_id) != (arm, want, reading_id):
             continue
         if rec.arm != checks_arm:
             continue
@@ -191,8 +204,13 @@ def readers_over(
     posture_class: str,
     signed: SignedFn | None = None,
     agreement_passed: bool = False,
+    routing: Mapping[str, bool] | None = None,
 ) -> Readers:
-    """The gate's readers over readings and rows already read (pure: the tests' seam)."""
+    """The gate's readers over readings and rows already read (pure: the tests' seam).
+    ``routing`` says, for each organisation class-set version, whether it routes: a cell of
+    a version that does not (unsigned, revoked or failing its validity report) has no proven
+    standard, whatever its readings say (ADR-0026 item 9)."""
+    routes_by = dict(routing or {})
 
     def outcome(cell: CellRef) -> ReadingOutcome | None:
         return outcome_for(
@@ -205,6 +223,12 @@ def readers_over(
         )
 
     def standard_for(cell: CellRef) -> Standard | None:
+        if (
+            cell.taxonomy
+            and cell.taxonomy != GLOBAL_CLASS_SET
+            and not routes_by.get(cell.taxonomy, False)
+        ):
+            return None  # a class set that does not route licenses nothing
         o = outcome(cell)
         std = standard_from(o, signed=False)
         if std is None:
@@ -225,6 +249,7 @@ def readers_in(session: Session, repo: str, *, checks_arm: str, posture_class: s
     """The gate's readers for ``repo``, read ONCE in ``session`` (the pre-run map): its
     registered readings, its rows and its sign-offs — none when the sign-off chain is broken."""
     readings = load_readings(session, repo)
+    routing = routing_versions(session, (r.taxonomy for r in readings))
     # the ONE sign-off reader (P-336): a broken chain, or a row the audit trail names that
     # the chain lacks, lifts nothing — never a per-row filter of its own
     records = load_signoff_records(session, repo)
@@ -247,7 +272,8 @@ def readers_in(session: Session, repo: str, *, checks_arm: str, posture_class: s
         checks_arm=checks_arm,
         posture_class=posture_class,
         signed=signed,
-        agreement_passed=points_agreement_passed(repo),
+        agreement_passed=points_agreement_passed(repo) or size_agreement_passed(session, repo),
+        routing=routing,
     )
 
 

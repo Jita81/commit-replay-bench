@@ -96,7 +96,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -127,6 +127,7 @@ from crb.intake.client import (
 )
 from crb.server import factory_standard
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
+from crb.server.class_set_state import RESERVED_LABELS
 from crb.server.deps import (
     ApiError,
     DbDep,
@@ -200,6 +201,20 @@ class BacklogItemIn(BaseModel):
     depends_on: list[str] = Field(default_factory=list, max_length=50)
     level: str = "L1"
     labels: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("labels")
+    @classmethod
+    def _no_class_set_labels(cls, v: dict[str, str]) -> dict[str, str]:
+        # only the intake's classification writes an organisation's class onto an item, so it
+        # is read by the version's rule and a person's override is counted (P-683)
+        named = sorted(set(v) & set(RESERVED_LABELS))
+        if named:
+            raise ValueError(
+                f"{', '.join(named)} are written by an organisation's class set at intake, never "
+                "by hand: name the class with a crb:class=<slug> tag on the ticket instead, "
+                "which is counted as an override"
+            )
+        return v
 
 
 class AuthoredTestIn(BaseModel):

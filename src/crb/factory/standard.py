@@ -142,6 +142,11 @@ class CellRef:
     model: str = ""
     arm: str = ""
     provider: str = ""
+    #: An organisation's class-set version and class (ADR-0026 item 9) when the item was
+    #: classified by one: ``capability_class`` stays the global parent; ``""`` is the global
+    #: vocabulary.
+    taxonomy: str = ""
+    org_class: str = ""
 
     def key(self) -> str:
         parts = [self.capability_class, self.size]
@@ -151,6 +156,8 @@ class CellRef:
             parts.append(f"@{self.provider}")
         if self.arm:
             parts.append(self.arm)
+        if self.org_class:
+            parts.append(f"{self.taxonomy}#{self.org_class}")
         return "|".join(parts)
 
     def to_dict(self) -> dict[str, str]:
@@ -161,6 +168,8 @@ class CellRef:
             out["provider"] = self.provider
         if self.arm:
             out["arm"] = self.arm
+        if self.org_class:
+            out |= {"taxonomy": self.taxonomy, "org_class": self.org_class}
         return out
 
 
@@ -367,6 +376,8 @@ def decide_entry(
     require_signed_cell: bool = False,
     override_by: str = "",
     author: str | None = None,
+    taxonomy: str = "",
+    org_class: str = "",
 ) -> Entry:
     """The entry gate for one item, before any spend (ADR-0026 item 8).
 
@@ -399,7 +410,12 @@ def decide_entry(
             reason_code=STOP_GRANULARIZE,
             cells=tuple({"size": s, "standard": "", "ceiling": False} for s in sizes),
         )
-    read = [(s, standard_for(CellRef(capability_class, s))) for s in sizes]
+    # an item an organisation's class set classified reads its own class's cells (ADR-0026
+    # item 9): the class a ticket is routed by is the class its cell was measured under
+    read = [
+        (s, standard_for(CellRef(capability_class, s, taxonomy=taxonomy, org_class=org_class)))
+        for s in sizes
+    ]
     cells = _cells_view(read)
     _chosen, standard = more_demanding(read)
     # every cell read that is as demanding as the one applied is named: "the XS and S cells"
@@ -636,6 +652,8 @@ def gate_for(
         require_signed_cell=require_signed_cell,
         override_by=override_by,
         author=author,
+        taxonomy=str(item.labels.get("taxonomy", "") or ""),
+        org_class=str(item.labels.get("org_class", "") or ""),
     )
 
 

@@ -295,7 +295,7 @@ from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
-from crb.server import factory_standard
+from crb.server import class_set_state, factory_standard
 from crb.server.decisions import record_due
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
@@ -1105,6 +1105,8 @@ class Worker:
             # this deployment's posture class
             gate=self._standard_readers(repo),
             require_signed_cell=self.settings.factory.require_signed_cell,
+            # ADR-0026 item 9: the organisation's routing class set classifies each ticket
+            classes=class_set_state.draft_stamper(self.factory, repo),
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -2420,6 +2422,8 @@ class Worker:
             corpus_sha=str(p.get("corpus_sha") or ""),
             policy_version=str(p.get("policy_version") or ""),
             evaluate_api=checks.api_stable,
+            # ADR-0026 item 9: an organisation's routing class set, checked at enqueue
+            taxonomy=str(p.get("taxonomy") or ""),
             keep_worktrees=bool(
                 p.get("keep_worktrees", retain.get("worktrees", self.settings.keep_worktrees))
             ),

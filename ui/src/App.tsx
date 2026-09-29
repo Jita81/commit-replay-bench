@@ -36,6 +36,7 @@ import { HomePage } from './screens/Home/HomePage'
 import { PosturePage } from './screens/Posture/PosturePage'
 import { DecisionsPage } from './screens/Decisions/DecisionsPage'
 import { LibraryPage } from './screens/Library/LibraryPage'
+import { ClassesPage } from './screens/Classes/ClassesPage'
 import { FactoryPage } from './screens/Factory/FactoryPage'
 import { IntakePage } from './screens/Factory/IntakePage'
 import { DocPage } from './screens/Help/DocPage'
@@ -82,6 +83,7 @@ export function App() {
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/decisions" element={<DecisionsPage />} />
           <Route path="/library/:repo" element={<LibraryPage />} />
+          <Route path="/classes" element={<ClassesPage />} />
           <Route path="/repos" element={<ReposPage />} />
           <Route path="/repos/:name" element={<RepoDetail />} />
           <Route path="/runs" element={<RunsPage />} />

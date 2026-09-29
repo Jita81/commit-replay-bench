@@ -24,7 +24,9 @@ task_qualifications — APPEND-ONLY: each task's qualification per posture (ADR-
              latest row for (repo, task, posture) is in force, a revocation is a new row
              (revision 0011)
 library_acts — APPEND-ONLY, hash-chained: every act on a repository's context library —
-             propose, sponsor, sign, stale, revoke, retire (ADR-0026 item 10; revision 0016)
+             propose, sponsor, sign, stale, revoke, retire (ADR-0026 item 10; revision 0016);
+             ``class_set_acts`` and ``class_labels`` — an organisation's class sets and the
+             label table (ADR-0026 item 9; revision 0047)
 
 Navigation
 ----------
@@ -565,6 +567,50 @@ class LibraryActRow(Base):
     __table_args__ = (Index("ix_library_acts_repo_entry", "repo", "entry_id", "seq"),)
 
 
+class ClassSetActRow(Base):
+    """APPEND-ONLY. One act on an organisation's class sets (ADR-0026 item 9) — the
+    :class:`crb.core.class_sets.ClassSetAct` column for column, chained on its own
+    ``prev_hash`` / ``row_hash``. A proposal, a signature and a revocation are each a new
+    row; nothing is edited (revision 0047)."""
+
+    __tablename__ = "class_set_acts"
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    act_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    schema: Mapped[str] = mapped_column(String(32), nullable=False)
+    org: Mapped[str] = mapped_column(String(48), nullable=False)
+    version_id: Mapped[str] = mapped_column(String(96), nullable=False)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    act: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    body_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created: Mapped[str] = mapped_column(String(40), nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+
+    __table_args__ = (Index("ix_class_set_acts_org_version", "org", "version_id", "seq"),)
+
+
+class ClassLabelRow(Base):
+    """APPEND-ONLY. The label table (ADR-0026 item 9): one task's class under one class-set
+    version — a person's label of a derivation commit (``source = person``), or the version's
+    rule applied to a commit (``source = rule``, a relabel). A relabel writes here and never
+    touches a stored ledger row; the latest row per (version, repo, task, source, labeller)
+    is the one read (revision 0047)."""
+
+    __tablename__ = "class_labels"
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    taxonomy: Mapped[str] = mapped_column(String(96), nullable=False)
+    repo: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    capability_class: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    labeller: Mapped[str] = mapped_column(String(128), nullable=False)
+    created: Mapped[str] = mapped_column(String(40), nullable=False)
+
+    __table_args__ = (Index("ix_class_labels_version_repo", "taxonomy", "repo", "seq"),)
+
+
 #: Every append-only table of the CURRENT schema. A revision script pins the tuple that
 #: existed at its own revision (a table a later revision adds has no triggers to install
 #: yet); ``init_db`` and ``migrate.upgrade`` use this live one.
@@ -576,4 +622,6 @@ APPEND_ONLY_TABLES: tuple[str, ...] = (
     "reviews",
     "task_qualifications",
     "library_acts",
+    "class_set_acts",
+    "class_labels",
 )

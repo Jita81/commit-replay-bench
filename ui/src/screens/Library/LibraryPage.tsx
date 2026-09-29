@@ -487,6 +487,11 @@ export function LibraryPage() {
       <Lede>
         What a test cannot say — its parts, its kinds of change, its decisions, conventions, designs and quality rules — in one vocabulary. Each entry needs two people: a sponsor who puts it forward and a different approver who signs it. Nothing here reaches a builder until an arm has measured it.
       </Lede>
+      <p className="mb-4">
+        <Hint as={Link} id="link.library.classes" to="/classes">
+          Your organisation’s classes of work
+        </Hint>
+      </p>
       <div className="mb-6" data-testid="library-count" data-ready={lib.data ? 'true' : 'false'}>
         <Pill tone={counts.signed > 0 ? 'green' : 'primary'} size="sm" label={`${counts.all} entries, ${counts.signed} signed`} hint="stat.library.count">
           {lib.data ? `${counts.all} entries · ${counts.signed} signed` : 'counting…'}

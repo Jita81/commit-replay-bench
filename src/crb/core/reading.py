@@ -41,7 +41,9 @@ What it is:   The reading — registration (``register`` → a ``Reading`` the c
               operating characteristic, the counting of first observed attempts per distinct
               change, the hierarchy that finds a cell's standard, and the per-cell budget.
 What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a hand-picked
-              list is ``pool_not_blind``); refuses a registration over commits already graded
+              list is ``pool_not_blind``); keeps a reading of an organisation's class
+              (``org_class``) a cell, a seeded order and a budget of its own; refuses a
+              registration over commits already graded
               under its arms at its apparatus (``pool_seen``), beyond the cell's budget
               (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
               the ledger's rows in the seeded order; stops the hierarchy at the first arm that
@@ -303,6 +305,14 @@ def canonical_cell_key(cell: CellKey | Mapping[str, str]) -> str:
     return "|".join(str(d.get(f, "")) for f in CELL_FIELDS)
 
 
+def reading_cell_key(cell: CellKey | Mapping[str, str], org_class: str = "") -> str:
+    """The key one reading's cell is known by: the canonical cell key, and — for a reading of
+    an organisation's class (ADR-0026 item 9) — ``|<org class>`` after it, so two classes of one
+    global parent are two cells with two seeded orders and two budgets, never one."""
+    key = canonical_cell_key(cell)
+    return f"{key}|{org_class}" if org_class else key
+
+
 def seed_of(repo: str, cell_key: str, commit: str) -> str:
     """``sha256("crb.reading.v1|" + repo + "|" + canonical cell key + "|" + commit)``."""
     preimage = SEED_PREFIX + repo + "|" + cell_key + "|" + commit
@@ -354,6 +364,10 @@ class Reading:
     #: The rule the pool was frozen by (:func:`pool_by_rule`); ``""`` for a pool a caller of
     #: the core supplied directly (tests, the in-code programme) — hashed when present.
     pool_rule: str = ""
+    #: The organisation's class the reading reads under ``taxonomy`` (ADR-0026 item 9): the
+    #: cell key keeps the global parent, and this splits it. ``""`` for the global vocabulary
+    #: — hashed when present, so a global reading's id never moves.
+    org_class: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
@@ -370,7 +384,7 @@ class Reading:
 
     @property
     def cell_key(self) -> str:
-        return canonical_cell_key(self.cell)
+        return reading_cell_key(self.cell, self.org_class)
 
     @property
     def budget_key(self) -> tuple[str, str, str, str]:
@@ -408,6 +422,7 @@ class Reading:
             "registered_at": self.registered_at,
             "actor": self.actor,
             **({"pool_rule": self.pool_rule} if self.pool_rule else {}),
+            **({"org_class": self.org_class} if self.org_class else {}),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -437,6 +452,7 @@ class Reading:
             schema=str(d.get("schema", READING_SCHEMA)),
             reading_id=str(d.get("reading_id", "")),
             pool_rule=str(d.get("pool_rule", "") or ""),
+            org_class=str(d.get("org_class", "") or ""),
         )
 
     def verify(self) -> bool:
@@ -578,6 +594,7 @@ def register(
     max_reruns: int = DEFAULT_MAX_RERUNS,
     now: str = "",
     pool_rule: str = "",
+    org_class: str = "",
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -606,7 +623,7 @@ def register(
         raise ReadingRefused(why, code=REFUSAL_INVALID)
     authors = {parse_arm(a).author for a in hier if parse_arm(a).author}
     author = author_model or (next(iter(authors)) if authors else "")
-    key = canonical_cell_key(cell_d)
+    key = reading_cell_key(cell_d, org_class)
     ordered = seeded_order(repo, key, pool)
     arms = set(hier)
     pool_set = set(ordered)
@@ -662,6 +679,7 @@ def register(
         registered_at=now or utc_now_iso(),
         actor=actor,
         pool_rule=pool_rule,
+        org_class=org_class,
     )
 
 
@@ -972,10 +990,12 @@ def outcomes_for_cell(
     taxonomy: str,
     checks_arm: str,
     posture_class: str,
+    org_class: str = "",
 ) -> list[ReadingOutcome]:
     """Every reading registered on exactly this cell, apparatus, class-set version, checks arm
-    and posture class — every scope field a reading counts its rows on (P-319)."""
-    want = canonical_cell_key(cell)
+    and posture class — every scope field a reading counts its rows on (P-319) — and, under an
+    organisation's class set, on exactly this organisation class."""
+    want = reading_cell_key(cell, org_class)
     return [
         evaluate(r, rows)
         for r in readings
@@ -998,6 +1018,7 @@ def standard_of(
     taxonomy: str,
     checks_arm: str,
     posture_class: str,
+    org_class: str = "",
 ) -> Standard | None:
     """The cell's proven standard (or its ceiling) on one checks arm and posture class, or
     ``None`` — no proven standard. Pure: the caller supplies the readings and the rows (the
@@ -1012,6 +1033,7 @@ def standard_of(
             taxonomy=taxonomy,
             checks_arm=checks_arm,
             posture_class=posture_class,
+            org_class=org_class,
         )
     )
     if best is None or best.state not in (OUTCOME_STANDARD, OUTCOME_CEILING):
@@ -1176,6 +1198,7 @@ __all__ = [
     "p_deliver",
     "pool_by_rule",
     "pool_digest",
+    "reading_cell_key",
     "refuse_unless_blind",
     "register",
     "rule_spend",
