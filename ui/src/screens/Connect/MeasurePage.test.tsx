@@ -19,8 +19,14 @@
  *               and that the estimate reads the map's economics fold, so a known $0 is quoted as
  *               $0.00 over the attempts with a known cost, never dropped for the planning range
  *               (P-131); and that a map that cannot be read is said with Retry while nothing is
- *               priced and the button waits (G-108).
- * How:          `mockApi` + `renderApp` with `path` for `useParams`.
+ *               priced and the button waits (G-108); that the pre-flight switch is OFF by
+ *               default and posts `preflight: true` only when ticked, naming its separate arm
+ *               (G-382); that the summary states the outage stop the run keeps at the worker's
+ *               default; that a stack with only the test-only fixture builder prices the estimate
+ *               at a known $0.00 and names the builder test-only (G-380); and that the About
+ *               block's purpose says what the page does not do (G-908).
+ * How:          `mockApi` + `renderApp` with `path` for `useParams`; the help registry imported
+ *               for the About sentence.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0006-zero-raw-retention-and-evidence-packs.md
  * Works with:   ui/src/screens/Connect/MeasurePage.tsx, ui/src/help/hints.ts (the copy the
@@ -32,7 +38,10 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { HELP } from '../../help/help'
+import { HINTS } from '../../help/hints'
 import { unhinted } from '../../help/hints-collector'
+import { FIXTURE_LABEL } from '../../lib/builder'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { MeasurePage } from './MeasurePage'
 
@@ -318,5 +327,118 @@ describe('MeasurePage', () => {
     expect(label).not.toHaveAttribute('tabindex')
     await expectHintOpens(label, 'field.measure.attempts')
     expect(screen.getByRole('link', { name: /Every knob/ })).toHaveAttribute('href', '/runs')
+  })
+
+  it('the pre-flight switch is off by default and posts preflight: true when ticked, naming its separate arm', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+      'POST /runs': () => json({ id: 'run-1', repo: 'cobra', kind: 'replay', status: 'queued' }, 201),
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent("this repository's measured mean"))
+    const toggle = screen.getByRole('checkbox', { name: 'Run the repository’s own formatter and linter on each attempt before grading' })
+    expect(toggle).not.toBeChecked()
+    expect(box).toHaveTextContent('Off — the plain arm')
+    // the note says what switching it on does: a separate arm, never pooled, a repair call that can spend
+    const note = screen.getByTestId('measure-preflight')
+    expect(note).toHaveTextContent('the rows record a separate arm, claude_code+preflight, never pooled with plain rows')
+    expect(note).toHaveTextContent('the one bounded repair call the builder gets can spend')
+    expect(note.querySelector('[data-hint="field.measure.preflight"]')).not.toBeNull()
+    await userEvent.click(toggle)
+    expect(toggle).toBeChecked()
+    expect(box).toHaveTextContent('On — recorded as claude_code+preflight, never pooled with plain rows; the repair call can spend')
+    await userEvent.click(screen.getByRole('button', { name: /^Start the run — estimated/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', builder: 'claude_code', model: 'claude-sonnet-5', limit: 30, retain: { worktrees: false, transcripts: false }, max_cost_usd: 13, preflight: true })
+  })
+
+  it('the summary states the outage stop the run keeps', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: { executor: 'docker' } }, { name: 'builders', status: 'ok', detail: '', data: { anthropic: true } }] },
+    })
+    const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    // the worker's default (3 consecutive provider refusals): stated, not offered — this page changes nothing about it
+    expect(box).toHaveTextContent('Outage stop')
+    expect(box).toHaveTextContent('At the worker default: after 3 attempts in a row the provider refused, the run stops and says so. The full run form can change the number.')
+    expect(container.querySelector('[data-hint="summary.measure.outage_stop"]')).not.toBeNull()
+    // a viewer reads the pre-flight state as a row, never a control
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(screen.getByTestId('measure-preflight')).toHaveTextContent('off unless the operator switches it on')
+  })
+
+  it('the fixture builder is priced at $0 and named test-only', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      // no measured mean for this repository: a real builder would fall back to the planning range
+      'GET /capability-map': { ...MAP, economics: econ(22, 0, null, NONE_KNOWN) },
+      // the hermetic stack: no credential, only the test-only fixture registered
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'ok', detail: 'local', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false, fixture_gold: true } }] },
+      'POST /runs': () => json({ id: 'run-1', repo: 'cobra', kind: 'replay', status: 'queued' }, 201),
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('$0.00 to $0.00 for 30 attempts, at a known $0.00 each'))
+    expect(box).toHaveTextContent('this is an instrument check, never a builder measurement')
+    expect(box).not.toHaveTextContent('a planning range, not a measured interval')
+    expect(box).toHaveTextContent(FIXTURE_LABEL)
+    // the cap still starts at the top of the estimate, floored at a dollar, and the button names both
+    const button = screen.getByRole('button', { name: 'Start the run — estimated $0.00 to $0.00, stops at $1.00' })
+    await userEvent.click(button)
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs')).toBe(true))
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'cobra', kind: 'replay', mode: 'sighted', builder: 'fixture_gold', model: 'gold', limit: 30, retain: { worktrees: false, transcripts: false }, max_cost_usd: 1 })
+  })
+
+  it('with the fixture, a map that cannot be read is still said with Retry and the button waits (G-108 holds for every builder)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': () => envelope(503, 'ledger_unavailable', 'ledger is locked'),
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'ok', detail: 'local', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false, fixture_gold: true } }] },
+    })
+    renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const err = await screen.findByTestId('measure-estimate-error')
+    expect(err).toHaveTextContent('Could not read this repository’s measured cost')
+    expect(within(err).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    // the known $0 is not quoted over a map that could not be read, and the button waits
+    expect(screen.getByTestId('before-you-start')).not.toHaveTextContent('at a known $0.00 each')
+    expect(screen.getByRole('button', { name: 'Start the run — no estimate yet' })).toBeDisabled()
+  })
+
+  it('the estimate’s hover, the About block’s numbers and the cap’s note say the known-price and $1-floor cases the fixture makes visible', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/cobra': REPO,
+      'GET /capability-map': { ...MAP, economics: econ(22, 0, null, NONE_KNOWN) },
+      'GET /health': { status: 'degraded', probes: [{ name: 'sandbox', status: 'ok', detail: 'local', data: { executor: 'local' } }, { name: 'builders', status: 'degraded', detail: 'configured: none', data: { anthropic: false, claude_code_cli: false, fixture_gold: true } }] },
+    })
+    const { container } = renderApp(<MeasurePage />, { route: '/connect/cobra/measure', path: '/connect/:name/measure' })
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('at a known $0.00 each'))
+    // the hover on the number describes the number: the third pricing mode is named
+    const estimate = container.querySelector('[data-hint="stat.measure.estimate"]')!
+    await expectHintOpens(estimate, 'stat.measure.estimate')
+    expect(HINTS['stat.measure.estimate']).toMatch(/known price per attempt — only the test-only fixture, at \$0 — is priced at that price/)
+    expect(HELP.find((h) => h.route === '/connect/:name/measure')?.numbers).toMatch(/known price per attempt — only the test-only fixture, at \$0/)
+    // the cap's words agree with its $1 floor
+    expect(HINTS['field.measure.spend_cap']).toMatch(/or at \$1 when the estimate is \$0/)
+    expect(container.textContent).toMatch(/It starts at the top of the estimate, or at \$1 when the estimate is \$0\./)
+    expect(screen.getByRole('button', { name: 'Start the run — estimated $0.00 to $0.00, stops at $1.00' })).toBeEnabled()
+  })
+
+  it('the About block says what this page does not do (G-908)', () => {
+    const about = HELP.find((h) => h.route === '/connect/:name/measure')
+    expect(about).toBeDefined()
+    expect(about!.purpose).toContain('This page does not run blind, choose the builder or model, sign off, route or deliver, or set a budget beyond this run’s cap; blind runs start from Runs.')
   })
 })

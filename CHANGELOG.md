@@ -70,6 +70,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   held until re-qualified; lint debt is never proposed (DL-316). Cancel the run asks in the
   app's dialog, Measure… posts nothing, and an unknown repository offers Connection.
 
+- **Proof through each journey's own doors (Wave 6, stream prf)**
+  ([the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-prf)).
+  The walk's Run watches the run it queued; its probe line is the runner's own summary.
+  The money page offers the test-only fixture only with no real builder credentialed, at a
+  known $0, never in production: `CRB_ENV` unset is production, as the server reads it; Factory
+  never defaults to it. A Pre-flight switch, off by default; the outage stop stated.
+  Tier 1 of `scripts/walkthrough.sh` hides `claude` and the builder keys from its stack. 04b
+  walks Connect from the walk; 05 presses the red button and downloads every export — the
+  abstract keeps fixture rows in; 06c reads the map's doors after 06b; 07 sweeps routing.
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

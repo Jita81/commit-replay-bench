@@ -10,7 +10,12 @@
  *               summary (estimated cost from the repository's own measured cost per
  *               attempt, the run's spend cap and how it is kept, retention, posture) and one
  *               red button that names the estimate and the cap — the MoJ "confirm an action"
- *               pattern. A spend cap field starts at the top of the estimate (F5b). While a
+ *               pattern. A spend cap field starts at the top of the estimate (F5b). A
+ *               Pre-flight switch, OFF by default, posts `preflight: true` only when ticked and
+ *               says in its note that the rows then record a separate arm (`<builder>+preflight`,
+ *               never pooled with plain rows) and that the repair call can spend (G-382); the
+ *               summary states the outage stop the run keeps at the worker's default (three
+ *               provider refusals in a row), which this page does not change. While a
  *               replay is already queued or running for the repository the button and the
  *               estimate give way to a banner naming that run, so the page can never queue
  *               a second spend by accident (J-ONR-4).
@@ -20,7 +25,12 @@
  *               documented range; while the map has not answered nothing is priced, and a
  *               failed map read is said with Retry — never priced from the range, G-108),
  *               the button says "estimated" and names the cap the request
- *               carries as `max_cost_usd` and the worker keeps (F5b); a last replay that
+ *               carries as `max_cost_usd` and the worker keeps (F5b); a builder with a KNOWN
+ *               price per attempt — only the test-only `fixture_gold`, offered by `builderChoice`
+ *               when no real builder is credentialed and named a test-only instrument check —
+ *               prices the estimate from that price ($0.00), never from the map's mean or the
+ *               planning range (G-380) — the map is still waited for and a failed read still
+ *               said; a last replay that
  *               stopped itself at its cap is said in a banner with its reason and its run,
  *               the posture is the real sandbox mode, and nothing is queued until the red
  *               button. A reader without the operator role is told so under the title and
@@ -30,15 +40,20 @@
  *               the way forward when the cap is refused on an unpriced model,
  *               the gold-clean cap note, every "Before you start" row, the "Every knob" link
  *               and the red button — is a hint trigger (`link.measure.*`, `nav.measure.kicker`,
- *               `banner.measure.inflight`, `banner.measure.spend_cap_stop`, `field.measure.*`,
- *               `stat.measure.*`, `text.measure.spend_cap_unpriced`,
- *               `summary.measure.*`, `button.measure.start`).
+ *               `banner.measure.inflight`, `banner.measure.spend_cap_stop`, `field.measure.*`
+ *               (the pre-flight switch is `field.measure.preflight`), `stat.measure.*`,
+ *               `text.measure.spend_cap_unpriced`, `summary.measure.*` (the outage stop is
+ *               `summary.measure.outage_stop`), `button.measure.start`). The About block's
+ *               purpose (ui/src/help/help.ts) names what the page does not do: blind, the
+ *               builder or model, sign-off, routing, delivery, a budget beyond this run's cap
+ *               (G-908).
  * How:          `useRepo` (+ `last_run` → `useRun`, polled, for the in-flight banner),
  *               `useCapabilityMap` (its economics fold, read by `measuredCostPerAttempt`),
  *               `useHealth` (sandbox posture and the builder), `builderChoice`
  *               (ui/src/lib/builder.ts) for the builder the deployment can run,
  *               `useCreateRun` with `{kind: replay, mode: sighted, limit, retain,
- *               max_cost_usd}`, the cap's text read by `readAmount` (ui/src/lib/amount.ts,
+ *               max_cost_usd}` plus `preflight: true` only when the switch is on, the cap's
+ *               text read by `readAmount` (ui/src/lib/amount.ts,
  *               P-273); a 422 `spend_cap_unpriced` gets this page's own way forward; on
  *               success the walk resumes on the repository with
  *               the run watched. The kicker is `journeyEyebrow(pathname, 'task 5 of 8 · …')`.
@@ -52,7 +67,8 @@
  *               ui/src/screens/Runs/RunNewDialog.tsx (the full form for an operator who wants
  *               every knob), src/crb/server/routes/runs.py (the request it submits)
  * Tested by:    ui/src/screens/Connect/MeasurePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
- *               (every element resolves to a registry id)
+ *               (every element resolves to a registry id),
+ *               ui/e2e/walkthrough/05-replay-fake.spec.ts (the red button on the live stack)
  * Touch when:   never for a new repository; the run request grows a field the walk should expose.
  */
 
@@ -133,6 +149,8 @@ export function MeasurePage() {
   const [limit, setLimit] = useState(30)
   const [worktrees, setWorktrees] = useState(false)
   const [transcripts, setTranscripts] = useState(false)
+  // G-382: the belt-5 pre-flight, OFF by default — it records a separate arm and can spend
+  const [preflight, setPreflight] = useState(false)
   const operator = can('operator')
 
   // the repository's own measured cost per attempt, when it has one: the map's economics
@@ -144,8 +162,15 @@ export function MeasurePage() {
   // the run makes one attempt per gold-clean task: the estimate, the button and the
   // request all use the SAME capped number, never the radio's face value
   const runLimit = gold > 0 ? Math.min(limit, gold) : limit
-  const lo = measuredMean !== null ? measuredMean * 0.8 * runLimit : RANGE_LOW * runLimit
-  const hi = measuredMean !== null ? measuredMean * 1.2 * runLimit : RANGE_HIGH * runLimit
+  const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
+  // the money page is the ONE screen that asks for the instrument check: on a hermetic stack
+  // with no credentialed builder the red button measures with the test-only fixture at $0
+  const choice = builderChoice(health.data, { instrumentCheck: true })
+  // a builder whose price per attempt is KNOWN before any attempt (the test-only fixture, $0)
+  // is priced from that price — the map's mean and the planning range describe real builders
+  const knownPrice = choice?.cost_per_attempt_usd ?? null
+  const lo = knownPrice !== null ? knownPrice * runLimit : measuredMean !== null ? measuredMean * 0.8 * runLimit : RANGE_LOW * runLimit
+  const hi = knownPrice !== null ? knownPrice * runLimit : measuredMean !== null ? measuredMean * 1.2 * runLimit : RANGE_HIGH * runLimit
   // F5b — the run's own spend cap, which the worker keeps: it starts at the top of the
   // estimate, rounded up to the dollar, and follows it until the operator types another
   const [capDraft, setCapDraft] = useState<string | null>(null)
@@ -159,12 +184,12 @@ export function MeasurePage() {
   // 422 spend_cap_unpriced, whose own way forward ("run without a cap") this page cannot
   // take, so the page names the two it can reach
   const unpriced = create.error instanceof ApiError && create.error.code === 'spend_cap_unpriced' ? unpricedModels(create.error.detail) : null
-  const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
-  const choice = builderChoice(health.data)
   const posture = posturePhrase(sandbox)
   const retention = !worktrees && !transcripts ? 'Nothing retained — grades and hashes only' : `${[worktrees && 'worktrees', transcripts && 'transcripts'].filter(Boolean).join(' and ')} kept until deleted`
-  // G-108: the estimate prices from the map's measured mean, so it waits for the map to
-  // answer; a failed read is said, with Retry, and nothing is priced from the fallback range
+  // G-108: the estimate waits for the map to answer and a failed read is said, with Retry,
+  // while nothing is priced — whatever the builder: a known price ($0, the fixture) is then
+  // quoted from the builder's price and the map's mean is not read for it, but the page never
+  // hides that the map could not be read, and the button waits for it like any other run.
   const priced = map.isSuccess
   const estimate: SummaryRow = {
     key: 'Estimated cost',
@@ -177,6 +202,11 @@ export function MeasurePage() {
       </span>
     ) : !priced ? (
       <span data-testid="measure-estimate-pending">Reading this repository’s measured cost…</span>
+    ) : knownPrice !== null ? (
+      <>
+        {usd(lo)} to {usd(hi)} for {runLimit} attempts, at a known {usd(knownPrice)} each — the test-only fixture builder spends nothing; this is an instrument check, never a builder measurement, and the map's measured mean is not read for it.{' '}
+        <DocLink to="ONBOARDING-A-REPO#step-4--measure-operator-the-money-step">Measure: the money step</DocLink>
+      </>
     ) : (
       <>
         {usd(lo)} to {usd(hi)} for {runLimit} attempts
@@ -201,6 +231,9 @@ export function MeasurePage() {
         limit: runLimit,
         retain: { worktrees, transcripts },
         max_cost_usd: cap,
+        // G-382: sent only when ticked — the API stores it only when set, and the rows then
+        // record the `<builder>+preflight` arm
+        ...(preflight ? { preflight: true } : {}),
       },
       { onSuccess: () => navigate(`/connect/${encodeURIComponent(name)}`) },
     )
@@ -293,7 +326,7 @@ export function MeasurePage() {
               />
             </Hint>
             <p id="measure-cap-note" className="m-0 mt-2 text-[16px] text-on-surface-muted">
-              The run stops before an attempt that could take its spend past this amount. An attempt with no cost cap of its own is counted at the dearest attempt so far (nothing before the first), so the run can pass this amount by up to one attempt; it then stops and says so. It starts at the top of the estimate.
+              The run stops before an attempt that could take its spend past this amount. An attempt with no cost cap of its own is counted at the dearest attempt so far (nothing before the first), so the run can pass this amount by up to one attempt; it then stops and says so. It starts at the top of the estimate, or at $1 when the estimate is $0.
             </p>
             {!capOk && (
               <p className="m-0 mt-2 text-[16px] font-bold text-status-red" data-testid="cap-invalid">
@@ -302,7 +335,7 @@ export function MeasurePage() {
             )}
           </>
         ) : (
-          <SummaryList label="Spend cap" rows={[{ key: 'Stop the run at', value: `${usd(capOk ? cap : 0)}, the top of the estimate unless the operator sets another`, hint: 'field.measure.spend_cap' }]} />
+          <SummaryList label="Spend cap" rows={[{ key: 'Stop the run at', value: `${usd(capOk ? cap : 0)}, the top of the estimate ($1 when the estimate is $0) unless the operator sets another`, hint: 'field.measure.spend_cap' }]} />
         )}
       </div>
       <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Retention</h2>
@@ -328,6 +361,20 @@ export function MeasurePage() {
             ]}
           />
         )}
+      </div>
+      <h2 className="mb-2 text-[24px] font-bold leading-[1.3]">Pre-flight</h2>
+      <div className="mb-8 max-w-[44em]" data-testid="measure-preflight">
+        {operator ? (
+          <Hint as="label" id="field.measure.preflight" className="flex cursor-pointer items-center gap-4 py-2 text-[19px] leading-[1.47]">
+            <input type="checkbox" className="h-6 w-6 accent-[var(--trust)]" checked={preflight} onChange={(e) => setPreflight(e.target.checked)} aria-describedby="measure-preflight-note" />
+            <span>Run the repository’s own formatter and linter on each attempt before grading</span>
+          </Hint>
+        ) : (
+          <SummaryList label="Pre-flight" rows={[{ key: 'Formatter and linter before grading', value: 'off unless the operator switches it on', hint: 'field.measure.preflight' }]} />
+        )}
+        <p id="measure-preflight-note" className="m-0 mt-2 text-[16px] text-on-surface-muted">
+          Off by default. When on, the rows record a separate arm{choice ? `, ${choice.builder}+preflight` : ''}, never pooled with plain rows, and the one bounded repair call the builder gets can spend within the cap above. Switch it on for a measurement you mean to compare with a plain one.
+        </p>
       </div>
       <div className="mb-8 max-w-[44em] border border-border p-6 shadow-[0_4px_0_var(--line)]" data-testid="before-you-start">
         <h2 className="mb-4 text-[24px] font-bold leading-[1.3]">Before you start</h2>
@@ -355,6 +402,17 @@ export function MeasurePage() {
                 : 'No valid cap yet: enter an amount above $0 under Spend cap.',
             },
             { key: 'Retention', hint: 'summary.measure.retention', value: retention },
+            {
+              key: 'Pre-flight',
+              hint: 'field.measure.preflight',
+              value: preflight ? `On — recorded as ${choice ? `${choice.builder}+preflight` : 'a separate arm'}, never pooled with plain rows; the repair call can spend` : 'Off — the plain arm',
+            },
+            // the circuit breaker the run keeps at the worker's default; this page states it and does not change it
+            {
+              key: 'Outage stop',
+              hint: 'summary.measure.outage_stop',
+              value: 'At the worker default: after 3 attempts in a row the provider refused, the run stops and says so. The full run form can change the number.',
+            },
             { key: 'Posture', hint: 'summary.measure.posture', value: posture },
           ]}
         />

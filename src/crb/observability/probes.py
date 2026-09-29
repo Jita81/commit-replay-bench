@@ -26,13 +26,16 @@ Layer:        observability — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/routes/system.py (``/health`` and ``/health/live`` — which
               probes run depends on ``CRB_ROLE``; its store probes run under ``run_probe``
-              with the request's id), src/crb/cli/commands/service.py (``crb doctor`` adds
+              with the request's id), src/crb/core/fixture_builder_switch.py (the one switch
+              ``probe_builders`` and the builder registry both read for the test-only
+              ``fixture_gold``), src/crb/cli/commands/service.py (``crb doctor`` adds
               the Claude Code login probe and the database ping; no request, so no id),
               src/crb/builders/container.py (``probe_builder_container``, the sealed-
               container counterpart), deploy/helm/crb/templates/api-service.yaml (the
               readiness/liveness endpoints these feed), docs/API.md#the-migrations-probe
               (the served shape of a failed read)
-Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py
+Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
+              tests/test_probe_fixture_builder.py
 Touch when:   onboarding a repository in a language whose toolchain is not in
               ``probe_toolchains``'s default list — add the binary name so ``/health`` says
               ``degraded`` before a sweep fails; a new credential source joins
@@ -49,6 +52,8 @@ import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
+
+from crb.core.fixture_builder_switch import fixture_builder_enabled
 
 log = logging.getLogger("crb.observability.probes")
 
@@ -147,7 +152,15 @@ def probe_docker(timeout: int = 10, *, request_id: str = "") -> ProbeResult:
 
 
 def probe_builders(env: dict[str, str] | None = None) -> ProbeResult:
-    """Which builder credentials / CLIs are configured (presence only, never values)."""
+    """Which builder credentials / CLIs are configured (presence only, never values).
+
+    ``fixture_gold`` is the test-only instrument check: reported present only when the
+    SAME switch the registry reads says so (``CRB_ENABLE_FIXTURE_BUILDER=1`` and never a
+    production ``CRB_ENV`` — :func:`crb.core.fixture_builder_switch.fixture_builder_enabled`),
+    so ``/health`` never says it is absent while a worker would accept it, or the reverse.
+    It is never a credential: it does not count toward ``configured`` and never lifts the
+    status from ``degraded`` — a deployment with only the fixture has no builder.
+    """
     e = env if env is not None else dict(os.environ)
     keys = {
         "anthropic": bool(e.get("ANTHROPIC_API_KEY")),
@@ -158,6 +171,7 @@ def probe_builders(env: dict[str, str] | None = None) -> ProbeResult:
     }
     configured = [k for k, v in keys.items() if v]
     status = OK if configured else DEGRADED
+    keys["fixture_gold"] = fixture_builder_enabled(e)
     return ProbeResult("builders", status, "configured: " + (", ".join(configured) or "none"), keys)
 
 

@@ -51,6 +51,8 @@
 #               refuse if any ``crb`` module the stack loads comes from another checkout →
 #               build ``ui/dist`` if stale → build and bare-clone the
 #               fixture → export a fresh env (secret, admin, local sandbox, dev switches) →
+#               tier 1 only: a stack PATH on which no ``claude`` resolves and the builder keys
+#               unset, so the builders probe can never credential a real builder (P-663) →
 #               ``crb migrate`` → ``crb serve`` + ``crb worker`` on a free port → wait for
 #               ``/health`` → export the ``CRB_E2E_*`` contract → ``npx playwright test``; the
 #               trap stops only the two PIDs it started and removes only its own temp dir (kept
@@ -63,7 +65,8 @@
 #               src/crb/cli/main.py (``migrate`` / ``serve`` / ``worker``), .github/workflows/ci.yml
 #               (the ``walkthrough`` job)
 # Tested by:    tests/test_walkthrough_script.py (the preflight: which checkout the stack
-#               imports; streams D and A1), tests/test_walkthrough_serves_this_tree.py (a foreign crb on the
+#               imports, and that tier 1 hides ``claude`` from the stack's PATH; streams D and
+#               A1), tests/test_walkthrough_serves_this_tree.py (a foreign crb on the
 #               path is never served), ui/e2e/walkthrough/01-login.spec.ts,
 #               ui/e2e/walkthrough/05-replay-fake.spec.ts (the suite it drives; CI runs it end to end)
 # Touch when:   never for a new repository; a spec needs another ``CRB_E2E_*`` variable (export it
@@ -147,6 +150,43 @@ then
   exit 2
 fi
 echo "walkthrough: crb imports from $ROOT/src" >&2
+
+# --- 0b. tier 1 is hermetic by construction, not by the operator's PATH -------------------
+# `probe_builders` reads `shutil.which("claude")` and the provider keys: with the operator's
+# CLI on PATH (or a key in the environment) /health credentials a real builder, the money page
+# offers it, and 05 refuses to press the red button — rightly, pressing would spend — so tier 1
+# went red on any developer machine (docs/PREVENTION.md P-663). The stack is therefore started
+# with a PATH on which no `claude` resolves — every directory that holds one is replaced by a
+# directory of symlinks to everything else it holds — and with the builder keys unset. Tier 2
+# (CRB_E2E_BUILDER set) keeps the operator's PATH: its real replay needs the CLI.
+BUILDER_KEYS=(ANTHROPIC_API_KEY OPENAI_API_KEY AZURE_OPENAI_API_KEY AZURE_OPENAI_ENDPOINT CEREBRAS_API_KEY)
+hide_cli_from_path() {  # usage: hide_cli_from_path <name> <shim-dir> → prints a PATH without <name>
+  local name="$1" shim="$2" d out="" entry farm
+  local -a dirs
+  IFS=':' read -r -a dirs <<<"$PATH"
+  for d in "${dirs[@]}"; do
+    [[ -n "$d" ]] || continue
+    if [[ -x "$d/$name" ]]; then
+      farm="$shim/${d//\//_}"
+      mkdir -p "$farm"
+      for entry in "$d"/*; do
+        [[ -x "$entry" && "${entry##*/}" != "$name" ]] || continue
+        ln -sf "$entry" "$farm/${entry##*/}"
+      done
+      d="$farm"
+    fi
+    out="${out:+$out:}$d"
+  done
+  printf '%s\n' "$out"
+}
+if [[ -z "${CRB_E2E_BUILDER:-}" ]]; then
+  if hidden_cli="$(command -v claude 2>/dev/null)"; then
+    echo "walkthrough: tier 1 is hermetic — the stack's PATH will hide $hidden_cli (the builders probe must not credential a CLI login)" >&2
+  fi
+  for k in "${BUILDER_KEYS[@]}"; do
+    if [[ -n "${!k:-}" ]]; then echo "walkthrough: tier 1 is hermetic — $k is set here and will be unset for the stack" >&2; fi
+  done
+fi
 if [[ "${CRB_E2E_PREFLIGHT_ONLY:-0}" == "1" ]]; then
   # tests/test_walkthrough_script.py and tests/test_walkthrough_serves_this_tree.py: the
   # preflight, and nothing created
@@ -284,12 +324,25 @@ export CRB_PUBLIC_URL="$BASE_URL"
 
 # the wall clock from the first command to a /health that answers: Step 0's machine time on
 # this single-host shape, printed so docs/DEPLOYMENT.md §8.1 cites a reading, not a guess (G-321)
-BOOT_T0="$("$PY" -c 'import time; print(time.time())')"
-"$CRB" migrate >"$API_LOG" 2>&1
+# the stack's own environment: tier 1 hides `claude` and unsets the builder keys (step 0b);
+# tier 2 runs with the operator's PATH and environment as they are
+STACK_ENV=(env)
+if [[ -z "${CRB_E2E_BUILDER:-}" ]]; then
+  STACK_PATH="$(hide_cli_from_path claude "$WORK/shim")"
+  if PATH="$STACK_PATH" command -v claude >/dev/null 2>&1; then
+    echo "walkthrough: tier 1 could not hide claude from the stack's PATH ($(PATH="$STACK_PATH" command -v claude))" >&2
+    exit 2
+  fi
+  for k in "${BUILDER_KEYS[@]}"; do STACK_ENV+=(-u "$k"); done   # env's -u must precede its assignments
+  STACK_ENV+=("PATH=$STACK_PATH")
+fi
 
-"$CRB" serve --host 127.0.0.1 --port "$PORT" >>"$API_LOG" 2>&1 &
+BOOT_T0="$("$PY" -c 'import time; print(time.time())')"
+"${STACK_ENV[@]}" "$CRB" migrate >"$API_LOG" 2>&1
+
+"${STACK_ENV[@]}" "$CRB" serve --host 127.0.0.1 --port "$PORT" >>"$API_LOG" 2>&1 &
 API_PID=$!
-"$CRB" worker --home "$CRB_HOME" --executor local --poll 0.5 >"$WORKER_LOG" 2>&1 &
+"${STACK_ENV[@]}" "$CRB" worker --home "$CRB_HOME" --executor local --poll 0.5 >"$WORKER_LOG" 2>&1 &
 WORKER_PID=$!
 
 # wait for the API (and the worker's first heartbeat is not required — runs are queued)

@@ -60,6 +60,21 @@ describe('stagesFor', () => {
     expect(s.filter((x) => x.spends).map((x) => x.id)).toEqual(['measure'])
   })
 
+  it('a Done probe stage reads the runner’s own summary line (the last non-empty line of the transcript), the same line the Configuration tab shows — never pytest’s dots (P-662)', () => {
+    // the probe stores the runner's tail: the progress line first, the summary last
+    const detail = 'tests/test_calc.py .                                                    [100%]\n1 passed in 0.08s\n'
+    const s = stagesFor({ repo: repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail } }) })
+    expect(s[1]?.status).toBe('done')
+    expect(s[1]?.detail).toBe('ok — 1 passed in 0.08s')
+    // a failed probe names the summary too, not the dots
+    const down = stagesFor({ repo: repo({ probe: { status: 'down', run_id: 'r1', checked: 'x', detail: 'collecting ...\nERROR: pytest: command not found\n' } }) })
+    expect(down[1]?.status).toBe('failed')
+    expect(down[1]?.detail).toBe('ERROR: pytest: command not found')
+    // a one-line detail is that line; a long line is cut with an ellipsis
+    expect(stagesFor({ repo: repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'pytest 8' } }) })[1]?.detail).toBe('ok — pytest 8')
+    expect(stagesFor({ repo: repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'x'.repeat(200) } }) })[1]?.detail).toBe(`ok — ${'x'.repeat(160)}…`)
+  })
+
   it('a running probe or mine run marks its stage in progress with the run to watch', () => {
     const probing = stagesFor({ repo: repo({ last_run: { id: 'r1', kind: 'probe', status: 'running', finished: null } }) })
     expect(probing[1]).toMatchObject({ status: 'running', runId: 'r1' })

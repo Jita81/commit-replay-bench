@@ -394,7 +394,7 @@ export const HINTS = {
   'field.measure.retain_transcripts':
     'Keep the builder’s conversation for each attempt. Off by default; it can contain code from your repository, so it is in scope for your retention policy.',
   'stat.measure.estimate':
-    'A planning band for this run: the number of attempts times a per-attempt cost. With no measured mean for this repository it uses the range earlier repositories showed and carries no apparatus; once this repository has measured attempts it uses their mean (n shown) with ±20 % around it. It is not a measured interval.',
+    'A planning band, not a measured interval: attempts times a per-attempt cost. With no measured mean for this repository it uses the range earlier repositories showed; once this repository has measured attempts it uses their mean (n shown) with ±20 % around it. A builder with a known price per attempt — only the test-only fixture, at $0 — is priced at that price and reads neither the band nor the mean.',
   'summary.measure.builder':
     'The builder and model this deployment will use for every attempt, chosen from the credentials the admin configured. Every knob opens the full run form.',
   'link.measure.every_knob':
@@ -402,13 +402,17 @@ export const HINTS = {
   'summary.measure.budget_cap':
     'The most this run may spend, and how it keeps to it: before each attempt it counts what it has spent plus what that attempt could cost, and stops if the sum would pass the cap. An attempt with no cost cap of its own is counted at the dearest attempt so far, nothing before the first, so a run can pass its cap by up to one attempt; it then stops and says so.',
   'field.measure.spend_cap':
-    'The most this measurement should spend, in US dollars. It starts at the top of the estimate. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass this amount by up to one attempt.',
+    'The most this measurement should spend, in US dollars. It starts at the top of the estimate, or at $1 when the estimate is $0. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass this amount by up to one attempt.',
   'text.measure.spend_cap_unpriced':
     'Why the run was not queued and what to do: this page always caps the run, and a cap needs the price of the model. An admin can add the price, or you can use the full run form, which can run with no cap.',
   'banner.measure.spend_cap_stop':
     'The last measurement stopped at its spend cap: before an attempt that could have passed it, or after an attempt with no cost cap of its own passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
   'summary.measure.retention':
     'What this run will keep beyond grades and hashes, from the two boxes above.',
+  'field.measure.preflight':
+    'Off by default. When on, the repository’s own formatter and linter run on each attempt’s changed files after the build, fix what they can, and the builder gets one bounded repair call; that call is part of the attempt’s spend. The rows record a separate arm, the builder plus “+preflight”, which is never pooled with plain rows — so switch it on only for a measurement you mean to compare.',
+  'summary.measure.outage_stop':
+    'The circuit breaker this run keeps at the worker’s default: after three attempts in a row that the provider refused — a usage limit, a dead credential — the run stops and says so instead of writing a refused row for every remaining attempt. The full run form can change the number.',
   'summary.measure.posture':
     'Whether the sandbox that runs the tests is sealed (docker) so the rows count as evidence, or a local executor whose rows are a development reading only.',
   'button.measure.start':
@@ -2224,7 +2228,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/home': 10,
   '/connect': 8,
   '/connect/:name': 14,
-  '/connect/:name/measure': 10,
+  '/connect/:name/measure': 18,
   '/results': 31,
   '/decisions': 6,
   // a signed entry, an unsigned one and a work type with slots, sizes and the quality table
