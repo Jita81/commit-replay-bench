@@ -611,11 +611,21 @@ describe('HomePage', () => {
     second.unmount()
     vi.unstubAllGlobals()
     mockApi({ ...routes, 'GET /factory/alpha/intake': () => envelope(500, 'internal', 'intake unreadable') })
-    renderApp(<HomePage />, { route: '/home' })
+    const third = renderApp(<HomePage />, { route: '/home' })
     await waitFor(() => expect(screen.getByTestId('home-task-8-note')).toHaveTextContent('intake state not known'))
     expect(screen.getByTestId('home-task-8-note')).not.toHaveTextContent('not configured')
     // and the failed read is named in the envelope with the others (G-164)
     expect(screen.getByRole('alert')).toHaveTextContent('Not read: the board intake')
+    third.unmount()
+    vi.unstubAllGlobals()
+    // a read still on its way is not a failed read: the note says the state is being read
+    mockApi({ ...routes, 'GET /factory/alpha/intake': () => new Promise<Response>(() => {}) })
+    renderApp(<HomePage />, { route: '/home' })
+    const pending = await screen.findByTestId('home-task-8-note')
+    await waitFor(() => expect(pending).toHaveTextContent('Task 8. Work enters from your board: being read — the intake state has not arrived yet'))
+    expect(pending).not.toHaveTextContent('failed')
+    expect(pending).not.toHaveTextContent('not known')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   const healthRoutes = (health: unknown) => ({
@@ -644,15 +654,20 @@ describe('HomePage', () => {
           { name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} },
           { name: 'migrations', status: 'down', detail: 'database at 0041 is behind code head 0042', data: {} },
           { name: 'worker', status: 'degraded', detail: 'no worker has checked in', data: {} },
+          { name: 'append_only', status: 'degraded', detail: 'the trigger is missing', data: {} },
         ],
       }),
     )
     const { container } = renderApp(<HomePage />, { route: '/home' })
     const list = await screen.findByTestId('home-probe-banner')
     const region = screen.getByRole('region', { name: 'Important' })
-    expect(region).toHaveTextContent('2 health probes need attention.')
+    expect(region).toHaveTextContent('3 health probes need attention.')
     const rows = within(list).getAllByRole('listitem')
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(3)
+    // a probe's identifier is not a word: the sentence names it in plain English
+    expect(rows[2]).toHaveTextContent('The append-only store probe is degraded: the trigger is missing.')
+    expect(rows[2]).not.toHaveTextContent('append_only')
+    expect(within(rows[2]!).getByRole('link', { name: 'What to do' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#33-postgresql')
     expect(rows[0]).toHaveTextContent('The migrations probe is down: database at 0041 is behind code head 0042.')
     expect(within(rows[0]!).getByRole('link', { name: 'What to do' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#6-upgrade')
     expect(rows[1]).toHaveTextContent('The worker probe is degraded: no worker has checked in.')

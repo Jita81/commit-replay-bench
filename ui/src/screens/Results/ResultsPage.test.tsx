@@ -55,7 +55,7 @@ import { helpFor } from '../../help/help'
 import { unhinted } from '../../help/hints-collector'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
-import { ResultsPage, gateOpen } from './ResultsPage'
+import { ResultsPage, gateOpen, oracleTone } from './ResultsPage'
 import pageSource from './ResultsPage.tsx?raw'
 import testSource from './ResultsPage.test.tsx?raw'
 
@@ -592,6 +592,24 @@ describe('ResultsPage', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(empty.calls.some((c) => c.method === 'POST')).toBe(false)
   })
+  it('the oracle tile’s tone and the door back to the walk are one reading, never two rules (P-403)', () => {
+    // a scored oracle with no bar to read it against is not amber: nothing says it is under the bar
+    expect(oracleTone(0.7, null)).toBe('muted')
+    expect(oracleTone(null, 0.8)).toBe('muted')
+    expect(oracleTone(0.7, 0.8)).toBe('amber')
+    expect(oracleTone(0.8, 0.8)).toBe('green')
+    // the gate reads the tile's tone, so the two cannot disagree on any pair
+    for (const [mean, bar] of [
+      [0.7, null],
+      [null, 0.8],
+      [0.7, 0.8],
+      [0.8, 0.8],
+      [null, null],
+    ] as const) {
+      const tone = oracleTone(mean, bar)
+      expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleTone: tone })).toBe(tone === 'amber')
+    }
+  })
   it('an amber or not-run gate offers one click back to the walk; all-green gates and a failed read do not (G-236, G-444)', async () => {
     // all green: controls passed, the oracle mean (0.8) meets the bar (0.8) — no door in the gates card
     mockApi(ROUTES)
@@ -637,8 +655,8 @@ describe('ResultsPage', () => {
     await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('escaped'))
     expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
     // the empty state's own door carries the same hint
-    expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleMean: 0.9, oracleBar: 0.8 })).toBe(false)
-    expect(gateOpen({ controlsNotRun: false, verdictState: 'unmeasured', oracleNotRun: false, oracleMean: 0.9, oracleBar: 0.8 })).toBe(true)
+    expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleTone: oracleTone(0.9, 0.8) })).toBe(false)
+    expect(gateOpen({ controlsNotRun: false, verdictState: 'unmeasured', oracleNotRun: false, oracleTone: oracleTone(0.9, 0.8) })).toBe(true)
   })
 
   it('the Waiting on a person card says how many rows it is not showing when it cuts the list', async () => {

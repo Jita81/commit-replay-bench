@@ -4,15 +4,18 @@
  *
  * Navigation
  * ----------
- * What it is:   `intakeState(intake, failed)` folds `GET /factory/{repo}/intake` into one of four
- *               states — `not_known` (the read failed), `not_configured` (no tracker on the
- *               deployment), `not_listening` (configured, the listener off) and `listening` (on
- *               `column`) — and `intakeLine(state)` gives the words each screen shows after
- *               "Work enters from your board:".
+ * What it is:   `intakeState(intake, failed, pending)` folds `GET /factory/{repo}/intake` into one
+ *               of five states — `reading` (the answer has not arrived), `not_known` (the read
+ *               failed), `not_configured` (no tracker on the deployment), `not_listening`
+ *               (configured, the listener off) and `listening` (on `column`) — `intakeWords`
+ *               gives the words each screen shows after "Work enters from your board:", and
+ *               `intakeLine(intake, failed, pending)` is the whole line.
  * What it does: Says, wherever the stream is named, that work enters from the enterprise's own
  *               board and whether the product is listening to it (G-548), in the same words on
  *               both screens so they can never disagree. A failed read is "intake state not
- *               known", never "not configured": absence of an answer is not an answer. Nothing
+ *               known", never "not configured", and a read still on its way is "being read",
+ *               never a failure: absence of an answer is not an answer, and waiting for one is
+ *               not a failed read (the first paint said "the read failed" until P-632). Nothing
  *               here implies a ticket WILL be built — a ready ticket waits for an operator's
  *               Register act (ADR-0022), and the entry gate decides after that (ADR-0026 item 8).
  * How:          Pure functions over the `Intake` shape; the screens wrap the words in a link to
@@ -32,7 +35,7 @@
 
 import type { Intake } from '../../api/types'
 
-export type IntakeState = 'not_known' | 'not_configured' | 'not_listening' | 'listening'
+export type IntakeState = 'reading' | 'not_known' | 'not_configured' | 'not_listening' | 'listening'
 
 /** The state and, when listening, the column it listens on. */
 export interface IntakeReading {
@@ -42,11 +45,14 @@ export interface IntakeReading {
 
 /**
  * Fold the intake read into a state. `failed` is the query's own failure (any error: a
- * failed read is never read as "not configured"); `undefined` with no failure is still
- * loading, and reads as not known until the answer arrives.
+ * failed read is never read as "not configured"); `pending` is the query still on its way
+ * (`isPending`), which reads as "being read" — never as a failure; `undefined` with neither
+ * is not known.
  */
-export function intakeState(intake: Intake | undefined, failed: boolean): IntakeReading {
-  if (failed || !intake) return { state: 'not_known', column: '' }
+export function intakeState(intake: Intake | undefined, failed: boolean, pending = false): IntakeReading {
+  if (failed) return { state: 'not_known', column: '' }
+  if (pending && !intake) return { state: 'reading', column: '' }
+  if (!intake) return { state: 'not_known', column: '' }
   if (!intake.connection.configured) return { state: 'not_configured', column: '' }
   const column = intake.listener.column || intake.connection.column || ''
   if (!intake.listener.enabled) return { state: 'not_listening', column }
@@ -62,6 +68,8 @@ export const INTAKE_LEAD = 'Work enters from your board:'
  */
 export function intakeWords(reading: IntakeReading): string {
   switch (reading.state) {
+    case 'reading':
+      return 'being read — the intake state has not arrived yet'
     case 'not_known':
       return 'intake state not known — the intake read failed, so this page cannot say whether the board is being read'
     case 'not_configured':
@@ -74,6 +82,6 @@ export function intakeWords(reading: IntakeReading): string {
 }
 
 /** The whole line: `Work enters from your board: <words>`. */
-export function intakeLine(intake: Intake | undefined, failed: boolean): string {
-  return `${INTAKE_LEAD} ${intakeWords(intakeState(intake, failed))}`
+export function intakeLine(intake: Intake | undefined, failed: boolean, pending = false): string {
+  return `${INTAKE_LEAD} ${intakeWords(intakeState(intake, failed, pending))}`
 }

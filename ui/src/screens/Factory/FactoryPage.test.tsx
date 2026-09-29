@@ -926,6 +926,20 @@ describe('FactoryPage — the shipped contract', () => {
     expect(line).not.toHaveTextContent('not listening')
   })
 
+  it('while the intake read is still on its way the head says the state is being read, never that the read failed', async () => {
+    // a read that never settles: the words for the wait are not the words for a failure
+    mockApi(base({ 'GET /factory/alpha/intake': () => new Promise<Response>(() => {}) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const line = await screen.findByTestId('factory-intake-state')
+    await waitFor(() => expect(line).toHaveTextContent('Work enters from your board: being read — the intake state has not arrived yet'))
+    expect(line).not.toHaveTextContent('failed')
+    expect(line).not.toHaveTextContent('not known')
+    expect(within(line).getByRole('link')).toHaveAttribute('href', '/factory/intake?repo=alpha')
+  })
+
+  /** The route the task view serves for the evolution — with a query only the server would add (DL-310 item 1). */
+  const SERVED_ROUTE = '/factory/alpha/backlog/evolutions?served=v2'
+
   /** A weak-test stop with the served way forward and its draft (G-904), as `_prefill` serves it. */
   const weakTestStop = (): FactoryTask => {
     const reason = 'the reviewer found the oracle weak (the test asserts only that the call returns) and this deployment has no test author: strengthen the test and register a superseding item'
@@ -937,7 +951,9 @@ describe('FactoryPage — the shipped contract', () => {
       refusal: { step: 'review', reason, reason_code: '', measured_route: '' },
       way_forward: {
         action: 'register_evolution',
-        route: '/factory/alpha/backlog/evolutions',
+        // SERVED, and told apart from the path a screen could compose for itself: the query is
+        // the server's, so a screen that built `/factory/{repo}/backlog/evolutions` on its own fails
+        route: SERVED_ROUTE,
         supersedes: 'I-1',
         what_to_change: 'Strengthen the test so it fails for the reason the review gave, then register this item with the stronger test attached.',
         needs_authored_test: true,
@@ -972,7 +988,9 @@ describe('FactoryPage — the shipped contract', () => {
     await userEvent.type(within(form).getByLabelText(/^Test path/), 'tests/test_multiply.py')
     await userEvent.type(within(form).getByLabelText(/^Test content/), 'def test_multiply():\n    assert multiply(3, 4) == 12\n')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Register I-1-v2' }))
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/backlog/evolutions')).toBe(true))
+    // the POST goes to the served route exactly — query and all — never to a path composed here
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith(SERVED_ROUTE))).toBe(true))
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual([`/api/v1${SERVED_ROUTE}`])
     const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
     expect(body.item).toMatchObject({ id: 'I-1-v2', supersedes: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size_estimate: 'XS', kind: 'code', level: 'L1', structural_facts: ['reproduction: x'], acceptance_criteria: ['multiply(3, 4) == 12'], depends_on: [] })
     expect(body.authored).toEqual({ path: 'tests/test_multiply.py', content: 'def test_multiply():\n    assert multiply(3, 4) == 12\n' })

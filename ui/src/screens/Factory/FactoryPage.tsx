@@ -542,7 +542,7 @@ export function FactoryPage() {
         <Hint as="p" id="stat.factory.intake_state" className="mb-4 mt-0 text-sm text-on-surface-body" data-testid="factory-intake-state">
           {INTAKE_LEAD}{' '}
           <Link to={`/factory/intake?repo=${encodeURIComponent(repo)}`} className="underline underline-offset-4">
-            {intakeWords(intakeState(intake.data, intake.isError))}
+            {intakeWords(intakeState(intake.data, intake.isError, intake.isPending))}
           </Link>
         </Hint>
       )}

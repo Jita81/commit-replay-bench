@@ -56,7 +56,8 @@
  *               `useFactoryBacklog` +
  *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`;
  *               `useIntake` → `intakeState` (screens/Factory/intake.ts) for task 8's note;
- *               `probesNeedingAttention(health.probes)` → `PROBE_GUIDE` for the banner; every
+ *               `probesNeedingAttention(health.probes)` → `PROBE_LABEL` (the probe in words)
+ *               and `PROBE_GUIDE` for the banner; every
  *               query's error state (the App's and the runs' included) feeds the one
  *               `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -237,6 +238,21 @@ export const PROBE_GUIDE: Record<string, DocAnchor> = {
   build: 'DEPLOYMENT#6-upgrade',
 }
 
+/** The probe's name in words for the banner's sentence (a probe id is not plain English); the id itself for one not listed. */
+export const PROBE_LABEL: Record<string, string> = {
+  db: 'database',
+  migrations: 'migrations',
+  append_only: 'append-only store',
+  ledger: 'ledger',
+  sandbox: 'sandbox',
+  provision: 'provisioning',
+  toolchains: 'toolchains',
+  builders: 'builders',
+  worker: 'worker',
+  intake: 'intake',
+  build: 'build',
+}
+
 export function HomePage() {
   const { me, can } = useAuth()
   const [params] = useSearchParams()
@@ -410,7 +426,7 @@ export function HomePage() {
           <ul className="m-0 list-disc pl-5" data-testid="home-probe-banner">
             {attention.map((p) => (
               <Hint as="li" key={p.name} id="banner.home.probe" className="mb-1">
-                The {p.name} probe is {p.status}{p.detail ? `: ${p.detail}` : ''}. <DocLink to={PROBE_GUIDE[p.name] ?? PROBE_GUIDE_DEFAULT}>What to do</DocLink>
+                The {PROBE_LABEL[p.name] ?? p.name} probe is {p.status}{p.detail ? `: ${p.detail}` : ''}. <DocLink to={PROBE_GUIDE[p.name] ?? PROBE_GUIDE_DEFAULT}>What to do</DocLink>
               </Hint>
             ))}
           </ul>
@@ -433,7 +449,7 @@ export function HomePage() {
           // G-548 — the stream starts at the board: the same words the Factory head shows
           <Hint as="p" id="stat.home.intake_state" className="m-0 mt-2 text-[16px] text-on-surface-muted" data-testid="home-task-8-note">
             <strong>Task 8.</strong> {INTAKE_LEAD}{' '}
-            <Link to={`/factory/intake${q}`}>{intakeWords(intakeState(intake.data, intake.isError))}</Link>
+            <Link to={`/factory/intake${q}`}>{intakeWords(intakeState(intake.data, intake.isError, intake.isPending))}</Link>
           </Hint>
         )}
       </div>

@@ -142,6 +142,17 @@ describe('HELP ratchet', () => {
     expect(learn.purpose).toContain('The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.')
   })
 
+  // G-548 — the stream starts at the board: the About blocks say so in the same terms as the
+  // page head and Home's task 8, so the page's own explanation never contradicts its head
+  it('the /factory and /home About blocks say work enters from the board through intake, beside the frozen backlog (G-548)', () => {
+    const factory = helpFor('/factory')!
+    expect(factory.purpose).toContain('Work enters from your board through intake')
+    expect(factory.purpose).toContain('a ticket in the watched column becomes a frozen backlog item')
+    expect(factory.next.operator).toContain('Switch the listener on, or freeze a backlog here, then Run the factory')
+    const home = helpFor('/home')!
+    expect(home.next.operator).toContain('Task 8 starts at your board')
+  })
+
   it('the /signoff About block links the Step 6 human-review guide and says where the read of a diff is recorded (G-481)', () => {
     const h = helpFor('/signoff')!
     expect(h.readMore.map((r) => r.to)).toContain('HUMAN-REVIEW-GUIDE')

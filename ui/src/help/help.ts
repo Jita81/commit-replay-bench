@@ -53,7 +53,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'This is where the deployment is on the way from an empty install to a change delivered under evidence. The task list is the operators’ progress; every role can read it.',
     next: {
       viewer: 'Follow Continue to the baseline for the most recent repository, or open Decisions to see what is waiting on a person. You cannot start a task from here.',
-      operator: 'Work the tasks in order. Tasks 1 to 4 cost nothing; tasks 5 and 8 spend model budget and say so before they start.',
+      operator: 'Work the tasks in order. Tasks 1 to 4 cost nothing; tasks 5 and 8 spend model budget and say so before they start. Task 8 starts at your board: switch the intake listener on and a ticket in the watched column becomes the backlog item.',
       approver: 'Nothing here needs you until task 7 is done and a cell reaches your Decisions. Read the baseline meanwhile.',
       admin: 'Task 1 (the GitHub App) and task 7 (an approver account) are yours; both are in Settings.',
     },
@@ -158,10 +158,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/factory',
-    purpose: 'Deliver new work under the same rules as replay: a frozen backlog, an item built only when its cell has a proven context standard and the item carries what it needs, a failing test proved before any build, a build inside the sandbox, and a branch and pull request only where the change’s own cell licenses it. Every step is on the evidence chain.',
+    purpose: 'Deliver new work under the same rules as replay. Work enters from your board through intake: a ticket in the watched column becomes a frozen backlog item, and a backlog can also be frozen here. An item is built only when its cell has a proven context standard and the item carries what it needs, a failing test is proved before any build, the build runs inside the sandbox, and a branch and pull request open only where the change’s own cell licenses it. Every step is on the evidence chain.',
     next: {
       viewer: 'Read each item’s chain: readiness, RED proof, build, delivery, review, outcome. A PR link opens the pull request in the repository.',
-      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a cell this deployment would deliver from today. An item whose cell’s standard nobody has signed off is not built at all; the rest open no pull request.',
+      operator: 'Switch the listener on, or freeze a backlog here, then Run the factory. The count beside the checkbox says how many items sit in a cell this deployment would deliver from today. An item whose cell’s standard nobody has signed off is not built at all; the rest open no pull request.',
       approver: 'Items blocked on a structural gap wait for your signature, and an item whose cell has no proven standard waits for a calibration build only you can fund. Lifting a missing sign-off for one run is recorded on the chain under your name; it never lifts the route gate.',
     },
     numbers: '“k of m items sit in a cell this deployment would deliver from” is read from the map and the sign-offs at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',

@@ -9,7 +9,8 @@
  *               waiting on a person for this repository, and the doors into the full map,
  *               the routes with their reasons, the oracle and the ledger. When a gate is amber
  *               or not run, the gates card offers one click back to the walk step that
- *               produces it (`gateOpen`, G-236 / G-444); the "Waiting on a person" card
+ *               produces it (`oracleTone` → `gateOpen`, one reading for the tile and the
+ *               door, G-236 / G-444, P-634); the "Waiting on a person" card
  *               lists the first `SHOWN` rows and says how many more there are (G-237).
  * What it does: Gives an enterprise reader the answer in the order they need it — is the
  *               instrument trustworthy here, what may the builder be trusted to do, what is
@@ -124,17 +125,26 @@ const NO_TASKS: FactoryTask[] = []
 const SHOWN = 6
 
 /**
+ * The Oracle strength tile's tone, read once for the tile and the gate (P-403: one rule, one
+ * reader): muted until a mean is scored and a bar is loaded to read it against, green at or
+ * over the bar, amber under it.
+ */
+export function oracleTone(oracleMean: number | null, oracleBar: number | null): 'muted' | 'green' | 'amber' {
+  if (oracleMean === null || oracleBar === null) return 'muted'
+  return oracleMean >= oracleBar ? 'green' : 'amber'
+}
+
+/**
  * G-236 / G-444 — whether a gate is not green, so the page offers one click back to the walk
  * step that produces it: the controls were not run, their verdict is thin or unmeasured, the
- * oracle is not scored, or its mean sits under the policy's bar. A read that FAILED is not an
- * open gate (its way forward is Retry), and a red escape or a failed verdict is not either
- * (its way forward is stronger tests, on Learn).
+ * oracle is not scored, or its tile reads amber (`oracleTone`: the mean under the policy's
+ * bar). A read that FAILED is not an open gate (its way forward is Retry), and a red escape
+ * or a failed verdict is not either (its way forward is stronger tests, on Learn).
  */
-export function gateOpen(input: { controlsNotRun: boolean; verdictState: string | undefined; oracleNotRun: boolean; oracleMean: number | null; oracleBar: number | null }): boolean {
+export function gateOpen(input: { controlsNotRun: boolean; verdictState: string | undefined; oracleNotRun: boolean; oracleTone: 'muted' | 'green' | 'amber' }): boolean {
   if (input.controlsNotRun || input.oracleNotRun) return true
   if (input.verdictState === 'thin' || input.verdictState === 'unmeasured') return true
-  if (input.oracleMean !== null && input.oracleBar !== null && input.oracleMean < input.oracleBar) return true
-  return false
+  return input.oracleTone === 'amber'
 }
 
 /**
@@ -319,7 +329,8 @@ export function ResultsPage() {
   const oracleApparatus = oracleData ? `apparatus ${oracleData.apparatus_versions.join(', ') || '—'} · mean of per-task mutation scores${oracleBar !== null ? ` · ≥ ${pct(oracleBar)} per cell to deliver` : ''}` : 'one mutation score per task, from the oracle run'
   // G-236 / G-444 — computed from the current data (never `<query>.data`, which the source
   // ratchet refuses): the door back to the walk when a gate is amber or not run
-  const walkOpen = gateOpen({ controlsNotRun, verdictState: verdict?.state, oracleNotRun, oracleMean, oracleBar })
+  const oracleToneNow = oracleTone(oracleMean, oracleBar)
+  const walkOpen = gateOpen({ controlsNotRun, verdictState: verdict?.state, oracleNotRun, oracleTone: oracleToneNow })
   const walk = `/connect/${encodeURIComponent(repo)}`
 
   return (
@@ -383,7 +394,7 @@ export function ResultsPage() {
                 n={oracleData?.tasks.length ?? null}
                 ci={null}
                 apparatus={oracleApparatus}
-                tone={oracleMean === null ? 'muted' : oracleBar !== null && oracleMean >= oracleBar ? 'green' : 'amber'}
+                tone={oracleToneNow}
                 hint="stat.results.oracle_strength"
                 footer={oracleFailed ? <RetryLine onRetry={() => void oracle.refetch()} /> : 'no interval: a mean of per-task scores, not a rate'}
                 data-testid="tile-oracle-strength"

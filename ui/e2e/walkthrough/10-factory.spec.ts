@@ -27,7 +27,8 @@
  *               the approver (a second persona, signed in as themselves) signs I-2's
  *               structural gap and the evidence chain records it under their id, with no
  *               lift of the sign-off clause offered while delivery is not linked (G-143); that
- *               the head says work enters from the board with the intake state (G-548); that a
+ *               the head says work enters from the board with the tier-1 stack's own intake
+ *               state, "configured but not listening", asserted exactly (G-548); that a
  *               built item's Task door lands on its task page (G-366); that the outcomes row
  *               counts the delivered pull requests and a sync the App cannot make says why
  *               (G-368); that the record evolves — an evolution registered through the served
@@ -35,7 +36,9 @@
  *               `register_evolution` stop, so the dialog's own post is proved at unit level);
  *               that Freeze and Run are pressed from the keyboard (G-992); and that
  *               /factory does not scroll sideways at 375 px (J-FAC-14).
- * How:          `signIn` (the fixture), the freeze dialog's JSON mode (the only way to attach
+ * How:          `signIn` (the fixture), `ensureRepository` (the fixture repository is registered
+ *               and probed here when no earlier story did, so the story runs alone), the freeze
+ *               dialog's JSON mode (the only way to attach
  *               an authored test in the UI), `tabTo` + Enter for Freeze and Run, `waitForRun`
  *               on the status pill, then the item rows' test ids (`factory-item-<id>`,
  *               `step-<id>-<step>`, `cell-route-<id>`, `refusal-<id>`, `evidence-<id>`,
@@ -55,7 +58,7 @@
  */
 import type { Page } from '@playwright/test'
 import { focusedIs, settle, tabTo } from './keyboard'
-import { apiPost, env, expect, personaPassword, primary, runIdFromUrl, signIn, test, waitForRun } from './support'
+import { apiGet, apiPost, env, expect, personaPassword, primary, runIdFromUrl, signIn, test, waitForRun, waitRunApi } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -94,6 +97,33 @@ const BACKLOG = {
 const APPROVER = 'walk-approver'
 const APPROVER_PASS = personaPassword(APPROVER)
 
+/** The fixture repository the story works on (registered here when no earlier story did). */
+const t = primary()
+
+/**
+ * Make the fixture repository exist and be probed, as 02-repo-onboard does through the dialog,
+ * unless an earlier story already did: this story owns its own precondition, so a run of it
+ * alone (`--grep 10-factory`) meets a registered repository, not a 404 from the first freeze.
+ */
+async function ensureRepository(page: Page): Promise<void> {
+  const repos = (await apiGet(page.request, '/repos?limit=500')) as { items: Array<{ name: string }> }
+  if (repos.items.some((r) => r.name === t.name)) return
+  await apiPost(page, '/repos', {
+    name: t.name,
+    language: t.language,
+    runner: 'pytest',
+    url: t.url,
+    src_prefix: 'src/',
+    test_prefix: 'tests/',
+    ext: '.py',
+    belt_scope: t.beltScope,
+    probe: t.probe,
+    runner_opts: t.runnerOpts ?? {},
+  })
+  const probe = await apiPost(page, `/repos/${encodeURIComponent(t.name)}/probe`, {})
+  await waitRunApi(page, String(probe.id), t.probeTimeoutMs)
+}
+
 /** Create the approver persona unless an earlier spec did; the page must be signed in as the admin. */
 async function ensureApprover(page: Page): Promise<void> {
   const users = await page.request.get(`${env.baseUrl}/api/v1/users?limit=500`)
@@ -110,18 +140,20 @@ async function ensureApprover(page: Page): Promise<void> {
 
 test.describe('10 factory (fixture_gold)', () => {
   test.skip(env.publicTier, 'tier 1 only: the fixture builder drives the loop without a model')
-  const t = primary()
   let runId = ''
 
   test('freeze a two-item backlog through the dialog; the pills and the before-you-run facts read from the stack', async ({ page }) => {
+    await ensureRepository(page)
     await page.goto(`/factory?repo=${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('factory-no-backlog')).toBeVisible()
     // G-548 — the stream starts at the board: the head says so, with the intake state on the
-    // same line (the tier-1 stack has no tracker, so it reads not configured), never "will build"
+    // same line, never "will build". The tier-1 stack exports a fake tracker with a project and
+    // a column (scripts/walkthrough.sh) and no listener is switched on, so the one state it can
+    // serve is "configured but not listening" — asserted exactly, so a failed read cannot pass
     const intake = page.getByTestId('factory-intake-state')
-    await expect(intake).toContainText('Work enters from your board:')
-    await expect(intake).toContainText(/listening on|not listening|not configured|not known/)
+    await expect(intake).toContainText('Work enters from your board: configured but not listening — an operator switches this repository’s listener on')
     await expect(intake).not.toContainText('will build')
+    await expect(intake).not.toContainText('not known')
     // G-140 — where work comes from is said on the empty state and on the dialog
     await expect(page.getByTestId('factory-no-backlog')).toContainText('Work comes from a backlog typed here or pasted as JSON, or from board tickets that arrive through intake.')
     // G-992 — the freeze is driven from the keyboard: Tab to the button, Enter opens the dialog
