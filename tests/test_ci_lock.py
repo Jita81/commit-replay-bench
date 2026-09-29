@@ -601,9 +601,9 @@ def _planted_job(edit: Any) -> str:
         ),
         (
             "an aggregator that does not prove the partition",
-            lambda j: j.replace("ci_test_shards.py verify --shards 6", "ci_test_shards.py plan"),
+            lambda j: j.replace("ci_test_shards.py verify --shards 8", "ci_test_shards.py plan"),
         ),
-        ("a shard that drops a slice", lambda j: j.replace('--shard="$SHARD/6"', '--shard="1/6"')),
+        ("a shard that drops a slice", lambda j: j.replace('--shard="$SHARD/8"', '--shard="1/8"')),
         (
             "a shard that claims the stopped daemon",
             lambda j: j.replace(

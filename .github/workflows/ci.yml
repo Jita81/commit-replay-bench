@@ -488,14 +488,17 @@ jobs:
     # provides as root, so a test that needs one of them fails instead of skipping when it
     # does not work (P-745). Not provided here, so skipped with the reason: docker (the daemon
     # is stopped) and cargo (the runner's rustup has no toolchain for root). The list is
-    # test-shard's less exactly those (tests/test_toolchain_gates.py, P-748).
-    name: fresh-clone shard (${{ matrix.shard }} of 6, as root, no docker daemon)
+    # test-shard's less exactly those (tests/test_toolchain_gates.py, P-748). The timeout is
+    # test-shard's 30 minutes scaled by the measured root slowdown and rounded up: at the same
+    # N, the refreshed weights (P-740) put the heaviest shard at 17.9 min as root, so a
+    # 30-minute timeout would leave it over half (tests/test_ci_test_shards.py, P-743).
+    name: fresh-clone shard (${{ matrix.shard }} of 8, as root, no docker daemon)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       CRB_TEST_REQUIRE_TOOLS: "go gofmt node npm mvn jdk helm uv jq bash"
     steps:
@@ -538,7 +541,7 @@ jobs:
           git fetch -q "$SRC" HEAD
           git checkout -q --detach "$(git -C "$SRC" rev-parse HEAD)"
           uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
-          PYTHONPATH=scripts .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images" -p ci_test_shards --shard="$SHARD/6" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"
+          PYTHONPATH=scripts .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images" -p ci_test_shards --shard="$SHARD/8" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"
           GATES
           sudo --preserve-env=SRC,SHARD,CRB_TEST_REQUIRE_TOOLS,JAVA_HOME,PYTHONDONTWRITEBYTECODE \
             env "PATH=$PATH" HOME=/root bash -euo pipefail "$RUNNER_TEMP/gates.sh" < /dev/null
@@ -553,7 +556,7 @@ jobs:
           retention-days: 1
       - name: Job budget (fails past 80 % of timeout-minutes)
         if: always()
-        run: python3 scripts/ci_job_budget.py --timeout-minutes 30 --mode fail
+        run: python3 scripts/ci_job_budget.py --timeout-minutes 40 --mode fail
 
   fresh-clone:
     # The one context an administrator adds to main's required checks (DL-101, G-930): it
@@ -586,9 +589,10 @@ jobs:
           merge-multiple: true
       - name: Every test ran in exactly one shard (the partition proof)
         run: >-
-          python3 scripts/ci_test_shards.py verify --shards 6 --python 3.12
+          python3 scripts/ci_test_shards.py verify --shards 8 --python 3.12
           shards/shard-1.json shards/shard-2.json shards/shard-3.json
           shards/shard-4.json shards/shard-5.json shards/shard-6.json
+          shards/shard-7.json shards/shard-8.json
       - name: Job budget (fails past 80 % of timeout-minutes)
         if: always()
         run: python3 scripts/ci_job_budget.py --timeout-minutes 10 --mode fail

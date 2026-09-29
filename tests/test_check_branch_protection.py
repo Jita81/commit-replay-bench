@@ -245,11 +245,11 @@ def test_the_real_workflow_requires_its_aggregators_and_none_of_their_parts() ->
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     parts = mod.aggregated_parts(ci)
     assert set(parts.values()) == {"test", "walkthrough", "fresh-clone"}
-    assert sum(1 for c in parts if c.startswith("test shard (py")) == 12
+    assert sum(1 for c in parts if c.startswith("test shard (py")) == 16
     assert "walkthrough story (browser, live stack, tier 1)" in parts
     assert sum(1 for c in parts if c.startswith("walkthrough screens (")) == 4
     assert "fresh-clone gates (from uv.lock, as root, no docker daemon)" in parts
-    assert sum(1 for c in parts if c.startswith("fresh-clone shard (")) == 6
+    assert sum(1 for c in parts if c.startswith("fresh-clone shard (")) == 8
     gating = mod.gating_contexts(ci)
     assert {
         "test (py3.12)",
