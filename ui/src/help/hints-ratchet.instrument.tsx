@@ -304,9 +304,11 @@ const BACKLOG = {
     { id: 'I-1', title: 'Multiply', kind: 'code', capability_class: 'bug.fix', size: 'XS', level: 'L1', depends_on: [], structural_facts: ['reproduction: x'], has_authored_test: true, description: 'calc needs multiply' },
     { id: 'I-2', title: 'Divide', kind: 'code', capability_class: 'feature.add', size: 'S', level: 'L1', depends_on: ['I-1'], structural_facts: [], has_authored_test: false, description: '' },
   ],
+  // G-368 — the delivered pull requests by outcome, and when the newest was read
+  outcomes: { delivered: 1, merged: 1, closed: 0, open: 0, last_synced: '2026-09-16T08:00:00+00:00' },
 }
 const FACTORY_TASKS = [
-  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64) },
+  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64), outcome: { state: 'merged', pr_number: 7, pr_url: 'https://github.invalid/acme/alpha/pull/7', merged_at: '2026-09-16T07:59:00+00:00', merged_by: 'ada', merge_sha: 'm'.repeat(40), closed_at: '', synced_at: '2026-09-16T08:00:00+00:00' } },
   { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'not_ready', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: NO_ROUTE, ...UNTOUCHED, refusal: { step: 'readiness', reason: 'two structural gaps are unsigned', reason_code: '', measured_route: '' } },
 ]
 const INTAKE = {
@@ -560,6 +562,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
       'GET /factory/alpha/backlog': BACKLOG,
       'GET /factory/alpha/tasks': FACTORY_TASKS,
       'GET /factory/catalogue': CATALOGUE,
+      'GET /factory/alpha/intake': INTAKE,
       'GET /health': HEALTH,
       'GET /version': VERSION,
       'GET /capability-map': MAP,

@@ -1551,6 +1551,66 @@ export interface FactoryBacklog {
    * rather than guess — the field is optional so that fallback stays type-checked.
    */
   delivery?: FactoryDeliveryPreflight
+  /**
+   * B-9 / F30 — the pull requests the factory delivered on this repository and how they
+   * ended, as COUNTS (a merge is a human act, never a rate — DL-049); `last_synced` is the
+   * newest outcome's record time, `''` when none was ever read. Optional for a mock built
+   * before G-368; the server always sends it.
+   */
+  outcomes?: FactoryOutcomesSummary
+}
+
+/** `FactoryBacklogOut.outcomes` (`OutcomesSummaryOut`): delivered / merged / closed / open, by count. */
+export interface FactoryOutcomesSummary {
+  delivered: number
+  merged: number
+  closed: number
+  open: number
+  last_synced: string
+}
+
+/** The newest delivered pull request's fate (`DeliveryOutcomeOut`): `open` = delivered and no
+ *  outcome recorded yet (the other fields `''`); `merged` / `closed` from the newest
+ *  `delivery.merged` / `delivery.closed` event, `synced_at` its record time. */
+export interface FactoryDeliveryOutcome {
+  state: 'open' | 'merged' | 'closed' | string
+  pr_number: number
+  pr_url: string
+  merged_at: string
+  merged_by: string
+  merge_sha: string
+  closed_at: string
+  synced_at: string
+}
+
+/** `POST /factory/{repo}/outcomes/sync` (`OutcomeSyncOut`): what one sync did, and the summary after it. */
+export interface FactoryOutcomeSync {
+  checked: number
+  merged: number
+  closed: number
+  open: number
+  errors: string[]
+  outcomes: FactoryOutcomesSummary
+}
+
+/** The body `POST /factory/{repo}/backlog/evolutions` takes (`EvolutionRegisterIn`, F32): the
+ *  superseding item — a backlog item plus `supersedes` — and, when the stop was about the test,
+ *  the operator-authored failing test that goes with it. */
+export interface FactoryEvolutionBody {
+  item: {
+    id: string
+    title: string
+    kind: string
+    description: string
+    capability_class: string
+    size_estimate: string
+    structural_facts: string[]
+    acceptance_criteria: string[]
+    depends_on: string[]
+    level: string
+    supersedes: string
+  }
+  authored?: { path: string; content: string }
 }
 
 /** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
@@ -1647,6 +1707,11 @@ export interface FactoryTask {
   calibration?: FactoryCalibrationGrant | null
   /** The SHA-256 of the test the newest RED proof carries — what a strength-probe waiver names. */
   test_sha256?: string
+  /** B-9 / F30 — the newest delivered pull request's fate; `null` until a delivery (optional for older mocks). */
+  outcome?: FactoryDeliveryOutcome | null
+  /** F32 — the supersession chain: the id this item replaced, and the evolution that replaced it (`''` = neither). */
+  supersedes?: string
+  superseded_by?: string
 }
 
 /** Why the entry gate stopped an item before any spend (ADR-0026 item 8). */

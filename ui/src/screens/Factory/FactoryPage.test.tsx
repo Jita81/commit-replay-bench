@@ -26,7 +26,14 @@
  *               refused 422 on freeze), that a built item opens its evidence (F15), and that an active
  *               factory run is a banner that polls the chain (J-FAC-5 / J-TEL-9), and that
  *               at phone width an item is one line with the six cards behind a Details and
- *               the cell-route pill short (J-FAC-14).
+ *               the cell-route pill short (J-FAC-14); that the head says work enters from the
+ *               board with the intake state on the same line and a failed intake read as
+ *               "not known" (G-548); that the freeze dialog says where work comes from and what
+ *               the form does not take (G-140); that a built item links its task page (G-366);
+ *               that Register this evolution posts the served draft to the served route, needs
+ *               the failing test for a weak-test stop, and shows the record's 409 in the dialog
+ *               (F32); and that the outcomes row counts the delivered pull requests, an operator
+ *               syncs them, and a refused sync says why and changes nothing (G-368).
  * How:          `mockApi` + `renderApp` at `/factory?repo=…`; a stubbed `matchMedia` for the
  *               phone-width case (jsdom has none, so the page otherwise renders wide).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -209,6 +216,13 @@ describe('stepsFor — an item the factory has not touched', () => {
     const build = stepsFor(task({ status: 'not_clean', route_hint: 'build', red_proof: true, build_status: 'not_clean', last_event: 'build', cell_route: DELIVER }))[2]!
     expect(build.status).toBe('failed')
     expect(build.detail).toBe('not clean')
+  })
+
+  it('a build that is not clean names the reason and says to register an evolution that supersedes the item', () => {
+    // recovery.16: every stop names its reason and its way forward — a not-clean build had no sentence at all
+    const notClean = task({ status: 'not_clean', route_hint: 'build', red_proof: true, build_status: 'not_clean', last_event: 'item.outcome', cell_route: DELIVER, outcome_reason: 'belt 3: two new failing tests' })
+    expect(refusalSentence(notClean)).toBe('The build under the belts was not clean: belt 3: two new failing tests, so nothing was reviewed or pushed. Read the evidence, then add the fact the belts found missing and register an evolution that supersedes this item (the frozen hash stays; the old chain is kept); or open the change by hand and mark the item done in the next backlog.')
+    expect(refusalSentence(task({ status: 'not_clean', build_status: 'not_clean' }))).toMatch(/^The build under the belts was not clean, so nothing was reviewed or pushed\./)
   })
 })
 
@@ -845,5 +859,245 @@ describe('FactoryPage — the shipped contract', () => {
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
     const refusal = await screen.findByTestId('refusal-I-1')
     expect(within(refusal).getByRole('link', { name: 'Strengthen the tests on Learn' })).toHaveAttribute('href', '/learn?repo=alpha#strengthen')
+  })
+  it('the freeze dialog says where work comes from and what the form does not take', async () => {
+    // G-140: the form collects a subset of a backlog item, and nothing said so; a tester could
+    // not tell from the dialog that a test comes through the JSON tab or the test author
+    mockApi(base({ 'GET /factory/alpha/backlog': () => envelope(404, 'not_found', "no backlog registered for 'alpha'"), 'GET /factory/alpha/tasks': [] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const empty = await screen.findByTestId('factory-no-backlog')
+    expect(empty).toHaveTextContent('Work comes from a backlog typed here or pasted as JSON, or from board tickets that arrive through intake.')
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(within(empty).getByRole('button', { name: 'Freeze a backlog…' }))
+    const sources = await screen.findByTestId('freeze-sources')
+    expect(sources).toHaveTextContent('Work comes from a backlog typed here or pasted as JSON, or from board tickets that arrive through intake.')
+    expect(sources).toHaveTextContent('The form takes no acceptance criteria, labels or authored test: paste JSON to attach a test, or the test author writes one if it is switched on.')
+    expect(sources).not.toHaveTextContent('can never')
+  })
+
+  it('a built item links to its task page beside Evidence; an unbuilt item offers none (G-366)', async () => {
+    mockApi(base())
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row1 = await screen.findByTestId('factory-item-I-1')
+    const link = within(row1).getByRole('link', { name: 'Task' })
+    expect(link).toHaveAttribute('href', `/tasks/alpha/${'c'.repeat(40)}`)
+    expect(link).toHaveAttribute('data-hint', 'button.factory.item_task')
+    // beside the evidence: both in the item's head line
+    expect(within(row1).getByRole('button', { name: 'Evidence' })).toBeInTheDocument()
+    const row2 = screen.getByTestId('factory-item-I-2')
+    expect(within(row2).queryByRole('link', { name: 'Task' })).toBeNull()
+  })
+
+  it('the head says work enters from the board, with the intake state on the same line: listening, not listening, not configured (G-548)', async () => {
+    const connection = { tracker: 'ado', url: 'https://dev.azure.invalid/contoso', project: 'Widgets', column: 'Ready for manufacture', poll_s: 300, outcome_map: {}, configured: true, credential_set: true, credential_fingerprint: 'AB12' }
+    const listener = { enabled: true, column: '', switched_by: 'Ada', switched_at: '2026-09-22T09:00:00Z', since: '' }
+    const intake = (over: Record<string, unknown>) => ({ repo: 'alpha', listener, connection, last_poll: null, rows: [], ...over })
+    mockApi(base({ 'GET /factory/alpha/intake': intake({}) }))
+    const first = renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const line = await screen.findByTestId('factory-intake-state')
+    await waitFor(() => expect(line).toHaveTextContent('Work enters from your board: listening on “Ready for manufacture”'))
+    // never "will build": a ready ticket waits for a person's Register act (ADR-0022)
+    expect(line).toHaveTextContent('a ready ticket waits for an operator’s Register act')
+    expect(line).not.toHaveTextContent(/will build/)
+    expect(within(line).getByRole('link')).toHaveAttribute('href', '/factory/intake?repo=alpha')
+    expect(line).toHaveAttribute('data-hint', 'stat.factory.intake_state')
+    // the header itself starts at the board
+    expect(screen.getByText(/New work from your own board/)).toBeInTheDocument()
+    first.unmount()
+    vi.unstubAllGlobals()
+    mockApi(base({ 'GET /factory/alpha/intake': intake({ listener: { ...listener, enabled: false } }) }))
+    const second = renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('factory-intake-state')).toHaveTextContent('Work enters from your board: configured but not listening — an operator switches this repository’s listener on'))
+    second.unmount()
+    vi.unstubAllGlobals()
+    mockApi(base({ 'GET /factory/alpha/intake': intake({ listener: { ...listener, enabled: false }, connection: { ...connection, tracker: 'none', configured: false, credential_set: false } }) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const notConfigured = await screen.findByTestId('factory-intake-state')
+    await waitFor(() => expect(notConfigured).toHaveTextContent('Work enters from your board: not configured — an admin sets the tracker'))
+    expect(within(notConfigured).getByRole('link')).toHaveAttribute('href', '/factory/intake?repo=alpha')
+  })
+
+  it('an intake read that fails says the state is not known, never not configured', async () => {
+    mockApi(base({ 'GET /factory/alpha/intake': () => envelope(500, 'internal', 'intake unreadable') }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const line = await screen.findByTestId('factory-intake-state')
+    await waitFor(() => expect(line).toHaveTextContent('Work enters from your board: intake state not known'))
+    expect(line).not.toHaveTextContent('not configured')
+    expect(line).not.toHaveTextContent('not listening')
+  })
+
+  /** A weak-test stop with the served way forward and its draft (G-904), as `_prefill` serves it. */
+  const weakTestStop = (): FactoryTask => {
+    const reason = 'the reviewer found the oracle weak (the test asserts only that the call returns) and this deployment has no test author: strengthen the test and register a superseding item'
+    return {
+      ...TASKS[0]!,
+      status: 'oracle_needs_strengthening',
+      outcome_reason: reason,
+      error: reason,
+      refusal: { step: 'review', reason, reason_code: '', measured_route: '' },
+      way_forward: {
+        action: 'register_evolution',
+        route: '/factory/alpha/backlog/evolutions',
+        supersedes: 'I-1',
+        what_to_change: 'Strengthen the test so it fails for the reason the review gave, then register this item with the stronger test attached.',
+        needs_authored_test: true,
+        prefill: { ...PREFILL, description: `${PREFILL.description}\n\nWhy the last attempt stopped: ${reason}` },
+      },
+    }
+  }
+
+  it('Register this evolution posts the drafted item to the way-forward route and the item reads superseded', async () => {
+    const { calls } = mockApi(base({ 'GET /factory/alpha/tasks': [weakTestStop(), TASKS[1]!], 'POST /factory/alpha/backlog/evolutions': () => json({ ...BACKLOG, evolutions_hash: 'e'.repeat(64) }, 201) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    const open = within(row).getByRole('button', { name: 'Register this evolution…' })
+    expect(open).toHaveAttribute('data-hint', 'button.factory.register_evolution')
+    // nothing is registered on its own: no POST before the press
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    // the secondary path stays beside it
+    expect(within(row).getByRole('button', { name: 'Freeze a revised backlog…' })).toBeInTheDocument()
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(open)
+    const dialog = await screen.findByRole('dialog', { name: 'Register an evolution of I-1' })
+    const form = within(dialog).getByTestId('evolution-form')
+    // the draft is the form's starting point: id and supersedes read-only, the rest as served
+    expect(within(form).getByLabelText('Id')).toHaveValue('I-1-v2')
+    expect(within(form).getByLabelText('Id')).toHaveAttribute('readonly')
+    expect(within(form).getByLabelText('Supersedes')).toHaveValue('I-1')
+    expect(within(form).getByLabelText('Supersedes')).toHaveAttribute('readonly')
+    expect(within(form).getByLabelText(/^Title/)).toHaveValue('Multiply')
+    expect((within(form).getByLabelText(/^Description/) as HTMLTextAreaElement).value).toContain('the test asserts only that the call returns')
+    expect(within(form).getByLabelText(/^Structural facts/)).toHaveValue('reproduction: x')
+    expect(within(form).getByLabelText(/^Acceptance criteria/)).toHaveValue('multiply(3, 4) == 12')
+    await userEvent.type(within(form).getByLabelText(/^Test path/), 'tests/test_multiply.py')
+    await userEvent.type(within(form).getByLabelText(/^Test content/), 'def test_multiply():\n    assert multiply(3, 4) == 12\n')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Register I-1-v2' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/backlog/evolutions')).toBe(true))
+    const body = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))
+    expect(body.item).toMatchObject({ id: 'I-1-v2', supersedes: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size_estimate: 'XS', kind: 'code', level: 'L1', structural_facts: ['reproduction: x'], acceptance_criteria: ['multiply(3, 4) == 12'], depends_on: [] })
+    expect(body.authored).toEqual({ path: 'tests/test_multiply.py', content: 'def test_multiply():\n    assert multiply(3, 4) == 12\n' })
+    // on 201 the item reads superseded by the evolution's id, and the record is re-read
+    expect(await within(row).findByTestId('superseded-I-1')).toHaveTextContent('Superseded by I-1-v2')
+    expect(within(row).queryByRole('button', { name: 'Register this evolution…' })).toBeNull()
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.path === '/factory/alpha/tasks').length).toBeGreaterThan(1))
+  })
+
+  it('a weak-test stop cannot register an evolution without the failing test', async () => {
+    const { calls } = mockApi(base({ 'GET /factory/alpha/tasks': [weakTestStop(), TASKS[1]!], 'POST /factory/alpha/backlog/evolutions': () => json(BACKLOG, 201) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(within(row).getByRole('button', { name: 'Register this evolution…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Register an evolution of I-1' })
+    expect(dialog).toHaveTextContent('This stop was about the test, so the evolution must carry a failing test of its own.')
+    expect(within(dialog).getByRole('button', { name: 'Register I-1-v2' })).toBeDisabled()
+    expect(dialog).toHaveTextContent('The path and the content of the failing test are needed before this evolution can be registered.')
+    // a path alone is not a test
+    await userEvent.type(within(dialog).getByLabelText(/^Test path/), 'tests/test_multiply.py')
+    expect(within(dialog).getByRole('button', { name: 'Register I-1-v2' })).toBeDisabled()
+    await userEvent.type(within(dialog).getByLabelText(/^Test content/), 'assert False')
+    expect(within(dialog).getByRole('button', { name: 'Register I-1-v2' })).toBeEnabled()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('an evolution during an active run is refused with factory_run_active, in the dialog', async () => {
+    const { calls } = mockApi(
+      base({
+        'GET /factory/alpha/tasks': [weakTestStop(), TASKS[1]!],
+        'POST /factory/alpha/backlog/evolutions': () => envelope(409, 'factory_run_active', 'a factory run is queued or running for alpha: the backlog cannot change until it ends'),
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(within(row).getByRole('button', { name: 'Register this evolution…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Register an evolution of I-1' })
+    await userEvent.type(within(dialog).getByLabelText(/^Test path/), 'tests/test_multiply.py')
+    await userEvent.type(within(dialog).getByLabelText(/^Test content/), 'assert False')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Register I-1-v2' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    // the refusal is beside the form that made it, and the item is not read as superseded
+    await waitFor(() => expect(dialog).toHaveTextContent('a factory run is queued or running for alpha: the backlog cannot change until it ends'))
+    expect(screen.getByRole('dialog', { name: 'Register an evolution of I-1' })).toBeInTheDocument()
+    expect(within(row).queryByTestId('superseded-I-1')).toBeNull()
+  })
+
+  it('a viewer reads who registers an evolution and who reads the outcomes; a served superseded item says so', async () => {
+    const superseded: FactoryTask = { ...TASKS[0]!, id: 'I-0', status: 'superseded', superseded_by: 'I-1', way_forward: null }
+    mockApi(base({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /factory/alpha/backlog': { ...BACKLOG, outcomes: { delivered: 0, merged: 0, closed: 0, open: 0, last_synced: '' } }, 'GET /factory/alpha/tasks': [weakTestStop(), superseded] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    expect(within(row).queryByRole('button', { name: 'Register this evolution…' })).toBeNull()
+    expect(within(row).getByTestId('prefill-I-1')).toHaveTextContent('An operator registers the evolution')
+    expect(screen.getByTestId('factory-outcomes')).toHaveTextContent('an operator reads the outcomes')
+    expect(screen.queryByRole('button', { name: 'Sync outcomes' })).toBeNull()
+    expect(screen.getByTestId('factory-outcomes-counts')).toHaveTextContent('0 delivered · 0 merged · 0 closed · 0 open · never read')
+    // the record's own word on a superseded item: I-0 was replaced by I-1
+    const old = screen.getByTestId('factory-item-I-0')
+    expect(within(old).getByTestId('superseded-I-0')).toHaveTextContent('Superseded by I-1')
+    expect(within(old).getByTestId('item-status-I-0')).toHaveTextContent('Superseded')
+  })
+
+  it('the outcome card shows delivered / merged / closed / open with when they were last read, and an operator syncs them', async () => {
+    const merged = { state: 'merged', pr_number: 7, pr_url: 'https://github.invalid/acme/alpha/pull/7', merged_at: '2026-09-16T07:59:00+00:00', merged_by: 'ada', merge_sha: 'm'.repeat(40), closed_at: '', synced_at: '2026-09-16T08:00:00+00:00' }
+    const delivered: FactoryTask = { ...TASKS[0]!, pr_url: merged.pr_url, outcome: merged }
+    const { calls } = mockApi(
+      base({
+        'GET /factory/alpha/backlog': { ...BACKLOG, delivery: LINKED, outcomes: { delivered: 2, merged: 1, closed: 0, open: 1, last_synced: '2026-09-16T08:00:00+00:00' } },
+        'GET /factory/alpha/tasks': [delivered, TASKS[1]!],
+        'POST /factory/alpha/outcomes/sync': () => json({ checked: 1, merged: 0, closed: 0, open: 1, errors: ['PR #8 (I-2): GitHub 404: not found'], outcomes: { delivered: 2, merged: 1, closed: 0, open: 1, last_synced: '2026-09-16T08:00:00+00:00' } }),
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const counts = await screen.findByTestId('factory-outcomes-counts')
+    // counts, never a rate (DL-049), and when the newest outcome was read
+    expect(counts).toHaveTextContent(/Delivered pull requests: 2 delivered · 1 merged · 0 closed · 1 open · last read 16 Sept 2026/)
+    expect(counts).not.toHaveTextContent('%')
+    expect(counts).toHaveAttribute('data-hint', 'stat.factory.outcomes')
+    // the item's own pill links the pull request and says when its fate was read
+    const pill = within(screen.getByTestId('factory-item-I-1')).getByTestId('outcome-I-1')
+    expect(pill).toHaveAttribute('href', merged.pr_url)
+    expect(pill).toHaveTextContent(/PR #7 merged by ada · read 16 Sept 2026/)
+    expect(within(screen.getByTestId('factory-item-I-2')).queryByTestId('outcome-I-2')).toBeNull()
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(screen.getByRole('button', { name: 'Sync outcomes' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/outcomes/sync')).toBe(true))
+    const report = await screen.findByTestId('factory-sync-report')
+    expect(report).toHaveTextContent('checked 1 · merged 0 · closed 0 · still open 1')
+    expect(report).toHaveTextContent('1 could not be read: PR #8 (I-2): GitHub 404: not found')
+    // the record is re-read after a sync: the counts and each item's outcome come from it
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.path === '/factory/alpha/backlog').length).toBeGreaterThan(1))
+  })
+
+  it('a sync the App cannot make says why (outcome_sync_unavailable) and changes nothing', async () => {
+    const reason = 'the outcome of a delivered pull request can only be read through the GitHub App installation the repository is linked to. Delivery is not possible for this repository: it is connected by URL, not through the GitHub App.'
+    const { calls } = mockApi(
+      base({
+        'GET /factory/alpha/backlog': { ...BACKLOG, outcomes: { delivered: 1, merged: 0, closed: 0, open: 1, last_synced: '' } },
+        'POST /factory/alpha/outcomes/sync': () => envelope(409, 'outcome_sync_unavailable', reason),
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const counts = await screen.findByTestId('factory-outcomes-counts')
+    expect(counts).toHaveTextContent('1 delivered · 0 merged · 0 closed · 1 open · never read')
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(screen.getByRole('button', { name: 'Sync outcomes' }))
+    const err = await screen.findByTestId('factory-sync-error')
+    expect(err).toHaveTextContent('The outcomes cannot be read for this repository — nothing was recorded')
+    expect(err).toHaveTextContent(reason)
+    // nothing changed: the counts stand, no report, and the record was not re-read
+    expect(screen.getByTestId('factory-outcomes-counts')).toHaveTextContent('1 delivered · 0 merged · 0 closed · 1 open · never read')
+    expect(screen.queryByTestId('factory-sync-report')).toBeNull()
+    expect(calls.filter((c) => c.method === 'GET' && c.path === '/factory/alpha/backlog')).toHaveLength(1)
+    // and a GitHub refusal is said as one
+    vi.unstubAllGlobals()
+    cleanup()
+    mockApi(base({ 'GET /factory/alpha/backlog': { ...BACKLOG, delivery: LINKED, outcomes: { delivered: 1, merged: 0, closed: 0, open: 1, last_synced: '' } }, 'POST /factory/alpha/outcomes/sync': () => envelope(502, 'github_error', 'GitHub refused: bad credentials') }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    await screen.findByTestId('factory-outcomes-counts')
+    await userEvent.click(screen.getByRole('button', { name: 'Sync outcomes' }))
+    const refused = await screen.findByTestId('factory-sync-error')
+    expect(refused).toHaveTextContent('GitHub refused the read — nothing was recorded')
+    expect(refused).toHaveTextContent('GitHub refused: bad credentials')
   })
 })

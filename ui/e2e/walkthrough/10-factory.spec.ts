@@ -26,15 +26,24 @@
  *               forward (J-FAC-4 / J-FAC-15); that the Runs list names the factory kind; that
  *               the approver (a second persona, signed in as themselves) signs I-2's
  *               structural gap and the evidence chain records it under their id, with no
- *               lift of the sign-off clause offered while delivery is not linked (G-143); and that
+ *               lift of the sign-off clause offered while delivery is not linked (G-143); that
+ *               the head says work enters from the board with the intake state (G-548); that a
+ *               built item's Task door lands on its task page (G-366); that the outcomes row
+ *               counts the delivered pull requests and a sync the App cannot make says why
+ *               (G-368); that the record evolves — an evolution registered through the served
+ *               route supersedes I-1 and the page reads both rows (F32; tier 1 serves no
+ *               `register_evolution` stop, so the dialog's own post is proved at unit level);
+ *               that Freeze and Run are pressed from the keyboard (G-992); and that
  *               /factory does not scroll sideways at 375 px (J-FAC-14).
  * How:          `signIn` (the fixture), the freeze dialog's JSON mode (the only way to attach
- *               an authored test in the UI), `waitForRun` on the status pill, then the item
- *               rows' test ids (`factory-item-<id>`, `step-<id>-<step>`, `cell-route-<id>`,
- *               `refusal-<id>`, `evidence-<id>`).
+ *               an authored test in the UI), `tabTo` + Enter for Freeze and Run, `waitForRun`
+ *               on the status pill, then the item rows' test ids (`factory-item-<id>`,
+ *               `step-<id>-<step>`, `cell-route-<id>`, `refusal-<id>`, `evidence-<id>`,
+ *               `task-<id>`, `superseded-<id>`, `factory-outcomes-counts`).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md (the route gate)
- * Works with:   ui/e2e/walkthrough/support.ts, ui/src/screens/Factory/FactoryPage.tsx (under
+ * Works with:   ui/e2e/walkthrough/support.ts, ui/e2e/walkthrough/keyboard.ts (`tabTo`,
+ *               `focusedIs`, `settle`), ui/src/screens/Factory/FactoryPage.tsx (under
  *               test), src/crb/server/routes/factory.py and src/crb/server/factory_state.py
  *               (the fold it reads), src/crb/factory/loop.py (the refusals it asserts),
  *               src/crb/builders/fixture_gold.py (the builder), ui/e2e/walkthrough/README.md
@@ -45,7 +54,8 @@
  *               grades clean and the delivery step, not the build step, is the one to assert).
  */
 import type { Page } from '@playwright/test'
-import { env, expect, personaPassword, primary, runIdFromUrl, signIn, test, waitForRun } from './support'
+import { focusedIs, settle, tabTo } from './keyboard'
+import { apiPost, env, expect, personaPassword, primary, runIdFromUrl, signIn, test, waitForRun } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -106,14 +116,31 @@ test.describe('10 factory (fixture_gold)', () => {
   test('freeze a two-item backlog through the dialog; the pills and the before-you-run facts read from the stack', async ({ page }) => {
     await page.goto(`/factory?repo=${encodeURIComponent(t.name)}`)
     await expect(page.getByTestId('factory-no-backlog')).toBeVisible()
-    await page.getByRole('button', { name: 'Freeze a backlog…' }).first().click()
+    // G-548 — the stream starts at the board: the head says so, with the intake state on the
+    // same line (the tier-1 stack has no tracker, so it reads not configured), never "will build"
+    const intake = page.getByTestId('factory-intake-state')
+    await expect(intake).toContainText('Work enters from your board:')
+    await expect(intake).toContainText(/listening on|not listening|not configured|not known/)
+    await expect(intake).not.toContainText('will build')
+    // G-140 — where work comes from is said on the empty state and on the dialog
+    await expect(page.getByTestId('factory-no-backlog')).toContainText('Work comes from a backlog typed here or pasted as JSON, or from board tickets that arrive through intake.')
+    // G-992 — the freeze is driven from the keyboard: Tab to the button, Enter opens the dialog
+    await settle(page)
+    await tabTo(page, '[data-hint="button.factory.freeze"]', 'the Freeze a backlog… button')
+    await page.keyboard.press('Enter')
     const dialog = page.getByRole('dialog', { name: 'Freeze a backlog' })
     await expect(dialog).toBeVisible()
+    expect(await focusedIs(dialog), 'focus did not move into the freeze dialog when it opened').toBe(true)
+    await expect(dialog.getByTestId('freeze-sources')).toContainText('The form takes no acceptance criteria, labels or authored test')
     // the form asks the class's questions; the authored test needs the JSON view
     await expect(dialog.getByTestId('backlog-form')).toBeVisible()
     await dialog.getByRole('button', { name: 'Advanced: paste JSON instead' }).click()
     await dialog.getByLabel('Backlog JSON').fill(JSON.stringify(BACKLOG, null, 2))
-    await dialog.getByRole('button', { name: /^Freeze/ }).click()
+    // from the JSON field, Tab reaches the Freeze button (the footer: mode, Cancel, Freeze) and Enter freezes
+    const freeze = dialog.getByRole('button', { name: /^Freeze/ })
+    for (let i = 0; i < 6 && !(await focusedIs(freeze)); i += 1) await page.keyboard.press('Tab')
+    expect(await focusedIs(freeze), 'Tab from the JSON field did not reach the Freeze button').toBe(true)
+    await page.keyboard.press('Enter')
     await expect(dialog).toBeHidden()
     await expect(page.getByText('frozen', { exact: true })).toBeVisible()
     await expect(page.getByText('2 items', { exact: true })).toBeVisible()
@@ -175,7 +202,9 @@ test.describe('10 factory (fixture_gold)', () => {
     await box.getByLabel('Builder', { exact: true }).fill('fixture_gold')
     await box.getByLabel('Model', { exact: true }).fill('gold')
     await expect(box).toContainText('fixture_gold · gold — named by you')
-    await box.getByRole('button', { name: /^Run the factory/ }).click()
+    // G-992 — Run is pressed from the keyboard: Tab from the Model field to the button, then Enter
+    await tabTo(page, '[data-hint="button.factory.run"]', 'the Run the factory button', { fromTop: false, maxTabs: 8 })
+    await page.keyboard.press('Enter')
     // J-FAC-5 — the banner names the run; the controls step aside
     const banner = page.getByTestId('factory-active-run')
     await expect(banner).toBeVisible({ timeout: 30_000 })
@@ -224,6 +253,47 @@ test.describe('10 factory (fixture_gold)', () => {
     // J-FAC-16 — the approver's gap form asks the catalogue's question
     const form = i2.getByRole('form', { name: 'Sign a structural gap for I-2' })
     await expect(form.getByRole('combobox')).toContainText(/\(method_path\)/)
+  })
+
+  test('a built item opens its task page; the outcomes row counts nothing yet and a sync says why; the record evolves and the page reads both rows (G-366, G-368, F32)', async ({ page }) => {
+    await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-1`)
+    const i1 = page.getByTestId('factory-item-I-1')
+    // G-366 — the journey's next page, one click from the row that produced the build
+    await expect(i1.getByTestId('task-I-1')).toHaveAttribute('href', new RegExp(`^/tasks/${encodeURIComponent(t.name)}/[0-9a-f]{40}$`))
+    await i1.getByTestId('task-I-1').click()
+    await page.waitForURL(/\/tasks\/[^/]+\/[0-9a-f]{40}$/)
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await page.goBack()
+    await expect(page.getByTestId('factory-item-I-1')).toBeVisible()
+
+    // G-368 — nothing was delivered on this stack, and the counts say so; the sync a repository
+    // connected by URL cannot make is refused with the pre-flight's reason and changes nothing
+    const counts = page.getByTestId('factory-outcomes-counts')
+    await expect(counts).toContainText('0 delivered · 0 merged · 0 closed · 0 open · never read')
+    await page.getByTestId('factory-sync-outcomes').click()
+    await expect(page.getByTestId('factory-sync-error')).toContainText('The outcomes cannot be read for this repository — nothing was recorded')
+    await expect(page.getByTestId('factory-sync-error')).toContainText('GitHub App')
+    await expect(counts).toContainText('0 delivered · 0 merged · 0 closed · 0 open · never read')
+
+    // F32 — tier 1 stops its items at the entry gate (a calibration build is the way forward)
+    // and a not-clean build has no served evolution, so no row offers Register this evolution…;
+    // the record still evolves through the served route, and the page reads the result
+    await expect(page.getByRole('button', { name: 'Register this evolution…' })).toHaveCount(0)
+    const first = BACKLOG.items[0]!
+    await apiPost(page, `/factory/${encodeURIComponent(t.name)}/backlog/evolutions`, {
+      item: { ...first, id: 'I-1-v2', title: `${first.title} (evolved)`, supersedes: 'I-1' },
+      authored: BACKLOG.authored['I-1'],
+    })
+    await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-1-v2`)
+    const old = page.getByTestId('factory-item-I-1')
+    await expect(old.getByTestId('superseded-I-1')).toContainText('Superseded by I-1-v2')
+    await expect(old.getByTestId('item-status-I-1')).toHaveText('Superseded')
+    // the superseded item's chain stays readable: its build evidence is still there
+    await expect(old.getByTestId('evidence-I-1')).toBeVisible()
+    const evolved = page.getByTestId('factory-item-I-1-v2')
+    await expect(evolved).toContainText('Add multiply to calc (evolved)')
+    // the frozen hash did not move: the backlog card still reads the freeze
+    await expect(page.getByText('frozen', { exact: true })).toBeVisible()
   })
 
   // G-143 — the approver's own acts, walked live as the approver: signing the structural gap

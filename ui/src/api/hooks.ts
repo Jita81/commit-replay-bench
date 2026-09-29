@@ -76,6 +76,8 @@ import type {
   EvidenceResponse,
   FactoryBacklog,
   FactoryCatalogue,
+  FactoryEvolutionBody,
+  FactoryOutcomeSync,
   FactoryTask,
   Flow,
   GoLive,
@@ -940,6 +942,21 @@ export function useWaiveProbe(): UseMutationResult<unknown, ApiError, { repo: st
   })
 }
 
+/** `POST /factory/{repo}/outcomes/sync` (operator) — read each delivered pull request's fate from GitHub
+ * and record `delivery.merged` / `delivery.closed` (G-368, B-9 / F30). 409 `outcome_sync_unavailable`
+ * when the repository is not linked through the App; 502 `github_error` when the token cannot be
+ * minted. Invalidates the backlog (its outcomes summary) and the tasks (each item's outcome). */
+export function useSyncOutcomes(repo: string): UseMutationResult<FactoryOutcomeSync, ApiError, void> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<FactoryOutcomeSync>(`/factory/${enc(repo)}/outcomes/sync`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
+  })
+}
+
 /** `POST /factory/{repo}/backlog` (operator) — freeze a backlog; 409 while a factory run is active. */
 export function useRegisterBacklog(): UseMutationResult<FactoryBacklog, ApiError, { repo: string; body: unknown }> {
   const qc = useQueryClient()
@@ -958,6 +975,22 @@ export function useFactoryEvidence(repo: string): UseQueryResult<Page<EvidencePa
     queryFn: () => api<Page<EvidencePack>>(`/factory/${enc(repo)}/evidence`),
     enabled: repo.length > 0,
     retry: false,
+  })
+}
+
+/** `POST <way_forward.route>` (operator) — register an evolution that supersedes a stopped item (F32,
+ * DL-049): the body is `{item, authored?}` and the route is the one the task view SERVED for the
+ * item (`/factory/{repo}/backlog/evolutions` today), never composed here. 409 `factory_run_active`
+ * / `item_exists` / `already_superseded`, 422 for a malformed item. Invalidates the backlog and the
+ * tasks, because the record gained an item. Nothing is posted without a person's press. */
+export function useRegisterEvolution(repo: string): UseMutationResult<FactoryBacklog, ApiError, { route: string; body: FactoryEvolutionBody }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ route, body }) => api<FactoryBacklog>(route, { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
   })
 }
 
