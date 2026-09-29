@@ -1374,6 +1374,20 @@ export interface ChainVerify {
   detail: string
 }
 
+/**
+ * The `disqualified` figure the Ledger's tile reads (G-400): attempts disqualified in the
+ * last `window_days`, counted per builder against `threshold`; `over` names the builders past
+ * it, which is a stop condition (docs/OPERATOR.md#8-stop-conditions). `LedgerVerifyOut` does
+ * not serve it yet (G-400's server half), so it is NOT a field of the mirrored `LedgerVerify`
+ * — the page reads it as an extension and says so when it is absent.
+ */
+export interface LedgerDisqualified {
+  window_days: number
+  threshold: number
+  by_builder: Array<{ builder: string; n: number }>
+  over: string[]
+}
+
 export interface LedgerVerify {
   rows: number
   ok: boolean

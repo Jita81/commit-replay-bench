@@ -3,8 +3,8 @@
  *
  * Navigation
  * ----------
- * What it is:   The screen at /ledger: the chain-verification gate, the false-Q1 tile, the
- *               filterable row table and the export buttons.
+ * What it is:   The screen at /ledger: the chain-verification gate, the false-Q1 and
+ *               disqualified tiles, the filterable row table and the export buttons.
  * What it does: Shows `GET /ledger/verify` as a gate with one row per part it checks — the
  *               grade chain (by row), the audit trail's chain (by event id, ADR-0029),
  *               false-Q1 total = 0 and every clean row's pack — so a break names its part, and
@@ -13,23 +13,34 @@
  *               in the URL; a filter that arrives in a link and has no control (run, task,
  *               builder, language) shows as a removable chip above the rows, and so does a
  *               link value the Clean, Mode or Size select does not offer, which is not applied
- *               and says so (`SELECT_FILTERS`, G-180). Export
- *               links point straight at the API's download URLs (JSONL, CSV, and for
- *               operators the abstract cell export that carries no code or ids).
- * How:          `useLedgerVerify` → `GateBanner`; filters read from `?…` into
+ *               and says so (`SELECT_FILTERS`, G-180). The three exports (JSONL, CSV, and for
+ *               operators the abstract cell export that carries no code or ids) are
+ *               `ExportButton`s: real links to the API's download URLs whose click the page
+ *               fetches, so a refusal — the abstract export's 409 while a false-Q1 row exists
+ *               — is the envelope beside the button, never a raw response (G-182). An empty
+ *               table is two states: filtered, with Clear filters (which empties the URL,
+ *               the repository included), or an empty ledger with its reason and no action
+ *               (G-181). The Disqualified tile reads `disqualified` from the verify —
+ *               the window, the threshold and the count per builder — red when a builder is
+ *               over, and says so when the server does not serve the figure (G-400).
+ * How:          `useLedgerVerify` → `GateBanner` and the tiles; filters read from `?…` into
  *               `GradeListParams` → `useGrades` → `DataTable` with offset paging (100 rows).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
  *               docs/adr/0007-abstract-cell-export-only.md,
  *               docs/adr/0029-the-audit-trail-is-hash-chained.md
  * Works with:   ui/src/api/hooks.ts (`useLedgerVerify`, `useGrades`), ui/src/api/types.ts
- *               (`GradeRow`, `LedgerVerify`, `beltsOf`), ui/src/components/GateBanner.tsx (the
+ *               (`GradeRow`, `LedgerVerify`, `LedgerDisqualified` — read as an extension of
+ *               the verify until the server serves it, `beltsOf`),
+ *               ui/src/components/ExportButton.tsx (the three exports),
+ *               ui/src/components/GateBanner.tsx (the
  *               gate), ui/src/components/BeltPills.tsx and ui/src/components/Provenance.tsx
  *               (per row), ui/src/components/Help.tsx (`Term` — clean, sighted and blind open
  *               their definitions beside the filters), src/crb/server/routes/ledger.py (verify
  *               and export), src/crb/server/routes/grades.py (the rows, served column-by-column)
  * Tested by:    ui/src/screens/Ledger/LedgerPage.test.tsx (the abstract export's sentence per
- *               role, the filter terms, each failure state on its own gate row),
+ *               role and its refusal beside the button, the filter terms, each failure state
+ *               on its own gate row, the two empty states, the disqualified tile),
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts (gate OPEN with false-Q1 = 0, rows
  *               listed, the JSONL export verifies with `crb ledger verify`),
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
@@ -42,14 +53,14 @@
  */
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { apiUrl } from '../../api/client'
 import { useGrades, useLedgerVerify } from '../../api/hooks'
-import { beltsOf, type GradeListParams, type GradeRow } from '../../api/types'
+import { beltsOf, type GradeListParams, type GradeRow, type LedgerDisqualified, type LedgerVerify } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
-import { AnchorButton } from '../../components/Button'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
+import { ExportButton } from '../../components/ExportButton'
 import { GateBanner } from '../../components/GateBanner'
 import { InlineSelect } from '../../components/Field'
 import { Term } from '../../components/Help'
@@ -85,6 +96,37 @@ const SELECT_FILTERS: ReadonlyArray<{ key: 'clean' | 'mode' | 'size'; label: str
 ]
 const SIZES = SELECT_FILTERS[2]!.options
 
+/**
+ * `disqualified` is not yet a field of `GET /ledger/verify` (G-400's server half), so it is read
+ * as an extension of the mirrored `LedgerVerify`, never added to it (tests/test_ui_type_mirrors.py).
+ */
+type VerifyWithDisqualified = LedgerVerify & { disqualified?: LedgerDisqualified }
+
+/**
+ * The Disqualified tile: the served window, threshold and per-builder count, red when a
+ * builder is over the threshold (a stop condition, OPERATOR §8); a server that does not serve
+ * the figure gets a dash and the reason, never a zero (G-400).
+ */
+function DisqualifiedTile({ figure, served }: { figure: LedgerDisqualified | undefined; served: boolean }) {
+  if (!figure) {
+    return <StatTile label="Disqualified" hint="stat.ledger.disqualified" value="—" n={null} apparatus={served ? 'not served by this server' : '—'} footer={served ? 'This server does not report the disqualified count.' : undefined} data-testid="tile-disqualified" />
+  }
+  const n = figure.by_builder.reduce((a, b) => a + b.n, 0)
+  const footer = figure.over.length ? `Over the threshold: ${figure.over.join(', ')}` : figure.by_builder.length ? figure.by_builder.map((b) => `${b.builder} ${fmtInt(b.n)}`).join(' · ') : 'no attempt disqualified in the window'
+  return (
+    <StatTile
+      label={`Disqualified (${figure.window_days} days)`}
+      hint="stat.ledger.disqualified"
+      value={fmtInt(n)}
+      n={n}
+      apparatus={`threshold ${fmtInt(figure.threshold)} per builder · ${figure.window_days}-day window`}
+      tone={figure.over.length ? 'red' : 'green'}
+      footer={footer}
+      data-testid="tile-disqualified"
+    />
+  )
+}
+
 /** A select-controlled filter whose URL value the select cannot show. */
 function unoffered(key: string, value: string | null): boolean {
   const f = SELECT_FILTERS.find((x) => x.key === key)
@@ -119,6 +161,12 @@ export function LedgerPage() {
     if (v) next.set(k, v)
     else next.delete(k)
     setParams(next, { replace: true })
+    setOffset(0)
+  }
+  // a filtered view is one the URL narrows: the repository or any filter key (G-181)
+  const filtered = Boolean(repo) || FILTER_KEYS.some((k) => params.get(k))
+  const clearFilters = () => {
+    setParams(new URLSearchParams(), { replace: true })
     setOffset(0)
   }
 
@@ -167,20 +215,20 @@ export function LedgerPage() {
       <PageHeader
         eyebrow="Instrument · Ledger"
         title="Ledger"
-        purpose="Every graded trial, append-only and hash-chained. Verify proves nothing was edited, reordered or removed; false-Q1 total is the number everything else defends."
+        purpose="Every graded trial, append-only and hash-chained. The server re-checks the chain on every load. If rows are removed from the end, only comparing with a head hash you recorded earlier shows it. The false-Q1 total is the number everything else defends."
         actions={
           <>
             <RepoPicker value={repo} onChange={setRepo} />
-            <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=jsonl${exportQs}`)} download hint="button.ledger.export_jsonl">
+            <ExportButton size="sm" path={`/ledger/export?format=jsonl${exportQs}`} hint="button.ledger.export_jsonl">
               Export JSONL
-            </AnchorButton>
-            <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv${exportQs}`)} download hint="button.ledger.export_csv">
+            </ExportButton>
+            <ExportButton size="sm" path={`/ledger/export?format=csv${exportQs}`} hint="button.ledger.export_csv">
               Export CSV
-            </AnchorButton>
+            </ExportButton>
             {can('operator') && (
-              <AnchorButton size="sm" href={apiUrl('/ledger/export/abstract')} download aria-describedby="abstract-export-note" hint="button.ledger.export_abstract">
+              <ExportButton size="sm" path="/ledger/export/abstract" aria-describedby="abstract-export-note" hint="button.ledger.export_abstract">
                 Export abstract
-              </AnchorButton>
+              </ExportButton>
             )}
           </>
         }
@@ -213,6 +261,7 @@ export function LedgerPage() {
         <StatTile label="Rows" hint="stat.ledger.rows" value={verify.data ? fmtInt(verify.data.rows) : '—'} n={verify.data?.rows ?? 0} apparatus="whole ledger, all repos" />
         <StatTile label="false-Q1 total" hint="stat.ledger.false_q1" value={verify.data ? String(verify.data.false_q1_total) : '—'} n={verify.data?.rows ?? 0} apparatus="enforced at write; re-checked at read" tone={verify.data ? (verify.data.false_q1_total === 0 ? 'green' : 'red') : undefined} data-testid="tile-false-q1-total" />
         <StatTile label="Matching rows" hint="stat.ledger.matching" value={grades.data ? fmtInt(grades.data.total) : '—'} n={grades.data?.total ?? 0} apparatus="current filters" />
+        <DisqualifiedTile figure={(verify.data as VerifyWithDisqualified | undefined)?.disqualified} served={Boolean(verify.data)} />
       </div>
 
       <Card
@@ -318,7 +367,21 @@ export function LedgerPage() {
                 caption="Ledger rows"
                 dense
                 initialSort={{ key: 'created', dir: 'desc' }}
-                empty={<EmptyState title="No rows match" reason={repo || params.toString() ? 'Nothing in the ledger matches these filters.' : 'The ledger is empty. Every graded trial appends one row.'} />}
+                empty={
+                  filtered ? (
+                    <EmptyState
+                      title="No rows match these filters"
+                      reason="Nothing in the ledger matches these filters."
+                      action={
+                        <Button size="sm" hint="button.ledger.clear_filters" onClick={clearFilters}>
+                          Clear filters
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <EmptyState title="The ledger is empty" reason="Every graded trial appends one row." />
+                  )
+                }
               />
               <div className="flex items-center justify-between px-3 py-2 text-xs text-on-surface-muted">
                 <Hint id="stat.ledger.page" className="num">

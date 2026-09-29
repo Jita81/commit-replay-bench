@@ -207,6 +207,8 @@ export const HINTS = {
     'Step 4: deliver new work under the baseline — a frozen backlog, a RED proof, a build under the belts and a pull request only where the map routes deliver.',
   'nav.posture':
     'A printable statement of how this deployment is built, secured and audited, for an architecture or security review.',
+  'nav.instrument_group':
+    'The Operate path — the evidence behind the journey and the instrument’s own health: Runs (where an operator starts and watches one), the Map grid, Routes, the Oracle, Learn, the Ledger and, for admins, Settings. The operating routine is health → Runs → Ledger → Settings.',
   'nav.runs':
     'Every run the worker has executed or queued, with its progress and cost; where an operator starts one.',
   'nav.capability':
@@ -1517,6 +1519,12 @@ export const HINTS = {
     'How many cells route this way, out of every measured cell (n). Counts of cells, not attempts.',
   'col.routing.cell':
     'The class and size (and language, builder, model or provider where projected) the decision is for.',
+  'col.routing.doors':
+    'Where to go from a decision: its rows on the ledger, and its class × size cell on the map with the detail card open.',
+  'button.routing.rows':
+    'Open the ledger rows behind this decision: the repository, class and size, and the language, builder and model where the decision carries them. The ledger page does not filter by provider or process step, so a decision projected by either opens every row of its class and size.',
+  'button.routing.map_cell':
+    'Open this decision’s cell on the map: the class × size aggregate, whatever the decision was projected by, with its detail card already open.',
   'col.routing.route':
     'The route the published rule gave the cell from its own evidence.',
   'col.routing.code':
@@ -1828,6 +1836,10 @@ export const HINTS = {
     'Rows credited clean against a failed belt, across the whole ledger. Must be 0; it is the number everything else defends.',
   'stat.ledger.matching':
     'Rows matching the current filters, out of the whole ledger; the table shows one page of them.',
+  'stat.ledger.disqualified':
+    'Attempts disqualified in the last window, summed over builders, against the threshold the deployment sets per builder. A builder over it is a stop condition: it is named under the number and the tile turns red. A dash means this server does not serve the figure.',
+  'button.ledger.clear_filters':
+    'Remove every filter, the repository included, and show the whole ledger again. The address bar is reset with it, so the link you followed no longer narrows the rows.',
   'button.ledger.remove_filter':
     'A filter that came with the link you followed, with no control of its own on this page. Matching rows counts only the rows it lets through; press it to remove the filter. A value a select on this page does not offer (Size xl, say) reads "not applied": the rows are not narrowed by it, and pressing it removes it from the link.',
   'field.ledger.clean':
@@ -2155,12 +2167,12 @@ export const MIN_HINTS: Record<string, number> = {
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
   '/capability': 30,
-  '/routing': 20,
+  '/routing': 55,
   '/oracle': 22,
   // a viewer's Learn page under the ratchet's fixtures: the reports, the remeasure plan's four
   // kinds of entry and the learn stream's FlowPanel with each of its counts explained (G-536)
   '/learn': 87,
-  '/ledger': 26,
+  '/ledger': 47,
   // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
   // "Change my password" card; the admin's configuration and Users card (and the deeper
   // set-password dialog and account history) are held by the ratchet's variants

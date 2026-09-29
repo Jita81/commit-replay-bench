@@ -31,6 +31,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   A cancel that fails says why, an unknown task says so, and task rows link to their pages,
   by keyboard too (DL-303, DL-304, P-610 to P-619).
 
+- **Exports the page reports, doors from every route decision, and the Operate path named**
+  (Wave 6, stream pgs; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-pgs)).
+  Every export says "Downloaded <file> — <n> rows" (a CSV counted by record) or shows the
+  refusal beside the button with Retry; a double-click is one download. A filtered empty
+  ledger offers Clear filters. A decision on Routes opens its ledger rows and its map cell
+  at every width; Map grid and Routes land on the latest repository. The Ledger's
+  Disqualified tile says when the figure is not served. The instrument row names the
+  Operate path; Runs, Ledger and Deployment say what operating does not include
+  (DL-306, DL-307, P-620 to P-627).
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull
