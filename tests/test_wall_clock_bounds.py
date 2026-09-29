@@ -22,9 +22,10 @@ How:          ``ast`` walk → per-function symbol table (elapsed names, numeric
               ``file:line`` findings.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   tests/test_server_reaper.py, tests/test_worker.py and tests/test_worker_reaper.py
-              (the budget tests moved to fake or in-process daemons), tests/test_execution.py (the kill-bound tests
-              given room), docs/PREVENTION.md (P-014, the row this closes)
+Works with:   tests/test_server_reaper.py (budget tests moved to fake or in-process daemons),
+              tests/test_worker.py and tests/test_worker_reaper.py (the same, for the worker),
+              tests/test_execution.py (the kill-bound tests given room), docs/PREVENTION.md
+              (P-014, the row this closes)
 Tested by:    tests/test_wall_clock_bounds.py
 Touch when:   never for a new repository; a test needs a wall-clock bound: make it at least the
               floor and wide enough to tell bounded from unbounded, or move the arithmetic onto a
