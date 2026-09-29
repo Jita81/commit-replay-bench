@@ -705,10 +705,12 @@ describe('ResultsPage', () => {
   })
 
   it('the Waiting on a person card says how many rows it is not showing when it cuts the list', async () => {
-    // eight human-routed cells → eight decisions; the card shows six and says "and 2 more"
+    // eight human-routed cells, and the served inbox (P-619: the card reads the server, never a
+    // fold of the map) raising eight rows; the card shows six and says "and 2 more"
     const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXS', 'XXL', 'XXXL']
     const cells = sizes.map((size, i) => ({ ...HUMAN, size, n: 10 + i }))
-    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, sizes, cells, summary: { ...MAP.summary, total_cells: 8, measured_cells: 8, deliver_cells: 0 } } })
+    const held = sizes.slice(2).map((size) => ({ kind: 'strengthen', key: `bug.fix|${size}`, title: `bug.fix × ${size} is held until its tests are stronger`, role: 'operator', act: 'Strengthen the tests', can_act: true, href: '/learn?repo=alpha#strengthen' }))
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, sizes, cells, summary: { ...MAP.summary, total_cells: 8, measured_cells: 8, deliver_cells: 0 } }, 'GET /decisions': inbox('approver', held) })
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
     expect(within(screen.getByRole('list', { name: 'Decisions for alpha' })).getAllByRole('listitem')).toHaveLength(6)
