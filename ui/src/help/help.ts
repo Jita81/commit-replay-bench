@@ -82,7 +82,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/connect/:name/measure',
-    purpose: 'Choose how many attempts to buy and what to keep, then start the first sighted measurement. This is the step that spends money, and it says how much before you confirm.',
+    purpose: 'Choose how many attempts to buy and what to keep, then start the first sighted measurement. This is the step that spends money, and it says how much before you confirm. This page does not run blind, choose the builder or model, sign off, route or deliver, or set a budget beyond this run’s cap; blind runs start from Runs.',
     next: {
       viewer: 'Only an operator can start a measurement.',
       operator: 'Pick a number of attempts, check the spend cap the run will keep, decide whether to keep worktrees for failed attempts, then confirm. You can cancel the run from Runs while it is in flight and you pay only for attempts made.',

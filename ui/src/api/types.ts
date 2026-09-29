@@ -617,6 +617,14 @@ export interface RunCreateRequest {
   qualify_first?: boolean
   /** ADR-0019 — stop after this many consecutive environment rows (default 2; 0 = off). */
   env_stop?: number
+  /**
+   * The belt-5 pre-flight: after an honest build the repository's own formatter and linter
+   * plan runs on the changed files, fixes what it can and gives the builder ONE bounded repair
+   * call. The rows record the builder as `<name>+preflight` — a separate arm, never pooled
+   * with plain rows — and the repair call is the attempt's spend. Sent only when `true`
+   * (the Measure page's switch, off by default). @contract API.md "POST /runs".
+   */
+  preflight?: boolean
 }
 
 /** One refusal code of a repository's posture, with what to do (ADR-0019 §9). */

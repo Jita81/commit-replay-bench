@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Proof through each journey's own doors (Wave 6, stream prf)**
+  ([the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-prf)).
+  The walk's own Run now watches the run it queued: the repository is read again on success.
+  The money page offers the test-only fixture only when no real builder is credentialed, at a
+  known $0 and never in production (`CRB_ENV=prod` denies the switch; `/health` reads the same
+  switch as the worker); it gains a Pre-flight switch, off by default, and states the outage
+  stop. Walkthrough 04b walks Connect by URL, the probe, mine, oracle and controls from the
+  walk on a fixture of its own; 05 presses the red button, reads the map through its four
+  doors and downloads every export; 06 is one operator's journey; 07 sweeps `/routing`.
+
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

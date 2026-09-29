@@ -14,10 +14,14 @@ that is *git archaeology* — recovering the real patch — so a row it produces
 must never be mistaken for a measurement of a builder. Three guards make that
 impossible to do by accident:
 
-1. **Registration is opt-in.** :mod:`crb.builders` registers the name only when
-   ``CRB_ENABLE_FIXTURE_BUILDER=1`` is set in the worker's environment; without
-   it ``get_builder("fixture_gold")`` is an unknown-builder ``ValueError`` exactly
-   like any other typo. Production deployments (``deploy/``) never set it.
+1. **Registration is opt-in, and never in production.** :mod:`crb.builders`
+   registers the name only when ``CRB_ENABLE_FIXTURE_BUILDER=1`` is set in the
+   worker's environment AND ``CRB_ENV`` does not name production (``prod`` /
+   ``production`` — the belt, :mod:`crb.core.fixture_builder_switch`); without
+   that ``get_builder("fixture_gold")`` is an unknown-builder ``ValueError`` exactly
+   like any other typo. Production deployments (``deploy/``) never set the switch,
+   and the belt holds even if one did. The ``builders`` health probe reports
+   ``fixture_gold`` through the same function, so ``/health`` and the worker agree.
 2. **The identity is unmistakable.** ``name`` is ``fixture_gold``, the model is
    forced to ``gold`` whatever the rung says, ``provider`` is ``fixture`` and
    ``describe()`` / ``BuildOutcome.extra`` carry ``fixture: true`` and a
@@ -39,7 +43,9 @@ What it does: Overlays the commit's non-test files onto the parent worktree and 
               outcome that names itself unmistakably (builder ``fixture_gold``, model
               ``gold``, provider ``fixture``, ``extra.fixture: true``), spends nothing and
               claims nothing (``done=False``). It is registered only under
-              ``CRB_ENABLE_FIXTURE_BUILDER=1``. With ``builder_config {"attempt": cmd}`` it
+              ``CRB_ENABLE_FIXTURE_BUILDER=1`` and never under a production ``CRB_ENV``
+              (the switch is ``crb.core.fixture_builder_switch``, which the ``builders``
+              health probe reads too). With ``builder_config {"attempt": cmd}`` it
               first asks the real shell guard about ``cmd`` (never running it); a refusal is
               recorded as a protocol violation and the attempt stops with no patch — how
               the Learn walkthrough gets a real refusal row on a hermetic stack.
@@ -47,12 +53,14 @@ How:          ``source_files``: the commit's changed files minus tests and delet
               ``Workspace.overlay_sources`` → a zero-cost ``BuildOutcome``.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
-Works with:   src/crb/builders/__init__.py (the opt-in registration), src/crb/core/workspace.py
+Works with:   src/crb/builders/__init__.py (the opt-in registration),
+              src/crb/core/fixture_builder_switch.py (the switch and its production belt, shared
+              with src/crb/observability/probes.py), src/crb/core/workspace.py
               (``overlay_sources``), src/crb/core/oracle/controls.py (the ``gold`` control
               does the same overlay — the two must agree), scripts/walkthrough.sh and
               tests/fixtures/builders_repo.py (the hermetic drivers), src/crb/core/federated.py
               (the abstract export that must never carry these rows)
-Tested by:    tests/test_builders_fixture_gold.py
+Tested by:    tests/test_builders_fixture_gold.py, tests/test_probe_fixture_builder.py
 Touch when:   never for a new repository and never in production — the switch stays unset
               in deploy/ (docs/DEPLOYMENT.md); a change to what ``gold`` means is a change
               to the negative control first.
@@ -62,9 +70,7 @@ Claims:       A ``fixture_gold`` row measures the instrument; it must never be r
 
 from __future__ import annotations
 
-import os
 import time
-from collections.abc import Mapping
 from typing import Any
 
 from crb.builders.base import (
@@ -76,10 +82,28 @@ from crb.builders.base import (
     GitArchaeologyGuard,
     emit,
 )
+from crb.core.fixture_builder_switch import (
+    ENABLE_ENV,
+    ENV_ENV,
+    PRODUCTION_ENVS,
+    fixture_builder_enabled,
+)
 from crb.core.workspace import Workspace
 
-#: The environment switch that registers the builder (``1`` only).
-ENABLE_ENV = "CRB_ENABLE_FIXTURE_BUILDER"
+# ``ENABLE_ENV`` and ``fixture_builder_enabled`` live in crb.core.fixture_builder_switch so
+# the ``builders`` health probe (crb.observability, a sibling layer) reads the SAME switch
+# and the same production belt; they are re-exported here as the builder's own names.
+__all__ = [
+    "ENABLE_ENV",
+    "ENV_ENV",
+    "MODEL",
+    "NAME",
+    "PRODUCTION_ENVS",
+    "PROVIDER",
+    "WARNING",
+    "FixtureGoldBuilder",
+    "fixture_builder_enabled",
+]
 
 NAME = "fixture_gold"
 MODEL = "gold"
@@ -89,13 +113,6 @@ WARNING = (
     "fixture_gold replays the commit's own source change (git archaeology by design); "
     "it measures the instrument, never a builder — test/dev only"
 )
-
-
-def fixture_builder_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """``CRB_ENABLE_FIXTURE_BUILDER=1`` exactly; anything else (unset, ``0``, ``true``)
-    keeps the builder unregistered — the switch is deliberately narrow."""
-    e = env if env is not None else os.environ
-    return e.get(ENABLE_ENV, "").strip() == "1"
 
 
 class FixtureGoldBuilder:

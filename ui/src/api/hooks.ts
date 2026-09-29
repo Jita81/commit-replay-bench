@@ -533,6 +533,12 @@ export function useCreateRun(): UseMutationResult<Run, ApiError, RunCreateReques
     onSuccess: (run) => {
       qc.invalidateQueries({ queryKey: ['runs'] })
       qc.setQueryData(keys.run(run.id), run)
+      // the repository's `last_run` is this run now: the walk on /connect/:name and the
+      // Connect list read the stage they watch from it, so a stale card (G-428: a stage's
+      // Run left the card on the previous run) is refetched the moment the run is queued —
+      // the same reads `useProbeRepo` invalidates
+      qc.invalidateQueries({ queryKey: keys.repo(run.repo) })
+      qc.invalidateQueries({ queryKey: keys.repos })
     },
   })
 }

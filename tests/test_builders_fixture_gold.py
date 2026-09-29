@@ -53,6 +53,15 @@ def test_switch_is_exactly_one() -> None:
         assert fg.fixture_builder_enabled({fg.ENABLE_ENV: off}) is False, off
 
 
+def test_a_production_env_denies_the_switch() -> None:
+    """The belt: ``CRB_ENV`` naming production keeps the builder off with the switch set — the
+    same function the ``builders`` health probe reads (tests/test_probe_fixture_builder.py)."""
+    for prod in ("prod", "production", "Prod"):
+        assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: prod}) is False, prod
+    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: "dev"}) is True
+    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: ""}) is True
+
+
 def test_unregistered_without_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv(fg.ENABLE_ENV, raising=False)
     importlib.reload(builders_pkg)

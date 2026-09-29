@@ -359,6 +359,10 @@ export const HINTS = {
     'The last measurement stopped at its spend cap: before an attempt that could have passed it, or after an attempt with no cost cap of its own passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
   'summary.measure.retention':
     'What this run will keep beyond grades and hashes, from the two boxes above.',
+  'field.measure.preflight':
+    'Off by default. When on, the repository’s own formatter and linter run on each attempt’s changed files after the build, fix what they can, and the builder gets one bounded repair call; that call is part of the attempt’s spend. The rows record a separate arm, the builder plus “+preflight”, which is never pooled with plain rows — so switch it on only for a measurement you mean to compare.',
+  'summary.measure.outage_stop':
+    'The circuit breaker this run keeps at the worker’s default: after three attempts in a row that the provider refused — a usage limit, a dead credential — the run stops and says so instead of writing a refused row for every remaining attempt. The full run form can change the number.',
   'summary.measure.posture':
     'Whether the sandbox that runs the tests is sealed (docker) so the rows count as evidence, or a local executor whose rows are a development reading only.',
   'button.measure.start':

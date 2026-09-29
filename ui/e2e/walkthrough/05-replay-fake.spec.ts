@@ -16,7 +16,11 @@
  *    server's preview lists the failing clauses (`thin_cell`, and the controls escape
  *    04's run found), the gate is CLOSED and the action stays disabled — 08 tells the
  *    whole sign-off story, including a cell that clears the policy.
- *  - Export JSONL downloads a file whose rows verify with `crb ledger verify --path`.
+ *  - Export JSONL downloads a file whose rows verify with `crb ledger verify --path`;
+ *    Export CSV has `row_hash` and `builder` columns, and Export abstract carries no
+ *    `fixture_gold` row and no key outside ADR-0007's allowlist.
+ *  - The map is read through its own doors as one persona: Baseline → All decisions →
+ *    Open the full map → Every route with its reason, one number per page equal to its API.
  *
  * Tier 2 with CRB_E2E_BUILDER=claude_code (worker: CRB_CLAUDE_CODE_AUTH=cli) runs a
  * REAL replay (claude-sonnet-5, limit 2, {"auth":"cli"}) and asserts ≥1 ledger row
@@ -27,17 +31,25 @@
  * ----------
  * What it is:   Walkthrough spec 05 (replay with the test-only `fixture_gold` builder), the
  *               spine of the story.
- * What it does: Pins that a replay run grades clean with all four belts ✓ and cost $0; that
+ * What it does: Pins that the money page's red button (/connect/:name/measure — the test-only
+ *               fixture named test-only, priced at a known $0.00) queues the replay and the walk
+ *               watches it; that the run grades clean with all four belts ✓ and cost $0; that
  *               the Evidence drawer opens with belts, apparatus and the `verified` badge;
  *               that the Ledger gate is OPEN with false-Q1 = 0 and rows listed; that the
  *               Capability page renders the (class × size) cell with n, Wilson interval and
  *               route `calibrate` (n < 10) — never a fabricated cell; that the Sign-off page
  *               refuses a thin cell with the clauses listed and the action disabled; and
- *               that the JSONL export verifies with `crb ledger verify --path`. Tier 2 with
- *               `CRB_E2E_BUILDER=claude_code` runs a REAL replay instead.
- * How:          `startRun` (kind replay, builder `fixture_gold`); `waitForRun`; then each
- *               screen in turn by its test ids; the export downloaded and verified through
- *               the CLI named by `CRB_E2E_CRB`.
+ *               that the JSONL export verifies with `crb ledger verify --path`, the CSV has its
+ *               columns and the abstract export carries no fixture row; and that the four
+ *               map pages are walked through their doors with one number each equal to its
+ *               API. Tier 2 with `CRB_E2E_BUILDER=claude_code` runs a REAL replay instead
+ *               (through the dialog — the money page offers the deployment's credentialed
+ *               builder, and tier 1 refuses to press the button when one is credentialed:
+ *               nothing is spent by accident).
+ * How:          The Measure page's red button (tier 1; `startRun` with `claude_code` in tier
+ *               2); the walk's stage watched; `waitForRun`; then each screen in turn by its
+ *               test ids; the exports downloaded and verified through the CLI named by
+ *               `CRB_E2E_CRB` (`exportAndVerifyLedger`).
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md,
  *               docs/adr/0006-zero-raw-retention-and-evidence-packs.md
@@ -45,18 +57,19 @@
  *               hermetic builder — registered only under `CRB_ENABLE_FIXTURE_BUILDER=1`),
  *               ui/src/screens/Runs/RunDetailPage.tsx, ui/src/screens/Runs/EvidenceDrawer.tsx,
  *               ui/src/screens/Ledger/LedgerPage.tsx, ui/src/screens/Capability/CapabilityPage.tsx,
- *               ui/src/screens/Signoff/SignoffPage.tsx (the screens under test); the
+ *               ui/src/screens/Signoff/SignoffPage.tsx, ui/src/screens/Connect/MeasurePage.tsx
+ *               (the red button), ui/src/screens/Results/ResultsPage.tsx, ui/src/screens/Decisions/DecisionsPage.tsx,
+ *               ui/src/screens/Routing/RoutingPage.tsx (the doors), src/crb/core/federated.py
+ *               (the abstract allowlist the export test mirrors) — the screens under test; the
  *               Baseline's flow card is checked in 06b, after the read 06b must see first
  * Tested by:    ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   never for a new repository; a screen's test ids change, or the thin-cell refusal
  *               wording changes (08 asserts on the same cell's n).
  */
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Locator } from '@playwright/test'
-import { env, expect, expectLogAction, field, primary, startRun, test, waitForRun } from './support'
+import type { Locator, Page } from '@playwright/test'
+import { apiGet, env, expect, expectLogAction, exportAndVerifyLedger, field, primary, runIdFromUrl, stackHealth, startRun, test, waitForRun, workDir } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -69,6 +82,15 @@ const BELTS = ['tests_unmodified', 'target_green', 'no_new_failures', 'source_ch
 
 /** A StatTile's headline value (label / value / dl). */
 const tileValue = (tile: Locator) => tile.locator(':scope > div').nth(1)
+/** A StatTile's `n =` reading (the first `dd` of its dl). */
+const tileN = (tile: Locator) => tile.locator('dd').first()
+/** A StatTile by its label text, for tiles that carry no test id. */
+const tileLabelled = (page: Page, label: string) => page.locator('[data-component="stat-tile"]').filter({ has: page.locator('.label', { hasText: label }) })
+/** A route tile on /results: fac's `tile-route-<route>` test id once it lands, else the StatTile whose label is the route. */
+const routeTile = (page: Page, route: string) => page.getByTestId(`tile-route-${route}`).or(tileLabelled(page, route))
+
+/** ADR-0007: the ONLY keys an abstract cell may carry (src/crb/core/federated.py `ABSTRACT_ALLOWLIST`). */
+const ABSTRACT_ALLOWLIST = new Set(['process_step', 'capability_class', 'size', 'language', 'builder', 'model', 'provider', 'n', 'clean', 'false_q1', 'point', 'ci_low', 'ci_high', 'cost_usd_mean', 'latency_s_mean'])
 
 test.describe(`05 replay (${BUILDER})`, () => {
   const t = primary()
@@ -77,14 +99,41 @@ test.describe(`05 replay (${BUILDER})`, () => {
   let cellClass = ''
   let cellSize = ''
 
-  test(`Start run (replay, ${BUILDER}:${MODEL}, limit ${LIMIT}) → succeeded with ledger rows`, async ({ page }) => {
-    runId = await startRun(page, t.name, {
-      kind: 'replay',
-      builder: BUILDER,
-      model: MODEL,
-      limit: LIMIT,
-      ...(REAL ? { builderConfig: { auth: 'cli' } } : {}),
-    })
+  test('the red button on Measure queues the replay; the walk watches it; it succeeds with ledger rows', async ({ page }) => {
+    if (REAL) {
+      // tier 2: a real, priced replay is a deliberate act through the full form
+      runId = await startRun(page, t.name, { kind: 'replay', builder: BUILDER, model: MODEL, limit: LIMIT, builderConfig: { auth: 'cli' } })
+    } else {
+      // tier 1 is hermetic: the money page must offer the test-only fixture and nothing else.
+      // A stack that credentials a real builder (a key in the API's environment, a `claude`
+      // on its PATH) would make the red button spend — refuse before pressing anything.
+      const builders = (await stackHealth(page)).probes.find((p) => p.name === 'builders')
+      expect(builders?.data.fixture_gold, 'tier 1 needs the test-only fixture registered (CRB_ENABLE_FIXTURE_BUILDER=1, CRB_ENV=dev)').toBe(true)
+      for (const key of ['anthropic', 'openai', 'azure_openai', 'cerebras', 'claude_code_cli']) {
+        expect(builders?.data[key], `tier 1 is hermetic: the stack credentials ${key}, so the money page would offer a real builder — nothing was pressed`).not.toBe(true)
+      }
+      await page.goto(`/connect/${encodeURIComponent(t.name)}/measure`)
+      const box = page.getByTestId('before-you-start')
+      await expect(box).toBeVisible()
+      // the Builder row names the fixture for what it is, and the estimate is its known $0
+      await expect(box).toContainText('fixture_gold · gold · test-only instrument check')
+      await expect(box).toContainText('never a builder measurement')
+      await expect(box).toContainText('$0.00 to $0.00')
+      // the regex survives a cap or a limit phrase on the button (ns2-h)
+      await page.getByRole('button', { name: /^Start the run — estimated/ }).click()
+      // the walk resumes on the repository, watching the run it queued
+      await page.waitForURL(new RegExp(`/connect/${t.name}$`))
+      const stage = page.getByTestId('stage-measure')
+      await expect(stage.getByRole('img', { name: /^First measurement: (Queued|In progress|Done)$/ })).toBeVisible()
+      await expect
+        .poll(async () => (await stage.getByRole('img', { name: /^First measurement: / }).getAttribute('aria-label')) ?? '', { timeout: RUN_TIMEOUT_MS, intervals: [500, 1000, 2000], message: 'the measure stage did not finish' })
+        .toMatch(/: (Done|Failed)$/)
+      await expect(stage.getByRole('img', { name: 'First measurement: Done' })).toBeVisible()
+      // the stage's own door to the run: the rest of the spec reads that run
+      await stage.getByRole('link', { name: 'open run' }).click()
+      await page.waitForURL(/\/runs\/[0-9a-f]{32}$/)
+      runId = runIdFromUrl(page)
+    }
     await expect(page.getByText(`sighted · ${BUILDER} · ${MODEL}`)).toBeVisible()
     await waitForRun(page, 'succeeded', RUN_TIMEOUT_MS)
     await expectLogAction(page, 'build.done')
@@ -226,32 +275,106 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await expect(page.getByRole('table', { name: `Sign-offs for ${t.name}` })).toContainText('No attestations yet')
   })
 
-  test('Export JSONL downloads the ledger and it verifies with `crb ledger verify`', async ({ page }) => {
-    await page.goto('/ledger')
-    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Export JSONL' }).click()])
-    expect(download.suggestedFilename()).toMatch(/\.jsonl$/)
-    const dir = env.work && existsSync(env.work) ? env.work : mkdtempSync(join(tmpdir(), 'crb-walk-'))
-    const path = join(dir, `ledger-${runId.slice(0, 8)}.jsonl`)
-    await download.saveAs(path)
+  test('the map read through its doors: Baseline → All decisions → Open the full map → Every route with its reason', async ({ page }) => {
+    const q = `repo=${encodeURIComponent(t.name)}`
+    // what the API says, read once, so every number on every page is compared with its source
+    const map = await apiGet(page.request, `/capability-map?${q}`)
+    const controls = (await apiGet(page.request, `/oracle/${encodeURIComponent(t.name)}/controls`)) as { verdict: { state: string; escapes: number } }
+    const oracle = (await apiGet(page.request, `/oracle/${encodeURIComponent(t.name)}`)) as { tasks: Array<{ strength: number | null }> }
+    const routes = (await apiGet(page.request, `/routes?${q}`)) as { policy: { version: string }; decisions: Array<{ cell: Record<string, string>; route: string; reason_code?: string; policy_version: string; n: number }> }
+    const summary = map.summary as { false_q1_total: number; n_total: number }
+    const cells = map.cells as Array<{ capability_class: string; size: string; n: number; route: string }>
+    const mapCell = cells.find((c) => c.capability_class === cellClass && c.size === cellSize)
+    expect(mapCell, `the graded cell ${cellClass} × ${cellSize} on the map`).toBeTruthy()
+    expect(mapCell!.n).toBe(cellN)
+    const calibrate = cells.filter((c) => c.route === 'calibrate')
+    expect(calibrate.length, 'the walkthrough grades on the host: every measured cell routes calibrate').toBeGreaterThanOrEqual(1)
+    const calibrateN = calibrate.reduce((a, c) => a + c.n, 0)
 
-    const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean)
-    expect(lines.length).toBeGreaterThanOrEqual(1)
-    const rows = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
-    for (const r of rows) {
-      expect(String(r.row_hash)).toMatch(/^[0-9a-f]{64}$/)
-      expect(typeof r.prev_hash).toBe('string')
-    }
-    expect(rows.some((r) => r.builder === BUILDER)).toBeTruthy()
+    // door 0: the Baseline, from the walk's own button — the repository carried
+    await page.goto(`/connect/${encodeURIComponent(t.name)}`)
+    await page.getByRole('link', { name: 'Baseline' }).click()
+    await page.waitForURL(new RegExp(`/results\\?${q}$`))
+    // the gate tiles equal their APIs
+    await expect(tileValue(page.getByTestId('tile-negative-controls'))).toHaveText(controls.verdict.state)
+    await expect(page.getByTestId('tile-negative-controls')).toContainText(`${controls.verdict.escapes} escapes`)
+    await expect(tileN(page.getByTestId('tile-oracle-strength'))).toHaveText(String(oracle.tasks.length))
+    expect(summary.false_q1_total, 'false-Q1 is refused at write').toBe(0)
+    await expect(tileValue(tileLabelled(page, 'False-Q1'))).toHaveText('0')
+    // the calibrate route tile: its cells and its n are the map's
+    const tile = routeTile(page, 'calibrate')
+    await expect(tileValue(tile)).toHaveText(String(calibrate.length))
+    await expect(tileN(tile)).toHaveText(String(calibrateN))
+    // the decisions panel's count for this repository is carried to the next door
+    const eyebrow = page.getByText(/^\d+ for this repository$/)
+    await expect(eyebrow).toBeVisible()
+    const waitingN = Number(/^(\d+) /.exec((await eyebrow.textContent()) ?? '')![1])
 
-    if (env.crb && existsSync(env.crb)) {
-      const out = execFileSync(env.crb, ['ledger', 'verify', '--path', path, '--json'], { encoding: 'utf8' })
-      const verdict = JSON.parse(out) as { ok: boolean; rows: number; false_q1: number; chain_ok: boolean }
-      expect(verdict.ok, out).toBe(true)
-      expect(verdict.chain_ok, out).toBe(true)
-      expect(verdict.false_q1, out).toBe(0)
-      expect(verdict.rows).toBe(rows.length)
+    // door 1: All decisions — the repository's own section, with the same count (or no section
+    // when nothing waits on a person: a calibrate cell asks nobody to decide)
+    await page.getByRole('link', { name: 'All decisions' }).click()
+    await page.waitForURL(/\/decisions$/)
+    await expect(page.getByTestId('decisions-count')).toHaveAttribute('data-ready', 'true')
+    const section = page.getByRole('list', { name: `Decisions for ${t.name}` })
+    if (waitingN > 0) {
+      await expect(section).toBeVisible()
+      await expect(section.locator(':scope > li')).toHaveCount(waitingN)
     } else {
-      test.info().annotations.push({ type: 'note', description: 'CRB_E2E_CRB not set: chain checked by row_hash presence + row count only' })
+      await expect(section).toHaveCount(0)
     }
+
+    // door 2: Open the full map carries the repository; the cell's n is the map's
+    await page.goto(`/results?${q}`)
+    await page.getByRole('link', { name: 'Open the full map' }).click()
+    await page.waitForURL(new RegExp(`/capability\\?${q}`))
+    const cell = page.locator(`[data-testid="cell-measured"][aria-label^="${cellClass} ${cellSize}:"]`)
+    await expect(cell).toContainText(`n=${mapCell!.n}`)
+
+    // door 3: Every route with its reason carries the repository; the decision equals GET /routes
+    await page.goto(`/results?${q}`)
+    await page.getByRole('link', { name: 'Every route with its reason' }).click()
+    await page.waitForURL(new RegExp(`/routing\\?${q}`))
+    const decision = routes.decisions.find((d) => d.cell.capability_class === cellClass && d.cell.size === cellSize)
+    expect(decision, `a route decision for ${cellClass} × ${cellSize}`).toBeTruthy()
+    expect(decision!.route).toBe('calibrate')
+    await expect(page.getByTestId('policy-rule')).toContainText(routes.policy.version)
+    const table = page.getByRole('table', { name: `Route decisions for ${t.name}` })
+    const row = table.locator('tbody tr').filter({ hasText: cellClass }).filter({ hasText: cellSize })
+    await expect(row).toHaveCount(1)
+    await expect(row.getByRole('img', { name: /^Route: calibrate/ })).toBeVisible()
+    if (decision!.reason_code) await expect(row).toContainText(decision!.reason_code)
+    await expect(row).toContainText(decision!.policy_version)
+  })
+
+  test('Export JSONL downloads the ledger and it verifies with `crb ledger verify`', async ({ page }) => {
+    const { rows } = await exportAndVerifyLedger(page, runId.slice(0, 8))
+    expect(rows.some((r) => r.builder === BUILDER)).toBeTruthy()
+  })
+
+  test('Export CSV and Export abstract download; the abstract carries no fixture row', async ({ page }) => {
+    await page.goto('/ledger')
+    const dir = workDir()
+    // the CSV, by its accessible name: a header with the chain's key and the builder column
+    const [csv] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Export CSV' }).click()])
+    expect(csv.suggestedFilename()).toMatch(/\.csv$/)
+    const csvPath = join(dir, `ledger-${runId.slice(0, 8)}.csv`)
+    await csv.saveAs(csvPath)
+    const [header, ...body] = readFileSync(csvPath, 'utf8').split('\n').filter(Boolean)
+    const columns = (header ?? '').split(',')
+    expect(columns).toContain('row_hash')
+    expect(columns).toContain('builder')
+    expect(body.length).toBeGreaterThanOrEqual(1)
+    // the abstract (ADR-0007): cells only, never a fixture row, never a key outside the allowlist
+    const [abstract] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Export abstract' }).click()])
+    expect(abstract.suggestedFilename()).toMatch(/\.jsonl$/)
+    const abstractPath = join(dir, `abstract-${runId.slice(0, 8)}.jsonl`)
+    await abstract.saveAs(abstractPath)
+    const cellsOut = readFileSync(abstractPath, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>)
+    for (const c of cellsOut) {
+      expect(c.builder, JSON.stringify(c)).not.toBe('fixture_gold')
+      for (const key of Object.keys(c)) expect(ABSTRACT_ALLOWLIST.has(key), `abstract key ${key} is outside the ADR-0007 allowlist`).toBe(true)
+    }
+    // tier 1 has measured with the fixture and nothing else: the abstract is honestly empty
+    if (!REAL) expect(cellsOut, 'no fixture row leaves the boundary').toEqual([])
   })
 })
