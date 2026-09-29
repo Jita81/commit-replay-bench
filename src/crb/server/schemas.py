@@ -1418,11 +1418,31 @@ class EventsVerifyOut(BaseModel):
     full_walk_at: str = ""
 
 
+class DisqualifiedBuilderOut(BaseModel):
+    """One builder's disqualified rows in the window."""
+
+    builder: str
+    n: int
+
+
+class DisqualifiedOut(BaseModel):
+    """The rising-disqualified stop condition, served (G-400, DL-312): rows graded
+    ``disqualified`` in the last ``window_days``, per builder, and ``over`` = the builders at
+    or past ``threshold`` — what the Ledger's tile reads and what OPERATOR §8 names. It is a
+    count of what the ledger holds; it never changes ``ok``."""
+
+    window_days: int
+    threshold: int
+    by_builder: list[DisqualifiedBuilderOut]
+    over: list[str]
+
+
 class LedgerVerifyOut(BaseModel):
     """``GET /ledger/verify`` — the grades chain, false-Q1 over the stored belts, the clean
     rows measured here whose pack is absent or does not re-hash to its name, the sign-off
     and review chains (EI-6) and the audit trail's chain (``events``, ADR-0029): ``ok`` only
-    when every one of them holds."""
+    when every one of them holds. ``disqualified`` is the rising-disqualified stop condition
+    beside them (G-400) — reported, not part of ``ok``."""
 
     rows: int
     ok: bool
@@ -1438,6 +1458,7 @@ class LedgerVerifyOut(BaseModel):
     #: store, so a chain replaced wholesale reads another head (G-601).
     head_row_hash: str = ""
     events: EventsVerifyOut
+    disqualified: DisqualifiedOut
 
 
 class LedgerImportOut(BaseModel):

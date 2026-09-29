@@ -283,6 +283,7 @@ export const ACTION_HELP: Record<string, string> = {
   'builder.copy_back': 'The builder’s changes were copied back from the sealed container; the payload is the summary.',
   'builder.discard': 'The builder’s container and scratch files were discarded after the attempt.',
   'builder.discard.error': 'Discarding the builder’s container failed; the attempt’s grade is unaffected.',
+  'builder.egress_denied': 'The egress sidecar refused the builder’s connection to a host outside the allowlist; the payload names the targets. The allowlist held — read it as the builder reaching where it may not.',
   'builder.refused': 'The attempt was refused before the builder was called, because the repository’s test command cannot start (a runner tool is missing); nothing was spent.',
   'builder.preflight.fixed': 'A formatting or lint problem in the patch was fixed before grading.',
   'builder.preflight.repaired': 'The patch was repaired by a bounded repair turn before grading.',

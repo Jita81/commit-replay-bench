@@ -177,6 +177,23 @@ def h(tmp_path: Path, pyrepo: pr.PyRepo, monkeypatch: pytest.MonkeyPatch) -> Har
     return harness
 
 
+def test_set_controls_verdict_is_one_hot_over_the_five_states(registry: Any) -> None:
+    """G-920: ``crb_controls_verdict{repo,state}`` reads 1 for the state and 0 for every other
+    word; a second set moves the 1; a word outside the router's vocabulary is refused."""
+    metrics.set_controls_verdict("demo", "passed")
+    hot = {
+        st: sample(registry, "crb_controls_verdict", repo="demo", state=st)
+        for st in metrics.CONTROLS_STATES
+    }
+    assert hot == {"unmeasured": 0, "failed": 0, "escaped": 0, "thin": 0, "passed": 1}
+    metrics.set_controls_verdict("demo", "thin")
+    assert sample(registry, "crb_controls_verdict", repo="demo", state="thin") == 1
+    assert sample(registry, "crb_controls_verdict", repo="demo", state="passed") == 0
+    with pytest.raises(ValueError, match="unknown controls state"):
+        metrics.set_controls_verdict("demo", "green")
+    assert metrics.CONTROLS_STATES == ("unmeasured", "failed", "escaped", "thin", "passed")
+
+
 def test_worker_runs_total_and_sandbox_unavailable_after_harness_runs(
     registry: Any, h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,4 +1,5 @@
-"""The chart ships DEPLOYMENT §9.2's four alert rules, so no deployment retypes them.
+"""The chart ships DEPLOYMENT §9.2's alert rules (four at first, seven since Wave 6), so no
+deployment retypes them.
 
 The rules existed only as expressions in docs/DEPLOYMENT.md §9.2: every deployment copied
 them into its own Prometheus, and a typo there was silent — an alert on the honesty floor
@@ -11,7 +12,7 @@ Navigation
 What it is:   The chart suite for the ``PrometheusRule`` template.
 What it does: Renders the chart with and without ``prometheusRule.enabled`` and asserts that
               nothing is rendered by default; that the enabled render carries exactly the
-              four alerts of DEPLOYMENT §9.2, each ``expr`` the table's own expression; that
+              alerts of DEPLOYMENT §9.2 (``ALERTS``), each ``expr`` the table's own expression; that
               the false-Q1 alert fires on any non-zero value with no delay; that the
               operator's labels reach the resource; that a worker with its metrics port
               off is refused, since three of the four rules read the worker's series; and
@@ -48,6 +49,11 @@ ALERTS = {
     "No worker": "CrbNoWorker",
     "Sandbox failing closed": "CrbSandboxFailingClosed",
     "Deliveries failing": "CrbDeliveriesFailing",
+    # Wave 6 (ops): the three stop conditions OPERATOR §8 named and nothing reported (G-400,
+    # G-920) — the same table row, chart rule and name discipline as the first four
+    "Controls not passed": "CrbControlsNotPassed",
+    "Disqualified rising": "CrbDisqualifiedRising",
+    "Egress denied": "CrbEgressDenied",
 }
 
 
@@ -70,6 +76,8 @@ def test_no_alert_rule_is_rendered_by_default() -> None:
 
 
 def test_the_chart_carries_the_guides_four_rules_word_for_word() -> None:
+    """Named for the four rules it began with (docs/dod/product.md go-live.20 cites it); it
+    holds every rule in ``ALERTS`` — seven since Wave 6 — to the guide word for word."""
     guide = _guide_expressions()
     assert set(guide) == set(ALERTS), f"DEPLOYMENT §9.2 lists {sorted(guide)}"
     rules = _rules(_render(*ENABLED))

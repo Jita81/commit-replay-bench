@@ -93,20 +93,24 @@ class TestVerify:
         r = env.get("/ledger/verify")
         assert r.status_code == 200
         d = r.json()
-        assert set(d) == {
-            "rows",
-            "ok",
-            "false_q1_total",
-            "chain_ok",
-            "broken_at",
-            "detail",
-            "clean_without_pack",
-            "signoffs",
-            "reviews",
-            "verified_at",
-            "head_row_hash",
-            "events",
-        }
+        assert (
+            set(d)
+            == {
+                "rows",
+                "ok",
+                "false_q1_total",
+                "chain_ok",
+                "broken_at",
+                "detail",
+                "clean_without_pack",
+                "signoffs",
+                "reviews",
+                "verified_at",
+                "head_row_hash",
+                "events",
+                "disqualified",  # G-400: the rising-disqualified block, tests/test_ledger_disqualified.py
+            }
+        )
         assert d["rows"] == 50 and d["ok"] is True and d["false_q1_total"] == 0
         # EI-6: the sign-off and review chains are walked with the grades chain
         assert d["signoffs"]["chain_ok"] is True and d["reviews"]["chain_ok"] is True

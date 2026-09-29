@@ -898,9 +898,9 @@ Compose or Helm install, with the operator's own decisions, has not been timed (
 
 ## 9. Observability
 
-Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, eleven
+Three surfaces: **metrics** (Prometheus, two expositions), **health** (`/health`, twelve
 probes), **events** (the run's audit trail, streamed as SSE and stored in the `events`
-table) **[measured — n = 11 probes and 2 expositions; method: the probes the readiness
+table) **[measured — n = 12 probes and 2 expositions; method: the probes the readiness
 route runs, counted in its code and held there by `tests/test_health_probe_docs.py`, and one
 exposition per process that records metrics; apparatus n/a]**. Logs are JSON and redacted. Nothing here leaves the tenant.
 
@@ -940,8 +940,21 @@ scraped, and that suite fails if the api serves one.
 | `crb_queue_depth` | gauge | — | worker | queued runs, as the worker last saw them on check-in (every `heartbeat_s`) |
 | `crb_false_q1_total` | gauge | — | api (recounted on every scrape and every `/health`) and worker (after every run) | clean ledger rows with a failed belt. **Must be 0** — a stop condition ([OPERATOR §8](OPERATOR.md#8-stop-conditions)) |
 | `crb_ledger_rows` | gauge | — | api, worker | rows in the grade ledger |
+| `crb_controls_verdict` | gauge | `repo, state` | api (recomputed on every scrape from the latest `controls.report`) | each repository's negative-controls verdict at the running apparatus, one-hot over `state` ∈ `unmeasured`, `failed`, `escaped`, `thin`, `passed` — the router's own word, the same read the Oracle screen and the route gate make. Set at scrape time, never by the worker, so an API restart blanks nothing and an alert on `state!="passed"` cannot fall silent when the deployment comes back. Only `passed` licenses delivery ([OPERATOR §3.1](OPERATOR.md#31-oracle-adequacy--mutation-scoring)) |
+| `crb_egress_denied_total` | counter | `repo` | worker | `host:port` targets the builder's egress sidecar refused a CONNECT to during sealed builds, one count per denied target per build, metered from the run's own `builder.egress_denied` event. The allowlist held — this is a builder that tried to reach somewhere it may not — and it is a stop condition to read ([OPERATOR §8](OPERATOR.md#8-stop-conditions)); what it cannot see is under the alert below |
 | `crb_http_requests_total` | counter | `method, route, status` | api | requests by route template (never a raw id) |
 | `crb_http_request_duration_seconds` | histogram | `method, route` | api | request latency |
+
+**The three learning reports** are metered as served: `crb_http_requests_total` carries one
+series per report route — `/api/v1/learn/refusals`, `/api/v1/learn/strengthen` and
+`/api/v1/learn/remeasure` — so
+`sum by (route) (increase(crb_http_requests_total{route=~"/api/v1/learn/(refusals|strengthen|remeasure)",status="200"}[7d]))`
+is how many times each report was served in the window, to any caller: a person who opened
+the Learn screen, a script, or another screen that fetched it. It counts reports served, not
+people reading them ([OPERATOR §13](OPERATOR.md#13-the-three-learning-reports) says when to
+read each) **[measured — n = 3 report routes; method:
+`tests/test_server_system.py::TestMetrics::test_each_learning_report_has_its_own_request_series`
+serves each report once and asserts its route-labelled series; apparatus n/a]**.
 
 Histogram buckets: 1, 5, 15, 30, 60, 120, 300, 600, 1200, 1800 seconds **[measured — n = 10
 buckets; method: the bucket bounds every histogram is built with in the metrics module,
@@ -954,7 +967,8 @@ chart ships them as a `PrometheusRule` (`prometheusRule.enabled`, off by default
 `labels` are what your Prometheus's `ruleSelector` matches), with these expressions word for
 word — `tests/test_deploy_alert_rules.py` fails when the chart and this table disagree — so
 no deployment retypes them. The render refuses the rules while `worker.metrics.port` is 0:
-three of them read series only the worker serves.
+the no-worker, sandbox, delivery, disqualified and egress rules read series only the worker
+serves.
 
 | Alert | Expression | Meaning and action |
 |---|---|---|
@@ -962,6 +976,19 @@ three of them read series only the worker serves.
 | **No worker** | `absent_over_time(crb_queue_depth[5m])` | no worker's exposition has been scraped for 5 minutes (`prometheusRule.noWorkerFor`; keep it several scrape intervals long), so queued runs will not start. A worker that is up but stopped checking in, or a running run whose heartbeat is stale, still serves the series: the `/health` probe `worker` names those (probe `/api/v1/health` with a blackbox exporter to alert on them too) |
 | **Sandbox failing closed** | `increase(crb_sandbox_unavailable_total[15m]) > 0` | the docker daemon, image or mounts are wrong on the worker host ([OPERATOR §7](OPERATOR.md#7-when-the-sandbox-is-unavailable)); no test ran on the host as a fallback |
 | **Deliveries failing** | `increase(crb_deliveries_total{outcome="failed"}[1h]) > 0` | the push or the pull-request call errored — the GitHub App's installation, permissions or the repository's default branch |
+| **Controls not passed** | `max by (repo) (crb_controls_verdict{state!="passed"}) == 1` | `for: 1h` — a repository whose latest negative-controls verdict has read anything but `passed` for an hour: `unmeasured` (no report at this apparatus — a freshly connected repository, or one whose report predates the apparatus), `failed`, `escaped` or `thin`. Its map licenses no delivery until the controls pass; run them, or read the Oracle screen for why they did not ([OPERATOR §3.1](OPERATOR.md#31-oracle-adequacy--mutation-scoring), [§8](OPERATOR.md#8-stop-conditions)). Silence it per `repo` for a repository you are deliberately not measuring yet. Warning |
+| **Disqualified rising** | `sum by (repo) (increase(crb_tasks_total{outcome="disqualified"}[7d])) >= 2` | attempts disqualified for test tampering on one repository in the window reached DL-312's threshold — the rising `disqualified` count [OPERATOR §8](OPERATOR.md#8-stop-conditions) names. The per-builder split against the same threshold is served on `GET /ledger/verify` (`disqualified`) and shown on the Ledger's tile: stop delivering from the builder it names and read its rows' `dq_reason`. Warning |
+| **Egress denied** | `increase(crb_egress_denied_total[1h]) > 0` | the egress sidecar refused a builder's CONNECT to a host outside the allowlist in the last hour. The allowlist held; read the run's `builder.egress_denied` events for the targets, and decide whether the host belongs on `CRB_BUILDER__ALLOW_HOSTS` or the builder was reaching where it should not ([OPERATOR §8](OPERATOR.md#8-stop-conditions)). Warning |
+
+**What the product cannot see.** The grading sandbox runs with no network at all
+(`--network=none`, ADR-0005), so it has no sidecar and writes no deny line: nothing there can
+be reported because nothing can be attempted. A runtime escape — a container that reaches the
+host, another container or the network by any route other than the proxy — is invisible to
+the product's own probes and counters, which only ever see the proxy's decisions. That signal
+needs the operator's sensor: Falco (or an equivalent runtime rule set) on the worker host, or
+a NetworkPolicy whose drops are logged, alerting on any traffic from the `crb-b-*` internal
+networks that is not to the proxy. The product's signal is the allowlist holding; the
+operator's is the sandbox holding.
 
 Useful, not alerts: `sum by (repo) (increase(crb_builder_cost_usd_total[24h]))` (spend per
 repository, a floor), `sum by (repo, outcome) (increase(crb_deliveries_total[7d]))`,
@@ -970,13 +997,16 @@ rate is worth a look), `histogram_quantile(0.9, rate(crb_grade_latency_seconds_b
 
 ### 9.3 Health
 
-`GET /api/v1/health` (readiness, 503 on `down`) runs eleven probes — `db`, `migrations`
+`GET /api/v1/health` (readiness, 503 on `down`) runs twelve probes — `db`, `migrations`
 (the store's revision is the code's head; `down`, and so 503, when the store is behind, ahead,
 empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_only`, `ledger`,
-`sandbox` (skipped for `CRB_ROLE=api`), `provision` (dependency provisioning, ADR-0019;
-skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders`,
-`worker`, `intake` and `build` (the served commits agree) — each documented in
-[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface) **[measured — n = 11
+`redaction` (the newest fifty stored evidence packs carry no credential shape the redactor
+knows — `down` naming the pack hash, never the value, when one does; known shapes only, in
+stored packs only, never a log or an export — G-400), `sandbox` (skipped for `CRB_ROLE=api`),
+`provision` (dependency provisioning, ADR-0019; skipped for `CRB_ROLE=api` and while
+provisioning is off), `toolchains`, `builders`, `worker`, `intake` and `build` (the served
+commits agree) — each documented in
+[API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface) **[measured — n = 12
 probes; method: the probes the readiness route runs, counted in its code and held there by
 `tests/test_health_probe_docs.py`; apparatus n/a]**.
 `GET /api/v1/health/live` is the liveness probe: the process and its database, nothing else.

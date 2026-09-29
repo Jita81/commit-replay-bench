@@ -23,6 +23,14 @@ store-level checks:
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``; and
   the sign-off and review chains walked from their stored columns — a break = ``down``.
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
+* ``redaction``   — the newest :data:`REDACTION_PROBE_PACKS` stored evidence packs carry no
+  credential shape the redactor knows (G-400): every string of each pack is re-run through
+  :func:`crb.core.redact.redact` with the redactor's own ``[REDACTED…]`` markers cut out
+  first, so a marker the head cap truncated is never read as a secret. A pack that changes
+  is ``down`` and the detail names the pack hash, never the value; a pack body that cannot
+  be read is ``degraded``, never down. Known shapes only, in stored packs only — a secret of
+  a shape the redactor does not know is not seen here. The reading is reused for
+  :data:`REDACTION_PROBE_TTL_S` (one worker heartbeat).
 * ``worker``      — liveness from the ``workers`` table each worker upserts every
   ``heartbeat_s`` even when idle (J-TEL-2): a worker seen within 3 × its own
   ``heartbeat_s`` is alive. ``degraded`` (never ``down``) when runs are queued and no
@@ -87,7 +95,11 @@ What it does: Readiness aggregates the store probes (db, migrations at head, app
               the fixed ``failure_detail`` naming the request id, the exception logged, never
               served;
               liveness checks the database only; ``/metrics``
-              refreshes the ledger gauges then renders the shared registry.
+              refreshes the ledger gauges and each repository's one-hot
+              ``crb_controls_verdict`` (from the latest controls report, at scrape time, so a
+              restart cannot blank it — G-920) then renders the shared registry;
+              ``disqualified_counts`` is the ``disqualified`` block ``/ledger/verify`` serves
+              (per builder over the last seven days against DL-312's threshold, G-400).
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
               request id → ``probes.aggregate`` → stamp;
               ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
@@ -115,7 +127,8 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
-              tests/test_settings_posture.py
+              tests/test_settings_posture.py, tests/test_health_probe_docs.py,
+              tests/test_ledger_disqualified.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere), whether it may fail readiness, and putting its read
               under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
@@ -127,9 +140,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +153,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5, LedgerIntegrityError
+from crb.core.redact import redact
 from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsError
 from crb.core.signoff import SIGNOFF_POLICY_VERSION
@@ -150,6 +165,7 @@ from crb.provision.probe import probe_provision
 from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
 from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
+from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
 from crb.server.routes.reviews import verify_reviews
 from crb.server.routes.signoffs import verify_signoffs
 from crb.server.secrets import SecretsFile
@@ -159,6 +175,7 @@ from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import (
     LEASE_ROW_PREFIX,
+    EvidencePackRow,
     Grade,
     Repo,
     Run,
@@ -346,6 +363,54 @@ def refresh_ledger_gauges(factory: sessionmaker[Session]) -> tuple[int, int]:
     rows, fq1 = ledger_counts(factory)
     metrics.set_ledger_health(rows=rows, false_q1=fq1)
     return rows, fq1
+
+
+def refresh_controls_gauges(factory: sessionmaker[Session]) -> dict[str, str]:
+    """Set ``crb_controls_verdict{repo,state}`` one-hot for every repository from its latest
+    ``controls.report`` at the running apparatus (``latest_controls_verdict`` — the same read
+    the router and the Oracle screen make) and return ``{repo: state}``. Called at SCRAPE
+    time by ``/metrics``, not by the worker on ``controls.report``: a gauge the worker set
+    would read absent after every API restart until the next controls run, and an alert on
+    ``state!="passed"`` would fall silent exactly when the deployment came back (G-920)."""
+    states: dict[str, str] = {}
+    with factory() as s:
+        names = [str(n) for n in s.execute(select(Repo.name).order_by(Repo.name)).scalars()]
+        for name in names:
+            states[name] = str(verdict_dict(latest_controls_verdict(s, name))["state"])
+    for name, state in states.items():
+        metrics.set_controls_verdict(name, state)
+    return states
+
+
+#: The ``disqualified`` block of ``GET /ledger/verify`` (DL-312, G-400): rows graded
+#: ``disqualified`` in the last :data:`DISQUALIFIED_WINDOW_DAYS`, counted per builder, and a
+#: builder at or over :data:`DISQUALIFIED_THRESHOLD` of them is a stop condition
+#: (docs/OPERATOR.md#8-stop-conditions). The threshold is a hypothesis until a deployment
+#: has measured its own base rate — DL-312 says how to change it.
+DISQUALIFIED_WINDOW_DAYS = 7
+DISQUALIFIED_THRESHOLD = 2
+
+
+def disqualified_counts(session: Session, *, now: _dt.datetime | None = None) -> dict[str, Any]:
+    """``{window_days, threshold, by_builder: [{builder, n}], over: [builder]}`` over the
+    grade rows created in the last :data:`DISQUALIFIED_WINDOW_DAYS` (``created`` is an
+    ISO-8601 UTC string, so the cut is a string compare against one), disqualified rows
+    only, per builder, descending by count then by name; ``over`` names the builders at or
+    past :data:`DISQUALIFIED_THRESHOLD`."""
+    at = now or _dt.datetime.now(_dt.UTC)
+    since = (at - _dt.timedelta(days=DISQUALIFIED_WINDOW_DAYS)).isoformat(timespec="seconds")
+    rows = session.execute(
+        select(Grade.builder, func.count(Grade.seq))
+        .where(Grade.disqualified.is_(True), Grade.created >= since)
+        .group_by(Grade.builder)
+    ).all()
+    counts = sorted(((str(b or ""), int(n)) for b, n in rows), key=lambda t: (-t[1], t[0]))
+    return {
+        "window_days": DISQUALIFIED_WINDOW_DAYS,
+        "threshold": DISQUALIFIED_THRESHOLD,
+        "by_builder": [{"builder": b, "n": n} for b, n in counts],
+        "over": [b for b, n in counts if n >= DISQUALIFIED_THRESHOLD],
+    }
 
 
 def probe_ledger(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
@@ -762,6 +827,131 @@ def probe_intake(
     return probes.run_probe("intake", _read, request_id=request_id)
 
 
+#: How many of the newest stored evidence packs the ``redaction`` probe re-reads.
+REDACTION_PROBE_PACKS = 50
+#: How long a reading is reused: one worker heartbeat (``heartbeat_s`` defaults to 10 s), so
+#: a readiness poll every few seconds does not re-walk fifty packs each time, and a pack
+#: stored since is seen within a heartbeat. A reading that is not ``ok`` is not cached at
+#: all, so a fixed store is seen at once.
+REDACTION_PROBE_TTL_S = 10.0
+#: The redactor's own markers — ``[REDACTED]``, ``[REDACTED-KEY]``, ``[REDACTED-PRIVATE-KEY]``
+#: — and a marker the head cap truncated (``[REDACT …``): cut out before the redactor is
+#: re-run, because a stored ``api_key=[REDACTED]`` re-matches the ``key=value`` rule and would
+#: read as a secret with none present (the Wave 6 plan critique, 2026-09-29).
+_REDACTION_MARKER = re.compile(r"\[REDACT[A-Z-]*\]?")
+#: Per store (the factory's bind URL), like the provision cache is per configuration, so two
+#: stores in one process — the test suite's — never read each other's packs.
+_redaction_cache: dict[str, tuple[float, ProbeResult]] = {}
+_redaction_lock = threading.Lock()
+
+
+def _store_key(factory: sessionmaker[Session]) -> str:
+    bind = dict(getattr(factory, "kw", {}) or {}).get("bind")
+    url = getattr(bind, "url", None)
+    return str(url) if url is not None else f"factory:{id(factory)}"
+
+
+def carries_secret_shape(text: str) -> bool:
+    """``True`` when the redactor would change ``text`` once its own markers are cut out —
+    a credential shape whose captured value is not a ``[REDACTED…]`` marker, whole or
+    truncated."""
+    bare = _REDACTION_MARKER.sub("", text)
+    return redact(bare) != bare
+
+
+def _strings_of(value: Any) -> Iterator[str]:
+    """Every string in a JSON-shaped value, keys included (a key can carry a value)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for k, v in value.items():
+            yield from _strings_of(k)
+            yield from _strings_of(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _strings_of(v)
+
+
+def redaction_result(factory: sessionmaker[Session]) -> ProbeResult:
+    """One uncached reading of the ``redaction`` probe (see the module docstring)."""
+    with factory() as s:
+        packs = list(
+            s.execute(
+                select(EvidencePackRow.pack_hash, EvidencePackRow.body_json)
+                .order_by(EvidencePackRow.created.desc(), EvidencePackRow.pack_hash)
+                .limit(REDACTION_PROBE_PACKS)
+            ).all()
+        )
+    leaking: list[str] = []
+    unreadable: list[str] = []
+    for pack_hash, body in packs:
+        try:
+            found = any(carries_secret_shape(text) for text in _strings_of(body))
+        except Exception:  # one pack's read must not decide the others'
+            unreadable.append(str(pack_hash))
+            continue
+        if found:
+            leaking.append(str(pack_hash))
+    data = {
+        "packs": len(packs),
+        "window": REDACTION_PROBE_PACKS,
+        "leaking": leaking,
+        "unreadable": unreadable,
+    }
+    if leaking:
+        return ProbeResult(
+            "redaction",
+            DOWN,
+            f"{_plural(len(leaking), 'stored evidence pack')} carry a credential shape the "
+            f"redactor knows — pack {leaking[0]}"
+            + (f" and {len(leaking) - 1} more" if len(leaking) > 1 else "")
+            + " — stop delivery (docs/OPERATOR.md#8-stop-conditions); the value is not served",
+            data,
+        )
+    if unreadable:
+        return ProbeResult(
+            "redaction",
+            DEGRADED,
+            f"{_plural(len(unreadable), 'stored evidence pack')} could not be read — "
+            f"pack {unreadable[0]} — the others carry no known credential shape",
+            data,
+        )
+    if not packs:
+        return ProbeResult(
+            "redaction", OK, "no stored evidence pack yet; nothing to re-check", data
+        )
+    return ProbeResult(
+        "redaction",
+        OK,
+        f"the newest {_plural(len(packs), 'stored evidence pack')} carry no credential shape "
+        "the redactor knows (known shapes only)",
+        data,
+    )
+
+
+def probe_redaction(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
+    """``redaction`` (G-400): :func:`redaction_result`, an ``ok`` reading reused for
+    :data:`REDACTION_PROBE_TTL_S`; a store that cannot be read is ``down`` with the fixed
+    ``failure_detail`` (``run_probe``)."""
+    key = _store_key(factory)
+    now = _monotonic()
+    with _redaction_lock:
+        hit = _redaction_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+
+    def _read() -> ProbeResult:
+        result = redaction_result(factory)
+        with _redaction_lock:
+            if result.status == OK:
+                _redaction_cache[key] = (now + REDACTION_PROBE_TTL_S, result)
+            else:
+                _redaction_cache.pop(key, None)
+        return result
+
+    return probes.run_probe("redaction", _read, request_id=request_id)
+
+
 #: ``collect_health`` without the app's mounted UI directory (a caller outside a request):
 #: the probe then resolves the candidates itself.
 UI_DIST_UNKNOWN: Any = object()
@@ -814,6 +1004,7 @@ def collect_health(
         probe_migrations(factory, request_id=rid),
         probe_append_only(factory, request_id=rid),
         probe_ledger(factory, request_id=rid),
+        probe_redaction(factory, request_id=rid),
         probes.run_probe(
             "sandbox", lambda: probe_sandbox(settings, role, request_id=rid), request_id=rid
         ),
@@ -885,13 +1076,14 @@ def health_live(request: Request, response: Response, factory: SessionFactoryDep
     summary="Prometheus exposition (crb_false_q1_total must read 0)",
 )
 def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Response:
-    """The exposition; the ledger gauges are refreshed on every scrape so
-    ``crb_false_q1_total`` is never stale."""
+    """The exposition; the ledger gauges and each repository's ``crb_controls_verdict`` are
+    refreshed on every scrape so neither is ever stale, and a restart blanks nothing."""
     if not settings.metrics_enabled:
         raise ApiError(404, "metrics_disabled", "CRB_METRICS_ENABLED is false")
     if not metrics.available():
         raise ApiError(503, "metrics_unavailable", "prometheus_client is not installed")
     refresh_ledger_gauges(factory)
+    refresh_controls_gauges(factory)
     return Response(content=metrics.render_api(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -922,22 +1114,29 @@ def version(request: Request) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_ROLE",
+    "DISQUALIFIED_THRESHOLD",
+    "DISQUALIFIED_WINDOW_DAYS",
     "LICENCE",
     "MIGRATE_FIX",
+    "REDACTION_PROBE_PACKS",
     "ROLES",
     "ROLE_ALL",
     "ROLE_API",
     "ROLE_ENV",
     "ROLE_WORKER",
     "SKIPPED",
+    "carries_secret_shape",
     "collect_health",
     "collect_liveness",
+    "disqualified_counts",
     "ledger_counts",
     "migrations_result",
     "probe_migrations",
     "probe_provision_role",
+    "probe_redaction",
     "probe_worker",
     "process_role",
+    "refresh_controls_gauges",
     "refresh_ledger_gauges",
     "router",
 ]
