@@ -196,6 +196,8 @@ const ALPHA_WALK = {
   'GET /capability-map': MAP,
   'GET /runs/r9': RUN,
   'GET /flow': FLOW,
+  // the mine stage reads the config candidates (DL-316); the fixture implies none
+  'GET /repos/alpha/config-candidates': { repo: 'alpha', items: [] },
 }
 
 /** The on-ramp routes, keyed by App.tsx pattern. */

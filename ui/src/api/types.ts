@@ -308,6 +308,39 @@ export interface RepoConfig {
   runner_opts: Record<string, unknown>
   sandbox_image: string
   mining: MiningConfig
+  /** Chain the £0 stages (DL-315): present, and true, only once an operator switched it on. */
+  auto_stages?: boolean
+}
+
+/**
+ * @contract API.md "GET /repos/{name}/config-candidates" — one config change the mine's gold
+ * notes and skips imply (DL-316): `field` is the dotted config path (`runner_opts.timeout`,
+ * `lint.timeout`) or, for a `deployment` scope, the variable an operator sets; `observed` is
+ * the configured limit that was hit; `proposed` what Accept applies.
+ */
+export interface ConfigCandidate {
+  id: string
+  kind: 'raise_test_timeout' | 'raise_lint_timeout' | 'provisioning_on' | string
+  scope: 'repo' | 'deployment'
+  field: string
+  observed: number | boolean | null
+  proposed: number | boolean | null
+  reason: string
+  sources: string[]
+}
+
+export interface ConfigCandidates {
+  repo: string
+  items: ConfigCandidate[]
+}
+
+/** @contract API.md "POST /repos/{name}/config-candidates/{id}/accept|reject". */
+export interface CandidateDecision {
+  repo: string
+  id: string
+  decision: 'accepted' | 'rejected'
+  candidate: ConfigCandidate
+  config: RepoConfig
 }
 
 /** @contract API.md "Repos: list with probe status, task counts, last run". */

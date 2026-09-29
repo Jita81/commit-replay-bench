@@ -11,16 +11,24 @@
  *               posts the right run kind (`POST /runs {kind: mine}`) and the probe posts to
  *               its own route; that a viewer sees the stage and a sentence, not a bare
  *               "operator" (J-ONR-15); that a running measurement renders the in-flight
- *               panel from the polled run — attempts, spend, started, Cancel with a confirm
- *               that posts the cancel (J-ONR-5) — and a queued run reads "Queued" with its
- *               place in the line (J-TEL-6); and that every element on both screens carries
- *               a hint, with a stage-summary pill and a stage title opening on hover; that a
+ *               panel from the polled run — attempts, spend, started, and a Cancel that asks
+ *               in the app's own dialog and posts only once "Cancel the run" is confirmed,
+ *               nothing on "Keep it running" (J-ONR-5, G-117) — and a queued run reads
+ *               "Queued" with its place in the line (J-TEL-6); that every element on both
+ *               screens carries a hint, the door column's hidden header included (G-127),
+ *               with a stage-summary pill and a stage title opening on hover; that a
  *               row, and the walk, whose oracle, controls or map read fails for a reason other
  *               than 404 shows the error with Retry, never a stage state — each of the three
  *               reads failing on its own, and on the walk with no stage action offered (G-124,
- *               G-730); and that a viewer is offered
- *               no Connect control on the list or its empty state (G-126).
- * How:          `mockApi` + `renderApp` with `path` set so `useParams` resolves.
+ *               G-730); that a viewer is offered no Connect control on the list or its empty
+ *               state (G-126); that the header offers every role All repositories (G-228);
+ *               that the walk's Measure… opens the Measure page and posts nothing (G-907);
+ *               that an unknown name says so and offers Connection while a 500 offers Retry
+ *               (G-979); and that the mine stage lists the config candidates the notes imply
+ *               with Accept and Reject for an operator only (DL-316). No test stubs
+ *               `window.confirm`: the product has none.
+ * How:          `mockApi` + `renderApp` with `path` set so `useParams` resolves; the Measure
+ *               door is proved with a second route mounted beside the walk.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Connect/ConnectPage.tsx (under test), connection.ts,
@@ -32,10 +40,21 @@
 
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import { ConnectPage, ConnectRepoPage } from './ConnectPage'
+
+/**
+ * G-117's class: a native `window.confirm` carries no hint, cannot be reached by the hint
+ * ratchet and is invisible to axe. Every source of the app as text (Vite's raw import), so a
+ * new one anywhere in ui/src fails here — the question is always the app's own `Dialog`.
+ */
+const SOURCES = import.meta.glob('../../**/*.{ts,tsx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+
+/** The walk's mine stage reads the candidates (DL-316); most walks imply none. */
+const NO_CANDIDATES = { 'GET /repos/alpha/config-candidates': { repo: 'alpha', items: [] } }
 
 const REPO = {
   name: 'alpha',
@@ -79,6 +98,17 @@ const RUN = {
   progress: { done: 2, total: 10, current_task_id: 't3' },
 }
 const EMPTY_MAP = { repo: 'alpha', by: ['capability_class', 'size'], classes: [], sizes: [], languages: [], models: [], cells: [], summary: { trusted_autonomy_coverage: 0, total_cells: 0, measured_cells: 0, deliver_cells: 0, n_total: 0, false_q1_total: 0, apparatus_versions: [] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } }
+
+describe('no screen asks a question through window.confirm (G-117)', () => {
+  it('no source under ui/src calls confirm(); the app Dialog asks instead', () => {
+    const offenders = Object.entries(SOURCES)
+      .filter(([path]) => !/\.test\.tsx?$/.test(path))
+      .filter(([, text]) => /\b(?:window\.|globalThis\.)?confirm\s*\(/.test(text))
+      .map(([path]) => path)
+    expect(Object.keys(SOURCES).length).toBeGreaterThan(50) // the glob matched the app, not nothing
+    expect(offenders).toEqual([])
+  })
+})
 
 describe('ConnectPage', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -169,7 +199,7 @@ describe('ConnectPage', () => {
     const { container } = renderApp(<ConnectPage />, { route: '/connect' })
     await waitFor(() => expect(screen.getByRole('table', { name: 'Connected repositories' })).toBeInTheDocument())
     expect(unhinted(container)).toEqual([])
-    expect(container.querySelectorAll('th[scope="col"] [data-hint^="col.connect."]').length).toBe(5)
+    expect(container.querySelectorAll('th[scope="col"] [data-hint^="col.connect."]').length).toBe(6)
     expect(screen.getByRole('button', { name: 'Connect by URL' })).toHaveAttribute('data-hint', 'button.connect.url')
     expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('data-hint', 'button.connect.row_action')
     const pill = container.querySelector('[data-hint="pill.connect.stage_summary"]')!
@@ -184,6 +214,7 @@ describe('ConnectPage', () => {
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 4 } },
       'GET /runs/r9': RUN,
+      ...NO_CANDIDATES,
     })
     const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     await waitFor(() => expect(screen.getByTestId('in-flight')).toBeInTheDocument())
@@ -207,6 +238,7 @@ describe('ConnectPage', () => {
       'GET /capability-map': EMPTY_MAP,
       'POST /runs': (_u: string, init?: RequestInit) => json({ id: 'run-9', repo: 'alpha', kind: JSON.parse(String(init?.body)).kind, status: 'queued' }, 201),
       'GET /runs/run-9': { id: 'run-9', repo: 'alpha', kind: 'mine', status: 'queued' },
+      ...NO_CANDIDATES,
     })
     renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     await waitFor(() => expect(screen.getByRole('list', { name: 'Connection stages' })).toBeInTheDocument())
@@ -237,6 +269,7 @@ describe('ConnectPage', () => {
       'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6, apparatus: { controls_version: 'controls.v3' } },
       'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
       [route]: () => {
         reads.push(route)
         return envelope(503, 'store_unavailable', 'the store is not answering')
@@ -266,6 +299,7 @@ describe('ConnectPage', () => {
       'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
       'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
       'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
     })
     renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     await waitFor(() => expect(screen.getByTestId('stage-probe')).toHaveTextContent('Not started'))
@@ -280,6 +314,7 @@ describe('ConnectPage', () => {
       'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
     })
     renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Not started'))
@@ -288,15 +323,21 @@ describe('ConnectPage', () => {
   })
 
   it('a running measurement shows attempts, spend, started and a Cancel that confirms before posting (J-ONR-5)', async () => {
-    vi.stubGlobal('confirm', vi.fn(() => true))
+    // no window.confirm: the question is the app's own dialog (G-117)
+    let cancelled = false
     const { calls } = mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
       'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'running', finished: null } },
       'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
       'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
       'GET /capability-map': { ...EMPTY_MAP, summary: { ...EMPTY_MAP.summary, n_total: 4 } },
-      'GET /runs/r9': RUN,
-      'POST /runs/r9/cancel': () => json({ ...RUN, cancel_requested: true }),
+      // the run is re-read after the cancel answers (useCancelRun), so the mock answers it live
+      'GET /runs/r9': () => json({ ...RUN, cancel_requested: cancelled }),
+      'POST /runs/r9/cancel': () => {
+        cancelled = true
+        return json({ ...RUN, cancel_requested: true })
+      },
+      ...NO_CANDIDATES,
     })
     renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
     await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('In progress'))
@@ -312,9 +353,228 @@ describe('ConnectPage', () => {
     expect(within(panel).getByRole('link', { name: 'Open the run' })).toHaveAttribute('href', '/runs/r9')
     // no second spend is offered while the run is in flight
     expect(screen.queryByRole('button', { name: /^Measure…$/ })).not.toBeInTheDocument()
+    const posted = () => calls.some((c) => c.method === 'POST' && c.path === '/runs/r9/cancel')
+    // the question opens; nothing is posted until it is answered
     await userEvent.click(within(panel).getByRole('button', { name: 'Cancel the run' }))
-    expect(globalThis.confirm).toHaveBeenCalledWith('Cancel this run? Attempts already made are still charged.')
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs/r9/cancel')).toBe(true))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveAccessibleName('Cancel this run?')
+    expect(dialog).toHaveTextContent('Attempts already made are still charged.')
+    expect(posted()).toBe(false)
+    // Keep it running: the question closes and nothing is posted
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Keep it running' }))
+    await waitFor(() => expect(screen.queryByTestId('cancel-confirm')).toBeNull())
+    expect(posted()).toBe(false)
+    // asked again and confirmed: the cancel is posted and the run re-read says so
+    await userEvent.click(within(panel).getByRole('button', { name: 'Cancel the run' }))
+    const again = await screen.findByRole('dialog')
+    expect(within(again).getByRole('button', { name: 'Keep it running' })).toHaveAttribute('data-hint', 'button.connect.cancel_keep')
+    expect(within(again).getByRole('button', { name: 'Cancel the run' })).toHaveAttribute('data-hint', 'button.connect.cancel_confirm')
+    await userEvent.click(within(again).getByRole('button', { name: 'Cancel the run' }))
+    await waitFor(() => expect(posted()).toBe(true))
+    await waitFor(() => expect(screen.queryByTestId('cancel-confirm')).toBeNull())
+    await waitFor(() => expect(panel).toHaveTextContent('Cancel requested — the worker stops between attempts.'))
+  })
+
+  it('every column of the connected-repositories table has an accessible header, the door column included', async () => {
+    mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 } })
+    renderApp(<ConnectPage />, { route: '/connect' })
+    const table = await screen.findByRole('table', { name: 'Connected repositories' })
+    const headers = within(table).getAllByRole('columnheader')
+    expect(headers).toHaveLength(6)
+    for (const th of headers) expect((th.textContent ?? '').trim(), 'an empty th names nothing').not.toBe('')
+    // the door column's name is for a screen reader: hidden, hinted, never drawn
+    const door = headers[5]!
+    expect(door).toHaveTextContent('Next')
+    expect(door.querySelector('.sr-only')).not.toBeNull()
+    expect(door.querySelector('[data-hint="col.connect.next"]')).not.toBeNull()
+  })
+
+  it('the Connection header offers All repositories to every role (G-228)', async () => {
+    for (const role of ['viewer', 'operator', 'admin'] as const) {
+      vi.unstubAllGlobals()
+      mockApi({ 'GET /auth/me': { ...PRINCIPAL, role }, 'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 }, 'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] } })
+      const { unmount } = renderApp(<ConnectPage />, { route: '/connect' })
+      const door = await screen.findByRole('link', { name: 'All repositories' })
+      expect(door).toHaveAttribute('href', '/repos')
+      expect(door).toHaveAttribute('data-hint', 'button.connect.all_repos')
+      unmount()
+    }
+  })
+
+  it('the walk’s Measure… opens the Measure page, never the run form, and posts nothing (G-907)', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
+    })
+    renderApp(
+      <Routes>
+        <Route path="/connect/:name" element={<ConnectRepoPage />} />
+        <Route path="/connect/:name/measure" element={<h1>Measure page</h1>} />
+      </Routes>,
+      { route: '/connect/alpha', path: '*' },
+    )
+    const measure = await screen.findByRole('button', { name: 'Measure…' })
+    expect(measure).toHaveAttribute('data-hint', 'button.walk.run_stage')
+    await userEvent.click(measure)
+    await screen.findByRole('heading', { name: 'Measure page' })
+    // no run form opened and nothing was posted: the Measure page is where the spend is confirmed
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('a failed replay’s Retry takes the same door to the Measure page (G-907)', async () => {
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': { ...MEASURED, last_run: { id: 'r9', kind: 'replay', status: 'failed', finished: 'x' } },
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
+    })
+    renderApp(
+      <Routes>
+        <Route path="/connect/:name" element={<ConnectRepoPage />} />
+        <Route path="/connect/:name/measure" element={<h1>Measure page</h1>} />
+      </Routes>,
+      { route: '/connect/alpha', path: '*' },
+    )
+    await waitFor(() => expect(screen.getByTestId('stage-measure')).toHaveTextContent('Failed'))
+    await userEvent.click(within(screen.getByTestId('stage-measure')).getByRole('button', { name: 'Retry' }))
+    await screen.findByRole('heading', { name: 'Measure page' })
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('an unknown repository says so and offers Connection, not a bare retry (G-979)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos/ghost': () => envelope(404, 'not_found', "no repo 'ghost'"),
+      'GET /oracle/ghost': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/ghost/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      'GET /repos/ghost/config-candidates': () => envelope(404, 'not_found', "no repo 'ghost'"),
+    })
+    const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/ghost', path: '/connect/:name' })
+    const state = await screen.findByTestId('unknown-repo')
+    expect(state).toHaveTextContent('No repository called ghost')
+    expect(within(state).getByRole('link', { name: 'Open Connection' })).toHaveAttribute('href', '/connect')
+    expect(within(state).getByRole('link', { name: 'Open Connection' })).toHaveAttribute('data-hint', 'button.shared.unknown_repo')
+    expect(container).toHaveTextContent('Not found')
+    // not an error, no retry, no stage list and no door to a configuration that does not exist
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Connection stages' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Configuration' })).toBeNull()
+    expect(unhinted(container)).toEqual([])
+  })
+
+  it('a repository read that fails for another reason is an error with Retry, not a missing repository (G-979)', async () => {
+    const reads: string[] = []
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos/alpha': () => {
+        reads.push('repo')
+        return envelope(500, 'internal_error', 'the store is not answering')
+      },
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      ...NO_CANDIDATES,
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const err = await screen.findByRole('alert')
+    expect(err).toHaveTextContent('the store is not answering')
+    expect(err).toHaveTextContent('HTTP 500')
+    expect(screen.queryByTestId('unknown-repo')).toBeNull()
+    const before = reads.length
+    await userEvent.click(within(err).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(reads.length).toBeGreaterThan(before))
+  })
+
+  const CANDIDATES = {
+    repo: 'alpha',
+    items: [
+      { id: 'raise_test_timeout:runner_opts.timeout:1800', kind: 'raise_test_timeout', scope: 'repo', field: 'runner_opts.timeout', observed: 900, proposed: 1800, reason: '2 commit(s) hit the 900 s test wall clock at the parent, the baseline or the gold; raising it lets them qualify', sources: ['a'.repeat(40), 'b'.repeat(40)] },
+      { id: 'provisioning_on:CRB_PROVISION__ENABLED:True', kind: 'provisioning_on', scope: 'deployment', field: 'CRB_PROVISION__ENABLED', observed: null, proposed: true, reason: '1 commit(s) could not load their dependencies offline; switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md §3.4), then qualify again', sources: ['c'.repeat(40)] },
+    ],
+  }
+
+  it('the mine stage lists the config changes the notes imply; an operator accepts or rejects each, and a deployment setting has no Accept (DL-316)', async () => {
+    let decided = ''
+    // the hook encodes the id (its colons) in the path, as any id must be
+    const ACCEPT = `/repos/alpha/config-candidates/${encodeURIComponent('raise_test_timeout:runner_opts.timeout:1800')}/accept`
+    const { calls, fetchMock } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      'GET /repos/alpha/config-candidates': () => json(decided ? { repo: 'alpha', items: CANDIDATES.items.filter((c) => c.id !== decided) } : CANDIDATES),
+      [`POST ${ACCEPT}`]: () => {
+        decided = 'raise_test_timeout:runner_opts.timeout:1800'
+        return json({ repo: 'alpha', id: decided, decision: 'accepted', candidate: CANDIDATES.items[0], config: { ...MEASURED.config, runner_opts: { timeout: 1800 } } })
+      },
+    })
+    const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const panel = await screen.findByTestId('config-candidates')
+    expect(within(screen.getByTestId('stage-mine')).getByTestId('config-candidates')).toBe(panel)
+    expect(panel).toHaveTextContent('The mine notes imply 2 configuration changes. Nothing changes until an operator decides.')
+    const timeout = within(panel).getByTestId('candidate-raise_test_timeout')
+    expect(timeout).toHaveTextContent('runner_opts.timeout: 900 s → 1800 s')
+    expect(timeout).toHaveTextContent('(2 commits)')
+    expect(within(timeout).getByRole('button', { name: 'Accept' })).toHaveAttribute('data-hint', 'button.walk.candidate_accept')
+    expect(within(timeout).getByRole('button', { name: 'Reject' })).toHaveAttribute('data-hint', 'button.walk.candidate_reject')
+    // a deployment setting is named, never applied from here
+    const env = within(panel).getByTestId('candidate-provisioning_on')
+    expect(env).toHaveTextContent('CRB_PROVISION__ENABLED → true (a deployment setting)')
+    expect(within(env).queryByRole('button', { name: 'Accept' })).toBeNull()
+    expect(within(env).getByRole('button', { name: 'Reject' })).toBeInTheDocument()
+    expect(unhinted(container)).toEqual([])
+    await expectHintOpens(timeout.querySelector('[data-hint="stat.walk.candidate"]')!, 'stat.walk.candidate')
+    // nothing was posted by reading; Accept posts the decision and the list is re-read without it
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    await userEvent.click(within(timeout).getByRole('button', { name: 'Accept' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === ACCEPT)).toBe(true))
+    await waitFor(() => expect(within(panel).queryByTestId('candidate-raise_test_timeout')).toBeNull())
+    expect(panel).toHaveTextContent('The mine notes imply a configuration change.')
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it('a viewer reads the candidates and is told an operator decides; a failed read is said with Retry (DL-316)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      'GET /repos/alpha/config-candidates': CANDIDATES,
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const panel = await screen.findByTestId('config-candidates')
+    expect(within(panel).queryByRole('button', { name: /Accept|Reject/ })).toBeNull()
+    expect(within(panel).getAllByText('An operator decides this.')).toHaveLength(2)
+    vi.unstubAllGlobals()
+    const reads: string[] = []
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': () => envelope(404, 'not_found', 'x'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'x'),
+      'GET /capability-map': EMPTY_MAP,
+      'GET /repos/alpha/config-candidates': () => {
+        reads.push('c')
+        return envelope(503, 'store_unavailable', 'the store is not answering')
+      },
+    })
+    renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const err = await screen.findByTestId('config-candidates-error')
+    expect(err).toHaveTextContent('Could not read the config candidates')
+    const before = reads.length
+    await userEvent.click(within(err).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(reads.length).toBeGreaterThan(before))
   })
 
   it('a queued run reads Queued with the server’s queue_position (the worker’s own order), never a client recount (J-TEL-6)', async () => {

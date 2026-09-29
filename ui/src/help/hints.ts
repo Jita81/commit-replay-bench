@@ -50,6 +50,8 @@ export const HINTS = {
     'A row in this cell was credited clean although its belts contradict it (false-Q1). Nothing measured in the cell is evidence until the ledger is audited.',
   'route.not_yet_measured':
     'No graded attempt exists for this cell. It says nothing, not zero: a rate appears once a replay puts rows here.',
+  'button.shared.unknown_repo':
+    'Open Connection, which lists every repository this deployment knows, to find the one you meant or to connect it.',
   'belt.tests_unmodified':
     'Belt 1: the builder did not change any test file. A tick means the tests that grade the attempt are the repository’s own; a cross disqualifies the row.',
   'belt.target_green':
@@ -263,6 +265,10 @@ export const HINTS = {
     'Continue opens the walk at its next stage; Baseline opens what the evidence says once every stage holds rows.',
   'button.connect.empty_connect':
     'Start the walk for a first repository: register, probe, mine, oracle, controls, then a first measurement.',
+  'button.connect.all_repos':
+    'The flat list of every repository on this deployment, with its probe, task counts and last run. Add one there by URL when the GitHub App is not configured.',
+  'col.connect.next':
+    'Where each repository goes next: the row’s door. Continue opens the walk at its next stage; Baseline opens the evidence once every stage holds rows.',
 
   // ── Connect from GitHub dialog (screens/Connect/GitHubConnectDialog.tsx)
   'field.github.installation':
@@ -314,7 +320,13 @@ export const HINTS = {
   'pill.walk.spends':
     'This stage calls a model and costs money. Every other stage is free.',
   'button.walk.run_stage':
-    'Queue this stage’s run. Run and Retry cost nothing; Measure… opens the estimate for the one stage that spends. A queued run can be cancelled from Runs.',
+    'Queue this stage’s run. Run and Retry cost nothing; Measure… opens the Measure page — the estimate and the confirm for the one stage that spends — and posts nothing itself. A queued run can be cancelled from Runs.',
+  'stat.walk.candidate':
+    'A configuration change the mine’s notes imply: the setting, the limit that was hit and the value Accept would apply, with the commits that imply it. Nothing changes until an operator decides.',
+  'button.walk.candidate_accept':
+    'Apply this change to the repository’s configuration under your name, validated and recorded exactly as a hand edit. Re-check the gold of the named commits afterwards.',
+  'button.walk.candidate_reject':
+    'Decline this change and record that you did. The configuration is untouched, and the same note is not offered again.',
   'stat.walk.stage_detail':
     'What the stage found, as counts (tasks mined, mutants killed, controls constructed) or the probe’s first line. Counts, not rates: the rates with n and interval are on the Baseline.',
   'link.walk.open_run':
@@ -327,6 +339,10 @@ export const HINTS = {
     'Watch the live log and per-task rows of this run.',
   'button.walk.cancel':
     'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
+  'button.connect.cancel_keep':
+    'Close this question and leave the run running. Nothing is posted.',
+  'button.connect.cancel_confirm':
+    'Ask the worker to stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
 
   // ── /connect/:name/measure (screens/Connect/MeasurePage.tsx)
   'link.measure.back':

@@ -282,6 +282,11 @@ class _RepoConfigFields(BaseModel):
             RepoChecks.from_config(v)  # ValueError → 422 with the reason
         return v
 
+    #: Chain the £0 stages (DL-315, ``RepoConfig.auto_stages``): the worker queues the next
+    #: free stage when the previous one succeeds and its pass fact holds. Set through this
+    #: route, so the switch is a ``repo.updated`` event with its actor like any config change.
+    auto_stages: bool | None = Field(default=None, strict=True)  # a string never switches it on
+
     @field_validator("runner")
     @classmethod
     def _runner_known(cls, v: str | None) -> str | None:
@@ -334,6 +339,38 @@ class RepoUpdateRequest(_RepoConfigFields):
     """``PUT /repos/{name}`` — a partial update; ``name`` cannot change."""
 
     language: str | None = Field(default=None, min_length=1, max_length=32)
+
+
+class ConfigCandidateOut(BaseModel):
+    """One config change the mine notes imply (DL-316, ``crb.core.mine.config_candidates``):
+    ``field`` is the dotted config path (``runner_opts.timeout``, ``lint.timeout``) or, for a
+    ``deployment`` scope, the deployment variable; ``observed`` is the configured limit that
+    was hit, ``proposed`` the value Accept applies; ``sources`` the task ids or skipped shas."""
+
+    id: str
+    kind: str
+    scope: str
+    field: str
+    observed: Any = None
+    proposed: Any = None
+    reason: str
+    sources: list[str]
+
+
+class ConfigCandidatesOut(BaseModel):
+    repo: str
+    items: list[ConfigCandidateOut]
+
+
+class CandidateDecisionOut(BaseModel):
+    """``POST /repos/{name}/config-candidates/{id}/accept|reject``: what was decided, by the
+    session, and the repository's config after it (unchanged on reject)."""
+
+    repo: str
+    id: str
+    decision: str
+    candidate: ConfigCandidateOut
+    config: dict[str, Any]
 
 
 class ProfileCell(BaseModel):

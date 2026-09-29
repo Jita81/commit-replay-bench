@@ -14,8 +14,11 @@
  *               repositories with no GitHub link, posts `{installation_id, full_name}` to
  *               `/repos/{name}/github-link` and selects that repository; and that the
  *               Connect screen opens the picker on `?installation=` (the setup callback's
- *               landing); and that every field, pill and act in the dialog carries a hint,
- *               with the installation select's opening on hover with the registry copy.
+ *               landing); that a landing on `?installation=&unverified=1` for an installation
+ *               not on record shows the banner, and Sync installations posts the sync, records
+ *               it, clears the banner and selects it (G-128); and that every field, pill and
+ *               act in the dialog carries a hint, with the installation select's opening on
+ *               hover with the registry copy.
  * How:          `mockApi` + `renderApp`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0014-github-app-is-the-connection.md
@@ -26,7 +29,8 @@
  *               ui/src/help/hints-collector.ts (`unhinted`),
  *               src/crb/server/routes/github.py (the routes whose shapes the mocks mirror)
  * Tested by:    ui/src/screens/Connect/GitHubConnectDialog.test.tsx
- * Touch when:   the connect body or the picker row changes.
+ * Touch when:   never for a new repository (the picker connects it, with no code); the connect
+ *               body, the picker row or the landing on an unverified installation changes.
  */
 
 import { screen, waitFor, within } from '@testing-library/react'
@@ -194,6 +198,38 @@ describe('GitHubConnectDialog', () => {
     renderApp(<ConnectPage />, { route: '/connect?installation=77' })
     await waitFor(() => expect(screen.getByRole('list', { name: 'Repositories' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Connect from GitHub' })).toBeInTheDocument()
+  })
+
+  it('landing unverified on an installation not on record: the banner says so, Sync records it, the banner clears and the installation is selected (G-128)', async () => {
+    const NINETY_NINE = { ...INSTALL, id: 99, account_login: 'ninety-nine', html_url: 'https://github.com/organizations/ninety-nine/settings/installations/99' }
+    // the app is stateful: 77 alone until the sync records 99
+    let recorded = [INSTALL]
+    const { calls } = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
+      'GET /github/app': () => json({ ...APP, installations: recorded }),
+      'GET /github/installations/77/repositories': PAGE,
+      'GET /github/installations/99/repositories': { ...PAGE, items: [] },
+      'POST /github/installations/sync': () => {
+        recorded = [INSTALL, NINETY_NINE]
+        return json(recorded)
+      },
+    })
+    renderApp(<ConnectPage />, { route: '/connect?installation=99&unverified=1' })
+    const banner = await screen.findByTestId('installation-unrecorded')
+    expect(banner).toHaveAttribute('role', 'status')
+    expect(banner).toHaveTextContent('GitHub sent installation 99 back, but it is not on record.')
+    expect(banner).toHaveTextContent('The link you arrived on carried no signed state for your session, so nothing was recorded automatically.')
+    // meanwhile the select holds an installation that IS on record, never the unrecorded id
+    const select = screen.getByLabelText(/Installation/)
+    expect(select).toHaveValue('77')
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    await userEvent.click(screen.getByRole('button', { name: 'Sync installations' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/github/installations/sync')).toBe(true))
+    // recorded: the banner is gone and the landed installation is the one selected
+    await waitFor(() => expect(screen.queryByTestId('installation-unrecorded')).toBeNull())
+    await waitFor(() => expect(screen.getByLabelText(/Installation/)).toHaveValue('99'))
+    expect(screen.getByRole('option', { name: /ninety-nine/ })).toBeInTheDocument()
   })
 
   it('the Settings card says configured-or-not and lists installations', async () => {

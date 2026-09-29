@@ -34,6 +34,7 @@ import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
 import type { Role } from '../api/types'
 import { CapabilityPage } from '../screens/Capability/CapabilityPage'
+import { ConnectRepoPage } from '../screens/Connect/ConnectPage'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
 import { IntakePage } from '../screens/Factory/IntakePage'
 import { LearnPage } from '../screens/Learn/LearnPage'
@@ -51,6 +52,7 @@ import { RunDetailPage } from '../screens/Runs/RunDetailPage'
 import { RunsPage } from '../screens/Runs/RunsPage'
 import { TaskDetailPage } from '../screens/Runs/TaskDetailPage'
 import { SettingsPage } from '../screens/Settings/SettingsPage'
+import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
 
 export interface InstrumentScreen {
   route: string
@@ -797,6 +799,21 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
       await screen.findByTestId('account-history-list')
     },
     minHints: 61,
+  },
+  {
+    // G-117: Cancel the run asks before it posts — the question's two buttons are a state of
+    // their own the one-entry table cannot reach (the fixture's walk has a replay in flight)
+    name: '/connect/:name + Cancel the run confirm',
+    route: '/connect/alpha',
+    path: '/connect/:name',
+    element: <ConnectRepoPage />,
+    api: ONRAMP_SCREENS['/connect/:name']!.api,
+    roles: ['operator'],
+    open: async () => {
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel the run' }))
+      await screen.findByTestId('cancel-confirm')
+    },
+    minHints: 20,
   },
   {
     name: '/repos + Add a repository dialog',

@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Connection: the £0 stages chain from one act, mine notes become decisions, every door
+  on the walk is a door** (Wave 6, stream cnx). A repository's `auto_stages` switch queues the
+  next free stage once the last passed its fact, under the person who switched it on,
+  never a stage that spends (DL-315). A gold note naming a hit wall clock or an unloadable
+  parent is offered on the mine stage to accept, through the audited config update, or
+  reject; lint debt is never proposed (DL-316). Cancel the run asks in the app's dialog, the
+  door column is named for screen readers, Measure… opens the Measure page and posts nothing,
+  an unknown repository offers Connection, and Connection offers All repositories.
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
   A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull

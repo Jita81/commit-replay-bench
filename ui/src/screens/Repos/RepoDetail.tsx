@@ -17,18 +17,23 @@
  *               link can land on Configuration (an unknown value is Overview);
  *               `RunNewDialog` is mounted for "Start a run"; the Configuration tab is keyed by
  *               repo name so it remounts per repo. Next steps lead to the journey (the
- *               Connection walk, the Factory) as well as the instrument screens.
+ *               Connection walk, the Factory) as well as the instrument screens. A name the
+ *               API does not know renders `UnknownRepo` ("No repository called <name>", Open
+ *               Connection) under a header that reads Not found and no tablist — there are no
+ *               sections of a repository that does not exist (G-979); any other failed read
+ *               is said with Retry.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/api/hooks.ts (`useRepo`, `useRepoProfile`, `useRepoTasks`,
  *               `useProbeRepo`), ui/src/api/types.ts (`RepoDetail`, `TaskSpec`,
  *               `ProfileCell`), ui/src/screens/Repos/RepoConfigTab.tsx (the fourth tab),
  *               ui/src/screens/Runs/RunNewDialog.tsx (start a run),
+ *               ui/src/components/UnknownRepo.tsx (the 404 state),
  *               ui/src/screens/Connect/ConnectPage.tsx (`ConnectRepoPage`) and ui/src/screens/Factory/FactoryPage.tsx
  *               (where Next steps lead), src/crb/server/routes/repos.py (detail, profile,
  *               tasks, probe)
  * Tested by:    ui/src/screens/Repos/RepoDetail.test.tsx (Next steps, `?tab=`, the operator-only
- *               run button), ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK
+ *               run button, the unknown-name state), ui/e2e/walkthrough/02-repo-onboard.spec.ts (probe pill reads OK
  *               with the runner's summary), ui/e2e/walkthrough/03-mine.spec.ts (the Tasks tab
  *               lists a mined task), ui/e2e/walkthrough/repo-config.spec.ts
  * Touch when:   never for a new repository; a field is added to `GET /repos/{name}` or the
@@ -49,6 +54,7 @@ import { Pill } from '../../components/Pill'
 import { QueryBoundary } from '../../components/QueryBoundary'
 import { ShortId } from '../../components/ShortId'
 import { StatTile } from '../../components/StatTile'
+import { UnknownRepo, isUnknownRepo } from '../../components/UnknownRepo'
 import { useAuth } from '../../lib/auth'
 import { fmtDate, fmtInt, fmtPct, shortId, wilson } from '../../lib/format'
 import { probeDisplay } from '../../lib/verdict'
@@ -321,24 +327,38 @@ export function RepoDetail() {
 
   return (
     <>
-      <PageHeader title={name} purpose="The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed." />
-      <div role="tablist" aria-label="Repository sections" className="flex gap-1 border-b border-border">
-        {tabs.map((t) => (
-          <Hint
-            as="button"
-            key={t.id}
-            id={`tab.repo.${t.id}`}
-            role="tab"
-            type="button"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={`-mb-px h-10 border-b-2 px-3 text-sm ${tab === t.id ? 'border-primary font-semibold text-primary' : 'border-transparent text-on-surface-muted hover:text-on-surface'}`}
-          >
-            {t.label}
-          </Hint>
-        ))}
-      </div>
-      <QueryBoundary query={repo} loading="Loading repository…">
+      <PageHeader
+        title={name}
+        purpose={
+          repo.isError
+            ? isUnknownRepo(repo.error)
+              ? 'Not found'
+              : 'The repository could not be read.'
+            : 'The repository as an instrument: probe, mined tasks, change profile, and the config that governs how its commits are replayed.'
+        }
+      />
+      {/* G-979: an unknown name has no sections — the state below is the whole page */}
+      {repo.isError && <UnknownRepo name={name} error={repo.error} onRetry={() => void repo.refetch()} />}
+      {!repo.isError && (
+        <div role="tablist" aria-label="Repository sections" className="flex gap-1 border-b border-border">
+          {tabs.map((t) => (
+            <Hint
+              as="button"
+              key={t.id}
+              id={`tab.repo.${t.id}`}
+              role="tab"
+              type="button"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`-mb-px h-10 border-b-2 px-3 text-sm ${tab === t.id ? 'border-primary font-semibold text-primary' : 'border-transparent text-on-surface-muted hover:text-on-surface'}`}
+            >
+              {t.label}
+            </Hint>
+          ))}
+        </div>
+      )}
+      {!repo.isError && (
+        <QueryBoundary query={repo} loading="Loading repository…">
         {(r) => (
           <div role="tabpanel">
             {tab === 'overview' && <Overview repo={r} onStartRun={() => setStarting(true)} />}
@@ -359,7 +379,8 @@ export function RepoDetail() {
             {tab === 'config' && <RepoConfigTab key={r.name} repo={r} />}
           </div>
         )}
-      </QueryBoundary>
+        </QueryBoundary>
+      )}
       <RunNewDialog open={starting} onClose={() => setStarting(false)} repo={name} onCreated={(run) => navigate(`/runs/${run.id}`)} />
     </>
   )

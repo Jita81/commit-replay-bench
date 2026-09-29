@@ -73,7 +73,9 @@ from sqlalchemy.orm import Session
 
 from crb.core.capability import RepoChangeProfile, profile_repo
 from crb.core.git import GitError, GitRepo
+from crb.core.mine import SCOPE_REPO, ConfigCandidate, config_candidates
 from crb.core.redact import redact
+from crb.core.runners import get_runner
 from crb.core.spec import SIZE_TIER_NAMES, RepoConfig, TaskSpec
 from crb.server.auth import OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import (
@@ -97,6 +99,9 @@ from crb.server.schemas import (
     TERMINAL_STATUSES,
     BaselineRead,
     BaselineReadOut,
+    CandidateDecisionOut,
+    ConfigCandidateOut,
+    ConfigCandidatesOut,
     Page,
     PageDep,
     ProfileCell,
@@ -514,8 +519,26 @@ def update_repo(
     ``clone_path`` goes through :func:`confine_clone_path`; an unchanged one (a clone an
     admin registered outside the root) does not block an edit of anything else."""
     repo = get_repo_or_404(db, name)
+    return apply_config_update(db, repo, body.config_updates(), operator, settings)
+
+
+def apply_config_update(
+    db: Session,
+    repo: Repo,
+    updates: Mapping[str, Any],
+    operator: Principal,
+    settings: Any,
+    *,
+    extra: Mapping[str, Any] | None = None,
+) -> RepoDetail:
+    """The ONE way a repository's config changes from the API: merge ``updates`` over the
+    stored config, re-validate, store, and append the redacted diff as a ``repo.updated``
+    event under ``operator``. ``PUT /repos/{name}`` and an accepted config candidate
+    (DL-316) both come through here, so an accepted candidate is audited and validated
+    exactly as a hand edit is. ``extra`` rides on the event's payload."""
+    name = repo.name
     old = _config_of(repo).to_dict()
-    merged = {**old, **body.config_updates()}
+    merged = {**old, **updates}
     config = _validated_config(name, merged)
     moved = bool(config.path) and config.path != old.get("path")
     outside = confine_clone_path(config.path, settings.home, operator) if moved else None
@@ -541,7 +564,12 @@ def update_repo(
         action="repo.updated",
         repo=name,
         actor=operator.id,
-        payload={"diff": diff, "fields": sorted(diff), "github_unlinked": unlinked},
+        payload={
+            "diff": diff,
+            "fields": sorted(diff),
+            "github_unlinked": unlinked,
+            **dict(extra or {}),
+        },
     )
     if outside is not None:
         _record_outside_home(
@@ -549,6 +577,160 @@ def update_repo(
         )
     db.commit()
     return repo_detail(db, repo)
+
+
+# ---------------------------------------------------------------------------
+# Config candidates (DL-316): the mine's notes as named changes a person decides
+# ---------------------------------------------------------------------------
+
+CANDIDATE_ACCEPTED = "repo.candidate.accepted"
+CANDIDATE_REJECTED = "repo.candidate.rejected"
+
+
+def _mine_skips(db: Session, name: str) -> list[dict[str, Any]]:
+    """The ``mine.skip`` payloads of the repository's latest mine run (a timeout at mine
+    is a skip with no task and no note, so the candidates must read them)."""
+    run = _latest_run(db, name, kind="mine")
+    if run is None:
+        return []
+    rows = db.execute(
+        select(Event)
+        .where(Event.trace_id == run.id, Event.action == "mine.skip")
+        .order_by(Event.seq, Event.id)
+    ).scalars()
+    return [dict(e.payload_json or {}) for e in rows]
+
+
+def _decided_candidate_ids(db: Session, name: str) -> set[str]:
+    """Every candidate id a person has accepted or rejected for this repository."""
+    rows = db.execute(
+        select(Event).where(
+            Event.repo == name, Event.action.in_((CANDIDATE_ACCEPTED, CANDIDATE_REJECTED))
+        )
+    ).scalars()
+    return {str((e.payload_json or {}).get("candidate", {}).get("id") or "") for e in rows} - {""}
+
+
+def candidates_for(
+    db: Session, repo: Repo, *, undecided_only: bool = True
+) -> list[ConfigCandidate]:
+    """The candidates the stored tasks and the latest mine run imply, with the ones a person
+    already decided left out (``undecided_only``)."""
+    config = _config_of(repo)
+    try:
+        default_timeout = int(get_runner(config).default_timeout)
+    except ValueError:  # a runner the registry does not know: the base default stands
+        default_timeout = 900
+    tasks = [
+        TaskSpec.from_dict(t.spec_json)
+        for t in db.execute(select(Task).where(Task.repo == repo.name)).scalars()
+    ]
+    found = config_candidates(
+        tasks, config, skips=_mine_skips(db, repo.name), default_timeout=default_timeout
+    )
+    if not undecided_only:
+        return found
+    decided = _decided_candidate_ids(db, repo.name)
+    return [c for c in found if c.id not in decided]
+
+
+def _candidate_out(c: ConfigCandidate) -> ConfigCandidateOut:
+    return ConfigCandidateOut(**c.to_dict())
+
+
+def _candidate_or_404(db: Session, repo: Repo, candidate_id: str) -> ConfigCandidate:
+    for c in candidates_for(db, repo):
+        if c.id == candidate_id:
+            return c
+    raise ApiError(
+        404,
+        "not_found",
+        f"no open config candidate {candidate_id!r} for {repo.name!r}: it was decided, or "
+        "the notes no longer imply it",
+    )
+
+
+@router.get(
+    "/repos/{name}/config-candidates",
+    response_model=ConfigCandidatesOut,
+    responses={401: _ERR, 404: _ERR},
+    summary="The config changes the mine's gold notes and skips imply, not yet decided",
+)
+def list_config_candidates(name: str, viewer: ViewerDep, db: DbDep) -> ConfigCandidatesOut:
+    del viewer
+    repo = get_repo_or_404(db, name)
+    return ConfigCandidatesOut(
+        repo=name, items=[_candidate_out(c) for c in candidates_for(db, repo)]
+    )
+
+
+@router.post(
+    "/repos/{name}/config-candidates/{candidate_id}/accept",
+    response_model=CandidateDecisionOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR, 422: _ERR},
+    summary="Apply a candidate through the audited config update, under the session",
+)
+def accept_config_candidate(
+    name: str, candidate_id: str, operator: OperatorDep, db: DbDep, settings: SettingsDep
+) -> CandidateDecisionOut:
+    """The session decides: the change goes through :func:`apply_config_update` — the same
+    merge, re-validation and ``repo.updated`` event as a hand edit — and a
+    ``repo.candidate.accepted`` event names the candidate. A deployment-scoped candidate
+    (provisioning) is not a repository setting and is refused 409 ``not_a_repo_setting``."""
+    repo = get_repo_or_404(db, name)
+    c = _candidate_or_404(db, repo, candidate_id)
+    if c.scope != SCOPE_REPO:
+        raise ApiError(
+            409,
+            "not_a_repo_setting",
+            f"{c.field} is a deployment setting: an operator sets it on the deployment "
+            "(docs/DEPLOYMENT.md), then qualifies again; reject the candidate to dismiss it",
+            detail={"candidate": c.to_dict()},
+        )
+    detail = apply_config_update(
+        db, repo, c.update(_config_of(repo)), operator, settings, extra={"candidate": c.to_dict()}
+    )
+    append_system_event(
+        db,
+        trace_id=system_trace_id("repo", name),
+        action=CANDIDATE_ACCEPTED,
+        repo=name,
+        actor=operator.id,
+        payload={"candidate": c.to_dict()},
+    )
+    db.commit()
+    return CandidateDecisionOut(
+        repo=name, id=c.id, decision="accepted", candidate=_candidate_out(c), config=detail.config
+    )
+
+
+@router.post(
+    "/repos/{name}/config-candidates/{candidate_id}/reject",
+    response_model=CandidateDecisionOut,
+    responses={401: _ERR, 403: _ERR, 404: _ERR},
+    summary="Decline a candidate: nothing changes; the decision is recorded under the session",
+)
+def reject_config_candidate(
+    name: str, candidate_id: str, operator: OperatorDep, db: DbDep
+) -> CandidateDecisionOut:
+    repo = get_repo_or_404(db, name)
+    c = _candidate_or_404(db, repo, candidate_id)
+    append_system_event(
+        db,
+        trace_id=system_trace_id("repo", name),
+        action=CANDIDATE_REJECTED,
+        repo=name,
+        actor=operator.id,
+        payload={"candidate": c.to_dict()},
+    )
+    db.commit()
+    return CandidateDecisionOut(
+        repo=name,
+        id=c.id,
+        decision="rejected",
+        candidate=_candidate_out(c),
+        config=repo_detail(db, repo).config,
+    )
 
 
 @router.post(
