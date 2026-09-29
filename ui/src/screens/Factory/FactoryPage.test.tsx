@@ -23,8 +23,8 @@
  *               (J-FAC-2/3), that a refusal's reason reaches the step and the row (J-FAC-4,
  *               J-FAC-15), that the drafted successor takes the item it supersedes out of the
  *               form AND out of the other items' dependencies (G-904 — a stale dependency is
- *               refused 422 on freeze), that a built item opens its evidence (F15), and that an active
- *               factory run is a banner that polls the chain (J-FAC-5 / J-TEL-9), and that
+ *               refused 422 on freeze), that a built item opens its evidence (F15), and that an
+ *               active factory run is a banner that polls the chain (J-FAC-5 / J-TEL-9), and that
  *               at phone width an item is one line with the six cards behind a Details and
  *               the cell-route pill short (J-FAC-14); that the head says work enters from the
  *               board with the intake state on the same line and a failed intake read as
