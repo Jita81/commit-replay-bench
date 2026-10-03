@@ -1,0 +1,139 @@
+[
+ {
+  "id": "B1",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B2",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B3",
+  "class": "bug.fix",
+  "ready": false,
+  "route_hint": "human",
+  "reason": "1 unsigned structural gap(s): expected_behaviour",
+  "gaps": [
+   "expected_behaviour",
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B4",
+  "class": "backend.model.edit",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: default_value",
+  "gaps": [
+   "default_value"
+  ]
+ },
+ {
+  "id": "B5",
+  "class": "backend.route.add",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: example_payload",
+  "gaps": [
+   "example_payload"
+  ]
+ },
+ {
+  "id": "B6",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B7",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B8",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B9",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B10",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "B11",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ },
+ {
+  "id": "X1",
+  "class": "feature.add",
+  "ready": true,
+  "route_hint": "human",
+  "reason": "class 'feature.add' is not in the readiness catalogue \u2014 human test-design",
+  "gaps": []
+ },
+ {
+  "id": "X2",
+  "class": "docs.update",
+  "ready": true,
+  "route_hint": "human",
+  "reason": "class 'docs.update' has a weak oracle (green proves the build only)",
+  "gaps": []
+ },
+ {
+  "id": "X3",
+  "class": "bug.fix",
+  "ready": true,
+  "route_hint": "test_first_authoring",
+  "reason": "value slot(s) open \u2014 the value lives in the test; route to test-first authoring, never blind manufacture: exact_value",
+  "gaps": [
+   "exact_value"
+  ]
+ }
+]
