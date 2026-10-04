@@ -128,6 +128,18 @@ def test_operator_kind_weak_oracle_and_uncatalogued_route_human() -> None:
     assert unknown.ready and not unknown.catalogued and unknown.route_hint == rd.ROUTE_HUMAN
 
 
+def test_xl_item_routes_human_before_any_build() -> None:
+    # a cold-start repository has no capability map, so routing's "XL is split first"
+    # (ADR-0003 rule 2) is never read; readiness must say it, even when fully ready
+    filled = (*ROUTE_FACTS, "example_payload: GET /health -> 200 {status: ok}")
+    xl = rd.assess(_item(facts=filled, size_estimate="XL"))
+    assert xl.ready and xl.route_hint == rd.ROUTE_HUMAN and "split" in xl.reason
+    assert rd.GRANULARIZE_SIZES == ("XL",)
+    assert rd.assess(_item(facts=filled, size_estimate="L")).route_hint == rd.ROUTE_BUILD
+    op = rd.assess(_item(kind=KIND_OPERATOR, facts=filled, size_estimate="XL"))
+    assert "operator" in op.reason  # the never-delegable reason still comes first
+
+
 # --- sign-offs ---------------------------------------------------------------------
 
 

@@ -21,8 +21,11 @@ So the catalogue below has two kinds of slot per capability class:
 Routing hints (:data:`ROUTE_HINTS`):
 
 * ``human``               — operator-kind work (money / accounts / legal —
-  never delegable), a weak-oracle class (docs, CI, IaC: the test only proves
-  the build), or a class the catalogue does not know;
+  never delegable), an item estimated at a size the routing policy splits
+  before it is attempted (XL — ADR-0003 rule 2, read here because a repository
+  with no capability map never reaches that rule), a weak-oracle class (docs,
+  CI, IaC: the test only proves the build), or a class the catalogue does not
+  know;
 * ``test_first_authoring`` — structurally ready, value slots open;
 * ``build``               — every slot filled; an authored oracle can be built to.
 
@@ -80,6 +83,7 @@ from crb.core.ledger import (
     jsonl_last_line,
 )
 from crb.core.redact import redact
+from crb.core.routing import DEFAULT_POLICY
 from crb.factory.backlog import KIND_OPERATOR, BacklogItem
 
 GAP_SIGNOFF_SCHEMA = "crb.factory.gap_signoff.v1"
@@ -92,6 +96,12 @@ ROUTE_BUILD = "build"
 ROUTE_TEST_FIRST = "test_first_authoring"
 ROUTE_HUMAN = "human"
 ROUTE_HINTS: tuple[str, ...] = (ROUTE_BUILD, ROUTE_TEST_FIRST, ROUTE_HUMAN)
+
+#: Sizes split before they are attempted — the routing policy's own list (ADR-0003
+#: rule 2), not a second copy. The map's route says the same for a measured cell, but
+#: the map is read only to gate delivery and a cold-start repository has no map, so
+#: without this an XL item would be built (and paid for) and merely not delivered.
+GRANULARIZE_SIZES: tuple[str, ...] = DEFAULT_POLICY.granularize_sizes
 
 #: Classes whose oracle typically proves only the build; green cannot license
 #: auto-delivery on the test alone — they route ``human`` (EVIDENCE-AND-CLAIMS §7).
@@ -454,6 +464,12 @@ def assess(item: BacklogItem, signoffs: Iterable[GapSignoff] = ()) -> Readiness:
     # fully-filled operator item or weak-oracle class can never read as "build".
     if item.kind == KIND_OPERATOR:
         route, reason = ROUTE_HUMAN, "operator-kind work is never delegated to the factory"
+    elif item.size_estimate in GRANULARIZE_SIZES:
+        route, reason = (
+            ROUTE_HUMAN,
+            f"size {item.size_estimate} is split before it is attempted (ADR-0003 rule 2) — "
+            "granularize into smaller items",
+        )
     elif not catalogued:
         route, reason = (
             ROUTE_HUMAN,
@@ -536,6 +552,7 @@ def sign(
 __all__ = [
     "CATALOGUE",
     "GAP_SIGNOFF_SCHEMA",
+    "GRANULARIZE_SIZES",
     "ROUTE_BUILD",
     "ROUTE_HINTS",
     "ROUTE_HUMAN",

@@ -85,8 +85,10 @@ not crb apparatus 2.3, so never pooled with the ledger]**
 3. **On a cold-start repository nothing stops an XL item from being built.** Granularizing XL
    happens only in `crb.core.routing.route`, `crb.factory` never checks size, and with no map
    the route is never evaluated. X3 ("the whole prototype") is ready and would be attempted:
-   spend, not risk, since delivery is still withheld. A size check in readiness would close
-   this. **[gap]**
+   spend, not risk, since delivery is still withheld. **Closed on this branch (2026-10-04):**
+   readiness now routes an item estimated at a size in the routing policy's
+   `granularize_sizes` to `human` before any build (`crb.factory.readiness.GRANULARIZE_SIZES`,
+   the policy's own tuple, not a copy).
 4. **`feature.add` is the prototype's natural class and the catalogue doesn't hold it.** Writing
    new modules up as `bug.fix` worked here, but it bends the class meaning behind every cell.
 
