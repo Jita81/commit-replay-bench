@@ -717,8 +717,10 @@ def test_the_served_inbox_raises_a_stale_cell_until_its_runs_are_queued(env: Env
     clear_policy(env)
     login(env.client, "operator")
     plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
-    assert plan["cells"], "the seed must hold a stale cell"
-    stale = plan["cells"][0]
+    # the plan also carries thin and pending cells (top-ups); only a stale one is a row
+    stales = [c for c in plan["cells"] if c.get("reason", "stale") == "stale"]
+    assert stales, "the seed must hold a stale cell"
+    stale = stales[0]
     key = f"{stale['label']}|{stale['mode']}"
 
     def served() -> dict[str, Any]:

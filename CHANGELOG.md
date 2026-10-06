@@ -12,73 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **The learn loop's own numbers, and a top-up that buys only rows a reading counts**
-  (north-star Wave 6, stream Learn loop; [the branch](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-lrn)).
-  The Learn page shows the guard's false-positive rate by apparatus and month, as a range while
-  rows are undecided, and how long a finding takes to be re-measured, every count explained on hover.
-  A reading waiting on its look is offered exactly the commits it still
-  needs, priced and queued from one act; a cell with no reading is offered registration, never
-  a replay whose rows could not count. The connect stream times registration to the first green
-  probe, step 2 and each proving run. Reading the Baseline costs £0 (DL-300 to DL-302, P-600 to
-  P-609).
-
-- **One served Decisions inbox, and honest run, task and oracle pages**
-  (north-star Wave 6, stream Decisions; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-dec)).
-  `GET /decisions` derives every row once and fits each act to the reader's role; `?count=1`
-  feeds the nav badge in one request. Every act re-reads both, one broken repository no longer
-  blanks the inbox, and the Results panel reads the same rows. A held cell and a stale cell
-  each become a row. ADR-0003 says merge outcomes and review verdicts feed no routing clause.
-  A cancel that fails says why, an unknown task says so, and task rows link to their pages,
-  by keyboard too (DL-303, DL-304, P-610 to P-619).
-
-- **Exports the page reports, doors from every route decision, and the Operate path named**
-  (Wave 6, stream pgs; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-pgs)).
-  Every export says "Downloaded <file> — <n> rows" (a CSV counted by record) or shows the
-  refusal beside the button with Retry; a double-click is one download. A filtered empty
-  ledger offers Clear filters. A decision on Routes opens its ledger rows and its map cell
-  at every width; Map grid and Routes land on the latest repository. The Ledger's
-  Disqualified tile says when the figure is not served. The instrument row names the
-  Operate path; Runs, Ledger and Deployment say what operating does not include
-  (DL-306, DL-307, P-620 to P-627).
-
-- **Factory, Home and Baseline: the stream starts at the board, the loop closes on the screen**
-  (north-star Wave 6, stream fac; [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-fac)).
-  The Factory head, Home's task 8 and both About blocks say work enters from your board and
-  whether intake is being read, listening or off. An operator registers a stopped item's served
-  evolution from a dialog on the draft, a failing test required where the stop was the
-  test. The backlog card counts delivered pull requests; an operator syncs them. A built item
-  links its task page. Home names every degraded or down probe in words. The Baseline's oracle
-  tile and its door back to the walk are one reading (DL-309, DL-310, P-631 to P-638).
-
-- **Every stop condition has a surface, and the operator guide says what operating costs**
-  (north-star Wave 6, stream ops; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-ops)).
-  `/health` gains a `redaction` probe over the newest stored evidence packs (down naming the
-  pack, never the value; an approver's acknowledgement after rotation is the way back —
-  DL-313); `/metrics` carries each repository's controls verdict; a sealed build's denied
-  egress is read from the whole proxy log, evented, metered and alerted; `/ledger/verify`
-  serves the disqualified count per builder (DL-312). DEPLOYMENT §9 has the rules and what
-  the product cannot see; OPERATOR §8.1 tables every factory stop with its way forward and
-  §6.1 states the routine and the costs (G-400, G-401, G-920, G-978; P-640 to P-643).
-
-- **Connection: the £0 stages chain from one act, mine notes become decisions, every door
-  on the walk is a door** (Wave 6, stream cnx;
-  [the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-cnx)).
-  The walk's "Chain the free stages" switch queues the next free stage once the last passed
-  its fact, under the person who switched it on, never a stage that spends or one already
-  done (DL-315). A note naming a hit wall clock or an unloadable parent is offered on the
-  mine stage to accept, through the audited config update, or reject; an accepted note is
-  held until re-qualified; lint debt is never proposed (DL-316). Cancel the run asks in the
-  app's dialog, Measure… posts nothing, and an unknown repository offers Connection.
-
-- **Proof through each journey's own doors (Wave 6, stream prf)**
-  ([the pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns6-prf)).
-  The walk's Run watches the run it queued; its probe line is the runner's own summary.
-  The money page offers the test-only fixture only with no real builder credentialed, at a
-  known $0, never in production: `CRB_ENV` unset is production, as the server reads it; Factory
-  never defaults to it. A Pre-flight switch, off by default; the outage stop stated.
-  Tier 1 of `scripts/walkthrough.sh` hides `claude` and the builder keys from its stack. 04b
-  walks Connect from the walk; 05 presses the red button and downloads every export — the
-  abstract keeps fixture rows in; 06c reads the map's doors after 06b; 07 sweeps routing.
+- **Wave 6: the seven north-star streams land together** (lrn, dec, pgs, fac, ops, cnx
+  and prf; [pull request #71](https://github.com/Jita81/commit-replay-bench/pull/71), a
+  provisional link until it opens). Learn shows the guard's false-positive rate and offers a
+  reading its top-up (lrn). `GET /decisions` serves the inbox once; a refused cancel says why
+  (dec). Exports report what they downloaded; every route decision is a door (pgs). Factory,
+  Home and Baseline start at the board and close the loop (fac). Every stop condition has a
+  surface; the operator guide states the costs (ops). The walk chains its free stages and
+  turns mine notes into decisions (cnx). Tier-1 proof walks each journey through its own
+  doors (prf). DL-300 to DL-320, P-600 to P-665.
 
 - **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
   ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).

@@ -278,11 +278,13 @@ def _stale_signoffs(db: Session, repo: str, posture_class: str) -> list[dict[str
 
 
 def _remeasure(
-    db: Session, factory: sessionmaker[Session], repo: str
+    db: Session, factory: sessionmaker[Session], settings: Any, repo: str
 ) -> tuple[dict[str, Any], set[tuple[str, str]]]:
     """``GET /learn/remeasure``'s plan against the apparatus in force, and the cells whose
     queued runs have not finished (they ask nobody for anything)."""
-    plan = derive_remeasure(db, factory, repo, apparatus=APPARATUS_VERSION).to_dict()
+    plan = derive_remeasure(
+        db, factory, repo, apparatus=APPARATUS_VERSION, settings=settings
+    ).to_dict()
     busy = {
         (str(c["label"]), str(c["mode"]))
         for c in plan["cells"]
@@ -318,7 +320,7 @@ def inbox_for(
         posture = posture_class
         tasks = _chain_tasks(settings, repo)
     register = register_for(db, factory, settings.home, repo, settings=settings).to_dict()
-    plan, busy = _remeasure(db, factory, repo)
+    plan, busy = _remeasure(db, factory, settings, repo)
     rows = decision_rows(
         cells,
         tasks,
