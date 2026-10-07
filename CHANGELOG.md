@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Every pull-request workflow's jobs are required on `main`**. On 2026-10-07 an administrator
+  added the `fresh-clone` and `commit-subjects` checks to `main`'s required list, making 18. The
+  branch-protection check compared that list with `ci.yml` alone, so it called `commit-subjects`
+  a check no job reports. It never saw that the check was missing before. It now finds every
+  workflow whose `on:` names `pull_request` and requires each of their jobs. The new reading is
+  saved in `data/branch-protection-2026-10-07/` (P-749). No token that may read the setting is
+  provisioned yet, so the daily workflow stays red (G-930).
+
 - **Wave 2, part A: the context standard's record, checkable claims, provable audit, gates and spend**
   (Wave 2, streams T, C, I, H and X; [#68](https://github.com/Jita81/commit-replay-bench/pull/68)).
   ADR-0026 proposes the context standard (DL-086, DL-087). The claims gate reads every public

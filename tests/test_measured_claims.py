@@ -24,18 +24,18 @@ What it does: Finds each README block, in any rendered shape, whose ``[measured]
               (``DERIVATIONS``); requires each phrase and refuses any number left over, in
               digits or in words; and checks the apparatus. A locator with no
               derivation fails, so a new campaign cannot be cited without one. The
-              branch-protection reading is compared with the workflow vendored beside it,
-              never with the working tree's ci.yml.
+              branch-protection reading is compared with the pull-request workflows' jobs
+              vendored beside it, never with the working tree's workflows.
 How:          ``claims_check.blocks_of`` / ``claim_numbers`` / ``verify_manifest`` read the
               page; ``crb.core.legacy.import_census`` and ``crb.core.ledger.cell_stats``
-              recompute the census; ``check_branch_protection.job_contexts`` /
-              ``compare`` read the vendored workflow and the reading.
+              recompute the census; ``check_branch_protection.pull_request_contexts`` /
+              ``compare`` read the vendored workflows and the reading.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md (false-Q1 at write)
 Works with:   README.md (the claims), data/census-2026-07-08/ and
-              data/branch-protection-2026-09-27/ (the rows, and the workflow the reading was
-              compared with), scripts/claims_check.py (the locator rule),
-              scripts/check_branch_protection.py (the workflow's check names),
+              data/branch-protection-2026-10-07/ (the rows, and the workflows' jobs the
+              reading was compared with), scripts/claims_check.py (the locator rule),
+              scripts/check_branch_protection.py (the workflows' check names),
               tests/test_census_gate.py (the census's own invariants), docs/dod/product.md
               (product.claims.201, G-660)
 Tested by:    (this is a test file)
@@ -134,16 +134,22 @@ def _census(root: Path) -> Derived:
     )
 
 
+BRANCH_PROTECTION = "data/branch-protection-2026-10-07"
+
+
 def _branch_protection(root: Path) -> Derived:
     """The vendored reading of main's required checks, which must be exactly the jobs of the
-    workflow in force when it was read (the claim is that every job was required), vendored
-    beside it. It is never compared with the working tree's ci.yml: a pull request that adds
-    a job cannot be required before it merges, and ``scripts/check_branch_protection.py`` is
-    the operator's live comparison."""
-    data = root / "data" / "branch-protection-2026-09-27"
+    pull-request workflows in force when it was read (the claim is that every job was
+    required), vendored beside it with the aggregators' parts, none of which may be. It is
+    never compared with the working tree's workflows: a pull request that adds a job cannot
+    be required before it merges, and ``scripts/check_branch_protection.py`` is the
+    operator's live comparison."""
+    data = root / BRANCH_PROTECTION
     reading = json.loads((data / "required_status_checks.json").read_text(encoding="utf-8"))
     workflow = json.loads((data / "workflow_jobs.json").read_text(encoding="utf-8"))
-    problems = bp.compare(workflow["jobs"], reading["contexts"], reading["strict"])
+    problems = bp.compare(
+        workflow["jobs"], reading["contexts"], reading["strict"], workflow["parts"]
+    )
     assert problems == [], (
         f"the reading does not match the workflow it was read against: {problems}"
     )
@@ -157,7 +163,7 @@ def _branch_protection(root: Path) -> Derived:
 #: Every campaign a README [measured] tag may cite, and how its figures are derived.
 DERIVATIONS: dict[str, Callable[[Path], Derived]] = {
     "data/census-2026-07-08": _census,
-    "data/branch-protection-2026-09-27": _branch_protection,
+    BRANCH_PROTECTION: _branch_protection,
 }
 
 _NUM = r"\d[\d,]*(?:\.\d+)?"
@@ -392,31 +398,48 @@ def test_every_number_the_tag_covers_is_re_derived(page: str) -> None:
 def test_the_branch_protection_reading_is_compared_with_the_workflow_it_was_read_against(
     tmp_path: Path,
 ) -> None:
-    """The reading is compared with the workflow in force when it was taken, vendored beside
-    it — never with the working tree's ci.yml, which a later pull request may change before
-    an admin can honestly require the new job."""
+    """The reading is compared with the workflows in force when it was taken, vendored beside
+    it — never with the working tree's, which a later pull request may change before an admin
+    can honestly require the new job."""
     import shutil
 
-    campaign = "data/branch-protection-2026-09-27"
-    shutil.copytree(ROOT / campaign, tmp_path / campaign)
+    shutil.copytree(ROOT / BRANCH_PROTECTION, tmp_path / BRANCH_PROTECTION)
     derived = _branch_protection(tmp_path)
-    assert derived.figures["required_checks"] == 16
-
-
-def test_the_vendored_workflow_is_ci_yml_at_the_commit_it_names() -> None:
-    snapshot = json.loads(
-        (ROOT / "data" / "branch-protection-2026-09-27" / "workflow_jobs.json").read_text(
-            encoding="utf-8"
-        )
+    assert derived.figures["required_checks"] == 18
+    reading = json.loads(
+        (tmp_path / BRANCH_PROTECTION / "required_status_checks.json").read_text(encoding="utf-8")
     )
+    workflow = json.loads(
+        (tmp_path / BRANCH_PROTECTION / "workflow_jobs.json").read_text(encoding="utf-8")
+    )
+    # a part of an aggregator on the list is refused, as the live comparison refuses it
+    part = next(iter(workflow["parts"]))
+    assert bp.compare(workflow["jobs"], [*reading["contexts"], part], True, workflow["parts"])
+
+
+def test_the_vendored_jobs_are_the_pull_request_workflows_at_the_commit_they_name() -> None:
+    """``workflow_jobs.json`` is what every pull-request workflow at its commit gives — found
+    by reading each file's ``on:``, as the live comparison finds them."""
     import subprocess
 
-    shown = subprocess.run(
-        ["git", "-C", str(ROOT), "show", f"{snapshot['commit']}:.github/workflows/ci.yml"],
-        capture_output=True,
-        text=True,
-        check=False,
+    snapshot = json.loads(
+        (ROOT / BRANCH_PROTECTION / "workflow_jobs.json").read_text(encoding="utf-8")
     )
-    if shown.returncode != 0:
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False
+        )
+
+    listed = git("ls-tree", "--name-only", snapshot["commit"], ".github/workflows/")
+    if listed.returncode != 0:
         pytest.skip(f"this clone does not hold {snapshot['commit']} (a shallow clone)")
-    assert bp.job_contexts(shown.stdout) == snapshot["jobs"]
+    texts = {
+        path.rsplit("/", 1)[-1]: git("show", f"{snapshot['commit']}:{path}").stdout
+        for path in listed.stdout.split()
+        if path.endswith((".yml", ".yaml"))
+    }
+    gating, parts = bp.pull_request_contexts(texts)
+    assert gating == snapshot["jobs"]
+    assert parts == snapshot["parts"]
+    assert sorted(set(gating.values())) == snapshot["workflows"]

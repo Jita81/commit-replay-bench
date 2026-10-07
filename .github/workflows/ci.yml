@@ -27,8 +27,8 @@
 #             uv.lock, with the runner's docker daemon stopped (product.evidence.205, G-664):
 #             an aggregator over `fresh-clone-gates` (every gate but the suite) and the N
 #             `fresh-clone-shard` jobs (the suite, split as `test-shard` is), which proves the
-#             partition like `test`. Not on main's required-checks list until an administrator
-#             adds it (DL-101)
+#             partition like `test`. On main's required-checks list since 2026-10-07
+#             (DL-101)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
@@ -75,12 +75,14 @@
 #
 # Required contexts: every job in this file except `test-shard`, `walkthrough-story`,
 # `walkthrough-screens`, `fresh-clone-gates` and `fresh-clone-shard` (the parts behind the
-# `test`, `walkthrough` and `fresh-clone` aggregators) and `fresh-clone` itself, which awaits
-# an administrator (DL-101), is on main's required-checks list — lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13),
-# ui-unit, ui-smoke, security, sbom, test-postgres, container, sandbox-images and walkthrough:
-# 16 contexts, read from the repository setting on 2026-09-27. The list is a repository setting
-# only an administrator can change (docs/DEPLOYMENT.md §3.4 names the call); a part of a split
-# job is never added to it — its name changes with the split, the aggregator's does not.
+# `test`, `walkthrough` and `fresh-clone` aggregators) is on main's required-checks list —
+# lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13), ui-unit, ui-smoke,
+# security, sbom, test-postgres, container, sandbox-images, walkthrough and fresh-clone — with
+# commit-subjects.yml's one job: 18 contexts, read from the repository setting on 2026-10-07
+# (data/branch-protection-2026-10-07/). The list is a repository setting only an administrator
+# can change (docs/DEPLOYMENT.md §3.4 names the call); scripts/check_branch_protection.py holds
+# it to every pull-request workflow's jobs. A part of a split job is never added to it — its
+# name changes with the split, the aggregator's does not.
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
 # The installer itself is pinned too: every setup-uv step names the same exact uv version.
@@ -559,7 +561,7 @@ jobs:
         run: python3 scripts/ci_job_budget.py --timeout-minutes 40 --mode fail
 
   fresh-clone:
-    # The one context an administrator adds to main's required checks (DL-101, G-930): it
+    # The fresh-clone check's required context (on main's list since 2026-10-07, DL-101): it
     # passes only when the gates job and every shard passed — a failed, cancelled or skipped
     # part fails it — and the N reports prove every collected test ran in exactly one shard.
     # `if: always()` so it runs, and fails, when a part failed: a skipped required check does

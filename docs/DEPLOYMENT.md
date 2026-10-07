@@ -441,25 +441,31 @@ is not measured yet **[hypothesis — about 1 to 3 minutes per cobra task with a
 build cache, extrapolated from run `0c44ff24…`'s attempt latencies; the first live qualify
 run replaces this with a measured figure]**.
 
-Every check `.github/workflows/ci.yml` reports blocks a merge to `main` only while its name is
-on the branch's required-status-checks list, which is a repository setting, not a workflow
-file. The list names every job's check the workflow had when it was last read, but the parts an aggregator stands for (below) —
-`sandbox-images`, which has no `continue-on-error` and fails on any skipped smoke test exactly
-as `container` does, and `sbom` among them — and is strict (a branch must be up to date)
-**[measured 2026-09-27 — n = 16 required checks against the 16 gating check names the
-workflow rendered then, method: `scripts/check_branch_protection.py` against
+Every check a pull-request workflow reports — each workflow under `.github/workflows` whose
+`on:` names `pull_request`: today `ci.yml` and `commit-subjects.yml` — blocks a merge to
+`main` only while its name is on the branch's required-status-checks list, which is a
+repository setting, not a workflow file. The list names every job's check those workflows had
+when it was last read, but the parts an aggregator stands for (below) — `sandbox-images`,
+which has no `continue-on-error` and fails on any skipped smoke test exactly as `container`
+does, `sbom`, `fresh-clone` (every gate on a fresh clone from `uv.lock` as root with no docker
+daemon, DL-101) and `commit-subjects` among them — and is strict (a branch must be up to date)
+**[measured 2026-10-07 — n = 18 required checks against the 18 gating check names the
+pull-request workflows rendered then, method: `scripts/check_branch_protection.py` against
 `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
-apparatus 2.3; the same list was read on 2026-09-26]**. The `fresh-clone` job, which runs
-every gate on a fresh clone from `uv.lock` as root with no docker daemon (G-664), came later
-and is not on the list: an administrator adds its check name with the call below. Until then
-the saved reading (`tests/fixtures/branch_protection_main.json`) names it under
-`awaiting_protection` with that step, and the daily comparison against the live setting fails
-(DL-101).
+saved as `data/branch-protection-2026-10-07/`, apparatus 2.3; the reading of 2026-09-27 had
+the same list less `fresh-clone` and `commit-subjects`, which an administrator added on
+2026-10-07]**. A job added before the administrator can require it may wait in the saved
+reading (`tests/fixtures/branch_protection_main.json`) under `awaiting_protection`, with the
+step that remains and an open gap in docs/dod that names it; none waits there now, and the
+daily comparison against the live setting never honours the key (DL-101, P-269).
 
-`scripts/check_branch_protection.py` compares the two both ways. It fails on a required check
-that no job reports (every pull request would wait on it for ever), a job that no required
-check names (it could fail and the change still merge), a required check that is a part of an
-aggregator, a setting that is not strict, and a job name of 100 characters or more. The daily
+`scripts/check_branch_protection.py` compares the two both ways. It finds the pull-request
+workflows by reading each file's `on:`, never from a list kept by hand, so a new workflow's
+job is held to the setting the day it lands. It fails on a required check that no job of a
+pull-request workflow reports (every pull request would wait on it for ever), such a job that
+no required check names (it could fail and the change still merge), a required check that is
+a part of an aggregator, a setting that is not strict, and a job name of 100 characters or
+more. The daily
 `branch-protection` workflow (`.github/workflows/branch-protection.yml`) runs it against the
 live setting. Reading the setting needs a token with Administration: read, which a workflow's
 own `GITHUB_TOKEN` can never be given, so an administrator adds a fine-grained token with that
@@ -473,15 +479,15 @@ merges (a renamed job leaves its old name required, so the pull request waits un
 ```bash
 gh api repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
   --jq '{strict: .strict, contexts: .contexts}' > required.json
-# edit required.json: add or rename the check name exactly as ci.yml renders it
+# edit required.json: add or rename the check name exactly as its workflow renders it
 gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
   --input required.json
 python scripts/check_branch_protection.py --repo Jita81/commit-replay-bench   # must say "match"
 ```
 
 Then save the new reading as `tests/fixtures/branch_protection_main.json`: the test that
-compares the last reading with ci.yml fails on every pull request until the two agree. To
-re-create the list from nothing, send the whole set:
+compares the last reading with the pull-request workflows fails on every pull request until
+the two agree. To re-create the list from nothing, send the whole set:
 
 ```bash
 gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks \
@@ -496,23 +502,26 @@ gh api -X PATCH repos/Jita81/commit-replay-bench/branches/main/protection/requir
  "dod (every route, journey and stream has its definition of done; evidence resolves)",
  "claims (every quantified sentence on a covered page carries its tag)",
  "sandbox-images (build + hadolint + smoke each reference sandbox image)",
- "sbom (CycloneDX)"]}
+ "sbom (CycloneDX)",
+ "fresh-clone (every gate from uv.lock, as root, no docker daemon)",
+ "commit-subjects (Conventional Commits, imperative, at most 72 characters)"]}
 JSON
 ```
 
-`test (py3.12)`, `test (py3.13)` and `walkthrough (browser, live stack, tier 1)` are
-aggregators — each a job that `needs` its parts and runs `if: always()`: the work runs in
-parallel parts (`test shard (py3.12, 1 of 8)` …, the walkthrough story and its screens
-shards) and the aggregator passes only when every part passed (a failed, cancelled or skipped
-part fails it), the suite's parts together ran every test exactly once, and the union's
-coverage is at least 70 % (P-051, P-053) **[measured — n = 3 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes
+`test (py3.12)`, `test (py3.13)`, `walkthrough (browser, live stack, tier 1)` and
+`fresh-clone (every gate from uv.lock, as root, no docker daemon)` are aggregators — each a
+job that `needs` its parts and runs `if: always()`: the work runs in parallel parts
+(`test shard (py3.12, 1 of 8)` …, the walkthrough story and its screens shards, the
+fresh-clone gates and its shards) and the aggregator passes only when every part passed (a
+failed, cancelled or skipped part fails it), the suite's parts together ran every test
+exactly once, and, for `test`, the union's coverage is at least 70 % (P-051, P-053) **[measured — n = 4 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py` and `tests/test_check_branch_protection.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes
 whenever the job is split differently, and the aggregator's does not;
 `scripts/check_branch_protection.py` refuses a part on the list.
 
 A context must be the check-run name EXACTLY, and GitHub truncates a check-run name at 100
 characters — a `name:` longer than that can never satisfy the context it is required under
-(it blocked PR #48 until its long job names were shortened). Keep every `name:` in
-`.github/workflows/ci.yml` under 100 characters.
+(it blocked PR #48 until its long job names were shortened). Keep every job's `name:` in a
+pull-request workflow under 100 characters.
 
 ## 4. Azure
 

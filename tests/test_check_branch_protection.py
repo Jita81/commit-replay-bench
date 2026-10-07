@@ -1,30 +1,36 @@
-"""Branch protection requires exactly the jobs the workflow runs — compared, not assumed.
+"""Branch protection requires exactly the pull-request workflows' jobs — compared, not assumed.
 
 Navigation
 ----------
 What it is:   The tests for scripts/check_branch_protection.py.
-What it does: Pins that the workflow's jobs expand to the check names branch protection must
-              require (a matrix job once per combination, an aggregator's parts set aside);
-              that the comparison names a required check no job reports, a job nobody
-              requires, a required part of an aggregator, a non-strict setting and a job name
-              GitHub would cut at 100 characters; that the last reading of the setting
-              (tests/fixtures/branch_protection_main.json) still matches ci.yml, so renaming or
-              adding a job fails here until the setting is read again — or until the reading
-              names the job under ``awaiting_protection`` with the administrator's step and
-              an open gap in docs/dod that names the job, an entry that is itself refused once
-              stale or once no open gap holds it (DL-101, P-269); and that the scheduled
-              workflow runs the live comparison and fails, never passes, without its token.
-How:          Calls the module's functions on fixture text and on the real ci.yml, runs
+What it does: Pins that every workflow whose top-level ``on:`` names ``pull_request`` — and
+              no other — has its jobs held to the setting, its ``on:`` read in each form and
+              refused in any other; that the jobs expand to the check names branch protection
+              must require (a matrix job once per combination, an aggregator's parts set
+              aside); that the comparison names a required check no pull-request workflow
+              reports, a job nobody requires (with its file), a required part of an
+              aggregator, a non-strict setting and a job name GitHub would cut at 100
+              characters; that the last reading of the setting
+              (tests/fixtures/branch_protection_main.json) still matches the workflows, so
+              renaming or adding a job fails here until the setting is read again — or until
+              the reading names the job under ``awaiting_protection`` with the administrator's
+              step and an open gap in docs/dod that names the job, an entry that is itself
+              refused once stale or once no open gap holds it (DL-101, P-269); and that the
+              scheduled workflow runs the live comparison and fails, never passes, without its
+              token.
+How:          Calls the module's functions on fixture text and on the real workflows, runs
               ``main`` against the saved reading, and reads the workflow file.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
-Works with:   scripts/check_branch_protection.py (under test), .github/workflows/ci.yml (the
-              jobs), .github/workflows/branch-protection.yml (the scheduled live run),
+Works with:   scripts/check_branch_protection.py (under test), .github/workflows/ci.yml and
+              .github/workflows/commit-subjects.yml (the pull-request workflows' jobs),
+              .github/workflows/branch-protection.yml (the scheduled live run),
               tests/fixtures/branch_protection_main.json (the last reading),
               docs/dod/product.md (product.evidence.6 cites these tests)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it pins this repository's own workflow and setting);
-              a job is added to or renamed in ci.yml (read the setting again after the
+              a job is added to or renamed in a pull-request workflow, or a workflow starts
+              or stops running on pull requests (read the setting again after the
               administrator updates it, and save the reading in the fixture; until then name
               the job under ``awaiting_protection`` with the step that remains).
 """
@@ -42,6 +48,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 READING = ROOT / "tests" / "fixtures" / "branch_protection_main.json"
 WORKFLOW = ROOT / ".github" / "workflows" / "branch-protection.yml"
+FRESH = "fresh-clone (every gate from uv.lock, as root, no docker daemon)"
+SUBJECTS = "commit-subjects (Conventional Commits, imperative, at most 72 characters)"
 
 
 def _load() -> ModuleType:
@@ -103,8 +111,8 @@ def test_the_comparison_names_every_way_the_setting_and_the_workflow_disagree() 
     ]
     ghost = mod.compare(jobs, [*jobs, "types (mypy --strict)"], strict=True)
     assert ghost == [
-        "branch protection requires 'types (mypy --strict)', which no job in ci.yml reports: "
-        "every pull request waits on it for ever"
+        "branch protection requires 'types (mypy --strict)', which no job in a pull-request "
+        "workflow reports: every pull request waits on it for ever"
     ]
     loose = mod.compare(jobs, list(jobs), strict=False)
     assert loose == [
@@ -116,6 +124,136 @@ def test_the_comparison_names_every_way_the_setting_and_the_workflow_disagree() 
         f"job name {long_name!r} is 100 characters or more: GitHub cuts a check name at 100, "
         "so no run can ever satisfy it"
     ]
+
+
+SUBJECTS_TEXT = """name: commit-subjects
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+jobs:
+  commit-subjects:
+    name: commit-subjects (Conventional Commits, imperative, at most 72 characters)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every commit subject on the pull request
+        if: github.event_name == 'pull_request'
+        run: python scripts/check_commit_subject.py --check
+"""
+
+RELEASE_TEXT = """name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+jobs:
+  publish:
+    name: publish (the tagged image)
+    runs-on: ubuntu-latest
+"""
+
+WORKFLOW_TEXTS = {
+    "ci.yml": CI_TEXT,
+    "commit-subjects.yml": SUBJECTS_TEXT,
+    "release.yml": RELEASE_TEXT,
+}
+
+
+def test_a_job_in_any_pull_request_workflow_gates_not_only_ci_yml() -> None:
+    """The comparison once read ci.yml alone, so commit-subjects.yml's job — a pull-request
+    check in its own file — could fail and the change still merge, and nothing said so."""
+    mod = _load()
+    gating, parts = mod.pull_request_contexts(WORKFLOW_TEXTS)
+    assert gating == {
+        "lint (ruff)": "ci.yml",
+        "test (py3.12)": "ci.yml",
+        "test (py3.13)": "ci.yml",
+        "bare": "ci.yml",
+        SUBJECTS: "commit-subjects.yml",
+    }
+    assert parts == {}
+    without = [c for c in gating if c != SUBJECTS]
+    assert mod.compare(gating, without, strict=True, parts=parts) == [
+        f"job {SUBJECTS!r} in commit-subjects.yml runs on every pull request but branch "
+        "protection does not require it: it can fail and the change still merges"
+    ]
+    assert mod.compare(gating, list(gating), strict=True, parts=parts) == []
+
+
+def test_a_workflow_that_does_not_run_on_pull_requests_gates_nothing() -> None:
+    """release.yml runs on a tag push and by hand: no merge waits on it, so requiring its job
+    would hold every pull request for ever, and leaving it off the list is right."""
+    mod = _load()
+    assert mod.triggers(RELEASE_TEXT) == ["push", "workflow_dispatch"]
+    assert not mod.runs_on_pull_request(RELEASE_TEXT)
+    gating, _ = mod.pull_request_contexts(WORKFLOW_TEXTS)
+    assert "publish (the tagged image)" not in gating
+    assert mod.pull_request_contexts({"release.yml": RELEASE_TEXT}) == ({}, {})
+
+
+def test_a_required_check_that_no_pull_request_workflow_reports_is_still_an_error() -> None:
+    """A check the setting requires that no pull-request workflow reports — a renamed job, or
+    the job of a workflow that does not run on pull requests — never arrives, and every pull
+    request waits on it for ever. The sentence names the files it looked in."""
+    mod = _load()
+    gating, parts = mod.pull_request_contexts(WORKFLOW_TEXTS)
+    required = [*gating, "publish (the tagged image)"]
+    assert mod.compare(gating, required, strict=True, parts=parts) == [
+        "branch protection requires 'publish (the tagged image)', which no job in ci.yml or "
+        "commit-subjects.yml reports: every pull request waits on it for ever"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("on", "events"),
+    [
+        ("on: pull_request", ["pull_request"]),
+        ("on: [push, pull_request]  # both", ["push", "pull_request"]),
+        ('"on":\n  push:\n    branches: [main]\n  pull_request:', ["push", "pull_request"]),
+        ("on:\n  # a comment\n  - push\n  - pull_request", ["push", "pull_request"]),
+        (
+            "on:\n    workflow_dispatch:\n    schedule:\n    - cron: '1 1 * * *'",
+            ["workflow_dispatch", "schedule"],
+        ),
+    ],
+    ids=["scalar", "flow-list", "quoted-block", "block-list", "four-space-block"],
+)
+def test_the_trigger_scan_reads_each_form_of_on(on: str, events: list[str]) -> None:
+    mod = _load()
+    assert mod.triggers(f"name: x\n{on}\njobs:\n  a:\n    name: a\n") == events
+
+
+@pytest.mark.parametrize(
+    "on",
+    ["", "on: {push: {}, pull_request: {}}", "on:\n"],
+    ids=["no-on", "flow-mapping", "empty-block"],
+)
+def test_an_on_the_scan_cannot_read_fails_closed_never_drops_the_workflow(on: str) -> None:
+    """A workflow read as running on nothing would drop its jobs out of the comparison, and a
+    setting that did not require them would pass."""
+    mod = _load()
+    with pytest.raises(SystemExit, match="could not read the workflow's top-level on:"):
+        mod.pull_request_contexts({"x.yml": f"name: x\n{on}\njobs:\n  a:\n    name: a\n"})
+
+
+def test_one_check_name_in_two_workflows_fails_closed() -> None:
+    mod = _load()
+    twin = SUBJECTS_TEXT.replace(SUBJECTS, "lint (ruff)")
+    with pytest.raises(SystemExit, match=r"reported by both ci\.yml and twin\.yml"):
+        mod.pull_request_contexts({"ci.yml": CI_TEXT, "twin.yml": twin})
+
+
+def test_the_real_pull_request_workflows_are_found_by_reading_their_on() -> None:
+    """No list kept by hand: each file under .github/workflows is read, and today ci.yml and
+    commit-subjects.yml run on pull requests while the scheduled and release ones do not."""
+    mod = _load()
+    texts = mod.read_workflows(mod.default_workflows())
+    on_pr = {name for name, text in texts.items() if mod.runs_on_pull_request(text)}
+    assert on_pr == {"ci.yml", "commit-subjects.yml"}
+    assert {"branch-protection.yml", "release.yml"} <= set(texts) - on_pr
+    gating, _ = mod.pull_request_contexts(texts)
+    assert gating[SUBJECTS] == "commit-subjects.yml" and gating[FRESH] == "ci.yml"
 
 
 SPLIT_CI_TEXT = """name: ci
@@ -255,27 +393,25 @@ def test_the_real_workflow_requires_its_aggregators_and_none_of_their_parts() ->
         "test (py3.12)",
         "test (py3.13)",
         "walkthrough (browser, live stack, tier 1)",
-        "fresh-clone (every gate from uv.lock, as root, no docker daemon)",
+        FRESH,
     } <= set(gating)
     assert not set(gating) & set(parts)
 
 
 def test_the_last_reading_of_the_setting_still_matches_the_workflow() -> None:
-    """A job renamed or added in ci.yml breaks the required-check list silently — the renamed
-    check is never reported, and every pull request waits for ever. This fails first: read the
-    setting again once the administrator has updated it, and save it in the fixture."""
+    """A job renamed or added in a pull-request workflow breaks the required-check list
+    silently — the renamed check is never reported, and every pull request waits for ever.
+    This fails first: read the setting again once the administrator has updated it, and save
+    it in the fixture. The reading of 2026-10-07 requires all 18 — fresh-clone and
+    commit-subjects included — so no job awaits the administrator."""
     mod = _load()
     reading = json.loads(READING.read_text(encoding="utf-8"))
-    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    errors, awaiting = mod.compare_reading(
-        mod.gating_contexts(ci), reading, mod.open_gaps(), mod.aggregated_parts(ci)
-    )
+    gating, parts = mod.pull_request_contexts(mod.read_workflows(mod.default_workflows()))
+    errors, awaiting = mod.compare_reading(gating, reading, mod.open_gaps(), parts)
     assert errors == []
-    assert len(reading["contexts"]) == 16
-    # a job the administrator has not yet required is named, with its step, never silent
-    fresh = "fresh-clone (every gate from uv.lock, as root, no docker daemon)"
-    step = reading["awaiting_protection"][fresh]
-    assert awaiting == [f"job {fresh!r} awaits the administrator: {step}"]
+    assert len(reading["contexts"]) == 18
+    assert {FRESH, SUBJECTS} <= set(reading["contexts"])
+    assert "awaiting_protection" not in reading and awaiting == []
 
 
 def test_a_job_awaiting_protection_is_held_to_the_setting_and_the_workflow() -> None:
@@ -303,6 +439,10 @@ def test_a_job_awaiting_protection_is_held_to_the_setting_and_the_workflow() -> 
     ]
     ghost = {**waiting, "awaiting_protection": {"bare": step, "gone": "an administrator"}}
     assert mod.compare_reading(jobs, ghost, gaps)[0] == [
+        "'gone' awaits branch protection, but no job in a pull-request workflow reports it"
+    ]
+    files = dict.fromkeys(jobs, "ci.yml")
+    assert mod.compare_reading(files, ghost, gaps)[0] == [
         "'gone' awaits branch protection, but no job in ci.yml reports it"
     ]
     silent = {**base, "awaiting_protection": {"bare": " "}}
@@ -339,11 +479,15 @@ def test_a_job_awaits_protection_only_under_an_open_gap_that_names_it() -> None:
         "'bare' awaits branch protection under G-111, which is not an open gap in docs/dod "
         "that names the job"
     ]
-    # the real record: the fixture's entry names G-930, which is open and names the job
-    reading = json.loads(READING.read_text(encoding="utf-8"))
-    (fresh,) = reading["awaiting_protection"]
+    # the real record, read through dod_check's parser: G-930 is open (its token is not yet
+    # provisioned) but its text names no job, so a job parked under it is refused
     live = mod.open_gaps()
-    assert "G-930" in reading["awaiting_protection"][fresh] and fresh in live["G-930"]
+    assert "BRANCH_PROTECTION_TOKEN" in live["G-930"]
+    parked = {**base, "awaiting_protection": {"bare": "an administrator requires it (G-930)"}}
+    assert mod.compare_reading(jobs, parked, live)[0] == [
+        "'bare' awaits branch protection under G-930, which is not an open gap in docs/dod "
+        "that names the job"
+    ]
 
 
 def test_main_compares_a_saved_reading_and_fails_on_any_difference(
@@ -352,21 +496,44 @@ def test_main_compares_a_saved_reading_and_fails_on_any_difference(
     mod = _load()
     assert mod.main(["--from-json", str(READING)]) == 0
     said = capsys.readouterr().out
-    assert "branch protection: 16 required checks match" in said
-    assert "awaits the administrator" in said
+    assert (
+        "branch protection: 18 required checks match the jobs of ci.yml and commit-subjects.yml"
+        in said
+    )
+    assert "awaits the administrator" not in said
     reading = json.loads(READING.read_text(encoding="utf-8"))
     reading["contexts"].remove(
         "dod (every route, journey and stream has its definition of done; evidence resolves)"
     )
+    reading["contexts"].remove(SUBJECTS)
     edited = tmp_path / "reading.json"
     edited.write_text(json.dumps(reading), encoding="utf-8")
     assert mod.main(["--from-json", str(edited)]) == 1
     out = capsys.readouterr().out
     assert (
-        "job 'dod (every route, journey and stream has its definition of done; evidence resolves)' runs on every pull request"
+        "job 'dod (every route, journey and stream has its definition of done; evidence resolves)' in ci.yml runs on every pull request"
         in out
     )
-    assert "1 difference(s)" in out
+    assert f"job {SUBJECTS!r} in commit-subjects.yml runs on every pull request" in out
+    assert "2 difference(s)" in out
+
+
+def test_main_takes_named_workflows_and_refuses_one_off_pull_requests(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``--workflow`` (or its old name ``--ci``) narrows the comparison to the files named; a
+    file named there that does not run on pull requests is refused, never read as gating."""
+    mod = _load()
+    flows = ROOT / ".github" / "workflows"
+    assert mod.main(["--from-json", str(READING), "--ci", str(flows / "ci.yml")]) == 1
+    assert (
+        f"branch protection requires {SUBJECTS!r}, which no job in ci.yml reports"
+        in capsys.readouterr().out
+    )
+    both = ["--workflow", str(flows / "ci.yml"), "--workflow", str(flows / "commit-subjects.yml")]
+    assert mod.main(["--from-json", str(READING), *both]) == 0
+    with pytest.raises(SystemExit, match=r"release\.yml does not run on pull_request"):
+        mod.main(["--from-json", str(READING), "--workflow", str(flows / "release.yml")])
 
 
 def test_the_scheduled_workflow_runs_the_live_comparison_and_fails_without_its_token() -> None:
@@ -375,6 +542,8 @@ def test_the_scheduled_workflow_runs_the_live_comparison_and_fails_without_its_t
     a comparison that silently passes would be the fabricated default this gate replaces."""
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "schedule:" in text and "workflow_dispatch:" in text
+    # a push to main that changes any workflow re-reads the setting, not only one to ci.yml
+    assert 'paths: [".github/workflows/**"]' in text
     assert "GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_TOKEN }}" in text
     assert 'test -n "$GH_TOKEN"' in text
     assert "python scripts/check_branch_protection.py --repo" in text

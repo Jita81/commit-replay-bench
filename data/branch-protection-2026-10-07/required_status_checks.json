@@ -1,5 +1,7 @@
 {
   "_reading": "gh api repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks, read 2026-10-07 (the 16 contexts of the 2026-09-27 reading, plus fresh-clone and commit-subjects, which an administrator added that day); only strict and contexts are kept",
+  "_apparatus": "2.3",
+  "_note": "the product's APPARATUS_VERSION on main when the setting was read; a repository setting, not a graded number",
   "strict": true,
   "contexts": [
     "lint (ruff)",
