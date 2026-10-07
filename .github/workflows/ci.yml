@@ -638,11 +638,9 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - name: Install the UI + Playwright Chromium (with system deps)
         working-directory: ui
-        # Every network wait bounded and retried: a stalled apt mirror once ate a whole
-        # 40-minute job with no spec run (P-751), so never a bare `playwright install` here.
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          bash ../scripts/ci_playwright_install.sh
+          npx playwright install --with-deps chromium
       - name: Smoke (ui/e2e/smoke.spec.ts — the config builds the bundle and serves it)
         working-directory: ui
         env:
@@ -1029,11 +1027,9 @@ jobs:
           uv sync -q --locked --python 3.12 --extra server --extra dev
       - name: Install the UI + Playwright Chromium (with system deps)
         working-directory: ui
-        # Every network wait bounded and retried: a stalled apt mirror once ate a whole
-        # 40-minute job with no spec run (P-751), so never a bare `playwright install` here.
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          bash ../scripts/ci_playwright_install.sh
+          npx playwright install --with-deps chromium
       - name: Build the UI bundle the API serves
         working-directory: ui
         run: npm run build
@@ -1102,11 +1098,9 @@ jobs:
           uv sync -q --locked --python 3.12 --extra server --extra dev
       - name: Install the UI + Playwright Chromium (with system deps)
         working-directory: ui
-        # Every network wait bounded and retried: a stalled apt mirror once ate a whole
-        # 40-minute job with no spec run (P-751), so never a bare `playwright install` here.
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          bash ../scripts/ci_playwright_install.sh
+          npx playwright install --with-deps chromium
       - name: Build the UI bundle the API serves
         working-directory: ui
         run: npm run build
