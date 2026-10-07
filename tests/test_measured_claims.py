@@ -49,6 +49,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import subprocess
 import sys
 import unicodedata
 from collections.abc import Callable
@@ -417,29 +418,49 @@ def test_the_branch_protection_reading_is_compared_with_the_workflow_it_was_read
     assert bp.compare(workflow["jobs"], [*reading["contexts"], part], True, workflow["parts"])
 
 
-def test_the_vendored_jobs_are_the_pull_request_workflows_at_the_commit_they_name() -> None:
-    """``workflow_jobs.json`` is what every pull-request workflow at its commit gives — found
-    by reading each file's ``on:``, as the live comparison finds them."""
-    import subprocess
-
-    snapshot = json.loads(
-        (ROOT / BRANCH_PROTECTION / "workflow_jobs.json").read_text(encoding="utf-8")
-    )
+def _workflows_at(commit: str) -> dict[str, str]:
+    """``{file name: text}`` of each workflow at ``commit``, read from this clone's history.
+    A clone without ``commit`` fails, naming the fetch, and never skips: the suite jobs hold
+    the whole history (tests/test_toolchain_gates.py), and a skipped proof proves nothing
+    while every job stays green (P-750)."""
 
     def git(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=False
         )
 
-    listed = git("ls-tree", "--name-only", snapshot["commit"], ".github/workflows/")
+    listed = git("ls-tree", "--name-only", commit, ".github/workflows/")
     if listed.returncode != 0:
-        pytest.skip(f"this clone does not hold {snapshot['commit']} (a shallow clone)")
-    texts = {
-        path.rsplit("/", 1)[-1]: git("show", f"{snapshot['commit']}:{path}").stdout
+        pytest.fail(
+            f"this clone does not hold {commit}, the commit workflow_jobs.json names (a shallow "
+            f"clone?): run `git fetch --unshallow`, or `git fetch origin {commit}`, and rerun"
+        )
+    return {
+        path.rsplit("/", 1)[-1]: git("show", f"{commit}:{path}").stdout
         for path in listed.stdout.split()
         if path.endswith((".yml", ".yaml"))
     }
-    gating, parts = bp.pull_request_contexts(texts)
+
+
+def test_the_vendored_jobs_are_the_pull_request_workflows_at_the_commit_they_name() -> None:
+    """``workflow_jobs.json`` is what every pull-request workflow at its commit gives — found
+    by reading each file's ``on:``, as the live comparison finds them."""
+    snapshot = json.loads(
+        (ROOT / BRANCH_PROTECTION / "workflow_jobs.json").read_text(encoding="utf-8")
+    )
+    gating, parts = bp.pull_request_contexts(_workflows_at(snapshot["commit"]))
     assert gating == snapshot["jobs"]
     assert parts == snapshot["parts"]
     assert sorted(set(gating.values())) == snapshot["workflows"]
+
+
+def test_a_clone_without_the_named_commit_fails_the_proof_never_skips() -> None:
+    """The proof above skipped on a clone that lacked its commit, so a shallow checkout passed
+    it having proved nothing (P-750). The suite jobs hold the whole history; a clone without
+    the commit fails, naming the commit and the fetch that brings it."""
+    absent = "0" * 40  # well formed, and never a commit
+    with pytest.raises((pytest.fail.Exception, pytest.skip.Exception)) as raised:
+        _workflows_at(absent)
+    assert raised.type is pytest.fail.Exception, "a clone without the commit skipped the proof"
+    assert absent in str(raised.value)
+    assert "git fetch --unshallow" in str(raised.value)
