@@ -216,8 +216,18 @@ def test_a_required_check_that_no_pull_request_workflow_reports_is_still_an_erro
             "on:\n    workflow_dispatch:\n    schedule:\n    - cron: '1 1 * * *'",
             ["workflow_dispatch", "schedule"],
         ),
+        ("on:\n  \"push\":\n    branches: [main]\n  'pull_request':", ["push", "pull_request"]),
+        ("on:\n  - \"push\"\n  - 'pull_request'  # pr", ["push", "pull_request"]),
     ],
-    ids=["scalar", "flow-list", "quoted-block", "block-list", "four-space-block"],
+    ids=[
+        "scalar",
+        "flow-list",
+        "quoted-block",
+        "block-list",
+        "four-space-block",
+        "quoted-keys",
+        "quoted-items",
+    ],
 )
 def test_the_trigger_scan_reads_each_form_of_on(on: str, events: list[str]) -> None:
     mod = _load()
@@ -226,12 +236,27 @@ def test_the_trigger_scan_reads_each_form_of_on(on: str, events: list[str]) -> N
 
 @pytest.mark.parametrize(
     "on",
-    ["", "on: {push: {}, pull_request: {}}", "on:\n"],
-    ids=["no-on", "flow-mapping", "empty-block"],
+    [
+        "",
+        "on: {push: {}, pull_request: {}}",
+        "on:\n",
+        "on:\n  push:\n  ? pull_request\n",
+        "on:\n  push:\n  <<: *triggers\n",
+        "on:\n  - push\n  - pull_request: {}\n",
+    ],
+    ids=[
+        "no-on",
+        "flow-mapping",
+        "empty-block",
+        "explicit-key",
+        "merge-key",
+        "mapping-item-in-a-list",
+    ],
 )
 def test_an_on_the_scan_cannot_read_fails_closed_never_drops_the_workflow(on: str) -> None:
     """A workflow read as running on nothing would drop its jobs out of the comparison, and a
-    setting that did not require them would pass."""
+    setting that did not require them would pass. So would a block read in part: one event
+    line the scan cannot read refuses the whole block, never the events around it."""
     mod = _load()
     with pytest.raises(SystemExit, match="could not read the workflow's top-level on:"):
         mod.pull_request_contexts({"x.yml": f"name: x\n{on}\njobs:\n  a:\n    name: a\n"})
@@ -534,6 +559,22 @@ def test_main_takes_named_workflows_and_refuses_one_off_pull_requests(
     assert mod.main(["--from-json", str(READING), *both]) == 0
     with pytest.raises(SystemExit, match=r"release\.yml does not run on pull_request"):
         mod.main(["--from-json", str(READING), "--workflow", str(flows / "release.yml")])
+
+
+def test_two_named_workflows_with_one_file_name_fail_closed(tmp_path: Path) -> None:
+    """Two ``--workflow`` paths with one file name would share one key, so the second would
+    replace the first unread, and a job only the first runs would never be compared."""
+    mod = _load()
+    flows = ROOT / ".github" / "workflows"
+    other = tmp_path / "ci.yml"
+    other.write_text(SUBJECTS_TEXT, encoding="utf-8")
+    with pytest.raises(SystemExit, match=r"two workflows are named ci\.yml") as refused:
+        mod.read_workflows([flows / "ci.yml", other])
+    assert str(flows / "ci.yml") in str(refused.value) and str(other) in str(refused.value)
+    with pytest.raises(SystemExit, match=r"two workflows are named ci\.yml"):
+        mod.main(
+            ["--from-json", str(READING), "--workflow", str(flows / "ci.yml"), "--ci", str(other)]
+        )
 
 
 def test_the_scheduled_workflow_runs_the_live_comparison_and_fails_without_its_token() -> None:

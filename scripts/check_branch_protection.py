@@ -93,9 +93,10 @@ _MATRIX_LIST = re.compile(r"^        ([A-Za-z0-9_-]+):\s*\[(.*)\]\s*$")
 _MATRIX_REF = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
 #: The top-level trigger key, bare or quoted (``"on"`` keeps YAML 1.1 from reading ``true``).
 _ON = re.compile(r"""^(?:on|"on"|'on')\s*:(.*)$""")
-#: One event under a block ``on:``: a key (``pull_request:``) or a bare list item
-#: (``- push``); ``- cron: …`` under ``schedule:`` is neither.
-_EVENT = re.compile(r"^([A-Za-z_]+)\s*:|^-\s+([A-Za-z_]+)\s*$")
+#: One event under a block ``on:``: a key (``pull_request:``, ``"pull_request":``) in a block
+#: of keys, or a list item (``- push``, ``- "push"``) in a block of items, each bare or quoted.
+_EVENT_KEY = re.compile(r"""^(["']?)([A-Za-z_]+)\1\s*:(?:\s|$)""")
+_EVENT_ITEM = re.compile(r"""^-\s+(["']?)([A-Za-z_]+)\1$""")
 _COMMENT = re.compile(r"\s+#.*$|^#.*$")
 #: The one job-level condition that makes a job an aggregator: it runs, and so fails, when a
 #: part failed, was cancelled or was skipped. Without it a failed part SKIPS the job, and a
@@ -116,12 +117,46 @@ def _fill(label: str, values: dict[str, str]) -> str:
     return _MATRIX_REF.sub(lambda m: values[m.group(1)], label)
 
 
+def _block_events(lines: list[str]) -> list[str] | None:
+    """The events of a block ``on:`` whose lines follow it, or None when any line at the
+    events' indent is one the scan cannot read: a block read in part would drop the events it
+    missed, and with them, maybe, every job of a pull-request workflow. The first line sets
+    the block's kind: keys (``push:``, each with its filters below it) or list items
+    (``- push``). In a block of keys, a ``- …`` line at the keys' indent is the value of the
+    key above it (``schedule:`` then ``- cron: …``), never an event."""
+    events: list[str] = []
+    indent: int | None = None
+    items = False
+    for child in lines:
+        if not child.strip() or child.lstrip().startswith("#"):
+            continue
+        if not child.startswith(" "):
+            break
+        width = len(child) - len(child.lstrip(" "))
+        line = _COMMENT.sub("", child).strip()
+        if indent is None:
+            indent, items = width, line.startswith("-")
+        if width != indent:
+            continue
+        if items:
+            e = _EVENT_ITEM.match(line)
+        elif line.startswith("-") and events:
+            continue
+        else:
+            e = _EVENT_KEY.match(line)
+        if not e:
+            return None
+        events.append(e.group(2))
+    return events or None
+
+
 def triggers(text: str) -> list[str]:
     """The events a workflow's top-level ``on:`` names, in file order: ``on: push``,
     ``on: [push, pull_request]``, or a block of events (keys, with their filters, or list
-    items). A workflow with no top-level ``on:``, a ``{…}`` mapping or a block with no event
-    the scan can read fails closed: a workflow read as running on nothing would drop its jobs
-    out of the comparison, and a setting that did not require them would pass."""
+    items), each bare or quoted. A workflow with no top-level ``on:``, a ``{…}`` mapping, or a
+    block with no event or with any event line the scan cannot read fails closed: a workflow
+    read as running on nothing, or on only some of its events, could drop its jobs out of the
+    comparison, and a setting that did not require them would pass."""
     lines = text.split("\n")
     for i, line in enumerate(lines):
         m = _ON.match(line)
@@ -134,25 +169,14 @@ def triggers(text: str) -> list[str]:
             return [_unquote(v) for v in value.strip("[]").split(",") if v.strip()]
         if value:
             return [_unquote(value)]
-        events: list[str] = []
-        indent: int | None = None
-        for child in lines[i + 1 :]:
-            if not child.strip() or child.lstrip().startswith("#"):
-                continue
-            if not child.startswith(" "):
-                break
-            width = len(child) - len(child.lstrip(" "))
-            indent = width if indent is None else indent
-            if width == indent:
-                e = _EVENT.match(child.strip())
-                if e:
-                    events.append(e.group(1) or e.group(2))
+        events = _block_events(lines[i + 1 :])
         if events:
             return events
         break
     raise SystemExit(
         "check_branch_protection: could not read the workflow's top-level on: (missing, a "
-        "{…} mapping, or a block with no event) — teach triggers this shape"
+        "{…} mapping, a block with no event, or an event line it cannot read) — teach "
+        "triggers this shape"
     )
 
 
@@ -460,8 +484,20 @@ def default_workflows(directory: Path = WORKFLOWS) -> list[Path]:
 
 
 def read_workflows(paths: Iterable[Path]) -> dict[str, str]:
-    """``{file name: text}`` for each path."""
-    return {p.name: p.read_text(encoding="utf-8") for p in paths}
+    """``{file name: text}`` for each path. Two paths with one file name fail closed: they
+    would share one key, the second would replace the first unread, and a job only the first
+    runs would never be compared."""
+    texts: dict[str, str] = {}
+    seen: dict[str, Path] = {}
+    for p in paths:
+        if p.name in seen:
+            raise SystemExit(
+                f"check_branch_protection: two workflows are named {p.name} ({seen[p.name]} and "
+                f"{p}): name each file once"
+            )
+        seen[p.name] = p
+        texts[p.name] = p.read_text(encoding="utf-8")
+    return texts
 
 
 def main(argv: list[str] | None = None) -> int:
