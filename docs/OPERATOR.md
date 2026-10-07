@@ -76,7 +76,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `settings` | the server would start with this environment (`CRB_SECRET_KEY`, bootstrap password, `CRB_HOME`, …) | the first refusal, in the server's own words |
 | `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
-| `database` | the store answers and is initialised, every append-only trigger is live (present with the installer's own definition) and, once `grades` has a row, an UPDATE on it is refused (a fresh store says no UPDATE was tried) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
+| `database` | the store answers and is initialised, every append-only trigger is live (present with the installer's own definition) and an UPDATE and a DELETE are refused, in the trigger's own words, on every append-only table that holds a row (a store whose append-only tables are all empty says no write was tried) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
 | `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
@@ -154,15 +154,19 @@ language and runner — no token is handed over; the worker mints the installati
 repository you already measured can instead be *linked* to the picked GitHub repository — it
 keeps its name and its evidence; only its URL moves ([GITHUB-APP §4](GITHUB-APP.md)).
 Without the app, *Connect by URL* registers a public repository (or one the worker's git can
-reach). Either way the repository then walks the six stages (probe → mine → oracle →
-controls → first measurement) on `/connect/<name>`, each saying what it proves and what it
-costs, and lands on **Results**.
+reach). Either way the repository then walks the six stages (registration, then probe → mine
+→ oracle → controls → first measurement) on `/connect/<name>`, each saying what it proves and
+what it costs, and lands on **Results** **[measured — n = 6 stages; method: the stages the
+Connect screen's walk builds for a repository, read in its code at this commit; apparatus
+n/a]**.
 
 A registered repository is edited on its page under **Configuration** (operators and
 admins edit; viewers see the same form read-only). The form covers every field
 `PUT /repos/{name}` accepts — language, runner, clone path / URL, layout (source prefix,
 extensions, test mode with the matching test prefix or `|`-separated test suffixes), belt
-scope (the three policies or an explicit list with one scope per row), probe scope,
+scope (one of the three policies **[measured — n = 3 policies; method: the belt-scope values
+the repository configuration accepts, read in its validation at this commit; apparatus
+n/a]**, or an explicit list with one scope per row), probe scope,
 sandbox image, layer, mining caps — and the **runner options** as a sub-form that offers
 exactly the keys the selected runner reads (below), with a *Raw JSON* view that
 round-trips for anything else. Inline validation refuses what the API would refuse, in
@@ -259,8 +263,9 @@ the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
 `$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
 at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
 `--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
-pin Python as `name==version` in `requirements*.txt` (or name the files in
-`runner_opts.deps_lock`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+pin Python as `name==version` in `requirements*.txt` or commit a `uv.lock` (or name the
+files in `runner_opts.deps_lock`, where a list of alternatives lets one repository's history
+move from one lock to another, and the uv groups to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
 package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
 version does not provision is refused with its `PROVISION_*` code and the fix
 ([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
@@ -409,8 +414,8 @@ apparatus record of every row measured under it.
 
 ### 2.1b Clean means working — the `checks` switchboard
 
-A clean row says the repository's tests accept a patch. Three mechanisms make it also mean
-the repository's reviewers would (ADR-0024). Each is **off** until you switch it on, for one
+A clean row says the repository's tests accept a patch. The mechanisms in the table below make
+it also mean the repository's reviewers would (ADR-0024). Each is **off** until you switch it on, for one
 run or for the repository, and every row it touches records it.
 
 | switch | what it does | what the row records |
@@ -479,7 +484,8 @@ era's services are brought up before the builder starts and their `export` envir
 of the test command the brief shows, so the builder runs the oracle the grader will run — it
 never has to (and is never allowed to) start the service itself. Measured on mesh-client
 (2026-09-15): without this, 2 of 4 sighted attempts were refused for reaching for `docker ps` /
-`curl localhost:8701`.
+`curl localhost:8701` **[hypothesis — one reading on the operator's stack, n = 4 attempts;
+its rows are not in this repository, so it cannot be re-derived here]**.
 
 **The shape.** One entry per service, exactly one of `image` | `compose` | `build`:
 
@@ -568,9 +574,9 @@ which is also what the `post_create` symlinks point every worktree's client cert
 pre-boundary worktrees have their own committed copies and the symlink hook leaves an
 existing file alone). The tests keep their hard-coded `https://localhost:8701`; no `export`
 is needed. Switching eras restarts the one service (compose project
-`crb-mesh-client-mesh_sandbox-<variant>`), so **concurrency is 1 per service**: two runs of
-the same repository must not share a worker. To run two eras side by side give each variant
-its own host port and export the URL instead.
+`crb-mesh-client-mesh_sandbox-<variant>`), so **concurrency is 1 per service**: runs of the
+same repository must not share a worker. To run eras side by side give each variant its own
+host port and export the URL instead.
 
 **Where fixtures live, and why.** Under the runner's `env_dir` — `<home>/envs/<name>/services/`
 (worker) or `<workdir>/envs/<name>/services/` (CLI) — never under `/private/tmp` or
@@ -658,13 +664,69 @@ schedule — the token is long-lived):
    evaluation is over — `auth: cli` is a developer/evaluation mode; production runs use
    `ANTHROPIC_API_KEY` on the worker and never read the file.
 
+#### 3.0.2 Pointing the OpenAI-compatible builders at your own endpoint
+
+`editblock`, `openai_agent`, the intent labeller and the factory's test author all call one
+endpoint: the one the **worker's** environment names. With nothing set it is Cerebras (`CEREBRAS_API_KEY`). To use
+a self-hosted model (vLLM, llama-server) or another OpenAI-compatible provider:
+
+```bash
+export CRB_OPENAI_BASE_URL=http://gpu-box.internal:8080/v1
+export CRB_OPENAI_KEY_ENV=GPU_BOX_KEY            # the NAME of the variable holding the key
+export CRB_OPENAI_TIMEOUT_S=900                  # default 120; 1–3600
+export CRB_OPENAI_MAX_RETRIES=1                  # default 4; 0–10 — each retry regenerates
+export CRB_OPENAI_MAX_TOKENS=4000                # default 4000; 1–200000
+```
+
+- **What a row says.** The provider on every row, cell and label is the endpoint's own —
+  `cerebras` for a host in the `cerebras.ai` domain, `azure` for an Azure endpoint in an Azure
+  domain (`azure.com`, `azure-api.net`, `azure.us`, `azure.cn`), or otherwise the URL's host
+  and port (`gpu-box.internal:8080`) — so a self-hosted model is its own cell, never pooled
+  with Cerebras, even when its host name contains `cerebras` (a mirror). A host with no dot
+  and no port (a compose or Kubernetes service called `cerebras`) is stamped `host:cerebras`:
+  a provider's name is never taken from a host outside that provider's domain. Write rungs as
+  `openai_agent:qwen3@gpu-box.internal:8080` (the `@` form: a host carries a `:`) or leave the
+  provider empty and it is filled in.
+- **Never put the key in the URL.** The URL is stamped on every row and the ledger is
+  append-only, so a `CRB_OPENAI_BASE_URL` (or `CRB_AZURE_ENDPOINT`) with a user name or key
+  before the host (`https://user:key@host/v1`), a query string (`?api-key=…`) or a fragment is
+  refused by name, and the value is not repeated in the message. The key goes in the variable
+  `CRB_OPENAI_KEY_ENV` names.
+- **What it refuses.** A rung that names a provider the endpoint is not
+  (`openai_agent:qwen3@cerebras` while the URL is your server) is refused when you submit the
+  run — 422 `builder_provider_mismatch`, with the fix in the sentence and nothing queued — and
+  a run already queued stops the attempt as `builder unavailable: ProviderMismatch: …` before
+  any call is made. The factory's test author (the run's `test_author`, or
+  `CRB_FACTORY__TEST_AUTHOR`) is checked the same way. A tuning value that is out of range or not a number stops it the same way and names
+  the variable. A run's `builder_config` cannot get round this: the keys that name a
+  builder's own seams (`model_fn`, `chat_fn`, `spawn`, `runner_factory`, `endpoint`,
+  `executor`) are refused by `POST /runs` with a 422.
+- **Reply length.** `CRB_OPENAI_MAX_TOKENS` is the reply cap of the builders, the test author
+  and the intent labeller. While it is unset the labeller keeps its own shorter cap of 400
+  tokens (a label is one short JSON object); set it for a reasoning model that needs longer,
+  or set `max_tokens` in a label run's `builder_config`, which wins **[measured — n = 1 default, 400 tokens; method: `DEFAULT_MAX_TOKENS` in `src/crb/builders/labeller.py` read at this commit; apparatus n/a, a property of the product's own code, not a graded row]**.
+- **Timeouts.** A model that generates slowly needs a timeout longer than one reply takes:
+  at 15 tokens a second a 4,000-token reply takes about 270 s **[hypothesis — arithmetic from
+  a stated rate, not measured on a model]**. Keep retries low — a timed-out call is retried
+  from the start, so four retries can cost five full generations.
+- **Proof.** The request lands on the configured URL, the row carries its host, a mismatched
+  rung is refused and the timeout, reply length and retry count are the ones set **[measured —
+  n = 64 test cases in `tests/test_builders_endpoint.py`: 10 point a builder, the labeller or
+  the test author at a fake OpenAI-compatible server on 127.0.0.1 and check where the request
+  landed, what it carried and the provider stamped; the other 54 check the settings'
+  defaults and refusals, the provider rule, the seams a run request cannot set and a source
+  ratchet, and the module's own count; no model called; each fix reverted in turn made them
+  fail; apparatus 2.3]**.
+  The factory's test author (§10) follows the same rule: it calls this endpoint, stamps its
+  provider, and a test-author rung naming another provider is refused before any call.
+
 What you will see (the run's live log on `/runs/<id>`, and `crb` on the terminal):
 `mine.candidate` → `mine.red` / `mine.skip` → `mine.gold` → `build.*` → `grade.belt` (five
 per task with belt 5, `repo_lint_clean`; four on a repository without a lint plan) →
 `ledger.append`. The full vocabulary — every action, its payload and who reads it — is
 [API.md § Event vocabulary](API.md#event-vocabulary). Skips are normal: a commit whose
 target is already green at the parent, or times out, is not a valid oracle and is
-excluded, not counted. A queued run shows its place in the line ("Queued — 3 runs ahead of
+excluded, not counted. A queued run shows its place in the line ("Queued — n runs ahead of
 it"); if the health check's `worker` probe is not `ok`, no worker will take it — see §7.
 
 Every graded task produces an **evidence pack** (redacted; no raw diff, no transcript by
@@ -673,9 +735,9 @@ default), its **kept patch** (the builder's change, redacted, at most 1 MiB, und
 worktree; `CRB_RETENTION__PATCHES=false` keeps none) and a **ledger row** that carries the
 pack's hash. A row cannot be `clean` without a pack.
 
-#### 3.0.2 Spend: the calibrated budget and the measured escalation rule
+#### 3.0.3 Spend: the calibrated budget and the measured escalation rule
 
-Two switches decide what a build run pays for (`crb.core.spend`). Each is set per run on
+The switches in the table below decide what a build run pays for (`crb.core.spend`). Each is set per run on
 `POST /runs` or per repository on `PUT /repos/{name}` as `spend: {…}`; the run wins, and
 the run's apparatus says which applied and why (`extra.spend.sources`).
 
@@ -687,10 +749,10 @@ the run's apparatus says which applied and why (`extra.spend.sources`).
 Why: in the 2026-09-25 export, 40 escalated attempts (a same-model retry: a bare `r2` / `r3`
 rung is the run's own builder and model at the same budget, on a fresh worktree with the same
 brief) produced 2 clean patches for $20.70, against $1.35 per clean patch on a first blind
-attempt; and 47 attempts stopped at their budget cost $28.87 for no output `[measured
+attempt; and 47 attempts stopped at their budget cost $28.87 for no output **[hypothesis, recorded as measured
 2026-09-25; n = 322 valid of 618 rows, apparatus 2.0–2.2, builder claude_code /
-claude-sonnet-5; method: the product's failure rule over the export,
-scripts/spend_from_export.py]`. Every row a rule shaped says so: `labels.escalation` and
+claude-sonnet-5; method: the product's failure rule over the export, by
+`scripts/spend_from_export.py`; the export is the operator's and is not in this repository]**. Every row a rule shaped says so: `labels.escalation` and
 `labels.escalation_rule` on the row that stopped or climbed, `labels.budget_profile`,
 `labels.budget_calibration` and `labels.budget_tier` on a calibrated attempt.
 
@@ -737,7 +799,7 @@ tests can observe — the same operator measures something slightly different th
 is exactly why the family and language travel with the number.
 
 Every mutant is generated deterministically (candidates sorted on line, column, operator
-rank and description; two runs are byte-identical; `max_mutants` — default 20 — truncates
+rank and description; a rerun is byte-identical to the first; `max_mutants` — default 20 — truncates
 a stable prefix), the file under mutation is restored byte-exact after every mutant (and
 verified by hash), and test files are never mutated. The blind-spot catalogue — every
 escaped mutant with its diff — is the prevention artifact: each entry names a missing
@@ -795,6 +857,15 @@ crb ledger export --repo myrepo -o myrepo.jsonl   # chain preserved; legacy rows
 For an audit: export, run `crb ledger verify` on the export, and record the last
 `row_hash` out of band (for example in the audit report). Anyone with the file can re-run
 the verification.
+
+On the API host, `crb ledger verify --store` verifies the database itself: the grade ledger
+and the audit trail (the `events` table — every sign-in, account change, sign-off decision
+and cancel — which is hash-chained too, ADR-0029). It exits 1 if either chain is broken and
+names the first bad row or event; it prints both heads, the values to record out of band.
+`GET /api/v1/ledger/verify` serves the same to any signed-in reader, and every worker start
+writes both heads to its log. A chain cannot show that rows were cut from its end or that
+the whole store was replaced; a head you recorded earlier can — it must still be in the
+chain ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
 
 ## 7. When the sandbox is unavailable
 
@@ -874,7 +945,7 @@ the grader first runs the same failing scope on the humans' own change, now, in 
 posture. If that control passes, the row is `builder_red` (or `lint`) and names the witness
 (`labels.blame_control`). If it fails, the row is `harness` with `error: environment: …`
 — counted against autonomy, never against the model — and the task's qualification is
-revoked. Two such rows in a row stop the run (`env_stop`, default 2). When the trial's own
+revoked. Such rows in a row stop the run once they number `env_stop` (default 2). When the trial's own
 tree could not be copied into the sandbox (`tree_copy_failed`), the same control decides:
 if the gold's tree runs there, the trial's tree was the problem (too big for `work_size`, a
 file the sandbox user cannot read) and the attempt is **disqualified**, never charged and
@@ -902,6 +973,12 @@ Stop delivery and investigate before any further sign-off if you observe any of:
   the same scope in the same posture, so the posture moved under its qualification (a run
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
   before the next replay — §7a).
+
+A run that stops itself at its spend cap (`counts.stopped_code: spend_cap`,
+`run.spend_cap`) is not a stop condition: it did what it was told. Its attempts are graded
+and kept, the reason names what was spent and the attempt or item it did not start, and the
+next run reaches the tasks it did not. If a capped run stopped because an attempt's cost was
+not known, price the model in `CRB_PRICING_JSON` before the next one.
 
 **Intake stop conditions** (ADR-0017). A listener stops with one of eight published reasons,
 shown on `/factory/intake?repo=`, on the item's evidence chain as `intake.stopped` and in
@@ -1065,6 +1142,19 @@ to the longest model in the pricing table (`CRB_PRICING_JSON` extends it), so
 the rung by its place on the ladder (`build rung 2`) and the model — change that rung's
 model, or give the test author a different one.
 
+**The author calls the endpoint the builders call.** Whatever builder name its rung spells,
+the test author asks the OpenAI-compatible endpoint the worker's environment names (§3.0.2):
+`CRB_OPENAI_BASE_URL`, or Azure when `CRB_AZURE_ENDPOINT` is set, or Cerebras when neither is.
+What authoring returns and each `author.attempt` it records carry that endpoint's provider —
+`cerebras`, `azure` or the URL's host. An author rung that names a different provider
+(`editblock:qwen3:cerebras` while the URL is your own server) is refused with
+`ProviderMismatch` before anything is built or paid for; name the host the endpoint is
+(`editblock:qwen3@gpu-box.internal:8080`) or leave the provider empty. The author never takes
+the run's provider: that belongs to the build ladder, so a Claude ladder with an author on
+Cerebras (`CRB_FACTORY__TEST_AUTHOR=editblock:gpt-oss-120b`) runs.
+The provider is recorded, never compared as identity: the same model behind two providers is
+still one model, and the refusal above still stops it **[measured — n = 1 rule; method: `tests/test_builders_endpoint.py::test_a_provider_never_lets_the_authors_model_pass_as_another`; apparatus n/a, a property of the product's own code, not a graded row]**.
+
 Nothing the author writes is taken on trust. The test is written in a throwaway worktree at
 the base (a stray source edit cannot leak out of it), then the ordinary RED proof runs it at
 the base and requires a failure with attributable test ids — green, a timeout or an
@@ -1089,8 +1179,8 @@ change, the draft is chained onto it.
 
 A team's own board can be the front door of the factory: a ticket moved into one watched
 column is the request to manufacture, and the ticket **is** the backlog item
-(ADR-0017). Nothing about this is on by default, and it takes two separate decisions by
-two different roles to switch on.
+(ADR-0017). Nothing about this is on by default, and it takes a decision by an admin and
+another by an operator to switch on.
 
 **1. An admin configures the connection, once per deployment.** Set the `CRB_INTAKE__*`
 block on the API *and* the worker (DEPLOYMENT.md §2.1), then store the credential:
@@ -1166,7 +1256,9 @@ sign-in name, the Jira email or, where Jira hides it, the account id); `false` i
 on every registration. The allowlist trusts who **created** the ticket, not who edited it
 since; leave it empty if that difference matters to you. An edited ticket comes back as an
 *evolution* — a new item superseding the old one; the frozen record is never rewritten. Over
-a ticket's life it can receive four comments, each marked as its own (what is missing, the
+a ticket's life it can receive four comments **[measured — n = 4 comment kinds; method: the
+distinct markers the intake writes its comments under, read in the server's intake code at
+this commit; apparatus n/a]**, each marked as its own (what is missing, the
 queued note, the pull-request note, the note if the work stopped), one `crb:` label, a link
 to the item and a link to the pull request, and — only where the outcome map is configured —
 one state change. It edits no other field, never creates a ticket, and never reads a column it
@@ -1175,7 +1267,9 @@ code block, and the branch name is lower-case letters, digits and hyphens. **One
 time:** the worker's timer, *Re-read the column now* and *Register* each take the repository's
 lease first; a second one that finds it held does nothing and says so (`intake_busy`). A
 rate-limited tracker (HTTP 429) is waited out for up to 10 seconds at a time, twice, as its
-`Retry-After` asks, before the pass stops `unreachable`; and the tracker credential is only
+`Retry-After` asks, before the pass stops `unreachable` **[measured — n = 2 retries of at most
+10 seconds; method: the bounds in the intake's HTTP client, read at this commit; apparatus
+n/a]**; and the tracker credential is only
 ever sent to the tracker's own address. Switching the listener on or off is itself an event on the repository's
 system trace (`intake.listener.switched`) naming the operator, so a later switch cannot
 quietly overwrite who consented.
@@ -1254,7 +1348,7 @@ backup (DEPLOYMENT §5). The chain lives in the database, never in `CRB_HOME`.
 
 ## 13. The three learning reports
 
-The **Learn** page, beside the prevention register, shows three reports for one repository
+The **Learn** page, beside the prevention register, shows the loop's reports for one repository
 (any viewer; `GET /learn/refusals`, `/learn/strengthen` and `/learn/remeasure`, or `crb learn
 refusals|strengthen|remeasure` over exported files — [LEARNING-LOOP §2](LEARNING-LOOP.md#2-what-crbcorelearn-adds)).
 None of them spends anything or changes anything.

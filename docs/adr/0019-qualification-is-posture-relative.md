@@ -262,3 +262,27 @@ The same flaw cuts the other way for the negative controls. An environment that 
 - **Keep apparatus 2.2 and treat posture as a stamp only.** Rejected. `builder_red` now means "witnessed", belt 3's baseline comes from a different source, and belt 1b covers new ground. A verdict means something different. The cost is stated above: stale sign-offs, an empty current map, and model money to measure again.
 - **A writable copy on the host, bind-mounted read-write** (the operator-first design). Rejected as the default. The container would write to the worker's disk with no size cap. Under colima or `dind`, the worker cannot always remove files the container creates as uid 65534. The tmpfs copy dies with the container.
 - **Mount the parent's and the gold's dependencies in the sealed builder** (the correctness-first design). Rejected. The gold's module list is part of the answer.
+
+## Amendment 2026-09-27 — a `uv.lock`, and a lock that moved, are provisioned (DL-101)
+
+The refusal list above named `uv` locks. From this amendment a `uv.lock` of version 1 is read
+through git objects into the same hashed pins a requirements lock gives. The pins are the
+project's own dependencies and the groups `runner_opts.deps_groups` names, closed over every
+package's dependencies. Each pin carries every wheel's hash and the marker that reaches it.
+The fetch is unchanged: wheels only, `--require-hashes`, through the allowlisting proxy,
+installed with no network. So nothing this ADR says a test container, a builder or a fetch
+may never do has changed, and the apparatus does not move. The selection is part of the
+bundle key, so a set sealed for one set of groups never serves another. A `uv.lock` is still
+refused, each with its code, when it names an index other than the public one it was
+resolved against, when a package every environment needs has no wheel, when it is a
+workspace or another lock version, and when an edge resolves to more than one package. A
+lock is repository text, so it is never trusted to be well formed: a name, version or marker
+that is not plain package text — a newline, a comment, an option — and a hash that is not a
+whole sha256 are refused before anything is fetched, and the file pip reads is written line
+by line from pins that are each matched again, so no option can reach pip from a lock (P-259).
+
+`runner_opts.deps_lock` may also name alternatives, as a list inside the list: a commit
+reads the first one it carries, and a commit that carries none is refused `PROVISION_NO_LOCK`
+naming them all. A repository whose history moved from a requirements lock to `uv.lock`
+(click, in May 2025) is provisioned from one declaration. A plain entry is still one that
+every commit must carry. `poetry.lock`, `pylock.toml` and `Pipfile.lock` stay refused (G-951).

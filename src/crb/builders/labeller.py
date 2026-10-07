@@ -45,7 +45,8 @@ Works with:   src/crb/core/classify.py (the protocol, the prompt, the parser and
               transport), src/crb/builders/claude_code.py (the CLI's auth/env, reused
               verbatim), src/crb/builders/budget.py (metering), src/crb/server/worker.py
               (the ``label`` run kind)
-Tested by:    tests/test_builders_labeller.py, tests/test_worker_label.py
+Tested by:    tests/test_builders_labeller.py, tests/test_worker_label.py,
+              tests/test_builders_endpoint.py (the labeller id names the endpoint it calls)
 Touch when:   never for a new repository (a label run is started per repo from the UI or
               ``crb tasks label`` — docs/OPERATOR.md); a new class in the vocabulary is a
               change to src/crb/core/taxonomy.py, not here; a new transport implements
@@ -84,7 +85,7 @@ from crb.builders.openai_client import (
     EndpointConfig,
     MissingCredential,
     make_chat,
-    resolved_endpoint,
+    resolve_endpoint,
 )
 from crb.core.classify import (
     IntentLabel,
@@ -115,6 +116,7 @@ LABEL_OUTPUT_SCHEMA: dict[str, Any] = {
     "required": ["class", "confidence", "rationale"],
 }
 
+#: The labeller's own reply cap, used while the operator sets no ``CRB_OPENAI_MAX_TOKENS``.
 DEFAULT_MAX_TOKENS = 400
 DEFAULT_TIMEOUT_S = 120
 
@@ -191,7 +193,7 @@ class _Usage:
 
 
 class OpenAILabeller:
-    """Label through an OpenAI-compatible chat endpoint (Cerebras by default).
+    """Label through an OpenAI-compatible chat endpoint (the configured one; Cerebras if none).
 
     ``chat_fn`` is the test seam (``messages -> str | ChatReply``); without it the
     live client is built lazily on first use from ``endpoint`` (default:
@@ -209,15 +211,24 @@ class OpenAILabeller:
         provider: str = "",
         endpoint: EndpointConfig | None = None,
         chat_fn: ChatFn | None = None,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
+        max_tokens: int | None = None,
         temperature: float | None = 0.0,
     ) -> None:
         if not model.strip():
             raise ValueError("an OpenAI-compatible labeller needs a model")
         self.model = model.strip()
-        self.endpoint = endpoint
-        self.provider = provider or resolved_endpoint(endpoint).provider
+        # the configured endpoint when none is passed, and the provider it IS: the
+        # labeller id ``…@provider`` never names a provider it does not call
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=chat_fn)
         self._chat_fn = chat_fn
+        # the reply cap: a caller's (a run's builder_config) wins, then the operator's
+        # CRB_OPENAI_MAX_TOKENS, then the labeller's own short default — a label is one
+        # short JSON object, but a reasoning model the operator raised the cap for is not
+        # silently cut off at 400
+        if max_tokens is None:
+            max_tokens = (
+                self.endpoint.max_tokens if self.endpoint.max_tokens_set else DEFAULT_MAX_TOKENS
+            )
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.usage = _Usage(self.model)
@@ -242,9 +253,8 @@ class OpenAILabeller:
     def _chat(self) -> ChatFn:
         """The chat callable, built lazily so construction needs no credential."""
         if self._chat_fn is None:
-            ep = resolved_endpoint(self.endpoint)
             self._chat_fn = make_chat(
-                self.model, ep, max_tokens=self.max_tokens, temperature=self.temperature
+                self.model, self.endpoint, max_tokens=self.max_tokens, temperature=self.temperature
             ).text
         return self._chat_fn
 

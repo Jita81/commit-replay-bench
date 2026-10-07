@@ -17,8 +17,9 @@ Works with:   src/crb/store/models.py (``WorkerRow.unconfirmed_containers``),
               ``("0008", "workers", "unconfirmed_containers")``), src/crb/server/worker.py
               (stamps it on check-in), src/crb/server/routes/system.py (the probe reads it),
               src/crb/store/migrations/versions/v0007_workers.py (the table it extends)
-Tested by:    tests/test_store_migrate.py, tests/test_worker.py, tests/test_server_system.py
-Touch when:   never — a released revision is immutable.
+Tested by:    tests/test_store_migrate.py, tests/test_worker_reaper.py,
+              tests/test_server_system.py
+Touch when:   never for a new repository; never — a released revision is immutable.
 """
 
 from __future__ import annotations

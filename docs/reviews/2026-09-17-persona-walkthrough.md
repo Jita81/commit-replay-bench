@@ -12,11 +12,11 @@ browser, then swept with axe (WCAG 2.1 AA) as three of the four personas and che
 started by the operator through the Measure page (cobra, 10 sighted attempts,
 `claude_code / claude-sonnet-5`, `auth: cli`) so the walk crossed a run in flight and a run
 completing. One real sign-off was made and then revoked so the dev ledger records it as a
-test.
+test **[hypothesis — as measured on the operator's stack at the time; its rows are not in this repository]**.
 
 The defects found were fixed in the same branch as they were found; the table says what
 each person saw before and after. Every behavioural fix (1–12) carries a test; the two
-layout-only fixes (13, 14 — a wrapping title and a wrapping hash) do not.
+layout-only fixes (13, 14 — a wrapping title and a wrapping hash) do not **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## Verdict per persona
 
@@ -87,9 +87,10 @@ after the revoke (two cobra cells due, one click cell routed to a human).
 - One test backlog (`T-1 walkthrough test item`, hash `1644eba4…`) is frozen on cobra; the
   factory was not run on it.
 - Ledger after the walk: 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack
-  **[measured — `/ledger/verify`, apparatus 2.2; exact counts, no interval]**.
+  **[hypothesis, recorded as measured — n = 602 rows; method: the stack's ledger verification read after the walk,
+  not in this repository; exact counts, no interval; apparatus 2.2]**.
 - The two WCAG figures (4.4:1 before, 4.7:1 after) are contrast ratios computed from the
-  tokens, not sampled rates: no `n`, no interval.
+  tokens, not sampled rates: no `n`, no interval **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## How to repeat it
 

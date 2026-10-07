@@ -107,6 +107,13 @@ BUILDER_CONFIG_SECRET_MARKERS: tuple[str, ...] = (
     "passwd",
     "credential",
 )
+#: ``builder_config`` keys that name a builder's in-process seam or object — the model
+#: call, the transport, the endpoint, the executor. A request body is JSON and cannot carry
+#: one; a string in their place is not a seam and would let a rung skip the provider check
+#: (P-278), so they are refused with the reason.
+BUILDER_CONFIG_SEAM_KEYS: frozenset[str] = frozenset(
+    {"model_fn", "chat_fn", "spawn", "runner_factory", "endpoint", "executor"}
+)
 BUILDER_CONFIG_MAX_KEYS = 32
 BUILDER_CONFIG_MAX_BYTES = 8192
 
@@ -417,6 +424,9 @@ class RunCounts(BaseModel):
     rows: int = 0
     duration_s: float = 0.0
     stopped_reason: str = ""
+    #: Why the run stopped itself, as a code: ``spend_cap`` when it stopped before an attempt
+    #: or item that could pass its ``max_cost_usd`` (F5b); ``""`` otherwise.
+    stopped_code: str = ""
     #: The run kind's OWN counters when the kind is not a build (replay / blind / factory
     #: keep the RunSummary above): served VERBATIM from the worker's ``counts_json`` —
     #: a mine run's ``{examined, found, gold_clean, gold_dirty, skipped, known, pool}``, a
@@ -565,6 +575,9 @@ class RunOut(BaseModel):
     ladder: list[LadderEntry]
     #: Run-level budget overrides (``params.budget``; ``{}`` when the defaults apply).
     budget: dict[str, Any]
+    #: The run's spend cap (``params.max_cost_usd``, F5b): the most its attempts may cost
+    #: together; ``null`` for a run without one.
+    max_cost_usd: float | None = None
     executor: str
     timeout: int
     pool: str
@@ -643,6 +656,12 @@ class RunCreateRequest(BaseModel):
     #: (:data:`BUDGET_DEFAULTS`); a rung's own ``budget`` overrides these for that rung.
     #: Stored as ``params.budget`` (only the fields set) and stamped into the apparatus.
     budget: RunBudget | None = None
+    #: Build kinds (F5b): the most the run's attempts may cost together, in USD. The worker
+    #: stops the run before an attempt (a factory run: an item) that could take its spend
+    #: past it — ``failed``, ``counts.stopped_code: spend_cap``. Refused (422
+    #: ``spend_cap_unpriced``) when a rung's model has no known price. Stored as
+    #: ``params.max_cost_usd`` only when set.
+    max_cost_usd: float | None = Field(default=None, gt=0, le=1_000_000)
     task_ids: list[str] = Field(default_factory=list, max_length=5000)
     limit: int | None = Field(default=None, ge=1)
     pool: str = ""
@@ -750,6 +769,12 @@ class RunCreateRequest(BaseModel):
                     f"builder_config must not carry credentials ({key!r}); "
                     "provider keys come from the worker's environment"
                 )
+            if key in BUILDER_CONFIG_SEAM_KEYS:
+                raise ValueError(
+                    f"builder_config must not set {key!r}: it is a builder's in-process seam, "
+                    "not a setting — the endpoint comes from the worker's CRB_OPENAI_* / "
+                    "CRB_AZURE_* variables and the executor from the run's `executor`"
+                )
         if len(json.dumps(v, ensure_ascii=False)) > BUILDER_CONFIG_MAX_BYTES:
             raise ValueError(f"builder_config exceeds {BUILDER_CONFIG_MAX_BYTES} bytes")
         return v
@@ -838,6 +863,11 @@ class RunCreateRequest(BaseModel):
             raise ValueError(
                 f"kind {self.kind!r} needs a builder (or a ladder of object rungs "
                 "{builder, model, …}, whose first rung names the run's builder)"
+            )
+        if self.max_cost_usd is not None and self.kind not in BUILD_KINDS:
+            raise ValueError(
+                f"max_cost_usd applies to build runs only ({sorted(BUILD_KINDS)}): a "
+                f"{self.kind!r} run makes no builder attempt"
             )
         return self
 
@@ -1355,10 +1385,27 @@ class SignoffVerifyOut(ChainVerifyOut):
     verified_at: str
 
 
+class EventsVerifyOut(BaseModel):
+    """The audit trail's chain (``events``, ADR-0029): ``broken_at`` is an event id."""
+
+    rows: int
+    chain_ok: bool
+    broken_at: int | None
+    detail: str
+    #: The last event's ``row_hash`` (``""`` when there is none) — to record outside the store.
+    head_row_hash: str
+    #: ``full`` — every event re-hashed; ``tail`` — only those appended since the last clean
+    #: walk, from its head (P-257). ``?full=true`` (operator) forces ``full``.
+    walk: str = "full"
+    #: When the last full walk behind this answer ran (ISO 8601, UTC).
+    full_walk_at: str = ""
+
+
 class LedgerVerifyOut(BaseModel):
     """``GET /ledger/verify`` — the grades chain, false-Q1 over the stored belts, the clean
-    rows measured here whose pack is absent or does not re-hash to its name, and the
-    sign-off and review chains (EI-6): ``ok`` only when every one of them holds."""
+    rows measured here whose pack is absent or does not re-hash to its name, the sign-off
+    and review chains (EI-6) and the audit trail's chain (``events``, ADR-0029): ``ok`` only
+    when every one of them holds."""
 
     rows: int
     ok: bool
@@ -1370,6 +1417,10 @@ class LedgerVerifyOut(BaseModel):
     signoffs: ChainVerifyOut
     reviews: ChainVerifyOut
     verified_at: str
+    #: The grade ledger's last ``row_hash`` (``""`` when empty) — to record outside the
+    #: store, so a chain replaced wholesale reads another head (G-601).
+    head_row_hash: str = ""
+    events: EventsVerifyOut
 
 
 class LedgerImportOut(BaseModel):
@@ -1436,6 +1487,7 @@ __all__ = [
     "BUILDER_CONFIG_IDENTITY_KEYS",
     "BUILDER_CONFIG_MAX_BYTES",
     "BUILDER_CONFIG_MAX_KEYS",
+    "BUILDER_CONFIG_SEAM_KEYS",
     "BUILDER_CONFIG_SECRET_MARKERS",
     "BUILD_KINDS",
     "EXECUTORS",

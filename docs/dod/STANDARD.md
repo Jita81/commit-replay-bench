@@ -84,7 +84,7 @@ Rules for the table:
 - A gap line reads `- **G-nnn** — what is missing · the smallest change that closes it · owner`,
   and `owner` is one of `ui`, `server`, `factory`, `docs`, `deploy`. (A ` · ` inside quoted
   product copy is allowed; the rule is that the line ends with its owner and carries at least
-  the two separators.)
+  both separators.)
 - **A gap id names one piece of work.** Two files may share an id — and must, when the same
   change closes criteria in both — but then the line is identical in both, word for word. The
   checker fails when one id carries two different lines — whether they are in two files or
@@ -98,12 +98,26 @@ Rules for the table:
   nothing cites. When the work closes, the criterion flips to `met` and the line is deleted —
   the generator then carries the id into `GAP-ANALYSIS.md`'s *Gap ids retired* list, so a plan
   that named it stays valid.
+- **A reworded criterion takes its twins with it.** When a criterion's words change, a clause
+  of at least six words that its old words held and its new words do not may not survive in
+  any other criterion, unless that criterion waits on the same gap — the record saying the two
+  change together — and the gap line names it. The checker reads each criterion's words at the
+  merge-base with the base branch (`docs/PREVENTION.md` P-236); a twin that paraphrases the
+  old clause still needs a reader.
+- **A provisional value says so.** A Proposed ADR that leaves a value to the operator marks it
+  **[operator]** and registers it in a `## Operator values` table, with the words a criterion
+  states it in. A criterion or gap line that states one carries `ADR-nnnn [operator]` and
+  follows the operator's choice. The checker refuses one that does not, an `[operator]` marker
+  the table does not register, and the marker once the ADR is accepted (P-237).
 - **Tags in the record's own prose.** A criterion's `criterion` cell is a specification and
   carries no claims tag. Prose outside the table — a purpose paragraph, a gap line, a wave row
   — carries a tag on every statement that quantifies something (`docs/EVIDENCE-AND-CLAIMS.md`
-  §1), and a `[measured]` one carries its n, its method and its apparatus version. A gap id and
-  a typed evidence reference never carry a tag. The claims gate does not read `docs/dod/**`
-  yet; that is G-929 (CodeRabbit on PR #47 and PR #48).
+  §1), and a `[measured]` one carries its n, its method and its apparatus version. A gap line
+  is itself a `[gap]` statement, because its form names what is missing and what closes it; a
+  `[measured]` figure inside one still carries its n, method and apparatus. A gap id and a
+  typed evidence reference never carry a tag. The claims gate (`scripts/claims_check.py`, CI's
+  `claims` job) reads every page under `docs/dod/` but the generated gap analysis, whose
+  counts `scripts/dod_check.py --check` re-derives.
 
 ## 3. Evidence references (typed, resolvable)
 
@@ -161,7 +175,8 @@ The product adds, first, **VALUE** (the product produces working software and ge
 the more data goes through it: working changes per pound on blind attempts is served with its
 interval, clean → working precision is served, each bug class's recurrence is served and the
 classes the loop removed are counted, every graded row's output is kept, and every change the
-loop makes is scored and retired by data — the operator's two instructions of 2026-09-25; its
+loop makes is scored and retired by data, and each class × size cell names the least context
+proven to pass it (the operator's thesis of 2026-09-26; ADR-0026, DL-086) — the operator's instructions of 2026-09-25 and the thesis of 2026-09-26; its
 criteria head the product's table and the checker refuses a product artefact where they do
 not), then **IDENTITY** (one sentence, the same in README, Home and the book),
 **GO-LIVE** (every checklist line is proven by the product, not ticked by belief), **CLAIMS**
@@ -188,7 +203,7 @@ are named and exercised).
   than not-built. An open VALUE criterion outranks every other open criterion in the tree —
   its category weight is set so, and a test holds it — because the value is what the rest is
   for. The first 25 rows are *the order of work*; *Open gaps by fan-out* repeats
-  them as one row per gap, with how many criteria and which levels that one change closes.
+  them as one row per gap, with how many criteria and which levels that one change closes **[measured — n = 25 rows; method: the order-of-work length the checker holds the plan and the gap analysis to, TOP in scripts/dod_check.py, read at this commit; apparatus n/a]**.
 
 ## 6. What this is for
 

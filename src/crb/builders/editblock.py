@@ -34,7 +34,8 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome, ``TestFileGuard`
               src/crb/builders/budget.py (``BudgetTracker``/``CostMeter``),
               src/crb/builders/openai_agent.py (the agentic sibling on the same client),
               src/crb/builders/__init__.py (registered as ``"editblock"``)
-Tested by:    tests/test_builders_editblock.py
+Tested by:    tests/test_builders_editblock.py, tests/test_builders_endpoint.py (the
+              configured endpoint is the one called; its provider is the one stamped)
 Touch when:   never for a new repository; a marker shape a model emits that the parser
               drops is a parser test first (the strict regex once silently dropped valid
               edits); a language other than Python that needs a compile check extends
@@ -66,7 +67,7 @@ from crb.builders.openai_client import (
     ChatReply,
     EndpointConfig,
     make_chat,
-    resolved_endpoint,
+    resolve_endpoint,
 )
 from crb.core.redact import redact_and_cap
 from crb.core.spec import RepoConfig
@@ -352,10 +353,9 @@ class EditBlockBuilder:
         keep_transcript: bool = False,
     ) -> None:
         self.model = model
-        self.endpoint = endpoint
-        # the endpoint the build will call (resolved_endpoint: explicit, else the
-        # deployment's CRB_OPENAI_* / CRB_AZURE_*), so the provider column names it
-        self.provider = provider or resolved_endpoint(endpoint).provider
+        # the configured endpoint (CRB_OPENAI_BASE_URL …) when none is passed, and the
+        # provider it IS — a rung naming another provider is refused here, not stamped
+        self.endpoint, self.provider = resolve_endpoint(endpoint, provider, seam=chat_fn)
         self._chat_fn = chat_fn
         self.max_files = max_files
         self.max_file_chars = max_file_chars
@@ -368,6 +368,7 @@ class EditBlockBuilder:
             "model": self.model,
             "provider": self.provider,
             "process": "one-shot search/replace, compile-only feedback",
+            "endpoint": self.endpoint.to_dict(),
             "max_files": self.max_files,
         }
 

@@ -66,7 +66,6 @@ rustrepo = langs.fixture_module("rustrepo")
 
 pytestmark = [
     pytest.mark.toolchain("cargo"),
-    pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH"),
 ]
 
 

@@ -133,9 +133,7 @@ def test_a_source_only_package_is_build_required(
 
 @pytest.fixture
 def scratch() -> Iterator[Path]:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     langs.require_docker_image(DEFAULT_PYTHON_IMAGE, "the pinned python fetch image")
     root = langs.CACHE_DIR / "provision" / f"py-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)

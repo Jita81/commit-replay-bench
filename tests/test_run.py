@@ -1056,3 +1056,42 @@ def test_an_environment_row_stops_the_ladder_and_reports_it(
     (row,) = outcome.rows
     assert row.error.startswith("environment: gold control red") and row.failure_kind == "harness"
     assert reported == [(feat_task.task_id, row)]
+
+
+def test_an_admit_hook_halts_the_run_before_the_attempt_it_refuses(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """F5b: the worker's spend cap asks before every attempt. A refusal halts the ladder
+    before the builder is called — no worktree, no row — and ends the run with the refusal
+    as its stop reason; the rows of the attempts already made stay. A refusal before a
+    task's first attempt counts no task."""
+    from dataclasses import replace
+
+    from crb.core.run import run
+
+    builds: list[str] = []
+    asked: list[tuple[str, int]] = []
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        builds.append(rung)
+        return _attempt()  # does nothing: the target stays red, so the task climbs
+
+    def admit(task: TaskSpec, rung_index: int) -> str:
+        asked.append((task.task_id, rung_index))
+        return "spend cap: the next attempt could pass it" if rung_index == 2 else ""
+
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), admit=admit)
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    assert builds == ["r1"] and asked == [(feat_task.task_id, 1), (feat_task.task_id, 2)]
+    assert outcome.attempts == 1 and outcome.halted == "spend cap: the next attempt could pass it"
+    summary = run(spec, pyrepo.repo, [feat_task, feat_task], build_fn)
+    assert summary.stopped_reason == "spend cap: the next attempt could pass it"
+    assert (summary.tasks, summary.rows) == (1, 1)  # the second task was never reached
+    builds.clear()
+    closed = replace(spec, admit=lambda task, rung_index: "closed")
+    summary = run(closed, pyrepo.repo, [feat_task], build_fn)
+    assert (summary.stopped_reason, summary.tasks, summary.rows, builds) == ("closed", 0, 0, [])

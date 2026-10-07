@@ -35,7 +35,6 @@ Touch when:   never for a new repository; the image repository, issuer or signin
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -53,7 +52,7 @@ IDENTITY_RE = (
     r"^https://github.com/Jita81/commit-replay-bench/\.github/workflows/release\.yml@refs/tags/v"
 )
 
-pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash not available")
+pytestmark = pytest.mark.toolchain("bash")
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:

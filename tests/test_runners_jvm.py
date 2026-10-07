@@ -69,13 +69,7 @@ except ImportError:  # pragma: no cover — layout-dependent
 
 jvmrepo = langs.fixture_module("jvmrepo")
 
-pytestmark = [
-    pytest.mark.toolchain("mvn"),
-    pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH"),
-    pytest.mark.skipif(
-        not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME"
-    ),
-]
+pytestmark = [pytest.mark.toolchain("mvn", "jdk")]
 
 
 # ---------------------------------------------------------------------------

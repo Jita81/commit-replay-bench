@@ -39,8 +39,9 @@ abstract cells, never code.
 > ([docs/DEPLOYMENT.md §3.4](docs/DEPLOYMENT.md) names the call)
 > **[measured 2026-09-27 — the required-checks list read from the repository setting
 > (`gh api …/branches/main/protection`) and compared with the workflow's check names by
-> `scripts/check_branch_protection.py`, n = 16 required checks and 2 readings (26 and 27
-> September); apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
+> `scripts/check_branch_protection.py`, n = 16 required checks in the reading of 27 September,
+> which found the same checks as the reading of 26 September; rows: data/branch-protection-2026-09-27/;
+> apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
 > workflow outside `ci.yml` is red by design: the daily `branch-protection` check fails until an
 > administrator adds the `BRANCH_PROTECTION_TOKEN` secret it reads the setting with (G-930;
 > [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
@@ -108,6 +109,13 @@ default**.
   map gates the factory ([ADR-0003](docs/adr/0003-one-routing-rule.md), amendment
   2026-09-16). It never means a change is safe to merge or deploy unattended; a human
   merges, and the measurement says nothing about security, operations or business fit.
+- **Not a standards authority.** It does not decide an organisation's standards — it proposes,
+  measures and records the ones that organisation's people sign — and it never certifies that
+  code conforms to ISO/IEC 25010, ISO/IEC 5055 or any other standard. Its checks evidence
+  parts of only some of ISO/IEC 25010's characteristics, and the product names which:
+  `crb.core.quality_model` holds the table and
+  [EVIDENCE-AND-CLAIMS §9](docs/EVIDENCE-AND-CLAIMS.md#9-the-quality-baseline--named-never-claimed)
+  carries it ([ADR-0026](docs/adr/0026-the-context-standard.md) item 11).
 
 ---
 
@@ -267,9 +275,12 @@ Every claim in this repository carries one of these tags:
 
 The rule is a gate, not a habit: CI's `claims` job (`scripts/claims_check.py`) reads the pages
 on its allowlist, finds the sentences that quantify something, and fails when one carries no
-tag — or when a `[measured]` one carries no `n`, no method and no apparatus version. The
-script's own docstring says what the heuristic deliberately does not catch, and which pages
-are not yet covered.
+tag — or when a `[measured]` one carries no `n`, no method and no apparatus version. On this
+page a `[measured]` tag must also name the rows it rests on (`rows: data/<campaign>/`), kept
+in the repository with a checksum manifest that verifies, and `tests/test_measured_claims.py`
+re-derives every number such a tag covers from those rows, each held to the figure it is
+meant to be. The script's own docstring says
+what the heuristic deliberately does not catch, and which pages are not yet covered.
 
 **A number without its method is a slogan.** Every figure the product shows carries its
 `n`, its confidence interval and its apparatus version; numbers from different apparatus
@@ -278,14 +289,30 @@ for false-Q1, the apparatus stamp, the legacy-belt caveat on the census ledger, 
 permitted claim shapes at each maturity — is in
 [docs/EVIDENCE-AND-CLAIMS.md](docs/EVIDENCE-AND-CLAIMS.md).
 
-## What has been measured (2026-09-15) — and what it licenses
+## What has been measured — and what it licenses
 
-Everything below is **[measured — each bullet names its corpus, its mode, its builder and
-its budget, and every row behind it is in the ledger and re-derivable with `crb`; apparatus
-2.2 unless the bullet names another, and the SQLAlchemy census rows (apparatus 1.0-census)
-are never pooled with rows from apparatus 2.2]**, on the **host executor posture** (see the evidence caveat
-in the [Changelog](CHANGELOG.md)); nothing here is a per-repository or per-model capability
-claim.
+**Rows you can re-derive from this repository.** The census that seeded the product is vendored
+under [`data/census-2026-07-08/`](data/census-2026-07-08/README.md) with a checksum manifest.
+Under apparatus 1.0-census, the census builder (Claude Code, Sonnet) reproduced 49 of 55
+four-belt sighted attempts in the `bug.fix` XS cell (point 0.891, Wilson 95% interval 0.78 to
+0.95) of a retrospective commit-replay corpus, graded by each repository's own held-out tests,
+and no row of the 1,071 is credited clean while a belt it recorded failed (false-Q1 = 0)
+**[measured — n = 55 attempts in the cell and 1,071 rows in all; method: `grades.jsonl`
+re-imported through the product's census importer, the cell's rows selected by class, size,
+mode and belt set and read by the product's own cell statistics, and every row's verdict
+checked against its recorded belts; `tests/test_measured_claims.py` re-derives every number
+here from the rows; rows: data/census-2026-07-08/; apparatus 1.0-census, never pooled with
+rows of apparatus 2.x]**. It says nothing about blind work, about another cell, or about a
+repository you have not measured.
+
+**Measured once, on rows this repository does not carry.** Everything below is
+**[hypothesis — each bullet was measured once, on the host executor posture, in the
+operator's own ledger (apparatus 2.2 unless the bullet names another; the SQLAlchemy census
+rows are apparatus 1.0-census and never pooled with 2.2), and names its corpus, its mode, its
+builder and its budget; its rows are not vendored here, so a reader cannot re-derive it from
+this repository. What would confirm it: the sealed-posture campaign, whose rows will be
+vendored under `data/` with a manifest (G-660)]** (see the evidence caveat in the
+[Changelog](CHANGELOG.md)); nothing here is a per-repository or per-model capability claim.
 
 - **The instrument holds on real code.** n = 7 repositories: four public libraries (cobra,
   click, koa, SQLAlchemy census) and three NHS repositories (nhsuk-frontend,

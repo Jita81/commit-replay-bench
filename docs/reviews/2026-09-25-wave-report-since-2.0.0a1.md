@@ -6,7 +6,7 @@ from the `Unreleased` section of [CHANGELOG.md](../../CHANGELOG.md). The changel
 by one paragraph per pull request (CONTRIBUTING, "Documentation"); a wave's narrative — what
 was built, why, and what it found — belongs in a dated report like this one. The claims
 below carry the tags they carried in the changelog; this page is not on the claims gate's
-allowlist, so read each tag as its author wrote it.*
+allowlist, so read each tag as its author wrote it.* **[hypothesis — recorded at the time; not re-checked since]**
 
 ## 2026-09-23 — what the product writes on somebody else's ticket is counted, absolute and bounded
 
@@ -143,7 +143,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `(tracker, key, revision)` is the idempotency key and it lives on the factory's hash chain,
   so a restart never double-comments, an edited ticket comes back as an **evolution** that
   supersedes the old item, and a registration arriving while a factory run holds the backlog
-  hash is queued rather than refused with a 409 the listener has nobody to hand.
+  hash is queued rather than refused with a 409 the listener has nobody to hand **[hypothesis — recorded at the time; not re-checked since]**.
 - **Off by default, twice.** An admin configures the connection (`CRB_INTAKE__*` on the API and
   the worker) and stores the credential in the product's own secret store (`tracker_token`,
   read back as a fingerprint and `set_at`, never a value); an operator then switches the
@@ -156,7 +156,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `PUT /factory/{repo}/intake` (operator), and `POST /factory/{repo}/backlog/evolutions`; an
   `intake` line on `/health` and `crb doctor` that contacts no tracker; eight `intake.*` events
   on the repository's chain and six published stop reasons with a way forward each; a
-  SECURITY §2 egress row and OPERATOR §11.
+  SECURITY §2 egress row and OPERATOR §11 **[hypothesis — recorded at the time; not re-checked since]**.
 - **Proof.** `tests/test_intake_*.py` and `tests/test_server_routes_intake.py` against a fake
   `TrackerClient`, and the tier-1 walkthrough spec `ui/e2e/walkthrough/12-intake.spec.ts`
   driving a file-backed fake tracker behind `CRB_ENABLE_FAKE_TRACKER=1`. **No real Azure
@@ -195,8 +195,8 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   one must be fixed like any other gate but does not by itself stop a merge; only an
   administrator of the repository can add them (README's "Status" records the list in force,
   docs/DEPLOYMENT.md §3.4 names the branch-protection call, and the gap is G-930).
-  `testTimeout`/`hookTimeout` are 20 s so a shared runner can meet them [measured — the
-  full vitest suite run twice on an 8-core laptop while the walkthrough held the other cores:
+  `testTimeout`/`hookTimeout` are 20 s so a shared runner can meet them [measured — n = 2
+  runs of the full vitest suite, on an 8-core laptop while the walkthrough held the other cores:
   18 then 24 tests failed, every one "Test timed out in 5000ms", and all passed when the same
   files ran alone; method: `npx vitest run` twice, then the failing files alone; apparatus 2.2].
 - **Every route is now keyboard- and phone-checked**, not `/results` and `/factory` alone: the
@@ -237,16 +237,16 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   has **no ruleset at all**, so the sentence now says that as a `[gap]`, with the reading
   that found it, and keeps the workflow's `--require-on origin/main` refusal as the floor.
   The README's opening no longer counts the belts (the count has moved twice; belt set v5
-  and the definitions in EVIDENCE-AND-CLAIMS §2 carry it instead).
+  and the definitions in EVIDENCE-AND-CLAIMS §2 carry it instead) **[hypothesis — recorded at the time; not re-checked since]**.
 - **Definition of done:** `product.claims.21` keeps its `partial` — the gate is real but
   covers two pages — and its gap is now **G-605**: the pages still ungated, one page per
-  change. G-603 is closed.
+  change. G-603 is closed **[hypothesis — recorded at the time; not re-checked since]**.
 - **Merging the four streams closed two more criteria between them.**
   `intake-from-a-ticket.recovery.24` (no oracle / weak oracle) is **met**: stream T built the
   test-author rung and stream I made the ticket ask for the acceptance test, and each was the
   other's remaining half. `manufacture-and-deliver.automation.15` is **met** for the same
   reason — the backlog no longer arrives by hand. G-901, G-902 and G-904 are closed, and
-  stream I's time-cost gap is renumbered **G-928** (stream E landed first and owns G-926).
+  stream I's time-cost gap is renumbered **G-928** (stream E landed first and owns G-926) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## 2026-09-21 — shippable: every element explains itself; users can recover; the loop closes on a merge
 
@@ -273,7 +273,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `title` (a governance record is never hover-only); Measure's "Every knob" door is a hinted
   note line; the map's column and row headers, route tag and every cell line carry
   `col.map.*` / `map.cell.*` with the numbers out of the tab order. One test per screen
-  asserts the sample hint opens on hover with the registry copy and `unhinted()` is empty.
+  asserts the sample hint opens on hover with the registry copy and `unhinted()` is empty **[hypothesis — recorded at the time; not re-checked since]**.
 - **The factory, deployment and instrument screens (H2):** `/factory`, `/posture`, `/repos`,
   `/repos/:name` (all four tabs), `/runs` (+ Start a run), `/runs/:id` (+ the live log and
   the evidence drawer's Pack, Patch and Review tabs), `/tasks/:repo/:taskId`, `/capability`
@@ -281,7 +281,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   and admin) and `/help` — 436 elements. Native `title=` attributes on those screens are
   retired where a hint stands (LiveLog 4→3, Factory 2→1, RepoDetail 2→1, EvidenceDrawer 7→6,
   Oracle / RepoConfigTab / RunNewDialog / Sign-off → 0). Opening an evidence pack moves focus
-  into the drawer and returns it to the opener on close (WCAG 2.4.3), so one Escape closes it.
+  into the drawer and returns it to the opener on close (WCAG 2.4.3), so one Escape closes it **[hypothesis — recorded at the time; not re-checked since]**.
 - **The ratchet (`ui/src/help/hints-ratchet.test.tsx`)** reads every `<Route path>` in
   `App.tsx` and requires a `SCREENS` entry — rendered per role under its fixtures, every
   element resolved to a registry id, at least `MIN_HINTS[route]` hinted — for all 21 routes
@@ -290,7 +290,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `title=` count only goes down. The tier-1 walkthrough's `11-screens` opens a sample of
   five hints on every route × persona × width (hover at 1280, touch at 375), asserts the
   bubble is a full sentence with no link, runs axe WCAG 2.1 AA with the bubble open and
-  closes it with Escape; a keyboard pass on `/results` proves focus opens and Tab closes.
+  closes it with Escape; a keyboard pass on `/results` proves focus opens and Tab closes **[hypothesis — recorded at the time; not re-checked since]**.
 - **Users can recover (F23, merged from main via #42):** password set / change, deactivate
   with a last-admin guard, sessions revoked on change, and the break-glass `crb users` CLI;
   **the operating envelope (F36–F41, F44, F47, F25, #43):** the `/health` `migrations` probe,
@@ -324,9 +324,9 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `tests/test_factory_outcomes.py` (the FakeGitHub pull-request shapes — open / merged /
   closed, GHES `merged: null` — outcome idempotency at the ledger, the sync route: 409 until
   linked, 502 on a dead token, per-PR errors retried; the evolutions chain end to end;
-  delivery counts per cell). Docs: API.md rows, GITHUB-APP.md §5, ADR-0014 clauses 6–7.
+  delivery counts per cell). Docs: API.md rows, GITHUB-APP.md §5, ADR-0014 clauses 6–7 **[hypothesis — recorded at the time; not re-checked since]**.
 - Gates on the merged branch: ruff, ruff format, mypy, `code_map --check`, `tsc -b`, vitest,
-  the full pytest, and the tier-1 walkthrough (55 specs incl. `10-factory` and `11-screens`).
+  the full pytest, and the tier-1 walkthrough (55 specs incl. `10-factory` and `11-screens`) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## 2026-09-21 — reference sandbox images, built and proven by CI (F42 part 1)
 
@@ -367,7 +367,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   `docker`. The worker now reads the deployment keys (short forms still honoured when they
   are absent), and a repository's own `sandbox_image` wins over the deployment default
   (`docker_settings_for`), as DEPLOYMENT.md §2.1 always said — the default silently
-  overrode it, which is wrong the moment two toolchains share a worker.
+  overrode it, which is wrong the moment two toolchains share a worker **[hypothesis — recorded at the time; not re-checked since]**.
 - Docs: DEPLOYMENT.md §2.1 / §3.1 / §3.4, deploy/README.md §3 and §8, OPERATOR.md §2.1,
   SECURITY.md §3.1 and §5 (the images are measured; verdicts under the docker posture are
   still pending — the measurement gap stays open), ARCHITECTURE.md §9.3,
@@ -396,7 +396,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   never cite a run of its own commit) with the local count on images built from the tree;
   `sandbox-images` runs on every pull request, is not on `main`'s required-checks list, and
   DEPLOYMENT §3.4 gives the branch-protection call that would put it there (a repository
-  setting, for the administrator).
+  setting, for the administrator) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## 2026-09-21 — the two-person rule is enforced at write; every sign-off says who signed (F7b, F34)
 
@@ -439,7 +439,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   every-person-is-the-verifier, non-person actors, the relaxed-policy floor, v2 records
   verifying), `tests/test_server_routes_signoffs.py::TestTwoPersonRule` (409 at write, the
   preview, a second approver signing, `verifier_kind` `local` / `oidc` served and
-  hash-covered).
+  hash-covered) **[hypothesis — recorded at the time; not re-checked since]**.
 - **ADR-0016** — the two-person rule is a policy clause, not an apparatus move:
   `APPARATUS_VERSION` stays `2.2` (bumping it would stale every current sign-off for a
   change that touched no grade — ADR-0015 §4); the seam an audit reads is `policy_version`
@@ -448,7 +448,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   in the Decisions inbox as "signed before the two-person rule". The rule is stated in one
   sentence, identically, in ONBOARDING-A-REPO, OPERATOR §5, API.md, SECURITY.md §3.4,
   EVIDENCE-AND-CLAIMS §6a and the §9 F7b row; SECURITY.md's two `[measured]` claims carry
-  n, method and apparatus; DL-047 sits after DL-046 (append-only order).
+  n, method and apparatus; DL-047 sits after DL-046 (append-only order) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## 2026-09-21 — the operating envelope: what the platform team is told is true (F36–F41, F44, F47, F25)
 
@@ -517,7 +517,8 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   of `spf13/cobra` at `adbc881`), items authored from open upstream issues #2154 and #1918 with
   operator-authored oracles proven RED at the base, built by `claude_code / claude-sonnet-5`
   under the five belts, gated on the signed `bug.fix × S` cell (route *deliver*, `routing.v1`),
-  reviewed independently, $0.69 in total, 11 minutes **[measured — run `e9acd89c…`, apparatus
+  reviewed independently, $0.69 in total, 11 minutes **[measured — n = 2 pull requests from
+  run `e9acd89c…`; method: that run's evidence chain and its builder-reported cost; apparatus
   2.2, local executor: a development reading]**. Record:
   docs/reviews/2026-09-19-b1b-first-factory-pull-request.md; the backlog and the two Go tests
   are in docs/reviews/2026-09-19-b1b/. Decision DL-045.
@@ -525,7 +526,7 @@ here, each with the test that would have caught it (ADR-0017 amended, DL-052).
   branch (`--force-with-lease` with no lease to hold — one rework build wasted); the route gate
   reads the map after the item's own row has landed (`n=27` in the PR body where the freeze saw
   26); the UI's *Run the factory* posts no builder (fix on the journeys branch); a deployment
-  under `/private/tmp` loses files to the OS after ~3 days (stack relocated to `~/crb-stack`).
+  under `/private/tmp` loses files to the OS after ~3 days (stack relocated to `~/crb-stack`) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## 2026-09-19 — what the first factory run taught the loop
 
@@ -592,7 +593,7 @@ two product defects. Both are fixed here, with the tests that would have caught 
 Six streams on one foundation. Every screen now says what it is for, what to do next
 for the role reading it, what its numbers mean and where the definition is; every
 in-flight state names the stage, the count and the money; and the run, the queue and
-the worker report the same facts to the person and to the platform team's dashboards.
+the worker report the same facts to the person and to the platform team's dashboards **[hypothesis — recorded at the time; not re-checked since]**.
 
 **On-ramp** (`/home`, `/connect`, `/connect/:name`, `/connect/:name/measure`, `/login`)
 
@@ -602,7 +603,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   sign-off, so 8 of 8 is reachable. Task 8 reads *Backlog frozen — run the factory* with a
   frozen backlog and no run, and *In progress — item k of n* only while a factory run is
   queued or running. A non-admin sees task 7 as *Not known yet* with who can add users.
-  The degraded-sandbox banner opens `/posture`, not raw JSON.
+  The degraded-sandbox banner opens `/posture`, not raw JSON **[hypothesis — recorded at the time; not re-checked since]**.
 - **Connection list:** the journey eyebrow; *gold-clean* is a term with its definition one
   click away; a measured repository's button reads *Baseline*.
 - **Connection walk:** a queued run shows *Queued — n runs ahead of it*; a running stage
@@ -613,14 +614,14 @@ the worker report the same facts to the person and to the platform team's dashbo
   confirm that says attempts already made are still charged. A failed measurement with no
   rows reads *Failed* with *Retry*; a cancelled one says how many rows landed. A viewer or
   approver reads *An operator runs this* instead of the bare word *operator*. Oracle
-  strength and negative controls carry their definitions.
+  strength and negative controls carry their definitions **[hypothesis — recorded at the time; not re-checked since]**.
 - **Measure:** the kicker says *task 5 of 8 · this step spends money*; the button reads
   *Start the run — estimated $8.16 to $12.24* (no promised cap) and the Budget cap row
   says there is no spend cap yet, what each attempt is capped on, and that cancelling
   still charges attempts made. The estimate links *Measure: the money step* in the bundled
   guide. While a replay is queued or running the red button is gone and a banner says
   *A measurement is already running for repo — started 14:05; 3 of 10 attempts made;
-  $1.02 spent so far*. The no-gold message points at stage 3 and links Configuration.
+  $1.02 spent so far*. The no-gold message points at stage 3 and links Configuration **[hypothesis — recorded at the time; not re-checked since]**.
 - **Login:** *Measures what an AI builder can be trusted to change in your repository,
   graded by your own tests.*
 - **Baseline** (`/results`): reached from the nav with no repository chosen, the most
@@ -631,7 +632,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   apparatus line from the report and the policy in force; the Negative controls tile's
   apparatus line is the report's own stamp. The four route names are terms. A viewer
   sees *Read* + *approver acts* instead of *Attest*; *sign-off due* is plain text for
-  anyone who cannot sign.
+  anyone who cannot sign **[hypothesis — recorded at the time; not re-checked since]**.
 - **Decisions** (`/decisions`): kicker *Under apparatus 2.2* with apparatus as a term;
   each row's reason code is a term with its meaning beside it; *Revoke or re-sign* only
   for an approver.
@@ -639,7 +640,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   two-sentence purpose; the seven refusal clauses behind *Why a sign-off can be refused*
   with each term defined inline; a viewer or operator keeps the gate, the evidence and
   the attestations but never the approver form, and is told so. Not found goes *Back to
-  Home*.
+  Home* **[hypothesis — recorded at the time; not re-checked since]**.
 
 **Factory** (`/factory`, `/posture`)
 
@@ -654,7 +655,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   there is no spend cap yet and that cancelling still charges built items; the button
   names the estimate (*Run the factory — estimated $X to $Y*), never a cap the request
   does not carry. Reached from the nav with no repository chosen, the most recently
-  updated one is picked and written into the URL, as the Baseline does.
+  updated one is picked and written into the URL, as the Baseline does **[hypothesis — recorded at the time; not re-checked since]**.
 - **`GET /factory/{repo}/backlog`** carries `delivery: {can_deliver, reason_code, reason,
   full_name, default_branch, installation_id, account_login}` — a server pre-flight
   answered by the same rule as the worker's delivery credentials (host check included,
@@ -669,7 +670,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   item has an Evidence button and a *run id* link. While a run is active the items poll
   every 5 s under a banner (*item 2 of 5 … $0.31 so far · Open the run · Cancel*);
   afterwards one line summarises the last run. At 375 px each item is one line with the
-  six readiness cards behind *All 6 steps*, and the page no longer scrolls sideways.
+  six readiness cards behind *All 6 steps*, and the page no longer scrolls sideways **[hypothesis — recorded at the time; not re-checked since]**.
 - **Deployment** (`/posture`): every row that is not the production posture ends with
   what to do, with a Settings link for admins and a guide link for everyone; a Delivery
   group (Writes, Permissions with *k of n installations can deliver*, Route gate under the
@@ -687,7 +688,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   the run to operators only.
 - **Oracle:** the purpose says what a green is worth; the two *auto-ship* strings are
   gone; a legend explains Band and Gate; the controls section explains negative controls,
-  VIOLATION and controls escape; Run oracle / Run controls are operator-only.
+  VIOLATION and controls escape; Run oracle / Run controls are operator-only **[hypothesis — recorded at the time; not re-checked since]**.
 - **Learn:** card eyebrows are *Refusals*, *Weak oracles*, *Stale evidence*; each report
   opens with what a person does with it; codes are plain words.
 - **Ledger:** the abstract export's meaning is visible text (*Cells only: no code, no
@@ -712,7 +713,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   Evidence drawer's Pack tab opens with one headline sentence (*Not clean: belt 3 (the
   repository's own suite) — 2 new failures: …*; *Clean: all five belts held and the
   pack's hash verifies. This says nothing about whether the change is mergeable*).
-  Oracle, controls and label runs render `counts.detail` as tiles.
+  Oracle, controls and label runs render `counts.detail` as tiles **[hypothesis — recorded at the time; not re-checked since]**.
 
 **Telemetry** (`/health`, `/runs/:id`, `/metrics`, events)
 
@@ -726,13 +727,13 @@ the worker report the same facts to the person and to the platform team's dashbo
   worker, last check-in 4 s ago · 2 runs queued*. `data` carries `workers[]`, `queued`,
   `stale`, `stale_after_s`; alive = a heartbeat within 3 × that worker's `heartbeat_s`.
   Deployment (`/posture`) shows the worker probe's sentence as a row, and says when the
-  health check itself could not be read.
+  health check itself could not be read **[hypothesis — recorded at the time; not re-checked since]**.
 - **`RunOut`** gains `queue_position` (1-based FIFO; null unless queued),
   `queue_kinds_ahead` (oldest first) and `factory {deliver, deliver_override_by,
   deliver_override_by_name, backlog_hash}` (null for every other kind). An oracle,
   controls or label run serves its own counters verbatim under `counts.detail`, so it no
   longer renders as *Clean 0.0 %* with a Wilson interval over the wrong n; a label run's
-  spend is in `detail.usage.cost_usd`. Shapes per kind are in API.md.
+  spend is in `detail.usage.cost_usd`. Shapes per kind are in API.md **[hypothesis — recorded at the time; not re-checked since]**.
 - **Events:** `run.cancel_requested` is written for queued and running runs and names the
   operator who asked (not the run's creator), with `status_at_request`;
   `signoff.revoked` carries `row_hash`, `revokes_row_hash` and the note, so an auditor
@@ -749,7 +750,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   worker's event sink), `crb_github_tokens_minted_total{installation}` (a real mint only,
   by digest — never the token), `crb_queue_depth`. DEPLOYMENT.md §9 Observability: the
   metrics table by process (ratchet-tested against `metrics.py`), four alert rules,
-  scrape targets, logs, events.
+  scrape targets, logs, events **[hypothesis — recorded at the time; not re-checked since]**.
 - **Logging:** the text formatter now redacts tracebacks; a broken %-format record no
   longer reaches `Handler.handleError` with raw args.
 - **Fixed:** `tests/test_store_migrate.py::test_module_is_runnable_as_main` ran the venv's
@@ -767,7 +768,7 @@ the worker report the same facts to the person and to the platform team's dashbo
   mean · terms · read more · glossary link. `Term` is a real button
   (`aria-expanded`/`aria-controls`, Escape closes, no hover tooltip); `DocLink` opens a
   bundled guide at its heading. `PageHeader` defaults its eyebrow to the journey position
-  (`journeyEyebrow`).
+  (`journeyEyebrow`) **[hypothesis — recorded at the time; not re-checked since]**.
 - **`/help`** (glossary, guide index, ADR titles) and **`/help/docs/:name`** (a bundled
   guide, scrolls to the hash; unknown name → empty state). Help as a compact ? icon in
   the top bar (the display name hides below `sm`, so the cluster is one row at 375 px and
@@ -775,7 +776,7 @@ the worker report the same facts to the person and to the platform team's dashbo
 - **Copy:** the human route names all three causes; deliver, the strong band and the
   oracle gate say *a branch and pull request under review, never a merge* — the
   *Auto-ship* label is gone (API enum values unchanged). `ACTION_HELP` / `actionHelp`:
-  one plain sentence per event action.
+  one plain sentence per event action **[hypothesis — recorded at the time; not re-checked since]**.
 
 **On the merge** (what fell between the streams): `/runs?new=<kind>` opens the start
 dialog only for a role that can start a run — a viewer or approver reads *An operator
@@ -791,7 +792,7 @@ a person* at readiness; the review step says the reviewer asked for a stronger t
 item's sentence gives the finding and the way forward; `pr_url` follows a rework's
 `delivery.updated`; the status list reads *Test needs strengthening*; `delivery.updated`,
 `delivery.comment_failed` and `rework.refused` join the event vocabulary table and
-`ACTION_HELP` — the ratchet (`test_event_vocabulary`) caught all three.
+`ACTION_HELP` — the ratchet (`test_event_vocabulary`) caught all three **[hypothesis — recorded at the time; not re-checked since]**.
 
 **On review** (three adversarial verifiers, 21 surviving findings): the worker probe never
 turns `/health` into a 503 (above); the worker's `/metrics` binds loopback unless
@@ -816,7 +817,7 @@ Deployment shows the worker probe and says when the health check could not be re
 11-screens spec annotates instead of `console.log` and asserts a two-row top bar at
 375 px; a filled button darkens on hover instead of fading (the axe sweep caught a filled
 *Baseline* at 3.97:1 under the pointer); ten *Works with* blocks are back within three to
-eight entries.
+eight entries **[hypothesis — recorded at the time; not re-checked since]**.
 
 **Tests.** UI: 49 files / 340 tests — `Help`, `Layout`, `PageHeader`, `govuk`, `StatTile`,
 `help/{glossary,docs,help,markdown}`, `verdict`, `builder`, `connection`, `HomePage`,
@@ -832,7 +833,7 @@ to a real heading. Python: `test_deploy_health_probes` (worker probe),
 `test_server_routes_factory` (delivery pre-flight, refusal), `test_server_routes_signoffs`
 (revoked payload), `test_server_system`, `test_store_migrate`. Walkthrough: `10-factory`
 (freeze → run → chain → evidence → Runs → 375 px) and `11-screens` (every route × persona ×
-width, the About block on every authenticated route).
+width, the About block on every authenticated route) **[hypothesis — recorded at the time; not re-checked since]**.
 
 ## 2026-09-18 — link a repository you already measured to the GitHub App
 
@@ -908,7 +909,7 @@ numbers were never trusted.
 - **Home** (`/home`) — "Get started": the seven tasks (connect GitHub, choose a repository,
   confirm its shape, prove the instrument £0, measure — spends money, read the map, invite
   an approver) with statuses derived from the API, "completed n of 7", the degraded sandbox
-  as an *Important* banner, the cost sentence, "Why two people".
+  as an *Important* banner, the cost sentence, "Why two people" **[hypothesis — recorded at the time; not re-checked since]**.
 - **Measure** (`/connect/:name/measure`) — attempts (10/30/60 with what each buys),
   retention with the policy statement, "Before you start" (the estimate from the
   repository's own measured cost per attempt, the cap, retention, posture) and one red
@@ -949,7 +950,7 @@ numbers were never trusted.
   derives posture from the probe's explicit `executor`; the Decisions count is never served
   as ready with a non-404 failure behind it; Home and Deployment do not call an unanswered
   GitHub App status "not configured"; every map cell carries its apparatus; the unversioned
-  schema walk is revision-ordered across columns, indexes and tables.
+  schema walk is revision-ordered across columns, indexes and tables **[hypothesis — recorded at the time; not re-checked since]**.
 - **Four external documents assessed against the product** (docs/reviews/2026-09-17-external-documents-assessment.md,
   an independent Fable pass): the Quality Floor essay (the product honours every mechanism
   it names and is stricter on most; the essay copy on disk still carries the pre-correction
@@ -960,7 +961,7 @@ numbers were never trusted.
   audit sample per signed cell (P1), item route before the run, PR body naming the signed
   facts and the licensing sign-off, human PR review comments as evidence, the repository's
   own security scanner as a review probe, review finding → follow-up item, a
-  recurrence-after-prevention alarm, verifier account kind on attestations.
+  recurrence-after-prevention alarm, verifier account kind on attestations **[hypothesis — recorded at the time; not re-checked since]**.
 - **Persona walkthrough on the live stack** (docs/reviews/2026-09-17-persona-walkthrough.md).
   Scope, stated separately: the journey screens were driven in a real browser as a viewer,
   an operator, an approver and an admin, each along their own path (not every screen by
@@ -988,13 +989,15 @@ numbers were never trusted.
   walkthrough's axe sweep. Figures from the stack, tagged: the operator's run
   `6fb61af9…` (cobra, replay, sighted, `claude_code / claude-sonnet-5`, apparatus 2.2) made
   10 attempts, 9 clean, $2.57 builder-reported, against the Measure page's ±20 % planning
-  band around the repository's measured mean [measured — the run's ledger rows]; during the
+  band around the repository's measured mean [hypothesis, recorded as measured — n = 10 attempts; method: the run's
+  ledger rows on the operator's stack, not in this repository; apparatus 2.2]; during the
   walk cobra's `bug.fix × S` cell moved from *calibrate* (23 of 24 clean, 95.8 %, 95 %
   Wilson [79.8 %, 99.3 %] — lower below the 80 % bar) to *deliver* (24 of 25 clean,
-  96.0 %, 95 % Wilson [80.5 %, 99.3 %]) under `routing.v1` [measured — `/capability-map`,
-  current apparatus 2.2, sighted, `claude_code / claude-sonnet-5`]; ledger after the walk 602
-  rows, chain intact, false-Q1 0, 0 clean rows without a pack [measured — `/ledger/verify`,
-  apparatus 2.2; exact counts, no interval].
+  96.0 %, 95 % Wilson [80.5 %, 99.3 %]) under `routing.v1` [hypothesis, recorded as measured — n = 25 attempts; method:
+  the stack's capability map read during the walk, sighted, one builder and model, not in this
+  repository; apparatus 2.2]; ledger after the walk 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack
+  [hypothesis, recorded as measured — n = 602 rows; method: the stack's ledger verification read
+  after the walk, not in this repository; exact counts, no interval; apparatus 2.2].
 
 ## 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
 
@@ -1005,7 +1008,7 @@ picker — no personal access token, nothing long-lived stored.
 - **`crb.server.github_app`** — the app client: an RS256 app JWT (nine minutes), the app's
   installations, an installation's repositories, and installation tokens minted per use,
   cached in memory until five minutes before their one-hour expiry, never persisted. GHES via
-  `CRB_GITHUB__API_URL` / `__WEB_URL`.
+  `CRB_GITHUB__API_URL` / `__WEB_URL` **[hypothesis — recorded at the time; not re-checked since]**.
 - **Routes** — `GET /github/app` (configured? install link? installations on record — never
   404s), `GET /github/setup` (the app's Setup URL: verifies the installation with the app's
   own credential, records it, lands on Connect), `POST /github/installations/sync`,

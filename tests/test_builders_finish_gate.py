@@ -28,7 +28,7 @@ Touch when:   never for a new repository; the adapter's order of steps (build â†
 
 from __future__ import annotations
 
-import shutil
+import sys
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -56,7 +56,9 @@ from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.posture import witnessed_context_for
 
-RUFF = shutil.which("ruff") or str(Path(__file__).resolve().parents[1] / ".venv" / "bin" / "ruff")
+#: ruff is a locked dev dependency (uv.lock): the one installed beside the interpreter that
+#: runs the suite, never a skip when it is missing (P-747).
+RUFF = str(Path(sys.executable).parent / "ruff")
 
 #: The gold, written the way a model might: correct, and not how ``ruff format`` writes it.
 UGLY_SUBTRACT = "\n\ndef subtract(a,b):\n    return a-b\n"
@@ -192,10 +194,6 @@ def _run(
     return list(ledger.rows()), events
 
 
-needs_ruff = pytest.mark.skipif(not Path(RUFF).exists(), reason="ruff not available")
-
-
-@needs_ruff
 def test_without_the_format_step_a_correct_unformatted_patch_fails_belt_5(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -204,7 +202,6 @@ def test_without_the_format_step_a_correct_unformatted_patch_fails_belt_5(
     assert not {"checks", "format_step", "finish_gate"} & set(row.labels)
 
 
-@needs_ruff
 def test_the_format_step_makes_the_graded_patch_the_formatted_one(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -217,7 +214,6 @@ def test_the_format_step_makes_the_graded_patch_the_formatted_one(
     assert len(ScriptedBuilder.briefs) == 1 and not ScriptedBuilder.briefs[0].finish_checks
 
 
-@needs_ruff
 def test_the_format_step_never_touches_a_test_file_the_builder_wrote(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -229,7 +225,6 @@ def test_the_format_step_never_touches_a_test_file_the_builder_wrote(
     assert fmt["changed"] == [pr.SRC]
 
 
-@needs_ruff
 def test_the_finish_gate_verifies_repairs_once_and_records_before_and_after(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -252,7 +247,6 @@ def test_the_finish_gate_verifies_repairs_once_and_records_before_and_after(
     assert any(a == "builder.finish_gate" and p["passed"] for a, p in events)
 
 
-@needs_ruff
 def test_with_no_repair_turn_the_gate_records_the_failure_and_the_grade_still_judges(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -309,7 +303,6 @@ def test_every_attempt_of_a_checks_on_run_carries_the_checks_stamp(
     assert row.checks_arm == resolved.arm
 
 
-@needs_ruff
 def test_a_repair_that_ends_in_a_model_error_keeps_the_first_attempts_patch(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:

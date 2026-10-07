@@ -27,14 +27,14 @@ Works with:   deploy/Dockerfile (the HEALTHCHECK), deploy/helm/crb/templates/api
               src/crb/server/routes/system.py (the endpoints), tests/test_server_system.py (the
               endpoints' own suite), docs/DEPLOYMENT.md (the image and its roles, §2)
 Tested by:    tests/test_deploy_health_probes.py
-Touch when:   a probe endpoint or a pod role is added (the template and this suite together);
-              never point liveness at the deep probe.
+Touch when:   never for a new repository (the chart's probes are the deployment's, not a
+              repository's); a probe endpoint or a pod role is added (the template and this
+              suite together); never point liveness at the deep probe.
 """
 
 from __future__ import annotations
 
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -108,7 +108,7 @@ def test_worker_exposes_its_own_metrics_port_in_every_shipped_shape() -> None:
     assert re.search(r"serviceMonitor:\n(?:.*\n)*?  worker:\n    enabled: false", values)
 
 
-@pytest.mark.skipif(shutil.which("helm") is None, reason="helm not on PATH")
+@pytest.mark.toolchain("helm")
 def test_helm_renders_the_probes_and_lints_strict() -> None:
     lint = subprocess.run(
         ["helm", "lint", "--strict", str(CHART)],

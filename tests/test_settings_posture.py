@@ -53,7 +53,7 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from crb.server import settings as settings_mod
-from crb.server import worker_main
+from crb.server import unsealed_override, worker_main
 from crb.server.routes.system import collect_health
 from crb.server.settings import Settings
 from crb.store import init_db, make_engine, make_session_factory
@@ -62,6 +62,13 @@ KEY = SecretStr("k" * 40)
 #: The override's name, spelled out: the documents and the deployment templates use it.
 ALLOW_UNSEALED_PROD_ENV = "CRB_ALLOW_UNSEALED_PROD"
 ROOT = Path(__file__).resolve().parent.parent
+#: The named acknowledgement the override needs in production (ADR-0023 amendment, G-663).
+REASON = "evaluation on a host without docker, not evidence"
+ACK: dict[str, Any] = {
+    "allow_unsealed_prod": True,
+    "allow_unsealed_prod_by": "root",
+    "allow_unsealed_prod_reason": REASON,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -133,7 +140,7 @@ class TestSettings:
             s = prod(
                 sandbox={"executor": "local"},
                 builder={"executor": "host"},
-                allow_unsealed_prod=True,
+                **ACK,
             )
         assert s.posture() == {
             "env": "prod",
@@ -156,10 +163,14 @@ class TestSettings:
         with pytest.raises(ValidationError, match=ALLOW_UNSEALED_PROD_ENV):
             Settings()
         monkeypatch.setenv(ALLOW_UNSEALED_PROD_ENV, "1")
+        with pytest.raises(ValidationError, match=f"{ALLOW_UNSEALED_PROD_ENV}_BY"):
+            Settings()
+        monkeypatch.setenv(f"{ALLOW_UNSEALED_PROD_ENV}_BY", "root")
+        monkeypatch.setenv(f"{ALLOW_UNSEALED_PROD_ENV}_REASON", REASON)
         assert Settings().posture()["unsealed_prod_override"] is True
 
     def test_an_override_that_is_not_needed_is_not_reported_as_in_force(self) -> None:
-        assert prod(allow_unsealed_prod=True).posture()["unsealed_prod_override"] is False
+        assert prod(**ACK).posture()["unsealed_prod_override"] is False
 
 
 class TestHealth:
@@ -167,7 +178,7 @@ class TestHealth:
         engine = make_engine(f"sqlite:///{tmp_path / 'crb.db'}")
         init_db(engine)
         factory = make_session_factory(engine)
-        s = prod(sandbox={"executor": "local"}, allow_unsealed_prod=True)
+        s = prod(sandbox={"executor": "local"}, **ACK)
         body = collect_health(factory, s, role="api")
         assert body["posture"] == s.posture()
         assert body["posture"]["unsealed_prod_override"] is True
@@ -206,6 +217,8 @@ class TestWorker:
                 "CRB_SANDBOX__EXECUTOR": "local",
                 "CRB_BUILDER__EXECUTOR": "host",
                 ALLOW_UNSEALED_PROD_ENV: "1",
+                f"{ALLOW_UNSEALED_PROD_ENV}_BY": "root",
+                f"{ALLOW_UNSEALED_PROD_ENV}_REASON": REASON,
             },
         )
         assert s.executor == "local" and s.refuse_unsealed is False
@@ -215,7 +228,121 @@ class TestWorker:
             "builder_executor": "host",
             "override": ALLOW_UNSEALED_PROD_ENV,
             "adr": "0023",
+            "acknowledged_by": "root",
         }
+        assert dict(s.unsealed_override_ack) == {"by": "root", "reason": REASON}
+
+
+class TestTheOverrideNamesWhoSetIt:
+    """G-663 (ADR-0023 as amended 2026-09-27, DL-090): an environment variable carries no
+    identity, so in production the override needs a named acknowledgement beside it — the
+    username of an existing, active admin and a reason — and every process start under it
+    writes an audit event naming that person and the reason."""
+
+    def test_a_prod_override_without_a_name_or_a_reason_refuses(self) -> None:
+        with pytest.raises(ValidationError, match=f"{ALLOW_UNSEALED_PROD_ENV}_BY"):
+            prod(
+                builder={"executor": "host"},
+                allow_unsealed_prod=True,
+                allow_unsealed_prod_reason=REASON,
+            )
+        with pytest.raises(ValidationError, match=f"{ALLOW_UNSEALED_PROD_ENV}_REASON"):
+            prod(
+                builder={"executor": "host"},
+                allow_unsealed_prod=True,
+                allow_unsealed_prod_by="root",
+            )
+        # a sealed posture too: the override still admits factory builds on the host
+        with pytest.raises(ValidationError, match=f"{ALLOW_UNSEALED_PROD_ENV}_BY"):
+            prod(allow_unsealed_prod=True)
+        assert Settings(env="dev", home=Path("/srv/crb"), allow_unsealed_prod=True).env == "dev"
+
+    def test_a_prod_worker_without_a_name_refuses(self, tmp_path: Path) -> None:
+        args = worker_main.build_parser().parse_args(["--once"])
+        env = {
+            "CRB_HOME": str(tmp_path / "h"),
+            "CRB_ENV": "prod",
+            "CRB_BUILDER__EXECUTOR": "host",
+            ALLOW_UNSEALED_PROD_ENV: "1",
+        }
+        with pytest.raises(ValueError, match=f"{ALLOW_UNSEALED_PROD_ENV}_BY"):
+            worker_main.settings_from_args(args, env)
+
+    def _app(self, tmp_path: Path, by: str) -> Any:
+        from crb.server.app import create_app
+
+        s = prod(
+            builder={"executor": "host"},
+            database_url=f"sqlite:///{tmp_path / 'crb.db'}",
+            bootstrap_admin={"username": "root", "password": "p" * 16},
+            allow_unsealed_prod=True,
+            allow_unsealed_prod_by=by,
+            allow_unsealed_prod_reason=REASON,
+        )
+        return create_app(s)
+
+    def _events(self, tmp_path: Path) -> list[Any]:
+        from sqlalchemy import select
+
+        from crb.store.models import Event
+
+        factory = make_session_factory(make_engine(f"sqlite:///{tmp_path / 'crb.db'}"))
+        with factory() as db:
+            return list(
+                db.execute(select(Event).where(Event.action == unsealed_override.ACTION)).scalars()
+            )
+
+    def test_a_production_start_under_the_override_writes_an_event_naming_who_set_it(
+        self, tmp_path: Path
+    ) -> None:
+        from fastapi.testclient import TestClient
+        from sqlalchemy import select
+
+        from crb.store.models import User
+
+        with TestClient(self._app(tmp_path, "root")):
+            pass
+        with TestClient(self._app(tmp_path, "root")):  # every start, not only the first
+            pass
+        events = self._events(tmp_path)
+        factory = make_session_factory(make_engine(f"sqlite:///{tmp_path / 'crb.db'}"))
+        with factory() as db:
+            root = db.execute(select(User)).scalar_one()
+        assert len(events) == 2
+        for ev in events:
+            assert ev.stage == "system" and ev.actor == root.id
+            assert ev.payload_json["username"] == "root"
+            assert ev.payload_json["reason"] == REASON
+            assert ev.payload_json["process"] == "api"
+            assert ev.payload_json["builder_executor"] == "host"
+
+    @pytest.mark.parametrize(
+        ("name", "why"),
+        [("nobody", "names no account"), ("vic", "only an admin"), ("gone", "deactivated")],
+    )
+    def test_an_unknown_non_admin_or_inactive_name_refuses_the_start(
+        self, tmp_path: Path, name: str, why: str
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        from crb.server.auth import create_local_user, set_user_active
+
+        engine = make_engine(f"sqlite:///{tmp_path / 'crb.db'}")
+        init_db(engine)
+        factory = make_session_factory(engine)
+        with factory() as db:
+            create_local_user(db, username="root", password="p" * 16, role="admin")
+            create_local_user(db, username="vic", password="p" * 16, role="viewer")
+            gone = create_local_user(db, username="gone", password="p" * 16, role="admin")
+            db.commit()
+            set_user_active(db, gone, False, sign_in=None)
+            db.commit()
+        with (
+            pytest.raises(unsealed_override.OverrideRefused, match=why),
+            TestClient(self._app(tmp_path, name)),
+        ):
+            pass
+        assert self._events(tmp_path) == []
 
 
 class TestDeploymentDefaults:
@@ -303,8 +430,8 @@ class TestFactoryBuilds:
         assert prod().posture()["factory_builds"] == "refused"
 
     def test_the_override_lets_factory_builds_run_on_the_host_and_says_so(self) -> None:
-        assert prod(allow_unsealed_prod=True).posture()["factory_builds"] == "host"
-        unsealed = prod(builder={"executor": "host"}, allow_unsealed_prod=True)
+        assert prod(**ACK).posture()["factory_builds"] == "host"
+        unsealed = prod(builder={"executor": "host"}, **ACK)
         assert unsealed.posture()["factory_builds"] == "host"
 
     def test_dev_builds_factory_items_on_the_host(self) -> None:
@@ -374,7 +501,7 @@ def _helm_render(*sets: str) -> list[dict[str, Any]]:
     return [d for d in yaml.safe_load_all(out.stdout) if d]
 
 
-@pytest.mark.skipif(__import__("shutil").which("helm") is None, reason="helm not on PATH")
+@pytest.mark.toolchain("helm")
 class TestHelmOneBuilderPosture:
     """The API serves the posture on /health; the worker runs the builds. If the chart gives
     them different builder executors, /health says "sealed" while every build runs on the
@@ -384,7 +511,12 @@ class TestHelmOneBuilderPosture:
         "sets",
         [
             (),
-            ("worker.builder.executor=host", f"config.{ALLOW_UNSEALED_PROD_ENV}=1"),
+            (
+                "worker.builder.executor=host",
+                f"config.{ALLOW_UNSEALED_PROD_ENV}=1",
+                f"config.{ALLOW_UNSEALED_PROD_ENV}_BY=root",
+                f"config.{ALLOW_UNSEALED_PROD_ENV}_REASON=evaluation",
+            ),
         ],
         ids=["default", "host-under-the-override"],
     )

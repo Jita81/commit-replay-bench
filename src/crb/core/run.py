@@ -35,8 +35,9 @@ What it does: Creates a fresh worktree per attempt, overlays the tests in sighte
               (and, when a gate is set, only where the measured escalation rule says the
               next rung pays — the decision is stamped on the row), keeps every attempt's
               patch before its pack is written, and skips tasks whose gold is known-bad. A
-              builder crash is recorded and graded anyway; only a sandbox failure or
-              cancellation stops the run.
+              builder crash is recorded and graded anyway; only a sandbox failure,
+              cancellation or an attempt the ``admit`` hook refuses (the spend cap) stops the
+              run — the last before anything of that attempt exists.
 How:          ``run`` iterates tasks (checking ``stop`` and ``gold_clean``) → ``run_task``
               loops the ladder: ``Workspace.create`` → ``build_fn`` → ``grade`` →
               ``keep_patch`` → ``escalation_gate`` (not clean) → ``EvidencePack`` →
@@ -161,6 +162,10 @@ class RunSpec:
     #: belt 6 ``api_stable`` (ADR-0024): OFF unless the run or the repository's
     #: ``checks.api_stable`` switches it on (the worker resolves it)
     evaluate_api: bool = False
+    #: Asked before every attempt with the task and the rung's 1-based index: ``""`` admits
+    #: it; any other string halts the run there, before a worktree or a builder call, and is
+    #: the run's stop reason (the worker's per-run spend cap, F5b). ``None`` admits all.
+    admit: Callable[[TaskSpec, int], str] | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -199,6 +204,9 @@ class TaskOutcome:
     rows: tuple[GradeRow, ...]
     packs: tuple[str, ...]  # evidence pack hashes
     duration_s: float
+    #: Why the run halts at this task (``RunSpec.admit`` refused an attempt); ``""`` when
+    #: the ladder ended on its own.
+    halted: str = ""
 
 
 @dataclass(frozen=True)
@@ -298,8 +306,14 @@ def run_task(
     assert spec.context_for is not None  # __post_init__ refuses a RunSpec without one
     ctx = spec.context_for(task)
     task = ctx.spec(task)
+    halted = ""
     for i, rung in enumerate(spec.ladder, start=1):
         trial = f"r{i}"
+        if spec.admit is not None:
+            halted = spec.admit(task, i)
+            if halted:
+                _emit(on_event, "run.halted", task=task.task_id, trial=trial, reason=halted)
+                break
         # opaque: the builder's cwd must not name the future commit (B1); the event maps it
         dest = opaque_dest(spec.scratch, "run", avoid=(task.task_id,))
         _emit(on_event, "prep.start", task=task.task_id, trial=trial, rung=rung, worktree=dest.name)
@@ -437,6 +451,7 @@ def run_task(
         tuple(rows),
         tuple(packs),
         time.monotonic() - started,
+        halted,
     )
 
 
@@ -473,12 +488,16 @@ def run(
             stopped = f"sandbox unavailable: {exc}"
             _emit(on_event, "run.error", error=stopped)
             break
-        n += 1
+        if outcome.attempts or not outcome.halted:  # a task halted before it began is not one
+            n += 1
         rows += outcome.attempts
         clean += int(outcome.clean)
         dq += int(outcome.disqualified)
         err += sum(1 for r in outcome.rows if r.error)
         first += int(bool(outcome.rows) and outcome.rows[0].clean)
+        if outcome.halted:
+            stopped = outcome.halted
+            break
     summary = RunSummary(
         spec.run_id, n, clean, dq, err, first, rows, time.monotonic() - started, stopped
     )

@@ -6,9 +6,11 @@ recomputes every ``row_hash`` from the STORED columns (the same canonical body
 or false-Q1 row must be REPORTED, not hidden behind an exception), checks each
 ``prev_hash`` link, and counts false-Q1 over the stored belts; it also counts the clean
 rows measured here whose evidence pack is absent or does not re-hash to its name, and
-walks the sign-off and review chains (``signoffs`` / ``reviews``). ``ok`` is
-``chain_ok and false_q1_total == 0 and clean_without_pack == 0`` and both of those
-chains intact.
+walks the sign-off and review chains (``signoffs`` / ``reviews``) and the audit trail's
+own chain (``events``, ADR-0029), serving the grade and event heads — the last
+``row_hash`` of each — as values an operator records outside the store (G-601). ``ok`` is
+``chain_ok and false_q1_total == 0 and clean_without_pack == 0``, both of the sign-off and
+review chains intact and ``events.chain_ok``.
 
 ``/ledger/export`` streams the stored rows verbatim (chain fields included), so an
 UNFILTERED JSONL export verifies standalone with
@@ -24,9 +26,12 @@ Navigation
 What it is:   The ``/ledger/*`` route module — verify the chain, export it, export the
               abstract cells, import crb JSONL rows.
 What it does: ``verify`` walks the stored rows recomputing every hash from the columns (a
-              tampered or false-Q1 row is REPORTED, never hidden behind an exception) and
-              re-counts false-Q1 in SQL; ``export`` streams rows verbatim as JSONL (verifies
-              standalone when unfiltered) or formula-safe CSV; ``export/abstract`` emits
+              tampered or false-Q1 row is REPORTED, never hidden behind an exception),
+              re-counts false-Q1 in SQL, walks the ``events`` chain (only the new events
+              between full walks; in full on an operator's ``?full=true``) and serves both
+              heads;
+              ``export`` streams rows verbatim as JSONL (verifies standalone when
+              unfiltered) or formula-safe CSV; ``export/abstract`` emits
               only the allowlisted cell fields; ``import`` re-chains foreign rows, skips
               ones already held, and refuses census rows (they need tasks and configs).
 How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` (belt-set
@@ -34,9 +39,11 @@ How:          Batched ``select(Grade)`` by ``seq`` → ``row_hash_from_stored`` 
               → ``StreamingResponse``; import = ``parse_import`` → dedupe → ``import_rows``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
-              docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md
+              docs/adr/0007-abstract-cell-export-only.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0029-the-audit-trail-is-hash-chained.md
 Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this must mirror),
               src/crb/store/ledger.py (``import_rows`` / ``count``),
+              src/crb/store/events.py (``verify_events_in`` — the audit trail's walk),
               src/crb/core/federated.py (``export_abstract`` and its allowlist),
               src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
               src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
@@ -63,7 +70,7 @@ import json
 from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
-from fastapi import APIRouter, Query, UploadFile
+from fastapi import APIRouter, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -81,14 +88,15 @@ from crb.core.ledger import (
 )
 from crb.core.redact import redact
 from crb.observability.events import StepStatus
-from crb.server.auth import AdminDep, OperatorDep, ViewerDep
+from crb.server.auth import AdminDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.routes.grades import ROW_FIELDS, grade_to_dict, pack_verified
 from crb.server.routes.reviews import verify_reviews
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.routes.signoffs import FALSE_Q1_PREDICATE, verify_signoffs
-from crb.server.schemas import ChainVerifyOut, LedgerImportOut, LedgerVerifyOut
+from crb.server.schemas import ChainVerifyOut, EventsVerifyOut, LedgerImportOut, LedgerVerifyOut
 from crb.server.schemas_review import ReviewVerifyOut
+from crb.store.events import EventChainVerifier, verify_events_in
 from crb.store.ledger import DbLedger
 from crb.store.models import EvidencePackRow, Grade
 
@@ -143,10 +151,14 @@ def _iter_grades(session: Session, batch: int = EXPORT_BATCH) -> Iterator[Grade]
         last = chunk[-1].seq
 
 
-def verify_ledger(session: Session) -> LedgerVerifyOut:
+def verify_ledger(
+    session: Session, *, events_verifier: EventChainVerifier | None = None, full: bool = False
+) -> LedgerVerifyOut:
     """The chain walk + false-Q1 in SQL + the clean rows with no evidence to show
-    (:func:`clean_without_pack`) + the sign-off and review chains (EI-6); never raises —
-    the first break is reported by ``seq`` and the walk continues to count rows."""
+    (:func:`clean_without_pack`) + the sign-off and review chains (EI-6) + the audit trail's
+    chain; never raises — the first break is reported by ``seq`` and the walk continues to
+    count rows. The audit trail is walked by ``events_verifier`` (the app's, which re-hashes
+    only new events between full walks — P-257) or, without one, in full."""
     rows = 0
     prev = GENESIS_HASH
     broken_at: int | None = None
@@ -179,9 +191,16 @@ def verify_ledger(session: Session) -> LedgerVerifyOut:
         detail = f"chain intact but false_q1={fq1}, clean_without_pack={no_pack}"
     if others:
         detail += "; " + "; ".join(f"{n} chain broken at {c.detail}" for n, c in others)
+    events = (
+        events_verifier.verify(session, full=full)
+        if events_verifier is not None
+        else verify_events_in(session)
+    )
+    if not events.ok:
+        detail = f"{detail}; events chain broken — {events.detail}"
     return LedgerVerifyOut(
         rows=rows,
-        ok=chain_ok and fq1 == 0 and no_pack == 0 and not others,
+        ok=chain_ok and fq1 == 0 and no_pack == 0 and not others and events.ok,
         false_q1_total=fq1,
         chain_ok=chain_ok,
         broken_at=broken_at,
@@ -190,6 +209,8 @@ def verify_ledger(session: Session) -> LedgerVerifyOut:
         signoffs=_chain(signoffs),
         reviews=_chain(reviews),
         verified_at=_now(),
+        head_row_hash=prev if rows else "",
+        events=EventsVerifyOut(**events.to_dict()),
     )
 
 
@@ -234,9 +255,27 @@ def clean_without_pack(session: Session) -> int:
     responses={401: _ERR},
     summary="Walk the hash chain and re-count false-Q1 over the stored belts (never raises)",
 )
-def ledger_verify(viewer: ViewerDep, db: DbDep) -> LedgerVerifyOut:
-    del viewer
-    return verify_ledger(db)
+def ledger_verify(
+    request: Request,
+    viewer: ViewerDep,
+    db: DbDep,
+    full: bool = Query(
+        False,
+        description="Re-hash every audit event now rather than only those appended since the "
+        "last full walk (operator; each is a walk of the whole trail)",
+    ),
+) -> LedgerVerifyOut:
+    if full:
+        require_role_now(viewer, "operator")
+    return verify_ledger(db, events_verifier=events_verifier(request.app), full=full)
+
+
+def events_verifier(app: Any) -> EventChainVerifier:
+    """The app's one audit-trail verifier (made on first use)."""
+    v = getattr(app.state, "events_verifier", None)
+    if v is None:
+        v = app.state.events_verifier = EventChainVerifier()
+    return v
 
 
 # ---------------------------------------------------------------------------

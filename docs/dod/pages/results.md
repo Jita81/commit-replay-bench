@@ -24,7 +24,7 @@ updated repository is chosen. Leaves with the three gate readings, the route per
 n, interval and apparatus, the licence sentence, and one of the doors: Open the full map
 (`/capability?repo=`), Every route with its reason (`/routing?repo=`), Oracle and controls
 (`/oracle?repo=`), The ledger (`/ledger?repo=`), All decisions (`/decisions`), a decision's act
-(`/signoff`, `/ledger`, `/routing`, `/factory`) or Open the run (`/runs/:id`).
+(`/signoff`, `/ledger`, `/routing`, `/factory`) or Open the run (`/runs/:id`) **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 **Non-goals.** No repository-wide rate and no "the AI can do X%". No throughput or
 cost-per-accepted-change headline: the ledger records no human hours, and the merge outcomes
@@ -35,7 +35,7 @@ No economics tile reads an unknown cost or latency as zero, and none pools appar
 posture classes or checks arms.
 Opening the map of a repository with rows records, once per person, that its baseline was read
 (`repo.baseline_read`, DL-074) — the one thing the page writes; it changes no number and is
-what Home's task 6 reads.
+what Home's task 6 reads **[aspiration — this artefact's specification; its criteria state what is met]**.
 
 ## Definition of done
 
