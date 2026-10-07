@@ -445,10 +445,11 @@ Every check a pull-request workflow reports — each workflow under `.github/wor
 `on:` names `pull_request`: today `ci.yml` and `commit-subjects.yml` — blocks a merge to
 `main` only while its name is on the branch's required-status-checks list, which is a
 repository setting, not a workflow file. The list names every job's check those workflows had
-when it was last read, but the parts an aggregator stands for (below) — `sandbox-images`,
-which has no `continue-on-error` and fails on any skipped smoke test exactly as `container`
-does, `sbom`, `fresh-clone` (every gate on a fresh clone from `uv.lock` as root with no docker
-daemon, DL-101) and `commit-subjects` among them — and is strict (a branch must be up to date)
+when it was last read — `sandbox-images` (which has no `continue-on-error` and fails on any
+skipped smoke test exactly as `container` does), `sbom`, `fresh-clone` (every gate on a fresh
+clone from `uv.lock` as root with no docker daemon, DL-101) and `commit-subjects` among them —
+except the parts an aggregator stands for (below): the test, fresh-clone and walkthrough
+shards, `fresh-clone-gates` and `walkthrough-story`. It is strict (a branch must be up to date)
 **[measured 2026-10-07 — n = 18 required checks against the 18 gating check names the
 pull-request workflows rendered then, method: `scripts/check_branch_protection.py` against
 `GET /repos/Jita81/commit-replay-bench/branches/main/protection/required_status_checks`,
