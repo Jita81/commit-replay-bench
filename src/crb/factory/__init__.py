@@ -40,7 +40,8 @@ Works with:   src/crb/factory/loop.py (the orchestrator), src/crb/factory/backlo
               3), src/crb/factory/build.py (step 4), src/crb/factory/review.py (step 5),
               src/crb/factory/delivery.py (step 6), src/crb/factory/evidence.py (the ledger
               every step appends to), docs/API.md#factory-phase-p6
-Tested by:    tests/test_factory_loop.py
+Tested by:    tests/test_factory_loop.py, tests/test_factory_loop_rework.py,
+              tests/test_factory_loop_pull_requests.py
 Touch when:   never for a new repository; only when a new step type becomes part of the
               public surface (re-export it and extend the docstring's table).
 """

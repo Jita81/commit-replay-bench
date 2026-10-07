@@ -21,25 +21,39 @@ What it is:   The one OpenAI-compatible transport — ``OpenAIChat`` over a lazi
               ``ModelTurn``, ``ChatReply``) the tool loop, the edit-block builder and the
               labeller consume.
 What it does: Builds a client for Cerebras / Azure OpenAI / any base URL from an
-              ``EndpointConfig``, refuses to start without the named credential, retries
-              transient failures with jittered backoff, decodes tool calls tolerantly (bad
-              JSON → ``parse_error``, not a crash) and meters every attempt.
-How:          ``make_chat`` → ``make_client`` (imports ``openai`` here only) → ``OpenAIChat``:
-              ``_create`` (kwargs + ``with_retries``) → ``__call__`` parses usage, content and
-              tool calls into a ``ModelTurn``; ``text`` narrows it to a ``ChatReply``.
+              ``EndpointConfig`` — the operator's (``from_env``: ``CRB_OPENAI_BASE_URL`` and
+              the validated ``CRB_OPENAI_TIMEOUT_S`` / ``_MAX_TOKENS`` / ``_MAX_RETRIES``)
+              unless a caller passes one; ``resolve_endpoint`` gives every builder that
+              endpoint and ITS provider (a provider's name only for a host in its domain —
+              ``cerebras.ai``, ``AZURE_DOMAINS`` — else ``host_provider``: ``host:port``, and
+              ``host:<name>`` for a bare host, P-283), refusing a rung that names another
+              and, through ``url_refusal``, a URL that carries a key (P-276); refuses to
+              start without the named credential, retries transient failures with jittered
+              backoff, decodes tool calls tolerantly (bad JSON → ``parse_error``, not a
+              crash) and meters every attempt.
+How:          ``resolve_endpoint`` (at builder construction) → ``make_chat`` →
+              ``make_client`` (imports ``openai`` here only) → ``OpenAIChat``: ``_create``
+              (kwargs + ``with_retries``) → ``__call__`` parses usage, content and tool calls
+              into a ``ModelTurn``; ``text`` narrows it to a ``ChatReply``.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md
 Works with:   src/crb/builders/openai_agent.py and src/crb/builders/editblock.py (the
               builders on this client), src/crb/builders/labeller.py (the labeller on it),
+              src/crb/factory/author.py (the factory's test author on it),
+              src/crb/server/routes/runs.py (``credential_missing`` — the submit-time check),
               src/crb/builders/budget.py (``CostMeter``/``price_for`` — the meter here is
               per client), src/crb/server/settings.py (the ``CRB_OPENAI_*``/``CRB_AZURE_*``
               variables ``EndpointConfig.from_env`` reads)
 Tested by:    tests/test_builders_openai_agent.py, tests/test_builders_editblock.py,
-              tests/test_builders_labeller.py
-Touch when:   never for a new repository; pointing the factory at another OpenAI-compatible provider
-              — set ``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (docs/OPERATOR.md), not the
-              defaults here; a new retryable status joins ``RETRY_STATUSES``; a provider whose usage
-              block differs changes ``_usage_of`` with a fake-response test.
+              tests/test_builders_labeller.py, tests/test_builders_endpoint.py (a fake
+              OpenAI-compatible server on 127.0.0.1: the request lands there)
+Touch when:   never for a new repository; pointing the factory at another OpenAI-compatible
+              provider — set ``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV``
+              (docs/OPERATOR.md §3.0.2), not the defaults here; a new tuning variable joins
+              ``ENV_LIMITS`` with a default and a refusal case in
+              tests/test_builders_endpoint.py; a new retryable status joins
+              ``RETRY_STATUSES``; a provider whose usage block differs changes ``_usage_of``
+              with a fake-response test.
 """
 
 from __future__ import annotations
@@ -51,18 +65,88 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from crb.builders.budget import CostMeter, Pricing, price_for
 
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
 CEREBRAS_KEY_ENV = "CEREBRAS_API_KEY"
 AZURE_KEY_ENV = "AZURE_OPENAI_API_KEY"
+#: The domains whose hosts are stamped with a provider's name; any other host is stamped
+#: as itself (``host_provider``). Azure OpenAI's public and sovereign clouds and its API
+#: gateway; a private-link custom domain is its own provider, on nobody's word.
+CEREBRAS_DOMAIN = "cerebras.ai"
+AZURE_DOMAINS: tuple[str, ...] = ("azure.com", "azure-api.net", "azure.us", "azure.cn")
 
 RETRY_STATUSES: frozenset[int] = frozenset({408, 409, 429, 500, 502, 503, 504})
+
+#: The stated defaults ``EndpointConfig`` (and so ``from_env``) uses when the operator
+#: sets nothing: long enough for a hosted provider, too short for a self-hosted model
+#: generating thousands of tokens — which is why each one is an environment variable.
+DEFAULT_TIMEOUT_S = 120.0
+DEFAULT_MAX_TOKENS = 4000
+DEFAULT_MAX_RETRIES = 4
+
+#: ``CRB_OPENAI_*`` tuning variables → (default, lowest, highest). A value outside the
+#: range, or not a number, is refused by ``from_env`` with the variable's name — never
+#: silently clamped, because a clamp would run the build under a setting nobody chose.
+ENV_LIMITS: dict[str, tuple[float, float, float]] = {
+    "CRB_OPENAI_TIMEOUT_S": (DEFAULT_TIMEOUT_S, 1.0, 3600.0),
+    "CRB_OPENAI_MAX_TOKENS": (float(DEFAULT_MAX_TOKENS), 1.0, 200_000.0),
+    "CRB_OPENAI_MAX_RETRIES": (float(DEFAULT_MAX_RETRIES), 0.0, 10.0),
+}
+
+
+def url_refusal(url: str, *, https_only: bool = False) -> str:
+    """Why ``url`` cannot be an endpoint — ``""`` when it can. The endpoint is stamped on
+    every row (the provider column, the apparatus stamp) and the ledger is append-only, so
+    a URL that carries a credential — ``user:key@`` userinfo, a ``?api-key=`` query or a
+    fragment — is refused, never stored (P-276). The reason never repeats the URL: a
+    refusal's text reaches logs and run errors."""
+    schemes = ("https",) if https_only else ("http", "https")
+    try:
+        parts = urlsplit(url)
+        _ = parts.port  # a port that is not a number raises here
+    except ValueError:
+        return "must be a URL of the form scheme://host[:port]/path"
+    if parts.scheme.lower() not in schemes or not parts.hostname:
+        return f"must be an {'https' if https_only else 'http(s)'}://host[:port]/path URL"
+    if "@" in parts.netloc:
+        return (
+            "must not carry a user name or key before the host (user:key@host): the URL is "
+            "stamped on every row — put the key in the variable CRB_OPENAI_KEY_ENV (or "
+            "CRB_AZURE_KEY_ENV) names"
+        )
+    if parts.query or parts.fragment or url.rstrip().endswith(("?", "#")):
+        return (
+            "must not carry a query string or fragment (?…, #…): the URL is stamped on every "
+            "row — put the key in the variable CRB_OPENAI_KEY_ENV (or CRB_AZURE_KEY_ENV) names"
+        )
+    return ""
+
+
+def host_provider(url: str) -> str:
+    """The provider stamp of a host that is in no provider's domain: its ``host[:port]``,
+    lower-cased, never the userinfo. Every provider the product names without a host
+    (``cerebras``, ``azure``, ``anthropic`` …) is a bare name, so a stamp taken from a host
+    is never one: a host with no dot and no port — a compose or Kubernetes service called
+    ``cerebras`` — is stamped ``host:<name>`` (P-283). ``host:`` cannot be a real host's
+    stamp, because a port that is not a number is refused at construction."""
+    stamp = urlsplit(url).netloc.rpartition("@")[2].lower()
+    if not any(mark in stamp for mark in ".:["):
+        return f"host:{stamp}"
+    return stamp
 
 
 class MissingCredential(RuntimeError):
     """The named environment variable is not set. Fail closed before any call."""
+
+
+class ProviderMismatch(ValueError):
+    """A rung names one provider but the builder would call another endpoint.
+
+    Refused at construction: a row stamped with the rung's provider would put a
+    self-hosted model's results into another provider's cell (a ledger truth defect)."""
 
 
 class ModelCallError(RuntimeError):
@@ -154,8 +238,9 @@ class AzureConfig:
     api_key_env: str = AZURE_KEY_ENV
 
     def __post_init__(self) -> None:
-        if not self.endpoint.startswith("https://"):
-            raise ValueError("azure endpoint must be an https:// URL")
+        refusal = url_refusal(self.endpoint, https_only=True)
+        if refusal:
+            raise ValueError(f"the azure endpoint (CRB_AZURE_ENDPOINT) {refusal}")
         if not self.api_version or not self.deployment:
             raise ValueError("azure config needs api_version and deployment")
 
@@ -427,18 +512,35 @@ class EndpointConfig:
     base_url: str = CEREBRAS_BASE_URL
     api_key_env: str = CEREBRAS_KEY_ENV
     azure: AzureConfig | None = None
-    timeout_s: float = 120.0
-    max_retries: int = 4
+    timeout_s: float = DEFAULT_TIMEOUT_S
+    max_retries: int = DEFAULT_MAX_RETRIES
     temperature: float | None = 0.2
-    max_tokens: int = 4000
+    max_tokens: int = DEFAULT_MAX_TOKENS
+    #: whether ``max_tokens`` is the operator's (``CRB_OPENAI_MAX_TOKENS`` was set) rather
+    #: than the default — a caller with a shorter default of its own (the labeller) keeps
+    #: it only while the operator has set nothing. Not stamped: ``max_tokens`` is.
+    max_tokens_set: bool = field(default=False, compare=False)
+
+    def __post_init__(self) -> None:
+        refusal = url_refusal(self.base_url)
+        if refusal:
+            raise ValueError(f"the endpoint's base URL (CRB_OPENAI_BASE_URL) {refusal}")
 
     @property
     def provider(self) -> str:
-        """``azure`` | ``cerebras`` | the base URL's host — the ledger's provider column."""
+        """The ledger's provider column: ``cerebras`` | ``azure`` | the host's own stamp
+        (:func:`host_provider`). A provider's name is stamped only for a host in that
+        provider's domain (``cerebras.ai``; for an Azure endpoint, ``AZURE_DOMAINS``): a
+        mirror, a look-alike or a service that merely shares the name is its own provider,
+        never pooled into that provider's cell (P-279, P-283)."""
         if self.azure is not None:
-            return "azure"
-        host = self.base_url.split("//", 1)[-1].split("/", 1)[0]
-        return "cerebras" if "cerebras" in host else host
+            url, domains, name = self.azure.endpoint, AZURE_DOMAINS, "azure"
+        else:
+            url, domains, name = self.base_url, (CEREBRAS_DOMAIN,), "cerebras"
+        host = (urlsplit(url).hostname or "").lower()
+        if any(host == d or host.endswith(f".{d}") for d in domains):
+            return name
+        return host_provider(url)
 
     def to_dict(self) -> dict[str, Any]:
         """The apparatus-stamp shape (the key's NAME, never its value)."""
@@ -453,22 +555,55 @@ class EndpointConfig:
         }
 
     @classmethod
-    def from_env(cls) -> EndpointConfig:
-        """``CRB_OPENAI_BASE_URL`` / ``CRB_OPENAI_KEY_ENV`` (and the Azure trio) if set."""
+    def from_env(cls, env: Mapping[str, str] | None = None) -> EndpointConfig:
+        """The endpoint the operator configured: ``CRB_OPENAI_BASE_URL`` /
+        ``CRB_OPENAI_KEY_ENV`` (or the Azure trio, which wins when
+        ``CRB_AZURE_ENDPOINT`` is set) and the tuning variables in ``ENV_LIMITS``
+        (``CRB_OPENAI_TIMEOUT_S`` 120, ``CRB_OPENAI_MAX_TOKENS`` 4000,
+        ``CRB_OPENAI_MAX_RETRIES`` 4 when unset). A bad value is a ``ValueError``
+        naming the variable."""
+        e = os.environ if env is None else env
         az = None
-        ep = os.environ.get("CRB_AZURE_ENDPOINT", "")
+        ep = e.get("CRB_AZURE_ENDPOINT", "")
         if ep:
             az = AzureConfig(
                 endpoint=ep,
-                api_version=os.environ.get("CRB_AZURE_API_VERSION", "2024-10-21"),
-                deployment=os.environ.get("CRB_AZURE_DEPLOYMENT", ""),
-                api_key_env=os.environ.get("CRB_AZURE_KEY_ENV", AZURE_KEY_ENV),
+                api_version=e.get("CRB_AZURE_API_VERSION", "2024-10-21"),
+                deployment=e.get("CRB_AZURE_DEPLOYMENT", ""),
+                api_key_env=e.get("CRB_AZURE_KEY_ENV", AZURE_KEY_ENV),
             )
+        base_url = e.get("CRB_OPENAI_BASE_URL", "").strip() or CEREBRAS_BASE_URL
+        refusal = url_refusal(base_url)
+        if refusal:  # the value is never echoed: it may be the credential itself
+            raise ValueError(f"CRB_OPENAI_BASE_URL {refusal}")
         return cls(
-            base_url=os.environ.get("CRB_OPENAI_BASE_URL", CEREBRAS_BASE_URL),
-            api_key_env=os.environ.get("CRB_OPENAI_KEY_ENV", CEREBRAS_KEY_ENV),
+            base_url=base_url,
+            api_key_env=e.get("CRB_OPENAI_KEY_ENV", "").strip() or CEREBRAS_KEY_ENV,
             azure=az,
+            timeout_s=_env_number(e, "CRB_OPENAI_TIMEOUT_S"),
+            max_tokens=int(_env_number(e, "CRB_OPENAI_MAX_TOKENS", integer=True)),
+            max_retries=int(_env_number(e, "CRB_OPENAI_MAX_RETRIES", integer=True)),
+            max_tokens_set=bool(e.get("CRB_OPENAI_MAX_TOKENS", "").strip()),
         )
+
+
+def _env_number(env: Mapping[str, str], name: str, *, integer: bool = False) -> float:
+    """One ``ENV_LIMITS`` variable: its default when unset or blank, else the value
+    within its range — or a ``ValueError`` that names the variable and the range."""
+    default, lo, hi = ENV_LIMITS[name]
+    raw = env.get(name, "").strip()
+    if not raw:
+        return default
+    kind = "a whole number" if integer else "a number"
+    refusal = f"{name} must be {kind} from {lo:g} to {hi:g}, got {raw!r}"
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(refusal) from None
+    # NaN fails the range test; ``is_integer`` refuses 2.5 retries rather than rounding it
+    if not (lo <= value <= hi) or (integer and not value.is_integer()):
+        raise ValueError(refusal)
+    return value
 
 
 def resolved_endpoint(endpoint: EndpointConfig | None = None) -> EndpointConfig:
@@ -476,7 +611,7 @@ def resolved_endpoint(endpoint: EndpointConfig | None = None) -> EndpointConfig:
     the submit-time credential check, the build and the provider column agree. No explicit
     endpoint means the deployment's (:meth:`EndpointConfig.from_env` — Cerebras when
     nothing is set), never the Cerebras default regardless of the environment."""
-    return endpoint or EndpointConfig.from_env()
+    return endpoint if endpoint is not None else EndpointConfig.from_env()
 
 
 def key_env(endpoint: EndpointConfig | None = None) -> str:
@@ -498,8 +633,7 @@ def credential_missing(
     except ValueError as exc:  # the deployment's endpoint variables do not make an endpoint
         return (
             f"the OpenAI-compatible endpoint the worker would call is misconfigured: {exc} — "
-            "fix CRB_OPENAI_BASE_URL / CRB_AZURE_ENDPOINT, CRB_AZURE_API_VERSION and "
-            "CRB_AZURE_DEPLOYMENT before queuing the run"
+            "fix the CRB_OPENAI_* / CRB_AZURE_* variable it names before queuing the run"
         )
     if os.environ.get(name, "").strip():
         return ""
@@ -509,8 +643,39 @@ def credential_missing(
     )
 
 
+def resolve_endpoint(
+    endpoint: EndpointConfig | None, provider: str = "", *, seam: object = None
+) -> tuple[EndpointConfig, str]:
+    """The endpoint a builder will call and the provider its rows must carry.
+
+    ``endpoint`` wins; without one it is :meth:`EndpointConfig.from_env` — so
+    ``CRB_OPENAI_BASE_URL`` is the endpoint every OpenAI-compatible builder calls,
+    not only the labeller. The provider stamped is the endpoint's own
+    (:attr:`EndpointConfig.provider`); a rung that names a different one is
+    :class:`ProviderMismatch`. ``seam`` is the builder's test seam (a ``model_fn`` /
+    ``chat_fn`` that stands in for the endpoint and calls nothing): when it is CALLABLE and
+    no endpoint is explicit, the named provider is kept, because no endpoint is called to
+    disagree. Anything else passed as a seam (a string from a run's ``builder_config``) is
+    not one, and the named provider is checked like any other."""
+    ep = resolved_endpoint(endpoint)
+    named = provider.strip()
+    if callable(seam) and endpoint is None:
+        return ep, named or ep.provider
+    if named and named.lower() != ep.provider.lower():
+        raise ProviderMismatch(
+            f"the rung names provider {named!r} but this builder would call "
+            f"{ep.base_url if ep.azure is None else ep.azure.endpoint} "
+            f"(provider {ep.provider!r}); name {ep.provider!r} on the rung "
+            f"(builder:model@{ep.provider}), leave the provider empty, or point "
+            "CRB_OPENAI_BASE_URL at that provider"
+        )
+    return ep, ep.provider
+
+
 def make_chat(model: str, endpoint: EndpointConfig | None = None, **kw: Any) -> OpenAIChat:
-    """Build a live :class:`OpenAIChat` for ``model`` against ``endpoint``."""
+    """Build a live :class:`OpenAIChat` for ``model`` against ``endpoint`` — or, when
+    none is given, the one the operator configured (:meth:`EndpointConfig.from_env`),
+    never a silent Cerebras default."""
     ep = resolved_endpoint(endpoint)
     client = make_client(ep.base_url, ep.api_key_env, ep.azure, timeout_s=ep.timeout_s)
     pricing = price_for(f"azure:{model}" if ep.azure else model)
@@ -533,6 +698,10 @@ __all__ = [
     "AZURE_KEY_ENV",
     "CEREBRAS_BASE_URL",
     "CEREBRAS_KEY_ENV",
+    "DEFAULT_MAX_RETRIES",
+    "DEFAULT_MAX_TOKENS",
+    "DEFAULT_TIMEOUT_S",
+    "ENV_LIMITS",
     "RETRY_STATUSES",
     "AzureConfig",
     "ChatFn",
@@ -543,12 +712,15 @@ __all__ = [
     "ModelFn",
     "ModelTurn",
     "OpenAIChat",
+    "ProviderMismatch",
     "ToolCall",
     "credential_missing",
     "key_env",
     "make_chat",
     "make_client",
     "parse_tool_calls",
+    "resolve_endpoint",
     "resolved_endpoint",
+    "url_refusal",
     "with_retries",
 ]

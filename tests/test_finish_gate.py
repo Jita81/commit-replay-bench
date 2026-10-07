@@ -66,8 +66,7 @@ def test_a_checklist_that_names_the_oracle_is_refused() -> None:
     fg.assert_no_oracle(lines, ("tests/test_other.py", "./...", ""))  # no leak, no raise
 
 
-@pytest.mark.skipif(not langs.has_tool("gofmt"), reason="gofmt not on PATH")
-@pytest.mark.toolchain("go")
+@pytest.mark.toolchain("go", "gofmt")
 def test_verify_gates_on_a_real_gofmt_rejection_and_passes_once_formatted(tmp_path: Path) -> None:
     gorepo = langs.fixture_module("gorepo")
     root, _ = gorepo.build(tmp_path)

@@ -1192,7 +1192,7 @@ def test_javascript_package_json_test_script_is_disqualified_dependency_is_not(
         p.write_text(honest, encoding="utf-8")
         res = _grade_lang(ws, task, cfg, executor)
         assert res.belts.tests_unmodified is True and not res.disqualified
-        if langs.has_tool("node"):
+        if langs.tool_usable("node"):
             assert res.clean is True, res.to_dict()
             assert set(res.changed_files) == {"package.json", src}
     finally:
@@ -1230,7 +1230,6 @@ def test_go_infra_edit_is_disqualified(
         ws.remove()
 
 
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 @pytest.mark.toolchain("go")
 def test_go_honest_go_mod_edit_proceeds_to_a_clean_grade(
     tmp_path: Path, executor: LocalExecutor
@@ -1282,7 +1281,6 @@ def test_jvm_infra_edit_is_disqualified(
         ws.remove()
 
 
-@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
 @pytest.mark.toolchain("mvn")
 def test_jvm_honest_pom_version_bump_proceeds_to_a_clean_grade(
     tmp_path: Path, executor: LocalExecutor
@@ -1307,7 +1305,6 @@ def test_jvm_honest_pom_version_bump_proceeds_to_a_clean_grade(
         ws.remove()
 
 
-@pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH")
 @pytest.mark.toolchain("cargo")
 @pytest.mark.parametrize(
     ("rel", "edit", "tamper"),

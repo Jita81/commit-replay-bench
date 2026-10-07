@@ -27,7 +27,12 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               artefacts' git history (never the generated file, never a parent repository)
               or the base branch's committed gap analysis vouches for it; that every gap the
               order of work ranks, not only the first rows, sits in some table of the plan;
-              and that no plan heading quotes a rank (P-189).
+              that no plan heading quotes a rank (P-189); that a clause a reworded criterion
+              dropped since the merge-base may not survive in a twin that does not wait on the
+              same gap (P-236); and that a value a Proposed ADR leaves to the operator is
+              marked provisional on every row that states it, the ADR registers each such
+              value, and the marker goes when the ADR is accepted — on a fixture and on the
+              live record (P-237).
 How:          Builds a minimal tree under ``tmp_path`` (App.tsx, Layout.tsx, hints.ts, help.ts,
               a ratchet file, API.md, ci.yml, a test file, a spec, an ADR, the decision log),
               points the module's path constants at it with ``monkeypatch``, and calls
@@ -1083,6 +1088,210 @@ def test_the_base_comes_from_dod_base_unless_the_flag_names_one(
     monkeypatch.delenv("DOD_BASE")
     assert mod.main(["--check"]) == 1
     assert "merge-base with origin/main" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ twins and provisional values
+
+
+def _crit(mod: ModuleType, cid: str, text: str, state: str = "met", gap: str = "") -> object:
+    return mod.Criterion(cid, "NON-GOALS", text, "`absent`", state, gap, 1)
+
+
+def _art(mod: ModuleType, rel: str, *crits: object) -> object:
+    return mod.Artefact(mod.ROOT / rel, {}, list(crits), {})
+
+
+def test_a_reworded_criterion_leaves_no_twin_in_its_old_words() -> None:
+    """docs/PREVENTION.md P-236: stream T reworded manufacture.non-goals.12 from "items outside
+    a deliver cell are built and withheld" to "is not built" and dropped it to unmet on G-933,
+    while its twin on the page, factory.non-goals.19, kept the old clause and stayed met — two
+    end states that cannot both hold, and nothing told G-933's builder to change the page.
+    A clause a reworded criterion drops must leave every other criterion too, unless that
+    criterion waits on the same gap."""
+    mod = _load()
+    old = (
+        "The journey's limits are stated where the person acts: items outside a deliver cell "
+        "are built and withheld, delivery happens only when it is switched on"
+    )
+    new = (
+        "The journey's limits are stated where the person acts: an item whose cell has no "
+        "proven context standard is not built, delivery happens only when it is switched on"
+    )
+    twin = (
+        'The page states its own limits where the person stands: "no full run form", and that '
+        "items outside a deliver cell are built and withheld"
+    )
+    base = {"manufacture.non-goals.12": old, "factory.non-goals.19": twin}
+    journey = _art(
+        mod,
+        "docs/dod/journeys/manufacture.md",
+        _crit(mod, "manufacture.non-goals.12", new, "unmet", "G-933"),
+    )
+    page = _art(mod, "docs/dod/pages/factory.md", _crit(mod, "factory.non-goals.19", twin))
+    errors = mod.validate_twins([journey, page], base)
+    assert len(errors) == 1
+    assert "factory.non-goals.19" in errors[0] and "manufacture.non-goals.12" in errors[0]
+    assert "items outside a deliver cell are built and withheld" in errors[0]
+    # the twin waits on the same gap: the record says the page changes with the journey
+    waiting = _art(
+        mod,
+        "docs/dod/pages/factory.md",
+        _crit(mod, "factory.non-goals.19", twin, "partial", "G-933"),
+    )
+    assert mod.validate_twins([journey, waiting], base) == []
+    # the twin reworded in the same change: nothing of the old clause survives
+    reworded = _art(
+        mod,
+        "docs/dod/pages/factory.md",
+        _crit(mod, "factory.non-goals.19", "The page states its own limits", "met"),
+    )
+    assert mod.validate_twins([journey, reworded], base) == []
+    # a criterion whose words did not change drops nothing, so it makes no twin
+    same = _art(
+        mod,
+        "docs/dod/journeys/manufacture.md",
+        _crit(mod, "manufacture.non-goals.12", old),
+    )
+    assert mod.validate_twins([same, page], base) == []
+    # a short clause (fewer than TWIN_MIN_WORDS words) is common prose, not a twin
+    assert mod.TWIN_MIN_WORDS >= 5
+
+
+def test_the_twin_check_reads_the_criteria_at_the_merge_base(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--check`` compares each criterion with its words at the merge-base of HEAD and the
+    base branch, so a rewording made on the branch is caught before it merges."""
+    mod, root = tree
+    _write_all(root)
+    journey = root / "docs/dod/journeys/read-the-map.md"
+    clause = "every rate on the map carries its n and interval"
+    text = journey.read_text(encoding="utf-8").replace(
+        "| read-the-map.truth.3 | TRUTH | ok |", f"| read-the-map.truth.3 | TRUTH | {clause} |"
+    )
+    text = text.replace(
+        "| read-the-map.proof.12 | PROOF | ok |", f"| read-the-map.proof.12 | PROOF | {clause} |"
+    )
+    journey.write_text(text, encoding="utf-8")
+    assert mod.main([]) == 0
+    _git(root, "init", "-q", "-b", "main")
+    base = _commit(root, "two criteria share a clause")
+    _git(root, "branch", "-q", "base-under-test", base)
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
+    journey.write_text(
+        text.replace(
+            f"| read-the-map.truth.3 | TRUTH | {clause} |",
+            "| read-the-map.truth.3 | TRUTH | every rate carries a label |",
+        ),
+        encoding="utf-8",
+    )
+    assert mod.main(["--base", "base-under-test"]) == 1
+    capsys.readouterr()
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert "read-the-map.proof.12 still says" in said and "read-the-map.truth.3" in said
+
+
+ADR_OPERATOR = """# ADR-0099 — a proposal
+
+**Status:** Proposed (the values marked **[operator]** are proposals the operator fixes)
+
+1. The first look is at 20 **[operator]**.
+2. The split is one third and two thirds **[operator]**.
+
+## Operator values
+
+A criterion or gap line that states one of these carries `ADR-0099 [operator]` until the
+operator fixes it (P-237).
+
+| item | the proposal | the words a criterion states it in |
+|---|---|---|
+| 1 | the first look at 20 | `of the first 20` |
+| 2 | derivation one third, confirmation two thirds | `one third` · `two thirds` |
+"""
+
+
+def test_a_value_a_proposed_adr_leaves_to_the_operator_is_marked_provisional(
+    tmp_path: Path,
+) -> None:
+    """docs/PREVENTION.md P-237: product.truth.202, truth.207 and truth.208 fixed values
+    ADR-0026 still marks [operator] — the first look at 20, the size rule, twenty confirmation
+    commits — with nothing on the row saying so, and the definition of done wins over the
+    ADR, so a builder would have built a proposal as settled. A Proposed ADR registers each
+    [operator] value with the words a criterion states it in; a criterion or gap line that
+    states one must carry the ADR's marker, and the marker must go once the ADR is accepted."""
+    mod = _load()
+    adr_dir = tmp_path / "adr"
+    adr_dir.mkdir()
+    (adr_dir / "0099-a-proposal.md").write_text(ADR_OPERATOR, encoding="utf-8")
+    settled = _art(
+        mod,
+        "docs/dod/product.md",
+        _crit(mod, "product.truth.1", "clean at least 20 of the first 20", "unmet", "G-001"),
+    )
+    errors = mod.validate_operator_values([settled], adr_dir)
+    assert len(errors) == 1
+    assert "product.truth.1" in errors[0] and "of the first 20" in errors[0]
+    assert "ADR-0099 [operator]" in errors[0]
+    marked = _art(
+        mod,
+        "docs/dod/product.md",
+        _crit(
+            mod,
+            "product.truth.1",
+            "clean at least 20 of the first 20 (ADR-0099 [operator] values; the row follows "
+            "the operator's choice)",
+            "unmet",
+            "G-001",
+        ),
+    )
+    assert mod.validate_operator_values([marked], adr_dir) == []
+    # a gap line is read too: it tells a builder what to build
+    gap_art = mod.Artefact(
+        mod.ROOT / "docs/dod/product.md", {}, [], {"G-001": "split one third · do it · server"}
+    )
+    assert any("G-001" in e for e in mod.validate_operator_values([gap_art], adr_dir))
+    # an [operator] marker the ADR does not register is refused: the table is the whole list
+    (adr_dir / "0099-a-proposal.md").write_text(
+        ADR_OPERATOR.replace("2. The split", "3. The budget is 5% **[operator]**.\n2. The split"),
+        encoding="utf-8",
+    )
+    assert any("3 [operator] markers" in e for e in mod.validate_operator_values([], adr_dir))
+    # once the operator decides, the ADR is accepted and the marker must go
+    (adr_dir / "0099-a-proposal.md").write_text(
+        ADR_OPERATOR.replace("**Status:** Proposed", "**Status:** Accepted"), encoding="utf-8"
+    )
+    stale = mod.validate_operator_values([marked], adr_dir)
+    assert len(stale) == 1 and "accepted" in stale[0]
+
+
+def test_the_record_marks_every_operator_value_it_states() -> None:
+    """The live record: every criterion and gap line that states a value a Proposed ADR leaves
+    to the operator says so (P-237)."""
+    mod = _load()
+    arts = [mod.parse_artefact(p)[0] for p in mod.artefact_files()]
+    assert mod.validate_operator_values(arts, mod.ADR_DIR) == []
+
+
+def test_the_check_refuses_an_operator_value_stated_as_settled(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``main`` runs the provisional-value rule over the tree's own ADRs (P-237)."""
+    mod, root = tree
+    _write_all(root)
+    assert mod.main([]) == 0
+    (root / "docs/adr/0099-a-proposal.md").write_text(ADR_OPERATOR, encoding="utf-8")
+    product = root / "docs/dod/product.md"
+    product.write_text(
+        product.read_text(encoding="utf-8").replace(
+            "| product.truth.4 | TRUTH | ok |",
+            "| product.truth.4 | TRUTH | clean at least 20 of the first 20 |",
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert mod.main(["--check"]) == 1
+    assert 'product.truth.4 states "of the first 20"' in capsys.readouterr().out
 
 
 def test_a_projected_row_carries_its_claim_tag_verbatim_wherever_the_register_put_it(

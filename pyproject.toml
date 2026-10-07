@@ -61,6 +61,14 @@ dev = [
 ]
 all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 
+# Tools two CI jobs add beside the locked environment to report on it, never imported by crb:
+# pinned here so uv.lock pins them, with every dependency, by version and hash, and the jobs
+# install them from it (tests/test_ci_lock.py). A gate's verdict must not move with a
+# release nobody chose (pip-audit's is a gate).
+[dependency-groups]
+audit = ["pip==26.2.1", "pip-audit==2.10.1"]
+sbom = ["cyclonedx-bom==7.4.0"]
+
 [project.scripts]
 crb = "crb.cli.main:main"
 
@@ -118,8 +126,8 @@ pythonpath = ["src"]
 addopts = "-q --strict-markers -p no:cacheprovider"
 timeout = 600
 markers = [
-  "docker: needs a reachable docker daemon",
-  "toolchain(name): needs a language toolchain on PATH (go, node, mvn, cargo)",
+  "docker: needs a docker daemon that answers with its version (tests/conftest_langs.py require_docker); skipped with the reason when none does, a failure when CRB_TEST_REQUIRE_TOOLS names docker",
+  "toolchain(*tools): needs each named tool to WORK (a bounded probe, not a PATH lookup — tests/conftest_langs.py require_tool); skipped with the reason when one does not, a failure when CRB_TEST_REQUIRE_TOOLS names it",
   "live: needs live model credentials (skipped in CI)",
   "slow: long-running end-to-end test",
   "network(*hosts): needs outbound HTTPS to each named host (none: the Python package index); skipped with the reason when one is unreachable, a failure under CRB_TEST_STRICT_WARMUP=1 (tests/conftest.py)",

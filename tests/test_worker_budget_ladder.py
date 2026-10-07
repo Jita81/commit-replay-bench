@@ -40,6 +40,7 @@ from typing import Any, cast
 import pytest
 
 import crb.builders as builders_pkg
+from crb.builders.adapter import rung_from_object
 from crb.builders.base import Budget, EscalationLadder, Rung
 from crb.builders.budget import budget_for_rung
 from crb.core.ledger import GradeRow, verify_chain
@@ -48,7 +49,6 @@ from crb.server.worker import (
     LABEL_RUNG_INDEX,
     RunContext,
     budget_tier,
-    rung_from_object,
     trial_labels_for,
 )
 from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED

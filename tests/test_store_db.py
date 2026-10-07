@@ -567,20 +567,24 @@ def test_the_append_only_probe_never_claims_an_update_it_did_not_try(backend: Ba
     store. On an empty ledger the detail now says no UPDATE was tried (the live-trigger count
     still decides the status); once a row exists it says the UPDATE was refused."""
     from crb.observability.probes import OK
-    from crb.server.routes.system import probe_append_only
+    from crb.server.routes.system import (
+        APPEND_ONLY_OK_DETAIL,
+        APPEND_ONLY_UNTRIED_DETAIL,
+        probe_append_only,
+    )
     from crb.store.ledger import assert_append_only
 
     store_db.init_db(backend.engine)
     assert assert_append_only(backend.factory) is False  # nothing to try
     res = probe_append_only(backend.factory)
     assert res.status == OK
-    assert res.detail == "triggers present; no grades row to test the UPDATE on", res.detail
+    assert res.detail == APPEND_ONLY_UNTRIED_DETAIL, res.detail
     with backend.factory() as s:
         s.add(_one_row("grades"))
         s.commit()
     assert assert_append_only(backend.factory) is True  # tried, and refused
     res = probe_append_only(backend.factory)
-    assert (res.status, res.detail) == (OK, "triggers present; UPDATE on grades refused")
+    assert (res.status, res.detail) == (OK, APPEND_ONLY_OK_DETAIL)
 
 
 def test_the_append_only_probe_counts_the_truncate_trigger(backend: Backend) -> None:
@@ -766,6 +770,19 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
         with backend.engine.begin() as c:
             c.execute(text(f"DROP OWNED BY {role}"))
             c.execute(text(f"DROP ROLE {role}"))
+
+
+def test_the_pg_function_raises_the_one_append_only_text() -> None:
+    """The Wave 2 integration's merge spliced stream I's f-string body into feat/ns1's plain
+    string, so PostgreSQL's ``crb_append_only()`` would have raised the literal
+    ``{APPEND_ONLY_SUFFIX}`` and the probe, which takes only the trigger's own words as proof,
+    would have read every refusal as another error. The function raises exactly the text the
+    probe matches, on both dialects."""
+    assert "{" not in store_db._PG_FUNCTION_SRC
+    assert f"'%{store_db.APPEND_ONLY_SUFFIX}'" in store_db._PG_FUNCTION_SRC
+    assert store_db.append_only_error_text("grades") in store_db._sqlite_trigger_sql(
+        "grades", "grades_no_update"
+    )
 
 
 def test_the_guides_grants_name_every_table_and_only_the_owner_writes_the_version() -> None:

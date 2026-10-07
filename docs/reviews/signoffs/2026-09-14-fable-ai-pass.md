@@ -9,7 +9,7 @@ named human reviewer** and says at the end exactly what a human could sign on th
 - **Date:** 2026-09-14
 - **Commit reviewed:** `842875bf4b0811d02e66c74272c8cadaa24f2a64` on `reboot/v2` (worktree branch `worktree-agent-af7fb44b9f43026ce`, reset to `reboot/v2`; contains `6db8f42`)
 - **Environment:** macOS Darwin 25.6.0 (arm64); Python 3.12.13; `crb 2.0.0a1` (the guide says `2.0.0a0`); executor **local** for every grade; colima/docker 28 reachable — used only for `tests/test_builders_container_docker.py` (10 passed). Throwaway `CRB_HOME` under `mktemp -d`; the live stack on `127.0.0.1:8000` was never touched.
-- **Time spent:** ≈1.5 h reading / ≈2.5 h exercises and own attempts / ≈0.5 h write-up (agent wall clock)
+- **Time spent:** ≈1.5 h reading / ≈2.5 h exercises and own attempts / ≈0.5 h write-up (agent wall clock) **[hypothesis — the reviewing agent's own wall-clock estimate]**
 
 ## Files read (all six required)
 
@@ -96,7 +96,7 @@ Fix direction (not applied here): (1) assert `HEAD == parent` inside `grade()` (
 
 ### 5. The review patch-hash anchor is checked against the caller's pack, not the reviewed row's — **fix before pilot** (store-layer contract; the served API is sound)
 
-`src/crb/store/ledger.py:198-221` (`DbReviewLedger.append`: `pack=None` → `s.get(EvidencePackRow, record.evidence_pack_hash)`), `src/crb/core/review.py:362-377` (`JsonlReviewLedger.append` checks nothing when `pack` is omitted). Reproduction: two clean rows A (diff `1…`) and B (diff `2…`); `ReviewRecord(grade_row_hash=A.row_hash, evidence_pack_hash=B_pack, patch_sha256_reviewed="2"*64, …)`; `DbReviewLedger(f).append(rec)` → **accepted**. `routes/reviews.py:393-397` resolves the pack from the `Grade` row and refuses (`patch_hash_mismatch`, verified) — so `POST /reviews` is safe; the CLI has no review command; any other caller (a future importer, a script) is not. Fix direction: `DbReviewLedger.append` resolves the `Grade` by `grade_row_hash` and uses **its** `evidence_pack_hash`, refusing if the record's differs; `JsonlReviewLedger.append` should require `pack` for a reviewed record.
+`src/crb/store/ledger.py:198-221` (`DbReviewLedger.append`: `pack=None` → `s.get(EvidencePackRow, record.evidence_pack_hash)`), `src/crb/core/review.py:362-377` (`JsonlReviewLedger.append` checks nothing when `pack` is omitted). Reproduction: two clean rows A (diff `1…`) and B (diff `2…`); `ReviewRecord(grade_row_hash=A.row_hash, evidence_pack_hash=B_pack, patch_sha256_reviewed="2"*64, …)`; `DbReviewLedger(f).append(rec)` → **accepted**. `routes/reviews.py:393-397` resolves the pack from the `Grade` row and refuses (`patch_hash_mismatch`, verified) — so `POST /reviews` is safe; the CLI has no review command; any other caller (a future importer, a script) is not. Fix direction: `DbReviewLedger.append` resolves the `Grade` by `grade_row_hash` and uses **its** `evidence_pack_hash`, refusing if the record's differs; `JsonlReviewLedger.append` should require `pack` for a reviewed record **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### 6. Guard gaps (measurement contamination, not verdict — mitigated by the sealed container, which is opt-in) — **note**
 
@@ -108,13 +108,13 @@ Fix direction (not applied here): (1) assert `HEAD == parent` inside `grade()` (
 
 ### 8. The guide is stale in the following places — **note** (documentation)
 
-Baseline `655e732` → line numbers moved in every file (grade.py 302→484, ledger.py 445→928, controls 926→1371, base.py 913→2088; `GradeResult.__post_init__` L109→154, `assert_invariants` L152→362, `false_q1_total` L443→926, `check` L786→1467, `check_shell` L821→1471, `assert_append_only` L153→255, `_lock` L52→66); `crb --version` is `2.0.0a1`; ex 2 expects **eight** triggers (now ten: `reviews`); ex 3b "CLEAN via `crb grade`" (now DQ, belt 1c); ex 4 "today: escapes" and the empty-diff-hash finding (both fixed); ex 5's four "allowed" bypasses (all refused now); the "six core files" list omits `core/test_infra.py` and `core/lint.py`, which now decide `clean`, and `builders/container.py`, `core/review.py`, `core/signoff.py`, which decide what is unreachable / attestable. The TEMPLATE's file table should grow accordingly.
+Baseline `655e732` → line numbers moved in every file (grade.py 302→484, ledger.py 445→928, controls 926→1371, base.py 913→2088; `GradeResult.__post_init__` L109→154, `assert_invariants` L152→362, `false_q1_total` L443→926, `check` L786→1467, `check_shell` L821→1471, `assert_append_only` L153→255, `_lock` L52→66); `crb --version` is `2.0.0a1`; ex 2 expects **eight** triggers (now ten: `reviews`); ex 3b "CLEAN via `crb grade`" (now DQ, belt 1c); ex 4 "today: escapes" and the empty-diff-hash finding (both fixed); ex 5's four "allowed" bypasses (all refused now); the "six core files" list omits `core/test_infra.py` and `core/lint.py`, which now decide `clean`, and `builders/container.py`, `core/review.py`, `core/signoff.py`, which decide what is unreachable / attestable. The TEMPLATE's file table should grow accordingly **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### 9. Smaller observations — **note**
 
 - `ControlsReport.passed` still ignores escapes (deliberate); the router and the sign-off policy do gate on them — consistent, but a CI reader of `passed` alone is misled.
 - Redaction keeps the URL **username** (`https://alice:[REDACTED]@…`); document in the DPIA text.
-- `DEPLOYMENT.md:322` records the out-of-band `row_hash` anchor as a go-live checklist line; there is no mechanism (a signed export, a printed hash in the run summary) — the re-hash attack in ex 6 passes verification by construction.
+- `DEPLOYMENT.md:322` records the out-of-band `row_hash` anchor as a go-live checklist line; there is no mechanism (a signed export, a printed hash in the run summary) — the re-hash attack in ex 6 passes verification by construction **[hypothesis — recorded at the time; not re-checked since]**.
 - `services.py`: adoption by container name only; `ports` bind all interfaces by default; no `--cap-drop`/`--read-only` on service containers; 3xx counts as healthy (see A13).
 
 ## Verdict
@@ -131,7 +131,7 @@ What I would let a named human reviewer sign on the strength of this pass, becau
 - JS/Go/JVM/Rust: `test_infra` checked at unit level only; no JS demo repository was mined or graded; `jest.config.js` through a real jest run not attempted.
 - `env_poison` on JavaScript (`controls_js.env_poison_plan`) not run; controls were exercised only through their existing test suite.
 - PostgreSQL triggers/advisory lock not exercised (SQLite only); the Alembic initial migration's trigger install (`v0001_initial_schema.py` L246) not compared with `init_db`.
-- The egress proxy was attacked at unit level and through the product's own docker-level suite (10 tests, real sidecar), not with a hand-built container of my own.
+- The egress proxy was attacked at unit level and through the product's own docker-level suite (10 tests, real sidecar), not with a hand-built container of my own **[hypothesis — recorded at the time; not re-checked since]**.
 - `.gitattributes` filter/`-diff` tricks against belt 1 not attempted (belt-and-braces hash compare should hold; unverified).
 - `capability.py` (1027 lines) skimmed for `CapabilityCell`/`measure_cell` only; `server/routes/signoffs.py` read at the write path only; the UI not looked at.
 - Time budget: the guide's "read one accepted diff next to the maintainer's commit" was not possible without a live run.

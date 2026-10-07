@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
   sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
 
+- **Wave 2, part A: the context standard's record, checkable claims, provable audit, gates and spend**
+  (Wave 2, streams T, C, I, H and X; [#68](https://github.com/Jita81/commit-replay-bench/pull/68)).
+  ADR-0026 proposes the context standard (DL-086, DL-087). The claims gate reads every public
+  page, README's measured numbers re-derive from vendored rows, and ISO/IEC 25010 is named, never
+  claimed (DL-088, DL-089). The audit trail is hash-chained and the unsealed override names who
+  set it (ADR-0029, DL-090 to DL-092): stop the API and the worker to upgrade across revision
+  0013. CI installs from `uv.lock`; a build run keeps its spend cap (ADR-0030, DL-101, DL-102).
+  The configured endpoint is the one called (DL-103, DL-104). CI fails on stale shard weights
+  (P-740 to P-742); fresh-clone is sharded (DL-370).
+
 - **A pull request title is measured as the squash merge writes it**
   ([#67](https://github.com/Jita81/commit-replay-bench/pull/67)). The commit-subject gate now
   adds the ` (#<n>)` suffix a squash merge appends before it checks the 72-character limit:

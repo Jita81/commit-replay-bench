@@ -39,8 +39,9 @@ Works with:   src/crb/core/oracle/mutators_text.py (under test), src/crb/core/or
               tests/fixtures/langs/noderepo.py, tests/fixtures/langs/jvmrepo.py and
               tests/fixtures/langs/rustrepo.py (the per-language end-to-ends)
 Tested by:    tests/test_oracle_mutation_text.py
-Touch when:   a language is added to the text mutator (a scanner case for its literal syntax,
-              an operator case per family, the registration case and an end-to-end); an operator
+Touch when:   onboarding a repository in a language the text mutator does not read yet (add
+              a scanner case for its literal syntax, an operator case per family, the
+              registration case and an end-to-end); an operator
               is added (the table hash changes — an apparatus consequence).
 """
 
@@ -749,7 +750,6 @@ def _assert_shape(score: ms.CommitOracleScore, *, compiled: bool) -> None:
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 def test_e2e_go(tmp_path_factory):
     config = gorepo.config()
     root, sha = fixtures.two_commit_repo(
@@ -767,7 +767,6 @@ def test_e2e_go(tmp_path_factory):
 
 
 @pytest.mark.toolchain("node")
-@pytest.mark.skipif(not langs.has_tool("node"), reason="node not on PATH")
 def test_e2e_javascript_node_test(tmp_path_factory):
     config = noderepo.config("node")
     test_path = noderepo.test_sub("node")
@@ -790,9 +789,7 @@ def test_e2e_javascript_node_test(tmp_path_factory):
     assert score.provenance.language == "javascript" and score.provenance.runner == "node"
 
 
-@pytest.mark.toolchain("mvn")
-@pytest.mark.skipif(not langs.has_tool("mvn"), reason="mvn not on PATH")
-@pytest.mark.skipif(not jvmrepo.java_home(), reason="no JDK: neither brew openjdk nor $JAVA_HOME")
+@pytest.mark.toolchain("mvn", "jdk")
 def test_e2e_jvm_maven(tmp_path_factory):
     langs.maven_warmup(tmp_path_factory.mktemp("mvn-warm"))
     config = jvmrepo.config(offline=True)
@@ -810,7 +807,6 @@ def test_e2e_jvm_maven(tmp_path_factory):
 
 
 @pytest.mark.toolchain("cargo")
-@pytest.mark.skipif(not langs.has_tool("cargo"), reason="cargo not on PATH")
 def test_e2e_rust_cargo(tmp_path_factory):
     config = rustrepo.config()
     base = tmp_path_factory.mktemp("rs-e2e")
@@ -826,7 +822,6 @@ def test_e2e_rust_cargo(tmp_path_factory):
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 def test_e2e_go_stock_fixture_kills_its_one_mutant_and_git_derives_the_lines(tmp_path_factory):
     """The stock fixture's ``func Sub(a, b int) int { return a - b }`` yields exactly the
     ``- -> +`` flip on a git-derived changed line, and the feat's test kills it."""

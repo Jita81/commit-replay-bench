@@ -43,7 +43,9 @@ x-crb-common: &crb-common
     # allowlisting egress sidecar; without CRB_BUILDER__IMAGE a build fails CLOSED
     # (`sandbox unavailable`), never on the host. An explicit `docker` needs the image (the api
     # refuses to start without it). `host` in prod is refused unless
-    # CRB_ALLOW_UNSEALED_PROD=1 (docs/DEPLOYMENT.md §2.1).
+    # CRB_ALLOW_UNSEALED_PROD=1 is set with CRB_ALLOW_UNSEALED_PROD_BY (an active admin's
+    # username) and CRB_ALLOW_UNSEALED_PROD_REASON (why) — without both, neither the api nor
+    # the worker starts (deploy/.env.example; docs/DEPLOYMENT.md §2.1).
     CRB_BUILDER__EXECUTOR: ${CRB_BUILDER__EXECUTOR:-}
     CRB_BUILDER__IMAGE: ${CRB_BUILDER__IMAGE:-}
   user: "10001:10001"

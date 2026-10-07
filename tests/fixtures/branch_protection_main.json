@@ -18,5 +18,8 @@
     "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)",
     "sandbox-images (build + hadolint + smoke each reference sandbox image)",
     "sbom (CycloneDX)"
-  ]
+  ],
+  "awaiting_protection": {
+    "fresh-clone (every gate from uv.lock, as root, no docker daemon)": "added by stream H for product.evidence.205 (G-664); an administrator adds it to main's required status checks (docs/DEPLOYMENT.md §3.4) under G-930, then the reading is saved again without this entry"
+  }
 }

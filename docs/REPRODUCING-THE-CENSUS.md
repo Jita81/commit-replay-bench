@@ -1,9 +1,12 @@
 # Reproducing the census-ledger invariants
 
-*For a reviewer with a fresh clone and thirty minutes.* This walks you through re-deriving
-every claim `crb` makes **about the census ledger itself** — the 1,071 verdicts vendored in
-`data/census-2026-07-08/` — using only the checked-in data and the current code. Every
-command below was run as written; the output blocks are pasted, not typed.
+*For a reviewer with a fresh clone and thirty minutes* **[hypothesis — an estimate of the
+reading and running time; nobody has timed it]**. This walks you through re-deriving every
+claim `crb` makes **about the census ledger itself** — the 1,071 verdicts vendored in
+`data/census-2026-07-08/` **[measured — n = 1,071 rows; method: the lines of `grades.jsonl`,
+imported and counted by `tests/test_census_gate.py` on every pull request; apparatus
+1.0-census]** — using only the checked-in data and the current code. Every command below was
+run as written; the output blocks are pasted, not typed.
 
 **What this reproduces:** that the vendored files are the ones we say they are (hash
 manifest); that every census verdict imports into the v2 ledger without the ledger inventing
@@ -12,9 +15,11 @@ credited `clean` while a belt it recorded says otherwise; and what the routing r
 capability map say about those rows under apparatus `1.0-census`.
 
 **What this does NOT reproduce:** the builder runs. The 1,071 verdicts are 863 distinct
-(repository, task) pairs — `[measured]` from `grades.jsonl`; 22 of the 24 configured public
-repositories have verdicts — run through Claude Code (Sonnet) in July 2026, on Claude Code
-credits, with the untracked `bench.py` grader (apparatus `1.0-census`). Nothing here re-runs
+(repository, task) pairs; 22 of the 24 configured public repositories have verdicts **[measured
+— n = 1,071 rows; method: the distinct repository and task pairs, and the repositories, of
+`grades.jsonl`, against the 24 entries of `configs.json`; apparatus 1.0-census]** — run
+through Claude Code (Sonnet) in July 2026, on Claude Code credits, with the untracked
+`bench.py` grader (apparatus `1.0-census`). Nothing here re-runs
 a model, re-executes a repository's tests, or re-grades a patch. You are checking the
 **ledger's internal consistency** and the **grader's re-derivation** from the recorded
 belts — not the belts' truth. §7 says exactly what that licenses.
@@ -67,7 +72,9 @@ Output tail (31 files; `grep -c ': OK'` → `31`, exit code `0`):
 ## 2. Import the census into a temporary `CRB_HOME`
 
 The verb is `crb ledger import-census`. It reads the 24 repo configurations, the 25 task
-files and `grades.jsonl`, and appends one `GradeRow` per verdict to `$CRB_HOME/ledger.jsonl`
+files **[measured — n = 24 configurations and 25 task files; method: the entries of
+`configs.json` and the files under `tasks/` in the vendored directory; apparatus
+1.0-census]** and `grades.jsonl`, and appends one `GradeRow` per verdict to `$CRB_HOME/ledger.jsonl`
 together with an *imported* evidence pack per row (the raw census line, hashed) so that "no
 pack ⇒ no Q1" holds even for history. A belt the census did not record stays `None`; it is
 never defaulted — that is the entire point of the `v3-legacy` belt set.
@@ -97,7 +104,9 @@ again changes nothing — every row is recognised by its evidence-pack hash:
 
 **`banked_grades.jsonl` is deliberately not imported.** Its 232 rows come from the earlier
 paired-factorial campaigns and record *fewer* belts than the census grader: 121 rows carry
-only `target_green`, 108 carry `target_green` + `tests_unmodified`, 3 carry none; belt 3
+only `target_green`, 108 carry `target_green` + `tests_unmodified`, 3 carry none **[measured —
+n = 232 rows; method: the belt keys present on each line of `banked_grades.jsonl`, counted;
+apparatus 1.0-census]**; belt 3
 (`no_new_failures`) exists only as a `new_failures` list whose emptiness may mean "none
 found" or "not run". Feeding the file to the importer stops at its first clean row:
 
@@ -146,8 +155,8 @@ check is `GET /api/v1/ledger/verify`, and `/api/v1/health` reports the `ledger` 
 ### 4.1 The CLI form
 
 `false_q1_total` in `crb.core.ledger` is what §3 already printed: for every row with
-`clean == True`, every belt **that row recorded** must be `True`. Three belts for
-`v3-legacy` rows, four for `v4`. The same function feeds `crb ledger stats`, `crb route`,
+`clean == True`, every belt **that row recorded** must be `True`: the core belts of its day
+for `v3-legacy` rows (all but `source_changed`), all four for `v4`. The same function feeds `crb ledger stats`, `crb route`,
 the capability map, the sign-off ledger (which returns 409 on a non-zero count) and the
 health probe.
 
@@ -207,11 +216,15 @@ v4         365   280    0                 41
 "unrecorded" as "failed". Query (b) is `FALSE_Q1_PREDICATE` in `crb.server.routes.signoffs`
 and the `ledger` health probe: it applies belt 4 only to rows whose belt set recorded it.
 Query (a′) is the same statement from the other side: among the 365 rows that *did* record
-belt 4, no clean row has it false (41 non-clean rows do — belt 4 was doing work).
+belt 4, no clean row has it false (41 non-clean rows do — belt 4 was doing work) **[measured —
+n = 365 four-belt rows; method: the imported rows whose belt set is `v4`, and among them the
+non-clean rows whose `source_changed` is false; apparatus 1.0-census]**.
 
 So the sentence the census licenses is precisely EVIDENCE-AND-CLAIMS §2(a): **"0 recorded
 `clean` rows violate their recorded acceptance predicates."** It says nothing about belt 4
-on the 706 legacy rows, which is unmeasured for them — not passed, not failed.
+on the 706 legacy rows, which is unmeasured for them — not passed, not failed **[measured —
+n = 706 three-belt rows; method: the imported rows whose belt set is `v3-legacy`, counted by
+`tests/test_census_gate.py`; apparatus 1.0-census]**.
 
 The appendix's second query, the failure split, on the census:
 
@@ -247,7 +260,7 @@ apparatus_version  belt_set   mode     n    clean  point  ci_low  ci_high  dq  e
 ```
 
 `n` is eligible trials (not disqualified, `gold_clean` not `False`), which is why the
-legacy row shows 705 of 706 and the v4 sighted row 214 of 221. The three rows reconcile to
+legacy row shows 705 of 706 and the v4 sighted row 214 of 221. The rows of the table reconcile to
 the CI gate's totals: clean 682 + 114 + 166 = **962**; dq 1 + 7 = **8**; errors **12**.
 
 The `belts` and `apparatus` columns are there so a reader sees instrument mixing. Here the
@@ -305,10 +318,10 @@ EOF
 > **The legacy-belt caveat, stated as EVIDENCE-AND-CLAIMS §5 states it:** *"The census ledger
 > that seeds this product (`grades.jsonl`, **1,071 rows**) was produced by the upstream
 > apparatus. **706 of the 1,071 rows were graded under three belts before belt 4
-> (`source_changed`) existed; 365 carry all four.** `[measured]` from the file itself: the
-> `source_changed` key is present on 365 rows and absent on 706."* — and: *"**No claim blends
-> apparatus versions.** 'Under apparatus 1.0-census, cell X was …' and 'under apparatus 2.0,
-> cell X is …' are two statements."*
+> (`source_changed`) existed; 365 carry all four.** **[measured — n = 1,071 rows; method: from
+> the file itself, the `source_changed` key is present on 365 rows and absent on 706; apparatus
+> 1.0-census]**"* — and: *"**No claim blends apparatus versions.** 'Under apparatus
+> 1.0-census, cell X was …' and 'under apparatus 2.0, cell X is …' are separate statements."*
 
 ```
 # Capability map — capability_class x size
@@ -332,7 +345,9 @@ rows=1071 · false-Q1=0 · policy=routing.v1 · apparatus=1.0-census
 Two things to read off this table before quoting it. First, every cell in it mixes
 `v3-legacy` and `v4` rows AND sighted and blind rows (only §5.1's grouping separates
 them), so each is a statement about three belts on most of its rows and about two
-different measurements of the same task. The two `deliver` cells, split the way a claim
+different measurements of the same task **[measured — n = 1,071 rows; method: the belt set
+and the mode of the rows in each cell of the table, read by `crb ledger stats` as §5.1
+shows; apparatus 1.0-census]**. The two `deliver` cells, split the way a claim
 must be quoted (mode × belt set; Wilson 95%; `crb ledger stats --by
 class,size,mode,belt_set`; DQ rows excluded):
 
@@ -347,7 +362,9 @@ class,size,mode,belt_set`; DQ rows excluded):
 
 The blended 94.4% / 92.8% in the table above is what the map computed under `mode=all`;
 it is not a rate to quote — the four-belt sighted rate is ~89% and the blind rate ~85%,
-each with an interval that does not include the blended number. Second, the `capability_class` axis here is `crb`'s
+each with an interval that does not include the blended number **[measured — n = 396 and 391
+rows in the two blended cells; method: the split by mode and belt set in the table above,
+from `crb ledger stats --by class,size,mode,belt_set`; apparatus 1.0-census]**. Second, the `capability_class` axis here is `crb`'s
 deterministic, path-derived class — not the LLM-assigned labels in `class_labels.json`,
 which are kept as labels only — and the critical-friend review (§4.2, point 4) found that
 axis degenerate on library repositories: `bug.fix` absorbs behaviour changes and features.
@@ -388,7 +405,9 @@ condition (the test's docstring: do not "fix the test").
 
 Numbers that appear above but are **not** in the gate — 927 sighted rows, the 682 / 114 /
 166 clean split, the 33 routing cells, 8 `deliver` cells — are derived from the same rows by
-the commands shown; they are reproducible, not asserted.
+the commands shown; they are reproducible, not asserted **[measured — n = 1,071 rows; method:
+the commands shown in §5 over the imported census, re-run for this page on 2026-09-27;
+apparatus 1.0-census]**.
 
 ## 7. What you may claim after running this
 
@@ -399,9 +418,11 @@ the commands shown; they are reproducible, not asserted.
 > - "The vendored census ledger (`data/census-2026-07-08`, 1,071 rows, sha256-manifested)
 >   imports into `crb` 2.0 with 0 skipped rows, the hash chain verifies, and **0 rows are
 >   credited clean while any belt they recorded is not `True`** (false-Q1, mechanical = 0)."
->   **[measured]** — re-derivable by anyone from §1–§4.
+>   **[measured — n = 1,071 rows; method: the import, the chain check and the false-Q1
+>   query of §1 to §4, re-derivable by anyone; apparatus 1.0-census]**
 > - "This holds over three belts for 706 rows and four belts for 365; belt 4 is unmeasured,
->   not passed, for the 706." **[measured]**
+>   not passed, for the 706." **[measured — n = 1,071 rows; method: the rows counted by
+>   belt set after the import of §2; apparatus 1.0-census]**
 > - "Under apparatus `1.0-census`, builder `claude-code-workflow` (Sonnet), the
 >   retrospective commit-replay corpus graded by each repository's own held-out tests
 >   shows, for the class × size cell (`bug.fix`, `XS`), sighted four-belt rows 49/55 clean
@@ -409,7 +430,9 @@ the commands shown; they are reproducible, not asserted.
 >   sighted three-belt legacy rows 274/281 (97.5%, [0.95, 0.99]), false-Q1 = 0 in each" —
 >   and likewise for any other cell in §5, *split by mode and belt set, with its n,
 >   interval, builder and apparatus attached*; never the blended 374/396 (94.4%), which
->   pools two measurements of the same task and two belt sets. **[measured, retrospective]**
+>   pools two measurements of the same task and two belt sets. **[measured, retrospective —
+>   n = 55, 60 and 281 rows in the three quoted splits; method: `crb ledger stats --by
+>   class,size,mode,belt_set` over the imported census, as §5 shows; apparatus 1.0-census]**
 > - "A forged verdict in this ledger is refused at read, and any edit breaks the chain at
 >   the edited row" (§8). **[measured]**
 >
@@ -449,8 +472,9 @@ exit 1
 
 ## 9. Known limits and findings
 
-* **The builder runs are not reproduced.** 863 distinct tasks on 22 repositories, Claude
-  Code credits, July 2026; the `bench.py` grader is untracked. Only the ledger's consistency
+* **The builder runs are not reproduced.** 863 distinct tasks on 22 repositories **[measured
+  — n = 1,071 rows; method: the distinct repository and task pairs of `grades.jsonl`;
+  apparatus 1.0-census]**, Claude Code credits, July 2026; the `bench.py` grader is untracked. Only the ledger's consistency
   and the grader's re-derivation
   from recorded belts are checked. A reviewer who wants belt truth re-established must run
   the tasks again under apparatus 2.0 — a different, and separately reported, ledger.
@@ -458,7 +482,9 @@ exit 1
   ledger to accept a clean row honestly, so it contributes no number anywhere.
 * **A refused import is not atomic.** `crb ledger import-census` appends row by row; when the
   banked file was fed in by mistake, two non-clean rows had been appended before the first
-  clean row was refused. Point `--path` at a fresh file when experimenting, or re-verify
+  clean row was refused **[measured — n = 3 rows read; method: the first lines of
+  `banked_grades.jsonl`, whose first two rows are not clean and whose third is; apparatus
+  1.0-census]**. Point `--path` at a fresh file when experimenting, or re-verify
   afterwards; in the intended use (one import of `grades.jsonl` into an empty workdir) the
   question does not arise.
 * **The class axis** of every cell above is path-derived and coarse on these repositories

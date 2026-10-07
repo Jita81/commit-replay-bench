@@ -378,13 +378,13 @@ A dedicated `SECURITY.md` and `THREAT-MODEL.md` land in P7.
 
 Every stage emits a `StepEvent` (`crb.observability.events`): `trace_id` = run,
 `step_id` = task, `stage ∈ {mine, prep, build, grade, ledger, oracle, factory, system}`,
-`action` from the vocabulary in [API.md](API.md#event-vocabulary) (about a hundred
-actions — `mine.candidate`, `grade.belt`, `delivery.opened`, `run.cancel_requested`, … —
-each with its payload keys and consumer; `tests/test_event_vocabulary.py` keeps the table
+`action` from the vocabulary in [API.md](API.md#event-vocabulary) (every action —
+`mine.candidate`, `grade.belt`, `delivery.opened`, `run.cancel_requested`, … — with its
+payload keys and consumer; `tests/test_event_vocabulary.py` keeps the table
 in step with the code). Sinks: `MemorySink`, `JsonlSink`, `MultiSink`, `CallbackSink`; the
 server adds an events table and SSE; the worker's emitter also feeds a metering sink.
 
-Prometheus is two expositions, because the registry is per process: the **api** serves
+Prometheus has one exposition per process, because the registry is per process: the **api** serves
 `crb_http_requests_total{method, route, status}`, `crb_http_request_duration_seconds`,
 `crb_ledger_rows` and `crb_false_q1_total` (recounted on every scrape; **must stay 0** — a
 non-zero value is a stop condition) at `/metrics`; the **worker** serves
@@ -407,9 +407,10 @@ by reference, because a copy of it drifted (docs/PREVENTION.md P-126).
 All tables carry `created` (UTC ISO-8601) and `actor`. Tables marked **append-only** have
 DB triggers forbidding `UPDATE` and `DELETE`. The hash chain (`prev_hash` / `row_hash`,
 ADR-0002) is the ledger's: `grades`, `signoffs`, `reviews` and the factory evidence carry
-it; `events` is append-only by trigger only (no chain columns — every system event,
-`repo.created`, `run.cancel_requested`, `user.*`, is one plain envelope row; chaining it is
-backlog F51 in [the front-end review](reviews/2026-09-17-enterprise-front-end.md)).
+it; `events` — the audit trail, where every system event (`repo.created`,
+`run.cancel_requested`, `user.*`, `signoff.*`, `posture.unsealed_override`) is one envelope
+row — carries its own chain over the whole table in id order, set in each writer's flush
+(ADR-0029), so `/ledger/verify` and `crb ledger verify --store` can prove it was not altered.
 
 | Table | Key columns | Notes |
 |---|---|---|
@@ -418,7 +419,7 @@ backlog F51 in [the front-end review](reviews/2026-09-17-enterprise-front-end.md
 | `tasks` | `task_id` (sha), `repo`, `subject`, `authored`, `pool`, `size`, `capability_class` (resolved), `language`, `test_files`, `src_files`, `target_tests`, `belt_scope`, `baseline_failing`, `red_checked`, `gold_clean`, `gold_note`; in `spec_json` also `path_class`, `intent` (label or null), `class_source` | `TaskSpec.to_dict()` shape (§7.5). A `label` run rewrites `spec_json` + the `capability_class` column via the same upsert as `mine`. |
 | `attempts` | `id`, `run_id`, `task_id`, `builder`, `mode`, `turns`, `tokens_in/out`, `cost_usd`, `latency_s`, `transcript_ref` (opt-in) | `BuilderRef` shape. |
 | `grades` **(append-only)** | `row_id`, `repo`, `task_id`, `clean`, four belts, `disqualified`, `dq_reason`, `error`, `evidence_pack_hash`, `apparatus_version`, `belt_set ∈ v5\|v4\|v3-legacy`, `provenance`, cell fields, cost/latency, `actor`, `created`, `prev_hash`, `row_hash` | `GradeRow` — same invariants as the JSONL ledger, checked by a DB constraint **and** in Python before write. |
-| `events` **(append-only)** | `StepEvent` envelope columns | SSE reads from here. Trigger-protected, **not** hash-chained (F51). |
+| `events` **(append-only)** | `StepEvent` envelope columns, `prev_hash`, `row_hash` | SSE reads from here. Trigger-protected and hash-chained in id order (ADR-0029, revision 0013); a unique `prev_hash` means the chain cannot fork. |
 | `oracle_scores` | `task_id`, `mutants`, `killed`, `invalid`, `equivalent`, `strength`, `budget`, `apparatus_version` | Hygiene-adjusted mutation strength (P2). |
 | `signoffs` **(append-only)** | `cell`, `route`, `actor`, `reason`, `revoked_by` | 409 on any false-Q1 in the cell; revocation is a new row. |
 | `factory_backlog` / `factory_tasks` / `factory_evidence` | frozen backlog hash; per-item DoR gaps, RED proof, PR ref, review verdict | P6. |
@@ -478,7 +479,7 @@ sample per repo" takes minutes; `counts_json` of a `label` run carries the per-c
 counts, mean confidence (with its n), the unclassified count and the labeller's cost.
 
 Layering: `crb.core.taxonomy` (data) ← `crb.core.classify` (label, evidence, resolution,
-reply parser, prompt) ← `crb.core.spec` (task spec); `crb.builders.labeller` adds the two
+reply parser, prompt) ← `crb.core.spec` (task spec); `crb.builders.labeller` adds its
 transports (OpenAI-compatible chat; `claude -p` with `--tools ""`, one turn, structured
 output, the same `auth = api_key | cli` environment as the builder). Extending the
 vocabulary changes the instrument (§7.4).
@@ -543,7 +544,7 @@ vocabulary changes the instrument (§7.4).
 - `pyproject.toml` layers contract marks not-yet-existing packages optional (parenthesised);
   each package's landing PR must remove its parentheses.
 - Reference sandbox images ship for python, node and go (`deploy/sandbox/`, proven from
-  inside by CI **[measured — `tests/test_sandbox_images_docker.py`, 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**); a
+  inside by CI **[measured — `tests/test_sandbox_images_docker.py`, n = 10 tests × 3 images, plus the sandbox and sealed-builder suites on the python image, run as CI's `sandbox-images` smoke step (`-m "not network"`, strict warm-up, any skip fails the step): 47 passed / 0 skipped on images built from this tree, colima / Docker 29.5.2, 2026-09-22; the job runs that step on every pull request — PR #44 run 35678358686 on the merged head 4a64fe3, 44 passed / 0 skipped, before this commit added the setuid and strict-warm-up tests; hadolint on each Dockerfile in the same job; apparatus 2.2]**); a
   repository's dependencies are still the operator's extension of one, and a JVM image waits
   on the Maven runner's docker branch (`deploy/sandbox/README.md` §6) **[aspiration]**.
 

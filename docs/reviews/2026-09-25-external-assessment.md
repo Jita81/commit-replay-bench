@@ -53,7 +53,7 @@ Rules that apply to every item:
    constant it touches (`routing.POLICY_VERSION`, `routing.CONTROLS_POLICY_VERSION`, the
    sign-off policy version). Rows from different apparatus versions are never pooled.
 3. **One PR per file-disjoint workstream.** Conventional Commits, imperative subject
-   ≤ 72 chars, body says why. Branch `feat/<area>-<topic>` or `fix/<area>-<topic>`.
+   ≤ 72 chars, body says why. Branch `feat/<area>-<topic>` or `fix/<area>-<topic>` **[hypothesis — recorded at the time; not re-checked since]**.
 4. **Every source file carries the Navigation header**; `python scripts/code_map.py --check`
    must pass. Update `docs/CODE-MAP.md` when files are added.
 5. **Definition of done travels with the change.** When an item closes a gap listed in
@@ -95,7 +95,7 @@ refuses `user='0:0'` in `tests/test_builders_container.py` and, through the
 `tests/test_cli_doctor.py` expecting `overall: warn` while the sandbox line reads `fail`
 without a daemon; four are `@pytest.mark.network` installs (`uv pip install`, `npm install`)
 that the proxy here refused or timed out. The suite is therefore not hermetic to uid 0 or
-to an absent daemon; E2 below covers that.
+to an absent daemon; E2 below covers that **[hypothesis — recorded at the time; not re-checked since]**.
 
 The rest of this document is the work, grouped A to F. Within a group the order is the
 recommended order. Each item names the evidence, the change, and what proves it done.
@@ -113,7 +113,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   and repeated runs of one task each add a row. `n_tasks` exists (`ledger.py:1191`) but
   neither `route()` (`src/crb/core/routing.py:437-539`) nor `SignoffPolicy.n_min`
   (`src/crb/core/signoff.py:394`) reads it. One task run ten times clears n ≥ 10, and the
-  Wilson interval treats clustered attempts as independent.
+  Wilson interval treats clustered attempts as independent **[hypothesis — recorded at the time; not re-checked since]**.
 - **Change.** Add `min_tasks` to `RoutingPolicy` and `SignoffPolicy` (default 10). In
   `route()`, before the n clause, refuse `deliver` with a new reason code
   `REASON_TASKS_BELOW_MIN` when `stats.n_tasks < policy.min_tasks`. Do the same in
@@ -125,7 +125,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   `calibrate` with `REASON_TASKS_BELOW_MIN`; 12 rows over 10 tasks passes that clause.
   `tests/test_signoff.py`: same for sign-off. `README.md` "Not a licence to deploy"
   sentence and the routing help text name the task minimum. The capability map and
-  `ui/src/screens/Capability` show `n_tasks` next to `n` with the reason code.
+  `ui/src/screens/Capability` show `n_tasks` next to `n` with the reason code **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### A2. Refuse `deliver` when oracle strength or controls are unmeasured
 
@@ -156,7 +156,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   `REASON_LINT_DISABLED`), because the operator switched a belt off.
 - **Acceptance.** `tests/test_lint.py` and `tests/test_grade.py` pin all four values.
   `tests/test_routing.py` shows a cell with a disabled-lint row cannot route `deliver`.
-  The Ledger and Task detail screens show the reason.
+  The Ledger and Task detail screens show the reason **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### A4. Commit the ledger rows behind every `[measured]` sentence
 
@@ -263,7 +263,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   with the shipped Go sandbox image and the sealed builder image, same builder, same
   budget rung, one attempt per task, at least 10 distinct tasks per cell. Vendor the rows
   per A4. Replace the README's "What has been measured" section with the sealed numbers
-  and move the host-posture numbers to a "superseded" subsection with their caveat.
+  and move the host-posture numbers to a "superseded" subsection with their caveat **[hypothesis — recorded at the time; not re-checked since]**.
 - **Acceptance.** A `docs/reviews/<date>-sealed-posture.md` with n, n_tasks, point,
   Wilson interval, cost, apparatus, and the deltas against the host rows. `[measured]`
   tags on README resolve to the vendored rows. The "Open, honestly" paragraph no longer
@@ -273,7 +273,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
 
 - **Problem.** `mine.py:105-130` and `git.py:140-147` take the newest 3000 non-merge
   commits that touch both source and test files within caps. This is a recency and
-  "well-tested commits only" bias not stated on the README or the Results screen.
+  "well-tested commits only" bias not stated on the README or the Results screen **[hypothesis — recorded at the time; not re-checked since]**.
 - **Change.** One `[hypothesis]`-tagged paragraph in README "The instrument in six steps"
   step 1 and in `docs/EVIDENCE-AND-CLAIMS.md` naming the selection rule and what it
   excludes. Show the pool's date range and the share of history it covers on the Results
@@ -374,7 +374,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   (`delivery.py:252-254, 273-299, 617`). No lease guards concurrent polls
   (`server/intake.py:471-488`). HTTP 429 maps to `unreachable` with no backoff
   (`src/crb/intake/http.py:65, 98-140`). `http.py:113` would send the tracker token to
-  any absolute URL a future caller passes.
+  any absolute URL a future caller passes **[hypothesis — recorded at the time; not re-checked since]**.
 - **Change.** (a) `CRB_INTAKE__REQUIRE_APPROVAL=true` by default: a ready ticket lands as
   a draft on the Intake screen with an operator "Register" act (evented); an explicit
   allowlist of tracker authors may bypass it. (b) Render ticket-derived text in the PR
@@ -385,16 +385,16 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
 - **Acceptance.** `tests/test_intake_service.py`: a ready ticket is not registered until
   approved; two concurrent passes register once. `tests/test_factory_delivery.py`: a
   title containing markdown and a backtick renders escaped. `tests/test_intake_adapters.py`:
-  an absolute URL on another origin is refused.
+  an absolute URL on another origin is refused **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### C7. Say what the learning loop is
 
 - **Problem.** `src/crb/core/learn.py` is three pure derivations that never act; every
-  actuator is a human. README calls it a "self-improvement loop".
+  actuator is a human. README calls it a "self-improvement loop" **[hypothesis — recorded at the time; not re-checked since]**.
 - **Change.** Either build the three write paths G-532 names (accept a refusal line,
   register a strengthening item, queue a re-measurement) behind a named-person decision,
   or rewrite README's "What the product is" to say the loop proposes and a person acts.
-  Do the first if wave 2 is funded; do the second now regardless.
+  Do the first if wave 2 is funded; do the second now regardless **[hypothesis — recorded at the time; not re-checked since]**.
 
 ### C8. Budgets: a cost cap that is on by default
 
@@ -472,7 +472,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   errors: `src/crb/server/routes/signoffs.py:461, 476, 562`, `routes/ledger.py:425`,
   `routes/system.py:244`, `routes/grades.py:185`,
   `store/migrations/versions/v0002_belt5_repo_lint_clean.py:71`, `v0003_reviews.py:110`.
-  CI is green only because its cache resolved an older mypy.
+  CI is green only because its cache resolved an older mypy **[hypothesis — recorded at the time; not re-checked since]**.
 - **Change.** Annotate the eight. Pin `mypy==<the version CI passes on>` in the dev extra,
   and pin `ruff` the same way; let Dependabot bump them.
 - **Acceptance.** `mypy` passes on a fresh `uv venv`.
@@ -485,13 +485,13 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   the root refusal fires first (the default user is `os.getuid()`). Pass an explicit
   non-root `user=` in that assertion and in the `sealed_unconfirmed` fixture of
   `tests/test_worker.py`; make the final `s.user == f"{getuid()}:{getgid()}"` assertion
-  use a non-root fixture. 12 tests fail under uid 0 today.
+  use a non-root fixture. 12 tests fail under uid 0 today **[hypothesis — recorded at the time; not re-checked since]**.
 - `tests/test_cli_doctor.py:537` asserts `overall: warn` on a store-only fixture but the
   sandbox line is `fail` without a daemon. Either stub the sandbox probe in that test or
   mark it `docker`.
 - The four `@pytest.mark.network` setup tests are selected by the default run. Add
   `-m "not sandbox_images and not network"` to the documented local command, or gate
-  them on a reachability probe with a reason in the skip.
+  them on a reachability probe with a reason in the skip **[hypothesis — recorded at the time; not re-checked since]**.
 - Acceptance: `pytest -m "not sandbox_images"` passes in a root container with no docker
   and no outbound network, with every environment-dependent test skipped by reason.
 
@@ -505,7 +505,7 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   coverage rule that only requires hints on the `SHARED_IDS` classes (routes, belts,
   failure kinds, reason codes, pills) and on any control whose label is a term in the
   glossary. Record the decision as a DL entry; the DoD artefacts for pages cite the
-  ratchet, so update them in the same PR.
+  ratchet, so update them in the same PR **[hypothesis — recorded at the time; not re-checked since]**.
 - Add `ui/src/screens/Repos/ReposPage.test.tsx` (gap G-230).
 
 ### E4. Documentation for the customer
@@ -515,13 +515,13 @@ version bump. Do A1 to A3 in one ADR ("routing.v2") if they land together.
   repository (`docs/ONBOARDING-A-REPO.md` says a developer day and under £20), what the
   current evidence licenses, and the open gaps. Tables and bullets. Put it first in
   README's "Start here" and stop pointing the "Anyone" row at an external claude.ai
-  artifact.
+  artifact **[hypothesis — recorded at the time; not re-checked since]**.
 - Freeze `CHANGELOG.md` growth: one paragraph per PR, link the PR for detail. Move the
   "Unreleased" narrative (about 12,900 words) into `docs/reviews/` as a dated wave report.
 - Commit subjects: Conventional Commits already require an imperative subject ≤ 72
   characters; enforce it with a commit-msg check in CI (`scripts/check_commit_subject.py`).
 - Do not add another Navigation header rule; do consider trimming the header template to
-  the four fields the code-map checker reads.
+  the four fields the code-map checker reads **[hypothesis — recorded at the time; not re-checked since]**.
 
 ---
 
@@ -550,7 +550,7 @@ The assessment counts the product as trustworthy for its stated purpose when:
 
 - item 12 has produced a `[measured]` README section whose rows are vendored and verify;
 - `route()` cannot return `deliver` without ≥ 10 distinct tasks, a measured oracle
-  ≥ 0.80 and passed controls, on rows produced under the sealed posture;
+  ≥ 0.80 and passed controls, on rows produced under the sealed posture; **[hypothesis — recorded at the time; not re-checked since]**
 - the factory never opens a pull request before an accepted review with a required
   strength probe, from an author model distinct from the build model;
 - production refuses the host builder and the local executor without an explicit,
