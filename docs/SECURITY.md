@@ -695,9 +695,10 @@ machine:
   `/health` and `/version` say `on` only to a caller the route would sign in. Anyone else
   reads `off`, the same as a stack without it, so another machine cannot tell whether it is
   on. `crb doctor` reads the settings directly, so the operator is never told `off` while it
-  is on. [measured — `tests/test_server_dev_autologin.py::TestAuditAndReporting`, four
-  callers that could not sign in each read `off` on both routes, and
-  `ui/src/components/DevAutologinBanner.test.tsx`, apparatus 2.2]
+  is on. [measured — n = 8 test cases in
+  `tests/test_server_dev_autologin.py::TestAuditAndReporting` (four callers that could not
+  sign in each read `off` on both routes) and 5 in the banner's two `describe` blocks of
+  `ui/src/components/DevAutologinBanner.test.tsx`, apparatus 2.2; pass/fail, not a rate]
 
 **Who can reach it.** Anyone who can open a TCP connection to the API from the machine
 itself: every local user account and every local process, not only the person who switched
