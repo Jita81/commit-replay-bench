@@ -21,21 +21,14 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               / kind failing cleanly, stale-claim reclaim with event seq resuming, the heartbeat
               thread, ``run_forever`` processing then stopping and surviving a broken iteration,
               stage routing, the ``--once`` entrypoint and settings from args / env, that a
-              run where every attempt errors is ``failed`` not ``succeeded``, and that a sealed
-              attempt whose container kill went UNCONFIRMED is visible (``run.kill_unconfirmed``
-              on the trace, the note on the run's error, ``kill_confirmed: false`` in the pack)
-              and reaped (the loop's pass writes ``run.kill_reaped`` / ``run.kill_reap_failed``;
-              the check-in row counts what is pending); that the run's own docker executor
-              (the grade stage's test run) reports an unconfirmed kill through the same seam
-              (event under the task, note, reaper queue); and that a reap pass is budgeted to
-              ``heartbeat_s / 2`` so a daemon that answers nothing cannot hold the loop past
-              the worker's liveness bound — the check-in still lands. And (ADR-0023) that a
-              production worker stamps the unsealed-production override into every run's
-              apparatus and every pack, and refuses a run that asks for the local executor
-              without it. And that the idle loop calls every idle step under its guard and
-              survives each one raising (P-354), and that the production path stops an
-              unsigned deliver cell before any spend unless the setting turns the clause off
-              (ADR-0018).
+              run where every attempt errors is ``failed`` not ``succeeded``, the factory run
+              kind, and the ADR-0019 route gate reading the deployment's posture only; that the
+              idle loop calls every idle step under its guard and survives each one raising
+              (P-354); and that the production path stops an unsigned deliver cell before any
+              spend unless the setting turns the clause off (ADR-0018). The unconfirmed-kill
+              reaper lives in tests/test_worker_reaper.py and the posture rules (ADR-0023,
+              ADR-0019's gate) in tests/test_worker_posture.py — split out so the suite's
+              shards stay inside their time budget (files are the shard unit).
 How:          ``Harness`` wires a fresh store, the queue, a ``DbEventSink`` and the fake ``gold``
               / ``noop`` builder around ``Worker.run_one``; no docker, no network, no model.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -59,12 +52,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import stat
-import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -73,7 +63,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import crb.builders as builders_pkg
-from crb.builders import adapter as adapter_mod
 from crb.builders.base import (
     STOP_DONE,
     STOP_MAX_TURNS,
@@ -82,9 +71,8 @@ from crb.builders.base import (
     BuildBrief,
     BuildOutcome,
 )
-from crb.builders.container import BuilderContainerSettings, SealedCheckout, UnconfirmedKill
 from crb.core.evidence import verify_pack
-from crb.core.execution import ExecResult, LocalExecutor, SandboxUnavailable
+from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.ledger import verify_chain
 from crb.core.library import ACTOR_FRESHNESS, LibraryEntry, Provenance
 from crb.core.oracle import controls as nc
@@ -95,7 +83,6 @@ from crb.core.workspace import Workspace
 from crb.observability.events import JsonlSink, StepStatus
 from crb.server import worker as worker_mod
 from crb.server import worker_main
-from crb.server.reaper import ContainerReaper
 from crb.server.worker import Worker, WorkerSettings, docker_settings_for, stage_for
 from crb.store import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, read_events
@@ -108,7 +95,7 @@ from crb.store.jobs import (
     JobQueue,
 )
 from crb.store.library import DbLibraryLedger, new_act
-from crb.store.models import Repo, Run, Task, WorkerRow
+from crb.store.models import Event, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
 from fixtures.proven_cells import every_cell_proven
 
@@ -179,6 +166,17 @@ class FakeBuilder:
                 done=False,
                 stop_reason=STOP_MODEL_ERROR,
                 errors=("model_error: You've hit your limit · resets 3pm",),
+                budget=budget,
+            )
+        if self.behaviour == "login_refused":  # the pilot's canary (D1): the login answered 401
+            return BuildOutcome(
+                **base,
+                done=False,
+                stop_reason=STOP_MODEL_ERROR,
+                errors=(
+                    "model_error: authentication failed (HTTP 401) — run `claude login` as "
+                    "the worker's user",
+                ),
                 budget=budget,
             )
         return BuildOutcome(**base, done=False, stop_reason=STOP_MAX_TURNS, turns=1, budget=budget)
@@ -407,6 +405,113 @@ def test_replay_stops_after_consecutive_provider_outages(h: Harness) -> None:
     assert again.status == STATUS_FAILED and again.error.startswith("all 1 attempt(s) errored")
 
 
+def test_a_build_that_meets_a_refused_login_records_the_login_invalid(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pilot D1 (P-435): the canary met a login that answered HTTP 401. The worker now
+    records that login ``invalid`` the moment a build meets the refusal — a
+    ``builder.login.verified`` event (``trigger: build``) — so the next submit on it is refused
+    at once, without spending a verify; a provider's usage limit records nothing."""
+    from crb.builders.claude_code import LoginCheck, default_auth
+    from crb.server import builder_login as bl
+
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "fake",
+        bl.LoginVerifier(lambda a, b: LoginCheck("ok"), lambda a: ("keychain", ""), default_auth),
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="outage", **cfg)
+    h.enqueue("replay", ladder_json=["fake:m0"], params_json={"outage_stop": 0})
+    h.run_one()
+    with h.factory() as s:
+        assert bl.latest_verification(s, "fake", "cli") is None  # the provider's limit: not a login
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="login_refused", **cfg)
+    h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    h.run_one()
+    with h.factory() as s:
+        last = bl.latest_verification(s, "fake", "cli")
+        assert last is not None
+        assert last["status"] == "invalid" and last["trigger"] == bl.TRIGGER_BUILD
+        assert "authentication failed (HTTP 401)" in last["detail"]
+        state = bl.login_state(s, "fake", "cli", ttl_s=600)
+    assert state.state == bl.STATE_INVALID
+
+
+def test_a_failed_login_record_never_replaces_the_builds_own_outage(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-731: recording the refused login is a database write after the build returned. When
+    it raised, ``core_run`` caught it as a builder failure and wrote the database error in
+    place of the provider's refusal — a ``harness`` row, counted, its cause lost. The record
+    is best effort: the attempt stays the build's own ``outage``."""
+    from crb.server import worker as worker_mod
+
+    def broken(*a: object, **kw: object) -> bool:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(worker_mod, "record_refused_login", broken)
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="login_refused", **cfg)
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    h.run_one()
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))
+    assert row.failure_kind == "outage", row.error
+    assert "authentication failed (HTTP 401)" in row.error
+
+
+def test_a_queued_run_whose_login_was_recorded_invalid_is_failed_before_any_build(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: the gate held at submit only. A run queued while its login worked was
+    still claimed and started after that login was recorded invalid — the overnight queue's
+    shape — spending a build attempt and writing an outage row. At claim the worker now reads
+    the login from the cache (no verify, no model call) and fails the run before any build,
+    naming the login, with a ``builder.login.refused`` event."""
+    from crb.builders.claude_code import LoginCheck, default_auth
+    from crb.server import builder_login as bl
+
+    built: list[str] = []
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "fake",
+        bl.LoginVerifier(lambda a, b: LoginCheck("ok"), lambda a: ("keychain", ""), default_auth),
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: (
+        built.append("fake") or FakeBuilder(behaviour="gold", **cfg)
+    )
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    bl.record_verification(
+        h.factory,
+        "fake",
+        "cli",
+        LoginCheck("invalid", "authentication failed (HTTP 401)"),
+        trigger=bl.TRIGGER_SETTINGS,
+        resolution=("keychain", ""),
+    )
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith(bl.LOGIN_INVALID_CODE), done.error
+    assert "fake (auth cli" in done.error and "Nothing was built" in done.error
+    assert built == []  # no builder was constructed, nothing spent
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    with h.factory() as s:
+        refused = list(s.execute(select(Event).where(Event.action == bl.REFUSED_ACTION)).scalars())
+    assert [e.payload_json["trigger"] for e in refused] == [bl.TRIGGER_CLAIM]
+    assert refused[0].payload_json["run_id"] == run.id
+    assert any(e.action == "run.refused" for e in h.events(run.id))
+
+
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:
     run = h.enqueue(
         "replay",
@@ -490,342 +595,6 @@ def test_cancel_requested_before_start_is_honoured(h: Harness) -> None:
     assert h.worker.run_once() is None  # the claim finalises the cancel; nothing to execute
     assert h.queue.get(run.id).status == STATUS_CANCELLED  # type: ignore[union-attr]
     assert FakeBuilder.briefs == []
-
-
-# --- an unconfirmed container kill is visible and reaped ----------------------------------------
-
-
-class UnconfirmedSession:
-    """Stands in for ``ContainerSession`` (no daemon): the builder runs on the sealed
-    checkout host-side, and the session reports ONE container whose kill went unconfirmed."""
-
-    container: ClassVar[str] = "crb-build-fake-0badc0de"
-
-    def __init__(
-        self, settings: BuilderContainerSettings, checkout: SealedCheckout, **kw: Any
-    ) -> None:
-        self.settings = settings
-        self.checkout = checkout
-
-    def __enter__(self) -> UnconfirmedSession:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        return None
-
-    def overrides_for(self, builder: str) -> dict[str, Any]:
-        return {}
-
-    def unconfirmed_kills(self) -> list[UnconfirmedKill]:
-        return [UnconfirmedKill(container=self.container, bound_s=10.0)]
-
-
-def _scripted_docker(dir_: Path, *, gone: bool) -> str:
-    """A ``docker`` for the reaper: ``inspect`` answers "No such container" (gone) or
-    Running=true (never lets go); ``rm -f`` succeeds or fails with it. A daemon that is slow
-    to answer is ``_SlowDaemon``, in process (P-014)."""
-    dir_.mkdir(parents=True, exist_ok=True)
-    script = dir_ / "docker"
-    inspect = 'echo "Error: No such container: $4" >&2; exit 1' if gone else "echo true"
-    rm = ":" if gone else "exit 1"
-    script.write_text(f'#!/bin/sh\ncase "$1" in\n  inspect) {inspect} ;;\n  rm) {rm} ;;\nesac\n')
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
-    return str(script)
-
-
-def _realistic_heartbeat(h: Harness, heartbeat_s: float = 2.0) -> None:
-    """The harness polls at 50 ms; a reap pass is budgeted to ``heartbeat_s / 2``, so a
-    test that expects a scripted ``docker`` to be reached in one pass needs a real one."""
-    h.worker.settings = replace(h.worker.settings, heartbeat_s=heartbeat_s)
-
-
-@pytest.fixture
-def sealed_unconfirmed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
-) -> None:
-    """The worker's docker builder posture with the session doubled: every sealed attempt
-    reports an unconfirmed kill. The worker runs as uid 0 here (a root container), so the
-    posture must name its non-root user rather than inherit the worker's uid; pytest's base
-    temporary directory is created first because its ownership check reads ``os.getuid``."""
-    tmp_path_factory.getbasetemp()
-    monkeypatch.setattr(os, "getuid", lambda: 0)
-    monkeypatch.setattr(os, "getgid", lambda: 0)
-    monkeypatch.setenv("CRB_BUILDER__EXECUTOR", "docker")
-    monkeypatch.setenv("CRB_BUILDER__USER", "10001:10001")
-    monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
-    monkeypatch.setattr(adapter_mod, "SEALABLE_BUILDERS", frozenset({"fake"}))
-    real = worker_mod.build_fn_for
-
-    def with_double(*a: Any, **kw: Any) -> Any:
-        return real(*a, **{**kw, "session_factory": UnconfirmedSession})
-
-    monkeypatch.setattr(worker_mod, "build_fn_for", with_double)
-
-
-def _worker_row(h: Harness) -> WorkerRow:
-    with h.factory() as s:
-        row = s.get(WorkerRow, "w-test")
-        assert row is not None
-        return row
-
-
-def test_unconfirmed_kill_is_recorded_on_the_run_and_queued_for_the_reaper(
-    h: Harness, sealed_unconfirmed: None
-) -> None:
-    """A cancelled sealed attempt whose container the daemon never reported stopped: the
-    run still ends ``cancelled`` (it did stop building) but never silently — a system
-    ``run.kill_unconfirmed`` (status error) on its trace, the by-hand note on its error,
-    ``kill_confirmed: false`` in the attempt's evidence pack, the container in the reaper's
-    durable queue, and the check-in row counting it for the health probe."""
-    green_sha = h.pyrepo.add_green_commit()
-    h.add_task(
-        h.pyrepo.feat_task(
-            task_id=green_sha,
-            subject="second",
-            test_files=[pr.TEST_CALC],
-            target_tests=[pr.TEST_CALC],
-            baseline_failing=[],
-            authored=h.pyrepo.repo.author_date(green_sha),
-        )
-    )
-    _seed_qualified(h, h.pyrepo.feat_task())
-    _seed_qualified(h, h.pyrepo.feat_task(task_id=green_sha, baseline_failing=[]))
-    run = h.enqueue("replay", params_json={"canary": False})
-
-    def cancel_during_build(_ws: Workspace, _brief: BuildBrief) -> None:
-        h.queue.request_cancel(run.id, actor="tester")
-
-    FakeBuilder.hook = cancel_during_build
-    done = h.run_one()
-    name = UnconfirmedSession.container
-    assert done.status == STATUS_CANCELLED  # still cancelled: it did stop building
-    assert done.error == (
-        f"container {name} may still be running — it will be reaped by the worker; "
-        f"`docker rm -f {name}` reaps it by hand"
-    )
-    events = h.events(run.id)
-    (ev,) = [e for e in events if e.action == "run.kill_unconfirmed"]
-    assert ev.stage == "system" and ev.status == StepStatus.ERROR
-    assert ev.payload == {"container": name, "run_id": run.id, "bound_s": 10.0}
-    assert name in ev.error_message and "may still be running" in ev.error_message
-    # the pack says so — a reader of the row's evidence sees the unconfirmed kill
-    (row,) = list(h.worker.ledger.rows(run_id=run.id))  # the one task built before the cancel
-    assert ev.task_id == row.task_id
-    pack = h.worker.ledger.get_pack(row.evidence_pack_hash)
-    assert pack is not None and verify_pack(pack)
-    assert pack["notes"]["kill_confirmed"] is False and pack["notes"]["container"] == name
-    # queued durably, and counted on the worker's row
-    assert [e.container for e in h.worker.reaper.pending()] == [name]
-    assert (h.home / "unconfirmed-containers.json").exists()
-    assert _worker_row(h).unconfirmed_containers == 1
-
-
-def test_reaper_pass_reaps_and_records_on_the_run_trace(
-    h: Harness, sealed_unconfirmed: None, tmp_path: Path
-) -> None:
-    run = h.enqueue("replay")
-    FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
-    h.run_one()
-    name = UnconfirmedSession.container
-    h.worker.reaper.docker = _scripted_docker(tmp_path / "gone", gone=True)
-    _realistic_heartbeat(h)
-    assert h.worker.reap() == 1
-    (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_reaped"]
-    assert ev.stage == "system" and ev.status == StepStatus.OK
-    assert ev.payload == {"container": name, "attempts": 1}
-    assert ev.task_id == h.pyrepo.feat_task().task_id  # the queued entry remembers its task
-    assert h.worker.reaper.pending() == [] and h.worker.reap() == 0
-    h.worker.checkin()
-    assert _worker_row(h).unconfirmed_containers == 0
-
-
-def test_reaper_gives_up_at_the_bound_and_says_so_on_the_trace(
-    h: Harness, sealed_unconfirmed: None, tmp_path: Path
-) -> None:
-    run = h.enqueue("replay")
-    FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
-    h.run_one()
-    name = UnconfirmedSession.container
-    h.worker.reaper.docker = _scripted_docker(tmp_path / "stuck", gone=False)
-    h.worker.reaper.max_attempts = 2
-    _realistic_heartbeat(h)
-    assert h.worker.reap() == 0  # attempt 1: still pending
-    assert h.worker.reaper.pending()[0].attempts == 1
-    assert h.worker.reap() == 1  # attempt 2: the bound
-    (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_reap_failed"]
-    assert ev.stage == "system" and ev.status == StepStatus.ERROR
-    assert ev.payload["container"] == name and ev.payload["attempts"] == 2
-    assert f"docker rm -f {name}" in ev.error_message
-    assert h.worker.reaper.pending() == []
-    assert not [e for e in h.events(run.id) if e.action == "run.kill_reaped"]
-
-
-def test_reaper_runs_from_the_polling_loop(
-    h: Harness, sealed_unconfirmed: None, tmp_path: Path
-) -> None:
-    """The loop reaps every poll: a queued container is gone from the file, and the run's
-    trace carries ``run.kill_reaped``, without any run being claimed."""
-    run = h.enqueue("replay")
-    FakeBuilder.hook = lambda _ws, _brief: h.queue.request_cancel(run.id, actor="tester")
-    h.run_one()
-    h.worker.reaper.docker = _scripted_docker(tmp_path / "gone", gone=True)
-    _realistic_heartbeat(h)
-    stop = threading.Event()
-    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
-    t.start()
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and h.worker.reaper.pending_count():
-        time.sleep(0.05)
-    stop.set()
-    t.join(timeout=5)
-    assert h.worker.reaper.pending() == []
-    assert [e.action for e in h.events(run.id) if e.action.startswith("run.kill_")] == [
-        "run.kill_unconfirmed",
-        "run.kill_reaped",
-    ]
-
-
-class _SlowDaemon:
-    """A daemon that takes ``delay_s`` to answer anything, in process: each question sleeps
-    the smaller of the delay and the call's timeout, then answers "still running" or times
-    out. No process is spawned, so a loaded machine cannot turn spawn latency into a red
-    build (docs/PREVENTION.md P-014); the delay dwarfs the budget, so the bound still
-    discriminates."""
-
-    def __init__(self, delay_s: float) -> None:
-        self.delay_s = delay_s
-
-    def stopped(self, docker: str, name: str, *, timeout_s: float) -> bool | None:
-        time.sleep(min(self.delay_s, timeout_s))
-        return None if self.delay_s > timeout_s else False
-
-    def runner(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
-        timeout = float(kw["timeout"])
-        time.sleep(min(self.delay_s, timeout))
-        if self.delay_s > timeout:
-            raise subprocess.TimeoutExpired(argv, timeout)
-        return subprocess.CompletedProcess(argv, 1, "", "refused")
-
-
-def test_reap_pass_is_budgeted_so_the_check_in_still_lands(h: Harness, tmp_path: Path) -> None:
-    """A daemon that answers nothing inside the budget (every call takes 10 s) with two
-    containers queued: a pass ends within ``heartbeat_s / 2`` — the entry it ran out on
-    counts one attempt with the reason, the entry it never reached is untouched — and the
-    polling loop's check-in row is never older than the worker's liveness bound
-    (``3 × heartbeat_s``) while passes are running."""
-    heartbeat_s = 2.0
-    _realistic_heartbeat(h, heartbeat_s)
-    assert h.worker.reap_budget_s == heartbeat_s / 2
-    daemon = _SlowDaemon(delay_s=10.0)
-    h.worker.reaper = ContainerReaper(
-        h.worker.reaper.path, runner=daemon.runner, stopped=daemon.stopped
-    )
-    h.worker.reaper.add("crb-build-slow-1", run_id="r1", task_id="t1")
-    h.worker.reaper.add("crb-build-slow-2", run_id="r2", task_id="t2")
-    t0 = time.monotonic()
-    assert h.worker.reap() == 0
-    elapsed = time.monotonic() - t0
-    assert elapsed < 5.0, elapsed  # the 1 s budget, not 10 s x (inspect + rm + inspect)
-    first, second = h.worker.reaper.pending()
-    assert first.attempts == 1 and "pass budget exhausted" in first.last_error
-    assert second.attempts == 0 and second.last_error == ""
-    # the loop: passes every poll, the check-in every heartbeat — sampled while it runs
-    stop = threading.Event()
-    t = threading.Thread(target=h.worker.run_forever, args=(stop,), daemon=True)
-    t.start()
-    ages: list[float] = []
-    deadline = time.monotonic() + 3 * heartbeat_s
-    while time.monotonic() < deadline:
-        time.sleep(0.2)
-        row = _worker_row(h)
-        ages.append(time.monotonic() - h.worker._last_checkin)
-        assert row.unconfirmed_containers == 2
-    stop.set()
-    t.join(timeout=10)
-    assert ages and max(ages) < 3 * heartbeat_s, ages
-
-
-class _UnconfirmedGradeExecutor(LocalExecutor):
-    """The run's executor with a docker executor's cancel path scripted: the first
-    command it is asked to run is "cancelled" and its container kill goes unconfirmed —
-    reported through ``on_kill_unconfirmed`` exactly as ``DockerExecutor`` does."""
-
-    container: ClassVar[str] = "crb-grade-0badc0de"
-    instances: ClassVar[list[_UnconfirmedGradeExecutor]] = []
-
-    def __init__(self, *, cancel: Any, on_kill_unconfirmed: Any, request_cancel: Any) -> None:
-        super().__init__(cancel=cancel)
-        self.report = on_kill_unconfirmed
-        self.request_cancel = request_cancel
-        self.commands: list[tuple[str, ...]] = []
-        self.scripted = False
-        _UnconfirmedGradeExecutor.instances.append(self)
-
-    def run(self, cmd: Any) -> ExecResult:
-        self.commands.append(tuple(cmd.argv))
-        # the posture probe (`python -V`) runs as it would; the FIRST test run — the grade
-        # stage's — is the one whose container kill goes unconfirmed
-        if "pytest" not in " ".join(cmd.argv) or self.scripted:
-            return super().run(cmd)
-        self.scripted = True
-        self.request_cancel()
-        self.report(UnconfirmedKill(container=self.container, bound_s=10.0))
-        return ExecResult(
-            130, "", "", False, 0.1, True, kill_confirmed=False, container=self.container
-        )
-
-
-def test_grade_stage_unconfirmed_kill_is_recorded_under_the_task_and_queued(
-    h: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The non-stream path: a cancel that lands while the grade stage's test run is
-    in flight, whose ``docker kill`` the daemon never confirmed, reaches the worker through
-    the executor's ``on_kill_unconfirmed`` — ``run.kill_unconfirmed`` on the trace under
-    the task being graded, the by-hand note on the run's error, the container in the
-    reaper's queue and on the check-in row. The run still ends ``cancelled``."""
-    _UnconfirmedGradeExecutor.instances.clear()
-    green_sha = h.pyrepo.add_green_commit()
-    h.add_task(
-        h.pyrepo.feat_task(
-            task_id=green_sha,
-            subject="second",
-            test_files=[pr.TEST_CALC],
-            target_tests=[pr.TEST_CALC],
-            baseline_failing=[],
-            authored=h.pyrepo.repo.author_date(green_sha),
-        )
-    )
-    _seed_qualified(h, h.pyrepo.feat_task())
-    _seed_qualified(h, h.pyrepo.feat_task(task_id=green_sha, baseline_failing=[]))
-    run = h.enqueue("replay", params_json={"canary": False})
-    real = worker_mod.make_executor
-
-    def scripted(kind: str, **kw: Any) -> Any:
-        assert kw.get("on_kill_unconfirmed") is not None  # the worker wires the seam
-        return _UnconfirmedGradeExecutor(
-            cancel=kw["cancel"],
-            on_kill_unconfirmed=kw["on_kill_unconfirmed"],
-            request_cancel=lambda: h.queue.request_cancel(run.id, actor="tester"),
-        )
-
-    monkeypatch.setattr(worker_mod, "make_executor", scripted)
-    done = h.run_one()
-    monkeypatch.setattr(worker_mod, "make_executor", real)
-    name = _UnconfirmedGradeExecutor.container
-    assert done.status == STATUS_CANCELLED  # cancel is honoured between tasks: one of two ran
-    assert done.error == (
-        f"container {name} may still be running — it will be reaped by the worker; "
-        f"`docker rm -f {name}` reaps it by hand"
-    )
-    (ev,) = [e for e in h.events(run.id) if e.action == "run.kill_unconfirmed"]
-    assert ev.stage == "system" and ev.status == StepStatus.ERROR
-    (row,) = list(h.worker.ledger.rows(run_id=run.id))  # the one task graded before the cancel
-    assert ev.task_id == row.task_id  # filed under the task whose tests were running
-    assert ev.payload == {"container": name, "run_id": run.id, "bound_s": 10.0}
-    (executor,) = _UnconfirmedGradeExecutor.instances
-    assert executor.commands and any("pytest" in " ".join(c) for c in executor.commands)
-    assert [e.container for e in h.worker.reaper.pending()] == [name]
-    assert _worker_row(h).unconfirmed_containers == 1
 
 
 # --- mine --------------------------------------------------------------------------------------
@@ -1581,6 +1350,59 @@ def test_once_main(
     assert idle == {"status": "idle", "worker_id": "w-cli"}
 
 
+def test_the_worker_entry_point_records_its_metrics_listener(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: every D5 test called ``start_metrics`` directly, so ``main()`` going back to
+    the bare ``metrics.start_worker_exposition`` — the base's behaviour, which records nothing —
+    left the suite green while a real worker's ``/health`` read ``metrics: null`` on a bind
+    failure. The long-running path of the real entry point is driven here: a port another
+    process holds reads ``degraded`` for that worker."""
+    import socket
+
+    from crb.server.worker_metrics import exposition_by_worker
+
+    monkeypatch.setenv("CRB_ENV", "dev")
+    monkeypatch.setattr(worker_main.Worker, "run_forever", lambda self, stop: None)
+    monkeypatch.setattr(worker_main.signal, "signal", lambda *a, **k: None)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        rc = worker_main.main(
+            [
+                "--database-url",
+                h.url,
+                "--home",
+                str(h.home),
+                "--worker-id",
+                "w-main",
+                "--metrics-port",
+                str(port),
+                "--log-format",
+                "text",
+            ]
+        )
+    assert rc == worker_main.EXIT_OK
+    recorded = exposition_by_worker(h.factory, ["w-main"])
+    assert recorded["w-main"]["state"] == "degraded", recorded
+    assert str(port) in recorded["w-main"]["reason"]
+
+
+def test_the_worker_reads_the_login_window_the_api_reads(tmp_path: Path) -> None:
+    """The claim check applies the submit gate's window: ``CRB_BUILDER__LOGIN_TTL_S`` read as
+    the API reads it, with its bounds, and no other ``CRB_BUILDER__*`` key refused here."""
+    args = worker_main.build_parser().parse_args(["--once"])
+    home = {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev"}
+    assert worker_main.settings_from_args(args, home).builder_login_ttl_s == 600
+    got = worker_main.settings_from_args(
+        args, {**home, "CRB_BUILDER__LOGIN_TTL_S": "120", "CRB_BUILDER__MEMORY": "8g"}
+    )
+    assert got.builder_login_ttl_s == 120
+    with pytest.raises(ValueError, match="login_ttl_s"):
+        worker_main.settings_from_args(args, {**home, "CRB_BUILDER__LOGIN_TTL_S": "5"})
+
+
 def test_main_rejects_bad_kinds_and_bad_db(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1667,6 +1489,14 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s_off.metrics_port == 0 and s_off.metrics_enabled is False
     with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
         worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "70000"})
+    # pilot D5 (P-436): `auto` asks the operating system for a free port, so a second stack
+    # on one machine never fights over 9464; the flag reads the same words
+    s_auto = worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "auto"})
+    assert s_auto.metrics_port == "auto"
+    flag_auto = parser.parse_args(["--once", "--metrics-port", "auto"])
+    assert worker_main.settings_from_args(flag_auto, env).metrics_port == "auto"
+    with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
+        worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "nine"})
     s_all = worker_main.settings_from_args(args, {**env, "CRB_METRICS_HOST": "0.0.0.0"})
     assert s_all.metrics_host == "0.0.0.0"
     flag = parser.parse_args(["--once", "--metrics-host", "10.0.0.5"])
@@ -2020,6 +1850,23 @@ def test_the_worker_never_honours_an_override_from_a_deactivated_approver(
     assert not [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
 
 
+def test_every_statement_of_when_the_worker_honours_an_override_names_an_active_account() -> None:
+    """A review of PR #63: docs/API.md stated the P-229 rule twice, and the factory
+    paragraph left out that the approver's account must be active, so a reader could take a
+    leaver's grant as still licensing delivery. Every sentence in the guide that says when
+    the worker honours the override says ``active``."""
+    import re
+
+    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text(encoding="utf-8")
+    rules = [
+        s
+        for s in re.split(r"(?<=[.;|])\s", api)
+        if re.search(r"worker\b.*\bhonours\b", s) and "override" in s.lower()
+    ]
+    assert len(rules) >= 2, rules  # the endpoint's row and the factory paragraph
+    assert [r for r in rules if "active" not in r] == []
+
+
 def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2253,138 +2100,6 @@ def test_delivery_credentials_follow_a_linked_row_to_its_own_https_remote() -> N
     assert worker._delivery_credentials({"url": linked["url"]}, linked["url"]) is None
 
 
-# --- ADR-0023: production refuses the unsealed posture ------------------------------------------
-
-OVERRIDE_STAMP = {
-    "env": "prod",
-    "sandbox_executor": "local",
-    "builder_executor": "host",
-    "override": "CRB_ALLOW_UNSEALED_PROD",
-    "adr": "0023",
-}
-
-
-def test_a_prod_worker_stamps_the_unsealed_override_into_the_run_and_every_pack(
-    h: Harness,
-) -> None:
-    h.worker.settings = replace(h.settings, unsealed_override=OVERRIDE_STAMP)
-    run = h.enqueue("replay")
-    done = h.run_one()
-    assert done.status == STATUS_SUCCEEDED, done.error
-    assert done.apparatus_json["extra"]["unsealed_prod_override"] == OVERRIDE_STAMP
-    (row,) = list(h.worker.ledger.rows(run_id=run.id))
-    pack = h.worker.evidence_dir / f"{row.evidence_pack_hash}.json"
-    body = json.loads(pack.read_text(encoding="utf-8"))
-    assert body["apparatus"]["extra"]["unsealed_prod_override"] == OVERRIDE_STAMP
-    # the other kinds carry it on their apparatus too
-    h.enqueue("probe")
-    probe = h.run_one()
-    assert probe.apparatus_json["unsealed_prod_override"] == OVERRIDE_STAMP
-
-
-def test_a_sealed_worker_stamps_nothing(h: Harness) -> None:
-    run = h.enqueue("replay")
-    done = h.run_one()
-    assert done.id == run.id and "unsealed_prod_override" not in done.apparatus_json["extra"]
-
-
-def test_a_prod_worker_refuses_a_run_that_asks_for_the_local_executor(h: Harness) -> None:
-    h.worker.settings = replace(h.settings, executor="docker", refuse_unsealed=True)
-    run = h.enqueue("replay", params_json={"executor": "local"})
-    done = h.run_one()
-    assert done.status == STATUS_FAILED
-    assert done.error.startswith("sandbox unavailable") and "CRB_ALLOW_UNSEALED_PROD" in done.error
-    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
-
-
-def _sealed_sandbox_stand_in(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The test executor a sealed prod worker would use, stood in by a local one: the subject
-    here is where the factory's BUILDER runs, not where the tests run."""
-    monkeypatch.setattr(h.worker, "_executor", lambda ctx: LocalExecutor())
-
-
-def test_a_prod_worker_refuses_a_factory_run_because_factory_builds_run_on_the_host(
-    h: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A factory build is handed a host worktree and never a container (``_run_factory``
-    passes none to the builder), so a sealed prod posture must not run one: /health says
-    "sealed", and a factory run on the host would make that untrue (ADR-0023)."""
-    _multiply_backlog(h)
-    FakeBuilder.briefs = []
-    _sealed_sandbox_stand_in(h, monkeypatch)
-    h.worker.settings = replace(h.settings, refuse_unsealed=True, builder_executor="docker")
-    run = h.enqueue("factory", ladder_json=["fake:m0"])
-    done = h.run_one()
-    assert done.status == STATUS_FAILED
-    assert done.error.startswith("sandbox unavailable"), done.error
-    assert "factory" in done.error and "CRB_ALLOW_UNSEALED_PROD" in done.error
-    assert list(h.worker.ledger.rows(run_id=run.id)) == [] and FakeBuilder.briefs == []
-
-
-def test_a_prod_worker_under_the_override_stamps_every_factory_run(
-    h: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With the override, a factory run may build on the host, and its apparatus says so —
-    even on a worker whose replay posture is sealed and so carries no override of its own."""
-    _multiply_backlog(h)
-    _sealed_sandbox_stand_in(h, monkeypatch)
-    h.worker.settings = replace(
-        h.settings,
-        env="prod",
-        executor="docker",
-        builder_executor="docker",
-        unsealed_override={},
-        unsealed_override_ack={"by": "root", "reason": "evaluation"},
-    )
-    h.enqueue("factory", ladder_json=["fake:m0"])
-    done = h.run_one()
-    assert done.status == STATUS_SUCCEEDED, done.error
-    stamp = done.apparatus_json["unsealed_prod_override"]
-    assert stamp["builder_executor"] == "host" and stamp["run_kind"] == "factory"
-    assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
-    # G-663: the admin who set the override is named beside it on every run it admits
-    assert stamp["acknowledged_by"] == "root"
-
-
-def test_a_sealed_prod_worker_under_the_override_stamps_a_run_that_asks_for_local(
-    h: Harness,
-) -> None:
-    """P-256: a worker whose defaults are sealed (docker and docker) but that starts under
-    the override admits a run asking for the local executor in its own parameters. That run
-    executes unsealed, so its apparatus must carry the override and the name of the admin
-    who set it — the worker-wide stamp is empty because the DEFAULTS are sealed."""
-    h.worker.settings = replace(
-        h.settings,
-        env="prod",
-        executor="docker",
-        builder_executor="docker",
-        refuse_unsealed=False,
-        unsealed_override={},
-        unsealed_override_ack={"by": "root", "reason": "evaluation"},
-    )
-    h.enqueue("probe", params_json={"executor": "local"})
-    done = h.run_one()
-    assert done.status == STATUS_SUCCEEDED, done.error
-    stamp = done.apparatus_json["unsealed_prod_override"]
-    assert stamp["sandbox_executor"] == "local" and stamp["acknowledged_by"] == "root"
-    assert stamp["override"] == "CRB_ALLOW_UNSEALED_PROD" and stamp["adr"] == "0023"
-    # a run that keeps the sealed default stamps nothing: it ran sealed
-    h.enqueue("probe")
-    sealed = h.run_one()
-    assert "unsealed_prod_override" not in (sealed.apparatus_json or {})
-
-
-def test_a_dev_worker_stamps_no_override_on_a_factory_run(
-    h: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _multiply_backlog(h)
-    _sealed_sandbox_stand_in(h, monkeypatch)
-    h.enqueue("factory", ladder_json=["fake:m0"])
-    done = h.run_one()
-    assert done.status == STATUS_SUCCEEDED, done.error
-    assert "unsealed_prod_override" not in done.apparatus_json
-
-
 # --- ADR-0019: the posture gate --------------------------------------------------------------
 
 
@@ -2419,282 +2134,6 @@ def _seed_qualified(h: Harness, task: TaskSpec, *, posture_id: str = "", **kw: A
     with h.factory() as s:
         sq.append(s, q)
     return q
-
-
-def _records(h: Harness) -> list[Any]:
-    from crb.core.qualify import Qualification
-    from crb.store.models import TaskQualification
-
-    with h.factory() as s:
-        rows = s.execute(select(TaskQualification).order_by(TaskQualification.seq)).scalars().all()
-        return [Qualification.from_dict(r.body_json) for r in rows]
-
-
-def test_replay_with_no_qualified_task_fails_before_spend(h: Harness) -> None:
-    run = h.enqueue("replay", params_json={"qualify_first": False})
-    done = h.run_one()
-    assert done.status == STATUS_FAILED
-    assert done.error.startswith("POSTURE_UNQUALIFIED: 0 of 1 task(s) qualified")
-    assert "crb repo qualify" in done.error and "no model money" in done.error
-    assert FakeBuilder.briefs == []  # no builder was called
-    assert list(h.worker.ledger.rows(run_id=run.id)) == []
-    ev = h.events(run.id)
-    refused = next(e for e in ev if e.action == "run.posture_refused")
-    assert refused.payload["code"] == "POSTURE_UNQUALIFIED"
-    assert refused.payload["refusals"][0]["code"] == "POSTURE_UNQUALIFIED"
-    assert refused.payload["refusals"][0]["fix"]
-    assert any(e.action == "run.posture" for e in ev)
-
-
-def test_qualify_first_qualifies_then_replays_only_the_qualified(h: Harness) -> None:
-    green = h.pyrepo.add_green_commit()
-    h.add_task(
-        h.pyrepo.feat_task(
-            task_id=green,
-            test_files=[pr.TEST_CALC],
-            target_tests=[pr.TEST_CALC],
-            baseline_failing=[],
-            subject="refactor: green at parent",
-        )
-    )
-    run = h.enqueue("replay")
-    done = h.run_one()
-    assert done.status == STATUS_SUCCEEDED, done.error
-    assert done.counts_json["tasks"] == 1 and done.counts_json["clean"] == 1
-    assert done.counts_json["refusals"] == {"QUAL_NOT_RED": 1}
-    records = _records(h)
-    assert sorted(q.state for q in records) == ["qualified", "unqualified"]
-    (row,) = list(h.worker.ledger.rows(run_id=run.id))
-    assert row.labels["qualification_id"] == next(
-        q.qualification_id for q in records if q.is_qualified
-    )
-    assert row.labels["posture_id"] == _live_posture(h).posture_id
-    ev = h.events(run.id)
-    canary = next(e for e in ev if e.action == "run.canary")
-    assert canary.payload["clean"] is True
-    assert sum(1 for e in ev if e.action == "qualify.task") == 2
-
-
-def test_posture_drift_fails_at_zero_spend(h: Harness) -> None:
-    _seed_qualified(h, h.pyrepo.feat_task(), posture_id="pst_" + "d" * 24)
-    run = h.enqueue("replay", params_json={"qualify_first": False})
-    done = h.run_one()
-    assert done.status == STATUS_FAILED and done.error.startswith("POSTURE_DRIFT:")
-    assert "qualify again" in done.error
-    assert FakeBuilder.briefs == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
-
-
-def test_canary_not_clean_fails_before_the_first_build(h: Harness) -> None:
-    bad = h.pyrepo.add_bad_gold_commit()
-    task = h.pyrepo.feat_task(
-        task_id=bad,
-        test_files=[pr.TEST_MULTIPLY],
-        target_tests=[pr.TEST_MULTIPLY],
-        baseline_failing=[],
-        subject="feat: add multiply (breaks add)",
-    )
-    with h.factory() as s:
-        s.query(Task).delete()
-        s.commit()
-    h.add_task(task)
-    # qualified here once — the posture then moved under it (the gold now breaks belt 3)
-    _seed_qualified(h, task)
-    run = h.enqueue("replay")
-    done = h.run_one()
-    assert done.status == STATUS_FAILED and done.error.startswith("POSTURE_CANARY_FAILED:")
-    assert FakeBuilder.briefs == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
-    canary = next(e for e in h.events(run.id) if e.action == "run.canary")
-    assert canary.payload["clean"] is False
-
-
-def test_two_environment_rows_stop_the_run_and_revoke_the_qualifications(
-    h: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from crb.core.grade import BLAME_GOLD_GREEN, ControlRun
-    from crb.server import posture_gate
-
-    class RedGold:
-        def __init__(self, *a: Any, **k: Any) -> None:
-            pass
-
-        def control(self, scope: Any, *, why: str, allow_failing: Any = None) -> ControlRun:
-            return ControlRun(BLAME_GOLD_GREEN, tuple(scope), False, rc=1, tail="lookup failed")
-
-    monkeypatch.setattr(posture_gate, "GoldWitness", RedGold)
-    monkeypatch.setitem(
-        builders_pkg._REGISTRY, "fake", lambda **cfg: FakeBuilder(behaviour="noop", **cfg)
-    )
-    bad = h.pyrepo.add_bad_gold_commit()
-    second = h.pyrepo.feat_task(
-        task_id=bad,
-        test_files=[pr.TEST_MULTIPLY],
-        target_tests=[pr.TEST_MULTIPLY],
-        baseline_failing=[],
-    )
-    h.add_task(second)
-    _seed_qualified(h, h.pyrepo.feat_task())
-    _seed_qualified(h, second)
-    run = h.enqueue(
-        "replay",
-        ladder_json=["fake:m0", "fake:m1"],
-        params_json={"canary": False, "task_ids": [h.pyrepo.feat_sha, bad]},
-    )
-    done = h.run_one()
-    assert done.status == STATUS_FAILED and done.error.startswith("environment: 2 consecutive")
-    rows = list(h.worker.ledger.rows(run_id=run.id))
-    assert len(rows) == 2 and all(r.failure_kind == "harness" for r in rows)
-    assert all(r.labels["env_code"] == "GOLD_CONTROL_RED" for r in rows)
-    assert all(r.trial == "r1" for r in rows)  # each ladder stopped at its first rung
-    states = [q.state for q in _records(h)]
-    assert states.count("revoked") == 2  # both qualifications revoked, as new records
-    assert any(e.action == "run.environment_stop" for e in h.events(run.id))
-
-
-def test_only_a_control_that_ran_red_revokes_a_qualification(tmp_path: Path) -> None:
-    """QUAL_ENV_WITNESS_RED says the gold failed here during a replay, so only a row whose
-    control RAN red (``env_code`` ``GOLD_CONTROL_RED``) may revoke. An environment row no
-    control witnessed (``TEST_RUN_ENVIRONMENT``) leaves the record in force."""
-    from types import SimpleNamespace
-
-    from crb.core.execution import LocalExecutor
-    from crb.server.posture_gate import PostureGate
-    from fixtures.posture import discovery_qualification
-
-    task = pr.build(tmp_path / "repo").feat_task()
-    q = discovery_qualification(task, LocalExecutor())
-    gate = PostureGate(
-        repo=None,  # type: ignore[arg-type]  # on_environment reads none of these
-        config=None,  # type: ignore[arg-type]
-        runner=None,  # type: ignore[arg-type]
-        executor=None,  # type: ignore[arg-type]
-        scratch=tmp_path,
-        provider=None,  # type: ignore[arg-type]
-        posture=None,  # type: ignore[arg-type]
-    )
-    gate.qualifications[task.task_id] = q
-    unwitnessed = SimpleNamespace(
-        error="environment: tree_copy_failed", labels={"env_code": "TEST_RUN_ENVIRONMENT"}
-    )
-    gate.on_environment(task, unwitnessed)  # type: ignore[arg-type]
-    assert gate.qualifications[task.task_id] is q and q.is_qualified
-    red = SimpleNamespace(
-        error="environment: gold control red in pst_x: belt 2",
-        labels={"env_code": "GOLD_CONTROL_RED"},
-    )
-    gate.on_environment(task, red)  # type: ignore[arg-type]
-    revoked = gate.qualifications[task.task_id]
-    assert revoked.state == "revoked" and revoked.code == "QUAL_ENV_WITNESS_RED"
-
-
-def test_the_gate_hashes_each_sealed_set_once_and_fails_closed_on_first_use(
-    tmp_path: Path,
-) -> None:
-    """CodeRabbit on PR #56: ``context_for`` re-hashed every sealed set for every task, so
-    N tasks sharing one lockfile hashed the same ``node_modules`` N times. The gate verifies
-    a key once; a set that fails is never remembered as verified, so every use of it keeps
-    stopping the run ``BUNDLE_INTEGRITY`` (the mount's own write-bit check,
-    ``validate_mount``, still runs at every use)."""
-    from crb.core.deps import DepsBinding, ProvisionRefused, TaskDeps
-    from crb.core.qualify import adhoc_posture
-    from crb.server.posture_gate import PostureGate
-    from fixtures.posture import discovery_qualification
-
-    repo = pr.build(tmp_path / "repo")
-    first = repo.feat_task()
-    second = replace(first, task_id="f" * 40)
-    ex = LocalExecutor()
-
-    class CountingProvider:
-        deps_mode = "host-env"
-
-        def __init__(self) -> None:
-            self.verified: list[tuple[str, ...]] = []
-            self.broken = False
-
-        def resolve(self, *a: Any, **k: Any) -> TaskDeps:
-            shared = DepsBinding(role="gold", lang="python", key="k-shared", digest="sha256:0")
-            return TaskDeps.uniform(shared, mode="host-env", lang="python")
-
-        def verify(self, deps: TaskDeps) -> None:
-            self.verified.append(deps.keys)
-            if self.broken:
-                raise ProvisionRefused("BUNDLE_INTEGRITY", "k-shared: digest does not match")
-
-    provider = CountingProvider()
-    gate = PostureGate(
-        repo=repo.repo,
-        config=repo.config,
-        runner=PytestRunner(repo.config),
-        executor=ex,
-        scratch=tmp_path / "scratch",
-        provider=provider,  # type: ignore[arg-type]
-        posture=adhoc_posture(ex),
-    )
-    for t in (first, second):  # two tasks citing one set (one lockfile), resolved once each
-        gate.qualifications[t.task_id] = discovery_qualification(t, ex)
-        gate._deps[t.task_id] = provider.resolve()
-    for t in (first, second, first):
-        gate.context_for(t)
-    assert provider.verified == [("k-shared",)]  # one hash for three uses of one set
-
-    broken = CountingProvider()
-    broken.broken = True
-    gate.provider = broken  # type: ignore[assignment]
-    gate._verified.clear()
-    for _ in range(2):  # fail-closed on first use, and a failure is never remembered
-        with pytest.raises(ProvisionRefused, match="BUNDLE_INTEGRITY"):
-            gate.context_for(first)
-    assert broken.verified == [("k-shared",), ("k-shared",)]
-
-
-def test_qualify_run_spends_nothing(h: Harness, monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(*a: Any, **k: Any) -> Any:
-        raise AssertionError("a qualify run constructed a builder")
-
-    monkeypatch.setattr(builders_pkg, "get_builder", refuse)
-    monkeypatch.setattr(builders_pkg, "builder_for_rung", refuse)
-    run = h.enqueue("qualify")
-    done = h.run_one()
-    assert done.status == STATUS_SUCCEEDED, done.error
-    assert done.counts_json["qualified"] == 1 and done.counts_json["unqualified"] == 0
-    assert done.counts_json["cost_usd"] == 0.0 and done.counts_json["by_code"] == {}
-    assert done.counts_json["posture_id"] == _live_posture(h).posture_id
-    assert list(h.worker.ledger.rows(run_id=run.id)) == []  # no grade row: nothing was built
-    (q,) = _records(h)
-    assert q.is_qualified and q.run_id == run.id
-    assert any(e.action == "qualify.done" for e in h.events(run.id))
-
-
-def test_mine_in_docker_without_provisioning_says_what_to_do(
-    h: Harness, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The sealed posture as shipped cannot load a module graph (ADR-0019 D1): the mine's
-    qualification refuses each candidate QUAL_ENV_UNLOADABLE and the run stops with what to
-    do, instead of mining tasks every replay would then charge to the model. (The real
-    sealed image is exercised in tests/test_posture_docker.py.)"""
-    import sys as _sys
-
-    from crb.core.execution import Command
-
-    def unloadable(self: Any, root: Path, scope: Any, *, executor: Any, timeout: int) -> Command:
-        return Command((_sys.executable, "-c", "import sys; sys.exit(1)"), root, timeout=timeout)
-
-    monkeypatch.setattr(PytestRunner, "env_probe_command", unloadable)
-    for i in range(3):
-        pr._write(h.pyrepo.path, pr.SRC, pr.SRC_FEAT.replace("A tiny calculator.", f"v{i}."))
-        pr._write(
-            h.pyrepo.path,
-            pr.TEST_CALC,
-            pr.TEST_CALC_SRC + f"\n\ndef test_zero_{i}():\n    assert add(0, 0) == 0\n",
-        )
-        pr._commit(h.pyrepo.path, f"refactor: v{i}")
-    run = h.enqueue("mine", params_json={"target": 5})
-    done = h.run_one()
-    assert done.status == STATUS_FAILED
-    assert "QUAL_ENV_UNLOADABLE" in done.error
-    assert "switch provisioning on and qualify" in done.error
-    skips = [e for e in h.events(run.id) if e.action == "mine.skip"]
-    assert skips and all(e.payload.get("code") == "QUAL_ENV_UNLOADABLE" for e in skips)
 
 
 def test_route_gate_reads_the_deployment_posture_only(
@@ -3050,3 +2489,28 @@ def test_the_worker_stops_an_unsigned_deliver_cell_before_any_spend_unless_confi
     done, kinds, actions = run_and_read()
     assert done.counts_json["by_status"] == {"accepted": 1}
     assert "entry.refused" not in actions and fe.EV_BUILD in kinds
+
+
+def test_a_worker_whose_metrics_port_is_taken_keeps_running_and_records_why(
+    tmp_path: Path, pyrepo: pr.PyRepo
+) -> None:
+    """Pilot D5 (P-436): the worker's metrics listener could not bind 9464 because another
+    stack held it. Starting it must never stop the worker, and what happened is written
+    where ``/health`` reads it — ``degraded`` with the reason — not only to the log."""
+    import dataclasses
+    import socket
+
+    from crb.observability.metrics import EXPOSITION_DEGRADED
+    from crb.server.worker_metrics import exposition_by_worker
+
+    h = Harness(tmp_path, pyrepo)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        settings = dataclasses.replace(h.worker.settings, metrics_port=port)
+        got = worker_main.start_metrics(h.worker, settings)
+    assert got.state == EXPOSITION_DEGRADED
+    recorded = exposition_by_worker(h.factory, [h.worker.worker_id])
+    assert recorded[h.worker.worker_id]["state"] == "degraded"
+    assert f"127.0.0.1:{port}" in recorded[h.worker.worker_id]["reason"]

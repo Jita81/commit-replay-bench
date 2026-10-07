@@ -112,6 +112,8 @@ class FailureSplitOut(BaseModel):
     lint_evaluated: int = 0
     #: Provider outages (usage limit / 429 / dead credential): outside n, like DQ.
     outage: int = 0
+    #: Of ``outage``, the rows whose login this deployment presented was refused (pilot D1).
+    outage_auth: int = 0
     #: Belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold.
     api: int = 0
 
@@ -381,6 +383,9 @@ class FailureSplitResponse(BaseModel):
     lint: int = 0
     lint_evaluated: int = 0
     outage: int = 0
+    #: Of ``outage``, the rows whose login this deployment presented was refused — "your
+    #: login", not "the provider" (pilot D1; rows of apparatus 2.4 and later carry the cause).
+    outage_auth: int = 0
     api: int = 0
     point: float
     ci_low: float

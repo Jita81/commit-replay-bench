@@ -31,6 +31,7 @@ import { HINTS } from '../help/hints'
 import { PosturePage } from '../screens/Posture/PosturePage'
 import { GOLIVE } from '../test/golive'
 import { PRINCIPAL, envelope, mockApi, renderApp } from '../test/utils'
+import type { LedgerVerify } from '../api/types'
 import { collectHints } from './Help'
 import { ConfirmationPanel, Details, NotificationBanner, SummaryList, Tag, TaskList } from './govuk'
 
@@ -119,6 +120,22 @@ describe('govuk patterns', () => {
   })
 })
 
+/** An intact `/ledger/verify` answer of the declared shape; each test overrides what it breaks. */
+const VERIFY_OK = {
+  rows: 1,
+  ok: true,
+  false_q1_total: 0,
+  chain_ok: true,
+  broken_at: null,
+  detail: '',
+  clean_without_pack: 0,
+  signoffs: { rows: 0, chain_ok: true, broken_at: null, detail: '' },
+  reviews: { rows: 0, chain_ok: true, broken_at: null, detail: '' },
+  verified_at: '',
+  head_row_hash: '',
+  events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '', walk: 'full', full_walk_at: '' },
+} satisfies LedgerVerify
+
 describe('PosturePage', () => {
   afterEach(() => vi.unstubAllGlobals())
 
@@ -128,7 +145,7 @@ describe('PosturePage', () => {
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1, belt_set: 'v5', signoff_policy: 'signoff-policy.v3', licence: 'Apache-2.0' },
       'GET /golive': GOLIVE,
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} }, { name: 'toolchains', status: 'ok', detail: 'all present', data: {} }, { name: 'ledger', status: 'ok', detail: '592 rows, false_q1=0', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present; UPDATE on grades refused', data: {} }] },
-      'GET /ledger/verify': { rows: 592, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
+      'GET /ledger/verify': { ...VERIFY_OK, rows: 592 } satisfies LedgerVerify,
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
     })
@@ -150,7 +167,7 @@ describe('PosturePage', () => {
       'GET /auth/me': { ...PRINCIPAL, role: 'admin' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1, oidc_enabled: false },
       'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: 'local', data: { executor: 'local' } }, { name: 'toolchains', status: 'ok', detail: 'all present', data: {} }, { name: 'ledger', status: 'ok', detail: '592 rows', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present', data: {} }] },
-      'GET /ledger/verify': { rows: 592, ok: false, false_q1_total: 0, chain_ok: false, broken_at: 412, detail: 'seq 412: row_hash mismatch (row edited)', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
+      'GET /ledger/verify': { ...VERIFY_OK, rows: 592, ok: false, chain_ok: false, broken_at: 412, detail: 'seq 412: row_hash mismatch (row edited)' } satisfies LedgerVerify,
       'GET /github/app': {
         configured: true,
         app_slug: 'crb-bench',
@@ -193,7 +210,7 @@ describe('PosturePage', () => {
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
       'GET /health': { status: 'ok', probes: [{ name: 'ledger', status: 'ok', detail: '12 rows', data: {} }, { name: 'append_only', status: 'ok', detail: 'triggers present', data: {} }] },
-      'GET /ledger/verify': { rows: 12, ok: false, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '12 rows, chain intact, false_q1=0; events chain broken — event 3: row_hash mismatch (row edited)', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 5, chain_ok: false, broken_at: 3, detail: 'event 3: row_hash mismatch (row edited)', head_row_hash: '' } },
+      'GET /ledger/verify': { ...VERIFY_OK, rows: 12, ok: false, detail: '12 rows, chain intact, false_q1=0; events chain broken — event 3: row_hash mismatch (row edited)', events: { ...VERIFY_OK.events, rows: 5, chain_ok: false, broken_at: 3, detail: 'event 3: row_hash mismatch (row edited)' } } satisfies LedgerVerify,
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
     })
@@ -209,7 +226,7 @@ describe('PosturePage', () => {
     const base = {
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
-      'GET /ledger/verify': { rows: 1, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
+      'GET /ledger/verify': VERIFY_OK,
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
     }
@@ -232,7 +249,7 @@ describe('PosturePage', () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
-      'GET /ledger/verify': { rows: 1, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
+      'GET /ledger/verify': VERIFY_OK,
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
       'GET /health': {
@@ -249,7 +266,7 @@ describe('PosturePage', () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
-      'GET /ledger/verify': { rows: 1, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
+      'GET /ledger/verify': VERIFY_OK,
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
       'GET /health': {
@@ -268,7 +285,7 @@ describe('PosturePage', () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
       'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', uptime_s: 1 },
-      'GET /ledger/verify': { rows: 1, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '', clean_without_pack: 0, verified_at: '', head_row_hash: '', events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '' } },
+      'GET /ledger/verify': VERIFY_OK,
       'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
       'GET /settings': () => envelope(403, 'forbidden', 'admin only'),
       'GET /health': {

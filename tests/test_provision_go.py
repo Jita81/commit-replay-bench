@@ -185,9 +185,7 @@ def test_disabled_provisioning_refuses_a_repository_with_dependencies(
 
 @pytest.fixture
 def scratch() -> Iterator[Path]:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     langs.require_docker_image(DEFAULT_GO_IMAGE, "the pinned Go fetch image")
     root = langs.CACHE_DIR / "provision" / f"go-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)

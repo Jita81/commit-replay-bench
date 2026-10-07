@@ -203,6 +203,22 @@ def test_a_grant_is_claimed_once_on_either_store(tmp_path: Path) -> None:
         assert ev.verify() == 2
 
 
+def test_a_second_grant_while_one_waits_is_refused_under_the_stores_lock(tmp_path: Path) -> None:
+    """P-730: two approvers' POSTs could both read "no grant waits" and both append one.
+    The check is now the store's conditional append, read and write under one lock, on
+    either store: a grant while the item's newest grant waits is refused (``None``); once a
+    run claims it the item may be funded again; another item is not affected."""
+    for store in (fe.MemoryFactoryStore(), fe.JsonlFactoryStore(tmp_path / "ev.jsonl")):
+        ev = fe.FactoryEvidence(store, actor="tester", repo="pyrepo")
+        first = ev.record_calibration("I-1", approver="approver:ada", reason="measure")
+        assert first is not None
+        assert ev.record_calibration("I-1", approver="approver:bo", reason="again") is None
+        assert ev.record_calibration("I-2", approver="approver:bo", reason="other") is not None
+        assert ev.claim_calibration("I-1", first.event_id, run_id="run-a") is not None
+        assert ev.record_calibration("I-1", approver="approver:bo", reason="after") is not None
+        assert len(ev.events_for("I-1", fe.EV_CALIBRATION_FUNDED)) == 2
+
+
 class _StartsAnotherRun(MultiBuilder):
     """A builder that, during its first build, runs ``other`` — a second factory run on the
     same repository that starts while the first is still building (a second worker)."""
@@ -224,7 +240,8 @@ def test_one_grant_funds_one_build_when_two_runs_interleave(
     run that started while the first was building read the same grant as unspent and built
     too — one approver's grant, two paid builds. The grant is claimed on the chain, under
     the store's lock, before any spend: the second run finds it claimed and stops at the
-    gate. Two grants recorded at once (two approvers' POSTs racing) still fund one build."""
+    gate. A second grant recorded at once (two approvers' POSTs racing) is refused at the
+    store (P-730), and one build is funded either way."""
     builder = _StartsAnotherRun()
     builder.seen = []
     a = _rig(pyrepo, _sub(tmp_path, "a"), readers=_readers(_none), builder=builder)

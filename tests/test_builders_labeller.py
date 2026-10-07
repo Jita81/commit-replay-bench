@@ -29,8 +29,10 @@ Works with:   src/crb/builders/labeller.py (under test), src/crb/core/classify.p
               auth it mirrors), src/crb/builders/openai_client.py (the chat transport),
               tests/test_worker_label.py and tests/test_cli_tasks.py (the callers)
 Tested by:    tests/test_builders_labeller.py
-Touch when:   a labeller for a new transport is added (a no-diff case, a malformed-reply case
-              and a no-credential case); the prompt changes what the model sees.
+Touch when:   never for a new repository (the labeller reads any repository's commits the
+              same way); a labeller for a new transport is added (a no-diff case, a
+              malformed-reply case and a no-credential case); the prompt changes what the
+              model sees.
 """
 
 from __future__ import annotations
@@ -50,6 +52,11 @@ from crb.builders.openai_client import ChatReply, MissingCredential
 from crb.core import classify as c
 from crb.core.git import GitRepo
 from crb.core.spec import CLASS_VOCABULARY, UNCLASSIFIED
+
+try:
+    from tests import conftest_langs as langs
+except ImportError:  # pragma: no cover — layout-dependent
+    import conftest_langs as langs  # type: ignore[no-redef]
 
 # ---------------------------------------------------------------------------
 # shared evidence: cobra #1559 as the review describes it (stats only, no code)
@@ -506,9 +513,11 @@ _REVIEW_COMMITS: dict[str, tuple[str, str]] = {
 
 def _live_labeller() -> c.Labeller | None:
     """Prefer Claude Code (the census's measured path): an API key, or the operator's
-    own login when ``CRB_CLAUDE_CODE_AUTH=cli``. Else an OpenAI-compatible key."""
+    own login when ``CRB_CLAUDE_CODE_AUTH=cli`` — and then the CLI must work, through the one
+    gate (P-747). Else an OpenAI-compatible key."""
     cli = os.environ.get(cc.AUTH_ENV, "").strip() == cc.AUTH_CLI
-    if (os.environ.get(cc.API_KEY_ENV) or cli) and shutil.which("claude"):
+    if os.environ.get(cc.API_KEY_ENV) or cli:
+        langs.require_tool("claude")
         return lb.ClaudeCodeLabeller(effort=os.environ.get("CRB_TEST_LABEL_EFFORT", "low"))
     if os.environ.get("CEREBRAS_API_KEY"):
         return lb.OpenAILabeller(model=os.environ.get("CRB_TEST_LABEL_MODEL", "gpt-oss-120b"))

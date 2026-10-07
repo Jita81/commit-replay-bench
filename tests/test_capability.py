@@ -847,6 +847,7 @@ def test_cell_carries_the_failure_split_and_model_point_next_to_the_point() -> N
         "protocol": 1,
         "harness": 2,
         "outage": 0,
+        "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
         "disqualified": 1,
     }
     assert d["model_n"] == 9 and d["model_point"] == round(8 / 9, 4)

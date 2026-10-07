@@ -397,7 +397,6 @@ def fv_matrix(fv):
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 class TestGoFixtureMatrix:
     """gorepo: the feat commit ADDS ``Sub``. 6/7 constructible (was 4/7)."""
 
@@ -453,7 +452,6 @@ class TestGoFixtureMatrix:
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 class TestGoFuncVarMatrix:
     """gorepo_funcvar: the feat commit CHANGES ``var Scale``. 7/7 constructible."""
 
@@ -496,7 +494,6 @@ class TestGoFuncVarMatrix:
 
 
 @pytest.mark.toolchain("go")
-@pytest.mark.skipif(not langs.has_tool("go"), reason="go not on PATH")
 def test_report_apparatus_stamps_controls_v2(base):
     repo, task, config, scratch = base
     report = nc.run_controls(

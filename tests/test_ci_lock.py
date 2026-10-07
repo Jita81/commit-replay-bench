@@ -19,9 +19,12 @@ What it does: Fails when a job in any workflow, or the product image's Dockerfil
               re-pinned without relocking) or pins a gate or reporting tool at another
               version than ``pyproject.toml``; when a workflow's ``setup-uv`` step lets the
               installer float (no exact ``version``); and when the
-              ``fresh-clone`` job stops running a gate, stops running as root in its own
-              clone, or stops proving the docker daemon is gone. Each check is also run on a
-              planted regression so it cannot pass vacuously.
+              ``fresh-clone`` check — ``fresh-clone-gates``, the ``fresh-clone-shard`` jobs and
+              the ``fresh-clone`` aggregator over them — stops running a gate, stops running
+              as root in its own clone, stops proving the docker daemon is gone, stops proving
+              the shards' partition, lets an aggregator step be skipped (P-746), or declares a
+              tool root is not given (P-745, P-743). Each check
+              is also run on a planted regression so it cannot pass vacuously.
 How:          PyYAML reads the workflows; the Dockerfile's ``RUN`` instructions are joined
               across continuations; ``tomllib`` reads ``uv.lock`` and ``pyproject.toml``;
               requirement strings are compared as (name, extras, specifier, extra marker).
@@ -259,35 +262,42 @@ def _gates_script(runs: str) -> list[str]:
     return [line.strip() for line in m.group(1).splitlines()] if m else []
 
 
-def fresh_clone_findings(ci_text: str) -> list[str]:
-    """Each condition of product.evidence.205 the ``fresh-clone`` job no longer holds.
+#: The parts of the fresh-clone check: every gate but the suite, and the suite's N shards. The
+#: aggregator ``fresh-clone`` carries the one name an administrator requires (DL-101); it was
+#: one job until its first run took 65.9 of its 75 minutes (P-743).
+FRESH_CLONE_PARTS = ("fresh-clone-gates", "fresh-clone-shard")
+#: The aggregator's gate over ``toJSON(needs)``: every part succeeded, and there is one.
+ALL_PASSED_JQ = 'to_entries | length > 0 and all(.value.result == "success")'
+_ALWAYS = ("always()", "${{ always() }}")
 
-    The job is parsed, not searched (P-346): a gate counts only as an exact line of the
-    gates script (so ``|| true``, ``--co``, ``-k`` or ``--deselect`` on it is a finding), the
-    script runs only as ``bash -euo pipefail`` of the file, and neither the job nor a step
-    carries an ``if:`` or ``continue-on-error`` — a skipped required check does not block a
-    merge."""
-    jobs = yaml.safe_load(ci_text)["jobs"]
-    job = jobs.get("fresh-clone")
-    if job is None:
-        return ["ci.yml has no fresh-clone job"]
-    runs = "\n".join(str(s.get("run", "")) for s in job.get("steps", []))
-    script = _gates_script(runs)
+
+def shard_suite_line(n: int) -> str:
+    """The one line of a fresh-clone shard's script that runs the suite: the ``pytest`` gate
+    unchanged, plus this shard's options and its report — nothing else selects a test."""
+    return (
+        f"PYTHONPATH=scripts {GATES[-1]} -p ci_test_shards "
+        f'--shard="$SHARD/{n}" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"'
+    )
+
+
+def _shard_values(job: dict[str, Any]) -> list[Any]:
+    return list(((job.get("strategy") or {}).get("matrix") or {}).get("shard") or [])
+
+
+def _part_findings(name: str, job: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """What one part no longer holds of the fresh-clone conditions, and its gates script."""
     findings: list[str] = []
-    if str(job.get("if", "always()")).strip() not in ("always()", "${{ always() }}"):
-        findings.append(f"the fresh-clone job runs only if {job['if']!r}")
+    if str(job.get("if", "always()")).strip() not in _ALWAYS:
+        findings.append(f"{name} runs only if {job['if']!r}")
     if job.get("continue-on-error"):
-        findings.append("the fresh-clone job may fail without failing the check")
+        findings.append(f"{name} may fail without failing the check")
     for step in job.get("steps", []):
-        if "if" in step or step.get("continue-on-error"):
-            findings.append(f"a fresh-clone step can be skipped or ignored: {step.get('name')!r}")
-    for g in GATES:
-        exact = UI_GATES_LINE if g in ("npm run typecheck", "npx vitest run") else g
-        if exact not in script:
-            findings.append(f"the fresh-clone job does not run {g!r} as its own line")
+        if step.get("continue-on-error") or str(step.get("if", "always()")).strip() not in _ALWAYS:
+            findings.append(f"a {name} step can be skipped or ignored: {step.get('name')!r}")
+    runs = "\n".join(str(s.get("run", "")) for s in job.get("steps", []))
     lines = [line.strip() for line in runs.splitlines()]
     if GATES_INVOCATION not in lines:
-        findings.append("the gates script is not run as bash -euo pipefail of the file")
+        findings.append(f"{name}: the gates script is not run as bash -euo pipefail of the file")
     required = {
         "the daemon is stopped": "sudo systemctl stop docker.socket docker.service",
         "the step fails while a daemon answers": "if docker info >/dev/null 2>&1; then",
@@ -296,11 +306,66 @@ def fresh_clone_findings(ci_text: str) -> list[str]:
         "a clone made by root": "git clone -q --no-local",
         "installed from the lock": "uv sync -q --locked",
     }
-    findings += [
-        f"the fresh-clone job lost: {why}" for why, text in required.items() if text not in runs
-    ]
-    if runs.find("systemctl stop docker") > runs.find(".venv/bin/pytest"):
-        findings.append("the fresh-clone job runs the suite before it stops the daemon")
+    findings += [f"{name} lost: {why}" for why, text in required.items() if text not in runs]
+    if runs.find("systemctl stop docker") > runs.find('"$RUNNER_TEMP/gates.sh" <'):
+        findings.append(f"{name} runs its gates before it stops the daemon")
+    return findings, _gates_script(runs)
+
+
+def fresh_clone_findings(ci_text: str) -> list[str]:
+    """Each condition of product.evidence.205 the ``fresh-clone`` check no longer holds.
+
+    The jobs are parsed, not searched (P-346): a gate counts only as an exact line of a gates
+    script (so ``|| true``, ``--co``, ``-k`` or ``--deselect`` on it is a finding), each
+    script runs only as ``bash -euo pipefail`` of the file, and no part, aggregator or step of
+    either carries an ``if:`` other than ``always()`` or a ``continue-on-error``. The aggregator runs
+    ``always()``, needs every part, passes only when every part passed and proves the
+    shards' partition; each shard declares the tools it provides as root, and never docker —
+    its daemon is stopped (P-745)."""
+    jobs = yaml.safe_load(ci_text)["jobs"]
+    agg = jobs.get("fresh-clone")
+    if agg is None:
+        return ["ci.yml has no fresh-clone job"]
+    findings: list[str] = []
+    if str(agg.get("if", "")).strip() not in _ALWAYS:
+        findings.append("the fresh-clone aggregator does not run always(): a failed part skips it")
+    needs = agg.get("needs") or []
+    if set([needs] if isinstance(needs, str) else needs) != set(FRESH_CLONE_PARTS):
+        findings.append(f"the fresh-clone aggregator needs {needs!r}, not every part")
+    agg_runs = "\n".join(str(s.get("run", "")) for s in agg.get("steps", []))
+    if f"jq -e '{ALL_PASSED_JQ}'" not in agg_runs:
+        findings.append("the fresh-clone aggregator does not fail when a part did not pass")
+    if agg.get("continue-on-error") or any(s.get("continue-on-error") for s in agg["steps"]):
+        findings.append("the fresh-clone aggregator may fail without failing the check")
+    for step in agg.get("steps", []):  # an ``if: false`` step is green without running (P-746)
+        if str(step.get("if", "always()")).strip() not in _ALWAYS:
+            findings.append(f"a fresh-clone aggregator step can be skipped: {step.get('name')!r}")
+    scripts: dict[str, list[str]] = {}
+    for name in FRESH_CLONE_PARTS:
+        job = jobs.get(name)
+        if job is None:
+            findings.append(f"ci.yml has no {name} job")
+            continue
+        part, scripts[name] = _part_findings(name, job)
+        findings += part
+    for g in GATES[:-1]:
+        exact = UI_GATES_LINE if g in ("npm run typecheck", "npx vitest run") else g
+        if exact not in scripts.get("fresh-clone-gates", []):
+            findings.append(f"fresh-clone-gates does not run {g!r} as its own line")
+    shard = jobs.get("fresh-clone-shard") or {}
+    n = len(_shard_values(shard))
+    if _shard_values(shard) != list(range(1, n + 1)) or n == 0:
+        findings.append(f"the fresh-clone shards are not 1..N: {_shard_values(shard)!r}")
+    if shard_suite_line(n) not in scripts.get("fresh-clone-shard", []):
+        findings.append("fresh-clone-shard does not run the suite, sharded, as its own line")
+    if f"ci_test_shards.py verify --shards {n} " not in " ".join(agg_runs.split()):
+        findings.append(f"the fresh-clone aggregator does not prove the {n} shards' partition")
+    provided = str((shard.get("env") or {}).get("CRB_TEST_REQUIRE_TOOLS", "")).split()
+    if not provided or "docker" in provided:
+        findings.append(f"the fresh-clone shards declare {provided!r} as the tools they provide")
+    shard_runs = "\n".join(str(s.get("run", "")) for s in shard.get("steps", []))
+    if not re.search(r"--preserve-env=[^ ]*\bCRB_TEST_REQUIRE_TOOLS\b", shard_runs):
+        findings.append("the fresh-clone shards do not hand root the tools they provide")
     return findings
 
 
@@ -455,11 +520,16 @@ def test_the_fresh_clone_job_runs_every_gate_as_root_without_docker() -> None:
     assert fresh_clone_findings(CI.read_text(encoding="utf-8")) == []
 
 
+def _split_fresh_clone(text: str) -> tuple[str, str, str]:
+    """ci.yml as (before, the three fresh-clone jobs, after)."""
+    head, jobs = text.split("\n  fresh-clone-gates:\n", 1)
+    jobs, tail = jobs.split("\n  ui-unit:\n", 1)
+    return head, jobs, tail
+
+
 def _planted_job(edit: Any) -> str:
-    text = CI.read_text(encoding="utf-8")
-    head, job = text.split("\n  fresh-clone:\n", 1)
-    job, tail = job.split("\n  ui-unit:\n", 1)
-    return f"{head}\n  fresh-clone:\n{edit(job)}\n  ui-unit:\n{tail}"
+    head, jobs, tail = _split_fresh_clone(CI.read_text(encoding="utf-8"))
+    return f"{head}\n  fresh-clone-gates:\n{edit(jobs)}\n  ui-unit:\n{tail}"
 
 
 @pytest.mark.parametrize(
@@ -489,9 +559,60 @@ def _planted_job(edit: Any) -> str:
         (
             "a step that may fail",
             lambda j: j.replace(
-                "      - name: Every gate on a fresh clone",
-                "      - continue-on-error: true\n        name: Every gate on a fresh clone",
+                "      - name: Every gate but the suite",
+                "      - continue-on-error: true\n        name: Every gate but the suite",
             ),
+        ),
+        (
+            "a shard step that may fail",
+            lambda j: j.replace(
+                "      - name: This shard of the suite",
+                "      - continue-on-error: true\n        name: This shard of the suite",
+            ),
+        ),
+        (
+            "an aggregator a failed part skips",
+            lambda j: j.replace("fresh-clone-shard]\n    if: always()\n", "fresh-clone-shard]\n"),
+        ),
+        (
+            "an aggregator that ignores a failed part",
+            lambda j: j.replace("jq -e 'to_entries", "jq 'to_entries", 1),
+        ),
+        (
+            "an aggregator that does not wait for the shards",
+            lambda j: j.replace(
+                "needs: [fresh-clone-gates, fresh-clone-shard]", "needs: [fresh-clone-gates]"
+            ),
+        ),
+        (
+            "an aggregator whose every-part-passed step never runs",
+            lambda j: j.replace(
+                "      - name: Every part passed (the gates and every shard)\n",
+                "      - name: Every part passed (the gates and every shard)\n        if: false\n",
+            ),
+        ),
+        (
+            "an aggregator whose partition proof never runs",
+            lambda j: j.replace(
+                "      - name: Every test ran in exactly one shard (the partition proof)\n",
+                "      - name: Every test ran in exactly one shard (the partition proof)\n"
+                "        if: false\n",
+            ),
+        ),
+        (
+            "an aggregator that does not prove the partition",
+            lambda j: j.replace("ci_test_shards.py verify --shards 9", "ci_test_shards.py plan"),
+        ),
+        ("a shard that drops a slice", lambda j: j.replace('--shard="$SHARD/9"', '--shard="1/9"')),
+        (
+            "a shard that claims the stopped daemon",
+            lambda j: j.replace(
+                'CRB_TEST_REQUIRE_TOOLS: "go', 'CRB_TEST_REQUIRE_TOOLS: "docker go'
+            ),
+        ),
+        (
+            "a shard whose declaration never reaches root",
+            lambda j: j.replace("SRC,SHARD,CRB_TEST_REQUIRE_TOOLS,", "SRC,SHARD,"),
         ),
     ],
 )
@@ -506,9 +627,22 @@ def test_the_fresh_clone_check_refuses_a_neutered_job(what: str, edit: Any) -> N
 
 @pytest.mark.parametrize("dropped", [*GATES, "sudo systemctl stop docker.socket docker.service"])
 def test_the_fresh_clone_check_refuses_a_job_that_drops_a_condition(dropped: str) -> None:
-    text = CI.read_text(encoding="utf-8")
-    head, job = text.split("\n  fresh-clone:\n", 1)
-    job, tail = job.split("\n  ui-unit:\n", 1)
-    assert dropped in job
-    planted = f"{head}\n  fresh-clone:\n{job.replace(dropped, 'true', 1)}\n  ui-unit:\n{tail}"
+    head, jobs, tail = _split_fresh_clone(CI.read_text(encoding="utf-8"))
+    assert dropped in jobs
+    planted = (
+        f"{head}\n  fresh-clone-gates:\n{jobs.replace(dropped, 'true', 1)}\n  ui-unit:\n{tail}"
+    )
     assert fresh_clone_findings(planted) != []
+
+
+@pytest.mark.parametrize("part", FRESH_CLONE_PARTS)
+def test_the_fresh_clone_check_refuses_a_part_that_drops_a_condition(part: str) -> None:
+    """Every part holds every condition on its own: dropping the daemon stop, the root
+    assertion or the lock from the SECOND part is found as surely as from the first."""
+    head, jobs, tail = _split_fresh_clone(CI.read_text(encoding="utf-8"))
+    body = jobs.split(f"\n  {part}:\n", 1)[-1] if part != FRESH_CLONE_PARTS[0] else jobs
+    for condition in ("sudo systemctl stop docker.socket docker.service", 'test "$(id -u)" = 0'):
+        assert condition in body
+        cut = jobs[: len(jobs) - len(body)] + body.replace(condition, "true", 1)
+        planted = f"{head}\n  fresh-clone-gates:\n{cut}\n  ui-unit:\n{tail}"
+        assert any(f.startswith(part) for f in fresh_clone_findings(planted)), (part, condition)

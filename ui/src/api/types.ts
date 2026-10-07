@@ -98,8 +98,10 @@ export type MigrationsHeadStatus = {
   at_head: boolean
   /** For an unversioned store with crb tables: the revision its fingerprints correspond to; `null` otherwise. */
   unversioned_at: string | null
-  /** Unversioned store whose schema equals the current models at head — `crb migrate` would only stamp it. */
+  /** The schema was compared with the current models and equals them — a store at head (versioned or not); `false` when a difference was found or nothing at head was compared (pilot D7). */
   matches_models: boolean
+  /** Up to five differences the comparison found, as `<op> <names>` (`remove_index ix_runs_status`); `[]` when it matched or was not compared. */
+  drift?: string[]
 }
 
 /** The `migrations` probe as served: `Probe` with its `data` typed. */
@@ -126,6 +128,8 @@ export interface WorkerProbeWorker {
   alive: boolean
   /** Containers whose `docker kill` the daemon never confirmed and this worker is still reaping (0 on an older server). */
   unconfirmed_containers?: number
+  /** What this worker's metrics listener did at start (pilot D5): `listening` on `addr:port` (the port `auto` chose included), `off` by choice, or `degraded` with the reason; `null` when it recorded nothing. */
+  metrics?: { state: 'listening' | 'off' | 'degraded'; addr: string; port: number; requested: string; reason: string } | null
 }
 
 /**
@@ -1361,11 +1365,6 @@ export interface EventsVerify {
   full_walk_at: string
 }
 
-/**
- * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
- * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
- * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
- */
 /** One hash-chained table walked from its stored columns (``ChainVerifyOut``). */
 export interface ChainVerify {
   rows: number
@@ -1374,6 +1373,11 @@ export interface ChainVerify {
   detail: string
 }
 
+/**
+ * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
+ * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
+ * `broken_at` are the grade chain's alone, so a reader is told WHICH part failed.
+ */
 export interface LedgerVerify {
   rows: number
   ok: boolean

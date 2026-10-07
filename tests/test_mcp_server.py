@@ -21,9 +21,8 @@ Works with:   src/crb/mcp/server.py, src/crb/mcp/client.py (under test),
               tests/fixtures/server_seed.py (the seeded app and accounts),
               src/crb/server/routes/*.py (what the tools wrap)
 Tested by:    tests/test_mcp_server.py
-Touch when:   never for a new repository; a tool is added (add it to ``EXPECTED_TOOLS`` and
-              one call); the seed's cells
-              change (the map assertions name the seeded cobra-like cell).
+Touch when:   never for a new repository; a tool is added (add it to ``EXPECTED_TOOLS`` and one
+              call); the seed's cells change (the map assertions name the seeded cobra-like cell).
 """
 
 from __future__ import annotations

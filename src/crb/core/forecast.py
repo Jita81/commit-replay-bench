@@ -198,10 +198,23 @@ def _resolve(
         if r.apparatus_version == APPARATUS_VERSION and r.taxonomy in ("", GLOBAL_CLASS_SET)
     ]
     world = {"controls": controls, "oracle_by_task": oracle_by_task, "readings": book}
-    rs = book.standard_rows(base, PROJECTION_CLASS_SIZE)
-    cs_map = build_capability_map(rs, projection=PROJECTION_CLASS_SIZE, policy=policy, **world)  # type: ignore[arg-type]
+    # one standardised row set PER projection: a cell is priced on the rows it is routed on,
+    # never on another projection's, whose arm can differ per sub-cell (P-725)
+    standard: dict[tuple[str, ...], list[GradeRow]] = {}
+
+    def standard_for(projection: tuple[str, ...]) -> list[GradeRow]:
+        if projection not in standard:
+            standard[projection] = book.standard_rows(base, projection)
+        return standard[projection]
+
+    cs_map = build_capability_map(
+        standard_for(PROJECTION_CLASS_SIZE),
+        projection=PROJECTION_CLASS_SIZE,
+        policy=policy,
+        **world,  # type: ignore[arg-type]
+    )
     c_map = build_capability_map(
-        book.standard_rows(base, PROJECTION_CLASS),
+        standard_for(PROJECTION_CLASS),
         projection=PROJECTION_CLASS,
         policy=policy,
         **world,  # type: ignore[arg-type]
@@ -214,7 +227,7 @@ def _resolve(
 
     def rows_for(projection: tuple[str, ...], key: tuple[str, ...]) -> list[GradeRow]:
         if projection not in groups:
-            groups[projection] = group_by_cell(rs, key_fields=projection)
+            groups[projection] = group_by_cell(standard_for(projection), key_fields=projection)
         return groups[projection].get(key, [])
 
     out: list[_Resolved] = []

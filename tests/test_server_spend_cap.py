@@ -158,3 +158,99 @@ def test_a_capped_factory_run_whose_test_author_is_unpriced_is_refused(
     assert envelope(declined)["code"] == "no_frozen_backlog", declined.text
     uncapped = env.post("/runs", json=body)
     assert envelope(uncapped)["code"] == "no_frozen_backlog", uncapped.text
+
+
+def test_the_cap_prices_the_rungs_the_worker_would_call() -> None:
+    """The price check reads the ladder the worker builds — ``params.ladder`` over
+    ``ladder_json``, each label read by ``parse_rung_label`` — so it prices the model the
+    run calls: ``vendor:model`` for ``builder:vendor:model@provider`` and ``org:model`` for
+    ``builder:org:model:provider``, not the first half of either (P-700)."""
+    from crb.server.routes.runs import run_rungs
+
+    run = Run(
+        repo=ALPHA,
+        kind="replay",
+        builder="editblock",
+        model="gpt-oss-120b",
+        ladder_json=[
+            "r1",
+            "editblock:vendor:model@p",
+            "openai_agent:org:model:prov",
+            {"builder": "editblock", "model": "m2"},
+        ],
+        params_json={},
+    )
+    assert run_rungs(run) == [
+        ("editblock", "gpt-oss-120b"),
+        ("editblock", "vendor:model"),
+        ("openai_agent", "org:model"),
+        ("editblock", "m2"),
+    ]
+    run.params_json = {"ladder": ["openai_agent:acme:coder-1@p"]}
+    assert run_rungs(run) == [("openai_agent", "acme:coder-1")]
+
+
+def test_the_cap_does_not_price_the_run_s_own_pair_no_rung_calls(env: Env, jobs: FakeJobs) -> None:
+    """A ladder with no bare rung never calls the run's own ``builder:model`` — the worker
+    builds only the rungs ``rungs_from_entries`` names — so an unpriced run-level model
+    under priced explicit rungs is queued capped, not refused ``spend_cap_unpriced``. A
+    bare rung still resolves to that pair and is priced (P-706)."""
+    from crb.server.routes.runs import run_rungs
+
+    run = Run(
+        repo=ALPHA,
+        kind="replay",
+        builder="editblock",
+        model="mystery-model",
+        ladder_json=["editblock:gpt-oss-120b"],
+        params_json={},
+    )
+    assert run_rungs(run) == [("editblock", "gpt-oss-120b")]
+    run.ladder_json = ["r1", "editblock:gpt-oss-120b"]
+    assert run_rungs(run) == [("editblock", "mystery-model"), ("editblock", "gpt-oss-120b")]
+    login(env.client, "operator")
+    body = {**PRICED, "model": "mystery-model", "max_cost_usd": 5}
+    r = env.post("/runs", json={**body, "ladder": ["editblock:gpt-oss-120b"]})
+    assert r.status_code == 201, r.text
+    r = env.post("/runs", json={**body, "ladder": ["r1", "editblock:gpt-oss-120b"]})
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == "spend_cap_unpriced", r.text
+    assert len(jobs.enqueued) == 1
+
+
+def test_a_capped_rung_priced_under_its_whole_model_id_is_queued(
+    env: Env, jobs: FakeJobs, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A model id that carries ``:`` is priced under that whole id; the cap check must not
+    look up its first half and refuse a run the price table covers (P-700)."""
+    login(env.client, "operator")
+    table = tmp_path / "pricing.json"
+    table.write_text(json.dumps({"acme:coder-1": {"input_per_m": 1, "output_per_m": 2}}))
+    monkeypatch.setenv("CRB_PRICING_JSON", str(table))
+    body = {**PRICED, "ladder": ["r1", "editblock:acme:coder-1@"], "max_cost_usd": 5}
+    r = env.post("/runs", json=body)
+    assert r.status_code == 201, r.text
+
+
+def test_a_blank_test_author_on_a_capped_run_prices_the_deployment_author(
+    env: Env, jobs: FakeJobs
+) -> None:
+    """The worker reads a blank ``test_author`` as absent and calls the deployment's
+    author, so the cap check must price that author too — a capped run with
+    ``test_author: ""`` over an unpriced deployment author is refused, not queued to spend
+    before the worker stops it (P-701)."""
+    from crb.server.routes.runs import author_rung
+    from crb.server.settings import FactorySettings
+
+    run = Run(repo=ALPHA, kind="factory", builder="editblock", model="gpt-oss-120b")
+    assert author_rung(run, "", "openai_agent:mystery") == ("openai_agent", "mystery")
+    assert author_rung(run, "  ", "openai_agent:mystery") == ("openai_agent", "mystery")
+    assert author_rung(run, "editblock:vendor:model@p", "") == ("editblock", "vendor:model")
+    login(env.client, "operator")
+    env.settings.factory = FactorySettings(test_author="openai_agent:mystery")
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "gpt-oss-120b"}
+    for blank in ("", "   "):
+        r = env.post("/runs", json={**body, "max_cost_usd": 5, "test_author": blank})
+        assert r.status_code == 422, r.text
+        assert envelope(r)["code"] == "spend_cap_unpriced", r.text
+    assert jobs.enqueued == []

@@ -109,6 +109,17 @@ MODIFIER_LOOP = "+L"
 #: The bases that certify (license) a cell; ``S3`` alone is a ceiling (ADR-0026 item 4).
 CERTIFYING_BASES: frozenset[str] = frozenset({BASE_S1, BASE_S2})
 
+#: The head of every ``needs`` entry that asks for a TEST rather than a structural slot:
+#: ``S2``'s bare "a failing test" and ``S1``'s "a failing test written by <author>, …".
+NEED_FAILING_TEST = "a failing test"
+
+
+def is_test_need(need: str) -> bool:
+    """``True`` when an entry stop's ``need`` is a failing test (any author), never a slot —
+    the one test the way forward reads, so a new wording cannot fall through (P-726)."""
+    return need.startswith(NEED_FAILING_TEST)
+
+
 #: What each certifying arm asks the ticket for, in words a person can act on.
 NEEDS: dict[str, str] = {
     BASE_S1: "the structural facts the test author reads, one `slot: text` line each",
@@ -446,7 +457,7 @@ def decide_entry(
             "an arm nobody measured, so it is not built. Run it with the standard's test "
             "author, or an approver may fund one calibration build of the other arm",
             reason_code=BASE_S1,
-            needs=(f"a failing test written by {want}, the standard's test author",),
+            needs=(f"{NEED_FAILING_TEST} written by {want}, the standard's test author",),
             standard=standard,
             cells=cells,
         )
@@ -455,7 +466,7 @@ def decide_entry(
             STOP_NEEDS_CONTEXT,
             f"the {cell} {_cells(named)} standard is {standard.arm}, which needs {NEEDS[BASE_S2]}",
             reason_code=BASE_S2,
-            needs=("a failing test",),
+            needs=(NEED_FAILING_TEST,),
             standard=standard,
             cells=cells,
         )
@@ -654,6 +665,7 @@ __all__ = [
     "ITEM_SIZES",
     "MODIFIER_LOOP",
     "NEEDS",
+    "NEED_FAILING_TEST",
     "NO_READINGS",
     "OVERRIDABLE",
     "REASON_CEILING",
@@ -679,6 +691,7 @@ __all__ = [
     "StandardFor",
     "decide_entry",
     "gate_for",
+    "is_test_need",
     "licensing_rungs",
     "more_demanding",
     "next_size",

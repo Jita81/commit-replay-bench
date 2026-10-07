@@ -12,9 +12,9 @@ The first replay in the docker posture was run `0c44ff24189d4879b1254be6181ef54c
 operator's stack: cobra, bug.fix × XS, image `crb-sandbox-go:main-8ab88ad`, builder
 `claude_code:claude-sonnet-5`. The operator's session cancelled it after 3 of 9 attempts, and all
 three were graded `failure_kind: builder_red` with `target_green: false`, at $0.147, $0.180 and
-$0.137 **[measured — n = 3 attempts, method: the run's grade rows read on the live stack on
-2026-09-25, recorded in the session's findings note; apparatus 2.2]**. The same cell on the host
-posture reads Sonnet 5 22 of 22 clean **[measured — n = 22 attempts on 9 tasks, method: the
+$0.137 **[hypothesis, recorded as measured — n = 3 attempts, method: the run's grade rows
+read on the live stack on 2026-09-25, recorded in the session's findings note, not in this
+repository; apparatus 2.2]**. The same cell on the host posture reads Sonnet 5 22 of 22 clean **[measured — n = 22 attempts on 9 tasks, method: the
 README's host-posture cell; apparatus 2.2]**. Stream D's CHANGELOG entry counts 4 `builder_red` rows for the same run;
 this review could not reconcile the two counts without the stack's ledger, which the hard rules
 keep out of reach **[gap]**.

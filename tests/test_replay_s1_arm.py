@@ -209,6 +209,7 @@ _SDK_CLASS = {
     401: "AuthenticationError",
     402: "APIStatusError",
     429: "RateLimitError",
+    500: "InternalServerError",
     503: "InternalServerError",
 }
 
@@ -252,12 +253,65 @@ def test_an_author_outage_is_an_outage_never_an_authoring_failure(
         assert row.failure_kind == "outage", (status, row.error)
         assert row.error.startswith("authoring: the test author failed: model_error:"), row.error
         assert cell_stats(rows).n == 0
-    rows, _ = _replay(
-        pyrepo, tmp_path / "s400", s1=S1Arm(author=_provider_refusal(400), author_model="t1")
-    )
-    assert rows[0].failure_kind == FAILURE_AUTHORING, rows[0].error
     red = "authoring: the authored test 'tests/test_x.py' is not RED at the parent: it passes"
     assert derive_failure_kind(clean=False, disqualified=False, error=red) == "authoring"
+
+
+def test_an_author_call_that_failed_without_a_refusal_is_harness_never_the_arms_miss(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """Rule 4b holds for the test author as it holds for the builder (DL-360, P-720): the
+    author's own provider call failed with no refusal (a 400, a 500) or the runner raised
+    while proving the test RED — the author produced nothing to judge, so the row is an
+    instrument failure, ``harness``, skipped by a reading's first-attempt rule, never an
+    ``authoring`` miss counted against the arm. The same ``model_error`` on the builder's
+    side reads ``harness`` too."""
+    for status in (400, 500):
+        rows, _ = _replay(
+            pyrepo,
+            tmp_path / f"s{status}",
+            s1=S1Arm(author=_provider_refusal(status), author_model="t1"),
+        )
+        (row,) = rows
+        assert row.error.startswith("authoring: the test author failed: model_error:"), row.error
+        assert row.failure_kind == "harness", (status, row.error)
+        builder_side = row.error.removeprefix("authoring: the test author failed: ")
+        assert derive_failure_kind(clean=False, disqualified=False, error=builder_side) == (
+            "harness"
+        )
+    proving = "authoring: harness error proving RED: OSError: the sandbox went away"
+    assert derive_failure_kind(clean=False, disqualified=False, error=proving) == "harness"
+
+
+def test_a_miss_whose_text_the_model_chose_is_the_arms_miss_whatever_it_says(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-735: rule 3b read ``model_error`` anywhere in an ``authoring:`` error, and the path
+    the model chose for its test is part of that error — so a test green at the parent at
+    ``tests/test_model_error.py`` read ``harness`` (skipped by a reading, never the arm's miss)
+    and at ``tests/test_model_error_rate_limit.py`` read ``outage`` (outside n). Only the head
+    the adapter itself writes (``authoring: [the test author failed: ]model_error``) is the
+    instrument's; every other word is the model's, and the miss is the arm's."""
+    green = "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n"
+    for path in ("tests/test_model_error.py", "tests/test_model_error_rate_limit.py"):
+
+        def author(ws: Any, subject: str, message: str, path: str = path) -> tuple[str, str]:
+            return path, green
+
+        name = path.rsplit("/", 1)[1]
+        rows, _ = _replay(pyrepo, tmp_path / name, s1=S1Arm(author=author, author_model="t1"))
+        (row,) = rows
+        assert "is not RED at the parent" in row.error and path in row.error, row.error
+        assert row.failure_kind == FAILURE_AUTHORING, (path, row.error)
+        stats = cell_stats(rows)
+        assert (stats.n, stats.clean, stats.n_harness) == (1, 0, 0), path
+
+    def raising(ws: Any, subject: str, message: str) -> tuple[str, str]:
+        raise ImportError("cannot import name 'Model_Error' from 'calc' (rate limit 429)")
+
+    rows, _ = _replay(pyrepo, tmp_path / "import", s1=S1Arm(author=raising, author_model="t1"))
+    assert rows[0].error.startswith("authoring: the test author failed: ImportError:")
+    assert rows[0].failure_kind == FAILURE_AUTHORING, rows[0].error
 
 
 def test_every_row_of_one_s1_run_carries_the_runs_arm(pyrepo: pr.PyRepo, tmp_path: Path) -> None:

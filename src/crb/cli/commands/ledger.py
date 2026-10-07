@@ -60,6 +60,7 @@ from crb.cli.commands import (
 )
 from crb.core.checks import ARMS
 from crb.core.federated import export_abstract
+from crb.core.grade import FalseQ1Violation, MisattributionViolation
 from crb.core.ledger import (
     CELL_FIELDS,
     GradeRow,
@@ -389,6 +390,16 @@ def _verify_store(args: argparse.Namespace) -> int:
             )
         except LedgerIntegrityError as e:
             out.update({"chain_ok": False, "error": str(e), "head_row_hash": ""})
+        except (FalseQ1Violation, MisattributionViolation, ValueError, TypeError) as e:
+            # a stored row the reader refuses (edited underneath its triggers): reported,
+            # and the audit trail is still walked (P-702)
+            out.update(
+                {
+                    "chain_ok": False,
+                    "error": f"a stored row the reader refuses — {type(e).__name__}: {e}",
+                    "head_row_hash": "",
+                }
+            )
         events = verify_events(factory)
         out["events"] = events.to_dict()
         out["ok"] = bool(
@@ -518,6 +529,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
             "belts",
             "apparatus",
             "checks",
+            # the reading key a cell is split by (P-727): two lines of one cell differ here
+            "arm",
+            "class_set",
         ]
         body = [
             [
@@ -533,6 +547,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "+".join(d["belt_sets"]),
                 "+".join(d["apparatus_versions"]),
                 d["checks"],
+                d["context_arm"] or "-",
+                d["taxonomy"] or "-",
             ]
             for d in stats
         ]

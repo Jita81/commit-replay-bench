@@ -61,7 +61,8 @@ What it does: Verifies passwords in constant time (an unknown user pays for a ve
               is empty, and owns the account lifecycle primitives (``set_password``,
               ``set_user_active`` — deactivation ends the sessions — and
               ``would_orphan_admins``, the one last-admin rule, which counts only admins who
-              can sign in by ``SignInPaths``) the admin routes, the OIDC
+              can sign in by ``SignInPaths``; serialised by ``lock_users_table``, which fails
+              closed when a transaction is already open — P-430) the admin routes, the OIDC
               callback and the ``crb users`` CLI share. Never logs or returns a password or
               token.
 How:          argon2id via ``argon2-cffi``; ``itsdangerous`` timed serialisers with a salt
@@ -293,6 +294,11 @@ def count_users(db: Session) -> int:
     return int(db.execute(select(func.count(User.id))).scalar_one())
 
 
+class UsersLockNotHeld(RuntimeError):
+    """The users write lock could not be taken because a transaction was already open on the
+    session: the users write is refused rather than run unserialised (P-430)."""
+
+
 def lock_users_table(db: Session) -> None:
     """Serialise a read-then-write on ``users`` for the rest of this transaction: SQLite
     takes its write lock now (``BEGIN IMMEDIATE``), Postgres a transaction-scoped advisory
@@ -301,17 +307,33 @@ def lock_users_table(db: Session) -> None:
     It is taken BEFORE the ``events`` write lock in a transaction, never after it: every
     admin act holds it and then records its event, so the other order deadlocks on
     PostgreSQL. Asking for it after the events lock raises
-    :class:`~crb.store.events.LockOrderError` at once, on every dialect (P-227)."""
+    :class:`~crb.store.events.LockOrderError` at once, on every dialect (P-227).
+
+    pysqlite defers BEGIN until the first write, so the lock is taken after a caller's
+    reads; every caller (``set_role``, ``set_user_active`` from the route and from ``crb
+    users``) only reads before it. Fails closed (P-430, P-429's class): when a transaction
+    is already open, ``BEGIN IMMEDIATE`` cannot run and its error is not a documented proof
+    that this session holds the write lock (a deferred ``BEGIN`` holds none; SQLite does
+    take the lock before it raises, by the order of its ``OP_Transaction`` and
+    ``OP_AutoCommit`` steps, which is why the old helper held it by accident), so
+    :class:`UsersLockNotHeld` is raised and nothing is written — unless this same
+    transaction took the lock already, which holds to its end. That proof is the one
+    record :func:`~crb.store.events.write_locks_held` keeps, which a commit or rollback
+    forgets."""
     refuse_after_events_lock(db, USERS_LOCK)
     dialect = db.get_bind().dialect.name
     if dialect == "sqlite":
-        # pysqlite defers BEGIN until the first write, so this is safe after the auth
-        # lookup's SELECTs; if a write already happened the write lock is already held.
+        if USERS_LOCK in write_locks_held(db):
+            return
         try:
             db.execute(text("BEGIN IMMEDIATE"))
         except OperationalError as exc:
             if "within a transaction" not in str(exc):
                 raise
+            raise UsersLockNotHeld(
+                "the users write lock was not taken: a transaction was already open on this "
+                "session, so the users write would run unserialised — nothing was written"
+            ) from exc
     elif dialect == "postgresql":
         db.execute(text("SELECT pg_advisory_xact_lock(7336)"))
     write_locks_held(db).add(USERS_LOCK)
@@ -1198,6 +1220,7 @@ __all__ = [
     "OidcState",
     "OperatorDep",
     "SignInPaths",
+    "UsersLockNotHeld",
     "ViewerDep",
     "authenticate_local",
     "bootstrap_admin_if_empty",

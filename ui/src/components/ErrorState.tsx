@@ -8,7 +8,8 @@
  * What it does: Shows the human message from the envelope under a heading chosen by code
  *               (`timeout`, `network`, `sandbox_unavailable`, `false_q1_refused`,
  *               `invalid_response`, `builder_credential_missing`,
- *               `builder_provider_mismatch`) or by HTTP status
+ *               `builder_provider_mismatch`, `builder_login_invalid` — which also carries
+ *               the link to the Settings login card, pilot D1) or by HTTP status
  *               (401 / 403 / 404 / 409 / 5xx), the `HTTP <status> · <code>` line in small
  *               mono, the structured `detail` behind a
  *               collapsed disclosure, and an optional Retry. No stack traces, no raw JSON in
@@ -31,7 +32,7 @@
  */
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'
-import { Button } from './Button'
+import { Button, LinkButton } from './Button'
 import { JsonView } from './JsonView'
 
 interface ErrorStateProps {
@@ -54,6 +55,14 @@ const CODE_TITLES: Record<string, string> = {
   builder_credential_missing: 'No credential for this builder — nothing was queued',
   // POST /runs: a rung names a provider the configured endpoint is not (docs/PREVENTION.md P-284)
   builder_provider_mismatch: 'This rung names a provider the endpoint is not — nothing was queued',
+  // POST /runs: the builder's login failed its verification (pilot D1, docs/PREVENTION.md P-435)
+  builder_login_invalid: 'The builder’s login does not work — nothing was queued',
+}
+
+/** Where a login refusal is fixed: the server's `detail.fix_path`, else the login card. */
+function loginFixPath(detail: Record<string, unknown>): string {
+  const path = detail.fix_path
+  return typeof path === 'string' && path.startsWith('/') ? path : '/settings#claude-code-login'
 }
 
 /** A heading from the HTTP status when the code is not a reserved one. */
@@ -103,6 +112,14 @@ export function ErrorState({ error, onRetry, title, compact = false, children }:
                 <JsonView value={api.detail} initiallyOpen />
               </div>
             </details>
+          )}
+          {api?.code === 'builder_login_invalid' && (
+            // the way forward travels with the refusal, on every screen that submits a run
+            <p className="pt-1">
+              <LinkButton size="sm" to={loginFixPath(api.detail)} hint="link.builder_login_fix" data-testid="error-login-fix">
+                Fix the login under Settings
+              </LinkButton>
+            </p>
           )}
           {children}
         </div>

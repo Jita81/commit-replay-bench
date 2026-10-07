@@ -19,11 +19,14 @@ What it does: Pins the RBAC matrix (viewer and operator are 403), that an admin-
               and never a password, that those events are ordinary ``events`` rows —
               trigger-protected and on the audit trail's own hash chain (ADR-0029) — and that a
               password set by any door rotates the session nonce, so the old sessions end
-              even when the stored hash does not move (#52's revocation, P-149).
+              even when the stored hash does not move (#52's revocation, P-149), and that
+              the users lock serialises two concurrent last-admin deactivations and refuses
+              rather than run unlocked when a transaction is already open (P-430).
 How:          ``create_app`` over a temp SQLite file with the bootstrap admin; a second
               ``TestClient`` on the started app (no second lifespan) where two sessions
               must be told apart; events read straight from the ``events`` table on the
-              account's ``users:<id>`` trace.
+              account's ``users:<id>`` trace; the lock cases drive two sessions (one on a
+              thread) or open a deferred ``BEGIN`` before the lock.
 Layer:        tests — docs/ARCHITECTURE.md#71-security
 ADRs:         none
 Works with:   src/crb/server/routes/admin.py (under test), src/crb/server/auth.py
@@ -38,6 +41,7 @@ Touch when:   never for a new repository; a lifecycle route or a ``user.*`` even
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -45,7 +49,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from crb.server.app import API_PREFIX, create_app
 from crb.server.auth import (
@@ -53,6 +57,7 @@ from crb.server.auth import (
     SESSION_COOKIE,
     count_active_admins,
     create_local_user,
+    lock_users_table,
     new_user_id,
     set_user_active,
 )
@@ -468,6 +473,104 @@ class TestActive:
         with app.state.session_factory() as s:
             assert count_active_admins(s) == 1 and s.get(User, x).role == "admin"
             assert s.get(User, z).active is True
+
+    def test_a_transaction_already_open_makes_the_users_lock_refuse(
+        self, client: TestClient, app: Any
+    ) -> None:
+        """P-430: the users lock fails closed. A deferred ``BEGIN`` holds no write lock, so
+        when one is already open ``BEGIN IMMEDIATE`` cannot run and nothing proves the
+        session is serialised: the lock must raise, never return as if it held it. Taking
+        it again in the transaction that took it is not that case (the write lock lasts to
+        the transaction's end), and that proof ends with the transaction."""
+        del client  # started: the lifespan binds the session factory
+        with app.state.session_factory() as s:
+            lock_users_table(s)
+            lock_users_table(s)  # the same transaction already holds the write lock
+            s.commit()
+            s.execute(text("BEGIN"))  # a transaction, but no write lock
+            with pytest.raises(RuntimeError, match="already open"):
+                lock_users_table(s)
+
+    def test_the_users_lock_re_entry_reads_the_one_write_lock_record(
+        self, client: TestClient, app: Any
+    ) -> None:
+        """One record says a transaction holds the users lock: ``write_locks_held``, the set
+        the lock-order check (P-227) reads. Re-entry in the transaction that took the lock
+        must read that record too, not a second copy in ``Session.info`` that could drift."""
+        del client  # started: the lifespan binds the session factory
+        with app.state.session_factory() as s:
+            lock_users_table(s)
+            for key in [k for k in s.info if k != "crb.write_locks_held"]:
+                del s.info[key]  # only the write-lock record survives
+            lock_users_table(s)  # still a no-op: the record proves the lock is held
+            s.rollback()
+
+    def test_a_transaction_already_open_refuses_a_deactivation_rather_than_run_unlocked(
+        self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P-430 at the route: a deferred ``BEGIN`` opened before the users lock (here after
+        the target's read) makes ``PUT /users/{id}/active`` refuse with nothing written,
+        not deactivate the account with its last-admin guard unserialised."""
+        login(client)
+        x = create(client, "xx", "operator")
+        real_get_user = admin_routes._get_user
+
+        def get_then_begin(db: Any, user_id: str) -> Any:
+            user = real_get_user(db, user_id)
+            db.execute(text("BEGIN"))  # a transaction, but no write lock
+            return user
+
+        monkeypatch.setattr(admin_routes, "_get_user", get_then_begin)
+        try:
+            r = client.put(f"{API_PREFIX}/users/{x}/active", json={"active": False})
+        except RuntimeError as exc:
+            assert "already open" in str(exc)
+            r = None
+        assert r is None or r.status_code == 500, r.text
+        with app.state.session_factory() as s:
+            assert s.get(User, x).active is True
+        assert [e.action for e in events_for(app, x)] == ["user.created"]  # nothing written
+
+    def test_the_lock_serialises_two_concurrent_last_admin_deactivations(
+        self, client: TestClient, app: Any
+    ) -> None:
+        """Two admins, two sessions, each deactivating the other admin. Without the lock
+        each would count "2 admins" and together leave none. Under it the second waits for
+        the first to commit, re-reads, counts 1 and is refused 409 ``last_admin``."""
+        del client  # started: the lifespan binds the session factory
+        with app.state.session_factory() as s:
+            y = create_local_user(s, username="yy", password=USER_PW, role="admin").id
+            root = s.execute(select(User).where(User.subject == "local:root")).scalar_one().id
+            s.commit()
+        a, b = app.state.session_factory(), app.state.session_factory()
+        started, outcome = threading.Event(), {}
+
+        def second() -> None:
+            started.set()
+            try:
+                outcome["changed"] = set_user_active(b, b.get(User, y), False, sign_in=None)
+            except ApiError as exc:
+                outcome["refused"] = exc.code
+            finally:
+                b.rollback()
+
+        try:
+            # a holds the lock
+            assert set_user_active(a, a.get(User, root), False, sign_in=None) is True
+            t = threading.Thread(target=second)
+            t.start()
+            started.wait(5)
+            t.join(0.5)
+            assert t.is_alive(), outcome  # b is waiting for a's write lock, not counting
+            a.commit()
+            t.join(10)
+            assert not t.is_alive()
+        finally:
+            a.close()
+            b.close()
+        assert outcome == {"refused": "last_admin"}
+        with app.state.session_factory() as s:
+            assert count_active_admins(s) == 1 and s.get(User, y).active is True
 
 
 # --- list rows --------------------------------------------------------------------------------

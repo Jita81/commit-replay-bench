@@ -46,7 +46,13 @@ from crb.cli.commands import (
     workdir_of,
 )
 from crb.core.context_arm import BASE_S2, parse_arm
-from crb.core.ledger import CELL_FIELDS, LABEL_CHANGE_ID, JsonlLedger, is_sealed_class
+from crb.core.ledger import (
+    CELL_FIELDS,
+    LABEL_CHANGE_ID,
+    JsonlLedger,
+    is_sealed_class,
+    jsonl_append_lock,
+)
 from crb.core.reading import RULE_LOOK_V1, RULES, Reading, ReadingRefused, pool_by_rule
 from crb.core.reading import register as register_reading
 from crb.core.taxonomy import GLOBAL_CLASS_SET
@@ -162,31 +168,35 @@ def cmd_register(args: argparse.Namespace) -> int:
         raise CliError(f"no gold-checked task of this cell on file under {pool_rule}")
     ledger = Path(args.path).expanduser() if args.path else wd.ledger_path
     path = readings_path(args)
-    try:
-        reading = register_reading(
-            repo=args.repo,
-            cell=cell,
-            hierarchy=hierarchy,
-            pool=pool,
-            apparatus=APPARATUS_VERSION,
-            taxonomy=GLOBAL_CLASS_SET,
-            posture_class=args.posture_class,
-            checks_arm=args.checks,
-            actor=args.actor or f"cli:{os.environ.get('USER', 'unknown')}",
-            existing=load_readings(path),
-            rows=JsonlLedger(ledger).rows(),
-            rule=args.rule,
-            author_model=args.author_model,
-            changes={c: str(tasks[c].labels.get(LABEL_CHANGE_ID, "")) for c in pool},
-            pool_rule=pool_rule,
-        )
-    except ReadingRefused as exc:
-        raise CliError(f"{exc.code}: {exc}") from exc
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(reading.to_dict(), sort_keys=True) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
+    # the read of the readings on file, the budget check and the append are ONE step under
+    # the file's lock: two overlapping registrations would otherwise both pass the check and
+    # overspend the cell's error budget (ADR-0026 item 5; P-722)
+    with jsonl_append_lock(path):
+        try:
+            reading = register_reading(
+                repo=args.repo,
+                cell=cell,
+                hierarchy=hierarchy,
+                pool=pool,
+                apparatus=APPARATUS_VERSION,
+                taxonomy=GLOBAL_CLASS_SET,
+                posture_class=args.posture_class,
+                checks_arm=args.checks,
+                actor=args.actor or f"cli:{os.environ.get('USER', 'unknown')}",
+                existing=load_readings(path),
+                rows=JsonlLedger(ledger).rows(),
+                rule=args.rule,
+                author_model=args.author_model,
+                changes={c: str(tasks[c].labels.get(LABEL_CHANGE_ID, "")) for c in pool},
+                pool_rule=pool_rule,
+            )
+        except ReadingRefused as exc:
+            raise CliError(f"{exc.code}: {exc}") from exc
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(reading.to_dict(), sort_keys=True) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
     out: dict[str, Any] = {"readings": str(path), **reading.to_dict()}
     if args.json:
         print_json(out)

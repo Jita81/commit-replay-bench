@@ -50,10 +50,9 @@ Works with:   src/crb/intake/client.py (the ``Ticket`` it maps),
               src/crb/core/spec.py (``SIZE_TIER_NAMES``, ``UNCLASSIFIED``),
               src/crb/intake/feedback.py (renders the draft's gaps onto the ticket)
 Tested by:    tests/test_intake_draft.py
-Touch when:   never for a new repository; a capability class joins the readiness catalogue
-              — give it cues in ``CUES`` or it can only ever arrive by an explicit
-              ``crb:class=`` tag; the points
-              scale changes (it is published, so change the guide in the same commit).
+Touch when:   never for a new repository; a capability class joins the readiness catalogue — give it
+              cues in ``CUES`` or it can only ever arrive by an explicit ``crb:class=`` tag; the
+              points scale changes (it is published, so change the guide in the same commit).
 """
 
 from __future__ import annotations

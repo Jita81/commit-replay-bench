@@ -160,9 +160,9 @@ export const SHELL_MENU_IDS = ['shell-menu-actions', 'shell-nav-primary', 'shell
 export const SHELL_MENU_BUTTON_ID = 'shell-menu-button'
 
 /**
- * The phone menu's open state, keyed to the address it was opened on, so following any link
- * inside it closes it (the next screen starts with the navigation folded away) without an
- * effect that resets state after render. Escape closes it and puts focus back on the button
+ * The phone menu's open state, closed by every navigation — a link inside it, Back, Forward
+ * (P-423) — so the next screen, and a screen returned to, starts with the navigation folded
+ * away, without an effect that resets state after render. Escape closes it and puts focus back on the button
  * — unless the Escape was already spent closing a hint bubble (`Hint` default-prevents it and
  * stops it in the capture phase), or focus is in another layer such as the evidence drawer
  * (whose own Escape closes it), so one press closes the innermost thing, as in a dialog.
@@ -175,10 +175,18 @@ function focusIsOnTheMenu(): boolean {
 }
 
 function useShellMenu(): { open: boolean; toggle: () => void } {
-  const { pathname, search } = useLocation()
-  const here = `${pathname}${search}`
+  // keyed to the history ENTRY, not the address: Back to the address the menu was opened
+  // on is another navigation, so the menu must not reopen by itself (P-423). Any move —
+  // a link, Back, Forward, or a link to the page already shown — ends the open state,
+  // adjusted during render so no effect resets it a frame late.
+  const { key } = useLocation()
   const [openAt, setOpenAt] = useState<string | null>(null)
-  const open = openAt === here
+  const [seen, setSeen] = useState(key)
+  if (seen !== key) {
+    setSeen(key)
+    if (openAt !== null) setOpenAt(null)
+  }
+  const open = openAt !== null && openAt === key
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -192,7 +200,7 @@ function useShellMenu(): { open: boolean; toggle: () => void } {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
-  return { open, toggle: () => setOpenAt(open ? null : here) }
+  return { open, toggle: () => setOpenAt(open ? null : key) }
 }
 
 /**

@@ -1,6 +1,6 @@
 # ADR-0028 — The moments the flow reading needs are recorded when they happen, never derived
 
-**Status:** Proposed (DL-067; stream M, G-557 and G-558)
+**Status:** Proposed (DL-067, amended DL-220; stream M, G-557 and G-558)
 **Date:** 2026-09-26
 **Apparatus impact:** none (no belt, size, class, route or threshold changes meaning; the
 recorder only writes system events that the flow reading reads back).
@@ -42,8 +42,10 @@ and dating an install from the oldest row in the database dates an upgrade as an
 4. **The first green `/health`.** The first `/health` read whose status is `ok` writes
    `deployment.first_healthy`. `degraded` is not green. Concurrent first reads may both write;
    every reader takes the earliest. This one IS stamped on a read, because a read is how
-   health is observed: the chart's readiness probe polls `/api/v1/health`, so under the chart
-   the first green read follows the first green state by at most one probe period.
+   health is observed: the chart's readiness probe polls `/api/v1/health` every 10 s
+   (`periodSeconds: 10`, `deploy/helm/crb/templates/api-deployment.yaml`), so under the chart
+   the first green read follows the first green state by at most one probe period plus the
+   read's own time [hypothesis — from the probe setting, not measured].
 5. **Observability, never a verdict.** A recorder failure is logged; the run, the start and
    the health answer stand. Nothing here changes a route, a grade or a sign-off.
 6. **A stamp is read only within its own scope** (amended 2026-09-27, after independent
@@ -61,6 +63,17 @@ and dating an install from the oldest row in the database dates an upgrade as an
    `GET /users` already draws: with n = 1 the recovery lead time is one person's recovery,
    timed. Anyone else reads the lead time as unmeasured with that reason, and no account
    count.
+8. **Every sign-in is recorded** (amended 2026-09-28, DL-220). `User.last_login` keeps only
+   the latest sign-in, so a recovery timed against it was timed to the latest sign-in, not
+   the first after the reset, and two resets of one account shared one sign-in. Every
+   successful sign-in, local or OIDC, now writes `user.signed_in` on a sign-in trace of its
+   own, apart from the account's change trail, since a sign-in changes nothing about the
+   account; DL-068's `user.login` on that trail is the audit record, this is flow's clock (a
+   refused one writes no `user.signed_in`, only DL-068's `user.login_failed`, and no event
+   carries a password). A reset by an admin is
+   paired with the account's first `user.signed_in` after it and before the account's next
+   password change. A reset older than the deployment's first recorded sign-in is counted
+   and never timed: a sign-in nothing recorded may have come first.
 
 ## Consequences
 
@@ -75,9 +88,12 @@ and dating an install from the oldest row in the database dates an upgrade as an
 - Every finished run now reads the served map once more (the same fold the route gate does
   for a factory run). A repository's first finished run writes one `flow.recorder_started`
   event.
+- Every successful sign-in writes one `user.signed_in` event, so the account trail grows by
+  one event per sign-in.
 - Must never: back-date a moment from a neighbouring record; time an inherited or unknown
-  moment; pair a stamp with a signature of another scope; serve the account figures below
-  admin; let the recorder fail a run or a start.
+  moment; time a recovery to any sign-in but the first after the reset; pair a stamp with a
+  signature of another scope; serve the account figures below admin; let the recorder fail a
+  run or a start.
 
 ## Alternatives considered
 

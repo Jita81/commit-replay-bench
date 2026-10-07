@@ -146,9 +146,7 @@ def test_fetch_user_is_the_worker_and_never_root(tmp_path: Path) -> None:
 
 @pytest.fixture
 def scratch() -> Iterator[Path]:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     langs.require_docker_image(DEFAULT_PYTHON_IMAGE, "the pinned python fetch image")
     root = langs.CACHE_DIR / "provision" / f"fetch-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)

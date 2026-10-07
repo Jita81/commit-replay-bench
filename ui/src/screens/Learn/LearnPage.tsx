@@ -342,7 +342,9 @@ const REFUSED_PREFIXES = ['archaeology', 'network']
 function DecideDialog({ repo, group, onClose }: { repo: string; group: RefusalGroup; onClose: () => void }) {
   const [verdict, setVerdict] = useState<'honest' | 'refuse'>('honest')
   const [note, setNote] = useState('')
-  const [command, setCommand] = useState('')
+  // P-424: the server takes a command only when it continues a recorded cut example byte
+  // for byte, so the field starts from that example and the person types only the tail
+  const [command, setCommand] = useState(group.truncated ? (group.examples[0] ?? '') : '')
   const [prefix, setPrefix] = useState(REFUSED_PREFIXES.includes(group.prefix) ? group.prefix : REFUSED_PREFIXES[0]!)
   const accept = useAcceptRefusal(repo)
   const needsCommand = group.truncated
@@ -432,7 +434,7 @@ function DecideDialog({ repo, group, onClose }: { repo: string; group: RefusalGr
                 required
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}
-                description="Every recorded example of this class was cut short by the recorder’s cap. A cut command is not a usable corpus line, so type the whole one."
+                description="Every recorded example of this class was cut short by the recorder’s cap, and a cut command is not a usable corpus line. Complete the command after the cut example: the start is filled in as recorded and must stay as it is."
               />
             )}
             {needsPrefix && (

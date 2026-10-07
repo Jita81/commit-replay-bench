@@ -7,9 +7,11 @@
  * What it is:   Behavioural tests for the build plugin in ui/plugins/requireBundledDocs.ts, and
  *               for its wiring into ui/vite.config.ts.
  * What it does: Runs the plugin's `buildStart` against temporary docs directories and pins
- *               that it passes with every guide `DOC_NAMES` lists and a decision record, and
- *               fails naming what is missing when one guide is gone, when docs/adr is empty
- *               or absent, and when `DOC_NAMES` cannot be read; that it passes on this
+ *               that it passes with every guide `DOC_NAMES` lists and every record
+ *               `ADR_TITLES` lists, and fails naming what is missing when one guide is gone,
+ *               when one listed record is gone though another is present (P-422), when
+ *               docs/adr is empty or absent, and when `DOC_NAMES` or `ADR_TITLES` cannot be
+ *               read; that it passes on this
  *               repository's own docs; and that the config vite builds with lists it — so the
  *               refusal P-173 relies on is proven by what it does, not by the words in the
  *               config (the grep this replaced survived its `if (false)` mutation).
@@ -35,8 +37,11 @@ afterEach(() => {
   while (made.length) rmSync(made.pop()!, { recursive: true, force: true })
 })
 
-/** A temporary tree: `docs/` with `guides` and `adrs`, and a `docs.ts` declaring `names`. */
-function tree(opts: { names: string[]; guides: string[]; adrs?: string[] | null; registry?: string }) {
+/**
+ * A temporary tree: `docs/` with `guides` and `adrs`, a `docs.ts` declaring `names`, and an
+ * `adrs.ts` declaring `adrNumbers` (by default the numbers of the `adrs` files, or `0001`).
+ */
+function tree(opts: { names: string[]; guides: string[]; adrs?: string[] | null; registry?: string; adrNumbers?: string[]; adrRegistry?: string }) {
   const root = mkdtempSync(join(tmpdir(), 'crb-docs-'))
   made.push(root)
   mkdirSync(join(root, 'docs'))
@@ -50,11 +55,15 @@ function tree(opts: { names: string[]; guides: string[]; adrs?: string[] | null;
   }
   const registry = opts.registry ?? `export const DOC_NAMES = [${opts.names.map((n) => `'${n}'`).join(', ')}] as const\n`
   writeFileSync(join(root, 'docs.ts'), registry)
-  return { docs: pathToFileURL(join(root, 'docs') + '/'), registry: pathToFileURL(join(root, 'docs.ts')) }
+  const fromFiles = (opts.adrs ?? []).map((a) => /^(\d{4})-/.exec(a)?.[1]).filter((n): n is string => Boolean(n))
+  const numbers = opts.adrNumbers ?? (fromFiles.length ? fromFiles : ['0001'])
+  const adrRegistry = opts.adrRegistry ?? `export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [\n${numbers.map((n) => `  ['${n}', 'Title ${n}'],`).join('\n')}\n]\n`
+  writeFileSync(join(root, 'adrs.ts'), adrRegistry)
+  return { docs: pathToFileURL(join(root, 'docs') + '/'), registry: pathToFileURL(join(root, 'docs.ts')), adrRegistry: pathToFileURL(join(root, 'adrs.ts')) }
 }
 
 /** Runs `buildStart` as Rollup would: `this.error` throws. */
-function build(where: { docs: URL; registry: URL }): void {
+function build(where: { docs: URL; registry: URL; adrRegistry: URL }): void {
   const plugin = requireBundledDocs(where)
   const ctx = {
     error(message: string): never {
@@ -84,6 +93,18 @@ describe('requireBundledDocs', () => {
   it('fails the build when there is no decision record, or no docs/adr at all', () => {
     expect(() => build(tree({ names: ['OPERATOR'], guides: ['OPERATOR'], adrs: ['README.md'] }))).toThrow(/docs\/adr\/\*\.md/)
     expect(() => build(tree({ names: ['OPERATOR'], guides: ['OPERATOR'], adrs: null }))).toThrow(/docs\/adr\/\*\.md/)
+  })
+
+  it('fails the build naming every decision record /help lists that the context lacks, even when another is present (P-422)', () => {
+    // one record present is not the list present: /help links every ADR_TITLES row, and a
+    // row whose file the build cannot see is a link that fails to load
+    const partial = tree({ names: ['OPERATOR'], guides: ['OPERATOR'], adrs: ['0001-x.md'], adrNumbers: ['0001', '0002', '0015'] })
+    expect(() => build(partial)).toThrow(/missing docs\/adr\/0002-\*\.md, docs\/adr\/0015-\*\.md/)
+    expect(() => build(tree({ names: ['OPERATOR'], guides: ['OPERATOR'], adrs: ['0001-x.md', '0002-y.md'], adrNumbers: ['0001', '0002'] }))).not.toThrow()
+  })
+
+  it('fails the build when ADR_TITLES cannot be read, rather than checking no record', () => {
+    expect(() => build(tree({ names: ['OPERATOR'], guides: ['OPERATOR'], adrs: ['0001-x.md'], adrRegistry: 'export const RECORDS = []\n' }))).toThrow(/could not read ADR_TITLES/)
   })
 
   it('fails the build when DOC_NAMES cannot be read, rather than checking nothing', () => {

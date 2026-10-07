@@ -256,7 +256,7 @@ function EvidencePanel({ preview, bars }: { preview: SignoffPreview; bars?: { ru
     <Card title="What you would be signing" id="signoff-evidence">
       <div className="flex flex-wrap gap-3" data-testid="signoff-evidence">
         <StatTile label="Pass rate" value={fmtPct(ev.point)} n={ev.n} ci={ev.ci_low === null || ev.ci_high === null ? null : { low: ev.ci_low, high: ev.ci_high }} apparatus={`${fmtInt(ev.clean)} clean of ${fmtInt(ev.n)} eligible · ${apparatus}`} hint="stat.signoff.point" data-testid="signoff-tile-point" />
-        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`over every attempt · the route reads the standard arm's registered reading${bars ? ` under ${bars.rule}` : ''}`} hint="stat.signoff.ci_low" data-testid="signoff-tile-ci-low" />
+        <StatTile label="Wilson lower" value={fmtPct(ev.ci_low)} n={ev.n} apparatus={`over every eligible attempt · the route reads the standard arm's registered reading${bars ? ` under ${bars.rule}` : ''}`} hint="stat.signoff.ci_low" data-testid="signoff-tile-ci-low" />
         <StatTile label="false-Q1" value={ev.measured ? String(ev.false_q1) : '—'} n={ev.n} apparatus="clean rows with a failed belt — must be 0" tone={ev.false_q1 > 0 ? 'red' : 'green'} hint="stat.signoff.false_q1" data-testid="signoff-tile-false-q1" />
         <StatTile label="Oracle strength" value={fmtRatio(ev.oracle_strength)} n={ev.oracle?.scored ?? ev.n} apparatus={`mean mutation kill-rate of the cell's tasks' oracles${ev.oracle ? ` · ${ev.oracle.scored} of ${ev.oracle.tasks} task(s) scored` : ''} · unmeasured is a refusal, never a pass`} hint="stat.signoff.oracle" data-testid="signoff-tile-oracle" />
       </div>

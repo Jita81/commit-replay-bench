@@ -90,9 +90,7 @@ def test_npm_fetch_is_ci_with_scripts_off_over_the_lock_only(tmp_path: Path) -> 
 
 @pytest.fixture
 def scratch() -> Iterator[Path]:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     langs.require_docker_image(DEFAULT_NODE_IMAGE, "the pinned node fetch image")
     root = langs.CACHE_DIR / "provision" / f"node-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)
