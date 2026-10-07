@@ -315,11 +315,19 @@ def deployment_author_model(settings: object) -> str:
 
 
 def derive_remeasure(
-    db: Session, factory: SessionFactoryDep, repo: str, *, apparatus: str, settings: object
+    db: Session,
+    factory: SessionFactoryDep,
+    repo: str,
+    *,
+    apparatus: str,
+    settings: object,
+    posture_class: str | None = None,
 ) -> RemeasurePlan:
     """The repo's re-measurement plan (``RemeasurePlan``) against ``apparatus``, read from its
     registered readings (ADR-0026 item 2): a top-up names only the commits a reading still
-    needs; a cell with no reading is offered registration, never a replay (P-602)."""
+    needs; a cell with no reading is offered registration, never a replay (P-602).
+    ``posture_class`` is the caller's own when its settings are not the API's (the worker's
+    idle pass, ``Worker._deployment_posture_class``); else the API settings decide (P-672)."""
     every = list(DbLedger(factory).rows(repo=repo))
     # the arm the repository grades under now: a cell never pools two arms (ADR-0024)
     rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
@@ -346,7 +354,11 @@ def derive_remeasure(
         gold_clean_tasks=gold,
         # a replay writes the arm the reading reads only with its test author, in its posture
         s1_author_model=deployment_author_model(settings),
-        deployment_posture=deployment_posture_class(settings, db.get(Repo, repo)),
+        deployment_posture=(
+            posture_class
+            if posture_class is not None
+            else deployment_posture_class(settings, db.get(Repo, repo))
+        ),
     )
 
 
