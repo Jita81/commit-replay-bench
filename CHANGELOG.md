@@ -12,7 +12,8 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **Every pull-request workflow's jobs are required on `main`**. On 2026-10-07 an administrator
+- **Every pull-request workflow's jobs are required on `main`**
+  ([#72](https://github.com/Jita81/commit-replay-bench/pull/72)). On 2026-10-07 an administrator
   added the `fresh-clone` and `commit-subjects` checks to `main`'s required list, making 18. The
   branch-protection check compared that list with `ci.yml` alone, so it called `commit-subjects`
   a check no job reports. It never saw that the check was missing before. It now finds every
