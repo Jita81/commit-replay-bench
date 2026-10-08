@@ -22,6 +22,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   fails, and every suite job must fetch the whole history (P-753). No token that may read the
   setting is provisioned yet, so the daily workflow stays red (G-930).
 
+- **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
+  ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table
+  the application updates, `invitations` and `decisions_due`. A split-role PostgreSQL store
+  upgraded across them gives a new table only `SELECT, INSERT`, and DEPLOYMENT §6 had no note
+  granting the rest, so accepting or revoking an invitation and every read of the decisions
+  inbox were refused with `permission denied`. §6 now names the grant, and a PostgreSQL test
+  proves it. A test fails when a later revision adds a table that §3.3 lets the application
+  rewrite and no upgrade note grants it (P-754).
+
 - **Wave 4: the context library and its miners, the second person, go-live on evidence, truthful
   screens** (north-star Wave 4, streams L, M, S, P and T;
   [#73](https://github.com/Jita81/commit-replay-bench/pull/73)). Library entries are proposed by a
