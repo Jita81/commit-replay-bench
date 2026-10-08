@@ -36,11 +36,13 @@ over a floor (DL-066).
 and its recovery lead time, which are an admin's (ADR-0028 §7): anyone else reads the lead time
 as unmeasured with :data:`ADMIN_ONLY` and no account count.
 
-**What it refuses to invent.** Three figures those criteria ask for are not recorded anywhere,
+**What it refuses to invent.** Two figures those criteria ask for are not recorded anywhere,
 so they are served as :class:`~crb.core.flow.NotCaptured` — named, with why and with the gap
 that would close them — and never derived from a neighbouring number: the developer hours of
-the guide's "real work" (G-556), how many go-live lines are proven (G-584) and the guard's
-false-positive rate (G-536). A screen prints the absence; nobody can mistake it for a zero.
+the guide's "real work" (G-556) and the guard's false-positive rate (G-536). A screen prints
+the absence; nobody can mistake it for a zero. How many go-live lines are proven, attested
+or unproven is read from the go-live checklist (:mod:`crb.server.golive`) the route passes
+in — ``golive_lines``, ``golive_proven``, ``golive_attested`` and ``golive_unproven``.
 Three moments that were missing are now recorded when they happen (ADR-0028,
 :mod:`crb.server.flow_record`) and read back here: a cell first routing ``deliver``, the
 install and the first green ``/health``. A moment that passed before recording began is
@@ -79,7 +81,7 @@ Touch when:   never for a new repository; a stream's milestone pair changes (cha
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -100,6 +102,7 @@ from crb.core.flow import (
     stated_durations,
 )
 from crb.core.ledger import PROCESS_FACTORY, GradeRow, pool_scope
+from crb.core.oracle.controls import controls_verdict_of
 from crb.core.routing import DEFAULT_POLICY, ControlsVerdict
 from crb.core.signoff import SignoffRecord
 from crb.core.version import APPARATUS_VERSION
@@ -168,7 +171,9 @@ def first_controls_pass(session: Session, repo: str) -> str:
 
     "Passed" is the same word the map routes under — :meth:`ControlsVerdict.state` against
     ``DEFAULT_POLICY`` — so a report with an escape or too few constructible controls does not
-    count here either. Source order matches ``latest_controls_verdict``, read oldest first:
+    count here either, nor does a passed one with no gold witness (before ``controls.v3``):
+    each report is reduced by the same ``controls_verdict_of`` the map reads (P-372). Source
+    order matches ``latest_controls_verdict``, read oldest first:
     the ``controls.report`` events, then the finished ``controls`` runs' counts.
     """
     events = session.execute(
@@ -177,14 +182,14 @@ def first_controls_pass(session: Session, repo: str) -> str:
         .order_by(Event.id.asc())
     ).scalars()
     for ev in events:
-        if _passed(ControlsVerdict.from_counts(dict(ev.payload_json or {}))):
+        if _passed(controls_verdict_of(dict(ev.payload_json or {}))):
             return ev.timestamp
     runs = session.execute(
         select(Run).where(Run.repo == repo, Run.kind == "controls").order_by(Run.created.asc())
     ).scalars()
     for run in runs:
         counts = dict(run.counts_json or {})
-        if "passed" in counts and _passed(ControlsVerdict.from_counts(counts)):
+        if "passed" in counts and _passed(controls_verdict_of(counts)):
             return run.finished or run.created
     return ""
 
@@ -598,7 +603,9 @@ ADMIN_ONLY = (
 )
 
 
-def run_the_platform(session: Session, *, admin: bool = False) -> StreamFlow:
+def run_the_platform(
+    session: Session, *, admin: bool = False, golive: Mapping[str, int] | None = None
+) -> StreamFlow:
     """An admin set an account's password → that account signed in again.
 
     This is the deployment's figure, not the repository's: the accounts are the deployment's.
@@ -691,8 +698,11 @@ def run_the_platform(session: Session, *, admin: bool = False) -> StreamFlow:
         counts={
             **(accounts if admin else {}),
             "install_recorded": 1 if observed else 0,
+            # the go-live checklist read against this deployment's own probes and the
+            # attestations on record (crb.server.golive): how many lines stand, and how
+            **({f"golive_{k}": int(v) for k, v in golive.items()} if golive is not None else {}),
         },
-        not_captured=(NOT_CAPTURED["go_live_lines"],),
+        not_captured=(),
     )
 
 
@@ -706,11 +716,6 @@ NOT_CAPTURED: dict[str, NotCaptured] = {
             "product, and nothing here times it"
         ),
         gap="G-556",
-    ),
-    "go_live_lines": NotCaptured(
-        figure="how many go-live lines are proven",
-        why="nothing reads the go-live checklist against this deployment's own probes",
-        gap="G-584",
     ),
     "guard_false_positives": NotCaptured(
         figure="the guard's false-positive rate and how often a defect class comes back",
@@ -729,6 +734,7 @@ def build_flow(
     factory_events: Sequence[FactoryEvent],
     apparatus: str = APPARATUS_VERSION,
     admin: bool = False,
+    golive: Mapping[str, int] | None = None,
 ) -> FlowReading:
     """Every stream's numbers for ``repo``, folded from what the stores already hold;
     ``admin`` says whether the caller may read the deployment's account figures."""
@@ -743,7 +749,7 @@ def build_flow(
         decide_and_license(session, repo, signoffs, rows),
         manufacture_and_deliver(factory_events, parts[PART_MANUFACTURE]),
         learn(factory_events),
-        run_the_platform(session, admin=admin),
+        run_the_platform(session, admin=admin, golive=golive),
     )
     return FlowReading(
         repo=repo,

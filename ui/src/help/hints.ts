@@ -108,6 +108,8 @@ export const HINTS = {
     'What a clean grade licenses at this strength: clears the bar (a branch and pull request under review), review-gated (a person reviews before anything opens), or needs a human (the tests are too weak for a green to mean anything).',
   'review.verdict':
     'The standing human review of this row: OK, or the worst finding recorded (regression, defect, API change, style). Not reviewed means someone looked and could not review. A review is advisory to a person; it never changes a route.',
+  'nav.deploy_position':
+    'Where this screen sits in going live: sign in, Settings, Deployment, then Home. It is part of running the platform — deploying, going live, operating and recovering — and the host install before sign-in is step 0.',
   'nav.journey_position':
     'Where this screen sits on the four-step journey: connect a repository, earn its baseline, decide what waits on a person, run the factory. The number is a position, not progress.',
 
@@ -436,6 +438,102 @@ export const HINTS = {
   'stat.results.waiting_count':
     'How many decisions are waiting on a person for this repository alone: sign-offs due, gaps to sign and factory items to decide.',
 
+  // ── /library/:repo (screens/Library/LibraryPage.tsx) — the context library, ADR-0026 item 10
+  'link.library.back':
+    'Back to this repository’s page, where the library is one of the things it holds.',
+  'stat.library.count':
+    'How many entries this repository’s library holds, and how many of them two different people have signed. A proposed, stale, retired or revoked entry is not signed.',
+  'link.library.work_type':
+    'Open the page for this kind of change: what it is, what a ticket must carry, the signed context and what is proven per size. The count is the commits of that kind mined here.',
+  'row.library.definition':
+    'What this kind of change is, from the global vocabulary or from the work-type entry two people signed, and the global class it belongs to.',
+  'row.library.examples':
+    'Commits of this kind mined from the repository. Each opens the task with its failing test and every graded attempt.',
+  'row.library.ticket':
+    'The facts readiness asks a ticket of this kind for today. A structural one blocks the ticket until it is answered; a value one only routes it.',
+  'tag.library.slot_kind':
+    'Structural: the ticket cannot enter until this is answered. Value: an open answer routes the ticket to a person instead of blocking it.',
+  'tag.library.briefs':
+    'No library entry reaches a builder’s brief in this release. One would only inside a context arm whose effect was measured, and that switch is off by default.',
+  'col.library.entry':
+    'The entry’s id, kind/slug: one vocabulary for components, work types, decisions, conventions, patterns and standards.',
+  'col.library.statement':
+    'What the entry says, in at most 400 characters. Values that belong in a test, code and secrets are never entries.',
+  'col.library.sponsor':
+    'The person who put the entry forward: whoever proposed it, or who adopted a miner’s or a model’s proposal. A miner or a model is never a person.',
+  'col.library.approver':
+    'The person who signed the entry. It is never the sponsor: two different people are needed.',
+  'col.library.signed_at':
+    'The day the entry was signed. A new version needs a new signature.',
+  'col.library.provenance':
+    'Where the entry came from: a file at a commit, the graded rows it was learned from, or the person who wrote it. A file and commit are as the proposer gave them; after each mine the product reads the file at the head, and the entry goes stale when it differs. Graded rows are checked against the ledger.',
+  'col.library.effect':
+    'What the entry does to a builder’s pass rate. Unmeasured until an arm with the entry is read against the same arm without it.',
+  'col.library.size':
+    'The size of the change: XS to XL, by how much code it touches.',
+  'col.library.standard':
+    'The leanest context proven to pass changes of this kind and size, or no proven standard. A standard found only on the commit’s own tests is a ceiling, not a licence.',
+  'col.library.commits':
+    'For a proven standard, the clean first attempts out of the distinct commits read. Otherwise how many commits of this kind and size are mined so far.',
+  'col.library.interval':
+    'The 95 % Wilson interval of the proven standard’s first-attempt clean rate.',
+  'col.library.next':
+    'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go.',
+  'col.library.characteristic':
+    'One of the nine product quality characteristics of ISO/IEC 25010:2023. Named, never claimed: the product does not certify conformity.',
+  'col.library.checks':
+    'The checks this repository runs that are counted as evidence of part of the characteristic.',
+  'col.library.evidenced':
+    'Whether a switched-on check evidences part of the characteristic here. Not evidenced says nothing either way.',
+  'tag.library.evidence':
+    'A standard or convention counts as evidence only when the product’s quality table counts its check for the characteristic it names, and the repository runs that check. Otherwise it is advisory: shown and signed, but no evidence.',
+  'col.library.kind':
+    'Which of the six kinds the entry is: component, work type, decision, convention, pattern or standard.',
+  'col.library.title':
+    'The entry’s short title, as a person would name it in a list or a review.',
+  'col.library.status':
+    'Proposed, signed, stale (its source file changed), retired or revoked. Only a signed entry counts as signed context.',
+  'tag.library.status':
+    'Where the entry stands. Proposed needs a second person; stale needs signing again; retired and revoked are kept as history.',
+  'col.library.act':
+    'The act due on the entry and who may take it: an operator sponsors a mined proposal; an approver who is not the sponsor signs.',
+  'button.library.sponsor':
+    'Adopt this mined or drafted proposal as its sponsor. Another person must then sign it.',
+  'button.library.sign':
+    'Sign this version of the entry as its second person. A later change to it needs a new signature.',
+  'button.library.sign_own':
+    'You sponsored this entry, so you cannot sign it. A different approver must; the rule cannot be relaxed.',
+  'field.library.entry':
+    'The entry to revoke or retire; its earlier acts stay on the record either way.',
+  'field.library.reason':
+    'Why, in your own words. It is kept on the record with your name.',
+  'button.library.revoke':
+    'Withdraw the entry because it was wrong. Appended to the record; the entry takes no act but a new proposal.',
+  'button.library.retire':
+    'Retire the entry because it no longer holds. Appended to the record and kept as history.',
+  'field.library.kind':
+    'Component, work type, decision, convention, pattern or standard. The kind becomes the first half of the id.',
+  'field.library.slug':
+    'A short name: lower case letters, digits, dots and dashes. The id is kind/slug.',
+  'field.library.title':
+    'A short title a person recognises in a list.',
+  'field.library.statement':
+    'What the entry says, in at most 400 characters. No code, no secrets and no values that belong in a test.',
+  'field.library.parent':
+    'The class of the global vocabulary this work type refines, such as bug.fix.',
+  'field.library.work_types':
+    'The kinds of change the entry applies to. Its page lists it as signed context once it is signed.',
+  'field.library.characteristic':
+    'The ISO/IEC 25010:2023 characteristic a standard refines. A standard must name one; a convention may.',
+  'field.library.check':
+    'The name of the repository’s check that evidences the entry. It counts only if the quality table counts that check for the characteristic named and the repository runs it; otherwise the entry is advisory.',
+  'button.library.propose':
+    'Record the proposal with you as its sponsor. Nothing is signed until a different approver signs it.',
+  'field.library.commit':
+    'The commit the miners read: a sha, a branch or a tag the repository’s clone holds. Leave it empty for the clone’s head. The run is pinned to the full sha, so a branch that moves later does not move it.',
+  'button.library.mine':
+    'Read the repository’s own files at that commit — its decision records, code owners and layout, lint and formatter settings, tests and change history — and propose entries from them. No model is called. Nothing is signed: each proposal waits for a person to sponsor it and a different approver to sign it. The same commit, with the same graded rows, proposes nothing new.',
+
   // ── /decisions (screens/Decisions/DecisionsPage.tsx)
   'stat.decisions.apparatus':
     'The apparatus version every decision below is read under. A sign-off made under an earlier version is listed as stale.',
@@ -444,7 +542,9 @@ export const HINTS = {
   'stat.decisions.repo_count':
     'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
-    'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, or delivery withheld by the route.',
+    'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, delivery withheld by the route, or a library entry to sign, gone stale or retired by measurement.',
+  'stat.decisions.waiting':
+    'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
     'The cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker.',
   'button.decisions.act':
@@ -458,7 +558,7 @@ export const HINTS = {
 
   // ── /signoff (screens/Signoff/SignoffPage.tsx)
   'details.signoff.why_refused':
-    'The six clauses the server checks before it records a sign-off. Two of them (false-Q1 and the attestation) cannot be relaxed by any deployment setting.',
+    'Every clause the server checks before it records a sign-off — seven of them. Three (false-Q1, the attestation and the two-person rule) cannot be relaxed by any deployment setting.',
   'gate.signoff.banner':
     'Every clause of the sign-off policy with its observed value against the threshold, evaluated before you try. Open only when every row holds; a refusal after pressing Sign off is the gate working.',
   'gate.signoff.measured':
@@ -477,6 +577,10 @@ export const HINTS = {
     'A sign-off is written only for the cell’s standard context arm, and only when that arm’s registered reading delivers at a look. A cell with no proven standard, or whose reading waits for its next look, cannot be signed.',
   'gate.signoff.attestation':
     'You have named one accepted row and affirmed you read its diff. This clause cannot be relaxed: the attestation is hash-chained with the sign-off.',
+  'gate.signoff.posture':
+    'Whether the evidence was graded in the sealed posture ONBOARDING Step 6 asks for: the docker executor with sealed dependencies. Advisory — the server does not refuse a sign-off on it — but evidence graded on the host is a development reading.',
+  'link.signoff.refusal_next':
+    'The screen where the number that failed can change: more attempts on Measure, the controls again on the walk, stronger tests on Learn, or the rule’s reason on Routing.',
   'gate.signoff.second_person':
     'The two-person rule: the server refuses your sign-off if you queued the run that produced the attested row, or if you are the only person behind the cell. No setting can relax it; the refusal code is same_actor.',
   'button.signoff.sign':
@@ -584,7 +688,7 @@ export const HINTS = {
   'field.factory.deliver':
     'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, an item the entry gate admits is built and graded locally only. The gate stops the rest either way.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell opens no pull request.',
+    'How many items sit right now in a cell this deployment would open a pull request from: the map routes it deliver AND the cell’s proven standard is signed off. It is read at this moment and changes as measurement and sign-off change. An item whose cell’s standard is not signed off is not built at all; an item in any other cell opens no pull request.',
   'field.factory.override':
     'Lift a missing sign-off for this run only: a second approver’s act — queue the run without it, then another approver grants it on the run’s page, under their name. An item whose cell has a proven standard nobody has signed off is then built. It never lifts a missing standard, missing context, a calibration build or a cell with a wrong clean verdict.',
   'item.factory.entry_stop':
@@ -771,6 +875,8 @@ export const HINTS = {
     'The four roles and what each may do: read, start runs, sign cells, administer.',
   'summary.posture.separation':
     'The two-person rule and how it is enforced: the server refuses a sign-off whose approver produced the evidence, so an operator who queued the runs cannot also sign them.',
+  'summary.posture.delivery_licence':
+    'What has to be true before this deployment builds and delivers in someone else’s repository: the cell’s route, and — while the default is in force — a person’s sign-off on that cell. Without the sign-off an item in a cell that routes deliver is not built at all; in a cell that routes elsewhere it is built and its delivery withheld.',
   'summary.posture.source_control':
     'Whether the GitHub App is registered, how many installations it has, and that its tokens are minted per use and never stored.',
   'summary.posture.executor':
@@ -794,7 +900,7 @@ export const HINTS = {
   'summary.posture.route_gate':
     'A pull request opens only for a cell the map routes deliver under the named policy.',
   'summary.posture.override':
-    'An approver may override the gate for one run; the override is an event on the chain naming them and the route it overrode.',
+    'An approver may lift the sign-off clause for one run — never the route. The override is an event on the chain naming them and the clause.',
   'summary.posture.credentials':
     'Installation tokens are minted per push and never stored.',
   'summary.posture.retention':
@@ -807,6 +913,16 @@ export const HINTS = {
     'How evidence leaves the system: JSONL export and evidence packs by hash.',
   'link.posture.settings':
     'Where an admin changes this value; the row above says what it should be.',
+  'button.posture.print':
+    'Opens the browser’s print dialogue. The printed page leaves out the menus and the help, and keeps every row with its source and the versions in the footer.',
+  'stat.posture.golive_counts':
+    'How many lines of the go-live checklist stand now: proven by a check this product ran when the page loaded, or attested by a named admin. The rest are unproven, each with the reason.',
+  'summary.posture.golive_line':
+    'One line of the go-live checklist, with its state now, why, and where that state comes from. A line the product proves is never ticked by hand.',
+  'pill.posture.golive_state':
+    'Proven: the product ran the check and it passed. Attested: an admin recorded doing it, with the day and what was done; the product did not check it. Unproven: neither yet.',
+  'link.posture.attest':
+    'Settings, where an admin records that this act was done, or withdraws a record that no longer holds.',
 
   // ── /repos (screens/Repos/ReposPage.tsx)
   'button.repos.add':
@@ -825,6 +941,8 @@ export const HINTS = {
     'Tasks the miner placed in the hard pool by churn; a run can be limited to one pool.',
   'col.repos.last_run':
     'The kind and status of the most recent run, and when it finished.',
+  'summary.repos.count':
+    'How many repositories this list shows of the total the server holds. Every page is read, each repository is listed once, and a list that changed while it was read is read again; "All" is said only when one read saw a list that did not change.',
 
   // ── Add a repository dialog (screens/Repos/RepoNewDialog.tsx)
   'field.repo_new.name':
@@ -899,6 +1017,8 @@ export const HINTS = {
     'The run that made this probe reading; its log shows the command the toolchain ran and what it printed.',
   'button.repo.start_run':
     'Open the full run form for this repository: kind, builder, model, ladder, budget and executor.',
+  'button.repo.library':
+    'What people know about this repository that a test cannot say — its work types, decisions, conventions and standards — each signed by two different people.',
   'button.repo.next_steps':
     'The screens that read this repository: its walk, the factory, the capability map, the oracle and its runs.',
   'col.profile.class':
@@ -1084,7 +1204,7 @@ export const HINTS = {
   'link.run.repo':
     'The repository this run worked; opens its overview, tasks and configuration.',
   'button.run.deliver_override':
-    'Let this factory run open pull requests for items whose cell does not route deliver. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace; it never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
+    'Let this factory run build and deliver items whose cell’s proven standard nobody has signed yet. It lifts the sign-off clause and nothing else: a cell that does not route deliver still opens no pull request, and a cell with a wrong clean verdict (the honesty floor) is never lifted. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace.',
   'button.run.cancel':
     'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
   'chart.run.progress':
@@ -1250,7 +1370,7 @@ export const HINTS = {
 
   // ── /capability — Map grid (screens/Capability/CapabilityPage.tsx)
   'button.capability.export':
-    'Download the ledger rows behind this map for this repository as CSV.',
+    'Download the ledger rows behind this map for this repository as CSV. Anyone signed in can take it, and each download is recorded with who took it.',
   'stat.capability.coverage':
     'The share of this repository’s change volume (its change profile, weighted by commit count) whose cell routes deliver. A coverage of the profile, not a sampled rate, so it carries no interval; each cell’s rate carries its own.',
   'stat.capability.posture':
@@ -1431,6 +1551,8 @@ export const HINTS = {
     'Which deliberate cheat: gold (the real change), noop, test-tamper, stub, regression, hardcode-cheat or env-poison.',
   'col.controls.expected':
     'What the grader must say for this cheat, and what it said.',
+  'col.controls.witness':
+    'What the commit’s own change graded in a fresh tree, in the same posture, beside a control that was caught. A catch stands only beside a clean witness; a red one means the environment could not build or grade the change, so the catch proves nothing and the row is a violation. A dash: the row is not a catch, or the report predates witnesses.',
   'col.controls.verdict':
     'ok means the grader answered as it must; VIOLATION means it passed a cheat (an instrument defect); ESCAPE means the tests could not tell (a finding about the tests); not constructible or skip means the control could not be built.',
   'pill.controls.verdict':
@@ -1641,6 +1763,8 @@ export const HINTS = {
     'Rows credited clean against a failed belt, across the whole ledger. Must be 0; it is the number everything else defends.',
   'stat.ledger.matching':
     'Rows matching the current filters, out of the whole ledger; the table shows one page of them.',
+  'button.ledger.remove_filter':
+    'A filter that came with the link you followed, with no control of its own on this page. Matching rows counts only the rows it lets through; press it to remove the filter. A value a select on this page does not offer (Size xl, say) reads "not applied": the rows are not narrowed by it, and pressing it removes it from the link.',
   'field.ledger.clean':
     'Show only clean rows, or only rows that were not clean.',
   'field.ledger.mode':
@@ -1735,6 +1859,51 @@ export const HINTS = {
     'A builder provider and whether its credential is configured on the worker. Configured or not is all the API reports; the secret itself is never returned.',
   'tile.settings.retention':
     'The retention settings in force: what raw artefacts are kept and for how long. Zero raw retention by default.',
+  // --- inviting the second person (G-518) ---------------------------------------------
+  'pill.invitations.two_person':
+    'Whether this deployment could produce a sign-off the two-person rule accepts: an account that can sign, that has signed in, and a second account that has too. It counts accounts, not people.',
+  'stat.invitations.two_person':
+    'The reading behind the pill: why a sign-off is or is not possible here, how many accounts that can sign have actually signed in, and how many invitations are still waiting.',
+  'stat.invitations.link':
+    'The invitation you have just made: who it is for, the role it grants and when the link stops working.',
+  'col.invitations.account':
+    'The sign-in name of the account the invitation creates. It exists already and is inactive until the link is used.',
+  'col.invitations.role':
+    'The role the account gets when the invitation is accepted. Only a role that can sign a cell may be invited.',
+  'col.invitations.state':
+    'Where the invitation stands: waiting for the person, accepted, expired, or withdrawn by an admin. Accepted rows also say whether that account has ever signed in.',
+  'col.invitations.invited':
+    'When the invitation was made, and by implication how long it has been waiting for the person to use it.',
+  'col.invitations.act':
+    'What an admin can do to this invitation: withdraw a link that has not been used. An accepted one is an account — deactivate the account instead.',
+  'button.invitations.invite':
+    'Create the account inactive and mint a one-time link. Nobody is emailed: the link is shown to you once, and you pass it on.',
+  'button.invitations.copy':
+    'Copy the one-time link to the clipboard. It is shown once and cannot be recovered — make a new invitation if you lose it.',
+  'button.invitations.revoke':
+    'Stop this link working. The inactive account is left as it is, and the withdrawal is recorded with a reason.',
+  'field.invitations.username':
+    'The name the invited person will type at sign-in. It cannot be one an account already uses.',
+  'field.invitations.display':
+    'The name shown next to the account in the product. Optional.',
+  'field.invitations.email':
+    'Recorded on the account so an operator can tell whose it is. Nothing is sent to it — this product emails nobody.',
+  'field.invitations.role':
+    'The role the invitation grants. Approver is the one a sign-off needs; admin also administers the deployment.',
+  'field.invitations.expires':
+    'How long the link works for, in hours (1 to 336). A shorter window is safer; an expired link is re-invited, never revived.',
+  'field.invite.password':
+    'The password you choose for your own account. At least 12 characters; nobody — including the admin who invited you — can read it.',
+  'field.invite.password_again':
+    'The same password again. The two are compared here, before anything is sent.',
+  'button.invite.accept':
+    'Set this password and activate your account. The link is then spent, and you sign in with the password you chose.',
+  'stat.invite.accepted':
+    'Your account is active and holds the role the invitation granted. The next step is to sign in with the password you just chose.',
+  'stat.invite.no_token':
+    'This page needs the one-time token from your invitation link. Without it there is nothing to accept.',
+  'link.invite.sign_in':
+    'Go to the sign-in page and use the password you have just chosen.',
   'col.settings.users':
     'The account’s sign-in name, display name, email, where it is issued (local or the OpenID provider) and when it was created.',
   'col.settings.role':
@@ -1787,6 +1956,22 @@ export const HINTS = {
     'Go back to Home: the task list shows the account you just created, and the next task.',
   'link.settings.created_connect':
     'Go on to Connection to connect a repository, the next step once the people who approve are set up.',
+  'tile.settings.attestations':
+    'The go-live acts only the operator can do. Recording one names you, the day it was done and what was done; the Deployment page then shows it as attested.',
+  'field.settings.attest_line':
+    'The go-live line you are recording. Only the acts the product cannot see are listed; the lines it proves by its own check cannot be attested.',
+  'field.settings.attest_day':
+    'The day the act was done on your own calendar, not today unless it was. It cannot be in the future, or before the last withdrawal of this line: withdrawn evidence cannot come back.',
+  'field.settings.attest_statement':
+    'What was done and where its evidence is kept, in up to 500 characters — for example the ticket that holds the test output. A reviewer reads these words.',
+  'button.settings.attest':
+    'Records the attestation as one event naming you. The line then reads attested on the Deployment page until someone withdraws it.',
+  'button.settings.withdraw':
+    'Asks before ending this attestation, for when the act no longer holds (a new image, a failed restore).',
+  'button.settings.withdraw_confirm':
+    'Ends the attestation. The line reads unproven again, and the withdrawal is itself on record.',
+  'button.settings.withdraw_keep':
+    'Closes the question and keeps the attestation.',
   'tile.settings.my_password':
     'Change the password of the account you are signed in as. This browser stays signed in; every other session of the account ends.',
   'field.settings.my_current_password':
@@ -1893,10 +2078,13 @@ export const MIN_HINTS: Record<string, number> = {
   '/connect/:name/measure': 10,
   '/results': 31,
   '/decisions': 6,
+  // a signed entry, an unsigned one and a work type with slots, sizes and the quality table
+  '/library/:repo': 30,
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 16,
-  '/posture': 23,
+  // the five groups plus the go-live checklist (both its lists) and the print control
+  '/posture': 39,
   '/repos': 8,
   // the Overview tab (the state a reader lands on); the Change profile, Tasks and Configuration tabs are held by the ratchet's variants
   '/repos/:name': 21,
@@ -1917,6 +2105,8 @@ export const MIN_HINTS: Record<string, number> = {
   // by name (G-909): both login fields, both sign-in buttons; a Read more and a guide link;
   // the guide's way back; the 404's one way out.
   '/login': 4,
+  // the invitation link's own page, outside the shell: both password fields and the button
+  '/invite': 3,
   '/help': 2,
   '/help/docs/:name': 1,
   '*': 1,

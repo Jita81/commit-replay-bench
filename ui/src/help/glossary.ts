@@ -167,7 +167,7 @@ export const TERMS: Record<TermId, Term> = {
   signoff: {
     term: 'sign-off',
     short: 'A named approver’s record that they reviewed a cell’s evidence and read one accepted change. It lifts the cell’s verification tier; it never changes its route, point or interval, and it expires when the apparatus changes.',
-    readMore: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2',
+    readMore: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3',
   },
   stale: {
     term: 'stale',

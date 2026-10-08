@@ -10,6 +10,15 @@ repository's source, a secret or ``CRB_HOME``, and nothing from a ``RepoConfig``
 request or a worktree reaches its argv, its environment or its allowlist — the plan's
 argv and environment are the recipe's, fixed.
 
+**One exception, the operator's own:** a private mirror that needs a credential
+(``CRB_PROVISION__MIRROR_CREDENTIAL_ENV`` names the worker variable holding
+``user:password``, G-950). Only a networked ``fetch`` step to a registry that is not public
+carries it; it is passed by NAME (``--env CRB_MIRROR_CREDENTIAL``, the value read by the
+docker client from this one process's environment), written by :data:`CREDENTIAL_PRELUDE`
+to ``$HOME/.netrc`` or ``$HOME/.npmrc`` on the container's tmpfs and removed from its
+environment before the toolchain starts, and scrubbed from any output kept. An install or
+rebuild step, a test container and a builder never receive it.
+
 The wall clock is ``fetch_timeout_s``; a watchdog measures the stage while the fetch runs
 and kills it past ``max_bundle_mb`` (``PROVISION_TOO_LARGE``); a non-zero exit is
 ``PROVISION_FETCH_FAILED`` naming every host the proxy denied.
@@ -20,7 +29,8 @@ What it is:   The dependency fetch — the hardened ``docker run`` argv and the 
               executes it behind the egress sidecar, with the size and time limits.
 What it does: Builds the exact argv (internal network or none, read-only, no capabilities,
               the worker's non-root uid, ``/in`` read-only and ``/out``, the proxy URL, the
-              recipe's fixed environment and nothing else); runs it with the sidecar for the
+              recipe's fixed environment and — for a private mirror — the credential by name
+              behind the prelude, and nothing else); runs it with the sidecar for the
               registry hosts; kills an oversized or overdue fetch; names denied hosts; emits
               ``provision.fetch`` and ``provision.refused``.
 How:          ``FetchPlan`` (recipe, image, argv, env, hosts, inputs, mirror) → ``fetch_argv``
@@ -34,7 +44,8 @@ Works with:   src/crb/builders/sidecar.py (the internal network and the proxy),
               src/crb/provision/store.py (the stage it fills), src/crb/provision/go.py (a recipe
               that builds plans; src/crb/provision/python.py and src/crb/provision/node.py are
               the others), src/crb/core/deps.py (the refusals)
-Tested by:    tests/test_provision_fetch.py, tests/test_provision_go.py
+Tested by:    tests/test_provision_fetch.py, tests/test_provision_go.py,
+              tests/test_provision_mirror_credential.py
 Touch when:   never for a new repository; a flag on the fetch's ``docker run`` is a security
               decision (docs/SECURITY.md §3.1.1 and ADR-0005's amendment change with it).
 """
@@ -53,6 +64,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from crb.builders.sidecar import EgressSidecar
 from crb.core.deps import ProvisionRefused, is_secret_like, worker_user
@@ -69,6 +81,74 @@ MIRROR_INSIDE = "/mirror"
 EventFn = Callable[[str, Mapping[str, Any]], None]
 
 _POLL_S = 0.5
+
+#: The one name a private mirror's credential has inside a fetch container (G-950). It is
+#: passed as ``--env CRB_MIRROR_CREDENTIAL`` — a name with no value, which docker reads from
+#: the client's own environment — so the value is never on a command line.
+MIRROR_CREDENTIAL = "CRB_MIRROR_CREDENTIAL"
+
+#: Runs first in a fetch that carries the credential: writes it to the one file the toolchain
+#: reads for that registry (``$HOME/.netrc`` for pip and Go, ``$HOME/.npmrc`` for npm), owner
+#: only, on the container's own tmpfs; removes it from the environment; then runs the fetch.
+#: A shell builtin writes it, so it is on no process's argv; base64 reads it on stdin.
+CREDENTIAL_PRELUDE = r"""set -eu
+umask 077
+c="${CRB_MIRROR_CREDENTIAL-}"
+unset CRB_MIRROR_CREDENTIAL
+if [ -z "$c" ]; then echo "crb: the mirror credential is empty" >&2; exit 64; fi
+case "$c" in *:*) ;; *) echo "crb: the mirror credential is not user:password" >&2; exit 64;; esac
+case "$CRB_MIRROR_KIND" in
+  netrc) printf 'machine %s
+login %s
+password %s
+' "$CRB_MIRROR_HOST" "${c%%:*}" "${c#*:}" > "$HOME/.netrc" ;;
+  npmrc) printf '%s:_auth=%s
+' "$CRB_MIRROR_SCOPE" "$(printf '%s' "$c" | base64 | tr -d '
+')" > "$HOME/.npmrc" ;;
+  *) echo "crb: unknown mirror credential kind" >&2; exit 64 ;;
+esac
+unset c
+exec "$@"
+"""
+
+
+@dataclass(frozen=True)
+class MirrorCredential:
+    """How one fetch carries a private mirror's credential: the worker variable that holds it
+    (``source``), and the non-secret facts the prelude needs — which file the toolchain reads
+    (``kind``: ``netrc`` or ``npmrc``), the host a ``.netrc`` names, and the registry prefix an
+    ``.npmrc`` scopes the credential to. Never the value."""
+
+    source: str
+    kind: str
+    host: str
+    scope: str = ""
+
+    @classmethod
+    def for_plan(cls, plan: FetchPlan, config: ProvisionConfig) -> MirrorCredential | None:
+        """The credential a plan carries: only a networked ``fetch`` step, never an install or
+        rebuild (those run with no network), and only to a registry that is not public."""
+        if plan.step != "fetch" or not plan.networked:
+            return None
+        found = config.mirror_credential_for(plan.lang)
+        if found is None:
+            return None
+        name, url = found
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        if plan.lang == "node":
+            port = f":{parts.port}" if parts.port else ""
+            path = parts.path if parts.path.endswith("/") else parts.path + "/"
+            return cls(name, "npmrc", host, f"//{host}{port}{path}")
+        return cls(name, "netrc", host)
+
+    def argv_env(self) -> list[str]:
+        """The ``--env`` flags: the credential by NAME only, the rest by value (none secret)."""
+        out = ["--env", MIRROR_CREDENTIAL, "--env", f"CRB_MIRROR_KIND={self.kind}"]
+        out += ["--env", f"CRB_MIRROR_HOST={self.host}"]
+        if self.scope:
+            out += ["--env", f"CRB_MIRROR_SCOPE={self.scope}"]
+        return out
 
 
 @dataclass(frozen=True)
@@ -122,8 +202,11 @@ def fetch_argv(
     name: str = "",
     ca_bundle: str = "",
     proxy_url: str = "",
+    credential: MirrorCredential | None = None,
 ) -> list[str]:
-    """The fetch's exact ``docker run`` argv (tests assert on every token)."""
+    """The fetch's exact ``docker run`` argv (tests assert on every token). With a
+    ``credential`` the argv names it and never carries it: ``--env CRB_MIRROR_CREDENTIAL``
+    with no value, and the command runs behind :data:`CREDENTIAL_PRELUDE`."""
     uid = user.split(":", 1)[0].strip().lower()
     if uid in {"", "0", "root"}:
         raise SandboxUnavailable(f"refusing to run a dependency fetch as root (user={user!r})")
@@ -163,10 +246,23 @@ def fetch_argv(
     argv += ["--env", "HOME=/tmp"]
     if proxy_url:
         argv += ["--env", f"HTTPS_PROXY={proxy_url}"]
-    for k, v in sorted(plan.env.items()):
+    env = dict(plan.env)
+    if credential is not None and credential.kind == "npmrc":
+        env["npm_config_userconfig"] = "/tmp/.npmrc"  # the file the prelude writes
+    for k, v in sorted(env.items()):
         argv += ["--env", f"{k}={v}"]
-    argv += [image, *plan.argv]
-    return argv
+    if credential is None:
+        return [*argv, image, *plan.argv]
+    return [
+        *argv,
+        *credential.argv_env(),
+        image,
+        "sh",
+        "-c",
+        CREDENTIAL_PRELUDE,
+        "crb-fetch",
+        *plan.argv,
+    ]
 
 
 def _dir_bytes(root: Path) -> int:
@@ -215,6 +311,15 @@ def run_fetch(
     (stage / plan.out_sub).mkdir(parents=True, exist_ok=True)
     fid = uuid.uuid4().hex[:12]
     name = f"crb-fetch-{fid}"
+    credential = MirrorCredential.for_plan(plan, config)
+    secret = ""
+    if credential is not None:
+        secret = os.environ.get(credential.source, "")
+        if not secret:
+            raise SandboxUnavailable(
+                f"the mirror credential is named {credential.source} "
+                "(CRB_PROVISION__MIRROR_CREDENTIAL_ENV) but that variable is not set on the worker"
+            )
 
     def call(*args: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -271,6 +376,7 @@ def run_fetch(
             name=name,
             ca_bundle=config.ca_bundle,
             proxy_url=proxy_url,
+            credential=credential,
         )
         return _execute(
             plan,
@@ -281,6 +387,7 @@ def run_fetch(
             config=config,
             sidecar=sidecar,
             on_event=on_event,
+            secret=secret,
         )
     finally:
         if sidecar is not None:
@@ -297,9 +404,13 @@ def _execute(
     config: ProvisionConfig,
     sidecar: EgressSidecar | None,
     on_event: EventFn | None,
+    secret: str = "",
 ) -> FetchResult:
     started = time.monotonic()
     cap = config.max_bundle_mb * (1 << 20)
+    # the credential reaches this one docker client process's environment, which docker reads
+    # for ``--env CRB_MIRROR_CREDENTIAL``; no other call (the sidecar, a kill) ever carries it
+    client = {**_client_env(), MIRROR_CREDENTIAL: secret} if secret else _client_env()
     proc = subprocess.Popen(
         argv,
         stdin=subprocess.DEVNULL,
@@ -307,7 +418,7 @@ def _execute(
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
-        env=_client_env(),
+        env=client,
     )
     box: dict[str, str] = {}
 
@@ -339,6 +450,11 @@ def _execute(
         t.join()
         break
     out, err = box.get("out", ""), box.get("err", "")
+    if secret:  # a tool that echoes its URL or config never puts the credential in a log
+        out, err = (
+            out.replace(secret, "[mirror credential]"),
+            err.replace(secret, "[mirror credential]"),
+        )
     duration = time.monotonic() - started
     denied = tuple(sidecar.denied_hosts()) if sidecar is not None else ()
     tail = redact_and_cap((out + "\n" + err).strip(), max_chars=1200)
@@ -370,4 +486,14 @@ def _execute(
     return FetchResult(stage, out, err, duration, denied)
 
 
-__all__ = ["CA_INSIDE", "MIRROR_INSIDE", "FetchPlan", "FetchResult", "fetch_argv", "run_fetch"]
+__all__ = [
+    "CA_INSIDE",
+    "CREDENTIAL_PRELUDE",
+    "MIRROR_CREDENTIAL",
+    "MIRROR_INSIDE",
+    "FetchPlan",
+    "FetchResult",
+    "MirrorCredential",
+    "fetch_argv",
+    "run_fetch",
+]

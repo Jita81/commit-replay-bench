@@ -96,7 +96,7 @@ STREAMS_THAT_SPEND = ("connect-and-prove", "measure", "manufacture-and-deliver")
 
 PASSING_CONTROLS = {
     "schema": "crb.negative_controls.v1",
-    "apparatus": {"apparatus_version": "2.2"},
+    "apparatus": {"apparatus_version": "2.2", "controls_version": "controls.v3"},
     "n_tasks": 2,
     "n_rows": 14,
     "violations": 0,
@@ -808,12 +808,14 @@ class TestManufactureAndDeliver:
 
 
 class TestRunThePlatform:
-    def test_the_accounts_are_counted_and_only_the_go_live_lines_are_not_captured(
-        self, env: Env
-    ) -> None:
+    def test_the_accounts_are_counted_and_the_go_live_lines_are_read(self, env: Env) -> None:
         s = stream(reading(env), "run-the-platform")
         assert s["counts"]["accounts"] == 4 and s["counts"]["admins_active"] == 1
-        assert [nc["gap"] for nc in s["not_captured"]] == ["G-584"]
+        # the go-live checklist is read, not named as missing (G-584 closed by ADR-0031)
+        assert s["not_captured"] == []
+        c = s["counts"]
+        assert c["golive_lines"] == 15
+        assert c["golive_proven"] + c["golive_attested"] + c["golive_unproven"] == 15
 
     def test_the_account_figures_are_an_admins_only(self, env: Env) -> None:
         # the admin-only user list (GET /users) is refused below admin; the same deployment's account
@@ -830,7 +832,15 @@ class TestRunThePlatform:
             login(env.client, role)
             assert env.get("/users").status_code == 403
             s = stream(reading(env), "run-the-platform")
-            assert set(s["counts"]) == {"install_recorded"}
+            # the go-live counts are the deployment's checklist, which every role reads
+            # (GET /golive); the account figures are not
+            assert set(s["counts"]) == {
+                "install_recorded",
+                "golive_lines",
+                "golive_proven",
+                "golive_attested",
+                "golive_unproven",
+            }
             lt = lead(s, "password_set_to_signed_in")
             assert (lt["n"], lt["median_s"], lt["min_s"], lt["max_s"]) == (0, None, None, None)
             assert lt["reason"] == ADMIN_ONLY

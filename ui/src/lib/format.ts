@@ -166,6 +166,11 @@ export function kOfN(done: number, total: number): string | null {
 }
 
 /** A git sha or hash, shortened for display; the full value goes in `title`. */
+/** A server sentence that starts a sentence here starts with a capital (GOV.UK style). */
+export function sentence(text: string): string {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
 export function shortId(id: string | null | undefined, n = 10): string {
   if (!id) return DASH
   return id.length > n ? id.slice(0, n) : id

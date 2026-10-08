@@ -14,7 +14,9 @@
  *               `repo.baseline_read` event.
  * What it does: Reads Home's task tags for the repository 02–05 onboarded and measured —
  *               Choose a repository, Confirm its shape and Measure read Completed, and no
- *               read failed — then finds task 6 "Read the baseline" Incomplete (rows exist,
+ *               read failed — and task 7 "Invite an approver" Incomplete with the reason on
+ *               the page, because the bootstrap admin is the only account and queued every
+ *               run (G-477) — then finds task 6 "Read the baseline" Incomplete (rows exist,
  *               nobody has read them, nobody has signed); opens the Baseline screen, which
  *               tells the server it was read (`POST /repos/{name}/baseline-read` answers 201
  *               with `recorded: true` — the first read by this person); and finds task 6
@@ -34,9 +36,10 @@
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts (the first later spec to open
  *               the baseline — this one must run before it), ui/src/components/FlowPanel.tsx
  * Tested by:    scripts/walkthrough.sh (CI job `walkthrough`)
- * Touch when:   never for a new repository; a task's derivation on Home changes, or a spec before
- *               07 starts opening the primary repository's baseline (then this spec's "Incomplete
- *               first" no longer holds and must move earlier).
+ * Touch when:   never for a new repository; a task's derivation on Home changes, a spec before
+ *               07 creates an account, or a spec before 07 starts opening the primary
+ *               repository's baseline (then this spec's "Incomplete first" no longer
+ *               holds and must move earlier).
  */
 import { expect, primary, test } from './support'
 import type { Locator, Page } from '@playwright/test'
@@ -67,6 +70,12 @@ test.describe('06b baseline read', () => {
     await expect(task(page, 5)).toContainText('Measure — spends money')
     await expect(task(page, 5)).toContainText('Completed')
     await expect(page.getByTestId('error-state')).toHaveCount(0)
+
+    // G-477: nobody but the bootstrap admin has an account yet (07 creates the first persona),
+    // and the admin queued every run — so task 7 is not complete, and the note says why
+    await expect(task(page, 7)).toContainText('Invite an approver')
+    await expect(task(page, 7)).toContainText('Incomplete')
+    await expect(page.getByTestId('home-task-7-note')).toContainText('would be signing their own evidence')
 
     // before the read: rows exist, nobody has opened them and nobody has signed — Incomplete
     await expect(task(page, 6)).toContainText('Read the baseline')

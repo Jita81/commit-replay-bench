@@ -97,6 +97,11 @@ config:
   CRB_PROVISION__MAX_TOTAL_GB: "20"
   CRB_PROVISION__MAX_BUNDLE_MB: "2048"
   CRB_PROVISION__FETCH_TIMEOUT_S: "900"
+  # A private mirror that needs a login (G-950): the NAME of the variable that holds its
+  # "user:password" — put the value itself in existingSecret under that name, never here. Only
+  # a networked fetch to a registry that is not public carries it; a test container and a
+  # builder never do (docs/SECURITY.md §3.1.1).
+  CRB_PROVISION__MIRROR_CREDENTIAL_ENV: ""
 
 # Extra env entries (list of core/v1 EnvVar) appended to every crb container.
 extraEnv: []

@@ -24,7 +24,8 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               trace's ``seq`` until it commits (EI-1) and the events write lock holds a second
               writer until the first commits (P-196), and that the ``users`` lock is never
               taken after the ``events`` lock, so an organisation sign-in and an admin act at
-              once never deadlock (P-227).
+              once never deadlock (P-227), and that the decisions clock joins a concurrent
+              first stamp in both dialects (P-357).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -56,6 +57,7 @@ from crb.store.models import (
     Base,
     Event,
     EvidencePackRow,
+    LibraryActRow,
     Repo,
     Review,
     Run,
@@ -154,6 +156,20 @@ def _one_row(table: str) -> object:
             body_json={"state": "qualified"},
             created="2026-09-25T12:00:00+00:00",
         )
+    if table == "library_acts":
+        return LibraryActRow(
+            act_id="l" * 32,
+            schema="crb.library.v1",
+            repo="r",
+            entry_id="convention/snake-case",
+            version="c" * 64,
+            act="propose",
+            actor="operator@example.org",
+            body_json={"entry": {}},
+            created="2026-09-27T12:00:00+00:00",
+            prev_hash=GENESIS_HASH,
+            row_hash="e" * 64,
+        )
     raise AssertionError(table)
 
 
@@ -165,6 +181,7 @@ def _pk(table: str) -> str:
         "evidence": "pack_hash",
         "reviews": "seq",
         "task_qualifications": "seq",
+        "library_acts": "seq",
     }[table]
 
 
@@ -942,3 +959,42 @@ def test_an_organisation_sign_in_and_an_admin_act_at_once_never_deadlock(
             ),
         )
     assert results == [302, 200], results
+
+
+# ---------------------------------------------------------------------------
+# the decisions clock's first stamp, on both dialects (P-357)
+# ---------------------------------------------------------------------------
+
+
+def test_a_concurrent_first_decision_stamp_is_joined_on_both_dialects(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``record_due`` writes a decision's first stamp with ``INSERT … ON CONFLICT DO
+    NOTHING`` in the dialect's own words, then reads the row back. Here the other stamper
+    commits the same ``(repo, kind, key)`` between this pass's read and its write: the pass
+    joins the earlier row — its ``first_due`` kept, ``last_seen`` moved — on SQLite and on
+    PostgreSQL alike, where a plain insert raised ``IntegrityError`` (P-357)."""
+    from crb.server import decisions as dec
+
+    store_db.init_db(backend.engine)
+    row = dec.DecisionRow(kind="signoff_due", key="bug.fix|S", title="sign it", role="approver")
+    original = dec.due_records
+    raced: list[bool] = []
+
+    def racing(db: object, repo: str = "") -> object:
+        seen = original(db, repo)  # type: ignore[arg-type]
+        if not raced:
+            raced.append(True)
+            with backend.factory() as other:
+                dec.record_due(other, "alpha", [row], now="2026-09-01T09:00:00+00:00")
+                other.commit()
+        return seen
+
+    monkeypatch.setattr(dec, "due_records", racing)
+    with backend.factory() as s:
+        dec.record_due(s, "alpha", [row], now="2026-09-01T10:00:00+00:00")
+        s.commit()
+    with backend.factory() as s:
+        (rec,) = original(s, "alpha")
+        assert raced and rec.first_due == "2026-09-01T09:00:00+00:00"
+        assert rec.last_seen == "2026-09-01T10:00:00+00:00" and rec.resolved == ""

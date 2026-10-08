@@ -414,7 +414,7 @@ def test_the_scan_leaves_the_gate_and_a_branch_alone() -> None:
 #: Empty on purpose: a package a test needs is one the suite jobs install (P-707).
 NOT_INSTALLED_BY_CI: dict[str, str] = {}
 #: An import name whose distribution is called something else in pyproject.toml.
-DIST_OF = {"claude_agent_sdk": "claude-agent-sdk"}
+DIST_OF = {"claude_agent_sdk": "claude-agent-sdk", "importlinter": "import-linter"}
 #: The jobs that run the hermetic suite; every package a test skips on is installed by both.
 SUITE_JOBS = ("test-shard", "fresh-clone-shard")
 

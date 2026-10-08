@@ -59,7 +59,7 @@ from crb.factory.backlog import KIND_CODE, KIND_OPERATOR, Backlog, BacklogError,
 from crb.factory.delivery import GitCredentials, StaticProvider
 from crb.factory.standard import CellRef, Readers, Standard
 from crb.factory.testfirst import AuthoredTest, SameIdentityError
-from crb.observability.events import Emitter, MemorySink
+from crb.observability.events import Emitter, MemorySink, StepStatus
 from fixtures import pyrepo as pr
 from test_factory_build import (
     DIVIDE_DEF,
@@ -289,8 +289,13 @@ DELIVER_ROUTE: dict[str, Any] = {
     "ci_low": 0.76,
     "false_q1": 0,
     "apparatus_versions": ["2.2"],
+    # ADR-0018: the gate's second clause reads the tier of this same reading — the signed
+    # map the worker hands over, so a delivery test must say a person attested the cell
+    "verification_tier": "human-verified",
     "policy_thresholds": {"min_n": 10},  # not part of the evidence summary
 }
+#: The same cell, measured exactly as well, with nobody's name on it (ADR-0018).
+UNSIGNED_DELIVER_ROUTE: dict[str, Any] = {**DELIVER_ROUTE, "verification_tier": "automated-pass"}
 HUMAN_ROUTE: dict[str, Any] = {
     "route": "human",
     "reason": "oracle strength 0.58 < 0.80 — green cannot license auto-delivery",
@@ -815,6 +820,150 @@ def test_a_change_smaller_than_its_estimate_is_licensed_by_its_own_measured_cell
     assert len(rig2.prs) == 1
 
 
+def _signed_only(*sizes: str) -> Readers:
+    """The person's test (``S2``) proven in every cell, signed only in ``sizes``."""
+    return Readers(standard_for=lambda cell: Standard(ARM_S2, signed=cell.size in sizes))
+
+
+def test_a_change_larger_than_its_estimate_is_delivered_only_into_a_signed_cell(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-391 (the Wave 4 attack): the entry gate checks the signatures of the cells the size
+    rule reads from the ESTIMATE (XS and S for an XS ticket); a change that measures larger
+    lands in a cell nobody may have signed. With the clause on, the delivered change's own
+    cell must carry an active sign-off too — or the item stops ``unsigned_cell`` at delivery,
+    with both sizes on the chain — and the pull request's licence line is the DELIVERED
+    cell's, never the estimate's."""
+    edit, oracle = _padded(40)
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    out = rig.loop().run_item(multiply_item(), authored=oracle)
+    measured = [r for r in rig.ledger.rows() if r.clean][-1].size
+    assert measured not in ("XS", "S", "")  # the change lands beyond the cells signed
+    assert out.status == fl.STATUS_UNSIGNED_CELL and out.delivery is None
+    assert not rig.pushes and not rig.prs
+    (refused,) = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    ev = refused.payload
+    assert ev["reason_code"] == "unsigned_cell"
+    assert ev["estimate"] == "XS" and ev["measured"] == measured
+    assert f"bug.fix {measured}" in ev["reason"] and "no active sign-off" in ev["reason"]
+    # a second approver's override lifts that clause at delivery too — and the pull request
+    # says so, naming the delivered cell's licence, never "signed cell"
+    rig2 = _rig(
+        pyrepo,
+        tmp_path / "b",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+        deliver_override_by="approver:ada",
+    )
+    out2 = rig2.loop().run_item(multiply_item(), authored=oracle)
+    assert out2.status == fl.STATUS_ACCEPTED and out2.delivery is not None
+    body = rig2.prs[0]["body"]
+    assert "**signed cell**" not in body
+    assert (
+        "- licence: **unsigned cell** — opened under a per-run override of the sign-off "
+        "clause by approver `approver:ada`" in body
+    )
+    (delivered,) = rig2.evidence.events_for("I-1", fe.EV_DELIVERY)
+    assert delivered.payload["licence"]["override_by"] == "approver:ada"
+    # the override is still refused for the run's own actor at delivery
+    rig3 = _rig(
+        pyrepo,
+        tmp_path / "c",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+        deliver_override_by="tester",
+    )
+    out3 = rig3.loop().run_item(multiply_item(), authored=oracle)
+    assert out3.status == fl.STATUS_UNSIGNED_CELL and not rig3.prs
+    (ev3,) = rig3.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)
+    assert ev3.payload["override_refused"] == "same_actor"
+    # a delivered cell that IS signed says so, quoting its own standard
+    rig4 = _rig(
+        pyrepo,
+        tmp_path / "d",
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S", measured),
+        require_signed_cell=True,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    out4 = rig4.loop().run_item(multiply_item(), authored=oracle)
+    assert out4.status == fl.STATUS_ACCEPTED and len(rig4.prs) == 1
+    assert "- licence: **signed cell**" in rig4.prs[0]["body"]
+
+
+def test_the_licence_line_is_the_delivered_cells_not_the_estimates(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """P-391: with the clause off, a change delivered into an unsigned larger cell is never
+    described as a signed cell because its ESTIMATE cell happened to be signed."""
+    edit, oracle = _padded(40)
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        builder=MultiBuilder(first_edit=edit),
+        readers=_signed_only("XS", "S"),
+        require_signed_cell=False,
+        route_decision_for=lambda item: DELIVER_ROUTE,
+    )
+    out = rig.loop().run_item(multiply_item(), authored=oracle)
+    assert out.status == fl.STATUS_ACCEPTED and len(rig.prs) == 1
+    body = rig.prs[0]["body"]
+    assert "**signed cell**" not in body
+    assert "- licence: **unsigned cell** — this deployment does not require a signed cell" in body
+
+
+def test_the_override_is_refused_when_any_cell_the_size_rule_reads_carries_false_q1(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """GOV-1 over every cell the size rule reads (Wave 4 attack): the override lifts the
+    sign-off clause on the estimate cell AND the next larger one, so the honesty floor is
+    read on both — a false-Q1 row in the next larger cell refuses it, on the chain, and the
+    item stops unsigned before any spend."""
+    reads: list[str] = []
+
+    def route_for(item: BacklogItem) -> dict[str, Any]:
+        reads.append(item.size_estimate)
+        return DELIVER_ROUTE if item.size_estimate == "XS" else FALSE_Q1_ROUTE
+
+    rig = _rig(
+        pyrepo,
+        tmp_path,
+        deliver=True,
+        creds=_creds(),
+        readers=UNSIGNED,
+        require_signed_cell=True,
+        route_decision_for=route_for,
+        deliver_override_by="approver:ada",
+    )
+    out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+    assert "S" in reads  # the next larger cell's route was read
+    assert out.status == fl.STATUS_UNSIGNED_CELL and not out.builds and not rig.prs
+    (refused,) = _override_refusals(rig)
+    assert refused["override_refused"] == "false_q1" and refused["override_by"] == "approver:ada"
+    assert not _lifted(rig)
+
+
 def test_a_larger_change_is_delivered_when_its_measured_cell_routes_deliver(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:
@@ -885,6 +1034,7 @@ def test_route_is_read_once_per_item_at_readiness_before_any_build(
         "false_q1": 0,
         "policy_version": "routing.v1",
         "apparatus_versions": ["2.2"],
+        "verification_tier": "human-verified",
     }
     kinds = rig.kinds("I-1")
     assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_RED_PROOF) < kinds.index(fe.EV_BUILD)
@@ -916,6 +1066,145 @@ def test_route_read_once_is_what_gates_delivery_even_if_the_map_moves_later(
     assert out2.status == fl.STATUS_ACCEPTED and out2.delivery is None
     (route,) = rig2.evidence.events_for("I-1", fe.EV_ROUTE)
     assert route.payload["cell_route"] is None
+
+
+# --- the signed-cell clause (ADR-0018, G-517) ---------------------------------------
+
+
+class TestSignedCellClause:
+    """The sign-off clause (ADR-0018 as amended by ADR-0026 item 8), on the entry gate: an
+    item whose cell's PROVEN standard carries no active sign-off stops BEFORE ANY SPEND,
+    whether or not delivery is on — nothing is authored, built or reviewed — with its own
+    status and the entry gate's one event (on by default). A second approver's per-run
+    override lifts this clause and no other, and the pull request says which licence opened
+    it: a signed cell, the override, or a deployment that does not require a signed cell."""
+
+    @staticmethod
+    def _nothing_spent(rig: Rig) -> None:
+        assert rig.builder.calls == 0 and not rig.author.calls
+        kinds = rig.kinds("I-1")
+        assert fe.EV_RED_PROOF not in kinds and fe.EV_BUILD not in kinds
+        assert fe.EV_DELIVERY not in kinds and not rig.pushes and not rig.prs
+
+    UNSIGNED_S2 = Readers(standard_for=lambda cell: Standard(ARM_S2, signed=False))
+    SIGNED_S2 = Readers(standard_for=lambda cell: Standard(ARM_S2, signed=True))
+
+    def test_the_clause_is_on_by_default(self) -> None:
+        assert fl.FactorySpec.__dataclass_fields__["require_signed_cell"].default is True
+
+    @pytest.mark.parametrize("deliver", [True, False], ids=["delivery-on", "delivery-off"])
+    def test_an_unsigned_standard_stops_before_any_spend(
+        self, pyrepo: pr.PyRepo, tmp_path: Path, deliver: bool
+    ) -> None:
+        rig = _rig(pyrepo, tmp_path, deliver=deliver, creds=_creds(), readers=self.UNSIGNED_S2)
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_UNSIGNED_CELL == "unsigned_cell"
+        assert out.proof is None and not out.builds and out.delivery is None
+        self._nothing_spent(rig)
+        (refused,) = rig.evidence.events_for("I-1", fe.EV_ENTRY_REFUSED)
+        assert refused.payload["code"] == "unsigned_cell"
+        emitted = [e for e in rig.sink.events if e.action == "entry.refused"]
+        assert len(emitted) == 1 and emitted[0].status is StepStatus.SKIPPED
+        assert emitted[0].payload["code"] == "unsigned_cell"
+        assert not [e for e in rig.sink.events if e.action == "delivery.override"]
+        assert pyrepo.repo.rev_parse("main") == pyrepo.docs_sha
+
+    def test_a_signed_standard_is_built_and_delivered_and_the_pull_request_says_which_licence(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        rig = _rig(pyrepo, tmp_path, deliver=True, creds=_creds(), readers=self.SIGNED_S2)
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+        assert len(rig.pushes) == 1 and len(rig.prs) == 1
+        assert not [e for e in rig.sink.events if e.action == "entry.refused"]
+        body = rig.prs[0]["body"]
+        assert (
+            "- licence: **signed cell** — the cell's proven standard (`S2`) carries an active "
+            "sign-off" in body
+        )
+
+    def test_the_setting_removes_this_clause_and_only_this_clause(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        """``require_signed_cell=False`` (``CRB_FACTORY__REQUIRE_SIGNED_CELL=false``): the same
+        unsigned standard is built and delivered, and the pull request says no person signed
+        it. The route clause still stands."""
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            require_signed_cell=False,
+            readers=self.UNSIGNED_S2,
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+        assert len(rig.prs) == 1
+        assert (
+            "- licence: **unsigned cell** — this deployment does not require a signed cell"
+            in rig.prs[0]["body"]
+        )
+        routed_human = _rig(
+            pyrepo,
+            tmp_path / "h",
+            deliver=True,
+            creds=_creds(),
+            require_signed_cell=False,
+            readers=self.UNSIGNED_S2,
+            route_decision_for=lambda item: HUMAN_ROUTE,
+        )
+        out = routed_human.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.delivery is None and not routed_human.prs
+
+    def test_an_approver_may_lift_the_clause_for_one_run_and_is_named_for_it(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            readers=self.UNSIGNED_S2,
+            deliver_override_by="approver:ada",
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is not None
+        lifted = [
+            e.payload
+            for e in rig.evidence.events_for("I-1", fe.EV_ROUTE)
+            if e.payload.get("override_by") == "approver:ada"
+        ]
+        assert len(lifted) == 1
+        assert "sign-off clause lifted by approver:ada for this run" in lifted[0]["reason"]
+        # recorded at the entry gate, before anything was spent
+        kinds = rig.kinds("I-1")
+        assert kinds.index(fe.EV_ROUTE) < kinds.index(fe.EV_RED_PROOF) < kinds.index(fe.EV_BUILD)
+        assert not [e for e in rig.sink.events if e.action == "entry.refused"]
+        # and the reader who merges it is never told a person signed the cell
+        assert (
+            "- licence: **unsigned cell** — opened under a per-run override of the sign-off "
+            "clause by approver `approver:ada`, not a human attestation of the cell"
+            in rig.prs[0]["body"]
+        )
+
+    def test_the_clause_leaves_a_cell_that_routes_elsewhere_to_the_route_clause(
+        self, pyrepo: pr.PyRepo, tmp_path: Path
+    ) -> None:
+        """A signed standard in a cell that does not route ``deliver`` is the ROUTE clause's:
+        it is built, and delivery is refused with the route's own code — the clauses are not
+        interchangeable."""
+        rig = _rig(
+            pyrepo,
+            tmp_path,
+            deliver=True,
+            creds=_creds(),
+            readers=self.SIGNED_S2,
+            route_decision_for=lambda item: HUMAN_ROUTE,
+        )
+        out = rig.loop().run_item(multiply_item(), authored=authored_multiply())
+        assert out.status == fl.STATUS_ACCEPTED and out.delivery is None
+        ev = rig.evidence.events_for("I-1", fe.EV_DELIVERY_REFUSED)[0].payload
+        assert ev["reason"].startswith("route gate:") and ev["reason_code"] == "oracle_weak"
 
 
 # --- a whole backlog ------------------------------------------------------------------

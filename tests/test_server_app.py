@@ -206,13 +206,17 @@ class TestFactory:
             "auth",
             "builders",
             "capability",
+            "decisions",
             "factory",
             "flow",
             "forecast",
             "github",
+            "golive",
             "grades",
+            "invitations",
             "learn",
             "ledger",
+            "library",
             "oracle",
             "prevention",
             "readings",
@@ -273,8 +277,8 @@ class TestFactory:
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "down"
             assert probe["data"] == {
-                "triggers": 10,
-                "expected": 12,
+                "triggers": 12,
+                "expected": 14,
                 "missing": ["grades_no_delete", "grades_no_update"],
             }
         # init_db is idempotent: a restart reinstalls the missing triggers.
@@ -282,7 +286,7 @@ class TestFactory:
             r = c.get(f"{API_PREFIX}/health")
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "ok"
-            assert probe["data"] == {"triggers": 12, "expected": 12}
+            assert probe["data"] == {"triggers": 14, "expected": 14}
 
 
 # --- middleware --------------------------------------------------------------------------
@@ -291,7 +295,16 @@ class TestFactory:
 class TestVersion:
     def test_version_says_whether_an_organisation_sign_in_exists(self, client: TestClient) -> None:
         d = client.get(f"{API_PREFIX}/version").json()
-        assert set(d) == {"crb", "apparatus", "policy", "uptime_s", "oidc_enabled"}
+        assert set(d) == {
+            "crb",
+            "apparatus",
+            "policy",
+            "uptime_s",
+            "oidc_enabled",
+            "belt_set",
+            "signoff_policy",
+            "licence",
+        }
         assert d["oidc_enabled"] is False  # the test settings configure no provider
 
 

@@ -26,8 +26,8 @@ stream once the run is terminal; a client disconnect stops the poll loop.
 Navigation
 ----------
 What it is:   The ``/runs`` API — create, list, inspect, cancel a run; a second approver's
-              route-gate override on a factory run; its per-task table; its stored and
-              streamed StepEvents.
+              one-run lift of a factory run's sign-off clause; its per-task table; its
+              stored and streamed StepEvents.
 What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_config, retain,
               outage_stop, preflight, budget_profile, escalation, checks, learning) into a
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
@@ -37,8 +37,9 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               ``submit_refusals``, the one gate every route that queues a run calls; serves
               run views with counts re-derived from the ledger when the worker wrote none; streams
               events as SSE with resume-by-seq; cancellation is a flag the worker honours;
-              the route gate's override is refused at enqueue and granted only by an approver
-              who did not queue the run, as an event (GOV-4, ADR-0003 amendment 2026-09-27);
+              lifting the sign-off clause for one run is refused at enqueue and granted only
+              by an approver who did not queue the run, as an event (GOV-4, ADR-0003
+              amendment 2026-09-27) — it never lifts the route gate (ADR-0026 item 8);
               and owns the out-of-band ``system`` event writers the other routes share
               (``append_system_event``, and ``commit_audited``: an event and its change in
               one commit, the trace's ``seq`` read under the events lock).
@@ -980,15 +981,15 @@ def create_run(
         named = sorted(k for k, v in factory_only.items() if v is not None)
         raise ApiError(422, "validation_error", f"{named} apply to factory runs only")
     if body.deliver_override:
-        # GOV-4 (governance review 2026-09-27): the override licenses a delivery the map
-        # refused, so — like a sign-off (ADR-0016) — it is never granted by the person who
+        # GOV-4 (governance review 2026-09-27): the override stands in for a cell's missing
+        # sign-off, so — like a sign-off (ADR-0016) — it is never granted by the person who
         # queues the run that produces the evidence. It is a second approver's act on the
         # queued or running run; nothing is queued here.
         require_role_now(operator, "approver")
         raise ApiError(
             409,
             "same_actor",
-            "the route gate's override is a second approver's act: queue the run without "
+            "lifting the sign-off clause is a second approver's act: queue the run without "
             "it, then another approver grants it with POST /runs/{id}/deliver-override",
             detail={"grant": "POST /runs/{id}/deliver-override"},
         )
@@ -1032,11 +1033,14 @@ def create_run(
     "/runs/{run_id}/deliver-override",
     response_model=RunOut,
     responses={401: _ERR, 403: _ERR, 404: _ERR, 409: _ERR},
-    summary="A second approver overrides a factory run's route gate (GOV-4)",
+    summary="A second approver lifts a factory run's sign-off clause for that run (GOV-4)",
 )
 def grant_deliver_override(run_id: str, approver: ApproverDep, db: DbDep) -> RunOut:
-    """The route gate's one-run override as a second approver's evented act (GOV-4,
-    ADR-0003 amendment 2026-09-27): on a queued or running factory run that delivers,
+    """The sign-off clause's one-run override as a second approver's evented act (GOV-4,
+    ADR-0003 amendment 2026-09-27; ADR-0026 item 8): it lets items whose cell's proven
+    standard nobody has signed be built and delivered, and never lifts the route gate — a
+    cell that does not route ``deliver`` still opens no pull request. On a queued or running
+    factory run that delivers,
     granted by an approver who is NOT the run's actor, named on the run
     (``params.deliver_override_by``) and on a ``system/run.deliver_override`` event on the
     run's trace, in one transaction. The worker reads it live at each item's gate; it never
@@ -1051,27 +1055,27 @@ def grant_deliver_override(run_id: str, approver: ApproverDep, db: DbDep) -> Run
     db.refresh(run)  # the row as it is under the lock, never an earlier read of it
     params = dict(run.params_json or {})
     if run.kind != KIND_FACTORY:
-        raise ApiError(409, "not_a_factory_run", "only a factory run has a route gate")
+        raise ApiError(409, "not_a_factory_run", "only a factory run has a sign-off clause")
     if run.status in TERMINAL_STATUSES:
         raise ApiError(
             409, "run_terminal", f"run is already {run.status}", detail={"status": run.status}
         )
     if not params.get("deliver"):
         raise ApiError(
-            409, "delivery_off", "this run does not deliver: there is no route gate to override"
+            409, "delivery_off", "this run does not deliver: there is no sign-off clause to lift"
         )
     if approver.id == run.actor:
         raise ApiError(
             409,
             "same_actor",
-            "you queued this run: its route gate is overridden by a second approver "
+            "you queued this run: its sign-off clause is lifted only by a second approver "
             "(ADR-0016's two-person rule)",
         )
     if params.get("deliver_override_by"):
         raise ApiError(
             409,
             "override_already_granted",
-            "the route gate's override is already granted for this run",
+            "the sign-off clause is already lifted for this run",
             detail={"deliver_override_by": params["deliver_override_by"]},
         )
     run.params_json = {**params, "deliver_override_by": approver.id}

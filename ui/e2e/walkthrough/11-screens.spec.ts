@@ -55,7 +55,8 @@
  *               task to anchor the detail routes, then for each persona × width first
  *               checks /login signed out (`loginChecks`: no sideways scroll and Sign in on
  *               the first screen at 375, axe, the keyboard pass and the hint sample —
- *               G-192), signs in through the form, visits every route, saves a full-page
+ *               G-192) and, for the first persona, /invite the same way with Set my password
+ *               as the button (G-209), signs in through the form, visits every route, saves a full-page
  *               screenshot under `<CRB_E2E_OUTPUT_DIR>/screens/`, asserts the About block
  *               is present on every route, the help pages and the unknown address
  *               included,
@@ -182,6 +183,7 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     [c.taskId ? `/tasks/${r}/${c.taskId}` : `/tasks/${r}/none`, 'tasks-detail'],
     ['/repos', 'repos'],
     [`/repos/${r}`, 'repos-detail'],
+    [`/library/${r}`, 'library-repo'],
     ['/capability', 'capability'],
     ['/routing', 'routing'],
     ['/oracle', 'oracle'],
@@ -411,12 +413,22 @@ async function keyboardPass(page: Page, where: string, want = 2, maxTabs = 12): 
  * hover or tap with axe clean while it is open.
  */
 async function loginChecks(page: Page, where: string, width: number): Promise<void> {
-  await expect(page.getByRole('button', { name: 'Sign in', exact: true }), `${where}: the sign-in form did not render`).toBeVisible()
+  await preSessionChecks(page, where, width, 'Sign in')
+}
+
+/**
+ * The checks a screen outside the shell gets before anyone signs in — /login's (G-192) and
+ * /invite's (G-209), where an invited person sets their password: no sideways scroll and the
+ * form's button on a phone's first screen at 375, axe clean, the keyboard pass and the hint
+ * sample.
+ */
+async function preSessionChecks(page: Page, where: string, width: number, button: string): Promise<void> {
+  await expect(page.getByRole('button', { name: button, exact: true }), `${where}: the form did not render`).toBeVisible()
   if (width === 375) {
     const w = await widestOverflow(page)
     expect(w.scroll, `${where}: the page scrolls sideways (scrollWidth ${w.scroll} > innerWidth ${w.inner}); the widest element is ${w.culprit}`).toBeLessThanOrEqual(w.inner)
-    const submit = await page.getByRole('button', { name: 'Sign in', exact: true }).boundingBox()
-    expect(submit ? submit.y + submit.height : Infinity, `${where}: the Sign in button is below a phone's first screen`).toBeLessThanOrEqual(812)
+    const submit = await page.getByRole('button', { name: button, exact: true }).boundingBox()
+    expect(submit ? submit.y + submit.height : Infinity, `${where}: the ${button} button is below a phone's first screen`).toBeLessThanOrEqual(812)
   }
   const violations = await axeViolations(page)
   expect(violations, `${where}: axe: ${JSON.stringify(violations, null, 2)}`).toEqual([])
@@ -597,6 +609,15 @@ test.describe('11-screens: every route × persona × width, with the About block
         await settle(page)
         await shot(page, persona, 'login', vp.width)
         await loginChecks(page, `${persona} @ ${vp.width} /login (signed out)`, vp.width)
+        if (persona === PERSONAS[0]) {
+          // /invite, where an invited person chooses their password, is outside the shell too:
+          // the same checks, once per width (G-209). The token was never issued — the page
+          // sends it only when the form is submitted, and nothing here submits it
+          await page.goto('/invite?token=walkthrough-never-issued')
+          await settle(page)
+          await shot(page, persona, 'invite', vp.width)
+          await preSessionChecks(page, `${persona} @ ${vp.width} /invite (signed out)`, vp.width, 'Set my password')
+        }
         await signIn(page, USERNAMES[persona], PASSWORDS[persona])
         let eyebrows = 0
         for (const r of routes(ctx)) {

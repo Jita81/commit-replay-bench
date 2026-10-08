@@ -9,9 +9,11 @@
  *               only when every criterion is `true`, CLOSED (amber) while one is `false`,
  *               PENDING while one is `null`, and REFUSED (red) only when the server refused
  *               (a 409). Each row carries a glyph and a screen-reader word as well as its
- *               colour; `data-state` exposes the verdict to tests. A criterion's `hint` (a
- *               registry id) makes its label the hover / focus / tap trigger for what the
- *               row checks; the section carries `data-component="gate"` so the ratchet can
+ *               colour; `data-state` exposes the verdict to tests. An `advisory` row (said,
+ *               never refused on — the sign-off gate's posture row, G-480) is left out of the
+ *               state and reads "advisory" in amber when it does not hold. A criterion's
+ *               `hint` (a registry id) makes its label the hover / focus / tap trigger for what
+ *               the row checks; the section carries `data-component="gate"` so the ratchet can
  *               require one on every row.
  * How:          Count failing / pending criteria → pick tone, glyph and state → a `<section>`
  *               labelled by its heading with the action slot and the rows.
@@ -22,14 +24,15 @@
  *               as `refused`), ui/src/screens/Ledger/LedgerPage.tsx (chain intact, false-Q1 =
  *               0), ui/src/screens/Oracle/OraclePage.tsx (the controls verdict),
  *               ui/src/components/ErrorState.tsx (what a refusal outside a gate looks like)
- * Tested by:    ui/src/help/hints-ratchet.test.tsx (the hint contract),
+ * Tested by:    ui/src/components/GateBanner.test.tsx (the derived state, advisory rows),
+ *               ui/src/help/hints-ratchet.test.tsx (the hint contract),
  *               ui/src/screens/Signoff/SignoffPage.test.tsx (CLOSED / REFUSED / OPEN states),
  *               ui/e2e/walkthrough/08-signoff.spec.ts, ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (the ledger gate OPEN)
- * Touch when:   a gate gains a criterion — add the row at the call site, not here; never for a
- *               new repository.
+ * Touch when:   never for a new repository; a gate gains a criterion — add the row at the call
+ *               site, not here; a row kind that is said but never refused on — `advisory`.
  * Claims:       A green gate means every listed criterion held at read time, nothing more
- *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3).
  */
 import type { ReactNode } from 'react'
 import type { HintId } from '../help/hints'
@@ -43,6 +46,13 @@ export interface GateCriterion {
   detail?: ReactNode
   /** What this row checks and what failing it means — a registry id; the ratchet requires one on every row. */
   hint?: HintId
+  /**
+   * An ADVISORY row says something the reader should know before acting that the server does
+   * not refuse on (the sign-off gate's posture row, G-480). It never opens, closes or holds
+   * the gate: it is left out of the state, and a row that does not hold reads "advisory" with
+   * an amber mark, never a red cross that the server would contradict.
+   */
+  advisory?: boolean
 }
 
 interface GateBannerProps {
@@ -67,9 +77,10 @@ export function GateBanner({ title, criteria, action, refused, eyebrow, ...rest 
   // The state is DERIVED, never asserted: a refusal from the server wins outright; a
   // gate with no criteria, a pending row or a failing row is not open. Green requires
   // every row true.
-  const failing = criteria.filter((c) => c.ok === false).length
-  const pending = criteria.filter((c) => c.ok === null).length
-  const passed = !refused && failing === 0 && pending === 0 && criteria.length > 0
+  const binding = criteria.filter((c) => !c.advisory)
+  const failing = binding.filter((c) => c.ok === false).length
+  const pending = binding.filter((c) => c.ok === null).length
+  const passed = !refused && failing === 0 && pending === 0 && binding.length > 0
 
   const tone = refused
     ? 'border-status-red/50 bg-status-red-soft'
@@ -104,9 +115,10 @@ export function GateBanner({ title, criteria, action, refused, eyebrow, ...rest 
       </div>
       <ul className="mt-3 grid list-none gap-1.5 p-0 sm:grid-cols-2">
         {criteria.map((c) => {
-          const g = c.ok === true ? '✓' : c.ok === false ? '✗' : '○'
-          const t = c.ok === true ? 'text-status-green' : c.ok === false ? 'text-status-red' : 'text-on-surface-muted'
-          const sr = c.ok === true ? 'satisfied' : c.ok === false ? 'not satisfied' : 'not yet evaluated'
+          const warn = c.advisory && c.ok === false
+          const g = c.ok === true ? '✓' : warn ? '!' : c.ok === false ? '✗' : '○'
+          const t = c.ok === true ? 'text-status-green' : warn ? 'text-status-amber' : c.ok === false ? 'text-status-red' : 'text-on-surface-muted'
+          const sr = c.ok === true ? 'satisfied' : warn ? 'advisory, not satisfied' : c.ok === false ? 'not satisfied' : 'not yet evaluated'
           return (
             <li key={c.label} className="flex items-start gap-2 rounded-[var(--radius-control)] bg-surface-container/70 px-3 py-2 text-sm">
               <span aria-hidden className={`font-mono ${t}`}>

@@ -229,6 +229,13 @@ class SignoffPreviewEvidence(BaseModel):
     apparatus_versions: list[str]
     #: the ``checks`` arm the evidence is read on — the repository's own (ADR-0024)
     checks_arm: str = ""
+    #: the posture class the evidence was graded in — the class this deployment grades the
+    #: repository in (ADR-0019 §8), which ``crb.signoff.v4`` stamps on the record
+    posture_class: str = ""
+    #: whether that class is the sealed posture ONBOARDING Step 6 asks for — the docker
+    #: executor with sealed dependencies (G-480; :func:`crb.core.posture.is_sealed_class`).
+    #: Advisory: no clause refuses on it.
+    sealed_posture: bool = False
     belt_sets: list[str]
     model_n: int
     model_point: float | None

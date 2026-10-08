@@ -97,7 +97,7 @@ export function ChangeMyPasswordCard() {
 
   return (
     <Card title={<Hint id="tile.settings.my_password">Change my password</Hint>} eyebrow="your account · local">
-      <form onSubmit={submit} className="space-y-4" data-testid="my-password-form">
+      <form onSubmit={submit} className="space-y-4" data-testid="my-password-form" aria-label="Change my password">
         <p className="m-0 text-sm text-on-surface-muted">
           Your current password proves the session is yours. After the change this browser stays signed in and every other session of your account ends. If you cannot sign in at all, an admin of this deployment sets a new password for you: <DocLink to="OPERATOR#9-users">Users, and what to do when nobody can sign in</DocLink>.
         </p>

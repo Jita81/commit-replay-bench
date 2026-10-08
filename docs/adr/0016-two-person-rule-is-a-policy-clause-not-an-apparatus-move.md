@@ -1,6 +1,7 @@
 # ADR-0016 — The two-person rule is a policy clause, not an apparatus move
 
-**Status:** Accepted (architect decision DL-047; built in PR #45)
+**Status:** Accepted (architect decision DL-047; built in PR #45). Amended 2026-09-28
+(DL-120): [a leaver's sign-off licenses nothing](#amendment-of-2026-09-28--a-leavers-sign-off-licenses-nothing).
 **Date:** 2026-09-21
 **Apparatus impact:** none — deliberately. `same_actor` changes what a sign-off may *attest at
 write*, not what a grade means: no belt, no grader, no routing threshold and no ledger row
@@ -80,6 +81,44 @@ read-time expiry rule.
   carries `policy_version: signoff-policy.v3`). `tests/test_version_consistency.py` pins the
   apparatus at `2.2`. [measured — n = 15 + 5 tests, apparatus 2.2; pass/fail, not a rate;
   the counts are stated in SECURITY.md §3.4]
+
+## Amendment of 2026-09-28 — a leaver's sign-off licenses nothing
+
+**Context.** The Wave 4 attack found that nothing decided whether a sign-off made by an
+approver whose account was later deactivated still licenses delivery. It did: the reader
+(`crb.server.factory_standard.signed_by` over `load_signoff_records`) never consulted the
+verifier's account. P-229 had already decided the question for the per-run override —
+"deactivation ends everything the account holds" — and a sign-off is a *standing* licence:
+unlike an override, which licenses one run, it keeps licensing every future delivery in its
+cell until it is revoked or goes stale.
+
+**Decision.** A sign-off licenses only while the account that made it is active. It is a read
+rule, in the spirit of ADR-0015's staleness:
+
+1. `load_signoff_records` — the one reader every licence and every map overlay takes its
+   records from (P-336) — leaves out an **attestation** whose verifier's account is
+   deactivated **now**. A revocation is never left out: withdrawing a licence is not a power
+   the leaver is exercising.
+2. Nothing is edited (ADR-0002). The row stays on the chain naming its approver,
+   `/signoffs/verify` still verifies, and re-activating the account brings the attestation
+   back with it.
+3. `GET /signoffs` serves the record `stale` with `stale_reason: verifier_deactivated`, so the
+   Sign-offs screen and the Decisions inbox ask another approver to sign the cell again.
+4. No apparatus bump and no `signoff-policy` bump: what may be attested at write, and what a
+   grade means, are unchanged (decisions 1 to 3 above apply as written).
+
+**Consequence.** Deactivating an approver can stop the factory in every cell they alone
+signed, at once. That is the point — a leaver's judgement is no longer vouched for by a live
+account — and it is visible: the entry gate stops those tickets `unsigned_cell`, and each
+sign-off reads stale with its reason. An organisation that expects a departure re-signs its
+cells first. **Rejected:** keeping a leaver's sign-offs and saying so on the Posture page —
+that would leave a standing licence with nobody accountable for it, and make P-229's rule
+true of the one-run override but false of the licence that outlives it.
+
+**Tested by** `tests/test_governed_delivery_e2e.py::test_a_leavers_sign_off_stops_licensing_delivery`
+(the gate reads the cell unsigned once the approver is deactivated, stops `unsigned_cell`
+before any spend, serves the record stale with its reason, keeps the chain intact, and reads
+it signed again once the account is re-activated).
 
 ## Alternatives considered
 

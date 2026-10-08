@@ -73,6 +73,9 @@ How:          ``RepoConfig.lint`` → ``plan_from_config``, else the runner's ``
               on the worktree → ``run_plan`` builds one ``Command`` per tool (changed files
               appended for ``paths="changed"``), runs it through the executor, ``_read_exit``
               → verdict, ``attribute_findings`` for ``findings_re`` tools → ``LintRun``.
+              Each plan reads its evidence through ``ConfigFiles`` (``*_lint_evidence``), and
+              ``belt5_evidence`` is their union — the one reading the library's lint miner
+              uses to say which conventions belt 5 checks.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0011-repo-lint-belt.md; ADR-0025 item 5 (``lint_status``, stream G)
 Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5 and stamps ``lint_status``),
@@ -89,7 +92,9 @@ Touch when:   onboarding a repository whose linter detection is wrong or missing
               timeout}`` or ``{disabled: true}``, the shape under ``plan_from_config``;
               docs/adr/0011-repo-lint-belt.md#decision) before adding a detector here; a new
               detector or exit-code rule needs a test with the real tool's exit codes
-              (tests/test_lint.py) and an amendment to docs/adr/0011-repo-lint-belt.md.
+              (tests/test_lint.py) and an amendment to docs/adr/0011-repo-lint-belt.md; a
+              detector reads its evidence through ``ConfigFiles`` and joins ``belt5_evidence``,
+              with a row in tests/test_miners.py's belt-5 table.
 """
 
 from __future__ import annotations
@@ -104,7 +109,7 @@ import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.redact import redact_and_cap
@@ -685,8 +690,12 @@ def _read_text(p: Path, limit: int = 1_000_000) -> str:
 
 def _read_toml(p: Path) -> dict[str, Any]:
     """Parsed TOML table, or ``{}`` for anything that is not one."""
+    return _toml_of(_read_text(p))
+
+
+def _toml_of(text: str) -> dict[str, Any]:
     try:
-        data = tomllib.loads(_read_text(p))
+        data = tomllib.loads(text)
     except (ValueError, TypeError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -694,26 +703,73 @@ def _read_toml(p: Path) -> dict[str, Any]:
 
 def _read_json(p: Path) -> dict[str, Any]:
     """Parsed JSON object, or ``{}`` for anything that is not one."""
+    return _json_of(_read_text(p))
+
+
+def _json_of(text: str) -> dict[str, Any]:
     try:
-        data = json.loads(_read_text(p) or "{}")
+        data = json.loads(text or "{}")
     except ValueError:
         return {}
     return data if isinstance(data, dict) else {}
 
 
-def _workflow_texts(root: Path) -> str:
-    """Every CI workflow file the repository carries, concatenated (evidence only)."""
-    out: list[str] = []
-    for d in (root / ".github" / "workflows",):
-        if d.is_dir():
-            for p in sorted(d.iterdir()):
-                if p.suffix in {".yml", ".yaml"}:
-                    out.append(_read_text(p, 200_000))
+class ConfigFiles(Protocol):
+    """What detection reads of a repository: whether a file is there, its text, and the
+    files directly under a directory. Belt 5 reads a worktree (:class:`DirFiles`); the
+    library's lint miner reads a commit's tree through the same detectors
+    (``crb.core.miners``), so the check a mined convention names is the check belt 5 runs."""
+
+    def is_file(self, path: str) -> bool: ...
+
+    def text(self, path: str, limit: int = 1_000_000) -> str:
+        """The file's text, or ``""`` when it is absent, unreadable or over ``limit``."""
+        ...
+
+    def files_under(self, directory: str) -> list[str]:
+        """The paths of the files directly under ``directory``, sorted."""
+        ...
+
+
+@dataclass(frozen=True)
+class DirFiles:
+    """A worktree on disk as :class:`ConfigFiles`."""
+
+    root: Path
+
+    def is_file(self, path: str) -> bool:
+        return (self.root / path).is_file()
+
+    def text(self, path: str, limit: int = 1_000_000) -> str:
+        return _read_text(self.root / path, limit)
+
+    def files_under(self, directory: str) -> list[str]:
+        d = self.root / directory
+        if not d.is_dir():
+            return []
+        return sorted(f"{directory}/{p.name}" for p in d.iterdir() if p.is_file())
+
+
+def config_files(root: Path | ConfigFiles) -> ConfigFiles:
+    """``root`` as :class:`ConfigFiles` — a path is read from disk."""
+    return DirFiles(Path(root)) if isinstance(root, (str, os.PathLike)) else root
+
+
+def _workflow_files(files: ConfigFiles) -> list[tuple[str, str]]:
+    """``(path, text)`` of every CI workflow file the repository carries (evidence only)."""
+    out: list[tuple[str, str]] = []
+    for path in files.files_under(".github/workflows"):
+        if path.endswith((".yml", ".yaml")):
+            out.append((path, files.text(path, 200_000)))
     for name in (".gitlab-ci.yml", ".travis.yml", "Makefile"):
-        p = root / name
-        if p.is_file():
-            out.append(_read_text(p, 200_000))
-    return "\n".join(out)
+        if files.is_file(name):
+            out.append((name, files.text(name, 200_000)))
+    return out
+
+
+def _workflow_texts(root: Path | ConfigFiles) -> str:
+    """Every CI workflow file the repository carries, concatenated (evidence only)."""
+    return "\n".join(text for _path, text in _workflow_files(config_files(root)))
 
 
 # --- Go: gofmt -------------------------------------------------------------------
@@ -746,30 +802,47 @@ def go_plan(root: Path, gofmt: str) -> LintPlan | None:
 
 _PRECOMMIT_RUFF_CHECK = re.compile(r"^\s*-\s*id:\s*ruff(?:-check)?\s*$", re.M)
 _PRECOMMIT_RUFF_FORMAT = re.compile(r"^\s*-\s*id:\s*ruff-format\s*$", re.M)
+_PRECOMMIT_BLACK = re.compile(r"^\s*-\s*id:\s*black(?:-jupyter)?\s*$", re.M)
 
 
-def python_ruff_evidence(root: Path) -> tuple[bool, bool]:
-    """``(check, format)`` — does the repository configure ``ruff check`` /
-    ``ruff format``? Evidence: ``[tool.ruff]`` in ``pyproject.toml`` or a
-    ``ruff.toml`` / ``.ruff.toml`` (check); a ``ruff-format`` pre-commit hook or a
-    ``[tool.ruff.format]`` table (format). click: ``pyproject.toml [tool.ruff]`` +
-    ``.pre-commit-config.yaml`` hooks ``ruff-check`` and ``ruff-format``, run by
-    ``.github/workflows/pre-commit.yaml`` on every PR."""
-    root = Path(root)
-    pyproject = _read_toml(root / "pyproject.toml")
+def python_lint_evidence(root: Path | ConfigFiles) -> dict[str, str]:
+    """tool → the file that is its evidence, for the Python tools :func:`python_plan` runs:
+    ``ruff`` (``ruff.toml`` / ``.ruff.toml``, ``[tool.ruff]`` in ``pyproject.toml``, or a
+    ``ruff`` / ``ruff-check`` pre-commit hook), ``ruff-format`` (a ``format`` table under
+    ``[tool.ruff]`` or a ``ruff-format`` pre-commit hook) and ``black`` (``[tool.black]`` or
+    a ``black`` hook) — black only where ruff format is not in force, as the plan runs it.
+    click: ``pyproject.toml [tool.ruff]`` + ``.pre-commit-config.yaml`` hooks ``ruff-check``
+    and ``ruff-format``, run by ``.github/workflows/pre-commit.yaml`` on every PR."""
+    files = config_files(root)
+    pyproject = _toml_of(files.text("pyproject.toml"))
     tool = pyproject.get("tool") if isinstance(pyproject.get("tool"), dict) else {}
     ruff_table = tool.get("ruff") if isinstance(tool, dict) else None
-    has_ruff_toml = (root / "ruff.toml").is_file() or (root / ".ruff.toml").is_file()
-    precommit = _read_text(root / ".pre-commit-config.yaml")
-    check = (
-        isinstance(ruff_table, dict)
-        or has_ruff_toml
-        or _PRECOMMIT_RUFF_CHECK.search(precommit) is not None
-    )
-    fmt = (
-        isinstance(ruff_table, dict) and isinstance(ruff_table.get("format"), dict)
-    ) or _PRECOMMIT_RUFF_FORMAT.search(precommit) is not None
-    return check, fmt
+    precommit = files.text(".pre-commit-config.yaml")
+    found: dict[str, str] = {}
+    ruff_toml = next((p for p in ("ruff.toml", ".ruff.toml") if files.is_file(p)), "")
+    if ruff_toml:
+        found["ruff"] = ruff_toml
+    elif isinstance(ruff_table, dict):
+        found["ruff"] = "pyproject.toml"
+    elif _PRECOMMIT_RUFF_CHECK.search(precommit) is not None:
+        found["ruff"] = ".pre-commit-config.yaml"
+    if isinstance(ruff_table, dict) and isinstance(ruff_table.get("format"), dict):
+        found["ruff-format"] = "pyproject.toml"
+    elif _PRECOMMIT_RUFF_FORMAT.search(precommit) is not None:
+        found["ruff-format"] = ".pre-commit-config.yaml"
+    if "ruff-format" not in found:
+        if isinstance(tool, dict) and isinstance(tool.get("black"), dict):
+            found["black"] = "pyproject.toml"
+        elif _PRECOMMIT_BLACK.search(precommit) is not None:
+            found["black"] = ".pre-commit-config.yaml"
+    return found
+
+
+def python_ruff_evidence(root: Path | ConfigFiles) -> tuple[bool, bool]:
+    """``(check, format)`` — does the repository configure ``ruff check`` /
+    ``ruff format``? (:func:`python_lint_evidence`, as two answers.)"""
+    found = python_lint_evidence(root)
+    return "ruff" in found, "ruff-format" in found
 
 
 _PRECOMMIT_RUFF_REPO = re.compile(
@@ -927,8 +1000,8 @@ def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
     repository evidences ``ruff format``). ``ruff`` is the resolved binary (the
     repository's venv first, then the host); ``None`` ⇒ the plan cannot run and is
     not detected (the belt is not evaluated, and the note says why)."""
-    check, fmt = python_ruff_evidence(root)
-    black = black_evidence(root) and not fmt
+    found = python_lint_evidence(root)
+    check, fmt, black = "ruff" in found, "ruff-format" in found, "black" in found
     if not check and not fmt and not black:
         return None
     tools: list[LintTool] = []
@@ -978,17 +1051,15 @@ def _sibling(binary: str | None, name: str) -> str | None:
     return str(p) if p.exists() else None
 
 
-_PRECOMMIT_BLACK = re.compile(r"^\s*-\s*id:\s*black(?:-jupyter)?\s*$", re.M)
-
-
-def black_evidence(root: Path) -> bool:
+def black_evidence(root: Path | ConfigFiles) -> bool:
     """Does the repository configure black? ``[tool.black]`` in ``pyproject.toml`` or a
-    ``black`` pre-commit hook (mesh-client: ``[tool.black]``, CI ``make black-check``)."""
-    root = Path(root)
-    tool = _read_toml(root / "pyproject.toml").get("tool")
+    ``black`` pre-commit hook (mesh-client: ``[tool.black]``, CI ``make black-check``) —
+    whether or not ruff format is in force (:func:`python_lint_evidence` says which runs)."""
+    files = config_files(root)
+    tool = _toml_of(files.text("pyproject.toml")).get("tool")
     if isinstance(tool, dict) and isinstance(tool.get("black"), dict):
         return True
-    return _PRECOMMIT_BLACK.search(_read_text(root / ".pre-commit-config.yaml")) is not None
+    return _PRECOMMIT_BLACK.search(files.text(".pre-commit-config.yaml")) is not None
 
 
 def ruff_version(ruff: str) -> str:
@@ -1109,7 +1180,7 @@ def _script_argv(script: str) -> list[str]:
     return script.split()
 
 
-def tsc_evidence(root: Path, pkg: Mapping[str, Any]) -> tuple[str, list[str]] | None:
+def tsc_evidence(root: Path | ConfigFiles, pkg: Mapping[str, Any]) -> tuple[str, list[str]] | None:
     """``(evidence, extra argv)`` when the repository gates on the TypeScript compiler,
     else ``None``. Evidence, in order:
 
@@ -1125,8 +1196,8 @@ def tsc_evidence(root: Path, pkg: Mapping[str, Any]) -> tuple[str, list[str]] | 
 
     The evidence string is what ``lint_run.detected`` records (``tsc:lint:types``,
     ``tsc:script:<name>``, ``tsc:ci``)."""
-    root = Path(root)
-    if not (root / "tsconfig.json").is_file():
+    files = config_files(root)
+    if not files.is_file("tsconfig.json"):
         return None
     scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
     scripts = {str(k): str(v) for k, v in scripts.items()} if isinstance(scripts, dict) else {}
@@ -1152,10 +1223,59 @@ def tsc_evidence(root: Path, pkg: Mapping[str, Any]) -> tuple[str, list[str]] | 
     if (
         isinstance(dev, dict)
         and "typescript" in dev
-        and _TSC_TOKEN_RE.search(_workflow_texts(root))
+        and _TSC_TOKEN_RE.search(_workflow_texts(files))
     ):
         return "tsc:ci", ["--noEmit", "-p", "tsconfig.json"]
     return None
+
+
+def js_lint_evidence(root: Path | ConfigFiles) -> dict[str, str]:
+    """tool → the file that is its evidence, for the JavaScript tools :func:`js_plan` runs
+    when every binary is installed: ``eslint``, ``prettier`` and ``stylelint`` (a config
+    file, or their key in ``package.json``), else ``standard`` (``scripts.lint`` starts with
+    it), then ``tsc`` (:func:`tsc_evidence`; its evidence is ``package.json``). Nothing
+    without a ``package.json``: there is no JavaScript package to lint."""
+    files = config_files(root)
+    pkg = _json_of(files.text("package.json"))
+    if not pkg and not files.is_file("package.json"):
+        return {}
+    found: dict[str, str] = {}
+    for tool, configs, key in (
+        ("eslint", _ESLINT_CONFIGS, "eslintConfig"),
+        ("stylelint", _STYLELINT_CONFIGS, "stylelint"),
+    ):
+        hit = next((c for c in configs if files.is_file(c)), "")
+        if hit or isinstance(pkg.get(key), dict):
+            found[tool] = hit or "package.json"
+    prettier = prettier_evidence(files)
+    if prettier:
+        found["prettier"] = prettier
+    found = {t: found[t] for t in ("eslint", "prettier", "stylelint") if t in found}
+    if not found and _standard_script(pkg):
+        found["standard"] = "package.json"
+    if tsc_evidence(files, pkg) is not None:
+        found["tsc"] = "package.json"
+    return found
+
+
+def prettier_evidence(root: Path | ConfigFiles) -> str:
+    """The file that configures prettier — a config file, or ``package.json`` when its
+    ``prettier`` key is set (an object, or a shared config's name) — or ``""``. The format
+    step asks this too (``crb.core.formatting``), so the two never disagree (P-376)."""
+    files = config_files(root)
+    hit = next((c for c in _PRETTIER_CONFIGS if files.is_file(c)), "")
+    if hit:
+        return hit
+    return (
+        "package.json" if _json_of(files.text("package.json")).get("prettier") is not None else ""
+    )
+
+
+def _standard_script(pkg: Mapping[str, Any]) -> bool:
+    """``scripts.lint`` starts with ``standard`` (koa: ``"lint": "standard"``)."""
+    scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+    lint_script = str(scripts.get("lint", "")) if isinstance(scripts, dict) else ""
+    return lint_script.split()[:1] == ["standard"]
 
 
 def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
@@ -1195,10 +1315,8 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
 
     tools: list[LintTool] = []
     names: list[str] = []
-    eslint_cfg = any((root / c).is_file() for c in _ESLINT_CONFIGS) or isinstance(
-        pkg.get("eslintConfig"), dict
-    )
-    if eslint_cfg and have("eslint"):
+    configured = js_lint_evidence(root)
+    if "eslint" in configured and have("eslint"):
         warn = _script_flag(pkg, "eslint")
         tools.append(
             LintTool(
@@ -1210,10 +1328,7 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
             )
         )
         names.append("eslint" + (f"(max-warnings={warn[1]})" if warn else ""))
-    prettier_cfg = any((root / c).is_file() for c in _PRETTIER_CONFIGS) or (
-        "prettier" in pkg and pkg.get("prettier") is not None
-    )
-    if prettier_cfg and have("prettier"):
+    if "prettier" in configured and have("prettier"):
         tools.append(
             LintTool(
                 "prettier",
@@ -1223,10 +1338,7 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
             )
         )
         names.append("prettier")
-    stylelint_cfg = any((root / c).is_file() for c in _STYLELINT_CONFIGS) or isinstance(
-        pkg.get("stylelint"), dict
-    )
-    if stylelint_cfg and have("stylelint"):
+    if "stylelint" in configured and have("stylelint"):
         # nhsuk-frontend: ``stylelint.config.mjs`` + ``lint:css`` (``--max-warnings 0``) in CI
         warn = _script_flag(pkg, "stylelint")
         tools.append(
@@ -1238,19 +1350,16 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
             )
         )
         names.append("stylelint")
-    if not tools:
-        scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
-        lint_script = str(scripts.get("lint", "")) if isinstance(scripts, dict) else ""
-        if lint_script.split()[:1] == ["standard"] and have("standard"):
-            tools.append(
-                LintTool(
-                    "standard",
-                    (binary("standard"),),
-                    exts=_JS_EXTS,
-                    findings_rcs=frozenset({1}),
-                )
+    if not tools and _standard_script(pkg) and have("standard"):
+        tools.append(
+            LintTool(
+                "standard",
+                (binary("standard"),),
+                exts=_JS_EXTS,
+                findings_rcs=frozenset({1}),
             )
-            names.append("standard")
+        )
+        names.append("standard")
     tsc = tsc_evidence(root, pkg)
     if tsc is not None and have("tsc"):
         evidence, extra = tsc
@@ -1274,6 +1383,18 @@ def js_plan(root: Path, bin_dir: Path | None) -> LintPlan | None:
 # --- JVM: spotless / checkstyle -------------------------------------------------------
 
 
+def jvm_lint_evidence(root: Path | ConfigFiles) -> dict[str, str]:
+    """tool → ``pom.xml`` for ``spotless`` and ``checkstyle`` when the pom declares the
+    plugin (what :func:`jvm_plan` runs)."""
+    pom = config_files(root).text("pom.xml", 5_000_000)
+    found: dict[str, str] = {}
+    if "spotless-maven-plugin" in pom:
+        found["spotless"] = "pom.xml"
+    if "maven-checkstyle-plugin" in pom:
+        found["checkstyle"] = "pom.xml"
+    return found
+
+
 def jvm_plan(root: Path, mvn: str, flags: Sequence[str], env: Mapping[str, str]) -> LintPlan | None:
     """``mvn -o -q -B spotless:check`` when ``pom.xml`` declares
     ``spotless-maven-plugin`` (gson: ``check`` goal bound in the build);
@@ -1281,13 +1402,13 @@ def jvm_plan(root: Path, mvn: str, flags: Sequence[str], env: Mapping[str, str])
     (petclinic: ``check`` at ``validate``; commons-lang: ``checkstyle:check`` in the
     ``defaultGoal``). Both run when both are declared. Maven plugins are module-wide
     (``paths="all"``): the changed files cannot be passed, the module is checked."""
-    pom = _read_text(Path(root) / "pom.xml", 5_000_000)
-    if not pom:
+    evidence = jvm_lint_evidence(root)
+    if not evidence:
         return None
     tools: list[LintTool] = []
     names: list[str] = []
     base = (mvn, "-o", "-q", "-B", *flags)
-    if "spotless-maven-plugin" in pom:
+    if "spotless" in evidence:
         tools.append(
             LintTool(
                 "spotless",
@@ -1298,7 +1419,7 @@ def jvm_plan(root: Path, mvn: str, flags: Sequence[str], env: Mapping[str, str])
             )
         )
         names.append("spotless")
-    if "maven-checkstyle-plugin" in pom:
+    if "checkstyle" in evidence:
         tools.append(
             LintTool(
                 "checkstyle",
@@ -1320,6 +1441,27 @@ def jvm_plan(root: Path, mvn: str, flags: Sequence[str], env: Mapping[str, str])
 _RUSTUP_MISSING_RE = r"is not installed for the toolchain|error: no such command: `(?:fmt|clippy)`"
 
 
+def rust_lint_evidence(root: Path | ConfigFiles) -> dict[str, str]:
+    """tool → the file that is its evidence, for what :func:`rust_plan` runs in a crate
+    (``Cargo.toml``): ``cargo-fmt`` (``rustfmt.toml`` / ``.rustfmt.toml``, or the first CI
+    file that runs ``cargo fmt``) and ``clippy`` (``clippy.toml`` / ``.clippy.toml``, or the
+    first CI file that names clippy)."""
+    files = config_files(root)
+    if not files.is_file("Cargo.toml"):
+        return {}
+    ci = _workflow_files(files)
+    found: dict[str, str] = {}
+    for tool, configs, word in (
+        ("cargo-fmt", ("rustfmt.toml", ".rustfmt.toml"), "cargo fmt"),
+        ("clippy", ("clippy.toml", ".clippy.toml"), "clippy"),
+    ):
+        hit = next((c for c in configs if files.is_file(c)), "")
+        hit = hit or next((path for path, text in ci if word in text), "")
+        if hit:
+            found[tool] = hit
+    return found
+
+
 def rust_plan(root: Path, cargo: str, env: Mapping[str, str]) -> LintPlan | None:
     """``cargo fmt --check`` when the repository configures rustfmt
     (``rustfmt.toml`` / ``.rustfmt.toml``) or its CI runs ``cargo fmt`` (clap:
@@ -1327,14 +1469,10 @@ def rust_plan(root: Path, cargo: str, env: Mapping[str, str]) -> LintPlan | None
     -D warnings`` when it configures clippy (``clippy.toml`` / ``.clippy.toml``) or
     its CI runs clippy (clap: ``.clippy.toml`` + ``ci.yml`` job ``clippy``). Both are
     crate-wide (``paths="all"``)."""
-    root = Path(root)
-    if not (root / "Cargo.toml").is_file():
-        return None
-    ci = _workflow_texts(root)
+    evidence = rust_lint_evidence(root)
     tools: list[LintTool] = []
     names: list[str] = []
-    fmt_cfg = (root / "rustfmt.toml").is_file() or (root / ".rustfmt.toml").is_file()
-    if fmt_cfg or "cargo fmt" in ci:
+    if "cargo-fmt" in evidence:
         tools.append(
             LintTool(
                 "cargo-fmt",
@@ -1345,8 +1483,7 @@ def rust_plan(root: Path, cargo: str, env: Mapping[str, str]) -> LintPlan | None
             )
         )
         names.append("cargo-fmt")
-    clippy_cfg = (root / "clippy.toml").is_file() or (root / ".clippy.toml").is_file()
-    if clippy_cfg or "clippy" in ci:
+    if "clippy" in evidence:
         tools.append(
             LintTool(
                 "clippy",
@@ -1362,6 +1499,41 @@ def rust_plan(root: Path, cargo: str, env: Mapping[str, str]) -> LintPlan | None
     if not tools:
         return None
     return LintPlan(tuple(tools), "+".join(names))
+
+
+#: The language runner whose belt 5 runs each detected tool (``BaseRunner.detect_lint``
+#: calls one language's plan: a Python replay never runs eslint, whatever it finds).
+BELT5_RUNNERS: dict[str, str] = {
+    "ruff": "Python", "ruff-format": "Python", "black": "Python",
+    "eslint": "JavaScript", "prettier": "JavaScript", "stylelint": "JavaScript",
+    "standard": "JavaScript", "tsc": "JavaScript",
+    "gofmt": "Go", "spotless": "Maven", "checkstyle": "Maven",
+    "cargo-fmt": "Rust", "clippy": "Rust",
+}  # fmt: skip
+#: Tools belt 5 runs on the host runner only (black: a sandbox image's contents are not
+#: known to the plan — declare it in ``RepoConfig.lint`` there).
+BELT5_HOST_ONLY: frozenset[str] = frozenset({"black"})
+
+
+def belt5_evidence(root: Path | ConfigFiles) -> dict[str, str]:
+    """tool → the file that is its evidence, for every tool belt 5's detected plans
+    (:func:`go_plan`, :func:`python_plan`, :func:`js_plan`, :func:`jvm_plan`,
+    :func:`rust_plan`) include on ``root`` when every binary is installed — each under its
+    language's runner (:data:`BELT5_RUNNERS`). The plans read the same functions, so what
+    this names is what belt 5 runs; the library's lint miner names ``repo_lint_clean`` for
+    these tools alone (P-376)."""
+    files = config_files(root)
+    found: dict[str, str] = {}
+    if files.is_file("go.mod"):
+        found["gofmt"] = "go.mod"
+    for evidence in (
+        python_lint_evidence(files),
+        js_lint_evidence(files),
+        jvm_lint_evidence(files),
+        rust_lint_evidence(files),
+    ):
+        found.update(evidence)
+    return found
 
 
 def which(name: str) -> str | None:
@@ -1412,26 +1584,37 @@ def fix_commands(plan: LintPlan, files: Sequence[str]) -> list[tuple[str, tuple[
 
 
 __all__ = [
+    "BELT5_HOST_ONLY",
+    "BELT5_RUNNERS",
     "DEFAULT_LINT_TIMEOUT_S",
     "PATHS_ALL",
     "PATHS_CHANGED",
     "PRETTIER_CONFIGS",
     "TSC_FINDINGS_RE",
+    "ConfigFiles",
+    "DirFiles",
     "LintPlan",
     "LintRun",
     "LintStep",
     "LintTool",
     "attribute_findings",
+    "belt5_evidence",
     "black_evidence",
+    "config_files",
     "fix_commands",
     "go_plan",
+    "js_lint_evidence",
     "js_plan",
+    "jvm_lint_evidence",
     "jvm_plan",
     "lint_disabled",
     "plan_from_config",
+    "prettier_evidence",
+    "python_lint_evidence",
     "python_plan",
     "python_ruff_evidence",
     "run_plan",
+    "rust_lint_evidence",
     "rust_plan",
     "tsc_evidence",
     "version_satisfies",

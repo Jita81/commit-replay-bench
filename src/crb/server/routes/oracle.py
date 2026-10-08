@@ -18,7 +18,10 @@ averaged in; a repo with no controls report answers ``404 not_measured``.
 route under (ADR-0003 amendment) — ONE source for the controls screen and the
 router, so they can never disagree. When no report event exists it falls back to
 the latest finished ``controls`` run's ``counts_json``; when neither exists it
-returns :meth:`ControlsVerdict.unmeasured` (an honest absence, never a pass).
+returns :meth:`ControlsVerdict.unmeasured` (an honest absence, never a pass). Every report
+is reduced through :func:`crb.core.oracle.controls.controls_verdict_of`, so a passed report
+with no gold witness (written before ``controls.v3``) reads as unmeasured too — on the
+controls screen's verdict and for routing alike (P-372).
 
 Navigation
 ----------
@@ -27,7 +30,8 @@ What it is:   The ``/oracle/{repo}`` and ``/oracle/{repo}/controls`` route modul
 What it does: Reduces the store's ``oracle.score`` events to the latest strength per task
               and per (class × size) cell, banded and gated by the frozen adequacy policy;
               serves the latest negative-controls report with its routing-reduced
-              verdict; answers ``unmeasured`` (never a pass) when no report exists. An
+              verdict; answers ``unmeasured`` (never a pass) when no report exists, or when
+              the latest passed report carries no gold witness (before ``controls.v3``). An
               unscoreable oracle is reported, never averaged in.
 How:          ``select(Event)`` by stage / action in insertion order → latest per task →
               ``classify_oracle`` / ``routing_decision`` → grouped cells;
@@ -37,6 +41,7 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0010-polyglot-negative-controls.md,
               docs/adr/0009-text-level-mutators.md
 Works with:   src/crb/core/oracle/adequacy.py (the bands and the gate),
+              src/crb/core/oracle/controls.py (``controls_verdict_of``, the reduction),
               src/crb/core/routing.py (``ControlsVerdict``), src/crb/server/worker.py (emits
               the events this reads), src/crb/server/routes/capability.py and
               src/crb/server/routes/signoffs.py (route under ``latest_controls_verdict`` and
@@ -66,6 +71,7 @@ from crb.core.oracle.adequacy import (
     licenses_autoship,
     routing_decision,
 )
+from crb.core.oracle.controls import controls_verdict_of
 from crb.core.oracle.mutation import mutation_version
 from crb.core.routing import DEFAULT_POLICY as ROUTING_POLICY
 from crb.core.routing import ControlsVerdict, RoutingPolicy
@@ -119,7 +125,7 @@ def latest_controls_verdict(
     ).scalars()
     other = ""
     for ev in events:
-        verdict = ControlsVerdict.from_counts(
+        verdict = controls_verdict_of(
             dict(ev.payload_json or {}), run_id=ev.trace_id, created=ev.timestamp
         )
         if not is_v2_apparatus(apparatus) or verdict.apparatus_version == apparatus:
@@ -138,7 +144,7 @@ def latest_controls_verdict(
     if run is not None and "passed" in (run.counts_json or {}):
         stamp = str(dict(run.apparatus_json or {}).get("apparatus_version", "") or "")
         if not is_v2_apparatus(apparatus) or stamp == apparatus:
-            return ControlsVerdict.from_counts(
+            return controls_verdict_of(
                 {"apparatus_version": stamp, **dict(run.counts_json)},
                 run_id=run.id,
                 created=run.finished or run.created,
@@ -359,7 +365,7 @@ def get_controls(repo: str, viewer: ViewerDep, db: DbDep) -> dict[str, Any]:
     report.setdefault("reported_at", ev.timestamp)
     # the routing-reduced view of this same report (what the capability map gates on)
     report["verdict"] = verdict_dict(
-        ControlsVerdict.from_counts(report, run_id=ev.trace_id, created=ev.timestamp)
+        controls_verdict_of(report, run_id=ev.trace_id, created=ev.timestamp)
     )
     return report
 

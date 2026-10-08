@@ -11,8 +11,10 @@
  * What it does: Turns `RepoSummary` (+ the oracle and controls reports when they exist,
  *               + the repo's last run, + the polled `Run` while one is in flight) into a task
  *               list the Connect screen renders: `done` with the evidence line, `warn` when
- *               the evidence carries a finding the person must answer (a controls escape
- *               or a thin set: `controlsFinding` — passed is not "nothing to do"), `running`
+ *               the evidence carries a finding the person must answer (a controls escape,
+ *               a thin set, or a passed report the server reads as unmeasured because no
+ *               gold witness stands beside its catches, P-372: `controlsFinding` — passed is
+ *               not "nothing to do"), `running`
  *               with the run to watch and its live line (`runningDetail`: k of n, the kind's
  *               own counters, spend so far, or "Queued — n runs ahead of it"), `todo` with
  *               the action, `failed` with the detail (the measure stage too: a failed or
@@ -32,8 +34,9 @@
  *               ui/src/lib/format.ts (`fmtAgo`, `count`),
  *               docs/ONBOARDING-A-REPO.md (the same six steps for a developer at the CLI)
  * Tested by:    ui/src/screens/Connect/connection.test.ts
- * Touch when:   a stage is added to onboarding (add it here and in ONBOARDING-A-REPO.md);
- *               the API exposes a stamp that answers a stage better than the proxy used.
+ * Touch when:   never for a new repository; a stage is added to onboarding (add it here and
+ *               in ONBOARDING-A-REPO.md); the API exposes a stamp that answers a stage better
+ *               than the proxy used.
  */
 
 import type { ControlsReport, OracleReport, RepoSummary, Run, RunKind, RunStatus } from '../../api/types'
@@ -161,7 +164,10 @@ export function controlsFinding(report: ControlsReport): string | null {
   const escapes = report.verdict?.escapes ?? report.escapes
   if (escapes > 0) return `${count(escapes, 'escape')} — deliver is withheld until the tests are hardened and the controls re-run`
   const v = report.verdict
-  const thin = v ? v.state === 'thin' || (v.total > 0 && v.constructible / v.total < 0.5) : report.n_rows > 0 && report.not_constructible / report.n_rows > 0.5
+  // P-372: the server reads a passed report with no gold witness beside its catches (one
+  // written before controls.v3) as unmeasured — it licenses nothing until the controls re-run
+  if (report.passed && v?.state === 'unmeasured') return 'no gold witness beside its catches (a report from before controls.v3) — run the controls again; deliver is withheld until then'
+  const thin =v ? v.state === 'thin' || (v.total > 0 && v.constructible / v.total < 0.5) : report.n_rows > 0 && report.not_constructible / report.n_rows > 0.5
   if (thin) return `too few controls constructible${v ? ` (${v.constructible} of ${v.total})` : ''} — the cell routes calibrate until more can be built`
   return null
 }

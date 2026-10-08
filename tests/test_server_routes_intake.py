@@ -239,6 +239,25 @@ def test_a_poll_comments_and_labels_and_the_register_act_registers_the_ticket(
     assert [i["id"] for i in got.json()["items"]] == ["fake-4711"]
 
 
+def test_the_on_demand_poll_labels_an_unsigned_proven_cell_with_the_sign_off_it_needs(
+    env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-392 (the Wave 4 attack): ``POST /factory/{repo}/intake/poll`` binds the served
+    sign-off clause (on by default) into the ticket feedback, so a ticket in a cell whose
+    proven standard nobody signed is labelled not deliverable, naming the sign-off — the
+    stop the next run makes — and never promised as entering."""
+    every_cell_proven(monkeypatch, "S1@claude-sonnet-5", signed=False)
+    assert env.settings.factory.require_signed_cell is True  # the served default
+    login(env.client, "operator")
+    _switch(env, True)
+    r = env.client.post(f"{API_PREFIX}/factory/{ALPHA}/intake/poll")
+    assert r.status_code == 200, r.text
+    (row,) = r.json()["rows"]
+    assert row["label"] == c.LABEL_NOT_DELIVERABLE and row["entry_stop"] == "unsigned_cell"
+    board = json.loads(fake_tracker_path(tmp_path).read_text(encoding="utf-8"))
+    assert c.LABEL_NOT_DELIVERABLE in board["tickets"]["4711"]["tags"]
+
+
 def test_the_served_row_carries_the_cell_route_the_ticket_was_told_about(env: Env) -> None:
     login(env.client, "operator")
     _switch(env, True)

@@ -185,6 +185,9 @@ services:
       CRB_PROVISION__EXTRA_ALLOW_HOSTS: ${CRB_PROVISION__EXTRA_ALLOW_HOSTS:-}
       CRB_PROVISION__ALLOW_PUBLIC: ${CRB_PROVISION__ALLOW_PUBLIC:-false}
       CRB_PROVISION__PROXY_IMAGE: ${CRB_PROVISION__PROXY_IMAGE:-}
+      # a private mirror's login (G-950): the NAME of the variable holding "user:password";
+      # add that variable to this service's environment from your secret store, never here
+      CRB_PROVISION__MIRROR_CREDENTIAL_ENV: ${CRB_PROVISION__MIRROR_CREDENTIAL_ENV:-}
       CRB_WORKER_ID: ${CRB_WORKER_ID:-worker-1}
       # The worker's own Prometheus exposition (docs/DEPLOYMENT.md §9). The build / grade /
       # cost / delivery series are recorded in THIS process; the api's /metrics carries the

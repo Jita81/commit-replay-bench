@@ -72,7 +72,8 @@ from fixtures.server_seed import ALPHA, BETA, add_users, make_factory, seed, use
 #: Every lead time the reading serves: ``key → (n, median_s, min_s, max_s)``, computed by hand
 #: from the stamps below.
 KNOWN: dict[str, tuple[int, float | None, float | None, float | None]] = {
-    # registered 08:00 → the first PASSED controls report 09:00 (an escaped one at 08:30)
+    # registered 08:00 → the first PASSED controls report 09:00 (an escaped one at 08:30, an
+    # unwitnessed controls.v2 one at 08:45)
     "registered_to_controls": (1, 3600.0, 3600.0, 3600.0),
     # run A queued 09:50, last row 10:11 (21 min); run B queued 10:15, last row 10:22 (7 min)
     "queued_to_graded": (2, 840.0, 420.0, 1260.0),
@@ -205,9 +206,13 @@ def served(tmp_path: Path) -> dict[str, Any]:
         n = 10
         # registration → controls: an escaped report first, then the first that passed
         event(s, n := n + 1, "repo.created", at("08:00"), {}, repo=ALPHA)
-        escaped = {"n_rows": 14, "escapes": 1, "not_constructible": 2, "passed": True}
+        v3 = {"controls_version": "controls.v3"}
+        escaped = {"n_rows": 14, "escapes": 1, "not_constructible": 2, "passed": True, **v3}
         event(s, n := n + 1, "controls.report", at("08:30"), escaped, repo=ALPHA)
-        passed = {"n_rows": 14, "escapes": 0, "not_constructible": 2, "passed": True}
+        # a clean report from before the gold witness (P-372) is not a pass either
+        unwitnessed = {**escaped, "escapes": 0, "controls_version": "controls.v2"}
+        event(s, n := n + 1, "controls.report", at("08:45"), unwitnessed, repo=ALPHA)
+        passed = {"n_rows": 14, "escapes": 0, "not_constructible": 2, "passed": True, **v3}
         event(s, n := n + 1, "controls.report", at("09:00"), passed, repo=ALPHA)
         # the two measured runs, queued at chosen moments
         s.add(Run(id=RUN_A, repo=ALPHA, kind="replay", created=at("09:50")))

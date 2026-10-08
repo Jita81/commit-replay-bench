@@ -14,7 +14,12 @@
  *               panel from the polled run — attempts, spend, started, Cancel with a confirm
  *               that posts the cancel (J-ONR-5) — and a queued run reads "Queued" with its
  *               place in the line (J-TEL-6); and that every element on both screens carries
- *               a hint, with a stage-summary pill and a stage title opening on hover.
+ *               a hint, with a stage-summary pill and a stage title opening on hover; that a
+ *               row, and the walk, whose oracle, controls or map read fails for a reason other
+ *               than 404 shows the error with Retry, never a stage state — each of the three
+ *               reads failing on its own, and on the walk with no stage action offered (G-124,
+ *               G-730); and that a viewer is offered
+ *               no Connect control on the list or its empty state (G-126).
  * How:          `mockApi` + `renderApp` with `path` set so `useParams` resolves.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -87,6 +92,59 @@ describe('ConnectPage', () => {
     // gold-clean carries its definition one click away
     expect(screen.getByRole('button', { name: /gold-clean/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('Journey · 1 of 4 · Connection')).toBeInTheDocument()
+  })
+
+  // G-124: each of the row's three reads, failing on its own while the other two answer
+  const FAILING_READS = [
+    { read: 'oracle', route: 'GET /oracle/alpha', title: 'Could not read the oracle scores' },
+    { read: 'controls', route: 'GET /oracle/alpha/controls', title: 'Could not read the controls report' },
+    { read: 'capability map', route: 'GET /capability-map', title: 'Could not read the capability map' },
+  ] as const
+  it.each(FAILING_READS)('a row whose $read read fails (not 404) shows the error with Retry, never a stage state (G-124)', async ({ route, title }) => {
+    const reads: string[] = []
+    const answering: Record<string, unknown> = {
+      'GET /oracle/alpha': () => envelope(404, 'not_measured', 'no oracle scores'),
+      'GET /oracle/alpha/controls': () => envelope(404, 'not_measured', 'no controls report'),
+      'GET /capability-map': EMPTY_MAP,
+    }
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [MEASURED], total: 1, limit: 500, offset: 0 },
+      ...answering,
+      [route]: () => {
+        reads.push(route)
+        return envelope(503, 'store_unavailable', 'the store is not answering')
+      },
+    })
+    renderApp(<ConnectPage />, { route: '/connect' })
+    const err = await screen.findByTestId('connect-row-error')
+    expect(err).toHaveTextContent(title)
+    expect(err).toHaveTextContent('the store is not answering')
+    expect(err).toHaveTextContent('HTTP 503')
+    // no stage state is shown in its place: the walk cannot know the stage without the read
+    expect(document.querySelector('[data-hint="pill.connect.stage_summary"]')).toBeNull()
+    const before = reads.length
+    await userEvent.click(within(err).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(reads.length).toBeGreaterThan(before))
+  })
+
+  it('a 404 on the oracle or the controls is never run, not an error: the row reads its stage (G-124)', async () => {
+    mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 } })
+    renderApp(<ConnectPage />, { route: '/connect' })
+    await screen.findByText('commits mined into tasks')
+    expect(screen.queryByTestId('connect-row-error')).toBeNull()
+  })
+
+  it('a viewer is offered neither connect button nor the empty state’s Connect, and reads the list (G-126)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [], total: 0, limit: 500, offset: 0 },
+      'GET /github/app': { configured: true, app_slug: 'crb', install_url: 'https://github.com/apps/crb/installations/new', api_url: '', installations: [] },
+    })
+    renderApp(<ConnectPage />, { route: '/connect' })
+    await screen.findByText('No repository connected yet')
+    expect(screen.queryByRole('button', { name: /Connect/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /Connect/ })).toBeNull()
   })
 
   it('a measured repository\'s door is named Baseline, the same as the nav, and opens the baseline', async () => {
@@ -169,6 +227,36 @@ describe('ConnectPage', () => {
     expect(JSON.parse(String(post.init?.body))).toEqual({ repo: 'alpha', kind: 'mine' })
     expect(screen.getByRole('link', { name: 'Baseline' })).toHaveAttribute('href', '/results?repo=alpha')
     expect(screen.getByText('Journey · 1 of 4 · Connection')).toBeInTheDocument()
+  })
+
+  it.each(FAILING_READS)('the walk whose $read read fails (not 404) says so with Retry, shows no stage state and offers no stage action (G-730)', async ({ route, title }) => {
+    const reads: string[] = []
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /repos/alpha': MEASURED,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6, apparatus: { controls_version: 'controls.v3' } },
+      'GET /capability-map': EMPTY_MAP,
+      [route]: () => {
+        reads.push(route)
+        return envelope(503, 'store_unavailable', 'the store is not answering')
+      },
+    })
+    const { container } = renderApp(<ConnectRepoPage />, { route: '/connect/alpha', path: '/connect/:name' })
+    const err = await screen.findByTestId('connect-walk-error')
+    expect(unhinted(container)).toEqual([])
+    expect(err).toHaveTextContent(title)
+    expect(err).toHaveTextContent('HTTP 503')
+    // no stage reads "Not started" in the read's place, and nothing is offered to run or spend
+    expect(screen.queryByTestId('stage-measure')).toBeNull()
+    expect(screen.queryByText('Not started')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^(Run|Measure…)$/ })).toBeNull()
+    // the only Retry is the read's own, never a stage's
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toEqual([within(err).getByRole('button', { name: 'Retry' })])
+    expect(document.body).toHaveTextContent('cannot say where this repository is')
+    const before = reads.length
+    await userEvent.click(within(err).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(reads.length).toBeGreaterThan(before))
   })
 
   it('a viewer sees the walk but no action', async () => {

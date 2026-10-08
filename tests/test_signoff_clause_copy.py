@@ -1,0 +1,191 @@
+"""The words about the sign-off clause say no more than the clause does (P-356).
+
+ADR-0018's sign-off clause, as ADR-0026 item 8 amends it, stops an item before any spend only
+when its cell has a PROVEN context standard that nobody has signed off: the entry gate
+(:func:`crb.factory.standard.decide_entry`) stops a cell with no standard, or only an ``S3``
+ceiling, as ``no_proven_standard`` — another stop, with another way forward — never as
+``unsigned_cell``. Stream S's copy said "an item in a cell nobody has signed off is not built
+at all": a rule wider than the code, which a reader would act on. This file holds the words to
+the code's scope: every clause in the product's copy that pairs signing with "not built" names
+the standard (or the deliver route the screen predicts from) in the same clause.
+
+The override has the same scope (P-393): ``deliver_override`` lifts the sign-off clause and
+never the route gate (ADR-0026 item 8), yet the run page's button, its hint, the verdict label,
+the Posture row, the API summary and the 409 messages all called it the route gate's override.
+No served string may pair "override" with "route gate".
+
+Navigation
+----------
+What it is:   The copy gate for the sign-off clause's scope, and the anchor that ties it to
+              the rule it describes.
+What it does: Splits the UI's copy (every non-test ``.ts``/``.tsx`` under ``ui/src``), the
+              docs and the README into clauses at ``. ; : ! ?`` and line ends, and fails on a
+              clause that speaks of signing (sign, unsigned, attest) and says an item is not
+              built without naming the standard or ``deliver``; proves the rule catches the
+              sentences it was written for; pins that the clause itself bites only on a
+              proven standard; and fails on a served string (the UI, the Python package and
+              the operator's guides) that calls the override the route gate's (P-393).
+How:          ``re`` over the files; ``decide_entry`` called directly.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         docs/adr/0018-a-signed-cell-licenses-delivery.md,
+              docs/adr/0026-the-context-standard.md (item 8)
+Works with:   src/crb/factory/standard.py (``decide_entry`` — the rule the words describe),
+              ui/src/screens/Posture/PosturePage.tsx and ui/src/screens/Factory/FactoryPage.tsx
+              (the rows and sentences that said too much), ui/src/help/hints.ts and
+              ui/src/help/help.ts (the hints), ui/src/screens/Runs/RunDetailPage.tsx and
+              src/crb/server/routes/runs.py (the override's button and route),
+              docs/PREVENTION.md (P-356, P-393)
+Tested by:    (this is a test file)
+Touch when:   never for a new repository; the sign-off clause changes scope (change the
+              anchor with the rule, and the words with both).
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+from crb.factory.standard import (
+    STOP_NO_PROVEN_STANDARD,
+    STOP_UNSIGNED_CELL,
+    CellRef,
+    Standard,
+    decide_entry,
+)
+
+ROOT = Path(__file__).resolve().parent.parent
+_NOT_BUILT = re.compile(
+    r"\b(?:is|are) not built\b|\bdoes not build\b|\bnot be built\b|\bis never built\b"
+)
+_SIGNING = re.compile(r"\bsign|\bunsigned\b|\battest", re.IGNORECASE)
+_BREAK = re.compile(r"[.;:!?\n]")
+
+
+def overclaims(text: str) -> list[str]:
+    """Every clause of ``text`` that pairs signing with "not built" and names neither the
+    standard nor the deliver route."""
+    out: list[str] = []
+    for m in _NOT_BUILT.finditer(text):
+        start = max((b.end() for b in _BREAK.finditer(text, 0, m.start())), default=0)
+        after = _BREAK.search(text, m.end())
+        clause = text[start : after.start() if after else len(text)]
+        low = clause.lower()
+        if _SIGNING.search(clause) and "deliver" not in low and "standard" not in low:
+            out.append(clause.strip())
+    return out
+
+
+def _copy_files() -> list[Path]:
+    ui = [
+        p
+        for p in (ROOT / "ui" / "src").rglob("*")
+        if p.suffix in {".ts", ".tsx"} and ".test." not in p.name and "node_modules" not in p.parts
+    ]
+    return [*ui, *(ROOT / "docs").rglob("*.md"), ROOT / "README.md"]
+
+
+def test_no_copy_says_an_unsigned_cell_is_not_built_without_naming_the_standard() -> None:
+    found = {
+        str(p.relative_to(ROOT)): hits
+        for p in _copy_files()
+        if (hits := overclaims(p.read_text(encoding="utf-8", errors="replace")))
+    }
+    assert found == {}, (
+        "the sign-off clause stops an item only in a cell whose proven standard nobody has "
+        f"signed; say so in the same clause: {found}"
+    )
+
+
+def test_the_gate_catches_the_sentences_it_was_written_for() -> None:
+    said = [
+        "the factory does not build an item in a cell until a person has attested that cell",
+        "from today; an item in a cell nobody has signed off is not built at all, and one",
+        "nobody has signed this cell off, so an item here is not built at all unless",
+        "An item in an unsigned cell is not built at all; one elsewhere is withheld.",
+        "Without the sign-off an item is not built at all.",
+    ]
+    for sentence in said:
+        assert overclaims(sentence), sentence
+    fixed = "an item whose cell's standard nobody has signed off is not built at all"
+    assert overclaims(fixed) == []
+    assert overclaims("an item in a deliver cell nobody has signed off is not built at all") == []
+    # a "not built" that is not about signing is somebody else's sentence
+    assert overclaims("a task that is not proven there is never built") == []
+
+
+def _entry(standard: Standard | None) -> str:
+    return decide_entry(
+        capability_class="bug.fix",
+        size="S",
+        standard_for=lambda _cell: standard,
+        agreement_passed=True,
+        missing_slots=(),
+        person_test=True,
+        require_signed_cell=True,
+    ).code
+
+
+def test_the_clause_the_words_describe_bites_only_on_a_proven_standard() -> None:
+    # no standard, or only a ceiling: another stop, never the sign-off clause's
+    assert _entry(None) == STOP_NO_PROVEN_STANDARD
+    assert _entry(Standard("S3", signed=True)) == STOP_NO_PROVEN_STANDARD
+    # a proven standard nobody signed: the clause, and only then
+    assert _entry(Standard("S2", signed=False)) == STOP_UNSIGNED_CELL
+    assert _entry(Standard("S2", signed=True)) == ""
+    assert CellRef("bug.fix", "S").size == "S"  # the cell the gate read
+
+
+#: "override" and "route gate" in one phrase, either way round: the override named as the
+#: route gate's (P-393). The sign-off clause's override never lifts the route gate.
+_OVERRIDE_ROUTE_GATE = re.compile(
+    r"overr(?:id|od)\w*\W+(?:[\w'\u2019]+\W+){0,4}route[ -]gate"
+    r"|route[ -]gate(?:'s|\u2019s)?\W+(?:[\w'\u2019]+\W+){0,2}overr(?:id|od)",
+    re.IGNORECASE,
+)
+
+
+def _served_files() -> list[Path]:
+    ui = [
+        p
+        for p in (ROOT / "ui" / "src").rglob("*")
+        if p.suffix in {".ts", ".tsx"} and ".test." not in p.name and "node_modules" not in p.parts
+    ]
+    py = list((ROOT / "src" / "crb").rglob("*.py"))
+    guides = [
+        ROOT / "docs" / name
+        for name in ("API.md", "MCP.md", "OPERATOR.md", "GITHUB-APP.md", "ONBOARDING-A-REPO.md")
+    ]
+    return [*ui, *py, *guides, ROOT / "README.md"]
+
+
+def override_named_as_the_route_gates(text: str) -> list[str]:
+    return [m.group(0) for m in _OVERRIDE_ROUTE_GATE.finditer(text)]
+
+
+def test_no_served_string_calls_the_override_the_route_gates() -> None:
+    found = {
+        str(p.relative_to(ROOT)): hits
+        for p in _served_files()
+        if (hits := override_named_as_the_route_gates(p.read_text(encoding="utf-8")))
+    }
+    assert found == {}, (
+        "deliver_override lifts the sign-off clause and never the route gate (ADR-0026 item "
+        f"8); name it the sign-off clause's: {found}"
+    )
+
+
+def test_the_override_gate_catches_the_words_it_was_written_for() -> None:
+    said = [
+        "Override the route gate (second approver)",
+        "A second approver overrides a factory run's route gate (GOV-4)",
+        "the route gate's override is already granted for this run",
+        "this run does not deliver: there is no route gate to override",
+        "you queued this run: its route gate is overridden by a second approver",
+        "A second approver overrode this factory run\u2019s route gate",
+        "a second approver's route-gate override on a factory run",
+    ]
+    for sentence in said:
+        assert override_named_as_the_route_gates(sentence), sentence
+    assert not override_named_as_the_route_gates(
+        "Lift the sign-off clause for this run (second approver): it never lifts the route gate"
+    )
