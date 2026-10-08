@@ -35,6 +35,19 @@ regexes = [
 ]
 
 [[allowlists]]
+# A public label, not a credential: ADR-0025 derives the ledger anchor's key as
+# HMAC(key, "crb.ledger.anchor.v1") from CRB_SECRET_KEY. The label is a fixed domain-separation
+# string, published in the ADR by design; the secret is the key, never the label.
+# generic-api-key captured the label as an API key on #69's push 435d2a49 (main's security job
+# red on 2026-10-08). Literal and anchored, so it passes this one label and nothing around it,
+# and only for generic-api-key (tests/test_gitleaks_config.py, docs/PREVENTION.md P-675).
+description = "ADR-0025's ledger-anchor HMAC label (a public domain-separation string)"
+targetRules = ["generic-api-key"]
+regexes = [
+  '''^crb\.ledger\.anchor\.v1$''',
+]
+
+[[allowlists]]
 description = "Documentation placeholders that are obviously not credentials"
 regexTarget = "match"
 regexes = [
