@@ -1,8 +1,9 @@
 # gitleaks configuration for crb.
-# Extends the default ruleset; allowlists ONLY the test tree, where redaction tests
+# Extends the default ruleset; allowlists ONLY the test tree by path, where redaction tests
 # deliberately contain fake tokens (crb.core.redact must recognise the shapes).
-# Nothing under src/, docs/ or deploy/ is allowlisted. Anything else that trips a rule
-# is a finding, not a false positive, until proven otherwise in review.
+# No path under src/, docs/ or deploy/ is allowlisted; elsewhere only an exact secret shape
+# is, each with its reason below. Anything else that trips a rule is a finding, not a false
+# positive, until proven otherwise in review.
 
 title = "crb gitleaks config"
 # The top-level [[allowlists]] form needs gitleaks >= 8.25; CI pins 8.30.1 (GITLEAKS_VERSION).
@@ -15,6 +16,22 @@ useDefault = true
 description = "Test fixtures and redaction tests contain deliberately fake credentials"
 paths = [
   '''^tests/''',
+]
+
+[[allowlists]]
+# A content hash, not a credential: the dependency store keys a provisioned bundle by
+# "dep_" + a sha256 hex digest (crb.core.provision.bundle_key), the shape the product itself
+# defines in crb.core.deps.KEY_RE. Committed review evidence carries such keys under "...key"
+# fields, which generic-api-key reads as API keys: first seen on #56's push 406ff747 (main's
+# security job red on 2026-09-27, unnoticed), then on every pull request whose scan range
+# reaches that commit (PR #75, 2026-10-08). The regex is matched against the captured secret
+# (the default regexTarget) and anchored, so it passes one whole key and nothing longer,
+# shorter or around it, and only for generic-api-key. It must stay in step with KEY_RE:
+# tests/test_gitleaks_config.py fails when the two shapes drift (docs/PREVENTION.md P-675).
+description = "Dependency-store keys: dep_ + a sha256 hex digest (crb.core.deps.KEY_RE)"
+targetRules = ["generic-api-key"]
+regexes = [
+  '''^dep_[0-9a-f]{64}$''',
 ]
 
 [[allowlists]]
