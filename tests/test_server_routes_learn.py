@@ -1181,12 +1181,19 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
     assert _queued_events(env) == []
 
 
+@pytest.mark.parametrize("refused_insert", ["event", "run"])
 def test_a_queue_that_fails_part_way_queues_nothing(
-    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch, refused_insert: str
 ) -> None:
     """P-420: a cell is queued whole or not at all. A registered reading's top-up is one run
-    (Wave 6), so the write fails part way after that run is written: when the event that names
-    it cannot be written, the run is not left on the queue with no event naming it."""
+    (Wave 6), so the write can fail at either of its two inserts. When the event that names
+    the run cannot be written, the run — written first — is not left on the queue with no
+    event naming it; when the run cannot be written, no event is left on the trace naming a
+    queue that never happened. Each case covers the other's blind spot. The event case holds
+    the order — the run is written before its event; an event flushed first is rolled back
+    with the refused run, so only the order shows it — and its last check is vacuous, since
+    its event is never written. The run case is the one that sees an event outlive its run:
+    an event committed on its own, or a refused run dropped and its event written anyway."""
     del builder_keys
     _sealed(env, monkeypatch)
     _add_reading(env)
@@ -1196,9 +1203,12 @@ def test_a_queue_that_fails_part_way_queues_nothing(
 
     def count_the_run(_mapper: Any, _connection: Any, _target: Any) -> None:
         inserts[0] += 1
+        if refused_insert == "run":
+            refused[0] += 1
+            raise RuntimeError("the queue refused the run")
 
     def refuse_the_event(_mapper: Any, _connection: Any, target: Any) -> None:
-        if target.action == "learn.remeasure.queued":
+        if refused_insert == "event" and target.action == "learn.remeasure.queued":
             refused[0] += 1
             raise RuntimeError("the queue refused the event that names its run")
 
@@ -1212,10 +1222,11 @@ def test_a_queue_that_fails_part_way_queues_nothing(
     finally:
         sa_event.remove(Run, "before_insert", count_the_run)
         sa_event.remove(Event, "before_insert", refuse_the_event)
-    assert inserts[0] == 1 and refused[0] == 1  # the run was written, then its event refused
+    # event: the run was written, then its event refused; run: the run's insert was refused
+    assert inserts[0] == 1 and refused[0] == 1
     assert r is None or r.status_code == 500
     assert env.get("/runs").json()["total"] == before
-    assert _queued_events(env) == []
+    assert _queued_events(env) == []  # meaningful in the run case: the event could be written
 
 
 def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unlocked(
