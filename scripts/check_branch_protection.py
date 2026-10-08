@@ -72,7 +72,7 @@ import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
 #: Every workflow here whose top-level ``on:`` names :data:`PR_EVENT` has its jobs required.
@@ -98,6 +98,16 @@ _ON = re.compile(r"""^(?:on|"on"|'on')\s*:(.*)$""")
 _EVENT_KEY = re.compile(r"""^(["']?)([A-Za-z_]+)\1\s*:(?:\s|$)""")
 _EVENT_ITEM = re.compile(r"""^-\s+(["']?)([A-Za-z_]+)\1$""")
 _COMMENT = re.compile(r"\s+#.*$|^#.*$")
+#: An event name as GitHub spells one (``pull_request_target``). An anchor, an alias, a tag
+#: or a block-scalar indicator (``&t``, ``*t``, ``!!str``, ``>-``) is no event: read as one, it
+#: would name a trigger the workflow does not have and drop the one it does.
+_EVENT = re.compile(r"^[a-z_]+$")
+#: A column-0 line that may end the ``on:`` value: another top-level key, bare or quoted, or a
+#: document marker. Any other column-0 line could still be part of ``on:`` (a flow list or a
+#: scalar that runs on), so the scan fails closed on it.
+_TOP_KEY = re.compile(
+    r"""^(?:[A-Za-z_][\w-]*|"[^"\\]*"|'[^']*')\s*:(?:\s|$)|^(?:---|\.\.\.)(?:\s|$)"""
+)
 #: The one job-level condition that makes a job an aggregator: it runs, and so fails, when a
 #: part failed, was cancelled or was skipped. Without it a failed part SKIPS the job, and a
 #: skipped required check does not block a merge — so a job without it is no aggregator and
@@ -123,7 +133,8 @@ def _block_events(lines: list[str]) -> list[str] | None:
     missed, and with them, maybe, every job of a pull-request workflow. The first line sets
     the block's kind: keys (``push:``, each with its filters below it) or list items
     (``- push``). In a block of keys, a ``- …`` line at the keys' indent is the value of the
-    key above it (``schedule:`` then ``- cron: …``), never an event."""
+    key above it (``schedule:`` then ``- cron: …``), never an event. The block ends at the
+    next top-level key; any other column-0 line is unreadable."""
     events: list[str] = []
     indent: int | None = None
     items = False
@@ -131,7 +142,9 @@ def _block_events(lines: list[str]) -> list[str] | None:
         if not child.strip() or child.lstrip().startswith("#"):
             continue
         if not child.startswith(" "):
-            break
+            if _TOP_KEY.match(child):
+                break
+            return None
         width = len(child) - len(child.lstrip(" "))
         line = _COMMENT.sub("", child).strip()
         if indent is None:
@@ -150,34 +163,49 @@ def _block_events(lines: list[str]) -> list[str] | None:
     return events or None
 
 
+def _unreadable(why: str) -> NoReturn:
+    raise SystemExit(
+        f"check_branch_protection: could not read the workflow's top-level on: ({why}) — "
+        "teach triggers this shape"
+    )
+
+
 def triggers(text: str) -> list[str]:
     """The events a workflow's top-level ``on:`` names, in file order: ``on: push``,
     ``on: [push, pull_request]``, or a block of events (keys, with their filters, or list
-    items), each bare or quoted. A workflow with no top-level ``on:``, a ``{…}`` mapping, or a
-    block with no event or with any event line the scan cannot read fails closed: a workflow
-    read as running on nothing, or on only some of its events, could drop its jobs out of the
-    comparison, and a setting that did not require them would pass."""
+    items), each bare or quoted. Anything else fails closed, because a workflow read as
+    running on nothing, or on only some of its events, could drop its jobs out of the
+    comparison, and a setting that did not require them would pass. That covers no top-level
+    ``on:`` or two of them, a ``{…}`` mapping, a value that runs on past its line (a flow list
+    over two lines, a scalar continued below), a list that nests, a block with no event or
+    with an event line it cannot read, and any event that is not an event name (an anchor, an
+    alias, a tag, a block scalar, a broken quote)."""
     lines = text.split("\n")
-    for i, line in enumerate(lines):
-        m = _ON.match(line)
-        if not m:
-            continue
-        value = _COMMENT.sub("", m.group(1)).strip()
-        if value.startswith("{"):
-            break
+    at = [i for i, line in enumerate(lines) if _ON.match(line)]
+    if len(at) != 1:
+        _unreadable("missing" if not at else f"{len(at)} top-level on: keys")
+    i = at[0]
+    value = _COMMENT.sub("", lines[i].split(":", 1)[1]).strip()
+    if value.startswith("{"):
+        _unreadable("a {…} mapping")
+    if value:
+        rest = [ln for ln in lines[i + 1 :] if ln.strip() and not ln.lstrip().startswith("#")]
+        if rest and not _TOP_KEY.match(rest[0]):
+            _unreadable("a value that runs on past its line")
         if value.startswith("["):
-            return [_unquote(v) for v in value.strip("[]").split(",") if v.strip()]
-        if value:
-            return [_unquote(value)]
-        events = _block_events(lines[i + 1 :])
-        if events:
-            return events
-        break
-    raise SystemExit(
-        "check_branch_protection: could not read the workflow's top-level on: (missing, a "
-        "{…} mapping, a block with no event, or an event line it cannot read) — teach "
-        "triggers this shape"
-    )
+            inner = value[1:-1]
+            if not value.endswith("]") or any(c in inner for c in "[]{}"):
+                _unreadable("a flow list that does not close on its line, or that nests")
+            events = [_unquote(v) for v in inner.split(",") if v.strip()]
+        else:
+            events = [_unquote(value)]
+    else:
+        events = _block_events(lines[i + 1 :]) or []
+    if not events:
+        _unreadable("no event, or an event line it cannot read")
+    if bad := [e for e in events if not _EVENT.match(e)]:
+        _unreadable(f"{bad[0]!r} is not an event name")
+    return events
 
 
 def runs_on_pull_request(text: str) -> bool:
