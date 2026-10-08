@@ -18,8 +18,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   branch-protection check compared that list with `ci.yml` alone, so it called `commit-subjects`
   a check no job reports. It never saw that the check was missing before. It now finds every
   workflow whose `on:` names `pull_request` and requires each of their jobs. The new reading is
-  saved in `data/branch-protection-2026-10-07/` (P-752). No token that may read the setting is
-  provisioned yet, so the daily workflow stays red (G-930).
+  saved in `data/branch-protection-2026-10-07/` (P-752). A test that skips on a git result now
+  fails, and every suite job must fetch the whole history (P-753). No token that may read the
+  setting is provisioned yet, so the daily workflow stays red (G-930).
 
 - **Wave 4: the context library and its miners, the second person, go-live on evidence, truthful
   screens** (north-star Wave 4, streams L, M, S, P and T;
