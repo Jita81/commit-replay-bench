@@ -28,6 +28,7 @@ Touch when:   never for a new repository; only if the registry's opt-in mechanis
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -175,6 +176,32 @@ def test_an_attempted_command_the_guard_allows_records_nothing(
     )
     assert out.errors == () and not out.violated
     assert trial.read(pr.SRC) == pr.SRC_FEAT
+
+
+def test_the_attempted_shell_call_is_counted_in_tool_calls_like_the_event_it_emits(
+    pyrepo: pr.PyRepo, feat_task: TaskSpec, trial: Workspace
+) -> None:
+    """P-425: the attempt emits one ``build.tool`` event, so the outcome counts one tool call
+    for it — a refused attempt overlays no file, and its row must not say no tool was
+    called when the event trace says one was."""
+    for command, refused in (("git log -p", True), ("ls -la", False)):
+        events: list[tuple[str, dict[str, object]]] = []
+
+        def record(
+            action: str,
+            payload: Mapping[str, object],
+            sink: list[tuple[str, dict[str, object]]] = events,
+        ) -> None:
+            sink.append((action, dict(payload)))
+
+        out = fg.FixtureGoldBuilder(attempt=command).build(
+            trial, _brief(feat_task, pyrepo.config), base.Budget(), on_event=record
+        )
+        tools = [kw for action, kw in events if action == "build.tool"]
+        assert len(tools) == 1 and tools[0]["ok"] is (not refused)
+        assert out.tool_calls == len(tools) + len(out.extra["files"]), command
+    plain = fg.FixtureGoldBuilder().build(trial, _brief(feat_task, pyrepo.config), base.Budget())
+    assert plain.tool_calls == len(plain.extra["files"])
 
 
 def test_a_refused_attempt_grades_as_a_protocol_row_not_a_clean_one(

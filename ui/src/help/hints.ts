@@ -73,7 +73,7 @@ export const HINTS = {
   'kind.harness':
     'Attempts that failed in the executor, sandbox, parser, setup or model API, or whose failure the humans’ own change also showed when run again in the same posture. The instrument failed, not the model; they count against autonomy until the instrument is fixed.',
   'kind.outage':
-    'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n.',
+    'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n. “Login” counts those refused because this deployment’s own login was rejected, which the operator fixes on Settings.',
   'kind.disqualified':
     'Attempts disqualified for tampering with a test or a malformed oracle. They are excluded and sit outside n, counted neither clean nor failed.',
   'stat.shared.model_rate':
@@ -140,7 +140,7 @@ export const HINTS = {
   'flow.installed_to_healthy':
     'From this deployment’s install to the first time /health read green. The install is dated only when the server was first started on an empty database; a deployment upgraded to this release shows a dash with the reason rather than a guessed date.',
   'flow.password_set_to_signed_in':
-    'From an admin setting someone else’s password to that person signing in again: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
+    'From an admin setting someone else’s password to that person’s first sign-in after it: how long an account recovery takes. Someone changing their own password is not a recovery and is not counted. Only an admin sees it, as only an admin sees the accounts.',
   'flow.spend':
     'What this stream spent, summing only the rows whose cost is a measurement. A row that reported no price is never counted as zero, so the figure is a floor and the line underneath says how many rows are missing from it.',
   'flow.spend_total':
@@ -1162,6 +1162,8 @@ export const HINTS = {
     'The sandbox image the posture runs, by the name the deployment gives it. The posture itself is keyed to the image’s content, so re-pinning the same name to new bytes asks for a new qualification.',
   'text.repo.posture_toolchain':
     'The exact toolchain version read inside the posture. A patch release is a different posture, because a test can pass on one and fail on the other.',
+  'text.repo.posture_environment':
+    'Where the tests get their tools. Declared: on the host they see only the tools the runner lists (its toolchain, git and the basic shell tools), and a change to any of them asks for a new qualification. The image: the sandbox image is the environment. Inherited: this runner does not declare its tools yet, so what is installed on the host can change a result.',
   'pill.repo.provisioning':
     'Whether this deployment provisions a task’s dependencies for the sealed sandbox. Off means a repository whose tests need a third-party module cannot be qualified there, and says so instead of blaming the model.',
   'text.repo.posture_stale':
@@ -1833,7 +1835,7 @@ export const HINTS = {
   'field.learn.note':
     'One line saying why, written into the corpus file as a comment above the line, for whoever reads it next. It stays one line: a line break would end the comment.',
   'field.learn.command':
-    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line.',
+    'The whole command. Every recorded example of this class was cut short by the recorder’s cap, and a cut command would not be a usable corpus line. The field starts with the cut example as recorded: add the rest after it.',
   'field.learn.prefix':
     'Which guard family to file the refusal under. The refused corpus takes archaeology and network lines only; an attempt to tamper with the tests is judged elsewhere.',
   'button.learn.accept_refusal':
@@ -1869,7 +1871,6 @@ export const HINTS = {
   'link.learn.queued_runs':
     'The runs page for this repository, where the runs just queued report their progress.',
 
-  // ── /ledger (screens/Ledger/LedgerPage.tsx)
   // the loop's hand-offs and position (G-172, G-348, G-352)
   'col.learn_strengthen.remeasure':
     'Opens a run for this item’s task once the tests are stronger: re-qualify it, re-score its oracle, or re-run the negative controls. Only an operator sees this column.',
@@ -1899,6 +1900,8 @@ export const HINTS = {
     'The Learn page’s strengthening report for this repository: the finding on this stage is closed by stronger tests, and that report names the work and re-runs the oracle and the controls.',
   'link.factory.learn':
     'The Learn page’s strengthening report for this repository: an item stopped for a weak test is closed by stronger tests, and that report names the work.',
+
+  // ── /ledger (screens/Ledger/LedgerPage.tsx)
   'button.ledger.export_jsonl':
     'Download the rows (filtered to the repository if one is chosen) as JSON lines, the form the chain verifies.',
   'button.ledger.export_csv':
@@ -1983,6 +1986,12 @@ export const HINTS = {
     'Paste a token to store. Never shown again after saving; only its last four characters are reported.',
   'button.settings.token_save':
     'Store the token on the server for the worker to use.',
+  'pill.settings.builder_login':
+    'Whether the login runs use works: verified means its last check passed within the time shown; unverified means it has not been checked recently; invalid means the last check failed, and no run on it will be queued.',
+  'button.settings.verify_builder_login':
+    'Checks the login runs use by running Claude Code once with no tools on the cheapest model, then records the answer that the next run and the health page read.',
+  'link.builder_login_fix':
+    'Opens the Claude Code login card on Settings, where you can sign in again or store a new token and then verify it.',
   'button.settings.verify_login':
     'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
   'button.settings.remove_token':
@@ -2214,6 +2223,8 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.refused',
   'flow.counts',
   'flow.not_captured',
+  // ErrorState's way forward from a login refusal (pilot D1): any screen that submits a run
+  'link.builder_login_fix',
 ]
 
 /**

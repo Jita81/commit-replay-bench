@@ -19,7 +19,8 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               owner's ``crb migrate`` where it does not) and on an accepted REPLACE, and never
               claims an UPDATE it did not try on an empty ledger, that a PostgreSQL
               application role that does not own the tables starts with no DDL and cannot
-              remove the protection nor issue table DDL, that a system event holds its
+              remove the protection nor issue table DDL nor write ``alembic_version``, under
+              DEPLOYMENT §3.3's grants run as written, that a system event holds its
               trace's ``seq`` until it commits (EI-1) and the events write lock holds a second
               writer until the first commits (P-196), and that the ``users`` lock is never
               taken after the ``events`` lock, so an organisation sign-in and an admin act at
@@ -42,6 +43,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import inspect, text
@@ -69,6 +71,35 @@ try:
     from tests.conftest_store import Backend, backend, grade_row, pg_schema
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
+
+#: DEPLOYMENT §3.3, whose SQL block the split-role tests run as written, so the guide's
+#: grants and the proof cannot drift apart.
+DEPLOYMENT = Path(__file__).resolve().parents[1] / "docs" / "DEPLOYMENT.md"
+
+
+def _deployment_grants() -> str:
+    """The ``sql`` block in DEPLOYMENT §3.3 that creates and grants ``crb_app``."""
+    blocks = DEPLOYMENT.read_text(encoding="utf-8").split("```sql\n")[1:]
+    found = [b.split("```", 1)[0] for b in blocks if "CREATE ROLE crb_app" in b]
+    assert len(found) == 1, "DEPLOYMENT §3.3 holds one crb_app grant block"
+    return found[0]
+
+
+def _grant_as_the_guide_says(c: Any, *, role: str, password: str, schema: str) -> None:
+    """Run DEPLOYMENT §3.3's grants on connection ``c`` (the owner's) for ``role``, with
+    the test's database and schema in place of ``crb`` and ``public``."""
+    import re
+
+    database = c.execute(text("SELECT current_database()")).scalar_one()
+    sql = _deployment_grants()
+    sql = re.sub(r"\bcrb_app\b", role, sql).replace("'<secret>'", f"'{password}'")
+    sql = sql.replace("DATABASE crb ", f"DATABASE {database} ")
+    sql = sql.replace("SCHEMA public", f"SCHEMA {schema}")
+    lines = [ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")]
+    for stmt in " ".join(lines).split(";"):
+        if stmt.strip():
+            c.execute(text(stmt))
+
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -323,6 +354,58 @@ def test_the_events_seq_lock_holds_a_second_writer_until_the_first_commits(
     assert errors == []
     assert sorted(seen.values()) == [0, 1]  # the second read saw the first commit
     assert _count(backend, "events") == 2
+
+
+def test_the_events_lock_is_held_even_inside_a_transaction_already_open(
+    backend: Backend,
+) -> None:
+    """P-429's rule for the events lock: ``BEGIN IMMEDIATE`` cannot run inside an open
+    transaction, and a caller's deferred ``BEGIN`` holds no write lock, so the helper takes
+    it explicitly (a zero-row write) instead of swallowing the refused ``BEGIN IMMEDIATE``.
+    After it returns, a second connection must not be able to take SQLite's write lock.
+    PostgreSQL's advisory lock has no such case (the concurrency test above covers it)."""
+    import sqlite3
+
+    from crb.store.events import lock_event_writes
+
+    if backend.dialect != "sqlite":
+        pytest.skip("SQLite's BEGIN IMMEDIATE only; PostgreSQL takes an advisory lock")
+    store_db.init_db(backend.engine)
+    database = backend.engine.url.database
+    assert database
+    with backend.factory() as s:
+        s.execute(text("BEGIN"))  # a transaction, but no write lock
+        lock_event_writes(s)
+        other = sqlite3.connect(database, timeout=0)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                other.execute("BEGIN IMMEDIATE")
+        finally:
+            other.close()
+        s.rollback()
+
+
+def test_a_refused_begin_immediate_already_took_sqlites_write_lock(tmp_path: Path) -> None:
+    """The accident P-429's and P-430's records describe: SQLite compiles ``BEGIN IMMEDIATE``
+    to ``OP_Transaction`` (which takes the write lock) BEFORE ``OP_AutoCommit`` (which raises
+    "cannot start a transaction within a transaction"), so the old helpers that swallowed
+    that error did hold the write lock. The fail-closed helpers no longer depend on that
+    order; this test pins it, so the records are corrected if a SQLite release changes it."""
+    import sqlite3
+
+    database = tmp_path / "order.db"
+    first = sqlite3.connect(database, isolation_level=None)
+    other = sqlite3.connect(database, timeout=0, isolation_level=None)
+    try:
+        first.execute("CREATE TABLE t (x)")
+        first.execute("BEGIN")  # deferred: no write lock yet
+        with pytest.raises(sqlite3.OperationalError, match="within a transaction"):
+            first.execute("BEGIN IMMEDIATE")
+        with pytest.raises(sqlite3.OperationalError, match="locked"):
+            other.execute("BEGIN IMMEDIATE")
+    finally:
+        other.close()
+        first.close()
 
 
 # ---------------------------------------------------------------------------
@@ -687,12 +770,7 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
     role, password = f"crb_app_{secrets.token_hex(4)}", secrets.token_hex(16)
     with backend.engine.begin() as c:
         schema = c.execute(text("SELECT current_schema()")).scalar_one()
-        others = sorted(set(inspect(backend.engine).get_table_names()) - set(APPEND_ONLY_TABLES))
-        c.execute(text(f"CREATE ROLE {role} LOGIN PASSWORD '{password}'"))
-        c.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {role}"))
-        c.execute(text(f"GRANT SELECT, INSERT ON {', '.join(APPEND_ONLY_TABLES)} TO {role}"))
-        c.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {', '.join(others)} TO {role}"))
-        c.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO {role}"))
+        _grant_as_the_guide_says(c, role=role, password=password, schema=schema)
     app_url = (
         make_url(backend.url)
         .set(username=role, password=password)
@@ -716,6 +794,11 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
             "DROP TABLE grades CASCADE",
             "DELETE FROM grades",
             "UPDATE events SET repo = 'tampered'",
+            # only the owner migrates: the application reads the schema's version, and
+            # writing it would let it hide an unapplied migration (PR #63 review)
+            "UPDATE alembic_version SET version_num = 'a-head-that-never-ran'",
+            "DELETE FROM alembic_version",
+            "INSERT INTO alembic_version VALUES ('a-head-that-never-ran')",
         ):
             with (
                 pytest.raises(DBAPIError, match=r"permission denied|must be owner|append-only"),
@@ -725,7 +808,19 @@ def test_an_application_role_that_does_not_own_the_tables_cannot_remove_the_prot
         with store_db.make_session_factory(app)() as s:  # and it still appends
             s.add(Repo(name="app-role", language="python", runner="pytest", config_json={}))
             s.commit()
+        with app.connect() as c:  # and reads the schema's version
+            assert c.execute(text("SELECT count(*) FROM alembic_version")).scalar_one() == 1
         assert _count(backend, "grades") == 1 and _count(backend, "events") == 1
+        # a table a later release adds gets the guide's default grant, the narrower one:
+        # the application may read and append to it, never rewrite it
+        with backend.engine.begin() as c:
+            c.execute(text("CREATE TABLE a_later_table (id serial PRIMARY KEY, v text)"))
+        with app.begin() as c:
+            c.execute(text("INSERT INTO a_later_table (v) VALUES ('appended')"))
+            assert c.execute(text("SELECT v FROM a_later_table")).scalar_one() == "appended"
+        for stmt in ("UPDATE a_later_table SET v = 'x'", "DELETE FROM a_later_table"):
+            with pytest.raises(DBAPIError, match="permission denied"), app.begin() as c:
+                c.execute(text(stmt))
     finally:
         app.dispose()
         with backend.engine.begin() as c:
@@ -744,6 +839,32 @@ def test_the_pg_function_raises_the_one_append_only_text() -> None:
     assert store_db.append_only_error_text("grades") in store_db._sqlite_trigger_sql(
         "grades", "grades_no_update"
     )
+
+
+def test_the_guides_grants_name_every_table_and_only_the_owner_writes_the_version() -> None:
+    """DEPLOYMENT §3.3's grants, read as text on every run (the split-role tests execute
+    them only on PostgreSQL): each model table is granted exactly once, the append-only
+    ones ``SELECT, INSERT`` only, ``alembic_version`` ``SELECT`` only (a review of PR #63:
+    the guide gave the application DML on it, though only the owner migrates), and the
+    owner's later tables and sequences get default grants."""
+    import re
+
+    sql = " ".join(
+        ln for ln in _deployment_grants().splitlines() if not ln.lstrip().startswith("--")
+    )
+    grants: dict[str, str] = {}
+    for privs, tables in re.findall(
+        r"GRANT ([A-Z, ]+?) ON (?!ALL |SCHEMA |DATABASE |TABLES |SEQUENCES )([\w, ]+?) TO", sql
+    ):
+        for t in (x.strip() for x in tables.split(",")):
+            assert t not in grants, f"{t} is granted twice"
+            grants[t] = " ".join(privs.split())
+    assert set(grants) == set(Base.metadata.tables) | {"alembic_version"}
+    for t in APPEND_ONLY_TABLES:
+        assert grants[t] == "SELECT, INSERT", t
+    assert grants["alembic_version"] == "SELECT"
+    assert "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES" in sql
+    assert "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES" in sql
 
 
 def test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_the_application(
@@ -768,12 +889,7 @@ def test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_th
     role, password = f"crb_app_{secrets.token_hex(4)}", secrets.token_hex(16)
     with backend.engine.begin() as c:
         schema = c.execute(text("SELECT current_schema()")).scalar_one()
-        others = sorted(set(inspect(backend.engine).get_table_names()) - set(APPEND_ONLY_TABLES))
-        c.execute(text(f"CREATE ROLE {role} LOGIN PASSWORD '{password}'"))
-        c.execute(text(f"GRANT USAGE ON SCHEMA {schema} TO {role}"))
-        c.execute(text(f"GRANT SELECT, INSERT ON {', '.join(APPEND_ONLY_TABLES)} TO {role}"))
-        c.execute(text(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {', '.join(others)} TO {role}"))
-        c.execute(text(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {schema} TO {role}"))
+        _grant_as_the_guide_says(c, role=role, password=password, schema=schema)
         c.execute(text("DROP TRIGGER grades_no_delete ON grades"))  # the owner may
     app_url = (
         make_url(backend.url)

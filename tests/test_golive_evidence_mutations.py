@@ -96,7 +96,7 @@ MUTATIONS: tuple[Mutation, ...] = (
     ),
     Mutation(
         "anyone signed in withdraws an attestation",
-        "settings.actions.15",
+        "settings.actions.16",
         ROUTES,
         "def delete_attestation(\n    line: str,\n    *,\n    admin: AdminDep,",
         "def delete_attestation(\n    line: str,\n    *,\n    admin: ViewerDep,",
@@ -158,7 +158,7 @@ MUTATIONS: tuple[Mutation, ...] = (
     ),
     Mutation(
         "the admin's today east of UTC is the future",
-        "settings.actions.15",
+        "settings.actions.16",
         GOLIVE,
         "if day > today + _ONE_DAY:",
         "if day > today:",
@@ -166,7 +166,7 @@ MUTATIONS: tuple[Mutation, ...] = (
     ),
     Mutation(
         "an act dated before its withdrawal is accepted",
-        "settings.actions.15",
+        "settings.actions.16",
         GOLIVE,
         "if when is not None and day < when - _ONE_DAY:",
         "if False:",

@@ -41,8 +41,10 @@ What it does: Migrates a database to the packaged head in one transaction, adopt
               matches, and refuses a partial or foreign schema rather than guess. Re-asserts
               the append-only triggers after every upgrade; never logs the URL.
               ``head_status`` is the one head check ``/health``'s ``migrations`` probe and
-              ``crb doctor`` both read: the applied revision against the packaged head, and
-              for an unversioned store the revision its fingerprints correspond to.
+              ``crb doctor`` both read: the applied revision against the packaged head, for an
+              unversioned store the revision its fingerprints correspond to, and at head
+              whether the schema was compared with the models and matched (``schema_drift``
+              names each difference).
 How:          ``upgrade`` = engine → ``_adopt_unversioned_schema`` (marker walk, parity
               diff at head) → ``command.upgrade`` on the same connection →
               ``install_append_only_triggers``; ``install_append_only_triggers_on`` adapts an
@@ -82,7 +84,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, Engine, inspect
+from sqlalchemy import Connection, Constraint, Engine, UniqueConstraint, inspect
 
 from crb.store.db import database_url, install_append_only_triggers, make_engine
 from crb.store.models import APPEND_ONLY_TABLES, Base
@@ -318,9 +320,16 @@ class HeadStatus:
     ``create_all`` one). ``head`` is the code's single head. ``at_head`` is True only when
     the applied revision IS the head. For an UNVERSIONED store with crb tables,
     ``unversioned_at`` is the revision its fingerprints correspond to (the same walk
-    ``upgrade`` uses to adopt it) and ``matches_models`` says whether that revision is the
-    head AND the schema equals the current models — i.e. ``upgrade`` would stamp it
-    without applying anything. Both are ``None`` / ``False`` for a versioned or empty store.
+    ``upgrade`` uses to adopt it); ``None`` for a versioned or empty store.
+
+    ``matches_models`` says the schema was COMPARED with the current models
+    (``compare_metadata``, the comparison adoption uses) and equals them: for a store at
+    head (versioned) or an unversioned one whose fingerprints reach head (``upgrade`` would
+    then stamp it without applying anything). It is ``False`` when the comparison found a
+    difference — ``drift`` then names up to :data:`DRIFT_SHOWN` of them — and when there
+    was nothing at head to compare (empty, behind, ahead). Before pilot D7 (P-437) a
+    versioned store at head was never compared and read ``False`` whatever its schema, so
+    "matches" and "not checked" could not be told apart.
     """
 
     database: str | None
@@ -328,15 +337,62 @@ class HeadStatus:
     at_head: bool
     unversioned_at: str | None = None
     matches_models: bool = False
+    drift: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, str | bool | None]:
+    def to_dict(self) -> dict[str, str | bool | list[str] | None]:
         return {
             "database": self.database,
             "head": self.head,
             "at_head": self.at_head,
             "unversioned_at": self.unversioned_at,
             "matches_models": self.matches_models,
+            "drift": list(self.drift),
         }
+
+
+#: How many differences a :class:`HeadStatus` names (the rest are counted in the last one).
+DRIFT_SHOWN = 5
+
+
+def _describe_difference(diff: object) -> str:
+    """One ``compare_metadata`` entry as ``<op> <name> …`` (``remove_index ix_runs_status``,
+    ``add_column users session_nonce``): the operation and the names it touches — never a
+    value, a default or a URL."""
+    entry = diff[0] if isinstance(diff, list) and diff else diff
+    if not isinstance(entry, tuple) or not entry:
+        return str(type(entry).__name__)
+    words = [str(entry[0])]
+    for part in entry[1:]:
+        if isinstance(part, Constraint):
+            # a constraint may have no name (a column's ``unique=True``): name its table and
+            # columns, so the line says WHICH constraint differs (Q1's review)
+            table = getattr(getattr(part, "table", None), "name", "")
+            cols = ", ".join(str(getattr(c, "name", c)) for c in getattr(part, "columns", ()))
+            kind = "unique" if isinstance(part, UniqueConstraint) else type(part).__name__
+            words += [w for w in (table, part.name if isinstance(part.name, str) else "") if w]
+            words.append(f"{kind}({cols})")
+            continue
+        name = getattr(part, "name", None)
+        if isinstance(name, str) and name:
+            words.append(name)
+        elif isinstance(part, str) and part:
+            words.append(part)
+    return " ".join(words)[:160]
+
+
+def schema_drift(connection: Connection) -> tuple[str, ...]:
+    """How the connection's schema differs from ``Base.metadata`` (``()`` when it matches),
+    by the same ``compare_metadata`` call adoption refuses a foreign schema with; at most
+    :data:`DRIFT_SHOWN` entries, the last naming how many more there are."""
+    # PostgreSQL reflects server defaults faithfully, so a default dropped out of band is
+    # drift there (Q1's review); SQLite's reflection reads a false difference at head, and
+    # the DDL parity test (``test_upgrade_head_equals_init_db``) guards migrations instead
+    opts = {"compare_server_default": connection.dialect.name == "postgresql"}
+    diffs = compare_metadata(MigrationContext.configure(connection, opts=opts), Base.metadata)
+    shown = [_describe_difference(d) for d in diffs[:DRIFT_SHOWN]]
+    if len(diffs) > DRIFT_SHOWN:
+        shown.append(f"and {len(diffs) - DRIFT_SHOWN} more")
+    return tuple(shown)
 
 
 def head_status_on(connection: Connection) -> HeadStatus:
@@ -344,15 +400,20 @@ def head_status_on(connection: Connection) -> HeadStatus:
     head = head_revision()
     applied = tuple(sorted(_current_heads(connection)))
     if applied:
-        return HeadStatus(",".join(applied), head, applied == (head,))
+        at_head = applied == (head,)
+        # a store at head is compared with the models, not assumed to match (pilot D7)
+        drift = schema_drift(connection) if at_head else ()
+        return HeadStatus(
+            ",".join(applied), head, at_head, matches_models=at_head and not drift, drift=drift
+        )
     present, _expected = _model_tables_present(connection)
     if not present:
         return HeadStatus(None, head, False)
     at = _unversioned_revision(connection)
-    matches = at == head and not compare_metadata(
-        MigrationContext.configure(connection), Base.metadata
+    drift = schema_drift(connection) if at == head else ()
+    return HeadStatus(
+        None, head, False, unversioned_at=at, matches_models=at == head and not drift, drift=drift
     )
-    return HeadStatus(None, head, False, unversioned_at=at, matches_models=matches)
 
 
 def head_status(url: str | None = None) -> HeadStatus:

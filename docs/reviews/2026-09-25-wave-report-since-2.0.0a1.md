@@ -993,11 +993,11 @@ numbers were never trusted.
   ledger rows on the operator's stack, not in this repository; apparatus 2.2]; during the
   walk cobra's `bug.fix × S` cell moved from *calibrate* (23 of 24 clean, 95.8 %, 95 %
   Wilson [79.8 %, 99.3 %] — lower below the 80 % bar) to *deliver* (24 of 25 clean,
-  96.0 %, 95 % Wilson [80.5 %, 99.3 %]) under `routing.v1` [measured — n = 25 attempts; method:
-  the stack's capability map read during the walk, sighted, one builder and model; apparatus
-  2.2]; ledger after the walk 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack
-  [measured — n = 602 rows; method: the stack's ledger verification read after the walk; exact
-  counts, no interval; apparatus 2.2].
+  96.0 %, 95 % Wilson [80.5 %, 99.3 %]) under `routing.v1` [hypothesis, recorded as measured — n = 25 attempts; method:
+  the stack's capability map read during the walk, sighted, one builder and model, not in this
+  repository; apparatus 2.2]; ledger after the walk 602 rows, chain intact, false-Q1 0, 0 clean rows without a pack
+  [hypothesis, recorded as measured — n = 602 rows; method: the stack's ledger verification read
+  after the walk, not in this repository; exact counts, no interval; apparatus 2.2].
 
 ## 2026-09-17 — the GitHub App is the connection (ADR-0014, DL-041)
 

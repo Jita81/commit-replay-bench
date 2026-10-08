@@ -109,17 +109,28 @@ class Job:
     def contexts(self) -> list[str]:
         """The check names this job reports: ``name:`` (or the key) once per combination of
         the matrix values it names; a job with a matrix and no ``name:`` reports
-        ``key (v1, v2, …)``, as GitHub renders it."""
+        ``key (v1, v2, …)``, as GitHub renders it. A matrix key the name uses (or, with no
+        ``name:``, any matrix list) that the scan read no values for fails closed: expanding
+        it would report no check at all, and a job with no check drops out of the comparison
+        and passes."""
+        refs = list(dict.fromkeys(_MATRIX_REF.findall(self.name or "")))
+        named = refs if self.name is not None else list(self.matrix)
+        unread = [r for r in named if not self.matrix.get(r)]
+        if unread:
+            raise SystemExit(
+                f"check_branch_protection: could not read the matrix value(s) {unread} of job "
+                f"{self.key!r} (an include: matrix or a multi-line list?) — teach parse_jobs "
+                "this matrix shape"
+            )
         if self.name is None:
             if not self.matrix:
                 return [self.key]
             combos = itertools.product(*self.matrix.values())
             return [f"{self.key} ({', '.join(c)})" for c in combos]
-        refs = list(dict.fromkeys(_MATRIX_REF.findall(self.name)))
         if not refs:
             return [self.name]
         out: list[str] = []
-        for combo in itertools.product(*(self.matrix.get(r, []) for r in refs)):
+        for combo in itertools.product(*(self.matrix[r] for r in refs)):
             label = _fill(self.name, dict(zip(refs, combo, strict=True)))
             if label not in out:
                 out.append(label)

@@ -50,6 +50,7 @@ Touch when:   never for a new repository; a model changes (write the revision, a
 from __future__ import annotations
 
 import io
+import json
 import sqlite3
 from contextlib import redirect_stdout
 from itertools import pairwise
@@ -63,10 +64,12 @@ from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from crb.core.ledger import GENESIS_HASH
+from crb.core.review import ReviewRecord, verify_review_chain
 from crb.store import migrate
 from crb.store.db import expected_triggers, init_db, make_engine, make_session_factory
-from crb.store.ledger import DbLedger, assert_append_only
-from crb.store.models import Base
+from crb.store.ledger import DbLedger, DbReviewLedger, assert_append_only
+from crb.store.models import APPEND_ONLY_TABLES, Base
 
 try:
     from tests.conftest_store import Backend, backend, grade_row, pg_schema
@@ -274,6 +277,7 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
         "at_head": False,
         "unversioned_at": None,
         "matches_models": False,
+        "drift": [],
     }
 
     init_db(backend.engine)
@@ -282,7 +286,11 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
     assert created.unversioned_at == head and created.matches_models is True
 
     migrate.upgrade(backend.url)
-    assert migrate.head_status(backend.url) == migrate.HeadStatus(head, head, True)
+    # a migrated store at head is compared with the models too (pilot D7, P-437): its
+    # schema matches, and the reading says so rather than a false that means "not checked"
+    assert migrate.head_status(backend.url) == migrate.HeadStatus(
+        head, head, True, matches_models=True
+    )
     with backend.factory() as s:  # the connection form /health uses (a session's)
         assert migrate.head_status_on(s.connection()).at_head is True
 
@@ -290,6 +298,83 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
     behind = migrate.head_status(backend.url)
     assert behind == migrate.HeadStatus(migrate.INITIAL_REVISION, head, False)
     assert migrate.check(backend.url) is False  # ``check`` is ``head_status().at_head``
+
+
+def test_a_migrated_store_at_head_reads_that_its_schema_matches_the_models(
+    backend: Backend,
+) -> None:
+    """Pilot D7 (P-437): the ``migrations`` probe read ``matches_models: false`` on a store
+    migrated to head whose schema equals the models — the field was computed for an
+    unversioned store only and left ``False`` for every versioned one, so the truth ("it
+    matches") and the unknown ("never compared") read the same. A versioned store at head is
+    now compared, by the same ``compare_metadata`` adoption uses, and reads ``True``."""
+    migrate.upgrade(backend.url)
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True
+    assert st.matches_models is True and st.drift == ()
+    assert st.to_dict()["matches_models"] is True and st.to_dict()["drift"] == []
+
+
+def test_a_store_at_head_whose_schema_drifted_names_the_drift(backend: Backend) -> None:
+    """The class D7 belongs to — a reading that cannot tell a matching schema from one that
+    was never compared — is closed only if a real difference reads ``False``: an index
+    dropped outside the migrations leaves the store stamped at head, and the reading names
+    the difference instead of passing it."""
+    migrate.upgrade(backend.url)
+    with backend.engine.begin() as c:
+        c.execute(text("DROP INDEX ix_runs_status"))
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert any("ix_runs_status" in d for d in st.drift), st.drift
+
+
+def test_the_health_reading_compares_again_after_an_out_of_band_change(backend: Backend) -> None:
+    """Why ``/health`` compares the schema on every read and never caches it by revision: an
+    out-of-band change (an index dropped by hand) leaves the revision where it was, so a
+    cache keyed on the revision would keep answering "matches" — the very reading pilot D7
+    closed. The same process reads the store twice, before and after the change."""
+    migrate.upgrade(backend.url)
+    with backend.engine.connect() as c:
+        assert migrate.head_status_on(c).matches_models is True
+    with backend.engine.begin() as c:
+        c.execute(text("DROP INDEX ix_runs_status"))
+    with backend.engine.connect() as c:
+        st = migrate.head_status_on(c)
+    assert st.at_head is True and st.matches_models is False
+
+
+def test_a_dropped_server_default_is_drift_on_postgresql(backend: Backend) -> None:
+    """Q1's review: the probe compared with alembic's defaults, so a server default dropped
+    outside the migrations on PostgreSQL read ``matches_models: True``. PostgreSQL reflects
+    defaults faithfully, so the comparison includes them there (on SQLite the reflection
+    reads a false difference at head, and the DDL parity test guards migrations instead)."""
+    if backend.dialect != "postgresql":
+        pytest.skip(
+            "server defaults are compared on PostgreSQL only (SQLite reflects them loosely)"
+        )
+    migrate.upgrade(backend.url)
+    assert migrate.head_status(backend.url).matches_models is True  # no false positive at head
+    with backend.engine.begin() as c:
+        c.execute(text("ALTER TABLE users ALTER COLUMN session_nonce DROP DEFAULT"))
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert any("session_nonce" in d for d in st.drift), st.drift
+
+
+def test_a_constraint_difference_names_its_table_and_columns() -> None:
+    """An unnamed constraint (a column's ``unique=True``) has no name to print: the drift line
+    names the table and the columns instead of a bare ``add_constraint``."""
+    from sqlalchemy import Column, Integer, MetaData, String, Table, UniqueConstraint
+
+    table = Table("users", MetaData(), Column("id", Integer), Column("email", String))
+    unnamed = UniqueConstraint(table.c.email)
+    assert migrate._describe_difference(("add_constraint", unnamed)) == (
+        "add_constraint users unique(email)"
+    )
+    named = UniqueConstraint(table.c.email, name="uq_users_email")
+    assert migrate._describe_difference(("remove_constraint", named)) == (
+        "remove_constraint users uq_users_email unique(email)"
+    )
 
 
 def test_head_status_of_an_older_release_create_all_schema(backend: Backend) -> None:
@@ -904,6 +989,34 @@ def test_no_released_revision_imports_the_application_runtime() -> None:
     assert offenders == []
 
 
+#: Released before the rule (docs/PREVENTION.md P-403) and immutable: 0002's downgrade copies
+#: ``grades`` on SQLite. It stays refused while any ``v5`` row exists; nothing newer may add to
+#: this set.
+_FROZEN_BEFORE_P403 = frozenset({"v0002_belt5_repo_lint_clean.py"})
+
+
+def test_no_downgrade_copies_the_rows_of_an_append_only_table_on_sqlite() -> None:
+    """docs/PREVENTION.md P-403: SQLite drops a column only by copying every row into a new
+    table (``batch_alter_table``'s move-and-copy), and a migration never rewrites the rows of
+    an append-only table. A revision that batch-alters one must refuse on SQLite while the
+    table holds any row — a dialect check and an unfiltered ``COUNT(*)`` of that table."""
+    import re
+
+    versions = Path(migrate.__file__).parent / "migrations" / "versions"
+    offenders: list[str] = []
+    for path in sorted(versions.glob("v*.py")):
+        src = path.read_text(encoding="utf-8")
+        consts = dict(re.findall(r'^([A-Z_]+) = "(\w+)"', src, re.M))
+        for ref in re.findall(r"batch_alter_table\(([^)]+)\)", src):
+            table = consts.get(ref.strip(), ref.strip().strip("\"'"))
+            if table not in APPEND_ONLY_TABLES or path.name in _FROZEN_BEFORE_P403:
+                continue
+            refuses = 'dialect.name == "sqlite"' in src and f'COUNT(*) FROM {table}")' in src
+            if not refuses:
+                offenders.append(f"{path.name}: {table}")
+    assert offenders == []
+
+
 def test_0011_backfills_the_legacy_record_the_runtime_reads() -> None:
     """The back-fill's frozen body is a record the product reads back unchanged, and its
     fingerprint is the product's own rule applied to the same facts (a copy that drifted
@@ -924,51 +1037,76 @@ def test_0011_backfills_the_legacy_record_the_runtime_reads() -> None:
 
 
 def _insert_review(conn: Any, *, n: int, minutes: int | None = None) -> None:
-    """One stored review row with every column a 0011 schema requires (``minutes`` only
-    when the schema has it)."""
-    cols = (
-        "review_id, schema, grade_row_hash, repo, task_id, reviewer, verdict, findings_json, "
-        "mergeable, statement, patch_sha256_reviewed, evidence_pack_hash, apparatus_version, "
-        "created, prev_hash, row_hash"
+    """One review chained the ledger's way (``ReviewRecord.chained`` on the stored head) and
+    stored with raw SQL, because the ORM model declares ``minutes`` and a 0011 schema has no
+    such column (``minutes`` is written only when the schema has it)."""
+    head = conn.execute(
+        text("SELECT row_hash FROM reviews ORDER BY seq DESC LIMIT 1")
+    ).scalar_one_or_none()
+    rec = ReviewRecord(
+        grade_row_hash=f"{n:064x}",
+        repo="calc",
+        task_id=f"{n:040x}",
+        reviewer="u1",
+        statement="looked",
+        verdict="not_reviewed",
+        minutes=minutes,
+        apparatus_version="2.3",
+        created="2026-09-26T10:00:00+00:00",
+    ).chained(head or GENESIS_HASH)
+    params = rec.to_dict()
+    assert params.pop("findings") == []  # a not_reviewed record carries none: '[]' below
+    params.setdefault("mergeable", None)
+    cols = [k for k in params if k != "minutes" or minutes is not None]
+    conn.execute(
+        text(
+            f"INSERT INTO reviews (findings_json, {', '.join(cols)}) "
+            f"VALUES ('[]', {', '.join(':' + k for k in cols)})"
+        ),
+        {k: params[k] for k in cols},
     )
-    vals = (
-        ":rid, 'crb.review.v1', :g, 'calc', :t, 'u1', 'not_reviewed', '[]', NULL, 'looked', "
-        "'', '', '2.3', '2026-09-26T10:00:00+00:00', :prev, :h"
-    )
-    params: dict[str, Any] = {
-        "rid": f"{n:032x}",
-        "g": f"{n:064x}",
-        "t": f"{n:040x}",
-        "prev": "0" * 64,
-        "h": f"{n + 100:064x}",
-    }
-    if minutes is not None:
-        cols += ", minutes"
-        vals += ", :m"
-        params["m"] = minutes
-    conn.execute(text(f"INSERT INTO reviews ({cols}) VALUES ({vals})"), params)
+
+
+def _verify_reviews(engine: Engine) -> int:
+    """Walk the stored review chain at whatever revision the schema is at; raises
+    ``LedgerIntegrityError`` on a record whose hash or link no longer verifies."""
+    with engine.connect() as c:
+        stored = c.execute(text("SELECT * FROM reviews ORDER BY seq")).mappings().all()
+    records = []
+    for m in stored:
+        d = dict(m)
+        raw = d.pop("findings_json")
+        d["findings"] = json.loads(raw) if isinstance(raw, str) else raw
+        records.append(ReviewRecord.from_dict(d))
+    return verify_review_chain(records)
 
 
 def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
     backend: Backend,
 ) -> None:
     """Revision 0012 (DL-067) adds ``reviews.minutes`` — the reviewer's own time on a review.
-    Every existing review reads NULL (not stated, so its hash is unchanged); the append-only
-    triggers still refuse an UPDATE; a downgrade is refused while any review states its
-    minutes, and otherwise drops the column. A ``create_all`` schema from the release before
-    it adopts at 0011 and 0012 adds the column."""
+    Every existing review reads NULL (not stated), and its chain still verifies after the
+    upgrade; the append-only triggers still refuse an UPDATE; a downgrade is refused while
+    any review states its minutes, and on SQLite while any review exists at all (dropping a
+    column there copies every row into a new table); an empty table's column may go. A
+    ``create_all`` schema from the release before it adopts at 0011 and 0012 adds the
+    column."""
     migrate.upgrade(backend.url, revision="0011")
     with backend.engine.begin() as c:
         _insert_review(c, n=1)
+    assert _verify_reviews(backend.engine) == 1
     migrate.upgrade(backend.url)
     assert migrate.current(backend.url) == migrate.head_revision() == HEAD
     with backend.engine.connect() as c:
         assert c.execute(text("SELECT minutes FROM reviews")).scalar_one() is None
+    assert _verify_reviews(backend.engine) == 1
     assert {"reviews_no_update", "reviews_no_delete"} <= backend.trigger_names()
     with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
         c.execute(text("UPDATE reviews SET minutes = 5"))
     with backend.engine.begin() as c:
         _insert_review(c, n=2, minutes=7)
+    assert _verify_reviews(backend.engine) == 2
+    assert DbReviewLedger(backend.factory).verify() == 2
     cfg = migrate.alembic_config(backend.url)
     with (
         pytest.raises(RuntimeError, match="state their minutes"),
@@ -977,17 +1115,30 @@ def test_0012_adds_the_reviewers_minutes_nullable_and_keeps_reviews_append_only(
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0011")
     assert migrate.current(backend.url) == HEAD
-    # with no minutes stated the column is empty and may go
+    # with no minutes stated, SQLite still refuses while a review exists; PostgreSQL drops
+    # the column in place, and the chain still verifies
     fresh = _reset(backend)
     migrate.upgrade(backend.url)
     with fresh.begin() as c:
         _insert_review(c, n=3)
     cfg = migrate.alembic_config(backend.url)
+    if backend.dialect == "sqlite":
+        with (
+            pytest.raises(RuntimeError, match="reviews is append-only"),
+            fresh.begin() as connection,
+        ):
+            cfg.attributes["connection"] = connection
+            command.downgrade(cfg, "0011")
+        assert migrate.current(backend.url) == HEAD
+        # an empty table's column may go
+        fresh = _reset(backend)
+        migrate.upgrade(backend.url)
     with fresh.begin() as connection:
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0011")
     assert migrate.current(backend.url) == "0011"
     assert "minutes" not in {c["name"] for c in inspect(fresh).get_columns("reviews")}
+    assert _verify_reviews(fresh) == (0 if backend.dialect == "sqlite" else 1)
     assert {"reviews_no_update", "reviews_no_delete"} <= backend.trigger_names()
     # a pre-0012 create_all database (reviews without the column) adopts at 0011
     fresh = _reset(backend)
@@ -1070,6 +1221,41 @@ def test_0013_chains_the_existing_events_deterministically_and_verifies(backend:
     assert "row_hash" not in cols and "prev_hash" not in cols
     with fresh.connect() as c:
         assert c.execute(text("SELECT COUNT(*) FROM events")).scalar_one() == 5
+    assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
+
+
+def _events_as_text(engine: Engine, columns: list[str]) -> list[tuple[str | None, ...]]:
+    """Every ``events`` row, each named column cast to text by the database, not read by a
+    driver (a JSON column stays its stored text). It compares text, not the stored bytes:
+    a change of storage type that renders the same text is not seen here."""
+    cast = ", ".join(f"CAST({c} AS TEXT)" for c in columns)
+    with engine.connect() as c:
+        return [tuple(r) for r in c.execute(text(f"SELECT {cast} FROM events ORDER BY id"))]
+
+
+def test_0013_leaves_every_existing_events_field_as_it_was(backend: Backend) -> None:
+    """ADR-0029 §3's recorded exception to the store rule: 0013 writes the two NEW chain
+    columns of rows that were already there (and SQLite rebuilds the table to add the
+    CHECK), so it must leave every column those rows held before — every hashed field and
+    the id — as it was. A back-fill or rebuild that changed one (a JSON re-serialised, a
+    float re-rounded, an id renumbered, a column retyped) would alter the audit trail it
+    claims to protect (DL-350). The test reads each column's declared type and its value
+    as text; it does not read the stored bytes."""
+    migrate.upgrade(backend.url, revision="0012")
+    before_types = {
+        c["name"]: str(c["type"]) for c in inspect(backend.engine).get_columns("events")
+    }
+    before_cols = list(before_types)
+    assert "row_hash" not in before_cols and "prev_hash" not in before_cols
+    with backend.engine.begin() as c:
+        for n in range(1, 6):
+            _insert_event(c, n=n, payload='{"k" : [1,2.50], "é": "\\u00e9 x"}')
+    before = _events_as_text(backend.engine, before_cols)
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD
+    assert _events_as_text(backend.engine, before_cols) == before
+    after_types = {c["name"]: str(c["type"]) for c in inspect(backend.engine).get_columns("events")}
+    assert {k: after_types.get(k) for k in before_cols} == before_types
     assert {"events_no_update", "events_no_delete"} <= backend.trigger_names()
 
 

@@ -243,8 +243,8 @@ def test_a_replay_of_a_task_mined_before_the_rule_names_its_change_on_the_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A task stored before the rule carries no ``change_id``: the replay path measures it,
-    and a 2.4 row — which the ledger refuses without it — carries it. The apparatus is pinned
-    to 2.4 here, as stream R's bump sets it."""
+    and a 2.4 row — which the ledger refuses without it — carries it. This test pins the
+    apparatus version to 2.4 explicitly."""
     old_task = feat_task.with_(labels={})
     assert lg.LABEL_CHANGE_ID not in old_task.labels
     monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.4")

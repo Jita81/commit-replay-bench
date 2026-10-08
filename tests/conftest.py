@@ -4,28 +4,35 @@ and a test that does need the network is skipped, with the reason, when it is no
 Navigation
 ----------
 What it is:   The pytest conftest of the hermetic core suite — five function-scoped fixtures
-              over the Python fixture repository, the setup gate for network tests, one
-              autouse pin of a host fact, one autouse guard of the ``CRB_*`` environment, and
-              the session finaliser that keeps the base temporary directory deletable.
+              over the Python fixture repository, the setup gate for toolchain, docker and
+              network tests, two autouse pins (a host fact and the builder login verify), one
+              autouse guard of the ``CRB_*`` environment, and the session finaliser that keeps
+              the base temporary directory deletable.
 What it does: Builds a fresh ``pyrepo`` (three commits) per test and derives from it the
               ``runner`` (a real ``PytestRunner``), a ``LocalExecutor``, the mined
               ``feat_task`` and a sighted ``trial`` worktree that is removed afterwards. Nothing
               here needs docker, a network or a model; nothing here decides a verdict. Before
-              every ``@pytest.mark.network`` test it asks whether the hosts the marker names
-              answer, and skips the test with the host and the reason when they do not (a
-              failure under ``CRB_TEST_STRICT_WARMUP=1``, as in CI). When the session ends it
+              every ``@pytest.mark.toolchain`` test it asks whether each tool the marker names
+              works, and before every ``@pytest.mark.docker`` test whether a daemon answers —
+              a skip with the reason, or a failure when ``CRB_TEST_REQUIRE_TOOLS`` names the
+              tool; before every ``@pytest.mark.network`` test it asks whether the hosts the
+              marker names answer, and skips the test with the host and the reason when they do not
+              (a failure under ``CRB_TEST_STRICT_WARMUP=1``, as in CI). When the session ends it
               gives every directory under the base temporary directory back to its owner, so
               the read-only sealed sets some tests leave never stop pytest deleting it (P-101).
 How:          ``pyrepo`` calls ``fixtures.pyrepo.build`` under ``tmp_path``; ``trial`` yields
               ``PyRepo.trial`` inside try/finally so a failing test never leaks a worktree;
-              ``pytest_runtest_setup`` hands the ``network`` marker's hosts to
-              ``conftest_langs.require_network``. ``_no_host_claude_cli`` pins
-              ``claude_cli_on_path`` to ``False`` for every test, so no test passes or fails on
-              whether this machine has the ``claude`` CLI (P-037); ``_no_host_endpoint_env``
-              clears the ``CRB_OPENAI_*`` / ``CRB_AZURE_*`` variables, so no test builds
-              against the endpoint this machine's shell names (P-277); ``_no_crb_env_leak``
-              puts every ``CRB_*`` variable back after each test, so no test (and no code
-              under test that writes one) hands a home or a setting to the next (P-310).
+              ``pytest_runtest_setup`` hands the ``toolchain`` marker's tools to
+              ``conftest_langs.require_tool``, a ``docker`` marker to ``require_docker`` and the
+              ``network`` marker's hosts to ``conftest_langs.require_network``.
+              ``_no_host_claude_cli`` pins ``claude_cli_on_path`` to ``False`` for every test, so no
+              test passes or fails on whether this machine has the ``claude`` CLI (P-037);
+              ``_no_real_builder_login`` pins the run preflight's claude_code login verify to a
+              fake ``ok`` (pilot D1); ``_no_host_endpoint_env`` clears the ``CRB_OPENAI_*`` /
+              ``CRB_AZURE_*`` variables, so no test builds against the endpoint this machine's
+              shell names (P-277); ``_no_crb_env_leak`` puts every ``CRB_*`` variable back after
+              each test, so no test (and no code under test that writes one) hands a home or a
+              setting to the next (P-310).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives from),
@@ -35,9 +42,10 @@ Works with:   tests/fixtures/pyrepo.py (the repository every fixture derives fro
               and tests/conftest_store.py (the deliberately separate helper modules),
               tests/fixtures/tmptree.py (``restore_removable``, the finaliser's walk)
 Tested by:    tests/test_grade.py, tests/test_mine.py, tests/test_workspace.py (every consumer),
-              tests/test_conftest_langs.py (the network gate), tests/test_tmp_tree_hygiene.py
-              (the finaliser), tests/test_endpoint_env_isolation.py (the endpoint variables),
-              tests/test_env_guard.py
+              tests/test_conftest_langs.py (the toolchain, docker and network gates),
+              tests/test_toolchain_gates.py (no test gates around them),
+              tests/test_tmp_tree_hygiene.py (the finaliser), tests/test_endpoint_env_isolation.py
+              (the endpoint variables), tests/test_env_guard.py
 Touch when:   never for a new repository; add a fixture here only when three or more core test
               modules need the same object — language, store and server fixtures live in their
               own helper modules so this file stays the core suite's.
@@ -65,13 +73,22 @@ except ImportError:  # pragma: no cover — layout-dependent
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
-    """A ``@pytest.mark.network`` test runs only when the hosts it names answer.
+    """A marked test runs only when what its markers name is there — asked before any of its
+    fixtures is built.
 
-    Offline, or behind a proxy that refuses, it is skipped with the host and the reason
-    instead of failing on an install the host could never complete; under strict warm-up
-    (CI, where the network is there) it fails. The marker's arguments are the hosts; none
-    means the Python package index.
+    ``@pytest.mark.toolchain(*tools)``: each tool must WORK (``langs.require_tool``: a
+    bounded probe, not a PATH lookup — P-744); ``@pytest.mark.docker``: a daemon must answer
+    with its version (``langs.require_docker``). Either is a skip with the reason, or a
+    failure when the job names the tool in ``CRB_TEST_REQUIRE_TOOLS`` (P-745).
+    ``@pytest.mark.network``: the hosts it names must answer; offline, or behind a proxy that
+    refuses, it is skipped with the host and the reason instead of failing on an install the
+    host could never complete; under strict warm-up (CI, where the network is there) it
+    fails. The marker's arguments are the hosts; none means the Python package index.
     """
+    for toolchain in item.iter_markers("toolchain"):
+        langs.require_tool(*(str(t) for t in toolchain.args))
+    if item.get_closest_marker("docker") is not None:
+        langs.require_docker()
     marker = item.get_closest_marker("network")
     if marker is not None:
         langs.require_network(tuple(str(h) for h in marker.args))
@@ -164,3 +181,31 @@ def _no_host_endpoint_env(monkeypatch: pytest.MonkeyPatch) -> None:
     endpoint sets the variables itself (tests/test_builders_endpoint.py)."""
     for name in _HOST_ENDPOINT_ENV:
         monkeypatch.delenv(name, raising=False)
+
+
+#: What the suite's fake login verify answers: a working login, from a labelled test source.
+FAKE_LOGIN_SOURCE = ("test", "")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_builder_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test runs with the claude_code login verify pinned to a fake that answers ``ok``:
+    the run preflight (src/crb/server/builder_login.py, pilot D1) verifies a login before a
+    build is queued, and no test may run the real ``claude`` CLI or call a model — nor pass or
+    fail on whether this machine has a working login (P-037). A test of the gate installs its
+    own verifier. Skipped where the server extra is not installed."""
+    try:
+        from crb.builders.claude_code import LoginCheck, default_auth
+        from crb.server import builder_login
+    except ImportError:  # pragma: no cover — a core-only environment
+        return
+
+    def verify(auth: str, binary: str) -> LoginCheck:
+        del auth, binary
+        return LoginCheck("ok", "pong", source=FAKE_LOGIN_SOURCE[0])
+
+    monkeypatch.setitem(
+        builder_login.LOGIN_VERIFIERS,
+        "claude_code",
+        builder_login.LoginVerifier(verify, lambda auth: FAKE_LOGIN_SOURCE, default_auth),
+    )

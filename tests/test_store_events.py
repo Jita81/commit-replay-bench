@@ -18,9 +18,8 @@ Works with:   src/crb/store/events.py (under test), src/crb/observability/events
               ``StepEvent`` envelope and ``Emitter``), src/crb/server/routes/runs.py (SSE reads
               the same table), tests/test_server_routes_runs.py
 Tested by:    tests/test_store_events.py
-Touch when:   never for a new repository; a field is added to ``StepEvent`` (the round-trip
-              case must list it); the read
-              limit or batching changes.
+Touch when:   never for a new repository; a field is added to ``StepEvent`` (the round-trip case
+              must list it); the read limit or batching changes.
 """
 
 from __future__ import annotations

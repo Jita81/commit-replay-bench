@@ -53,7 +53,7 @@ thereby tagged the sentence around it.
   that ``n``, a method and an apparatus version are *present*, never that they are sound.
   Only a person reading the ledger can do that;
 - any file not on ``ALLOWLIST``: the decision records under ``docs/adr/`` and CHANGELOG are
-  ungated (G-945), and the generated CODE-MAP and GAP-ANALYSIS are left to their generators'
+  ungated (G-936), and the generated CODE-MAP and GAP-ANALYSIS are left to their generators'
   own ``--check`` (``UNGATED``).
 
 **A review's actions are records, not prose.** A review under ``docs/reviews/`` that ends in
@@ -191,7 +191,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 #: The pages this gate reads: README, every guide under docs/, every review and every
 #: definition-of-done page (a glob reads a page added later the day it lands). It only grows
-#: (see the module docstring). The decision records and CHANGELOG are not on it yet (G-945).
+#: (see the module docstring). The decision records and CHANGELOG are not on it yet (G-936).
 ALLOWLIST: tuple[str, ...] = (
     "README.md",
     "docs/*.md",
@@ -410,7 +410,12 @@ _CONFIDENCE_PERCENT_RE = re.compile(
     rf"|\bWilson[\s-]+{_PERCENT}",
     re.I,
 )
-_TAG_RE = re.compile(r"\[(" + "|".join(TAGS) + r")\b([^\]]*)\]", re.I)
+#: A tag's detail may hold bracketed text of its own — an inner ``[gap]`` or a link's label —
+#: so one level of nested brackets is part of the tag, not its end (P-705).
+_TAG_RE = re.compile(
+    r"\[(" + "|".join(TAGS) + r")\b((?:[^\[\]]|\[[^\[\]]*\])*)\]",
+    re.I,
+)
 _N_RE = re.compile(r"\bn\s*(?:=|≥|>=|of)\s*\d|\b\d[\d,]*\s*(?:/|of)\s*\d", re.I)
 _APPARATUS_RE = re.compile(r"apparatus\s+(?:\d+\.\d+|n/a|none|[a-z0-9.-]+)", re.I)
 _CODE_RE = re.compile(r"`[^`]*`")
@@ -526,7 +531,11 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 #: A ``[measured]`` tag that says its own rows are not here contradicts itself (DL-088): a
 #: reading nobody can re-derive from the repository is a ``[hypothesis]`` with that reason.
 _NOT_HERE_RE = re.compile(
-    r"\bnot\s+in\s+this\s+repository\b|\bnot\s+vendored\b|\boperator's\s+(?:stack|export)\b",
+    r"\bnot\s+in\s+this\s+repository\b|\bnot\s+vendored\b|\boperator's\s+(?:stack|export)\b"
+    # the operator's stack named as "the stack" (P-704)
+    r"|\bthe\s+stack's\b"
+    # the live stack, a session's own note and an uncommitted export (P-705)
+    r"|\blive\s+stack\b|\bsession's\s+findings\s+note\b|\bnot\s+committed\b",
     re.I,
 )
 #: A method is checked for presence only: words inside the tag beyond its n and its apparatus.

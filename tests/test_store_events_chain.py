@@ -177,10 +177,19 @@ def test_an_event_edited_to_another_type_is_a_named_break_never_an_exception(
     unguarded, so an edit that changed a value's type raised out of the walk — ``/ledger/
     verify``, which "never raises", answered 500 — and on SQLite ``int()`` truncated a
     fractional ``seq`` or ``duration_ms`` back to the hashed value, so that edit went
-    unseen. A value of the wrong type is an unreadable row, reported by id."""
+    unseen. A value of the wrong type is an unreadable row, reported by id.
+
+    P-434: on PostgreSQL ``seq`` is an integer column, so the fraction cannot be stored: the
+    server rounds 3.9 onto seq 4, which the trace's unique ``(trace_id, seq)`` index refuses,
+    and the chain is untouched — the type change this case guards exists on SQLite only."""
     _write_through_every_writer(db)
     assert verify_events(db.factory).ok
     _drop_event_triggers(db)
+    if db.dialect == "postgresql" and "SET seq" in tamper:
+        with pytest.raises(IntegrityError, match="uq_events_trace_seq"), db.engine.begin() as c:
+            c.execute(text(tamper))
+        assert verify_events(db.factory).ok
+        return
     with db.engine.begin() as c:
         c.execute(text(tamper))
     report = verify_events(db.factory)

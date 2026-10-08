@@ -100,6 +100,7 @@ from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
+from crb.server.builder_login import login_refusal
 from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
@@ -124,6 +125,7 @@ from crb.server.schemas import (
 )
 from crb.server.secrets import secrets_dir_for
 from crb.server.spend_cap import unpriced_rungs
+from crb.store.db import make_session_factory
 from crb.store.events import lock_event_writes
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
@@ -323,14 +325,16 @@ def commit_audited(
     once ran out of the retries below and answered 500 (found by AUTH-1's regression
     test). On another dialect two writers can still read the same ``seq``; the loser's
     insert breaks ``uq_events_trace_seq``, which is a lost race, not a refusal, so the
-    transaction is rolled back and ``write`` runs again on fresh rows (DL-068).
+    transaction is rolled back and ``write`` runs again on fresh rows (DL-068). The break
+    can surface inside ``write`` too: a later query there (the next ``seq`` of the sign-in
+    trace, ADR-0028 §8) autoflushes the earlier insert, so both are guarded.
     """
     for attempt in range(AUDIT_ATTEMPTS):
         if before is not None:
             before()
         lock_event_writes(db)
-        write()
         try:
+            write()
             db.commit()
             return
         except IntegrityError:
@@ -727,17 +731,13 @@ CREDENTIAL_EXEMPT: dict[str, str] = {
 
 
 def run_builders(run: Run, *, default_author: str = "") -> list[str]:
-    """Every builder the run can call: the run's own and each rung's (a ``builder:model``
-    label or an object rung; ``rN`` labels are the run's own builder) — and, on the replay
-    ``S1`` arm (ADR-0026 item 1), its test author's (``params.test_author``, else the
-    deployment's ``default_author``), whose dead key would otherwise write an authoring
-    failure for every commit at $0 (docs/PREVENTION.md P-003's class)."""
-    names = [run.builder] if run.builder else []
-    for entry in run.ladder_json or []:
-        if isinstance(entry, Mapping):
-            names.append(str(entry.get("builder", "")))
-        elif isinstance(entry, str) and ":" in entry:
-            names.append(entry.split(":", 1)[0])
+    """Every builder the run can call: each rung's, as :func:`run_rungs` reads the ladder
+    the worker builds (``rN`` labels, or no ladder, are the run's own builder) — never the
+    run's own builder when no rung calls it (P-706) — and, on the replay ``S1`` arm
+    (ADR-0026 item 1), its test author's (``params.test_author``, else the deployment's
+    ``default_author``), whose dead key would otherwise write an authoring failure for
+    every commit at $0 (docs/PREVENTION.md P-003's class)."""
+    names = [builder for builder, _model in run_rungs(run)]
     params = dict(run.params_json or {})
     if str(params.get("arm") or "") == "S1":
         author = str(params.get("test_author") or default_author or "").strip()
@@ -778,35 +778,44 @@ def credential_refusal(run: Run, settings: Any) -> None:
 
 
 def run_rungs(run: Run) -> list[tuple[str, str]]:
-    """Every ``(builder, model)`` the run can call: its own and each rung's (``rN`` labels
-    are the run's own; a ``builder:model[:provider]`` or ``builder:model@provider`` label
-    and an object rung name theirs)."""
-    own = (run.builder, run.model)
-    out: list[tuple[str, str]] = [own] if run.builder else []
-    for entry in run.ladder_json or []:
-        if isinstance(entry, Mapping):
-            out.append((str(entry.get("builder", "")), str(entry.get("model", ""))))
-        elif isinstance(entry, str) and ":" in entry:
-            builder, rest = entry.split(":", 1)
-            out.append((builder.strip(), rest.split("@", 1)[0].split(":", 1)[0].strip()))
-        elif run.builder:
-            out.append(own)
+    """Every ``(builder, model)`` the run can call: its own and each rung's, read as the
+    worker reads them — ``params.ladder`` over ``ladder_json``, through
+    ``rungs_from_entries`` / ``parse_rung_label`` — so the price check prices the model the
+    run calls (``vendor:model`` for ``builder:vendor:model@provider``; P-700). The run's own
+    pair is priced only where a rung calls it — a bare rung, or no ladder at all — since the
+    worker builds no other (P-706). A ladder that does not parse leaves the run's own rung:
+    the worker refuses it before any call."""
+    params = dict(run.params_json or {})
+    try:
+        rungs = rungs_from_entries(
+            list(params.get("ladder") or run.ladder_json or []),
+            builder=run.builder or "",
+            model=run.model or "",
+            provider=str(run.provider or params.get("provider") or ""),
+        )
+    except ValueError:
+        rungs = []
+    out = [(r.builder, r.model) for r in rungs] or [(run.builder or "", run.model or "")]
     return list(dict.fromkeys(pair for pair in out if pair[0]))
 
 
 def author_rung(run: Run, body_author: str | None, deployment_author: str) -> tuple[str, str]:
     """``(builder, model)`` of the test author a factory run will call — the run's
-    ``test_author`` over the deployment's ``CRB_FACTORY__TEST_AUTHOR``, as the worker
-    resolves it — or ``("", "")`` when it has none (``none`` declines one). A label that is
-    not a rung is returned whole as the builder, so the price check names it."""
+    ``test_author``, else (absent or blank) the deployment's ``CRB_FACTORY__TEST_AUTHOR``,
+    the worker's reading (``_test_author``; P-701) — or ``("", "")`` when it has none
+    (``none`` declines one). The label is read by ``parse_rung_label``, as the worker reads
+    it; a label that is not a rung is returned whole as the builder, so the price check
+    names it."""
     if run.kind != KIND_FACTORY:
         return "", ""
-    label = (body_author if body_author is not None else deployment_author or "").strip()
+    label = (body_author or "").strip() or (deployment_author or "").strip()
     if not label or label.lower() == "none":
         return "", ""
-    builder, _, rest = label.partition(":")
-    model = rest.split("@", 1)[0].split(":", 1)[0].strip()
-    return (builder.strip(), model) if model else (label, "")
+    try:
+        rung = parse_rung_label(label)
+    except ValueError:
+        return label, ""
+    return (rung.builder, rung.model) if rung.model else (label, "")
 
 
 def spend_cap_refusal(run: Run, author: tuple[str, str] = ("", "")) -> None:
@@ -906,7 +915,9 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
         return
 
 
-def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
+def submit_refusals(
+    db: Session, settings: Any, body: RunCreateRequest, run: Run, *, login: bool = True
+) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
     route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
     enqueued the plan's runs with no credential check, the class P-003 closed on
@@ -915,12 +926,24 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
 
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
+    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
+      run's test author included (F5b);
     * 422 ``builder_provider_mismatch`` — a rung (or the factory's test author) names a
       provider the configured OpenAI-compatible endpoint is not (P-284);
-    * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
-      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker;
-    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
-      run's test author included (F5b).
+    * 409 ``posture_unqualified`` — the ADR-0019 §3 refusal: ``qualify_first: false`` on a
+      build with nothing qualified where it would be graded can only fail
+      ``POSTURE_UNQUALIFIED`` on the worker (a database read, so it costs nothing);
+    * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
+      presence check reads, an ``S1`` test author included) has a login whose last
+      verification failed; one that is not fresh is verified once first — LAST, after every
+      refusal that costs nothing, so a run refused for free never spends a verify (pilot D1,
+      P-435, P-462 — presence is not a working login; src/crb/server/builder_login.py;
+      ``tests/test_builder_login.py`` holds the order).
+
+    ``login=False`` skips ONLY the login check, for a caller that re-runs the gate under an
+    events write lock after running it whole before the lock: the check can verify a stale
+    login and record it on a second connection, which would wait on the lock the caller's
+    own transaction holds (P-729).
     """
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
@@ -941,6 +964,16 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    if not login:
+        return
+    # last: the only refusal that can cost a verify turn (P-462)
+    login_refusal(
+        make_session_factory(db.get_bind()),  # type: ignore[arg-type]
+        run,
+        ttl_s=settings.builder.login_ttl_s,
+        binary=settings.builder.claude_binary,
+        default_author=str(getattr(factory_settings, "test_author", "")),
+    )
 
 
 @router.post(

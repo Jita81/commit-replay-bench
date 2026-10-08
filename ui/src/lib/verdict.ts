@@ -216,11 +216,15 @@ export function beltDisplay(value: boolean | null | undefined, name?: string): D
 export const ACTION_HELP: Record<string, string> = {
   // system — the run itself, the clone and the probe
   'run.claimed': 'A worker took the run from the queue and will execute it.',
+  'builder.login.verified': 'The builder’s login was checked by running it once with no tools; the answer is what the next run and the health page read.',
+  'builder.login.refused': 'A run was refused because its builder’s login did not work — before it was queued, or when a worker took it from the queue — and nothing was built or spent.',
+  'worker.metrics': 'A worker started and recorded whether its metrics listener is serving, and on which port.',
   'run.executor': 'The run states which test executor it uses (docker or local); only docker counts as evidence.',
   'run.error': 'The run stopped on an error; nothing already graded is lost.',
   'run.finish_refused': 'The run could not be marked finished because its state had changed underneath it.',
   'run.credential_refused': 'The worker checked the builder’s credential again when it picked the run up and found it gone, so nothing was built and nothing was spent.',
   'run.finished': 'The run reached its final status with its counts and duration.',
+  'run.refused': 'A worker took the run from the queue and failed it before building anything, because a login it would use was found not to work after it was queued; nothing was spent.',
   'run.outage_stop': 'The run stopped because the sandbox or a service became unavailable; it can be started again later.',
   'run.escalation_stopped': 'A failed attempt did not climb to the next rung, because earlier retries in the same cell came back clean too rarely to pay; the rule and the yield are on the row.',
   'run.spend_history_unreadable': 'The ledger could not be read when the run started, so the spend rules saw no history: every rung may climb and a calibrated attempt keeps its default caps.',
@@ -425,6 +429,7 @@ export const ACTION_HELP: Record<string, string> = {
   'cell.routed_deliver': 'A cell first routed deliver after this run — the moment the decision’s clock starts.',
   'deployment.installed': 'The deployment’s install was recorded — dated only when the database held nothing before.',
   'deployment.first_healthy': 'The deployment read green on /health for the first time.',
+  'user.signed_in': 'Someone signed in; recorded for every sign-in so an account recovery is timed to the first one after a password reset.',
   'review.corrected': 'A review whose stored mergeable answer contradicted its own words was corrected by a new record; the original is kept.',
   'learn.refusal.accepted': 'An operator judged one class of refused rows honest or refused; the line was written into the guard corpus under their name.',
   'learn.strengthen.registered': 'An operator registered strengthening items on this repository’s backlog from the Learn report; a re-registered item supersedes the earlier one.',

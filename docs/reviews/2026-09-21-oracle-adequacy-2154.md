@@ -95,7 +95,7 @@ The four points below are **[hypothesis]** — conclusions drawn from one item's
   **[aspiration]**, backlog F32), API-valid against `BacklogRegisterIn`.
 - [2026-09-21-oracle-2154-v2/help_func_args_issue2154_test.go](2026-09-21-oracle-2154-v2/help_func_args_issue2154_test.go)
   — sha256 `e3821bc1213ded3ace50b88dc260db53c0015970b7c8f238922be81542139f71`, 44 tests
-  (39 RED at `9c0edca`, 5 guards green at base) **[hypothesis — from the proof runs this record cites; the wrong builds' patches were not kept, so the counts cannot be re-derived here]**.
+  (39 RED at `9c0edca`, 5 guards green at base) **[measured — n = 1 test file, 44 test ids (39 fail, 5 pass); method: *How to repeat it* below — the file at this sha256 on a pristine clone of `Jita81/cobra` at `9c0edca`, `go test -json -count=1 ./...`, Go 1.26.4, re-run 2026-09-28; apparatus n/a — Go's own test runner, not crb's grader]**.
 - [2026-09-21-oracle-2154-v2/proof-notes.md](2026-09-21-oracle-2154-v2/proof-notes.md) — every
   run, every attack's failing ids, the churn numbers, the residue. The throwaway correct fix is
   deliberately absent: the factory must earn it.

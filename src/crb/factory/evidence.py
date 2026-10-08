@@ -424,6 +424,19 @@ def ticket_authors(
     return [a for a in out if a]
 
 
+def waiting_grant(events: Iterable[FactoryEvent], item_id: str) -> FactoryEvent | None:
+    """The item's grant a run would build on: its NEWEST ``calibration.funded``, unless that
+    grant is spent (:func:`spent_grants`); ``None`` otherwise. An older grant is superseded
+    by a newer one and never funds a build — the loop reads only the newest — so it never
+    counts as waiting (ADR-0026 item 8; P-730)."""
+    evs = list(events)
+    newest = None
+    for ev in evs:
+        if ev.kind == EV_CALIBRATION_FUNDED and ev.item_id == item_id:
+            newest = ev
+    return None if newest is None or newest.event_id in spent_grants(evs) else newest
+
+
 def _payload(d: Mapping[str, Any]) -> dict[str, Any]:
     """A record's fields minus ``item_id`` (which is the event's own key)."""
     return {k: v for k, v in d.items() if k != "item_id"}
@@ -662,13 +675,21 @@ class FactoryEvidence:
 
     def record_calibration(
         self, item_id: str, *, approver: str, reason: str, answers: str = ""
-    ) -> FactoryEvent:
-        """An approver funds one calibration build of ``item_id`` (never delivers)."""
+    ) -> FactoryEvent | None:
+        """An approver funds one calibration build of ``item_id`` (never delivers), or
+        ``None`` when a grant for it already waits (:func:`waiting_grant`). The check and the
+        append are one step under the store's lock, so two approvers' requests at once
+        cannot both fund one (P-730)."""
         if not approver.strip() or not reason.strip():
             raise ValueError("a calibration build needs an approver and a reason")
-        return self.append(
-            EV_CALIBRATION_FUNDED, item_id, approver=approver, reason=reason, answers=answers
+        event = FactoryEvent(
+            kind=EV_CALIBRATION_FUNDED,
+            item_id=item_id,
+            payload={"approver": approver, "reason": reason, "answers": answers},
+            actor=self.actor,
+            repo=self.repo,
         )
+        return self.store.append_if(event, lambda events: waiting_grant(events, item_id) is None)
 
     def claim_calibration(self, item_id: str, grant: str, *, run_id: str) -> FactoryEvent | None:
         """Claim the grant ``grant`` for this run before any spend, or ``None`` when another
@@ -802,4 +823,5 @@ __all__ = [
     "spent_grants",
     "ticket_authors",
     "verify_events",
+    "waiting_grant",
 ]

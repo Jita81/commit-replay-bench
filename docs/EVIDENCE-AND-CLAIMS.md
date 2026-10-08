@@ -49,7 +49,7 @@ definition-of-done page under `docs/dod/`, each folder read as a glob so a page 
 is gated the day it lands **[measured — n = 4 entries on `ALLOWLIST`; method: by inspection
 of `scripts/claims_check.py`, which prints the same count in its own report; apparatus n/a —
 a count, not a rate, so no interval]**. The decision records and CHANGELOG are not on it yet
-(G-945), and the generated code map and gap analysis are held by their own generators'
+(G-936), and the generated code map and gap analysis are held by their own generators'
 checks. A gap register line (`- **G-nnn** — what is missing · what closes it · owner`,
 under `## Gaps` on a definition-of-done page or in the prevention register, where the
 definition-of-done check reads it) is a `[gap]` statement by its form, so it needs no

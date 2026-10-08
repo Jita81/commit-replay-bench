@@ -7,6 +7,7 @@ design behind these choices is [ARCHITECTURE §6](ARCHITECTURE.md#6-deployment-v
 
 Contents: [1 Shapes](#1-deployment-shapes) ·
 [1.1 Single host without containers](#11-single-host-without-containers-evaluation) ·
+[1.2 Two stacks on one machine](#12-two-stacks-on-one-machine) ·
 [2 The image](#2-the-image-and-its-roles) ·
 [2.2 Released image, signature, SBOM](#22-the-released-image-name-signature-sbom) ·
 [3 Kubernetes (Helm)](#3-kubernetes-helm) · [4 Azure](#4-azure) ·
@@ -74,6 +75,33 @@ when `CRB_HOME` resolves under one of those roots and `CRB_ENV=prod` (the defaul
 admits a temporary home for a throwaway evaluation only (the walkthrough harness runs
 `dev`, so it is warned, never refused). Back this shape up with §5.1.
 
+### 1.2 Two stacks on one machine
+
+A second stack — a pilot beside the operator's own, a rehearsal beside a campaign — needs its
+own everything, or the two will fight (pilot D5, 2026-09-27: the second worker could not bind
+the metrics port the first one held **[measured — n = 1 bind failure, method: the pilot
+worker's own log (`worker.log`, P-436), apparatus 2.3]**).
+
+- **Its own root.** A different `CRB_HOME` and `CRB_DATABASE_URL`, both persistent (§1.1).
+  A second stack never shares the first one's store: each worker would claim the other's runs.
+- **Its own API port.** `crb serve --port <another>`; the UI is served from the same port.
+- **Its own metrics port.** `CRB_METRICS_PORT=auto` lets the operating system pick a free one;
+  the port it chose is in `/health` (`worker` probe, `data.workers[].metrics.port`) and in the
+  worker's start-up log line. A fixed number works too, as long as it differs; `0` switches
+  the listener off. If the port is taken the worker keeps running and `/health` names the
+  conflict — no measurement is lost, only that worker's dashboard.
+- **Its own login check.** Each stack verifies its builder login on its own (Settings → Claude
+  Code login → Verify the login runs use); a login that works for one stack is not assumed to
+  work for the other.
+
+```bash
+export CRB_HOME=~/crb-pilot/home CRB_ENV=dev CRB_DATABASE_URL="sqlite:///$HOME/crb-pilot/crb.db"
+export CRB_METRICS_PORT=auto
+crb migrate                                   # in the foreground: the store is at head first
+crb serve --host 127.0.0.1 --port 8001 &      # only the API goes to the background
+crb worker --home "$CRB_HOME" --executor local
+```
+
 ## 2. The image and its roles
 
 `deploy/Dockerfile` builds one image from the repository root: a `node` stage builds `ui/`
@@ -122,7 +150,8 @@ server and never appear in logs or `/settings`.
 | `CRB_ALLOW_UNSEALED_PROD_REASON` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: why, in the admin's words — written into the same event |
 | `CRB_METRICS_ENABLED` | api, worker | `true` (default). `false` → the api's `/metrics` answers 404 and the worker starts no exposition |
 | `CRB_METRICS_HOST` | worker | the address the worker's exposition binds (default `127.0.0.1`, like `CRB_BIND_HOST`: the series name repositories, builders and installations, so a bare `crb worker` on a host offers them to nobody else). Compose and Helm set `0.0.0.0` inside the container, where only the compose network / the NetworkPolicy's scraper can reach the port (§9.1) |
-| `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off) — the build / grade / cost / delivery series live here, not on the api (§9) |
+| `CRB_METRICS_PORT` | worker | the worker's own Prometheus exposition port (default `9464`; `0` = off; `auto` = a free port the operating system picks, reported in `/health`'s `worker` probe and in the worker's log — for a second stack on one machine, §1.2) — the build / grade / cost / delivery series live here, not on the api (§9). A port the worker cannot bind never stops it: `/health` reads the worker `degraded` and names the port, the reason and the fix |
+| `CRB_BUILDER__LOGIN_TTL_S` | api, worker | how long a builder login's last verification stands, in seconds (default `600`, 30–86400). A build run whose builder's login failed its verification within it is refused `builder_login_invalid` before it is queued, and a run already queued is failed by the worker at claim, before any build (set it the same for both); past it, the next submit verifies the login once first (one no-tool Haiku turn). The `builders` probe reads the same state and never verifies (docs/API.md, "Builders") |
 | `CRB_LOG_FORMAT` / `CRB_LOG_LEVEL` | api, worker | `json` (default, one object per line) or `text`; `INFO` — every record is redacted before a handler sees it (§9) |
 | `CRB_WORKER_HEARTBEAT_STALE_S` | api | seconds after which a *running* run's heartbeat is reported stale by `/health` (default 120). Worker liveness itself is judged against each worker's own `heartbeat_s` (§9) |
 | `CRB_SANDBOX__IMAGE` | worker | default sandbox image when a repository config has none (a repository's own `sandbox_image` wins). The shipped reference images — `deploy/sandbox/Dockerfile.{python,node,go}`, built and smoked by CI — are what to push to your registry and name here (`deploy/sandbox/README.md`); the worker never pulls (`docker run --pull=never` **[measured — `tests/test_execution.py::test_docker_build_argv_has_every_hardening_flag` pins the flag on the argv; `tests/test_sandbox_images_docker.py::test_an_absent_image_fails_closed_without_a_pull` proves an absent image is `SandboxUnavailable` (exit 125, `No such image`) against a daemon, colima / Docker 29.5.2; apparatus 2.2]**), so the image must be in the daemon's store |
@@ -313,20 +342,32 @@ platform allows a second role, split them:
 - the **owner** runs `crb migrate` (the migration job) and owns every table and the
   `crb_append_only()` function;
 - the **application** role — the one in the API's and the worker's `CRB_DATABASE_URL` — is
-  granted `SELECT, INSERT` on the append-only tables and `SELECT, INSERT, UPDATE, DELETE` on
-  the rest, and `USAGE, SELECT` on the sequences:
+  granted `SELECT, INSERT` on the append-only tables, `SELECT, INSERT, UPDATE, DELETE` on
+  the rest, only `SELECT` on `alembic_version` (only the owner migrates, so only the owner
+  records the schema's version), and `USAGE, SELECT` on the sequences:
 
 ```sql
 -- as the owner, after `crb migrate` has created the schema
 CREATE ROLE crb_app LOGIN PASSWORD '<secret>';
 GRANT CONNECT ON DATABASE crb TO crb_app;
 GRANT USAGE ON SCHEMA public TO crb_app;
-GRANT SELECT, INSERT ON grades, events, signoffs, evidence, reviews, task_qualifications
-  TO crb_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON repos, runs, tasks, users, workers,
-  github_installations, alembic_version TO crb_app;
+GRANT SELECT, INSERT ON grades, events, signoffs, evidence, reviews, task_qualifications,
+  library_acts TO crb_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON repos, runs, tasks, users, invitations,
+  decisions_due, workers, github_installations TO crb_app;
+GRANT SELECT ON alembic_version TO crb_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crb_app;
+-- tables and sequences the owner creates later (a release that adds a table)
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES TO crb_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO crb_app;
 ```
+
+The default grants apply to what the owner creates, so run them as the owner. A table a
+later release adds gets the narrower grant, `SELECT, INSERT`, so a new table is never
+rewritable by the application before someone has decided it may be. When a release adds a
+table the application must update or delete, its upgrade notes name it: grant `UPDATE,
+DELETE` on that table as the owner before you restart the API and the worker, or those
+writes are refused with `permission denied`.
 
 (`SELECT tablename FROM pg_tables WHERE schemaname = 'public'` lists every table; the
 append-only ones are `APPEND_ONLY_TABLES` in `src/crb/store/models.py`.) The API and the
@@ -391,10 +432,11 @@ resolve plugins offline yet (README §6).
 container never has a network, so a repository's dependencies cannot be installed in it —
 and an image that bakes them in serves one commit's lockfile only. Before this, the docker
 posture could not build a Go repository with a third-party module and graded every attempt
-against the model **[measured — n = 3 or 4 rows of run `0c44ff24…` (cobra), each
-`builder_red` with the target red; method: the run's grade rows as read on 2026-09-25;
-apparatus 2.2. The count is disputed: 3 rows were observed when the run was cancelled, and
-stream D read 4 from the deployment's ledger export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
+against the model **[hypothesis, recorded as measured — n = 3 or 4 rows of run `0c44ff24…`
+(cobra), each `builder_red` with the target red; method: the run's grade rows as read on
+2026-09-25, neither read in this repository; apparatus 2.2. The count is disputed: 3 rows
+were observed when the run was cancelled, and stream D read 4 from the deployment's ledger
+export, which is not committed — [gap] F42]**. With `CRB_PROVISION__ENABLED=true`:
 
 - the lockfiles at the parent and at the gold are read from git objects; a fetch container
   (the pinned toolchain image, the worker's non-root uid, read-only, no capabilities) fetches
@@ -492,7 +534,7 @@ JSON
 
 `test (py3.12)`, `test (py3.13)` and `walkthrough (browser, live stack, tier 1)` are
 aggregators — each a job that `needs` its parts and runs `if: always()`: the work runs in
-parallel parts (`test shard (py3.12, 1 of 6)` …, the walkthrough story and its screens
+parallel parts (`test shard (py3.12, 1 of 9)` …, the walkthrough story and its screens
 shards) and the aggregator passes only when every part passed (a failed, cancelled or skipped
 part fails it), the suite's parts together ran every test exactly once, and the union's
 coverage is at least 70 % (P-051, P-053) **[measured — n = 3 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes
@@ -799,11 +841,12 @@ backup rehearsal, the digest check, the alert rules and the penetration test are
       digest is what `image.digest` / `CRB_IMAGE` says.
 - [ ] **`health-green`** · product proves — `GET /api/v1/health` on the API is green: `db` answers, `migrations` reads
       `database at <rev> = code head` — its contract is
-      [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
+      [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head with a schema that matches the models; `degraded` (still served) at head with a schema that differs (each difference named in `drift`) and for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id. A half-migrated database cannot pass this
       line. `append_only` proves every trigger live on every append-only table and an
       UPDATE and a DELETE refused, in the trigger's own words, on each table that holds a row
       (on an empty table no write is tried), `ledger` reads `false_q1=0`, `builders`
-      configured, `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
+      configured with its login `verified` (press Verify under Settings → Claude Code
+      login once; a present login alone reads `degraded`), `worker` heartbeats fresh (`sandbox` is `skipped` on the API pod — the
       worker owns it; prove it with `crb doctor` on the worker host). The line is proven
       only while every probe is `ok` or `skipped`.
 - [ ] **`doctor`** · operator attests — `crb doctor` on the API host and on the worker host: every line `ok`, or `warn` for a
@@ -908,7 +951,8 @@ exposition per process that records metrics; apparatus n/a]**. Logs are JSON and
 
 The Prometheus registry is process-wide, so a series lives in the process that records it.
 The api records the HTTP series, the ledger gauges and the sign-off counter; **the worker
-records everything else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464). A deployment
+records everything else and serves its own exposition** on `CRB_METRICS_PORT` (default 9464; `auto` picks a free
+port and reports it in `/health` — a second stack on one machine, §1.2). A deployment
 that scrapes the api alone sees `crb_false_q1_total`, `crb_ledger_rows`,
 `crb_signoffs_total` and the HTTP series — every cost, run, belt and delivery counter reads as absent. Scrape both:
 
@@ -974,8 +1018,10 @@ rate is worth a look), `histogram_quantile(0.9, rate(crb_grade_latency_seconds_b
 (the store's revision is the code's head; `down`, and so 503, when the store is behind, ahead,
 empty or unreadable — [the contract](API.md#the-migrations-probe)), `append_only`, `ledger`,
 `sandbox` (skipped for `CRB_ROLE=api`), `provision` (dependency provisioning, ADR-0019;
-skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders`,
-`worker`, `intake` and `build` (the served commits agree) — each documented in
+skipped for `CRB_ROLE=api` and while provisioning is off), `toolchains`, `builders` (a
+present builder login is `verified`, `unverified` or `invalid` from its last recorded check —
+never `ok` from presence alone, and a scrape never calls a model), `worker` (and each worker's
+metrics listener), `intake` and `build` (the served commits agree) — each documented in
 [API.md](API.md#health--metrics-no-auth-bind-to-an-internal-interface) **[measured — n = 11
 probes; method: the probes the readiness route runs, counted in its code and held there by
 `tests/test_health_probe_docs.py`; apparatus n/a]**.

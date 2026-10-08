@@ -22,8 +22,7 @@ Works with:   src/crb/server/reaper.py (under test), src/crb/server/worker.py (t
               drives it — tests/test_worker.py covers the events it emits)
 Tested by:    tests/test_server_reaper.py
 Touch when:   never for a new repository; the reap sequence or the bound changes — update
-              docs/API.md's cancel row and
-              ADR-0012 with it.
+              docs/API.md's cancel row and ADR-0012 with it.
 """
 
 from __future__ import annotations

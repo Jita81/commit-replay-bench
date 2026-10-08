@@ -22,7 +22,13 @@ What it does: Pins that ``partition`` puts every file in exactly one shard, dete
               runs ``verify`` over all N reports and ``coverage report --fail-under=70`` on the
               combined data; each shard runs the old job's command unchanged but for the shard
               and coverage-data options, the matrix lists 1..N, the name states N, and N
-              leaves no shard empty.
+              leaves no shard empty. ``weights`` keeps each file's largest measurement, never
+              a sum, and ``verify`` prints the table's own refresh recipe (P-741); no test
+              module that imports another's harness runs a test that module runs (P-742).
+              The fresh-clone suite is split the same N ways: its aggregator needs the gates
+              job and every shard, passes only when every part did and proves the partition,
+              and each shard fits its budget as root (P-743). No step of either aggregator
+              may carry an ``if:`` but ``always()`` (P-746).
 How:          Pure calls with synthetic ids and weights; one pytest subprocess per shard over a
               suite written to ``tmp_path``; ``ci.yml`` read as text with the job parser of
               tests/test_ci_job_budget.py.
@@ -32,7 +38,8 @@ Works with:   scripts/ci_test_shards.py (the partition, plugin and proof under t
               scripts/ci_test_weights.json (the per-file seconds the budget test reads),
               .github/workflows/ci.yml (the ``test-shard`` and ``test`` jobs it pins),
               tests/test_ci_job_budget.py (the job parser and the budget guard's own tests),
-              docs/PREVENTION.md (P-053 — the class these tests close)
+              docs/PREVENTION.md (P-053, P-740, P-741, P-742 — the classes these tests
+              close)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); the shard count
               changes (the matrix, the job names and ``--shards`` move together); the test
@@ -41,6 +48,7 @@ Touch when:   never for a new repository (it reads this repository's own CI); th
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -53,6 +61,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 
 from test_ci_job_budget import ALL_PASSED_JQ, _jobs, _needs, _steps
 
@@ -67,6 +76,13 @@ SUITE_COMMAND = '.venv/bin/pytest -q -m "not sandbox_images"'
 #: A shard's time outside its tests: checkout, install, helm, collection (about 70 s in PR
 #: #57's logs, doubled).
 SETUP_ALLOWANCE_S = 150
+#: Each aggregator whose parts load the shard plugin → that shard job. ``fresh-clone`` runs
+#: the same suite as root on a fresh clone, split the same N ways (P-743).
+SHARDED = {"test": "test-shard", "fresh-clone": "fresh-clone-shard"}
+#: The fresh-clone suite ran 63.8 min as root where the weights predict 54.5 for the runner
+#: user (its first run, 2026-09-28: no uv cache, root's own ~/.m2 and npm caches), so its
+#: shards are predicted at this multiple of the weights.
+ROOT_SLOWDOWN = 1.2
 
 
 def _shards() -> ModuleType:
@@ -247,6 +263,110 @@ def test_weights_are_refreshed_from_the_reports_measured_seconds() -> None:
     assert fresh["per_test_seconds_default"] == round(9.0 / sum(SAMPLE.values()), 2)
 
 
+def test_weights_keep_each_files_largest_measurement_across_runs_and_versions() -> None:
+    """A file runs in one shard per run, so a second report of it is another run or the other
+    Python version: its seconds are a second measurement, not more work. Summing them inflated
+    the table 1.6 times over PR #69's two versions and made the stale gate duller."""
+    m = _shards()
+    py12, py13, again = _reports(2), _reports(2), _reports(2)
+    for r in py13:
+        r["python"] = "3.13"
+    py12[0]["durations"] = {"tests/test_a.py": 3.0}
+    py12[1]["durations"] = {"tests/test_c.py": 6.0}
+    py13[0]["durations"] = {"tests/test_a.py": 5.0}
+    py13[1]["durations"] = {"tests/test_c.py": 4.0}
+    again[0]["durations"] = {"tests/test_a.py": 4.0}
+    again[1]["durations"] = {"tests/test_c.py": 7.0}
+    fresh = m.refreshed_weights(py12 + py13 + again)
+    assert fresh["files"] == {"tests/test_a.py": 5.0, "tests/test_c.py": 7.0}
+    assert fresh["per_test_seconds_default"] == round(12.0 / sum(SAMPLE.values()), 2)
+
+
+def test_verify_and_the_weights_table_give_the_same_refresh_recipe(tmp_path: Path) -> None:
+    """The recipe verify prints is the one the table's own ``_about`` states, word for word."""
+    m = _shards()
+    about = json.loads((ROOT / "scripts" / "ci_test_weights.json").read_text("utf-8"))["_about"]
+    assert m.REFRESH_RECIPE in about
+    table = tmp_path / "weights.json"
+    table.write_text(
+        json.dumps({"per_test_seconds_default": 1.0, "files": {"tests/test_a.py": 10.0}}), "utf-8"
+    )
+    paths = []
+    for rep in _timed({"tests/test_a.py": 300.0}):
+        p = tmp_path / f"shard-{rep['shard']}.json"
+        p.write_text(json.dumps(rep), "utf-8")
+        paths.append(str(p))
+    summary = tmp_path / "summary.md"
+    m.main(
+        ["verify", "--shards", "2", "--weights", str(table), *paths],
+        {"GITHUB_STEP_SUMMARY": str(summary)},
+    )
+    assert m.REFRESH_RECIPE in summary.read_text("utf-8")
+
+
+def _timed(durations: dict[str, float]) -> list[dict[str, Any]]:
+    """Two shard reports whose measured per-file seconds are ``durations``."""
+    r = _reports(2)
+    files = sorted(durations)
+    r[0]["durations"] = {f: durations[f] for f in files[::2]}
+    r[1]["durations"] = {f: durations[f] for f in files[1::2]}
+    return r
+
+
+def test_weights_a_run_measured_close_to_are_not_stale() -> None:
+    """A run a little slower than the table must not trip it (the table is each file's largest
+    measurement over several runs, so a runner's spread sits under it: P-741)."""
+    m = _shards()
+    weights = m.Weights(files={"tests/test_a.py": 100.0, "tests/test_c.py": 400.0})
+    assert (
+        m.stale_weights(_timed({"tests/test_a.py": 130.0, "tests/test_c.py": 520.0}), weights) == []
+    )
+    assert m.stale_weights(_reports(2), weights) == []  # a run that measured nothing says nothing
+
+
+def test_a_file_that_outgrew_its_weight_makes_the_weights_stale() -> None:
+    """P-740: tests/test_factory_loop.py was weighed at 158 s and took 880; the budget test read
+    the weight, predicted every shard under half its timeout, and a shard crept to 81 %."""
+    m = _shards()
+    weights = m.Weights(files={"tests/test_a.py": 158.0, "tests/test_c.py": 400.0})
+    errors = m.stale_weights(_timed({"tests/test_a.py": 880.0, "tests/test_c.py": 410.0}), weights)
+    assert errors == ["tests/test_a.py took 880 s against its weight of 158 s"]
+
+
+def test_files_the_weights_do_not_list_make_them_stale_past_a_tenth_of_the_run() -> None:
+    m = _shards()
+    weights = m.Weights(files={"tests/test_a.py": 900.0})
+    assert (
+        m.stale_weights(_timed({"tests/test_a.py": 900.0, "tests/test_c.py": 90.0}), weights) == []
+    )
+    (error,) = m.stale_weights(
+        _timed({"tests/test_a.py": 900.0, "tests/test_c.py": 90.0, "tests/test_d.py": 60.0}),
+        weights,
+    )
+    assert "2 test file(s) the weights do not list took 14% of this run's seconds" in error
+    assert "the heaviest tests/test_c.py at 90 s" in error
+
+
+def test_verify_fails_on_stale_weights_and_says_how_to_refresh_them(tmp_path: Path) -> None:
+    m = _shards()
+    table = tmp_path / "weights.json"
+    table.write_text(
+        json.dumps({"per_test_seconds_default": 1.0, "files": {"tests/test_a.py": 10.0}}), "utf-8"
+    )
+    paths = []
+    for rep in _timed({"tests/test_a.py": 300.0}):
+        p = tmp_path / f"shard-{rep['shard']}.json"
+        p.write_text(json.dumps(rep), "utf-8")
+        paths.append(str(p))
+    summary = tmp_path / "summary.md"
+    env = {"GITHUB_STEP_SUMMARY": str(summary)}
+    assert m.main(["verify", "--shards", "2", "--weights", str(table), *paths], env) == 1
+    text = summary.read_text("utf-8")
+    assert "ran in exactly one of 2 shards" in text  # the partition itself is proven
+    assert "THE SHARD WEIGHTS ARE STALE" in text and "tests/test_a.py took 300 s" in text
+    assert "python3 scripts/ci_test_shards.py weights" in text
+
+
 # --- the plugin, run by pytest ------------------------------------------------------------
 
 
@@ -380,8 +500,8 @@ def test_the_aggregator_needs_every_shard_job_and_passes_only_when_every_part_di
     body = jobs["test"]
     text = "\n".join(body) + "\n"
     loaders = {j for j, b in jobs.items() if "-p ci_test_shards" in "\n".join(b)}
-    assert loaders == {"test-shard"}
-    assert set(_needs(body)) == loaders
+    assert loaders == set(SHARDED.values()), "every job that loads the plugin is a known part"
+    assert set(_needs(body)) == {"test-shard"}
     assert re.search(r"^    if: always\(\)\s*$", text, re.M)
     steps = _steps(body)
     gate = [s for s in steps if "toJSON(needs)" in s]
@@ -407,6 +527,39 @@ def test_the_aggregator_proves_the_partition_over_every_shards_report() -> None:
     )
     assert "name: test-shard-py${{ matrix.python }}-${{ matrix.shard }}" in upload
     assert "continue-on-error" not in upload
+
+
+def aggregator_step_findings(ci_text: str) -> list[str]:
+    """Each step of a sharded suite's aggregator that can be skipped: an ``if:`` other than
+    ``always()`` — ``if: false`` on the every-shard-passed step or the partition proof leaves
+    the aggregator green over failed shards (P-746)."""
+    jobs = yaml.safe_load(ci_text)["jobs"]
+    return [
+        f"{agg}: step {step.get('name') or step.get('uses')!r} runs only if {step['if']!r}"
+        for agg in SHARDED
+        for step in jobs[agg].get("steps", [])
+        if str(step.get("if", "always()")).strip() not in ("always()", "${{ always() }}")
+    ]
+
+
+def test_no_aggregator_step_can_be_skipped() -> None:
+    assert aggregator_step_findings(CI.read_text("utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        "      - name: Every shard passed (both Python versions)\n",
+        "      - name: Every test ran in exactly one shard (the partition proof)\n",
+        "      - name: coverage >= 70 on the union of the shards\n",
+        "      - name: Every part passed (the gates and every shard)\n",
+    ],
+)
+def test_the_step_check_refuses_an_aggregator_step_that_never_runs(step: str) -> None:
+    text = CI.read_text("utf-8")
+    assert step in text, step
+    planted = text.replace(step, f"{step}        if: false\n")
+    assert aggregator_step_findings(planted) != [], step
 
 
 def test_coverage_is_enforced_at_70_percent_or_more_on_the_union() -> None:
@@ -440,12 +593,132 @@ def test_the_shard_count_leaves_no_shard_empty_and_fits_the_budget() -> None:
     m = _shards()
     n = _shard_count()
     weights = m.load_weights()
-    counts = dict.fromkeys(weights.files, 1)
+    # every test file on disk, not only the ones the table lists: a file the table does not
+    # know weighs its test count at the default (P-740 — 68 unlisted files were invisible here)
+    counts = {
+        str(f.relative_to(ROOT)): max(1, f.read_text("utf-8").count("\ndef test_"))
+        for f in sorted((ROOT / "tests").glob("test_*.py"))
+    }
     parts = m.partition(counts, n, weights)
     assert all(parts)
     budget_s = _timeout(_jobs(CI.read_text("utf-8"))["test-shard"]) * 60
-    heaviest = SETUP_ALLOWANCE_S + max(sum(weights.files[f] for f in p) for p in parts)
+    heaviest = SETUP_ALLOWANCE_S + max(
+        sum(weights.cost(f, counts[f]) for f in p) / 100 for p in parts
+    )
     assert heaviest <= budget_s / 2, (
         f"the heaviest of {n} shards is predicted at {heaviest / 60:.1f} min, over half of "
-        f"its {budget_s // 60}-minute timeout: raise N (P-053)"
+        f"its {budget_s // 60}-minute timeout: raise N, or split the heaviest test file "
+        "(P-053, P-740)"
+    )
+
+
+# --- a split test file runs each of its tests once ----------------------------------------------
+
+
+def _collected_names(tree: ast.Module) -> set[str]:
+    """The top-level names pytest collects from a module: ``test*`` functions, ``Test*`` classes."""
+    return {
+        n.name
+        for n in tree.body
+        if (isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test"))
+        or (isinstance(n, ast.ClassDef) and n.name.startswith("Test"))
+    }
+
+
+def _run_twice(sources: dict[str, str]) -> list[str]:
+    """Every test a module that imports another test module's harness would run a second time:
+    defined in both (a split module and its parent), or imported from it. ``sources`` maps a
+    module name (``test_worker``) to its text. ``verify`` compares whole node ids, so the same
+    test under two paths passes it (P-742)."""
+    trees = {name: ast.parse(text) for name, text in sources.items()}
+    errors = []
+    for name, tree in sorted(trees.items()):
+        for node in tree.body:
+            if not isinstance(node, ast.ImportFrom) or node.module not in trees:
+                continue
+            parent = node.module
+            for dup in sorted(_collected_names(tree) & _collected_names(trees[parent])):
+                errors.append(f"{dup} is defined in both tests/{name}.py and tests/{parent}.py")
+            for alias in node.names:
+                if alias.name.startswith(("test", "Test")):
+                    errors.append(f"tests/{name}.py imports {alias.name} from tests/{parent}.py")
+    return errors
+
+
+def test_a_test_defined_in_a_split_module_and_its_parent_is_caught() -> None:
+    parent = "def _rig():\n    pass\n\ndef test_kept():\n    pass\n\ndef test_moved():\n    pass\n"
+    split = "from test_worker import _rig\n\ndef test_moved():\n    pass\n"
+    assert _run_twice({"test_worker": parent, "test_worker_posture": split}) == [
+        "test_moved is defined in both tests/test_worker_posture.py and tests/test_worker.py"
+    ]
+    imported = "from test_worker import _rig, test_kept\n"
+    assert _run_twice({"test_worker": parent, "test_worker_posture": imported}) == [
+        "tests/test_worker_posture.py imports test_kept from tests/test_worker.py"
+    ]
+    moved = parent.replace("def test_moved():\n    pass\n", "")
+    assert _run_twice({"test_worker": moved, "test_worker_posture": split}) == []
+
+
+def test_no_test_file_runs_a_test_its_parent_file_also_runs() -> None:
+    """A merge that keeps a moved test in its old file as well (the Integrate conflict in
+    tests/test_worker.py would keep 10 posture tests in both) runs it twice unnoticed."""
+    sources = {f.stem: f.read_text("utf-8") for f in sorted((ROOT / "tests").glob("test_*.py"))}
+    assert _run_twice(sources) == []
+
+
+# --- the fresh-clone suite, split the same way (P-743) ---------------------------------------
+
+
+def test_the_fresh_clone_aggregator_needs_its_shards_and_proves_their_partition() -> None:
+    """The fresh-clone suite ran unsharded until its first run took 65.9 of its 75 minutes.
+    Its shards are the same N as ``test-shard`` (one weights file, one partition), each one
+    matrix value 1..N; the aggregator keeps the one name, needs the gates job and every
+    shard, runs ``always()``, fails unless every part passed, and runs ``verify`` over all N
+    reports, which every shard uploads under its own name."""
+    n = _shard_count()
+    jobs = _jobs(CI.read_text("utf-8"))
+    agg, shard = jobs["fresh-clone"], jobs["fresh-clone-shard"]
+    assert set(_needs(agg)) == {"fresh-clone-gates", "fresh-clone-shard"}
+    assert re.search(r"^    if: always\(\)\s*$", "\n".join(agg), re.M)
+    steps = _steps(agg)
+    gate = [s for s in steps if "toJSON(needs)" in s]
+    assert len(gate) == 1 and f"jq -e '{ALL_PASSED_JQ}'" in gate[0]
+    assert not any("continue-on-error" in s for s in steps)
+    assert _matrix(shard, "shard") == [str(k) for k in range(1, n + 1)]
+    assert re.search(rf"\(\$\{{\{{ matrix\.shard \}}\}} of {n}, ", _name(shard))
+    runs = [s for s in _steps(shard) if "ci_test_shards" in s]
+    assert len(runs) == 1 and f'--shard="$SHARD/{n}"' in runs[0]
+    assert "SHARD: ${{ matrix.shard }}" in runs[0]
+    proof = [s for s in steps if "ci_test_shards.py verify" in s]
+    assert len(proof) == 1
+    cmd = " ".join(proof[0].split())
+    assert f"verify --shards {n} --python 3.12" in cmd
+    assert re.findall(r"shards/shard-(\d+)\.json", cmd) == [str(k) for k in range(1, n + 1)]
+    download = next(s for s in steps if "download-artifact" in s)
+    assert "pattern: fresh-clone-shard-*" in download
+    upload = next(s for s in _steps(shard) if "upload-artifact" in s)
+    assert "name: fresh-clone-shard-${{ matrix.shard }}" in upload
+    assert "if-no-files-found: error" in upload and "continue-on-error" not in upload
+
+
+def test_the_fresh_clone_shards_fit_their_budget_as_root() -> None:
+    """Each fresh-clone shard, predicted from the weights at the measured root slowdown plus
+    the setup allowance, stays within half of its own timeout."""
+    m = _shards()
+    n = _shard_count()
+    weights = m.load_weights()
+    # every test file on disk, as the test-shard budget test partitions them (P-740): a file
+    # the table does not list weighs its test count at the default, never nothing
+    counts = {
+        str(f.relative_to(ROOT)): max(1, f.read_text("utf-8").count("\ndef test_"))
+        for f in sorted((ROOT / "tests").glob("test_*.py"))
+    }
+    parts = m.partition(counts, n, weights)
+    budget_s = _timeout(_jobs(CI.read_text("utf-8"))["fresh-clone-shard"]) * 60
+    heaviest = SETUP_ALLOWANCE_S + ROOT_SLOWDOWN * max(
+        sum(weights.cost(f, counts[f]) for f in p) / 100 for p in parts
+    )
+    assert heaviest <= budget_s / 2, (
+        f"the heaviest fresh-clone shard is predicted at {heaviest / 60:.1f} min, over half of "
+        f"its {budget_s // 60}-minute timeout: raise N for both shard jobs (P-743)"
     )

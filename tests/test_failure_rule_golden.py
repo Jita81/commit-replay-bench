@@ -14,8 +14,9 @@ could edit — so an edit to it moved stored rows between denominators (external
 
 Navigation
 ----------
-What it is:   The golden table of the failure rule, one hash per apparatus version, and the
-              pinned hash of the frozen 2.3 outage markers.
+What it is:   The golden table of the failure rule, one hash per apparatus version, the
+              pinned hash of the frozen 2.3 outage markers, and the pin of the outage-cause
+              rule the 2.4 rows' ``outage_cause`` label is stamped by (pilot D1).
 What it does: Fails when the live rule or its markers change under an unchanged
               ``APPARATUS_VERSION``; fails when the frozen v1 rule or markers change at all;
               shows the frozen reading of a row below 2.4 cannot move when the live markers do;
@@ -63,8 +64,12 @@ GOLDEN: dict[str, str] = {
     "2.3": "5f7e319ccde777ac118b0bac6b5e182b4356c419e7e6989679b7d9ec55fa473a",
     # 2.4 (ADR-0025): from here a row pins its own kind; the rule gained 3b, the S1 arm's
     # ``authoring`` kind and its author-outage exception (stream F), before 2.4 shipped — the
-    # Wave 2 integration wrote this line on the grid that reads them (AUTHORING_ERRORS)
-    "2.4": "e5acb3be0430e2fc0ad050087aa89865fc89781a00b70cfa6adbfa74fa20b268",
+    # Wave 2 integration wrote this line on the grid that reads them (AUTHORING_ERRORS);
+    # rewritten once, before 2.4 shipped and with no 2.4 row measured, when rule 3b took
+    # rule 4b for the author's instrument failures (DL-360), and once more, still before 2.4
+    # shipped, when rule 3b read the author's ``model_error`` only at the adapter's head
+    # (P-735, DL-360 amended) — never edited after release
+    "2.4": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
@@ -73,7 +78,9 @@ V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd54436
 #: branch the grid never reaches still fails (P-306). Written once per version, never edited.
 GOLDEN_SOURCE: dict[str, str] = {
     "2.3": "f4931817defdcb051a19397bee4a2b32bc1ea73e8b59eb2216edc3063df21e96",
-    "2.4": "869ee80395a9d636283035a2ea0b50f036298ecac6b7cbd9965a55d21602f251",
+    # 2.4: rewritten with the line above (DL-360), which also pinned rule 3b's helpers, and
+    # again with it for P-735 (``authoring_model_error``, ``AUTHORING_AUTHOR_FAILED``)
+    "2.4": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
 }
 #: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).
 V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54d842"
@@ -88,7 +95,39 @@ RuleFn = Callable[..., str]
 AUTHORING_ERRORS: tuple[str, ...] = (
     "authoring: the author returned no test that fails on the parent",
     "authoring: model_error: provider said USAGE LIMIT REACHED",
+    # rule 4b for the author (DL-360): a failed call that is no refusal, and the runner
+    # raising while proving RED, are ``harness`` — the instrument failed, not the arm
+    "authoring: the test author failed: model_error: InternalServerError: 500",
+    "authoring: harness error proving RED: OSError: the sandbox went away",
+    # the model's own words are never the instrument's (P-735): a miss whose test path — the
+    # model chose it — says ``model_error``, even beside an outage marker, is ``authoring``
+    "authoring: the authored test 'tests/test_model_error.py' is not RED at the parent: "
+    "it passes at the parent",
+    "authoring: the authored test 'tests/test_model_error_rate_limit.py' is not RED at the "
+    "parent: it passes at the parent",
 )
+
+
+def test_rule_3b_reads_the_instrument_only_off_the_head_the_adapter_writes() -> None:
+    """P-735: the answers the ``AUTHORING_ERRORS`` lines must give, spelt out, so the grid's
+    hash is not the only thing that knows them."""
+    want = {
+        AUTHORING_ERRORS[0]: lg.FAILURE_AUTHORING,
+        AUTHORING_ERRORS[1]: lg.FAILURE_OUTAGE,
+        AUTHORING_ERRORS[2]: lg.FAILURE_HARNESS,
+        AUTHORING_ERRORS[3]: lg.FAILURE_HARNESS,
+        AUTHORING_ERRORS[4]: lg.FAILURE_AUTHORING,
+        AUTHORING_ERRORS[5]: lg.FAILURE_AUTHORING,
+        "authoring: the test author failed: model_error: RateLimitError: 429": lg.FAILURE_OUTAGE,
+        "authoring: the test author failed: ImportError: no name 'Model_Error'": (
+            lg.FAILURE_AUTHORING
+        ),
+        "authoring: the test author failed: ValueError: model_error: rate limit": (
+            lg.FAILURE_AUTHORING
+        ),
+    }
+    got = {e: lg.derive_failure_kind(clean=False, disqualified=False, error=e) for e in want}
+    assert got == want
 
 
 def _errors(markers: Sequence[str], *, authoring: bool = True) -> list[str]:
@@ -233,8 +272,24 @@ _RULE_CONSTANTS = (
     "PROTOCOL_VIOLATION_PREFIX",
     "BUDGET_STOP_REASONS",
 )
-#: The live rule and the frozen one, each with every function it calls.
-LIVE_RULE = (lg.derive_failure_kind, lg.is_outage_error, lg._outage)
+#: What only the live rule reads (rule 3b, 2.4): pinned beside the shared constants, never
+#: added to them, so the frozen v1 pin (``V1_SOURCE_SHA256``) cannot move.
+_LIVE_ONLY_CONSTANTS = (
+    "FAILURE_AUTHORING",
+    "AUTHORING_ERROR_PREFIX",
+    "AUTHORING_HARNESS_ERROR",
+    "AUTHORING_AUTHOR_FAILED",
+)
+#: The live rule and the frozen one, each with every function it calls — held by
+#: ``test_every_function_and_constant_the_live_rule_reads_is_pinned`` (P-720).
+LIVE_RULE = (
+    lg.derive_failure_kind,
+    lg.is_outage_error,
+    lg._outage,
+    lg.authoring_model_error,
+    lg.authoring_outage,
+    lg.authoring_instrument_failure,
+)
 V1_RULE = (lg.derive_failure_kind_v1, lg.is_outage_error_v1, lg._outage)
 _SKIP_TOKENS = {
     tokenize.COMMENT,
@@ -268,12 +323,45 @@ def _code_tokens(source: str) -> list[str]:
     return out
 
 
-def _source_digest(sources: Iterable[str]) -> str:
+def _source_digest(sources: Iterable[str], constants: Sequence[str] = _RULE_CONSTANTS) -> str:
     body = {
         "code": [_code_tokens(src) for src in sources],
-        "constants": {name: getattr(lg, name) for name in _RULE_CONSTANTS},
+        "constants": {name: getattr(lg, name) for name in constants},
     }
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def _live_digest(sources: Iterable[str]) -> str:
+    return _source_digest(sources, (*_RULE_CONSTANTS, *_LIVE_ONLY_CONSTANTS))
+
+
+def _reads(fn: Callable[..., Any]) -> tuple[set[str], set[str]]:
+    """The ledger functions ``fn`` calls and the ledger constants it reads, by name."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    calls: set[str] = set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            calls.add(node.func.id)
+        elif isinstance(node, ast.Name) and node.id.isupper():
+            names.add(node.id)
+    return (
+        {c for c in calls if inspect.isfunction(getattr(lg, c, None))},
+        {n for n in names if hasattr(lg, n)},
+    )
+
+
+def test_every_function_and_constant_the_live_rule_reads_is_pinned() -> None:
+    """P-720: ``authoring_outage`` decided rule 3b's answers yet sat outside ``LIVE_RULE``,
+    so an edit to it moved no source pin (P-306's class). Every ledger function the live
+    rule reaches, and every ledger constant any of them reads, is pinned — by construction,
+    not by a list someone remembers to extend."""
+    pinned = {fn.__name__ for fn in LIVE_RULE}
+    constants = set(_RULE_CONSTANTS) | set(_LIVE_ONLY_CONSTANTS)
+    for fn in LIVE_RULE:
+        calls, names = _reads(fn)
+        assert calls <= pinned, (fn.__name__, calls - pinned)
+        assert names <= constants | {"OUTAGE_ERROR_MARKERS"}, (fn.__name__, names - constants)
 
 
 def _sources(fns: Sequence[Callable[..., Any]]) -> list[str]:
@@ -283,7 +371,7 @@ def _sources(fns: Sequence[Callable[..., Any]]) -> list[str]:
 def test_the_live_failure_rule_source_is_pinned_to_the_apparatus() -> None:
     """The live rule's code, not only its answers on the grid: an edit on a branch the grid
     never reaches fails here until the apparatus moves (P-306)."""
-    got = _source_digest(_sources(LIVE_RULE))
+    got = _live_digest(_sources(LIVE_RULE))
     assert APPARATUS_VERSION in GOLDEN_SOURCE, (
         f"apparatus {APPARATUS_VERSION} has no line in GOLDEN_SOURCE: add {got!r}"
     )
@@ -316,7 +404,7 @@ def test_an_edit_the_grid_never_reaches_still_moves_the_source_pin() -> None:
         lg.derive_failure_kind, lg.OUTAGE_ERROR_MARKERS
     )  # the grid is blind to it …
     live = _sources(LIVE_RULE)
-    assert _source_digest([edited, *live[1:]]) != _source_digest(live)  # … the pin is not
+    assert _live_digest([edited, *live[1:]]) != _live_digest(live)  # … the pin is not
 
 
 def test_a_docstring_or_comment_edit_leaves_the_source_pin_alone() -> None:
@@ -325,4 +413,33 @@ def test_a_docstring_or_comment_edit_leaves_the_source_pin_alone() -> None:
     edited = edited.replace("    if clean:\n", "    # a comment\n    if clean:\n", 1)
     assert edited != src
     live = _sources(LIVE_RULE)
-    assert _source_digest([edited, *live[1:]]) == _source_digest(live)
+    assert _live_digest([edited, *live[1:]]) == _live_digest(live)
+
+
+#: The outage-cause rule (pilot D1, P-435): its code and the constants it reads, for the 2.4
+#: rows that carry its label. Set once more before any row carried the label (Q1's review
+#: pruned the auth markers the failure rule could never reach — DL-234 (4)); from the first
+#: 2.4 row on it is never edited. A change to the rule or its markers moves an
+#: ``outage_cause`` already pinned in the chain, so it is then an apparatus bump with the old
+#: rule frozen beside the new one, like the failure rule's.
+OUTAGE_CAUSE_SOURCE_SHA256 = "9db880f1bc7a56459307e5cbc578229f62efb399d71e2ba0fac37175a621d66b"
+
+
+def _outage_cause_digest(source: str) -> str:
+    body = {
+        "code": _code_tokens(source),
+        "constants": {
+            "AUTH_ERROR_MARKERS": list(lg.AUTH_ERROR_MARKERS),
+            "OUTAGE_CAUSES": list(lg.OUTAGE_CAUSES),
+            "FAILURE_OUTAGE": lg.FAILURE_OUTAGE,
+        },
+    }
+    return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+
+
+def test_the_outage_cause_rule_is_pinned_by_its_code_and_markers() -> None:
+    got = _outage_cause_digest(inspect.getsource(lg.derive_outage_cause))
+    assert got == OUTAGE_CAUSE_SOURCE_SHA256, (
+        f"the outage-cause rule changed (now {got}); it decides a hashed 2.4 label, so a "
+        "change is an apparatus bump"
+    )

@@ -286,6 +286,9 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('95.0%')
     expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('40')
     expect(within(evidence).getByTestId('signoff-tile-ci-low').textContent).toContain('83.5%')
+    // P-733: both tiles name the same denominator — the eligible attempts, never every attempt
+    expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('eligible')
+    expect(within(evidence).getByTestId('signoff-tile-ci-low').textContent).toContain('over every eligible attempt')
     expect(within(evidence).getByTestId('signoff-tile-false-q1').textContent).toContain('0')
     expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('0.58')
     expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('3 of 4 task(s) scored')

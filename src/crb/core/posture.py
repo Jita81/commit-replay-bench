@@ -12,6 +12,8 @@ that instrument. :class:`Posture` names the instrument:
   not on the host);
 * the runner and a hash of its fixed command environment (the worktree's own path
   normalised out, so two worktrees are one posture);
+* on the host, the digest of the runner's declared test environment — every tool a test may
+  run by name, with its version and bytes (ADR-0048);
 * how the tree is presented (``inplace``, ``readonly``, ``copy``), the network, how the
   dependencies are provided (``sealed``, ``host-env``) and the limits;
 * the apparatus version.
@@ -31,17 +33,20 @@ What it does: Resolves the posture a run grades in from the executor's own facts
               class that statistics pool on.
 How:          ``executor.posture_facts()`` + ``runner.toolchain_argv()`` run through the
               executor + a SHA-256 of ``runner.command(root, ()).env`` with the root path
-              replaced by ``<root>`` → ``Posture`` → canonical JSON → SHA-256.
+              replaced by ``<root>`` + the runner's declared host environment's digest
+              (ADR-0048; hashed only when set) → ``Posture`` → canonical JSON → SHA-256.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
-              docs/adr/0005-fail-closed-docker-sandbox.md
+              docs/adr/0005-fail-closed-docker-sandbox.md,
+              docs/adr/0048-the-host-posture-declares-its-environment.md
 Works with:   src/crb/core/execution.py (``posture_facts`` — the executor's half),
               src/crb/core/runners/base.py (``toolchain_argv`` and the command environment),
               src/crb/core/qualify.py (a qualification is keyed to a posture id),
               src/crb/core/grade.py (``PostureMismatch`` when spec, context and executor
               disagree), src/crb/server/worker.py (resolves the live posture before a run),
               src/crb/core/version.py (the apparatus version a posture carries)
-Tested by:    tests/test_posture.py, tests/test_grade.py, tests/test_worker.py
+Tested by:    tests/test_posture.py, tests/test_grade.py, tests/test_worker.py,
+              tests/test_runners_toolenv.py
 Touch when:   never for a new repository; a fact that can change a test's outcome is found outside
               this record (add the field, prove the id moves with it, and say so in ADR-0019's
               successor).
@@ -97,10 +102,22 @@ class Posture:
     deps_mode: str = ""
     limits: str = ""
     apparatus_version: str = APPARATUS_VERSION
+    #: The host's declared test environment (ADR-0048): ``declared:sha256:<hex>`` over every
+    #: tool a test may run by name, with its version and bytes. ``""`` under a container
+    #: (the image is the environment) and for a runner that declares nothing yet.
+    environment: str = ""
+    #: The tools behind :attr:`environment`, one ``name=version@sha12`` each — a reader's
+    #: name for them, as ``image_ref`` is for the image, so never part of the id.
+    environment_tools: str = ""
 
     def _hashed(self) -> dict[str, str]:
         d = asdict(self)
         d.pop("image_ref")  # a name for the bytes, never the bytes
+        d.pop("environment_tools")  # the digest in ``environment`` is the bytes
+        if not d["environment"]:
+            # a posture with no declared environment hashes exactly as before the field
+            # existed: no sandbox record and no undeclared runner's record goes stale
+            d.pop("environment")
         return d
 
     @property
@@ -116,7 +133,11 @@ class Posture:
     def to_dict(self) -> dict[str, Any]:
         """Every field plus the derived ``posture_id`` / ``posture_class`` for readers;
         :meth:`from_dict` drops the derived ones and re-derives them."""
-        return {**asdict(self), "posture_id": self.posture_id, "posture_class": self.posture_class}
+        d = asdict(self)
+        for k in ("environment", "environment_tools"):
+            if not d[k]:
+                d.pop(k)  # present iff declared: every other posture's dict is unchanged
+        return {**d, "posture_id": self.posture_id, "posture_class": self.posture_class}
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Posture:
@@ -176,6 +197,7 @@ def resolve_posture(
     facts = executor.posture_facts()
     toolchain = probe_toolchain(executor, runner, Path(root), timeout=timeout)
     cmd = runner.command(Path(root), (), executor=executor, timeout=max(1, timeout))
+    declared = runner.declared_environment(executor, Path(root))
     limits = facts.get("limits", "")
     if facts.get("user"):
         limits = f"{limits},user={facts['user']}" if limits else f"user={facts['user']}"
@@ -190,6 +212,8 @@ def resolve_posture(
         network=facts.get("network", ""),
         deps_mode=deps_mode,
         limits=limits,
+        environment=declared.identity if declared is not None else "",
+        environment_tools=declared.summary() if declared is not None else "",
     )
 
 

@@ -211,15 +211,18 @@ def with_posture_labels(fields: dict[str, Any]) -> dict[str, Any]:
 
 def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> None:
     """ADR-0025 items 5 and 6 (stream G): a measured row of 2.4 or later carries its own
-    ``failure_kind``, ``lint_reason`` and, on a replay row, ``change_id`` — filled in here,
-    as the writer would, where the test did not name them."""
+    ``failure_kind``, ``lint_reason``, on an outage row its ``outage_cause`` (pilot D1) and,
+    on a replay row, ``change_id`` — filled in here, as the writer would, where the test did
+    not name them."""
     from crb.core.ledger import (
         LABEL_CHANGE_ID,
         LABEL_FAILURE_KIND,
         LABEL_LINT_REASON,
+        LABEL_OUTAGE_CAUSE,
         PROCESS_REPLAY,
         api_only_failure,
         derive_failure_kind,
+        derive_outage_cause,
         lint_only_failure,
     )
 
@@ -237,6 +240,9 @@ def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> No
             api_only=api_only_failure({**fields, "api_stable": labels.get("api_stable")}),
         ),
     )
+    cause = derive_outage_cause(labels[LABEL_FAILURE_KIND], error)
+    if cause:
+        labels.setdefault(LABEL_OUTAGE_CAUSE, cause)
     reason = (
         "none_detected" if lint is None else "error" if error.startswith("lint:") else "evaluated"
     )

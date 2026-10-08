@@ -14,7 +14,9 @@ What it does: Adds ``prev_hash`` and ``row_hash`` (``VARCHAR(64) NOT NULL``, ser
               chain cannot fork). ``events`` is append-only, so its UPDATE trigger is dropped
               for the back-fill and the triggers are re-installed at the end, in the same
               transaction on PostgreSQL. ``downgrade`` drops the indexes, the CHECK and the
-              columns; the events themselves stay.
+              columns; the events themselves stay. Filling the new columns of existing rows is
+              the store rule's one recorded exception (ADR-0029 §3, DL-350): every column a
+              row held before this revision stays byte for byte as it was.
 How:          ``op.add_column`` twice (skipped when ``init_db`` already made them) → drop
               ``events_no_update`` → read the rows in id pages and ``UPDATE`` each by id with
               the hashes of a FROZEN copy of the chain rule (``_row_hash``; a released

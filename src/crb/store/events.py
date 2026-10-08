@@ -90,7 +90,7 @@ from typing import Any
 from sqlalchemy import Column, func, select, text
 from sqlalchemy import event as sa_event
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.event_chain import GENESIS_HASH, EventChainReport, event_row_hash, walk_event_chain
@@ -163,17 +163,27 @@ def lock_event_writes(s: Session) -> None:
     the server's audited commit, ``commit_audited`` (P-196) — and the chain's flush hook,
     which must read the head under it (ADR-0029). It is the one helper for this
     lock: a second copy is refused by ``tests/test_advisory_lock_owners.py`` (P-224).
-    SQLite: ``BEGIN IMMEDIATE`` (pysqlite opens a transaction only at the first write, so a
-    transaction that is already open has written and holds the database's write lock).
+    SQLite: ``BEGIN IMMEDIATE``; when a transaction is already open it cannot run, and an
+    open transaction proves nothing (pysqlite opens one at the first write, which holds the
+    write lock, but a caller's deferred ``BEGIN`` holds none), so a zero-row write takes the
+    database's write lock explicitly — a no-op when the transaction has written, a wait (or
+    "database is locked") when it has not — rather than swallow the refused ``BEGIN
+    IMMEDIATE`` and carry on (P-429's rule: no lock helper carries on after that error).
+    SQLite does take the write lock before it refuses (``OP_Transaction`` runs before
+    ``OP_AutoCommit``'s error), so a swallowing helper held it by accident of that order;
+    the explicit write removes the dependence on it.
     PostgreSQL: a transaction-scoped advisory lock (id 7332 — one id per table, see
     ``crb.store.jobs``), re-entrant within the transaction. Other dialects: no-op."""
     dialect = s.get_bind().dialect.name
     if dialect == "sqlite":
-        try:
-            s.execute(text("BEGIN IMMEDIATE"))
-        except OperationalError as exc:
-            if "within a transaction" not in str(exc):
-                raise
+        # no autoflush: a pending ORM write flushed by the lock's own statement would open
+        # the transaction first; unflushed, it is written later, under the lock
+        with s.no_autoflush:
+            driver = s.connection().connection.driver_connection
+            if getattr(driver, "in_transaction", False):
+                s.execute(text("DELETE FROM events WHERE 0"))
+            else:
+                s.execute(text("BEGIN IMMEDIATE"))
     elif dialect == "postgresql":
         s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
     write_locks_held(s).add(EVENTS_LOCK)
@@ -236,9 +246,9 @@ def _take_chain_lock(session: Session) -> None:
     """Hold the write lock before the head is read, so two writers cannot read one head.
 
     The one helper for the ``events`` lock, :func:`lock_event_writes`, re-entrant within the
-    transaction on PostgreSQL; on SQLite a connection already in a transaction has written
-    (pysqlite begins only before a write), so it holds the database's write lock and reads
-    the latest head. A second copy of the lock here would be the class P-224 closed."""
+    transaction on PostgreSQL; on SQLite, inside an open transaction, it takes the database's
+    write lock explicitly (a zero-row write, P-429), so the head it reads is the latest. A
+    second copy of the lock here would be the class P-224 closed."""
     lock_event_writes(session)
 
 

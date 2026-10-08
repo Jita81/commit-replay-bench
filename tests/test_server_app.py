@@ -205,6 +205,7 @@ class TestFactory:
             "acceptance",
             "admin",
             "auth",
+            "builders",
             "capability",
             "classes",
             "decisions",

@@ -13,11 +13,11 @@ What it is:   Tests of the job-budget guard and of the CI configuration that run
 What it does: Pins the guard's arithmetic, its summary and annotation, its exit codes (fail
               mode exits 1 past the threshold, warn mode 0, a missing, unreadable, ``nan`` or
               ``inf`` start stamp 2 in either mode), and that ``ci.yml`` starts the clock as
-              the first step of the ``test-shard``, ``test``, ``walkthrough-story`` and
-              ``walkthrough-screens`` jobs and runs the guard last, ``if: always()``, with the
-              job's OWN ``timeout-minutes`` (so a raised timeout cannot leave the guard
-              measuring the old one) — failing, in every job that runs it (P-053: none
-              warns). For the split:
+              the first step of the ``test-shard``, ``test``, the three ``fresh-clone``,
+              ``walkthrough-story`` and ``walkthrough-screens`` jobs and runs the guard last,
+              ``if: always()``, with the job's OWN ``timeout-minutes`` (so a raised timeout
+              cannot leave the guard measuring the old one) — failing, in every job that runs
+              it (P-053: none warns). For the split:
               ``walkthrough-story`` runs every spec except 11-screens, ``walkthrough-screens``
               runs only 11-screens with a shard per matrix value ``k/N`` for k = 1..N, and N
               is at most the spec's persona count, so no shard is empty and together they are
@@ -25,6 +25,8 @@ What it does: Pins the guard's arithmetic, its summary and annotation, its exit 
               aggregator that ``needs`` every job running ``scripts/walkthrough.sh``, runs
               ``if: always()`` and passes only when every part succeeded (its jq program is
               run against success, failure, cancelled, skipped and empty ``needs``).
+              Also that every guarded job checks out before any step that can fail, so the
+              guard can run on the failure path (P-708).
 How:          Calls ``main`` with a fake clock and environment; reads ``ci.yml`` as text,
               job by job (no YAML dependency), and the spec's ``PERSONAS`` list; runs ``jq``
               (on every hosted runner) over sample ``needs`` objects.
@@ -45,7 +47,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -59,11 +60,15 @@ SCREENS_SPEC = ROOT / "ui" / "e2e" / "walkthrough" / "11-screens.spec.ts"
 WALKTHROUGH_DIR = ROOT / "ui" / "e2e" / "walkthrough"
 
 #: job id → the mode its guard must run in. Every guarded job fails past the threshold: the
-#: suite's shards, their ``test`` aggregators and the walkthroughs. The test job only warned
+#: suite's shards, their ``test`` aggregators, the three fresh-clone jobs (one job until its
+#: first run took 65.9 of its 75 minutes, P-743) and the walkthroughs. The test job only warned
 #: until the suite was split (P-053) — no guard warns now, and none may go back to warning.
 GUARDED = {
     "test-shard": "fail",
     "test": "fail",
+    "fresh-clone-gates": "fail",
+    "fresh-clone-shard": "fail",
+    "fresh-clone": "fail",
     "walkthrough-story": "fail",
     "walkthrough-screens": "fail",
 }
@@ -234,6 +239,24 @@ def test_each_guarded_job_starts_the_clock_first_and_ends_with_the_guard_on_its_
         assert sum("ci_job_budget.py" in s for s in steps) == 1
 
 
+def test_each_guarded_job_checks_out_before_any_step_that_can_fail() -> None:
+    """The guard is a script in the checkout. An aggregator whose "every part passed" gate
+    ran BEFORE ``actions/checkout`` failed that gate, then its guard failed too — exit 2,
+    ``can't open file scripts/ci_job_budget.py`` — so the failure path was never measured
+    and every red aggregator carried a second, meaningless error (P-708). After the clock,
+    the checkout comes before any step that can fail."""
+    jobs = _jobs(CI.read_text("utf-8"))
+    for job in GUARDED:
+        steps = _steps(jobs[job])
+        checkout = next((i for i, s in enumerate(steps) if "actions/checkout@" in s), None)
+        assert checkout is not None, f"{job}: no checkout, so the guard can never run"
+        for i, step in enumerate(steps[1:checkout], 1):
+            assert "run:" not in step, (
+                f"{job}: step {i} runs before the checkout and can fail — the guard would then "
+                "find no script; move the checkout to right after the clock"
+            )
+
+
 def test_every_job_that_runs_the_guard_is_guarded_and_none_only_warns() -> None:
     """A job that creeps to its timeout must fail before it gets there (P-053): a guard in
     warn mode is how the test job reached 58 of its 60 minutes with every run still green."""
@@ -285,7 +308,7 @@ def test_the_required_context_is_an_aggregator_over_every_walkthrough_job() -> N
     assert f"jq -e '{ALL_PASSED_JQ}'" in steps[0]
 
 
-@pytest.mark.skipif(shutil.which("jq") is None, reason="jq is on every hosted runner")
+@pytest.mark.toolchain("jq")  # on every hosted runner
 @pytest.mark.parametrize(
     ("needs", "passes"),
     [

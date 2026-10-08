@@ -391,6 +391,7 @@ class CapabilityCell:
                 "harness": self.n_harness,
                 "disqualified": self.n_disqualified,
                 "outage": self.n_outage,
+                "outage_auth": self.stats.n_outage_auth if self.stats is not None else 0,
             },
             "model_n": self.model_n,
             "model_point": None if self.model_point is None else round(self.model_point, 4),

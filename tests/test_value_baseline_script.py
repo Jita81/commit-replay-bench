@@ -188,6 +188,38 @@ def test_a_jsonl_export_reads_through_the_grade_row(vb: ModuleType, tmp_path: Pa
     assert v.failure_kind == "budget" and v.row_hash == row.row_hash and v.detail == "max_turns"
 
 
+def test_the_scorecard_says_your_login_apart_from_the_provider(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """Pilot D1 (P-435): the campaign's process-loss line reads a refused login as "your
+    login", not as the provider's outage, from the cause the row pinned at write."""
+    row = posture_row(
+        repo="alpha",
+        task_id="a" * 40,
+        clean=False,
+        tests_unmodified=True,
+        target_green=None,
+        no_new_failures=None,
+        source_changed=None,
+        mode="blind",
+        gold_clean=True,
+        apparatus_version="2.4",
+        error="model_error: authentication failed (HTTP 401) — run `claude login`",
+        labels={
+            "failure_kind": "outage",
+            "lint_reason": "not_reached",
+            "change_id": "e" * 40,
+            "outage_cause": "auth",
+        },
+    ).chained("0" * 64)
+    p = tmp_path / "ledger.jsonl"
+    p.write_text(json.dumps(row.to_dict()) + "\n", encoding="utf-8")
+    (v,) = vb.read_ledger(p)
+    assert v.failure_kind == "outage" and v.outage_cause == "auth"
+    out = vb.render_markdown([v], [], apparatus="all")
+    assert "| outage by cause: your login / the provider / not recorded | 1 / 0 / 0 |" in out
+
+
 def test_the_markdown_carries_n_method_and_apparatus_on_every_figure(
     vb: ModuleType, tmp_path: Path
 ) -> None:
@@ -197,6 +229,123 @@ def test_the_markdown_carries_n_method_and_apparatus_on_every_figure(
     )
     out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
     assert "| measure |" in out and "n = 2" in out and "apparatus" in out
+
+
+def test_the_budget_spend_and_the_loss_share_never_sum_an_unpriced_row_as_zero(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """DL-066: the budget spend and the process-loss share are sums of money too. They summed
+    ``cost_usd`` over every row, so an unpriced budget row printed as "$0.00" and the loss
+    share as 0.0% beside a loss amount the same table called unpriced."""
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join([HEADER, _row(1, clean="1", lint="1"), _row(2, kind="budget", cost="")]) + "\n",
+        encoding="utf-8",
+    )
+    out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
+    budget = next(line for line in out.splitlines() if "spend on budget-stopped" in line)
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$0.00" not in budget
+    assert "| unpriced (no row reported a cost) of $1.00;" in budget
+    assert "unpriced (no row reported a cost) of $1.00 (—)" in loss
+    assert "$1.00 (0.0%)" not in loss
+
+
+def test_the_page_sums_money_only_through_the_spend_rule() -> None:
+    """docs/PREVENTION.md P-401: the page summed ``cost_usd`` itself in two figures after the
+    report beside them had moved to the spend rule, so an unpriced row read as $0 there. No
+    ``sum(...)`` in the script may read ``cost_usd``; money goes through ``spend_of_rows`` or
+    the served report."""
+    import ast
+
+    src = (ROOT / "scripts" / "value_baseline.py").read_text(encoding="utf-8")
+    offenders = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "sum"
+        and "cost_usd" in ast.unparse(node)
+    ]
+    assert offenders == [], f"scripts/value_baseline.py sums cost_usd itself at lines {offenders}"
+
+
+def test_the_loss_share_is_rounded_once_from_the_exact_sums(vb: ModuleType, tmp_path: Path) -> None:
+    """docs/PREVENTION.md P-406: the loss share divided the two amounts the report had
+    already rounded to the cent, then ``_pct`` rounded again. 1.004 / 2.006 is 50.05%, which
+    prints as 50.0%; the cent-rounded $1.00 / $2.01 printed 49.8%."""
+    p = tmp_path / "ledger.psv"
+    rows = [
+        HEADER,
+        _row(1, clean="1", lint="1", cost="1.002"),
+        _row(2, kind="budget", cost="1.004"),
+    ]
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    out = vb.render_markdown(vb.read_ledger(p), [], apparatus="all")
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$1.00 of $2.01 (50.0%)" in loss, loss
+
+
+def test_the_page_reads_only_the_checks_arm_the_report_serves(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """docs/PREVENTION.md P-407: the page re-scoped the rows by apparatus alone, so a budget
+    row graded on another checks arm was added to the budget spend and the loss share,
+    beside the report's own figures, which read one arm (ADR-0024 - never two)."""
+    import dataclasses
+
+    from crb.core.checks import ARMS
+
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join(
+            [
+                HEADER,
+                _row(1, clean="1", lint="1"),
+                _row(2, kind="budget"),
+                _row(3, kind="budget", cost="5.0"),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = vb.read_ledger(p)
+    other = next(a for a in ARMS if a != rows[0].checks_arm)
+    rows = [rows[0], rows[1], dataclasses.replace(rows[2], checks_arm=other)]
+    out = vb.render_markdown(rows, [], apparatus="all")
+    budget = next(line for line in out.splitlines() if line.startswith("| spend on budget-stopped"))
+    loss = next(line for line in out.splitlines() if line.startswith("| process loss"))
+    assert "$1.00 of $2.00" in budget and "n = 1 budget rows" in budget, budget
+    assert "$1.00 of $2.00 (50.0%)" in loss, loss
+
+
+def test_no_percentage_on_the_page_is_formed_from_a_served_rounded_figure() -> None:
+    """docs/PREVENTION.md P-028 and P-406: the report serves money to the cent and shares and
+    rates to 4 places. A ``_pct`` or ``_frac`` whose argument reads one of those served keys
+    rounds twice; a percentage is formed from exact counts or exact sums only. Counts
+    (``rows``, ``all_rows``, ``valid_failures``, ``k``, ``n``) are exact and allowed."""
+    import ast
+
+    def rounded(key: str) -> bool:
+        return key.endswith(("usd", "gbp", "share")) or key in {"point", "ci_low", "ci_high"}
+
+    src = (ROOT / "scripts" / "value_baseline.py").read_text(encoding="utf-8")
+    offenders = [
+        node.lineno
+        for node in ast.walk(ast.parse(src))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"_pct", "_frac"}
+        and any(
+            isinstance(sub, ast.Subscript)
+            and isinstance(sub.slice, ast.Constant)
+            and isinstance(sub.slice.value, str)
+            and rounded(sub.slice.value)
+            for arg in node.args
+            for sub in ast.walk(arg)
+        )
+    ]
+    assert offenders == [], f"a percentage reads a served rounded figure at lines {offenders}"
 
 
 def test_the_baseline_page_quotes_its_own_tables_and_names_the_live_register() -> None:
