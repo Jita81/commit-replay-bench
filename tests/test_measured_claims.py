@@ -36,8 +36,8 @@ Works with:   README.md (the claims), data/census-2026-07-08/ and
               data/branch-protection-2026-10-07/ (the rows, and the workflows' jobs the
               reading was compared with), scripts/claims_check.py (the locator rule),
               scripts/check_branch_protection.py (the workflows' check names),
-              tests/test_census_gate.py (the census's own invariants), docs/dod/product.md
-              (product.claims.201, G-660)
+              tests/test_census_gate.py (the census's own invariants), docs/DEPLOYMENT.md
+              §3.4 (the same reading's count), docs/dod/product.md (product.claims.201, G-660)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; README gains a [measured] claim on a new campaign — vendor
               its rows with a manifest under data/ and add its derivation, with the phrases the
@@ -452,6 +452,21 @@ def test_the_vendored_jobs_are_the_pull_request_workflows_at_the_commit_they_nam
     assert gating == snapshot["jobs"]
     assert parts == snapshot["parts"]
     assert sorted(set(gating.values())) == snapshot["workflows"]
+
+
+def test_deployment_states_the_reading_s_count_of_required_checks() -> None:
+    """DEPLOYMENT §3.4 cites the same reading as README, outside README's re-derivation, so
+    its two counts are pinned to the reading and the vendored jobs here: a new reading
+    that changes either count fails until the page says so."""
+    data = ROOT / BRANCH_PROTECTION
+    reading = json.loads((data / "required_status_checks.json").read_text(encoding="utf-8"))
+    workflow = json.loads((data / "workflow_jobs.json").read_text(encoding="utf-8"))
+    page = " ".join((ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8").split())
+    stated = (
+        f"n = {len(reading['contexts'])} required checks against the "
+        f"{len(workflow['jobs'])} gating check names"
+    )
+    assert stated in page, f"DEPLOYMENT §3.4 does not state {stated!r}"
 
 
 def test_a_clone_without_the_named_commit_fails_the_proof_never_skips() -> None:
