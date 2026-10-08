@@ -86,22 +86,19 @@ Navigation
 ----------
 What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` routes — the
               unauthenticated operational surface.
-What it does: Readiness aggregates the store probes (db, migrations at head, append-only
-              triggers proven live, ledger false-Q1 = 0, worker check-ins from the ``workers``
-              table) and the served-commit ``build`` probe (``served`` + ``stale``) with the
-              observability probes
-              (sandbox — skipped for the ``api`` role — toolchains, builders with each
-              present login's verification state) and answers
-              503 when any is ``down``, and serves the deployment's ``posture`` beside them
-              (where tests and the builder run, and whether production runs unsealed under
-              ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that raises is ``down`` with
-              the fixed ``failure_detail`` naming the request id, the exception logged, never
-              served;
-              liveness checks the database only; ``/metrics``
+What it does: Readiness aggregates the store probes (db, migrations at head, append-only triggers
+              proven live, ledger false-Q1 = 0, worker check-ins from the ``workers`` table) and the
+              served-commit ``build`` probe (``served`` + ``stale``) with the observability probes
+              (sandbox — skipped for the ``api`` role — toolchains, builders with each present
+              login's verification state) and answers 503 when any is ``down``, and serves the
+              deployment's ``posture`` beside them (where tests and the builder run, and whether
+              production runs unsealed under ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that
+              raises is ``down`` with the fixed ``failure_detail`` naming the request id, the
+              exception logged, never served; liveness checks the database only; ``/metrics``
               refreshes the ledger gauges then renders the shared registry; ``/health`` and
-              ``/version`` say whether automatic sign-in is on (never which account, and
-              ``on`` only to a caller that could use it), and
-              ``probe_dev_autologin`` is the doctor line that warns while it is.
+              ``/version`` say whether automatic sign-in is on (never which account, and ``on`` only
+              to a caller that could use it), and ``probe_dev_autologin`` is the doctor line that
+              warns while it is.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
               request id → ``probes.aggregate`` → stamp;
               ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
