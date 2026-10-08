@@ -11,23 +11,28 @@ Navigation
 ----------
 What it is:   A source gate over ui/src/App.tsx (the route table),
               ui/e2e/walkthrough/11-screens.spec.ts (``routes()``, the sweep's list) and
-              ui/e2e/walkthrough/15-classes.spec.ts (``CLASS_SAMPLE_MINE``).
+              ui/e2e/walkthrough/15-classes.spec.ts (``CLASS_SAMPLE_MINE``), and every spec
+              under ui/e2e (its tests' time limits).
 What it does: Fails, naming the route, when a route inside the authenticated shell has no
               path in ``routes()`` that it matches (``:name`` segments match any segment; the
               catch-all ``*`` is the 404, swept as ``/nowhere/at/all``); a negative control pins
               that a route missing from the list is caught. Also fails when spec 15 mines too
               few commits for its labelling sample: the fixture's commit ids change every run,
-              so a small sample offered nothing to label about 1 run in 5.
+              so a small sample offered nothing to label about 1 run in 5. And fails when a
+              test that walks a list a function builds, as 11-screens walks ``routes()``, has a
+              time limit not computed from that list: a fixed one fell over when two routes
+              were added (P-771).
 How:          Text scan of the TypeScript sources; the chance from the class sets' split and
               example shares; no browser, no stack.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   ui/src/App.tsx (the routes), ui/e2e/walkthrough/11-screens.spec.ts (the sweep),
               ui/e2e/axe.ts (the scan it runs), src/crb/core/class_sets.py (the shares),
-              docs/PREVENTION.md (P-687)
+              docs/PREVENTION.md (P-687, P-771)
 Tested by:    (this is a test file)
 Touch when:   onboarding a client repository never needs it; a screen is added to the app (add
-              its route to ``routes()`` in 11-screens with a slug, in the same change).
+              its route to ``routes()`` in 11-screens with a slug, in the same change); a
+              spec gets a test that walks a built list.
 """
 
 from __future__ import annotations
@@ -109,3 +114,72 @@ def test_spec_15_mines_a_sample_it_is_almost_sure_to_label() -> None:
 def test_the_bound_catches_the_sample_earlier_specs_leave() -> None:
     # 5 replayable commits is what 03 and 11 left on the run that found nothing to label
     assert empty_queue_chance(5) > 0.1
+
+
+# --- a pass over routes() is given time for every route it walks (P-771) ------------------------
+
+E2E = ROOT / "ui" / "e2e"
+#: A test's first line, its indent captured; prettier closes the test at that indent with `})`.
+_TEST_LINE = re.compile(r"^(?P<indent> *)test\(")
+#: A loop over a list a function builds, such as `for (const r of routes(ctx))`.
+_LIST_LOOP = re.compile(r"for \(const \w+ of (?P<list>[A-Za-z_]\w*)\(")
+_SET_TIMEOUT = re.compile(r"test\.setTimeout\((?P<arg>.*)\)\s*$", re.M)
+
+
+def list_walks(src: str) -> list[tuple[int, str, list[str]]]:
+    """Each test that loops over a list a function builds: its line, the list, its time limits."""
+    lines = src.splitlines()
+    walks = []
+    for i, line in enumerate(lines):
+        m = _TEST_LINE.match(line)
+        if not m:
+            continue
+        close = m["indent"] + "})"
+        end = next((j for j in range(i + 1, len(lines)) if lines[j].rstrip() == close), len(lines))
+        body = "\n".join(lines[i:end])
+        limits = [t["arg"] for t in _SET_TIMEOUT.finditer(body)]
+        for name in sorted({loop["list"] for loop in _LIST_LOOP.finditer(body)}):
+            walks.append((i + 1, name, limits))
+    return walks
+
+
+def fixed_limits(src: str) -> list[str]:
+    """The walks whose time limit does not grow with the list: a fixed one, or the default."""
+    return [
+        f"line {line}: walks {name}() under {limits[0] if limits else 'the default time limit'}"
+        for line, name, limits in list_walks(src)
+        if not any(f"{name}(" in arg for arg in limits)
+    ]
+
+
+def test_a_pass_over_a_built_list_takes_its_time_limit_from_that_list() -> None:
+    specs = sorted(E2E.rglob("*.spec.ts"))
+    walks = [(p, w) for p in specs for w in list_walks(p.read_text(encoding="utf-8"))]
+    assert any(p == SCREENS and w[1] == "routes" for p, w in walks), "11-screens' pass was not read"
+    found = [
+        f"{p.relative_to(ROOT)} {f}"
+        for p in specs
+        for f in fixed_limits(p.read_text(encoding="utf-8"))
+    ]
+    assert found == [], (
+        "a test that walks a list gets a time limit computed from the list's length, so adding an "
+        f"entry adds time (see passTimeoutMs in 11-screens.spec.ts): {found}"
+    )
+
+
+def test_the_gate_catches_a_fixed_limit_and_a_missing_one() -> None:
+    def spec(limit: str) -> str:
+        return (
+            "  test('every route', async ({ page }) => {\n"
+            f"{limit}"
+            "    for (const r of routes(ctx)) {\n"
+            "      await page.goto(r.path)\n"
+            "    }\n"
+            "  })\n"
+        )
+
+    assert fixed_limits(spec("    test.setTimeout(6 * 60_000)\n")) == [
+        "line 1: walks routes() under 6 * 60_000"
+    ]
+    assert fixed_limits(spec("")) == ["line 1: walks routes() under the default time limit"]
+    assert fixed_limits(spec("    test.setTimeout(passTimeoutMs(routes(ctx).length))\n")) == []
