@@ -134,6 +134,7 @@ const VERIFY_OK = {
   verified_at: '',
   head_row_hash: '',
   events: { rows: 0, chain_ok: true, broken_at: null, detail: '', head_row_hash: '', walk: 'full', full_walk_at: '' },
+  disqualified: { window_days: 7, threshold: 2, by_builder: [], over: [] },
 } satisfies LedgerVerify
 
 describe('PosturePage', () => {
