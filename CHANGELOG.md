@@ -20,7 +20,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   sample blind; a second person signs; unsigned, it routes nothing. On `/factory/acceptance`
   a second person writes held-out tests from the ticket alone; a calibration build's first attempt
   is graded on them, stamped `S2`, and opens no pull request; only a forward reading's delivery
-  promotes a ceiling. DL-330 to DL-335, P-680 to P-696, P-770, P-771.
+  promotes a ceiling. DL-330 to DL-335, P-680 to P-696, P-770 to P-772.
 
 - **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
   ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table

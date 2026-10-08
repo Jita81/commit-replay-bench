@@ -11,8 +11,9 @@ Navigation
 ----------
 What it is:   A source gate over ui/src/App.tsx (the route table),
               ui/e2e/walkthrough/11-screens.spec.ts (``routes()``, the sweep's list) and
-              ui/e2e/walkthrough/15-classes.spec.ts (``CLASS_SAMPLE_MINE``), and every spec
-              under ui/e2e (its tests' time limits).
+              ui/e2e/walkthrough/15-classes.spec.ts (``CLASS_SAMPLE_MINE``), every spec
+              under ui/e2e (its tests' time limits), and ui/e2e/walkthrough/support.ts
+              (``waitRunApi``).
 What it does: Fails, naming the route, when a route inside the authenticated shell has no
               path in ``routes()`` that it matches (``:name`` segments match any segment; the
               catch-all ``*`` is the 404, swept as ``/nowhere/at/all``); a negative control pins
@@ -21,14 +22,17 @@ What it does: Fails, naming the route, when a route inside the authenticated she
               so a small sample offered nothing to label about 1 run in 5. And fails when a
               test that walks a list a function builds, as 11-screens walks ``routes()``, has a
               time limit not computed from that list: a fixed one fell over when two routes
-              were added (P-771).
+              were added (P-771). And fails when the shared wait on a run does not add its
+              wait to the running test's time limit before it polls: spec 15 waited up to ten
+              minutes for a mine under the default four (P-772).
 How:          Text scan of the TypeScript sources; the chance from the class sets' split and
               example shares; no browser, no stack.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         none
 Works with:   ui/src/App.tsx (the routes), ui/e2e/walkthrough/11-screens.spec.ts (the sweep),
               ui/e2e/axe.ts (the scan it runs), src/crb/core/class_sets.py (the shares),
-              docs/PREVENTION.md (P-687, P-771)
+              ui/e2e/walkthrough/support.ts (the wait on a run), docs/PREVENTION.md (P-687,
+              P-771, P-772)
 Tested by:    (this is a test file)
 Touch when:   onboarding a client repository never needs it; a screen is added to the app (add
               its route to ``routes()`` in 11-screens with a slug, in the same change); a
@@ -183,3 +187,55 @@ def test_the_gate_catches_a_fixed_limit_and_a_missing_one() -> None:
     ]
     assert fixed_limits(spec("")) == ["line 1: walks routes() under the default time limit"]
     assert fixed_limits(spec("    test.setTimeout(passTimeoutMs(routes(ctx).length))\n")) == []
+
+
+# --- a wait on a run is added to its test's time limit (P-772) -----------------------------------
+
+SUPPORT = E2E / "walkthrough" / "support.ts"
+#: The wait added to the running test's own limit: `info.setTimeout(info.timeout + timeoutMs)`.
+_GROWS_LIMIT = re.compile(r"\.setTimeout\(\s*info\.timeout\s*\+\s*timeoutMs\s*\)")
+
+
+def function_body(src: str, name: str) -> str:
+    """The text of the exported function ``name``, from its signature to its closing brace."""
+    start = re.search(rf"^export async function {name}\(", src, re.M)
+    if start is None:
+        return ""
+    end = src.find("\n}\n", start.start())
+    return src[start.start() : end if end != -1 else len(src)]
+
+
+def grows_limit_before_polling(body: str) -> bool:
+    """Whether the wait is added to the test's time limit before the poll starts."""
+    grow = _GROWS_LIMIT.search(body)
+    poll = body.find(".poll(")
+    return grow is not None and poll != -1 and grow.start() < poll
+
+
+def test_a_wait_on_a_run_is_added_to_its_tests_time_limit() -> None:
+    body = function_body(SUPPORT.read_text(encoding="utf-8"), "waitRunApi")
+    assert body, "support.ts's waitRunApi was not read"
+    assert grows_limit_before_polling(body), (
+        "waitRunApi adds its wait to the running test's time limit before it polls, so a "
+        "caller's wait (spec 15's ten-minute mine) can never outlast the test's default four "
+        "minutes: info.setTimeout(info.timeout + timeoutMs)"
+    )
+
+
+def test_the_gate_catches_a_wait_that_does_not_grow_the_limit() -> None:
+    def helper(first: str) -> str:
+        return (
+            "export async function waitRunApi(page: Page, runId: string, timeoutMs: number) {\n"
+            f"{first}"
+            "  await expect.poll(async () => status(runId), { timeout: timeoutMs })\n"
+            "}\n"
+        )
+
+    grows = "  const info = test.info()\n  info.setTimeout(info.timeout + timeoutMs)\n"
+    assert grows_limit_before_polling(function_body(helper(grows), "waitRunApi"))
+    assert not grows_limit_before_polling(function_body(helper(""), "waitRunApi"))
+    assert not grows_limit_before_polling(
+        function_body(helper("  info.setTimeout(4 * 60_000)\n"), "waitRunApi")
+    )
+    late = helper("").replace("}\n", grows + "}\n")
+    assert not grows_limit_before_polling(function_body(late, "waitRunApi"))
