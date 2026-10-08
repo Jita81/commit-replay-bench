@@ -776,6 +776,23 @@ before the upgrade (`kubectl -n crb scale deploy --replicas=0 -l
 the schema is not downgraded: do not roll back across it — restore the pre-upgrade dump
 instead.
 
+**Upgrading to revisions `0014` and `0015`** (`invitations`, `decisions_due`): additive.
+On a split-role PostgreSQL store (§3.3) both tables arrive with the default grant alone,
+`SELECT, INSERT`, but the application updates both: accepting or revoking an invitation,
+and every pass over the decisions inbox (`GET /decisions` and the worker's idle refresh).
+As the owner, before you restart the API and the worker, grant them the rest:
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON invitations, decisions_due TO crb_app;
+```
+
+Without it those writes are refused with `permission denied`: the two invitation routes and
+`GET /decisions` answer 500, and the worker logs `decisions refresh failed` for every
+repository (P-754). If your grants were made before §3.3 had its two `ALTER DEFAULT
+PRIVILEGES` lines (before 2026-09-28), run those as the owner too, and grant `SELECT,
+INSERT` on `library_acts` (`0016`). On SQLite, or where the application owns its tables,
+there is nothing to do.
+
 **Upgrading to the chart with the evidence store** (`evidenceStore`, P-045): before it, the
 worker kept its kept patches, evidence packs and transcripts on its own work claim, at
 `$CRB_HOME/evidence` and `$CRB_HOME/transcripts`. The new chart mounts the evidence claim

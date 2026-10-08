@@ -828,6 +828,48 @@ def test_the_guides_grants_name_every_table_and_only_the_owner_writes_the_versio
     assert "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES" in sql
 
 
+#: The first revision released after DEPLOYMENT §3.3 began giving a later release's tables
+#: the default ``SELECT, INSERT`` grant (PR #63, 2026-09-28). A table a revision from here
+#: on adds reaches an upgraded split-role store with that grant alone.
+_DEFAULT_GRANT_FROM = "0013"
+
+
+def test_a_later_table_the_application_rewrites_has_an_upgrade_note_that_grants_it() -> None:
+    """A table §3.3 grants ``UPDATE, DELETE`` that a revision after the default grant added
+    is only ``SELECT, INSERT`` on a split-role store upgraded across that revision, so the
+    application's first rewrite of it is refused with ``permission denied``. Revisions 0014
+    and 0015 shipped ``invitations`` and ``decisions_due`` that way with no note (P-754).
+    §3.3 says the release's upgrade notes name the grant: §6 must hold an "Upgrading to
+    revision" paragraph that names the revision, the table and ``UPDATE, DELETE``."""
+    import re
+
+    from crb.store.migrate import REVISION_TABLES
+
+    sql = " ".join(
+        ln for ln in _deployment_grants().splitlines() if not ln.lstrip().startswith("--")
+    )
+    rewritable = {
+        t.strip()
+        for tables in re.findall(r"GRANT SELECT, INSERT, UPDATE, DELETE ON ([\w, ]+?) TO", sql)
+        for t in tables.split(",")
+    }
+    page = DEPLOYMENT.read_text(encoding="utf-8")
+    upgrade = page.split("\n## 6. Upgrade\n", 1)[1].split("\n## 7. ", 1)[0]
+    notes: dict[str, str] = {}
+    for note in re.split(r"\n(?=\*\*Upgrading to )", upgrade):  # a note runs to the next one
+        head = re.match(r"\*\*Upgrading to revisions? ([^*]+)\*\*", note)
+        for rev in re.findall(r"`(\d{4})`", head.group(1)) if head else []:
+            notes[rev] = notes.get(rev, "") + " " + " ".join(note.split())
+    later = [(r, t) for r, t in REVISION_TABLES if r >= _DEFAULT_GRANT_FROM and t in rewritable]
+    assert later, "no later table is rewritable: the check reads nothing"
+    missing = [
+        f"{t} (revision {r})"
+        for r, t in later
+        if not re.search(rf"\b{t}\b", notes.get(r, "")) or "UPDATE, DELETE" not in notes.get(r, "")
+    ]
+    assert not missing, f"DEPLOYMENT §6 has no upgrade note granting UPDATE, DELETE on {missing}"
+
+
 def test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_the_application(
     backend: Backend,
 ) -> None:
