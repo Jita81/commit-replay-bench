@@ -9,7 +9,8 @@
  * What it does: Reads `GET /version` (unauthenticated, so the sign-in page can read it before
  *               anyone has a role) and, when it reports `dev_autologin`, renders one hinted
  *               sentence in the warning colour with `role="status"`; renders nothing otherwise,
- *               including while `/version` is loading or has failed. Follows the stack, not the
+ *               including while `/version` is loading, and says nothing when it has failed (it
+ *               cannot tell; the sign-in page reports the failure). Follows the stack, not the
  *               page load: `useVersion` refetches when the tab regains focus and after a
  *               minute, so an API restarted with the setting changed moves the banner too.
  * How:          `useVersion` → `dev_autologin === true` → a `Hint` with
@@ -34,6 +35,9 @@ export const DEV_AUTOLOGIN_SENTENCE = 'Automatic sign-in is on for this developm
 /** Rendered on every page while `GET /version` reports `dev_autologin`; nothing otherwise. */
 export function DevAutologinBanner() {
   const version = useVersion()
+  // A failed `/version` cannot say whether automatic sign-in is on, so the banner claims nothing;
+  // the sign-in page reports that failure on its own line (P-369).
+  if (version.isError) return null
   if (version.data?.dev_autologin !== true) return null
   return (
     <div className="border-b-4 border-status-amber bg-status-amber-soft text-on-surface" role="status" data-testid="dev-autologin-banner">

@@ -249,6 +249,7 @@ describe('an automatic sign-in that fails is not a refusal', () => {
     expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
     expect(await screen.findByText('Could not check for an organisation sign-in')).toBeInTheDocument()
     expect(screen.queryByText('Could not check your session')).toBeNull()
+    expect(screen.queryByTestId('dev-autologin-banner')).toBeNull()
     expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
   })
 })
