@@ -16,8 +16,8 @@ Works with:   src/crb/server/routes/oracle.py (under test), src/crb/core/oracle/
               (the bands and gates), src/crb/server/routes/runs.py (``event_to_model``),
               tests/fixtures/server_seed.py, docs/API.md (oracle adequacy)
 Tested by:    tests/test_server_routes_oracle.py
-Touch when:   the ``oracle.score`` or ``controls.report`` event shape changes in the worker (the
-              seed and these cases together).
+Touch when:   never for a new repository; the ``oracle.score`` or ``controls.report`` event shape
+              changes in the worker (the seed and these cases together).
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from crb.core.oracle.adequacy import DEFAULT_POLICY
+from crb.core.version import APPARATUS_VERSION
 from crb.observability.events import StepEvent
 from crb.server.routes.runs import event_to_model
 from fixtures.server_seed import ALPHA, BETA, Env, envelope, login, make_env, task_id
@@ -57,7 +58,8 @@ class TestOracleReport:
         assert set(d) == {"repo", "policy", "tasks", "cells", "apparatus_versions", "runs"}
         assert d["repo"] == ALPHA and d["policy"] == DEFAULT_POLICY.to_dict()
         assert d["policy"]["autoship_floor"] == 0.8 and d["policy"]["adequate_floor"] == 0.5
-        assert d["apparatus_versions"] == ["2.0"] and d["runs"] == [env.info.run_ids["oracle"]]
+        assert d["apparatus_versions"] == [APPARATUS_VERSION]
+        assert d["runs"] == [env.info.run_ids["oracle"]]
         by_task = {t["task_id"]: t for t in d["tasks"]}
         assert set(by_task) == {task_id(1), task_id(2), task_id(3), task_id(5)}
         t1 = by_task[task_id(1)]

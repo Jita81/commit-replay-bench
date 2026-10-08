@@ -56,6 +56,11 @@ from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.posture import grade_adhoc
 
+#: The apparatus the rows here are written at: these tests pin a grade's classification,
+#: which 2.3 and 2.4 share; what a 2.4 row carries besides is pinned in
+#: tests/test_ledger_classification.py and tests/test_context_arm.py.
+GRADE_APPARATUS = "2.3"
+
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
 except ImportError:  # pragma: no cover — layout-dependent
@@ -843,8 +848,10 @@ def test_poison_hidden_in_info_exclude_is_disqualified(
     executor: LocalExecutor,
 ) -> None:
     """Finding 1(a): ``echo conftest.py >> $(git rev-parse --git-path info/exclude)``
-    graded CLEAN on 842875b. The pre-flight removes the line and disqualifies; and
-    the poison is a touched file whatever the exclude file says."""
+    graded CLEAN on 842875b. The pre-flight reports the line and disqualifies; and
+    the poison is a touched file whatever the exclude file says. The clone's shared file
+    is left as found (ADR-0025 item 13: rewriting it raced every other worktree, P-123),
+    so a second grade is disqualified by the same line — never a pass."""
     (trial.root / "conftest.py").write_text(_POISON, encoding="utf-8")
     _identity_edit(trial)
     exclude = pyrepo.path / ".git" / "info" / "exclude"
@@ -855,14 +862,14 @@ def test_poison_hidden_in_info_exclude_is_disqualified(
     res = _grade(trial, feat_task, pyrepo, runner, executor, on_event=on_event)
     _assert_worktree_dq(res, ".git/info/exclude")
     assert "info/exclude" in res.dq_reason
-    assert "conftest.py" not in exclude.read_text(encoding="utf-8")  # restored
+    assert "conftest.py" in exclude.read_text(encoding="utf-8")  # read, never rewritten
     tamper = [p for a, p in events if a == "grade.tamper"]
     assert tamper[0]["kind"] == "worktree" and tamper[0]["files"] == [".git/info/exclude"]
     assert tamper[0]["violations"][0]["kind"] == "exclude_edited"
-    # a second grade of the same worktree: the exclude file is clean now, so the
-    # poison itself is what disqualifies (belt 1b) — never a pass
+    # a second grade of the same worktree: the line is still there, so it disqualifies
+    # again — never a pass
     res2 = _grade(trial, feat_task, pyrepo, runner, executor)
-    _assert_infra_dq(res2, "conftest.py")
+    _assert_worktree_dq(res2, ".git/info/exclude")
 
 
 def test_poison_hidden_in_info_exclude_is_disqualified_on_a_bound_worktree(
@@ -1435,7 +1442,9 @@ def test_a_blamed_grade_needs_a_witness_from_the_same_posture() -> None:
         belt_scope=(),
     )
     with pytest.raises(g.MisattributionViolation, match="without a witness"):
-        lg.grade_row_from_result(unwitnessed, task, pack_hash="c" * 64)
+        lg.grade_row_from_result(
+            unwitnessed, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        )
 
 
 def test_a_red_gold_control_is_environment_not_builder_red(
@@ -1454,7 +1463,9 @@ def test_a_red_gold_control_is_environment_not_builder_red(
     assert res.env_code == g.ENV_CODE_GOLD_CONTROL_RED and not res.blamed
     assert res.control is not None and res.extra["control"]["green"] is False
     assert witness.asked and witness.asked[0][0] == feat_task.target_tests
-    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(
+        res, feat_task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+    )
     assert row.failure_kind == lg.FAILURE_HARNESS  # the unchanged rule: never the model
     assert row.labels[lg.LABEL_ENV_CODE] == "GOLD_CONTROL_RED"
     assert lg.LABEL_BLAME_CONTROL not in row.labels
@@ -1485,7 +1496,9 @@ def test_a_green_gold_control_keeps_builder_red_and_names_the_witness(
     assert res.belts.target_green is False and not res.error
     assert res.blame_control == g.BLAME_GOLD_GREEN and res.control is not None and res.control.green
     assert witness.runs and witness.runs[0].scope == feat_task.target_tests
-    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(
+        res, feat_task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+    )
     assert row.failure_kind == lg.FAILURE_BUILDER_RED
     assert row.labels[lg.LABEL_BLAME_CONTROL] == "gold_green"
     assert row.labels[lg.LABEL_POSTURE_ID].startswith("pst_") and row.labels[lg.LABEL_QUALIFICATION]
@@ -1543,7 +1556,12 @@ def test_a_trial_outside_the_dependency_closure_is_disqualified_before_any_run(
     res = g.grade(trial, spec, ctx=ctx, config=pyrepo.config, runner=counting, executor=executor)
     assert res.disqualified and res.dq_reason.startswith("dependency closure: requirements.txt")
     assert counting.calls == 0 and not res.clean and not res.blamed
-    assert lg.grade_row_from_result(res, spec, pack_hash="c" * 64).failure_kind == "disqualified"
+    assert (
+        lg.grade_row_from_result(
+            res, spec, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        ).failure_kind
+        == "disqualified"
+    )
 
 
 def test_a_file_a_test_writes_is_never_the_builders(
@@ -1629,7 +1647,9 @@ def test_an_env_error_run_is_never_a_verdict_and_the_witness_says_whose(
     assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed")
     assert not res.error and not res.blamed and not res.env_code
     assert green.asked == [(feat_task.target_tests, "trial tree: " + broken.env_error, None)]
-    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(
+        res, feat_task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+    )
     assert row.failure_kind == "disqualified" and not lg.is_environment_error(row.error)
 
     red = _Scripted(green=False)
@@ -1637,13 +1657,20 @@ def test_an_env_error_run_is_never_a_verdict_and_the_witness_says_whose(
     assert res.error.startswith("environment: gold control red in pst_")
     assert "trial tree: tree_copy_failed" in res.error and not res.disqualified
     assert res.env_code == g.ENV_CODE_GOLD_CONTROL_RED and res.control is not None
-    row = lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(
+        res, feat_task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+    )
     assert row.failure_kind == "harness" and row.labels[lg.LABEL_ENV_CODE] == "GOLD_CONTROL_RED"
 
     res = graded(None)
     assert res.error.startswith("environment: tree_copy_failed")
     assert res.env_code == g.ENV_CODE_TEST_RUN and res.control is None and not res.blamed
-    assert lg.grade_row_from_result(res, feat_task, pack_hash="c" * 64).failure_kind == "harness"
+    assert (
+        lg.grade_row_from_result(
+            res, feat_task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        ).failure_kind
+        == "harness"
+    )
     assert ExecResult(0, "", "").env_error == ""
 
 

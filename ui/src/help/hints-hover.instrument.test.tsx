@@ -22,7 +22,8 @@
  *               ui/src/components/Hint.tsx (the trigger contract), ui/src/help/hints.ts
  *               (`HINTS`, the text asserted), ui/src/test/utils.tsx (`renderApp`, `mockApi`)
  * Tested by:    ui/src/help/hints-hover.instrument.test.tsx
- * Touch when:   a screen is added to the instrument row — add its route and one element here.
+ * Touch when:   never for a new repository; a screen is added to the instrument row — add its route
+ *               and one element here.
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -41,7 +42,7 @@ const HOVER: Record<string, HintId> = {
   '/runs/:id': 'stat.run.clean',
   '/tasks/:repo/:taskId': 'tile.task.target_tests',
   '/capability': 'stat.capability.coverage',
-  '/routing': 'policy.routing.min_ci_low',
+  '/routing': 'policy.routing.looks',
   '/oracle': 'stat.oracle.mean',
   '/learn': 'stat.learn.refusal_share',
   '/ledger': 'stat.ledger.false_q1',

@@ -23,6 +23,28 @@ The miner assigns the **path class** only (:func:`~crb.core.spec.classify_commit
 the intent label is a separate step (:mod:`crb.core.classify`) so mining never
 needs a model.
 
+A distinct commit is a distinct CHANGE
+--------------------------------------
+``git log --no-merges`` lists a cherry-pick beside its original and a revert beside the
+commit it reverts; counted as two tasks, one change can hold two rows of one cell with
+opposite outcomes (the commit census of 2026-09-27 found both in click's ``bug.fix`` S
+cell). So every commit in the walk has a **change identity** (:func:`change_identity`):
+its ``git patch-id --stable``, or — for a commit whose message says ``This reverts commit
+<sha>`` — the identity of the commit it reverts. The walk keeps ONE commit per identity:
+
+* of two commits with the same patch, the **older** is kept — the change as first made,
+  against the parent its author wrote it for; the copy is skipped, naming the kept one;
+* a revert is **never** kept — its change is its original's (the same diff inverted, whose
+  "oracle" is the original's tests going away), so the original is kept when the walk
+  reaches it, and neither counts twice;
+* a change the store already holds is **never mined again**, whichever of its commits the
+  store holds — the newer copy, the revert, or a commit outside this walk's window: every
+  commit of a held identity is skipped as ``already mined``, naming the known task.
+
+The identity travels on the task as the label ``change_id`` and, from apparatus 2.4, on
+every replay row (``crb.core.ledger.LABEL_CHANGE_ID``; no row below 2.4 carries it), so a
+reader counts changes.
+
 Navigation
 ----------
 What it is:   The miner — the stage that turns a repository's history into ``TaskSpec``s
@@ -34,21 +56,24 @@ What it does: Walks commits newest-first and keeps those that couple source and 
               and 5; skips a candidate whose target is green, times out or defines no test;
               stops the run after three consecutive harness errors rather than skipping
               history silently. Never assigns an intent label and never needs a model.
-How:          ``iter_candidates`` (git log + changed files + layout rules) → ``qualify``
+How:          ``iter_candidates`` (git log + changed files + layout rules, one commit per
+              distinct change: ``ChangeIndex`` over ``git patch-id --stable`` and the revert
+              messages) → ``qualify``
               (``Workspace.create`` → ``overlay_tests`` → target run → belt-scope run →
               ``TaskSpec``) → ``gold_check`` (``overlay_sources`` → target → belt → lint) →
               ``mine`` drives the loop to ``target_count`` and emits ``mine.*`` events.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
-              docs/adr/0019-qualification-is-posture-relative.md
+              docs/adr/0019-qualification-is-posture-relative.md; DL-093 (a distinct commit
+              is a distinct change); ADR-0025 item 13 (the unattributed baseline, stream G)
 Works with:   src/crb/core/spec.py (RepoConfig layout rules, TaskSpec, size tiers, path
               class), src/crb/core/workspace.py (the worktree and overlays),
               src/crb/core/runners/base.py (target scope, belt scope, oracle validity, lint
               plan), src/crb/core/git.py (log, changed files, churn), src/crb/core/grade.py
               (applies the same belts to a builder's patch), src/crb/core/lint.py (belt 5 on
               the gold), src/crb/cli/commands/mine.py (the ``crb mine`` command)
-Tested by:    tests/test_mine.py, tests/test_runners_go.py, tests/test_runners_jvm.py,
-              tests/test_runners_node.py, tests/test_runners_cargo.py
+Tested by:    tests/test_mine.py, tests/test_mine_distinct_change.py, tests/test_runners_go.py,
+              tests/test_runners_jvm.py, tests/test_runners_node.py, tests/test_runners_cargo.py
 Touch when:   onboarding a repository whose commits do not fit the pool caps (``pool_caps``)
               or whose skip reasons dominate (``crb mine`` reports them: fix the layout,
               probe scope or ``mining`` limits in the repo config first —
@@ -58,15 +83,17 @@ Touch when:   onboarding a repository whose commits do not fit the pool caps (``
 
 from __future__ import annotations
 
+import re
+import subprocess
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from crb.core.deps import SCOPE_RUN, DepsProvider, NullDepsProvider, ProvisionRefused, TaskDeps
 from crb.core.execution import Executor, SandboxUnavailable
-from crb.core.git import GitRepo
+from crb.core.git import GitError, GitRepo
 from crb.core.lint import LintRun, run_plan
 from crb.core.posture import Posture, resolve_posture
 from crb.core.qualify import (
@@ -116,12 +143,153 @@ def pool_caps(config: RepoConfig, pool: str) -> PoolCaps:
 
 @dataclass(frozen=True)
 class Candidate:
-    """A commit that fits the pool's shape but has not yet been proven replayable."""
+    """A commit that fits the pool's shape but has not yet been proven replayable.
+    ``change_id`` is the change it carries (:func:`change_identity`); empty only on a
+    candidate built by hand, and then measured when it is qualified."""
 
     sha: str
     files: tuple[str, ...]
     src_files: tuple[str, ...]
     test_files: tuple[str, ...]
+    change_id: str = ""
+
+
+#: The task label that carries a mined commit's change identity (the same key as
+#: ``crb.core.ledger.LABEL_CHANGE_ID``, which a 2.4 replay row must carry).
+LABEL_CHANGE_ID = "change_id"
+#: ``git revert``'s own words in the message of the commit it makes.
+_REVERT_RE = re.compile(r"^This reverts commit ([0-9a-f]{7,40})\b", re.MULTILINE)
+#: How far a chain of reverts (a revert of a revert …) is followed to its original.
+_MAX_REVERT_DEPTH = 8
+#: Pinned diff settings: a user's ``diff.noprefix`` or external diff must not move an id.
+_DIFF_PIN = ("-c", "diff.noprefix=false", "-c", "diff.mnemonicPrefix=false")
+
+
+def _patch_ids(repo: GitRepo, log_args: Sequence[str]) -> dict[str, str]:
+    """sha → ``git patch-id --stable`` for every commit ``git log -p <log_args>`` lists,
+    in one streamed pass (the diff is piped straight into ``git patch-id``)."""
+    base = [repo.git_binary, "-C", str(repo.path), *_DIFF_PIN]
+    log_argv = [*base, "log", "-p", "--no-color", "--no-ext-diff", "--format=commit %H"]
+    log_argv += list(log_args)
+    with subprocess.Popen(log_argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as log:
+        try:
+            pid = subprocess.run(
+                [*base, "patch-id", "--stable"],
+                stdin=log.stdout,
+                capture_output=True,
+                timeout=repo.timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as e:
+            log.kill()
+            raise GitError(log_argv, 124, f"patch-id timed out after {repo.timeout}s") from e
+        finally:
+            if log.stdout is not None:
+                log.stdout.close()
+        log.wait(timeout=repo.timeout)
+    if log.returncode != 0 or pid.returncode != 0:
+        raise GitError(log_argv, log.returncode or pid.returncode, "git patch-id failed")
+    out: dict[str, str] = {}
+    for line in pid.stdout.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            out[parts[1]] = parts[0]
+    return out
+
+
+def _messages(repo: GitRepo, log_args: Sequence[str]) -> dict[str, str]:
+    """sha → the full commit message, for every commit ``git log <log_args>`` lists."""
+    out = repo.run("log", "--format=%H%x1f%B%x1e", *log_args, check=True).stdout
+    msgs: dict[str, str] = {}
+    for record in out.split("\x1e"):
+        sha, sep, body = record.strip().partition("\x1f")
+        if sep:
+            msgs[sha] = body
+    return msgs
+
+
+def reverted_commit(repo: GitRepo, message: str) -> str:
+    """The full sha of the commit ``message`` says it reverts (``git revert``'s words),
+    or ``""`` when it names none that resolves in ``repo``."""
+    m = _REVERT_RE.search(message)
+    if not m:
+        return ""
+    res = repo.run("rev-parse", "--verify", "--quiet", f"{m.group(1)}^{{commit}}")
+    return res.stdout.strip() if res.ok else ""
+
+
+class ChangeIndex:
+    """The change identity of each commit in a walk, and which one commit per change the
+    walk keeps (module docstring: the older of two same-patch commits; never a revert).
+    Built once per walk from two ``git log`` passes over the same window."""
+
+    def __init__(self, repo: GitRepo, shas: Sequence[str], log_args: Sequence[str]) -> None:
+        self._repo = repo
+        self._ids = _patch_ids(repo, log_args)
+        self._msgs = _messages(repo, log_args)
+        #: revert sha → the sha it reverts (resolved in the repository)
+        self.reverts: dict[str, str] = {}
+        for sha in shas:
+            orig = reverted_commit(repo, self._msgs.get(sha, ""))
+            if orig:
+                self.reverts[sha] = orig
+        #: change identity → the commit the walk keeps for it (the OLDEST non-revert)
+        self.kept: dict[str, str] = {}
+        for sha in reversed(shas):  # oldest first
+            if sha not in self.reverts:
+                self.kept.setdefault(self.identity(sha), sha)
+
+    def identity(self, sha: str, _depth: int = 0) -> str:
+        """``sha``'s change identity: its original's for a revert, else its patch-id. A
+        commit outside the walk's window (an original, or a task already mined) is read on
+        its own; one the repository does not hold is ``commit:<sha>``, which no other
+        commit shares."""
+        orig = self.reverts.get(sha)
+        if orig is None and sha not in self._msgs:
+            orig = reverted_commit(
+                self._repo, self._repo.run("log", "-1", "--format=%B", sha).stdout
+            )
+        if orig and _depth < _MAX_REVERT_DEPTH:
+            return self.identity(orig, _depth + 1)
+        pid = self._ids.get(sha)
+        if pid is None:
+            resolves = self._repo.run("rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}").ok
+            # a sha this repository does not hold holds no change here; any other git
+            # failure (a timeout) propagates rather than reading as "no change"
+            pid = _patch_ids(self._repo, ["-1", sha]).get(sha, "") if resolves else ""
+            self._ids[sha] = pid
+        return pid or f"commit:{sha}"
+
+    def held(self, known: Iterable[str]) -> dict[str, str]:
+        """change identity → the known (already mined) commit that holds it. A candidate
+        with a held identity is the same change as a task the store already has, whichever
+        of the two the walk would otherwise keep (DL-093)."""
+        out: dict[str, str] = {}
+        for sha in sorted(known):
+            out.setdefault(self.identity(sha), sha)
+        return out
+
+    def skip_reason(self, sha: str) -> str:
+        """Why the walk does not keep ``sha``, or ``""`` when it does."""
+        orig = self.reverts.get(sha)
+        if orig is not None:
+            return (
+                f"revert of {orig[:12]}: one change with the commit it reverts; the original "
+                "is kept"
+            )
+        kept = self.kept.get(self.identity(sha), sha)
+        if kept != sha:
+            return (
+                f"duplicate change: the same patch as {kept[:12]} (git patch-id --stable); the "
+                "older commit is kept"
+            )
+        return ""
+
+
+def change_identity(repo: GitRepo, sha: str) -> str:
+    """One commit's change identity (module docstring) — for a task mined before the walk
+    stamped it: ``git patch-id --stable``, or the reverted commit's for a revert."""
+    return ChangeIndex(repo, [sha], ["-1", sha]).identity(sha)
 
 
 def iter_candidates(
@@ -133,14 +301,24 @@ def iter_candidates(
     ref: str = "HEAD",
     skip: frozenset[str] = frozenset(),
     only: frozenset[str] | None = None,
+    on_event: EventFn | None = None,
 ) -> Iterator[Candidate]:
-    """Walk history newest→oldest yielding commits that fit the pool's shape.
+    """Walk history newest→oldest yielding commits that fit the pool's shape, ONE per
+    distinct change (module docstring): a same-patch copy of an older commit and a revert
+    are skipped with a ``mine.skip`` event naming the commit that is kept.
 
     ``only`` restricts the walk to those shas (re-qualifying known tasks after the
-    miner changed); ``skip`` drops shas already mined."""
+    miner changed); ``skip`` drops shas already mined — and every other commit of a change
+    one of them holds (``already mined``), so extending a store never adds a second task
+    for a change it has, whichever commit of the change it holds."""
     caps = pool_caps(config, pool)
     n = log_n or int(config.mining.get("log_n", 3000))
-    for sha in repo.log_shas(n, ref=ref):
+    shas = repo.log_shas(n, ref=ref)
+    if not shas:
+        return
+    changes = ChangeIndex(repo, shas, ["--no-merges", "-n", str(n), ref])
+    held = changes.held(skip)
+    for sha in shas:
         if sha in skip or (only is not None and sha not in only):
             continue
         if not repo.run("rev-parse", "--verify", "--quiet", f"{sha}^1").ok:
@@ -154,7 +332,17 @@ def iter_candidates(
 
         if not (caps.src_min <= len(src) <= caps.src_max and len(lang_files) <= caps.files_max):
             continue
-        yield Candidate(sha, tuple(files), tuple(src), tuple(tests))
+        known = held.get(changes.identity(sha))
+        why = (
+            f"already mined: the same change as known task {known[:12]} (git patch-id "
+            "--stable, or the commit a revert reverts)"
+            if known
+            else changes.skip_reason(sha)
+        )
+        if why:
+            _emit(on_event, "mine.skip", sha=sha, reason=why)
+            continue
+        yield Candidate(sha, tuple(files), tuple(src), tuple(tests), changes.identity(sha))
 
 
 @dataclass(frozen=True)
@@ -208,6 +396,7 @@ def qualify(
     """
     started = time.monotonic()
     sha = cand.sha
+    change = {LABEL_CHANGE_ID: cand.change_id or change_identity(repo, sha)}
     dest = opaque_dest(scratch, "mine", avoid=(sha,))  # never named after the commit (B1)
     _emit(on_event, "mine.candidate", repo=config.name, sha=sha, pool=pool, worktree=dest.name)
     with Workspace.create(repo, sha, dest, config=config) as ws:
@@ -228,7 +417,7 @@ def qualify(
         if gold:
             discovery = _discovery_spec(
                 repo, config, cand, runner, target_scope=target_scope, pool=pool
-            )
+            ).with_(labels=change)
     if gold:
         return _qualified_outcome(
             repo,
@@ -259,12 +448,23 @@ def qualify(
             return MineOutcome(sha, None, "target green at parent", time.monotonic() - started)
 
         belt_scope = runner.belt_scope(target_scope, cand.test_files)
-        base = runner.run_for(
+        base = runner.run_belt_for(
             executor, ws.root, belt_scope, timeout=timeout, authored=repo.author_date(cand.sha)
         )
         if base.timed_out:
             _emit(on_event, "mine.skip", sha=sha, reason="baseline timeout")
             return MineOutcome(sha, None, "baseline timeout", time.monotonic() - started)
+        # the rule qualify_task applies (ADR-0019, one vocabulary): a baseline whose output
+        # does not parse is refused unless the RED itself was a build failure that explains
+        # it — else the task would later fail belt 3 on the unparsed run (P-124); a RED
+        # with an unattributed part (a target package that did not build) explains it too
+        if base.parse_error and red.failing and not red.parse_error:
+            reason = (
+                f"{QUAL_BASELINE_UNATTRIBUTED}: the belt scope failed at the parent without "
+                f"naming a test: {base.parse_error}"
+            )[:300]
+            _emit(on_event, "mine.skip", sha=sha, reason=reason, code=QUAL_BASELINE_UNATTRIBUTED)
+            return MineOutcome(sha, None, reason, time.monotonic() - started)
 
         # size is the SOURCE churn only: the tests are the oracle, not the change
         churn = repo.numstat_churn(f"{sha}~1", sha, list(cand.src_files))
@@ -287,7 +487,10 @@ def qualify(
             language=config.language.value,
             baseline_failing=tuple(sorted(base.failing)),
             red_checked=True,
-            labels={"baseline_parse_error": base.parse_error} if base.parse_error else {},
+            labels={
+                **change,
+                **({"baseline_parse_error": base.parse_error} if base.parse_error else {}),
+            },
         )
         _emit(
             on_event,
@@ -475,7 +678,7 @@ def gold_check(
             )
             _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
-        belt = runner.run_for(
+        belt = runner.run_belt_for(
             executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
         )
         if belt.timed_out or belt.parse_error:
@@ -581,7 +784,9 @@ def mine(
             mode = provider.mode(config, executor.name)
         # one posture for the whole mine: every candidate is qualified in the same one
         posture = resolve_posture(executor, runner, deps_mode=mode, root=repo.path)
-    for cand in iter_candidates(repo, config, pool=pool, ref=ref, skip=known, only=only):
+    for cand in iter_candidates(
+        repo, config, pool=pool, ref=ref, skip=known, only=only, on_event=on_event
+    ):
         if found >= want or examined >= cap:
             break
         examined += 1

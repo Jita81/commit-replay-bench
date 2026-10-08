@@ -89,6 +89,7 @@ from crb.server.routes import learn as learn_routes
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures.concurrency import at_once, pause_after
+from fixtures.posture import dict_at_apparatus
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -199,7 +200,7 @@ def _add_stale_rows(env: Env, n: int = 2, *, labels: dict[str, str] | None = Non
         )
         d.pop("failure_kind", None)
         d.pop("cost_known", None)
-        ledger.append(GradeRow.from_dict(d))
+        ledger.append(GradeRow.from_dict(dict_at_apparatus(d, "2.0")))
 
 
 def _legacy_cell(env: Env) -> str:
@@ -244,16 +245,16 @@ def test_strengthen_uses_the_controls_verdict_and_the_oracle_scores(env: Env) ->
     items = [i for i in d["items"] if i["labels"]["cell"] == "bug.fix|S"]
     assert items, d
     assert all(i["capability_class"] == "test.add" for i in items)
-    # the seed's scores average 0.58, below the bar: the cell is held for its oracle before
-    # its controls escape, as the map holds it (P-426)
+    # routing.v2 holds the host cell first on its posture; the item names the clause a test
+    # can fix — the seed's weak oracle (0.58), listed among the cell's shortfalls
     assert all(i["labels"]["reason_code"] == "oracle_weak" for i in items)
     weak = [
         i for i in items if i["labels"].get("oracle_strength") in ("0.50", "0.33", "unscoreable")
     ]
     assert weak, [i["labels"] for i in items]
-    # the seed scores are stamped 2.0: asking since the live apparatus drops them
+    # the seed scores are stamped at the live apparatus: asking since it keeps them
     d2 = env.get(f"/learn/strengthen?repo={ALPHA}&since={APPARATUS_VERSION}").json()
-    assert "bug.fix|S" in d2["cells_without_scores"]
+    assert "bug.fix|S" in d2["cells_flagged"] and "bug.fix|S" not in d2["cells_without_scores"]
     r = env.get(f"/learn/strengthen?repo={ALPHA}&by=nope")
     assert r.status_code == 422
 
@@ -263,13 +264,19 @@ def test_learn_and_the_map_agree_on_why_every_cell_is_held(env: Env) -> None:
     under — each task's latest ``oracle.score`` — so the two never disagree about why a cell
     is held. On the seed the rows' own strength is strong but the scores average 0.58: the
     map holds the cell ``oracle_weak``, and a report routed under the rows' strength called
-    it a controls escape and sent a person to the wrong work."""
+    it a controls escape and sent a person to the wrong work. routing.v2 names a cell's first
+    clause (the seed's host rows: its posture) and lists every clause among its shortfalls,
+    so the reason the map gives for the strengthening work is the first clause a test can
+    fix — the reason code when it is one, else the first such shortfall."""
     cmap = env.get(f"/capability-map?repo={ALPHA}&by=class,size").json()
-    held = {
-        c["label"]: c["reason_code"]
-        for c in cmap["cells"]
-        if c["reason_code"] in ("oracle_weak", "controls_escapes", "controls_thin")
-    }
+    strengthen = ("oracle_weak", "controls_escapes", "controls_thin")
+    held = {}
+    for c in cmap["cells"]:
+        codes = [c["reason_code"], *(s["code"] for s in c["shortfalls"])]
+        first = next((code for code in codes if code in strengthen), None)
+        if first is not None:
+            held[c["label"]] = first
+    assert held == {"backend.route.add|M": "controls_escapes", "bug.fix|S": "oracle_weak"}
     d = env.get(f"/learn/strengthen?repo={ALPHA}").json()
     assert sorted(d["cells_flagged"]) == sorted(held)
     assert d["items"]
@@ -345,8 +352,11 @@ def test_cli_over_the_exports_derives_the_route_items(
     with_controls = cli("--oracle", str(oracle), "--controls", str(controls))
     from_events = cli("--oracle", str(events), "--controls", str(controls))
     assert rows_only["cells_flagged"] == [] and rows_only["items"] == []
-    assert bare["controls"] is None
-    for d in (bare, with_controls, from_events):
+    # the oracle export alone holds the weak-oracle cell (routing.v2 reads the per-task
+    # scores); the thin cell is held by the controls escape, which only that export carries
+    assert bare["cells_flagged"] == ["bug.fix|S"] and bare["controls"] is None
+    assert {i["labels"]["cell"] for i in bare["items"]} == {"bug.fix|S"}
+    for d in (with_controls, from_events):
         got = sorted(
             (i["id"], i["labels"]["task_id"], i["labels"]["oracle_strength"]) for i in d["items"]
         )
@@ -1515,3 +1525,81 @@ def test_two_simultaneous_first_registrations_keep_both_items(
     active = FactoryHome(env.settings.home, ALPHA).load_backlog()
     assert active is not None
     assert {first, second} <= {i.id for i in active.all_items()}
+
+
+def test_learn_routes_on_the_rows_the_maps_current_reading_reads(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-728: Learn says it routes on what the capability map and the delivery gate read —
+    ``rows_for_apparatus(rows_for_mode(rows, "sighted"), "current")`` — so a blind row that
+    carries no certifying arm, and an imported row stamped with the current apparatus
+    (someone else's measurement, EI-2), never reach Learn's map, as they never reach the
+    capability map's. Filtering on the apparatus stamp alone kept both."""
+    from crb.core.ledger import LABEL_IMPORTED, GradeRow
+    from crb.server.routes import learn as learn_routes
+
+    ledger = DbLedger(env.factory)
+    template = next(r for r in ledger.rows(repo=ALPHA) if r.clean and r.mode == "sighted")
+    # a blind A0 row alone in its own cell (the sighted reading drops it, P-338's rule), and
+    # an imported row stamped with the current apparatus
+    for trial, change, labels in (
+        ("p728-blind", {"mode": "blind", "capability_class": "docs.update"}, {"context_arm": "A0"}),
+        ("p728-imported", {"provenance": "imported:peer"}, {LABEL_IMPORTED: "true"}),
+    ):
+        d = template.to_dict()
+        d.update(
+            {
+                **change,
+                "trial": trial,
+                "labels": {**template.labels, **labels},
+                "row_id": "",
+                "prev_hash": "",
+                "row_hash": "",
+            }
+        )
+        d.pop("failure_kind", None)
+        d.pop("cost_known", None)
+        ledger.append(GradeRow.from_dict(d))
+    seen: list[GradeRow] = []
+    real = learn_routes.build_capability_map
+
+    def capture(rows: Any, **kw: Any) -> Any:
+        seen.extend(rows)
+        return real(rows, **kw)
+
+    monkeypatch.setattr(learn_routes, "build_capability_map", capture)
+    assert env.get(f"/learn/strengthen?repo={ALPHA}").status_code == 200
+    assert seen, "Learn built no map"
+    assert not {r.trial for r in seen} & {"p728-blind", "p728-imported"}
+
+
+def test_the_login_check_runs_before_the_learn_lock_never_under_it(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-729: the login check can verify a stale login and write its outcome on a SECOND
+    connection. Under the Learn events write lock that second write waits for the lock the
+    request's own transaction holds (SQLite: ``database is locked``). So every run meets the
+    login check once, before the lock; the locked re-check re-runs every other refusal."""
+    del builder_keys
+    from crb.server.routes import learn as learn_routes
+    from crb.server.routes import runs as runs_routes
+
+    order: list[str] = []
+    real_login = runs_routes.login_refusal
+    real_lock = learn_routes.lock_event_writes
+
+    def login(*a: Any, **kw: Any) -> None:
+        order.append("login")
+        real_login(*a, **kw)
+
+    def lock(db: Any) -> None:
+        order.append("lock")
+        real_lock(db)
+
+    monkeypatch.setattr(runs_routes, "login_refusal", login)
+    monkeypatch.setattr(learn_routes, "lock_event_writes", lock)
+    _add_stale_rows(env)
+    r = _queue(env, cell=STALE_CELL)
+    assert r.status_code == 201, r.text
+    assert order.count("login") == len(r.json()["run_ids"]) == 2
+    assert "lock" in order and "login" not in order[order.index("lock") :], order

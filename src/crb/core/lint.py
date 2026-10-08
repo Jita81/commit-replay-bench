@@ -65,15 +65,17 @@ What it does: Runs the linter the repository configures over the changed non-tes
               could not run (a harness error, never a verdict); attributes a whole-project
               tool's findings to changed files so pre-existing debt elsewhere is recorded,
               not charged; leaves the belt *not evaluated* when the repository enforces
-              nothing. Never decides ``clean`` itself.
+              nothing, and says why in one of ``LINT_STATUSES`` (``lint_status``), whose
+              agreement with the belt ``lint_status_violation`` checks for the grade and the
+              ledger alike. Never decides ``clean`` itself.
 How:          ``RepoConfig.lint`` → ``plan_from_config``, else the runner's ``lint_plan``
               calls ``go_plan`` / ``python_plan`` / ``js_plan`` / ``jvm_plan`` / ``rust_plan``
               on the worktree → ``run_plan`` builds one ``Command`` per tool (changed files
               appended for ``paths="changed"``), runs it through the executor, ``_read_exit``
               → verdict, ``attribute_findings`` for ``findings_re`` tools → ``LintRun``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0011-repo-lint-belt.md
-Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5),
+ADRs:         docs/adr/0011-repo-lint-belt.md; ADR-0025 item 5 (``lint_status``, stream G)
+Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5 and stamps ``lint_status``),
               src/crb/core/mine.py (the same plan on the gold, so maintainers' lint debt
               excludes the task instead of blaming the builder), src/crb/core/runners/base.py
               (``lint_plan`` / ``detect_lint`` reach the detectors; the venv-first ruff
@@ -81,7 +83,7 @@ Works with:   src/crb/core/grade.py (folds ``LintRun.ok`` into belt 5),
               (validates the declared ``lint`` block at config time), src/crb/core/ledger.py
               (the ``lint`` failure kind)
 Tested by:    tests/test_lint.py, tests/test_grade.py, tests/test_mine.py,
-              tests/test_runners_node.py, tests/test_runner_audit.py
+              tests/test_runners_node.py, tests/test_runner_audit.py, tests/test_lint_status.py
 Touch when:   onboarding a repository whose linter detection is wrong or missing — declare it
               in the repo config (``lint: {command, paths, exts, findings_rc, findings_re,
               timeout}`` or ``{disabled: true}``, the shape under ``plan_from_config``;
@@ -120,6 +122,29 @@ MAX_LINT_FILES = 200
 PATHS_CHANGED = "changed"
 PATHS_ALL = "all"
 PATHS_MODES: tuple[str, ...] = (PATHS_CHANGED, PATHS_ALL)
+
+#: Why belt 5 holds the value it holds (ADR-0025 item 5): the grade's ``lint_status``, the
+#: evidence pack's record and, from apparatus 2.4, the row's hashed ``lint_reason`` label.
+#: ``evaluated`` — a plan ran over at least one changed file (``True`` or ``False``);
+#: ``none_detected`` — the repository configures no linter, or none that concerns the
+#: changed files (``None``); ``disabled_by_config`` — ``RepoConfig.lint = {disabled: true}``
+#: switched it off (``None``); ``error`` — a step could not run (``False``, a harness
+#: error); ``not_reached`` — the grade stopped before belt 5 (``None``); ``not_requested`` —
+#: ``grade(evaluate_lint=False)``, the negative controls, which write no row (``None``).
+LINT_EVALUATED = "evaluated"
+LINT_NONE_DETECTED = "none_detected"
+LINT_DISABLED_BY_CONFIG = "disabled_by_config"
+LINT_ERROR = "error"
+LINT_NOT_REACHED = "not_reached"
+LINT_NOT_REQUESTED = "not_requested"
+LINT_STATUSES: tuple[str, ...] = (
+    LINT_EVALUATED,
+    LINT_NONE_DETECTED,
+    LINT_DISABLED_BY_CONFIG,
+    LINT_ERROR,
+    LINT_NOT_REACHED,
+    LINT_NOT_REQUESTED,
+)
 
 #: Exit codes a shell reserves for "could not execute" — never a lint verdict.
 _NOT_RUNNABLE_RCS: frozenset[int] = frozenset({126, 127})
@@ -610,6 +635,36 @@ def plan_from_config(lint: Mapping[str, Any] | None) -> LintPlan | None:
 def lint_disabled(lint: Mapping[str, Any] | None) -> bool:
     """``RepoConfig.lint = {"disabled": true}`` — the operator switched belt 5 off."""
     return lint is not None and bool(lint.get("disabled"))
+
+
+def lint_status(run: LintRun | None, *, disabled: bool) -> str:
+    """Why belt 5 holds what it holds once the grade reached it — the ONE reading
+    (:data:`LINT_STATUSES`). ``disabled`` is :func:`lint_disabled` of the repository's
+    configuration; a run that linted no file (its plan concerns none of the changed files)
+    is ``none_detected``, like a repository with no linter: nothing was judged."""
+    if disabled:
+        return LINT_DISABLED_BY_CONFIG
+    if run is None or (run.ok is None and not run.error):
+        return LINT_NONE_DETECTED
+    if run.error:
+        return LINT_ERROR
+    return LINT_EVALUATED
+
+
+def lint_status_violation(status: str, belt: bool | None, *, clean: bool) -> str:
+    """The contradiction between a ``lint_status`` and belt 5's value, or ``""``: the rule
+    the grade and the ledger both hold (ADR-0025 item 5). ``evaluated`` needs a verdict,
+    ``error`` fails closed (``False``) and is never clean, and every other status leaves
+    the belt unevaluated (``None``)."""
+    if status not in LINT_STATUSES:
+        return f"lint status {status!r} is not one of {LINT_STATUSES}"
+    if status == LINT_EVALUATED and belt is None:
+        return "lint status 'evaluated' with belt 5 not evaluated (repo_lint_clean is None)"
+    if status == LINT_ERROR and (belt is not False or clean):
+        return "lint status 'error' must fail belt 5 closed (False) and is never clean"
+    if status not in (LINT_EVALUATED, LINT_ERROR) and belt is not None:
+        return f"lint status {status!r} with belt 5 evaluated (repo_lint_clean={belt!r})"
+    return ""
 
 
 # ---------------------------------------------------------------------------

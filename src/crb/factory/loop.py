@@ -1,7 +1,16 @@
 """The governed loop, one backlog item end to end, every step evidenced.
 
-    assess readiness ──refuse on unsigned structural gap──▶ not_ready
-      │ route hint ──human──▶ routed_human
+    assess readiness ──operator work / a class a person tests / unsized──▶ routed_human
+      │ THE ENTRY GATE (ADR-0026 item 8), before any spend, delivery on or off:
+      │   the size rule (the estimate's cell and the next larger one) ──XL──▶ granularize
+      │   no proven standard, or only an S3 ceiling ──▶ no_proven_standard
+      │   missing what the standard arm needs ──▶ needs_context
+      │   (an approver's calibration grant admits either as a calibration build)
+      │   proven but unsigned, where a signed cell is required ──▶ unsigned_cell
+      │     (the ONLY clause ``deliver_override`` lifts — a second approver's, never the
+      │     run's own actor's, never on a false-Q1 cell: a refused one is on the chain)
+      │ an unsigned structural gap ──▶ not_ready
+      │ delivery on, and no rung holds a licence at the item's size ──▶ not_licensed ($0)
       │ the capability map's route for the cell is read HERE, once, before any build
       ▼
     RED proof (authored test, or the test-first author rung) ──refused──▶ not_red
@@ -9,13 +18,19 @@
     build ladder → grade (pack + ledger row, process_step=factory)
       ▼ not clean / disqualified ──▶ not_clean / disqualified
     review (independent identity, probes) → verdict RECORDED before any edit
+      │ the required strength probe could not score the test (no waiver for its
+      │ bytes) ──▶ oracle_not_scoreable (routed human; nothing pushed)
       ▼ accept_with_edit ──▶ rework: edit permitted → RED proof → build → grade
       │     │                 → a fresh verdict on the rebuilt change (nothing delivered)
       │     └─ a weak_oracle finding with no test author, or one that returns the
       │        same oracle ──▶ oracle_needs_strengthening (routed human; NO rebuild)
       ▼ reject / rework_exhausted / oracle_needs_strengthening ──▶ NO pull request
+    a calibration build ──▶ calibration_build (NEVER a pull request)
+    the delivered change's own cell (its measured size, the final rung's builder and
+      │   model) must license it ──▶ size_exceeds_licence / cell_not_licensed
     deliver — ONLY an `accept` verdict reaches it (ADR-0021); OPT-IN, default OFF; fails
-      │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045)
+      │   closed on missing creds; gated on the route read at readiness (DL-038, DL-045),
+      │   re-read on the measured cell when the change measures larger (GOV-2)
       ▼   ──▶ delivery_failed
     accepted
 
@@ -34,14 +49,20 @@ Navigation
 ----------
 What it is:   The governed loop — one backlog item end to end, every step evidenced, no
               step skippable.
-What it does: Sequences readiness (where the capability map's route for the item's cell
-              is read once, before any build) → RED proof (authored or test-first rung) →
-              build ladder → independent review → rework (edit permitted only after a
-              recorded verdict; bounded by ``max_rework``; a ``weak_oracle`` verdict never
-              rebuilds against an unchanged oracle — DL-045 rule 3) → optional delivery
-              (default OFF, fails closed, gated on that route — re-read on the measured cell
-              when the change measures larger than its estimate; an override honoured only
-              from a second approver and never on a false-Q1 cell — and reached ONLY by an
+What it does: Sequences readiness and the entry gate (ADR-0026 item 8: an item is built only
+              on its cell's proven context standard and with what that arm needs; an
+              approver's calibration build never delivers; the override lifts only the
+              sign-off clause, honoured only from a second approver and never on a false-Q1
+              cell — GOV-1, GOV-4) — where the capability map's route for the item's cell is
+              read once, before any build — → RED proof on the standard arm's oracle
+              (authored or test-first rung) → build ladder, graded on the run's checks arm
+              (GOV-3) → independent review (an unscoreable oracle with no approver's waiver
+              for its bytes stops ``oracle_not_scoreable`` before any push) → rework (edit
+              permitted only after a recorded verdict; bounded by ``max_rework``; a
+              ``weak_oracle`` verdict never rebuilds against an unchanged oracle — DL-045
+              rule 3) → optional delivery (default OFF, fails closed, gated on the delivered
+              change's own licence and on that route — re-read on the measured cell when
+              the change measures larger than its estimate, GOV-2 — and reached ONLY by an
               ``accept`` verdict — ADR-0021), turning every governed refusal into an
               ``ItemOutcome`` status rather than an exception; an open pull request an
               earlier run opened is updated on ``accept`` and closed, naming the verdict, on
@@ -85,6 +106,15 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from crb.builders.base import Budget, Builder, Rung
+from crb.builders.brief import (
+    ACCEPTANCE_NONE,
+    ARM_S1,
+    ARM_S2,
+    LABEL_ACCEPTANCE,
+    arm_base,
+    arm_carries_loop,
+    context_arm_for,
+)
 from crb.core.checks import ResolvedChecks
 from crb.core.deps import TaskDeps
 from crb.core.evidence import utc_now_iso
@@ -92,6 +122,7 @@ from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.ledger import JsonlLedger
 from crb.core.posture import Posture
+from crb.core.prevention import LearningSnapshot
 from crb.core.redact import redact_and_cap, redact_and_cap_head
 from crb.core.routing import REASON_FALSE_Q1, ROUTE_DO_NOT_SHIP
 from crb.core.routing import ROUTE_DELIVER as ROUTE_DELIVER_WORD
@@ -114,9 +145,11 @@ from crb.factory.evidence import (
     EV_BACKLOG_FROZEN,
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
+    EV_PROBE_WAIVED,
     OUTCOME_CLOSED,
     FactoryEvent,
     FactoryEvidence,
+    waiting_grant,
 )
 from crb.factory.readiness import (
     ROUTE_HUMAN,
@@ -127,15 +160,36 @@ from crb.factory.readiness import (
     assess,
 )
 from crb.factory.review import (
+    FINDING_PROBE_WAIVED,
     FINDING_WEAK_ORACLE,
     SEVERITY_BLOCKING,
     SEVERITY_MAJOR,
     MechanicalReviewer,
     Probe,
+    ProbeWaiver,
     Reviewer,
     ReviewVerdict,
     permit_edit,
     review,
+    unscoreable,
+)
+from crb.factory.standard import (
+    NO_READINGS,
+    STOP_CALIBRATION_BUILD,
+    STOP_CELL_NOT_LICENSED,
+    STOP_GRANULARIZE,
+    STOP_NEEDS_CONTEXT,
+    STOP_NO_PROVEN_STANDARD,
+    STOP_NOT_LICENSED,
+    STOP_SIZE_EXCEEDS_LICENCE,
+    STOP_UNSIGNED_CELL,
+    STOP_UNSIZED,
+    Calibration,
+    Entry,
+    Readers,
+    gate_for,
+    licensing_rungs,
+    own_cell_licence,
 )
 from crb.factory.testfirst import (
     AuthoredTest,
@@ -145,11 +199,14 @@ from crb.factory.testfirst import (
     assert_distinct_identity,
     author_label,
     author_test,
+    canonical_model,
     prove_red,
 )
 from crb.observability.events import Emitter, MemorySink, StepStatus
 
 STAGE = "factory"
+#: The row label a calibration build carries (ADR-0026 item 8).
+LABEL_CALIBRATION = "calibration"
 
 STATUS_NOT_READY = "not_ready"
 STATUS_ROUTED_HUMAN = "routed_human"
@@ -165,6 +222,23 @@ STATUS_REWORK_EXHAUSTED = "rework_exhausted"
 #: can be had — no test author, or the author returned the same bytes: a rebuild would only
 #: let the builder find another way to pass the same test (B-1b finding 3, DL-045 rule 3).
 STATUS_ORACLE_NEEDS_STRENGTHENING = "oracle_needs_strengthening"
+#: The required strength probe could not score the authored test and no approver waived
+#: it for those bytes (ADR-0025 item 12): no rework, no delivery — the way forward is a
+#: superseding item with a scoreable test, or an approver's waiver for this test.
+STATUS_ORACLE_NOT_SCOREABLE = "oracle_not_scoreable"
+#: The entry gate's stops, before any spend (ADR-0026 item 8) — see crb.factory.standard.
+STATUS_NO_PROVEN_STANDARD = STOP_NO_PROVEN_STANDARD
+STATUS_NEEDS_CONTEXT = STOP_NEEDS_CONTEXT
+STATUS_UNSIGNED_CELL = STOP_UNSIGNED_CELL
+STATUS_GRANULARIZE = STOP_GRANULARIZE
+STATUS_NOT_LICENSED = STOP_NOT_LICENSED
+#: The licence of the delivered change (ADR-0025 item 12): after an accepting review, its
+#: own measured cell did not license it — no pull request.
+STATUS_SIZE_EXCEEDS_LICENCE = STOP_SIZE_EXCEEDS_LICENCE
+STATUS_CELL_NOT_LICENSED = STOP_CELL_NOT_LICENSED
+#: An approver's calibration build, accepted by its review: evented as one, stamped with its
+#: arm, and never able to open a pull request.
+STATUS_CALIBRATION_BUILD = STOP_CALIBRATION_BUILD
 STATUS_BLOCKED = "blocked_on_dependency"
 STATUS_ERROR = "error"
 STATUSES: tuple[str, ...] = (
@@ -179,9 +253,27 @@ STATUSES: tuple[str, ...] = (
     STATUS_REJECTED,
     STATUS_REWORK_EXHAUSTED,
     STATUS_ORACLE_NEEDS_STRENGTHENING,
+    STATUS_ORACLE_NOT_SCOREABLE,
+    STATUS_NO_PROVEN_STANDARD,
+    STATUS_NEEDS_CONTEXT,
+    STATUS_UNSIGNED_CELL,
+    STATUS_GRANULARIZE,
+    STATUS_NOT_LICENSED,
+    STATUS_SIZE_EXCEEDS_LICENCE,
+    STATUS_CELL_NOT_LICENSED,
+    STATUS_CALIBRATION_BUILD,
     STATUS_BLOCKED,
     STATUS_ERROR,
 )
+#: Entry-gate stop code → the item's status (``unsized`` goes to a person).
+_ENTRY_STATUS: dict[str, str] = {
+    STOP_UNSIZED: "routed_human",
+    STOP_GRANULARIZE: STATUS_GRANULARIZE,
+    STOP_NO_PROVEN_STANDARD: STATUS_NO_PROVEN_STANDARD,
+    STOP_NEEDS_CONTEXT: STATUS_NEEDS_CONTEXT,
+    STOP_UNSIGNED_CELL: STATUS_UNSIGNED_CELL,
+    STOP_NOT_LICENSED: STATUS_NOT_LICENSED,
+}
 #: How much of a ``weak_oracle`` finding's detail the ``oracle_needs_strengthening`` reason
 #: quotes — its head, so the reason's prefix and way forward fit ``ItemOutcome.error``.
 _FINDING_HEAD_CHARS = 300
@@ -234,18 +326,36 @@ class FactorySpec:
     #: as it stood before this run's own rows landed (B-1b finding 2 → DL-045). It must answer
     #: from ONE pre-run reading of the map (the worker's is computed once, without this run's
     #: rows): when the built change measures larger than the item's estimate it is asked
-    #: again, for the measured cell, and that answer licenses the delivery (GOV-2).
+    #: again, for the measured cell, and that answer is the route gate's (GOV-2).
     route_decision_for: Callable[[BacklogItem], Mapping[str, Any] | None] | None = None
-    #: An approver's identity that overrides the route gate for THIS run; recorded on the
-    #: evidence chain as a ``route.decided`` event naming the measured route it overrode.
-    #: Empty = no override (the default). Never honoured when it names the run's own
-    #: ``actor`` (GOV-4: ADR-0016's two-person rule) or on a cell refused for false-Q1 (GOV-1:
-    #: the honesty floor) — both refusals are recorded on the chain.
+    #: An approver's identity that lifts the SIGN-OFF clause (``unsigned_cell``) for THIS
+    #: run, and nothing else (ADR-0026 item 8): never a missing standard, a ceiling, missing
+    #: context, a calibration build, the route gate or the delivered change's own licence.
+    #: Recorded on the evidence chain naming the approver. Empty = no override (the default).
+    #: Never honoured when it names the run's own ``actor`` (GOV-4: ADR-0016's two-person
+    #: rule — a second approver grants it, ``POST /runs/{id}/deliver-override``) or on a cell
+    #: refused for false-Q1 (GOV-1: the honesty floor) — both refusals are on the chain.
     deliver_override_by: str = ""
-    #: The same override read LIVE at each item's delivery gate (the worker reads the run's
-    #: row, so a second approver's grant made while the run works reaches the next gate);
+    #: The same override read LIVE at each item's entry gate (the worker reads the run's
+    #: row, so a second approver's grant made while the run works reaches the next item);
     #: ``None`` = the static ``deliver_override_by``.
     deliver_override_for: Callable[[], str] | None = None
+    #: The run's ``checks`` switches (ADR-0024; the worker resolves ``params.checks`` over the
+    #: repository's block, as for a replay): every build is graded on that arm — the arm the
+    #: route gate read its licence on (GOV-3). ``None`` = the repository's own block.
+    checks: ResolvedChecks | None = None
+    #: The readers of the cells' proven standards (ADR-0026 item 8), bound ONCE per run to
+    #: the pre-run map (the worker's: ``crb.server.factory_standard.bind_readers``). ``None``
+    #: is ``crb.factory.standard.NO_READINGS`` — which fails closed: with no reading, no cell
+    #: has a standard, and only a calibration build is built.
+    readers: Readers | None = None
+    #: ADR-0018's sign-off clause (Wave 4, stream S): when on, a proven standard with no
+    #: active sign-off stops ``unsigned_cell`` before any spend. Off until that clause ships.
+    require_signed_cell: bool = False
+    #: The prevention loop's snapshot for this run (ADR-0020). A factory brief carries its
+    #: overlay and lines when, and ONLY when, the item's standard arm carries ``+L``
+    #: (ADR-0026 item 8): the loop switch never adds context the standard arm lacks.
+    learning: LearningSnapshot | None = None
     keep_workspaces: bool = False
     #: The posture the run grades in and the dependency bindings its items build with
     #: (ADR-0019). ``None`` resolves the posture live per build and uses the null
@@ -255,10 +365,6 @@ class FactorySpec:
     #: Keep every graded attempt's patch under ``<evidence_dir>/patches`` (crb.core.patches);
     #: ``False`` when the deployment keeps no code (``retention.patches`` off).
     keep_patches: bool = True
-    #: The run's ``checks`` switches (ADR-0024; the worker resolves ``params.checks`` over the
-    #: repository's block, as for a replay): every build is graded on that arm — the arm the
-    #: route gate read its licence on (GOV-3). ``None`` = the repository's own block.
-    checks: ResolvedChecks | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ladder", tuple(self.ladder))
@@ -274,6 +380,14 @@ class FactorySpec:
                 assert_distinct_identity(lbl, r.label, role=f"build rung {i}")
         if self.max_rework < 0:
             raise ValueError("max_rework cannot be negative")
+        if self.readers is None:
+            object.__setattr__(self, "readers", NO_READINGS)
+
+    @property
+    def gate(self) -> Readers:
+        """The bound readers (never ``None`` after construction)."""
+        assert self.readers is not None
+        return self.readers
 
 
 @dataclass(frozen=True)
@@ -347,15 +461,15 @@ def _route_summary(route: Mapping[str, Any] | None) -> dict[str, Any] | None:
 
 
 #: The ``reason_code`` of a delivery withheld because the change measured larger than the
-#: cell its licence was read on, and the measured cell does not route ``deliver`` (GOV-2).
+#: cell the route was read on, and the measured cell does not route ``deliver`` (GOV-2).
 REASON_SIZE_EXCEEDS_LICENCE = "size_exceeds_licence"
 #: Why an approver's override was NOT honoured, as the refusal records it (``override_refused``).
 OVERRIDE_REFUSED_FALSE_Q1 = "false_q1"
 OVERRIDE_REFUSED_SAME_ACTOR = "same_actor"
 _OVERRIDE_REFUSED_WHY: dict[str, str] = {
     OVERRIDE_REFUSED_FALSE_Q1: (
-        "false-Q1 = 0 is the honesty floor: no override delivers on a cell with a false-Q1 "
-        "row (the override by {by} was refused)"
+        "false-Q1 = 0 is the honesty floor: no override lifts anything on a cell with a "
+        "false-Q1 row (the override by {by} was refused)"
     ),
     OVERRIDE_REFUSED_SAME_ACTOR: (
         "the override was named by this run's own actor {by}; a second approver grants it "
@@ -370,9 +484,10 @@ def _tier(size: str) -> int:
 
 
 def _override_refusal(route: Mapping[str, Any] | None, override_by: str, *, actor: str) -> str:
-    """Why an override naming ``override_by`` cannot lift this route (``""`` = it may):
-    the honesty floor (a ``do_not_ship`` cell, a ``false_q1`` reason or any false-Q1 row in
-    the cell — GOV-1), or an override named by the run's own actor (GOV-4)."""
+    """Why an override naming ``override_by`` cannot lift the sign-off clause for this cell
+    (``""`` = it may): the honesty floor (a ``do_not_ship`` cell, a ``false_q1`` reason or
+    any false-Q1 row in the cell — GOV-1), or an override named by the run's own actor
+    (GOV-4)."""
     if not override_by:
         return ""
     r = route or {}
@@ -385,6 +500,13 @@ def _override_refusal(route: Mapping[str, Any] | None, override_by: str, *, acto
     if actor and override_by == actor:
         return OVERRIDE_REFUSED_SAME_ACTOR
     return ""
+
+
+def _waiver_notes(verdict: ReviewVerdict) -> tuple[str, ...]:
+    """Every waiver the accepted verdict went through, as the pull request states it."""
+    return tuple(
+        f.detail for p in verdict.probes for f in p.findings if f.kind == FINDING_PROBE_WAIVED
+    )
 
 
 class _Stop(Exception):
@@ -437,17 +559,64 @@ class FactoryLoop:
         return None if d is None else dict(d)
 
     def _override_by(self) -> str:
-        """Who overrides the route gate for this run, read now: the live seam when the spec
+        """Who lifts the sign-off clause for this run, read now: the live seam when the spec
         has one (a second approver's grant made while the run works), else the static
         value. ``""`` = nobody."""
         f = self.spec.deliver_override_for
         return str((f() if f is not None else self.spec.deliver_override_by) or "").strip()
 
-    def _assess(self, item: BacklogItem) -> tuple[Readiness, dict[str, Any] | None]:
-        """Step 1: readiness; stops the item on an unsigned structural gap or a human route.
-        Returns the readiness and the cell's route (:meth:`_map_route`), which the
-        ``route.decided`` event records as ``cell_route``."""
+    def _calibration(self, item: BacklogItem) -> Calibration | None:
+        """The item's unspent calibration grant: the newest ``calibration.funded`` that no
+        run has claimed (one grant funds ONE run — :func:`waiting_grant`). Reading it is not
+        taking it: :meth:`_assess` claims it on the chain before any spend (P-298)."""
+        ev = waiting_grant(self.spec.evidence.events_for(item.id), item.id)
+        if ev is None:
+            return None
+        return Calibration(
+            approver=str(ev.payload.get("approver", "")),
+            reason=str(ev.payload.get("reason", "")),
+            event_id=ev.event_id,
+        )
+
+    def _stop_entry(self, item: BacklogItem, r: Readiness, entry: Entry) -> NoReturn:
+        """Record the entry gate's stop — before any spend — and end the item."""
         ev = self.spec.evidence
+        ev.record_entry_refused(
+            item.id,
+            entry.code,
+            entry.reason,
+            reason_code=entry.reason_code,
+            needs=list(entry.needs),
+            entry=entry.to_dict(),
+        )
+        ev.record_route(
+            item.id, ROUTE_HUMAN, entry.reason, reason_code=entry.code, needs=list(entry.needs)
+        )
+        self._emit(
+            "entry.refused",
+            item.id,
+            status=StepStatus.SKIPPED,
+            code=entry.code,
+            reason=entry.reason,
+            needs=list(entry.needs),
+        )
+        raise _Stop(_ENTRY_STATUS[entry.code], readiness=r, error=entry.reason)
+
+    def _assess(
+        self, item: BacklogItem, authored: AuthoredTest | None = None
+    ) -> tuple[Readiness, dict[str, Any] | None, Entry]:
+        """Step 1: readiness and the ENTRY GATE (ADR-0026 item 8), before any spend.
+
+        Operator work and a class a person must test (uncatalogued, weak oracle) go to a
+        person; then the gate: the size rule, the cell's proven standard, what that arm
+        needs, the sign-off clause (the one clause ``deliver_override`` lifts); an
+        approver's calibration grant admits an item stopped for a missing standard or
+        missing context, as a calibration build. A structural gap still blocks any build
+        (``not_ready``). With delivery on, some rung must hold a licence at the item's size
+        (``not_licensed``). Returns the readiness, the cell's route (:meth:`_map_route`) and
+        the entry decision."""
+        s = self.spec
+        ev = s.evidence
         r = assess(item, self._signoffs(item))
         ev.record_readiness(r.to_dict())
         self._emit(
@@ -463,30 +632,185 @@ class FactoryLoop:
             ev.record_route(item.id, ROUTE_HUMAN, r.reason, open_gaps=[g.slot for g in r.gaps])
             self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=r.reason)
             raise _Stop(STATUS_ROUTED_HUMAN, readiness=r)
+        if r.route_hint == ROUTE_HUMAN and r.ready:
+            # a class a person must test (uncatalogued, or green proves only the build)
+            ev.record_route(item.id, ROUTE_HUMAN, r.reason)
+            self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=r.reason)
+            raise _Stop(STATUS_ROUTED_HUMAN, readiness=r)
+        g = s.gate
+        # the override names a second approver, and never lifts anything on a false-Q1 cell:
+        # a refused one is recorded, and the gate decides as if nobody had named it
+        override_by = self._override_by()
+        refused = _override_refusal(
+            self._map_route(item) if override_by else None, override_by, actor=s.actor
+        )
+        if refused:
+            ev.record_route(
+                item.id,
+                r.route_hint,
+                f"override refused — {_OVERRIDE_REFUSED_WHY[refused].format(by=override_by)}",
+                override_refused=refused,
+                override_by=override_by,
+            )
+            self._emit(
+                "delivery.override_refused",
+                item.id,
+                status=StepStatus.SKIPPED,
+                override_refused=refused,
+                override_by=override_by,
+            )
+            override_by = ""
+
+        def decide(calibration: Calibration | None) -> Entry:
+            return gate_for(
+                item,
+                r,
+                g,
+                person_test=authored is not None and authored.operator_authored,
+                calibration=calibration,
+                require_signed_cell=s.require_signed_cell,
+                override_by=override_by,
+                author=self._s1_author(authored),
+            )
+
+        entry = decide(self._calibration(item))
+        if not entry.enters:
+            self._stop_entry(item, r, entry)
+        if entry.override_by:
+            # the approver's override lifted the sign-off clause — and only that — by name
+            ev.record_route(
+                item.id,
+                r.route_hint,
+                f"sign-off clause lifted by {entry.override_by} for this run",
+                override_by=entry.override_by,
+                standard=entry.standard.to_dict() if entry.standard else None,
+            )
+            self._emit("delivery.override", item.id, override_by=entry.override_by)
         if not r.ready:
             ev.record_route(
-                item.id, ROUTE_HUMAN, r.reason, blocking=[g.slot for g in r.blocking_gaps]
+                item.id, ROUTE_HUMAN, r.reason, blocking=[gap.slot for gap in r.blocking_gaps]
             )
             self._emit("readiness.refused", item.id, status=StepStatus.SKIPPED, reason=r.reason)
             raise _Stop(STATUS_NOT_READY, readiness=r)
+        if entry.calibration is not None and (
+            ev.claim_calibration(item.id, entry.calibration.event_id, run_id=s.run_id) is None
+        ):
+            # another run claimed the grant between our read and now: this run is answered
+            # as if it had never been funded — the gate's own stop, before any spend (P-298)
+            self._stop_entry(item, r, decide(None))
         route = self._map_route(item)
         cell = _route_summary(route)
-        ev.record_route(item.id, r.route_hint, r.reason, cell_route=cell)
+        ev.record_route(
+            item.id,
+            r.route_hint,
+            r.reason,
+            cell_route=cell,
+            standard=entry.standard.to_dict() if entry.standard else None,
+            calibration=entry.calibration is not None,
+        )
         self._emit("route.decided", item.id, route=r.route_hint, reason=r.reason, cell_route=cell)
-        if r.route_hint == ROUTE_HUMAN:
-            raise _Stop(STATUS_ROUTED_HUMAN, readiness=r)
-        return r, route
+        if s.deliver and entry.calibration is None:
+            rungs = [(rung.builder, rung.model, rung.provider) for rung in s.ladder]
+            if not licensing_rungs(
+                item.capability_class,
+                item.size_estimate,
+                rungs,
+                arm=entry.arm,
+                standard_for=g.standard_for,
+            ):
+                self._stop_entry(
+                    item,
+                    r,
+                    Entry(
+                        STOP_NOT_LICENSED,
+                        f"delivery is on and no rung of this run's ladder "
+                        f"({', '.join(f'{b}:{m}@{p}' if p else f'{b}:{m}' for b, m, p in rungs)}) "
+                        f"holds a licence for {entry.arm} in the {item.capability_class} "
+                        f"{item.size_estimate} cell for its own builder, model and provider: "
+                        "not built",
+                        reason_code=STOP_NOT_LICENSED,
+                        standard=entry.standard,
+                        cells=entry.cells,
+                    ),
+                )
+        if entry.calibration is not None:
+            ev.record_route(
+                item.id,
+                r.route_hint,
+                entry.reason,
+                reason_code=STOP_CALIBRATION_BUILD,
+                calibration_by=entry.calibration.approver,
+                calibration_event=entry.calibration.event_id,
+            )
+            self._emit(
+                "calibration.started",
+                item.id,
+                approver=entry.calibration.approver,
+                answers=entry.reason_code,
+            )
+        return r, route, entry
 
-    def _oracle(
-        self, item: BacklogItem, r: Readiness, authored: AuthoredTest | None
-    ) -> AuthoredTest:
-        """Step 2a: the oracle — the caller's authored test, else the test-author rung;
-        stops with ``no_oracle`` when neither exists."""
-        if authored is not None:
-            return authored
+    def _s1_author(self, authored: AuthoredTest | None) -> str | None:
+        """The canonical model that would write this item's ``S1`` test — a caller's own
+        (non-person) test's author, else the run's test author — or ``None`` when there is
+        none (the oracle step then stops ``no_oracle``). The entry gate compares it with an
+        ``S1@<author>`` standard, before any spend (ADR-0026 items 1 and 8)."""
+        if authored is not None and not authored.operator_authored:
+            model = authored.author.split(":", 1)[-1]
+            return canonical_model(model) or model
         ta = self.spec.test_author
         if ta is None:
-            self.spec.evidence.record_red_refused(
+            return None
+        return canonical_model(ta.model) or ta.model
+
+    @staticmethod
+    def _arm_base(entry: Entry, authored: AuthoredTest | None) -> str:
+        """The base of the arm this build is composed from: the cell's standard arm; for a
+        calibration build, ``S2`` when a person attached a failing test, else ``S1``."""
+        if entry.calibration is None and entry.standard is not None and entry.standard.licenses:
+            return entry.standard.base
+        return ARM_S2 if authored is not None and authored.operator_authored else ARM_S1
+
+    def _oracle(
+        self,
+        item: BacklogItem,
+        r: Readiness,
+        authored: AuthoredTest | None,
+        entry: Entry | None = None,
+    ) -> tuple[AuthoredTest, str]:
+        """Step 2a: the oracle the standard arm is measured with, and the arm's id
+        (ADR-0026 items 1 and 8) — the builder gets exactly that arm's context:
+
+        * ``S2`` — the failing test a person attached;
+        * ``S1@<author>`` — the configured test author's test; a person's test attached to
+          an item in an ``S1`` cell is HELD OUT (recorded, never shown to the builder).
+
+        Stops with ``no_oracle`` when the arm's oracle cannot be had."""
+        entry = entry or Entry()
+        s = self.spec
+        plus_l = entry.calibration is None and entry.standard is not None and entry.standard.plus_l
+        base = self._arm_base(entry, authored)
+        if base == ARM_S2 and authored is not None:
+            return authored, context_arm_for(base=ARM_S2, plus_l=plus_l)
+        if authored is not None and authored.operator_authored:
+            s.evidence.record_route(
+                item.id,
+                r.route_hint,
+                "a person's test on an S1 cell is kept as a held-out acceptance test: the "
+                "builder never sees it",
+                held_out_test=authored.path,
+                held_out_sha256=authored.sha256,
+            )
+            self._emit("author.held_out", item.id, path=authored.path, sha256=authored.sha256)
+        elif authored is not None:
+            # a test handed in by another author (a caller's own oracle) is the arm's oracle
+            ta_model = authored.author.split(":", 1)[-1]
+            return authored, context_arm_for(
+                base=ARM_S1, author=canonical_model(ta_model) or ta_model, plus_l=plus_l
+            )
+        ta = s.test_author
+        if ta is None:
+            s.evidence.record_red_refused(
                 item.id, "no authored test and no test author configured", route=r.route_hint
             )
             raise _Stop(STATUS_NO_ORACLE, readiness=r)
@@ -496,13 +820,16 @@ class FactoryLoop:
             item,
             ta,
             facts=r.facts,
-            config=self.spec.config,
-            scratch=self.spec.scratch,
+            config=s.config,
+            scratch=s.scratch,
             on_event=self._cb(item.id),
         )
         if r.route_hint != ROUTE_TEST_FIRST:
             self._emit("author.done", item.id, note="authored on the build route (no value gaps)")
-        return res.authored
+        arm = context_arm_for(
+            base=ARM_S1, author=canonical_model(ta.model) or ta.model, plus_l=plus_l
+        )
+        return res.authored, arm
 
     def _prove(self, item: BacklogItem, r: Readiness, authored: AuthoredTest) -> RedProof:
         """Step 2b: the RED proof; a refusal is recorded and stops the item (``not_red``)."""
@@ -535,8 +862,12 @@ class FactoryLoop:
         proof: RedProof,
         *,
         trial_prefix: str,
+        labels: Mapping[str, str] | None = None,
+        arm: str = "",
     ) -> list[BuildResult]:
-        """Step 3: the build ladder; every attempt is recorded, the final one's tree kept."""
+        """Step 3: the build ladder; every attempt is recorded, the final one's tree kept.
+        ``labels`` go on every row: the context arm the brief carried, a calibration
+        build's stamp (ADR-0026 items 1 and 8)."""
         s = self.spec
         results = build_ladder(
             self.repo,
@@ -562,6 +893,11 @@ class FactoryLoop:
             deps=s.deps,
             keep_patches=s.keep_patches,
             checks=s.checks,
+            labels=labels,
+            arm=arm,
+            # ADR-0026 item 8: the loop's overlay and lines only on a +L arm
+            learning=s.learning if arm_carries_loop(arm) else None,
+            author_stamp=self._author_stamp(proof),
         )
         for res in results:
             s.evidence.record_build(
@@ -590,6 +926,7 @@ class FactoryLoop:
         previous: DeliveryResult | None = None,
         rework_n: int = 0,
         after_verdict: str = "",
+        arm: str = "",
     ) -> tuple[DeliveryResult | None, str]:
         """The LAST step: delivery of a build the review ACCEPTED (ADR-0021) — skipped and
         RECORDED when opt-in is off; a failure stops the item (``delivery_failed``).
@@ -599,8 +936,9 @@ class FactoryLoop:
         ``previous`` is the item's OPEN pull request from an earlier run: the same pull
         request is updated, never a second one opened; its comment failing (after the push
         has moved the branch) is recorded on the ``delivery.updated`` event as
-        ``comment_error`` and emitted as a ``delivery.comment_failed`` warning. Returns
-        ``(result, pr_ref)``."""
+        ``comment_error`` and emitted as a ``delivery.comment_failed`` warning. ``arm`` is
+        the context arm the build carried: the change's own cell must license THAT arm.
+        Returns ``(result, pr_ref)``."""
         s = self.spec
         if not verdict.accepted or verdict.pack_hash != final.pack_hash:
             raise DeliveryError(
@@ -616,20 +954,68 @@ class FactoryLoop:
             )
             self._emit("delivery.skipped", item.id, status=StepStatus.SKIPPED, reason="opt-in off")
             return None, ""
+        # THE LICENCE OF THE DELIVERED CHANGE (ADR-0025 item 12, C4): the change's OWN cell —
+        # its class, the size tier of the churn actually built, the final rung's builder,
+        # model and provider, and the arm the build carried — must license delivery in the map read
+        # before the run. Both sizes and both cells go on the evidence; nothing (no
+        # override) lifts this.
+        built_by = final.pack.builder
+        rung_builder, _, rung_model = final.rung.partition(":")
+        lic = own_cell_licence(
+            capability_class=item.capability_class,
+            estimate=item.size_estimate,
+            measured=final.task.size,
+            builder=built_by.name if built_by is not None else rung_builder,
+            model=built_by.model if built_by is not None else rung_model,
+            provider=built_by.provider if built_by is not None else "",
+            arm=arm,
+            standard_for=s.gate.standard_for,
+        )
+        if not lic.licensed:
+            s.evidence.record_delivery_refused(
+                item.id,
+                lic.reason,
+                pack_hash=final.pack_hash,
+                reason_code=lic.code,
+                estimate=lic.estimate,
+                measured=lic.measured,
+                estimated_cell=f"{item.capability_class}|{item.size_estimate}",
+                licence=lic.to_dict(),
+            )
+            self._emit(
+                "delivery.unlicensed",
+                item.id,
+                status=StepStatus.SKIPPED,
+                reason=lic.reason,
+                code=lic.code,
+                estimate=lic.estimate,
+                measured=lic.measured,
+            )
+            raise _Stop(
+                STATUS_SIZE_EXCEEDS_LICENCE
+                if lic.code == STOP_SIZE_EXCEEDS_LICENCE
+                else STATUS_CELL_NOT_LICENSED,
+                error=lic.reason,
+            )
+        # both sizes and both cells ride on the delivery event itself
+        licence = {
+            "estimate": lic.estimate,
+            "measured": lic.measured,
+            "estimated_cell": f"{item.capability_class}|{item.size_estimate}",
+            "licence": lic.to_dict(),
+        }
         # THE ROUTE GATE (external review 2026-09-16, point 36 → DL-038): the capability
         # map decides what the factory may deliver. A clean build in a cell that does not
-        # route `deliver` — or in a cell nobody has measured — is built, graded and
-        # reviewed, but no pull request is opened; the withholding and the measured route
-        # are on the evidence chain. An approver may override for one run, and that
-        # override is itself an event naming the route it overrode. The route was read
+        # route `deliver` — or in a cell nobody has measured — opens no pull request; the
+        # withholding and the measured route are on the evidence chain. The route was read
         # ONCE, at readiness, before this build's row landed (DL-045) — never re-read here,
-        # unless the change measures larger than the item's estimate (below).
-        #
-        # The licence covers the size of the change DELIVERED (GOV-2): the cell read at
-        # readiness is the item's declared size (a ticket's story points); when the build
-        # measures larger, the measured cell — from the same pre-run map — is the licence.
+        # unless the change measures another size than the item's estimate, larger OR
+        # smaller: the route gate covers the size DELIVERED (GOV-2, P-335), so the measured
+        # cell's route — from the same pre-run map — is the one read. No override lifts it
+        # (ADR-0026 item 8: ``deliver_override`` lifts the sign-off clause only).
         declared, delivered = item.size_estimate, final.task.size
-        resized = _tier(delivered) > _tier(declared)
+        resized = bool(delivered) and delivered != declared
+        larger = _tier(delivered) > _tier(declared)
         if resized:
             route = self._map_route(dc_replace(item, size_estimate=delivered))
         sizes = {"size_estimate": declared, "size_measured": delivered} if resized else {}
@@ -647,50 +1033,25 @@ class FactoryLoop:
                     f"where the item was estimated {declared}, and the ({item.capability_class}, "
                     f"{delivered}) cell licenses no delivery: {why}"
                 )
-                reason_code = REASON_SIZE_EXCEEDS_LICENCE
-            override_by = self._override_by()
-            refused = _override_refusal(route, override_by, actor=s.actor)
-            if not override_by or refused:
-                note = (
-                    f" — {_OVERRIDE_REFUSED_WHY[refused].format(by=override_by)}" if refused else ""
-                )
-                s.evidence.record_delivery_refused(
-                    item.id,
-                    f"route gate: {why}{note}",
-                    pack_hash=final.pack_hash,
-                    measured_route=measured,
-                    reason_code=reason_code,
-                    policy_version=str((route or {}).get("policy_version", "")),
-                    **sizes,
-                    **(
-                        {"override_refused": refused, "override_by": override_by} if refused else {}
-                    ),
-                )
-                self._emit(
-                    "delivery.withheld",
-                    item.id,
-                    status=StepStatus.SKIPPED,
-                    reason=why,
-                    measured_route=measured,
-                    **({"override_refused": refused} if refused else {}),
-                )
-                return None, ""
-            s.evidence.record_route(
+                if larger:
+                    reason_code = REASON_SIZE_EXCEEDS_LICENCE
+            s.evidence.record_delivery_refused(
                 item.id,
-                ROUTE_DELIVER_WORD,
-                f"route gate overridden by {override_by}: {why}",
-                override_by=override_by,
+                f"route gate: {why}",
+                pack_hash=final.pack_hash,
                 measured_route=measured,
                 reason_code=reason_code,
                 policy_version=str((route or {}).get("policy_version", "")),
                 **sizes,
             )
             self._emit(
-                "delivery.override",
+                "delivery.withheld",
                 item.id,
-                override_by=override_by,
+                status=StepStatus.SKIPPED,
+                reason=why,
                 measured_route=measured,
             )
+            return None, ""
         try:
             d = deliver(
                 self.repo,
@@ -708,6 +1069,7 @@ class FactoryLoop:
                 after_verdict=after_verdict,
                 verdict=verdict.verdict,
                 repo_id=self.credentials_key,
+                waivers=_waiver_notes(verdict),
             )
         except DeliveryError as exc:
             s.evidence.record_delivery_refused(
@@ -717,7 +1079,7 @@ class FactoryLoop:
             raise _Stop(STATUS_DELIVERY_FAILED, error=str(exc)) from exc
         if d.updated:
             s.evidence.record_delivery_updated(
-                d.to_dict(), rework=rework_n, after_verdict=after_verdict
+                {**d.to_dict(), **licence}, rework=rework_n, after_verdict=after_verdict
             )
             self._emit(
                 "delivery.updated",
@@ -741,16 +1103,100 @@ class FactoryLoop:
                     rework=rework_n,
                 )
             return d, d.pr_ref
-        s.evidence.record_delivery(d.to_dict())
+        s.evidence.record_delivery({**d.to_dict(), **licence})
         self._emit("delivery.opened", item.id, branch=d.branch, base=d.base, pr=d.pr_ref)
         return d, d.pr_ref
+
+    def _author_stamp(self, proof: RedProof) -> str:
+        """``ctx_author`` — the test author's provider stamp, when the test author wrote the
+        oracle (an ``S1`` arm); "" for a person's test."""
+        ta = self.spec.test_author
+        if ta is None or proof.author != author_label(ta):
+            return ""
+        return str(getattr(ta, "provider", "") or ta.name)
+
+    def _probe_waiver(self, item: BacklogItem, test_sha256: str) -> ProbeWaiver | None:
+        """The newest approver's waiver of the strength probe on the item's chain that is
+        bound to exactly ``test_sha256`` (ADR-0025 item 12); ``None`` when there is none —
+        a waiver for other bytes is not a waiver, and nor is one whose approver is the run's
+        own actor (ADR-0016's two-person rule, P-339): that refusal is on the chain."""
+        found: ProbeWaiver | None = None
+        actor = self.spec.actor
+        for ev in self.spec.evidence.events_for(item.id, EV_PROBE_WAIVED):
+            w = ProbeWaiver(
+                approver=str(ev.payload.get("approver", "")),
+                reason=str(ev.payload.get("reason", "")),
+                test_sha256=str(ev.payload.get("test_sha256", "")),
+                event_id=ev.event_id,
+            )
+            if not w.applies_to(test_sha256):
+                continue
+            if actor and w.approver == actor:
+                why = (
+                    f"probe waiver refused — {w.approver} queued this run; the strength "
+                    "probe is waived by a second approver (ADR-0016's two-person rule)"
+                )
+                self.spec.evidence.record_route(
+                    item.id,
+                    ROUTE_HUMAN,
+                    why,
+                    reason_code="waiver_refused",
+                    waiver_refused="same_actor",
+                    waiver_by=w.approver,
+                    waiver_event=w.event_id,
+                )
+                self._emit(
+                    "review.waiver_refused",
+                    item.id,
+                    status=StepStatus.SKIPPED,
+                    waiver_refused="same_actor",
+                    waiver_by=w.approver,
+                )
+                continue
+            found = w
+        return found
+
+    def _require_scoreable(
+        self,
+        item: BacklogItem,
+        verdict: ReviewVerdict,
+        oracle: AuthoredTest,
+        *,
+        open_pr: DeliveryResult | None = None,
+    ) -> None:
+        """Stop the item ``oracle_not_scoreable`` when the required strength probe could
+        not score its test and nobody waived it for these bytes (ADR-0025 item 12): the
+        verdict is already on the record; nothing is reworked or pushed, an open pull
+        request an earlier run opened is closed, and the reason carries the way forward."""
+        probe = unscoreable(verdict)
+        if probe is None:
+            return
+        why = redact_and_cap_head(probe.detail, max_chars=_FINDING_HEAD_CHARS)
+        reason = (
+            f"the strength probe could not score the authored test ({why}): register a "
+            "superseding item whose test exercises the changed lines, or ask an approver "
+            f"to waive the probe for this test's exact bytes (sha256 {oracle.sha256[:12]})"
+        )
+        self.spec.evidence.record_route(
+            item.id,
+            ROUTE_HUMAN,
+            reason,
+            reason_code=STATUS_ORACLE_NOT_SCOREABLE,
+            after_verdict=verdict.verdict,
+            verdict_event=verdict.event_id,
+            oracle_sha256=oracle.sha256,
+        )
+        self._emit("route.decided", item.id, route=ROUTE_HUMAN, reason=reason)
+        self._withdraw(item, open_pr, verdict, reason)
+        raise _Stop(STATUS_ORACLE_NOT_SCOREABLE, error=reason)
 
     def _review(
         self, item: BacklogItem, final: BuildResult, proof: RedProof, pr_ref: str = ""
     ) -> ReviewVerdict:
         """Step 4: independent review of the built change BEFORE anything leaves the
         factory (ADR-0021) — ``pr_ref`` is empty, no pull request exists yet; the verdict
-        is on the ledger before this returns."""
+        is on the ledger before this returns. An approver's strength-probe waiver for the
+        build's own oracle bytes is handed to the review (ADR-0025 item 12)."""
         s = self.spec
         v = review(
             final,
@@ -767,6 +1213,7 @@ class FactoryLoop:
             probes=s.probes,
             timeout=s.timeout,
             on_event=self._cb(item.id),
+            waiver=self._probe_waiver(item, final.oracle.test_sha256),
         )
         self._emit("review.recorded", item.id, verdict=v.verdict, event=v.event_id)
         return v
@@ -922,14 +1369,27 @@ class FactoryLoop:
         delivery: DeliveryResult | None = None
         reworks = 0
         keep: list[BuildResult] = []
+        entry = Entry()
         try:
-            readiness, route = self._assess(item)
+            readiness, route, entry = self._assess(item, authored)
+            calibrating = entry.calibration is not None
             # the item's pull request from an earlier run, read before this run appends
-            # anything: an accept updates it, any other final verdict closes it (ADR-0021)
-            open_pr = self._open_delivery(item)
-            oracle = self._oracle(item, readiness, authored)
+            # anything: an accept updates it, any other final verdict closes it (ADR-0021).
+            # A calibration build never touches a remote.
+            open_pr = None if calibrating else self._open_delivery(item)
+            oracle, arm = self._oracle(item, readiness, authored, entry)
+            # the arm is composed into the brief and stamped by the composer; the loop adds
+            # only what the build cannot know — that it is an approver's calibration build,
+            # and, on an S2 row, that no second person's held-out acceptance tests graded
+            # it (ADR-0026 item 8; product.truth.215 builds them): such a row is never a
+            # routing first attempt (``crb.builders.brief.counts_as_s2_first_attempt``)
+            labels = {LABEL_CALIBRATION: "true"} if calibrating else {}
+            if arm_base(arm) == ARM_S2:
+                labels[LABEL_ACCEPTANCE] = ACCEPTANCE_NONE
             proof = self._prove(item, readiness, oracle)
-            results = self._build(item, readiness, oracle, proof, trial_prefix="r")
+            results = self._build(
+                item, readiness, oracle, proof, trial_prefix="r", labels=labels, arm=arm
+            )
             builds += [b.summary() for b in results]
             final = results[-1]
             keep.append(final)
@@ -941,6 +1401,7 @@ class FactoryLoop:
             # request exists while the build is under review
             verdict = self._review(item, final, proof)
             verdicts.append(verdict)
+            self._require_scoreable(item, verdict, oracle, open_pr=open_pr)
             while verdict.rework_required and reworks < s.max_rework:
                 # DL-045 rule 3: a `weak_oracle` finding asks for a stronger TEST; rebuilding
                 # against the same one only lets the builder find another way to pass it
@@ -980,7 +1441,15 @@ class FactoryLoop:
                     )
                 oracle = edited or oracle
                 proof = self._prove(item, readiness, oracle)
-                results = self._build(item, readiness, oracle, proof, trial_prefix=f"w{reworks}r")
+                results = self._build(
+                    item,
+                    readiness,
+                    oracle,
+                    proof,
+                    trial_prefix=f"w{reworks}r",
+                    labels=labels,
+                    arm=arm,
+                )
                 builds += [b.summary() for b in results]
                 final = results[-1]
                 keep.append(final)
@@ -990,7 +1459,32 @@ class FactoryLoop:
                     raise _Stop(STATUS_NOT_CLEAN)
                 verdict = self._review(item, final, proof)
                 verdicts.append(verdict)
-            if verdict.accepted:
+                self._require_scoreable(item, verdict, oracle, open_pr=open_pr)
+            if verdict.accepted and calibrating:
+                # ADR-0026 item 8: a calibration build never opens a pull request, whatever
+                # its review and its cell's route say — it is a measurement, not a delivery
+                assert entry.calibration is not None
+                why = (
+                    f"a calibration build (funded by {entry.calibration.approver}) never opens "
+                    "a pull request: its row is a measurement of the arm"
+                )
+                s.evidence.record_delivery_refused(
+                    item.id,
+                    why,
+                    pack_hash=final.pack_hash,
+                    reason_code=STOP_CALIBRATION_BUILD,
+                    calibration_by=entry.calibration.approver,
+                    context_arm=arm,
+                )
+                self._emit(
+                    "calibration.built",
+                    item.id,
+                    status=StepStatus.SKIPPED,
+                    reason=why,
+                    approver=entry.calibration.approver,
+                )
+                status = STATUS_CALIBRATION_BUILD
+            elif verdict.accepted:
                 # the ONLY path to a pull request: the final, accepted, reviewed build
                 delivery, _ = self._deliver(
                     item,
@@ -1000,6 +1494,7 @@ class FactoryLoop:
                     previous=open_pr,
                     rework_n=reworks,
                     after_verdict=verdicts[-2].verdict if len(verdicts) > 1 else "",
+                    arm=arm,
                 )
                 status = STATUS_ACCEPTED
             else:
@@ -1037,6 +1532,11 @@ class FactoryLoop:
             error=error,
             duration_s=time.monotonic() - started,
         )
+        spent = (
+            {"calibration_event": entry.calibration.event_id}
+            if entry.calibration is not None and builds
+            else {}
+        )
         s.evidence.record_item_outcome(
             item.id,
             status=status,
@@ -1045,6 +1545,7 @@ class FactoryLoop:
             delivered=delivery is not None,
             reworks=reworks,
             error=error,
+            **spent,
         )
         self._emit(
             "item.done",
@@ -1137,6 +1638,7 @@ __all__ = [
     "STATUS_NOT_RED",
     "STATUS_NO_ORACLE",
     "STATUS_ORACLE_NEEDS_STRENGTHENING",
+    "STATUS_ORACLE_NOT_SCOREABLE",
     "STATUS_REJECTED",
     "STATUS_REWORK_EXHAUSTED",
     "STATUS_ROUTED_HUMAN",

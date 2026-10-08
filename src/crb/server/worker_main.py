@@ -58,8 +58,8 @@ What it does: Turns flags and ``CRB_*`` fallbacks into ``WorkerSettings``, refus
 How:          ``build_parser`` → ``settings_from_args`` (sets ``CRB_HOME`` for the builders'
               secrets lookup; reads ``CRB_GITHUB__*`` / ``CRB_METRICS_*`` through a
               pydantic-settings view of the same environment the API reads) → ``Worker`` →
-              ``announce_start`` → ``metrics.start_worker_exposition`` → ``run_once`` |
-              ``run_forever(stop)``.
+              ``announce_start`` → ``start_metrics`` (the listener, recorded for ``/health``
+              — pilot D5) → ``run_once`` | ``run_forever(stop)``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0023-production-refuses-the-unsealed-posture.md,
@@ -69,6 +69,7 @@ Works with:   src/crb/server/worker.py (``Worker`` / ``WorkerSettings`` — ever
               src/crb/server/unsealed_override.py (the override's start-up event),
               src/crb/store/events.py (``events_head``),
               src/crb/observability/metrics.py (the worker's exposition server),
+              src/crb/server/worker_metrics.py (records the listener for ``/health``),
               src/crb/cli/commands/service.py (``crb worker`` forwards its argv here),
               deploy/entrypoint.sh (the container's ``worker`` role), deploy/docker-compose.yml
               and deploy/helm/crb/templates/worker-deployment.yaml (set ``CRB_SANDBOX__*`` and
@@ -95,7 +96,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -103,6 +104,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from crb.core.execution import SANDBOX_TREES, TREE_COPY, DockerSettings, SandboxUnavailable
 from crb.observability import metrics
 from crb.observability.logging import configure_logging
+from crb.observability.metrics import parse_metrics_port
 from crb.provision.config import ProvisionConfig
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
@@ -118,6 +120,7 @@ from crb.server.settings import (
 )
 from crb.server.unsealed_override import OverrideRefused, record_unsealed_override
 from crb.server.worker import Worker, WorkerSettings
+from crb.server.worker_metrics import record_exposition
 from crb.store.events import events_head as events_head_of
 from crb.store.jobs import RUN_KINDS
 from crb.store.models import Grade
@@ -202,10 +205,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--metrics-port",
-        type=int,
         default=None,
         help=f"serve this worker's Prometheus /metrics on this port (default: ${METRICS_PORT_ENV} "
-        f"or {DEFAULT_METRICS_PORT}; 0 = off)",
+        f"or {DEFAULT_METRICS_PORT}; 0 = off; auto = a free port, shown on /health and in the log)",
     )
     p.add_argument("--once", action="store_true", help="process at most one run, then exit")
     p.add_argument("--keep-worktrees", action="store_true", help="do not remove trial worktrees")
@@ -286,9 +288,9 @@ def settings_from_args(
     unknown = [k for k in kinds if k not in RUN_KINDS]
     if unknown:
         raise ValueError(f"unknown run kind(s) {unknown!r}; expected {RUN_KINDS}")
-    port = args.metrics_port if args.metrics_port is not None else shared.metrics_port
-    if not 0 <= int(port) <= 65535:
-        raise ValueError(f"{METRICS_PORT_ENV} must be 0 (off) or a port 1-65535, got {port}")
+    port = parse_metrics_port(
+        args.metrics_port if args.metrics_port is not None else shared.metrics_port
+    )
     host = (args.metrics_host or shared.metrics_host).strip()
     if not host:
         raise ValueError(f"{METRICS_HOST_ENV} must name an address to bind (127.0.0.1, 0.0.0.0)")
@@ -313,7 +315,7 @@ def settings_from_args(
         public_url=shared.public_url,
         metrics_enabled=shared.metrics_enabled,
         metrics_host=host,
-        metrics_port=int(port),
+        metrics_port=port,
         builder_executor=builder,
         refuse_unsealed=shared.env == "prod" and not shared.allow_unsealed_prod,
         unsealed_override=override,
@@ -322,13 +324,22 @@ def settings_from_args(
         # CRB_PROVISION__* — the same variables the API validates (ADR-0019); off by default
         provision=ProvisionConfig.from_env(e, home=home),
         store_patches=shared.retention.patches,
+        builder_login_ttl_s=shared.builder.login_ttl_s,
     )
+
+
+class _BuilderLoginShared(BaseModel):
+    """The one ``CRB_BUILDER__*`` key the worker shares with the API's ``BuilderSettings``:
+    ``login_ttl_s``, with the API's bounds. Every other ``CRB_BUILDER__*`` key is ignored
+    here (the worker reads its builder posture elsewhere)."""
+
+    login_ttl_s: int = Field(default=600, ge=30, le=86400)
 
 
 class _SharedWithApi(BaseSettings):
     """Just the keys the worker shares with the API — ``CRB_GITHUB__*``, ``CRB_FACTORY__*``,
-    ``CRB_INTAKE__*``, ``CRB_METRICS_ENABLED``, ``CRB_METRICS_HOST`` and ``CRB_METRICS_PORT``
-    — read the way :class:`Settings` reads them (same prefix, same
+    ``CRB_INTAKE__*``, ``CRB_METRICS_ENABLED``, ``CRB_METRICS_HOST``, ``CRB_METRICS_PORT`` and
+    ``CRB_BUILDER__LOGIN_TTL_S`` — read the way :class:`Settings` reads them (same prefix, same
     nested delimiter) and nothing else: the worker must not fail on an unrelated server
     setting it does not use, and must not START on a malformed GitHub one — a bad
     ``CRB_GITHUB__API_URL`` is a configuration error the operator fixes, not a worker that
@@ -358,10 +369,14 @@ class _SharedWithApi(BaseSettings):
     #: ``CRB_BIND_HOST``; a container sets ``0.0.0.0``) and port (the API keeps ``/metrics``
     #: on its HTTP port).
     metrics_host: str = DEFAULT_METRICS_HOST
-    metrics_port: int = DEFAULT_METRICS_PORT
+    #: A port, ``0`` (off) or ``auto`` (a free port — two stacks on one machine, pilot D5).
+    metrics_port: int | str = DEFAULT_METRICS_PORT
     #: ``CRB_RETENTION__*`` — the worker reads ``patches`` (keep every graded attempt's
     #: patch; crb.core.patches), the same block the API's settings carry.
     retention: RetentionSettings = RetentionSettings()
+    #: ``CRB_BUILDER__LOGIN_TTL_S`` — how long a login's last verification stands, read as the
+    #: API's submit gate reads it, so the worker's claim check applies the same window.
+    builder: _BuilderLoginShared = _BuilderLoginShared()
 
 
 def _shared_settings(env: dict[str, str] | None = None) -> _SharedWithApi:
@@ -465,6 +480,17 @@ def announce_start(worker: Worker) -> dict[str, Any]:
     return heads
 
 
+def start_metrics(worker: Worker, settings: WorkerSettings) -> metrics.Exposition:
+    """Start the worker's metrics listener and record what it did where ``/health`` reads it
+    (pilot D5, P-436). A port that cannot be bound never stops the worker: the listener is
+    ``degraded``, the reason is logged AND recorded, and the ``worker`` probe names it."""
+    got = metrics.start_worker_exposition(
+        settings.metrics_port, enabled=settings.metrics_enabled, addr=settings.metrics_host
+    )
+    record_exposition(worker.factory, worker.worker_id, got)
+    return got
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Process entry point; see the module docstring for the exit codes."""
     parser = build_parser()
@@ -506,9 +532,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(ValueError, OSError):  # not the main thread / unsupported
             signal.signal(sig, _stop)
-    metrics.start_worker_exposition(
-        settings.metrics_port, enabled=settings.metrics_enabled, addr=settings.metrics_host
-    )
+    start_metrics(worker, settings)
     worker.run_forever(stop)
     return EXIT_OK
 
@@ -521,6 +545,7 @@ __all__ = [
     "build_parser",
     "main",
     "settings_from_args",
+    "start_metrics",
 ]
 
 

@@ -54,7 +54,9 @@ What it does: Turns a watched column into drafts, gap feedback and — once an o
               approves, or the ticket's author is on the deployment's allowlist — registered
               backlog items, once per ticket revision and one pass at a time, recording each
               step on the factory's evidence chain and serving the same rows to the API and
-              the screen.
+              the screen. Each ticket meets the entry gate the factory's pre-build check
+              applies (ADR-0026 item 8): its stop is on the comment, the label (a registered
+              ticket that will not be built stays ``crb:not-deliverable``) and the row.
 How:          Plain functions over injected callables (the tracker, the route lookup, the
               clock, "is a run active") and an injected lease, so the whole flow is exercised
               by a fake tracker with no HTTP and no model; the lease is a row in the
@@ -101,6 +103,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import utc_now_iso
+from crb.core.spec import SIZE_TIER_NAMES
 from crb.factory.backlog import BacklogItem
 from crb.factory.evidence import (
     EV_INTAKE_AWAITING,
@@ -115,6 +118,7 @@ from crb.factory.evidence import (
     INTAKE_EVENT_KINDS,
 )
 from crb.factory.readiness import assess
+from crb.factory.standard import NO_READINGS, CellRef, Readers, gate_for
 from crb.intake.ado import AdoConfig, AdoTracker
 from crb.intake.client import (
     LABEL_QUEUED,
@@ -135,7 +139,14 @@ from crb.intake.client import (
 )
 from crb.intake.draft import Draft, content_revision, draft_from
 from crb.intake.fake import FileTracker, fake_tracker_enabled, fake_tracker_path
-from crb.intake.feedback import render_delivered, render_feedback, render_queued, render_refusal
+from crb.intake.feedback import (
+    WAITING_STOPS,
+    label_once_registered,
+    render_delivered,
+    render_feedback,
+    render_queued,
+    render_refusal,
+)
 from crb.intake.jira import JiraConfig, JiraTracker
 from crb.server.factory_state import FactoryHome
 from crb.store.models import LEASE_ROW_PREFIX, Repo, WorkerRow
@@ -328,6 +339,13 @@ class IntakeRow:
     awaiting_approval: bool = False
     #: Who created the ticket, as the tracker names them (the allowlist's input).
     author: str = ""
+    #: The entry gate's stop for this ticket (ADR-0026 item 8) — ``no_proven_standard``,
+    #: ``needs_context``, ``unsigned_cell``, ``granularize``, ``unsized`` — or "" when it
+    #: enters; its sentence; what the ticket must carry; and the cell's standard arm.
+    entry_stop: str = ""
+    entry_reason: str = ""
+    entry_needs: tuple[str, ...] = ()
+    standard: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -353,6 +371,10 @@ class IntakeRow:
             "stopped_advice": self.stopped_advice,
             "awaiting_approval": self.awaiting_approval,
             "author": self.author,
+            "entry_stop": self.entry_stop,
+            "entry_reason": self.entry_reason,
+            "entry_needs": list(self.entry_needs),
+            "standard": self.standard,
         }
 
     @classmethod
@@ -380,6 +402,10 @@ class IntakeRow:
             stopped_advice=str(d.get("stopped_advice", "")),
             awaiting_approval=bool(d.get("awaiting_approval", False)),
             author=str(d.get("author", "")),
+            entry_stop=str(d.get("entry_stop", "")),
+            entry_reason=str(d.get("entry_reason", "")),
+            entry_needs=tuple(str(x) for x in (d.get("entry_needs") or ())),
+            standard=str(d.get("standard", "")),
         )
 
 
@@ -920,6 +946,7 @@ def poll_repository(
     item_url: Callable[[str], str],
     run_active: Callable[[], bool] = lambda: False,
     actor: str = "intake",
+    gate: Readers | None = None,
     now: Callable[[], str] = utc_now_iso,
     force: bool = False,
     max_tickets: int = DEFAULT_MAX_PER_POLL,
@@ -988,6 +1015,7 @@ def poll_repository(
             column=column,
             home=home,
             route_for=route_for,
+            gate=gate,
             item_url=item_url,
             run_active=run_active,
             actor=actor,
@@ -1034,6 +1062,7 @@ def _poll_column(
     budget_s: float,
     clock: Callable[[], float],
     approval: ApprovalPolicy,
+    gate: Readers | None = None,
 ) -> PollReport:
     """One pass, with no side effect outside the tracker and the chain. See
     :func:`poll_repository`, which is this plus the served view."""
@@ -1105,6 +1134,7 @@ def _poll_column(
             events=events,
             signoffs=signoffs,
             route_for=route_for,
+            gate=gate,
             item_url=item_url,
             run_active=run_active,
             actor=actor,
@@ -1220,8 +1250,13 @@ def _handle_ticket(
     force: bool = False,
     check_budget: Callable[[str], None] = lambda step: None,
     approval: ApprovalPolicy | None = None,
+    gate: Readers | None = None,
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
+
+    ``gate`` — the entry gate's readers (ADR-0026 item 8), the same call the factory's
+    pre-build check makes (:func:`crb.factory.standard.gate_for`); ``None`` binds the
+    repository's seams.
 
     ``check_budget`` is asked before EVERY tracker call (:class:`_BudgetGuard`), so a
     pass that has run out of time starts no further call on somebody's board. ``approval``
@@ -1298,13 +1333,24 @@ def _handle_ticket(
     report.read += 1  # counted once the ticket is a draft: before that it is a skip
     readiness = assess(draft.item, signoffs)
     route = route_for(draft.item)
-    feedback = render_feedback(draft, readiness, cell_route=route)
+    readers = gate if gate is not None else NO_READINGS
+    entry = gate_for(draft.item, readiness, readers, person_test=draft.item.id in home.authored())
+    arms = (
+        readers.arm_readings(CellRef(draft.item.capability_class, draft.item.size_estimate))
+        if draft.item.size_estimate in SIZE_TIER_NAMES
+        else ()
+    )
+    feedback = render_feedback(draft, readiness, entry=entry, cell_route=route, arms=arms)
     already_registered = backlog is not None and backlog.get(draft.item.id) is not None
     # The label is decided before it is written, not adjusted afterwards: a ticket already
     # on the frozen record is QUEUED, and writing `crb:ready` first and `crb:queued` second
     # would show a reader of the board a state the product had already left behind.
     queued_already = feedback.ready_to_register and already_registered
-    label = LABEL_QUEUED if queued_already else feedback.label
+    # a registered ticket under a standing entry stop keeps `crb:not-deliverable`: it waits
+    # on the record, NOT BUILT, and a queued label would say otherwise (ADR-0026 item 8)
+    registered_label = label_once_registered(entry.code)
+    not_built = entry.reason if entry.code in WAITING_STOPS else ""
+    label = registered_label if queued_already else feedback.label
     row = IntakeRow(
         key=ticket.key,
         title=ticket.title,
@@ -1324,6 +1370,10 @@ def _handle_ticket(
         cell_route=route,
         read_at=now(),
         author=ticket.author,
+        entry_stop=entry.code,
+        entry_reason=entry.reason,
+        entry_needs=entry.needs,
+        standard=entry.arm,
     )
     try:
         check_budget("comment")
@@ -1361,13 +1411,13 @@ def _handle_ticket(
         # on an earlier poll (the tracker was briefly unreachable) is repaired by the next
         # one, instead of being left saying `crb:ready` on the board for ever while the
         # screen said queued.
-        row = replace_row(row, registered=True, label=LABEL_QUEUED)
+        row = replace_row(row, registered=True, label=registered_label)
         url = item_url(draft.item.id)
         try:
             check_budget("queued note")
             tracker.comment(
                 ticket.key,
-                render_queued(draft.item.id, url),
+                render_queued(draft.item.id, url, not_built=not_built),
                 marker_for(tracker.name, f"{ticket.key}:queued"),
             )
             check_budget("queued link")
@@ -1386,7 +1436,9 @@ def _handle_ticket(
         # ADR-0022: a ready ticket is a DRAFT until an operator registers it. The draft goes
         # on the chain (what the act will register, bound to this revision and content) and
         # the row says it is waiting; nothing reaches the frozen record from here.
-        _await_approval(draft, tracker=tracker, evidence=evidence, events=events)
+        _await_approval(
+            draft, tracker=tracker, evidence=evidence, events=events, entry=entry.to_dict()
+        )
         report.awaiting += 1
         row = replace_row(row, awaiting_approval=True)
     elif feedback.ready_to_register:
@@ -1401,10 +1453,12 @@ def _handle_ticket(
             row=row,
             check_budget=check_budget,
             approved_by=policy.approver_for(ticket.author) or "",
+            label=registered_label,
+            not_built=not_built,
         )
         awaiting = outcome == OUTCOME_QUEUED
         if outcome == OUTCOME_REGISTERED:
-            row = replace_row(row, registered=True, label=LABEL_QUEUED)
+            row = replace_row(row, registered=True, label=registered_label)
         elif outcome == OUTCOME_REFUSED:
             # A refusal is NOT a registration. The row used to say registered and queued
             # because the three outcomes were one boolean, so the screen showed an item that
@@ -1455,9 +1509,13 @@ def _register_and_queue(
     row: IntakeRow,
     check_budget: Callable[[str], None] = lambda step: None,
     approved_by: str = "",
+    label: str = LABEL_QUEUED,
+    not_built: str = "",
 ) -> str:
     """Register the draft and tell the ticket. One of three words, because these are three
-    different things to say to the person reading the screen:
+    different things to say to the person reading the screen (``label`` / ``not_built`` —
+    a ticket registered under a standing entry stop keeps ``crb:not-deliverable`` and is
+    told it will not be built; ADR-0026 item 8):
 
     * ``queued`` — a factory run holds the backlog; the next poll registers it,
     * ``refused`` — the frozen record would not take the item; NOTHING is registered,
@@ -1500,11 +1558,11 @@ def _register_and_queue(
     )
     try:
         check_budget("queued note")
-        tracker.label(draft.ticket.key, LABEL_QUEUED)
+        tracker.label(draft.ticket.key, label)
         check_budget("queued comment")
         tracker.comment(
             draft.ticket.key,
-            render_queued(draft.item.id, url),
+            render_queued(draft.item.id, url, not_built=not_built),
             marker_for(tracker.name, f"{draft.ticket.key}:queued"),
         )
         check_budget("queued link")
@@ -1538,7 +1596,12 @@ def _latest(events: Sequence[Any], kind: str, tracker: str, key: str) -> Any:
 
 
 def _await_approval(
-    draft: Draft, *, tracker: TrackerClient, evidence: Any, events: Sequence[Any]
+    draft: Draft,
+    *,
+    tracker: TrackerClient,
+    evidence: Any,
+    events: Sequence[Any],
+    entry: Mapping[str, Any] | None = None,
 ) -> None:
     """Record the ready draft as waiting for an operator (``intake.awaiting_approval``),
     unless the same draft — same item, same content — is already the one waiting."""
@@ -1560,6 +1623,8 @@ def _await_approval(
         content_revision=content,
         author=draft.ticket.author,
         item=draft.item.to_dict(),
+        # the entry gate's stop as the ticket was told it: the Register act labels by it
+        entry=dict(entry or {}),
     )
 
 
@@ -1726,9 +1791,17 @@ def _register_approved(
         revision=str(revision),
     )
     stopped: TrackerError | None = None
+    told = dict(waiting.payload.get("entry") or {})
+    entry_stop = str(told.get("code", ""))
+    registered_label = label_once_registered(entry_stop)
+    not_built = str(told.get("reason", "")) if entry_stop in WAITING_STOPS else ""
     try:
-        tracker.label(key, LABEL_QUEUED)
-        tracker.comment(key, render_queued(item.id, url), marker_for(tracker.name, f"{key}:queued"))
+        tracker.label(key, registered_label)
+        tracker.comment(
+            key,
+            render_queued(item.id, url, not_built=not_built),
+            marker_for(tracker.name, f"{key}:queued"),
+        )
         tracker.link(key, url, LINK_ITEM)
     except TrackerError as exc:
         stopped = exc
@@ -1753,7 +1826,7 @@ def _register_approved(
         ),
         registered=True,
         awaiting_approval=False,
-        label=LABEL_QUEUED,
+        label=registered_label,
         item_id=item.id,
         item_url=url,
     )

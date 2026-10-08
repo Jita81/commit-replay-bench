@@ -519,6 +519,10 @@ class BuilderSettings(BaseModel):
     #: (``CRB_BUILDER__CLAUDE_BINARY``); empty ⇒ ``claude`` on PATH. The worker resolves its
     #: own binary through the builder config; this is the API's.
     claude_binary: str = ""
+    #: How long a builder login's last verification stands (``CRB_BUILDER__LOGIN_TTL_S``,
+    #: seconds): within it a submit reads the cached outcome; past it the next submit verifies
+    #: the login once before queuing (pilot D1, src/crb/server/builder_login.py).
+    login_ttl_s: int = Field(default=600, ge=30, le=86400)
 
     @field_validator("executor", mode="before")
     @classmethod

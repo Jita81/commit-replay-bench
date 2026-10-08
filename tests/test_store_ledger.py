@@ -440,3 +440,16 @@ def test_concurrent_appends_from_four_threads_form_one_valid_chain(
     assert len(set(hashes)) == len(hashes)
     trials = sorted(r.trial for r in ledger.rows())
     assert trials == sorted(f"{t}-{i}" for t in range(4) for i in range(per_thread))
+
+
+def test_every_imported_row_is_stamped_imported_even_without_a_source_hash(
+    ledger: DbLedger,
+) -> None:
+    """P-321: the marker a reading reads to skip imported rows is stamped on EVERY imported
+    row — a row exported with a blank hash would otherwise carry no marker at all. (The
+    import stamp keeps ``source_row_hash`` on every row too, empty when the source had none —
+    EI-2 — so the ``imported`` label, not the hash, is the marker.)"""
+    ledger.import_rows([grade_row(trial="blank")], imported_by="admin-1", imported_at="2026-09-28")
+    (row,) = ledger.rows()
+    assert row.labels["imported"] == "true" and row.imported
+    assert row.labels["source_row_hash"] == ""

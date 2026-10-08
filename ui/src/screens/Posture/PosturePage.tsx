@@ -45,11 +45,12 @@ import { DocLink, Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, PageTitle, SummaryList, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
+import { SIGNOFF_POLICY_VERSION } from '../Signoff/contract'
 
 /** The next step after a value that is not the production posture: the sentence, the guide, and Settings for an admin. */
 function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolean; doc?: ReactNode }) {
   return (
-    <span className="block text-[16px] leading-[1.5] text-on-surface-muted">
+    <span className="block text-[16px] leading-[1.5] text-on-surface-muted [overflow-wrap:anywhere]">
       {children}
       {doc ? <> ({doc})</> : null}
       {admin ? (
@@ -152,7 +153,7 @@ export function PosturePage() {
             '…'
           ),
         },
-        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · signoff-policy.v3` },
+        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · ${SIGNOFF_POLICY_VERSION}` },
         { key: 'Licence', hint: 'summary.posture.licence', value: 'Apache-2.0' },
       ],
     },
@@ -247,13 +248,21 @@ export function PosturePage() {
           // degraded, never a 503 — the API pod's readiness is not the worker's liveness
           value: (
             <>
-              {probeText('worker')}
+              {/* the sentence can carry a setting name (CRB_METRICS_PORT=auto) with no break in it */}
+              <span className="[overflow-wrap:anywhere]" data-testid="posture-worker-detail">{probeText('worker')}</span>
               {probe('worker') && probe('worker')!.status !== 'ok' && (
                 <>
                   {' '}
-                  <NextStep admin={admin} doc={<DocLink to="DEPLOYMENT#9-observability">Observability (DEPLOYMENT)</DocLink>}>
-                    Start a worker, or find why the running one stopped checking in; queued runs wait until one does.
-                  </NextStep>
+                  {(probe('worker')!.detail ?? '').includes('metrics listener') ? (
+                    // pilot D5: the worker is fine; its metrics port is taken (docs/PREVENTION.md P-436)
+                    <NextStep admin={admin} doc={<DocLink to="DEPLOYMENT#12-two-stacks-on-one-machine">Two stacks on one machine (DEPLOYMENT)</DocLink>}>
+                      The worker runs and measures; only its dashboard is missing. Give it a free port (CRB_METRICS_PORT=auto) and restart it.
+                    </NextStep>
+                  ) : (
+                    <NextStep admin={admin} doc={<DocLink to="DEPLOYMENT#9-observability">Observability (DEPLOYMENT)</DocLink>}>
+                      Start a worker, or find why the running one stopped checking in; queued runs wait until one does.
+                    </NextStep>
+                  )}
                 </>
               )}
             </>

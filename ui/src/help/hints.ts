@@ -39,9 +39,9 @@ export const HINTS = {
 
   // ── Shared vocabulary (derived by shared components)
   'route.deliver':
-    'This cell clears every bar of the published routing rule, so the factory may open a branch and a pull request for this class of change under human review. It never means a change is safe to merge.',
+    'This cell’s standard context arm cleared every clause of the published routing rule in a registered reading, so the factory may open a branch and a pull request for this class of change under human review. It never means a change is safe to merge.',
   'route.calibrate':
-    'Not enough evidence yet, or the rate is under the bar. More attempts, or running the negative controls, can change this route.',
+    'Something the rule needs is not measured yet: no registered reading, a look still pending, an unmeasured oracle or controls, rows outside the sealed posture, or an arm that is not the cell’s standard. The cell names what to measure next.',
   'route.granularize':
     'Changes of this size are split into smaller ones before they are attempted, so this cell is never measured as it stands.',
   'route.human':
@@ -73,7 +73,7 @@ export const HINTS = {
   'kind.harness':
     'Attempts that failed in the executor, sandbox, parser, setup or model API, or whose failure the humans’ own change also showed when run again in the same posture. The instrument failed, not the model; they count against autonomy until the instrument is fixed.',
   'kind.outage':
-    'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n.',
+    'Calls the model provider refused (a usage limit, a 429 or a dead credential). Nothing was observed, so these sit outside n. “Login” counts those refused because this deployment’s own login was rejected, which the operator fixes on Settings.',
   'kind.disqualified':
     'Attempts disqualified for tampering with a test or a malformed oracle. They are excluded and sit outside n, counted neither clean nor failed.',
   'stat.shared.model_rate':
@@ -473,6 +473,8 @@ export const HINTS = {
     'The cell’s tasks have a measured mutation strength at or above the bar. Unmeasured is a refusal that cannot be overridden: run an oracle run first.',
   'gate.signoff.route':
     'The published rule routes this cell deliver. A sign-off never changes a route, so a cell routed elsewhere cannot be signed.',
+  'gate.signoff.reading':
+    'A sign-off is written only for the cell’s standard context arm, and only when that arm’s registered reading delivers at a look. A cell with no proven standard, or whose reading waits for its next look, cannot be signed.',
   'gate.signoff.attestation':
     'You have named one accepted row and affirmed you read its diff. This clause cannot be relaxed: the attestation is hash-chained with the sign-off.',
   'gate.signoff.second_person':
@@ -580,11 +582,25 @@ export const HINTS = {
   'field.factory.spend_cap':
     'The most this factory run should spend, in US dollars. The run stops before an item that could take its spend past it, but an item whose attempts have no cost cap of their own can take it past by up to one item. Blank means no cap on the whole run.',
   'field.factory.deliver':
-    'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, every item is built and graded locally only.',
+    'When on, a clean build in a cell that routes deliver opens a branch and pull request under review; never a merge. When off, an item the entry gate admits is built and graded locally only. The gate stops the rest either way.',
   'stat.factory.deliverable':
-    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; the rest are built and withheld.',
+    'How many items sit right now in a cell the map routes deliver. It is read from the map at this moment and changes as measurement changes; an item in any other cell opens no pull request.',
   'field.factory.override':
-    'The route gate’s override is a second approver’s act: queue the run without it, then another approver grants it on the run’s page. It is recorded under their name and never overrides the honesty floor: a cell with a wrong clean verdict stays withheld.',
+    'Lift a missing sign-off for this run only: a second approver’s act — queue the run without it, then another approver grants it on the run’s page, under their name. An item whose cell has a proven standard nobody has signed off is then built. It never lifts a missing standard, missing context, a calibration build or a cell with a wrong clean verdict.',
+  'item.factory.entry_stop':
+    'Why the factory did not build this item: the entry gate’s stop, by its code, and what the ticket must carry. Nothing was spent on it.',
+  'item.factory.calibration_pending':
+    'An approver has funded one calibration build of this item. The next factory run builds it to measure its cell; it never opens a pull request.',
+  'field.factory.calibration_reason':
+    'Why you fund one calibration build of this item. The reason is recorded on the evidence chain under your name.',
+  'button.factory.fund_calibration':
+    'Fund one calibration build: the next factory run builds the item to measure its cell, and it never opens a pull request. Approver only.',
+  'field.factory.waiver_reason':
+    'Why the strength probe may be skipped for this exact test. The waiver holds only while the test is byte for byte the same.',
+  'button.factory.waive_probe':
+    'Waive the required strength probe for this test’s exact bytes, under your name. The pull request names you and the reason. Approver only.',
+  'note.factory.not_built':
+    'The factory’s limit on what it builds: an item enters only when its cell has a proven context standard and the ticket carries what that standard needs.',
   'details.factory.own_builder':
     'Name a registered builder and model for this run instead of the deployment’s default. Blank keeps the builder above.',
   'field.factory.own_builder':
@@ -602,9 +618,9 @@ export const HINTS = {
   'factory.cell_route.deliverable':
     'The item’s cell routes deliver on the signed map right now, so a clean build may open a pull request. The n, rate with interval and apparatus follow.',
   'factory.cell_route.withheld':
-    'The item’s cell routes something other than deliver (the reason code follows), so a clean build is withheld: built, graded and reviewed, no pull request.',
+    'The item’s cell routes something other than deliver (the reason code follows), so no pull request opens for it. Whether it is built is the entry gate’s decision: only when its cell has a proven context standard, and then it is built, graded and reviewed.',
   'factory.cell_route.unmeasured':
-    'Nobody has measured this class and size on this repository, so delivery would be withheld.',
+    'Nobody has measured this class and size on this repository, so an item in it is not built and nothing is spent on it.',
   'item.factory.cell_prov':
     'The cell’s attempts (n), clean rate with its 95 % Wilson interval, and the apparatus that graded them, as the route gate read them.',
   'item.factory.status':
@@ -732,9 +748,11 @@ export const HINTS = {
   'pill.intake.needs_info':
     'The acceptance test still needs something this ticket does not say. Nothing is built and nothing is spent until it is answered on the ticket.',
   'pill.intake.ready':
-    'Every question the acceptance test needs is answered and the change can be offered as a pull request once it is built.',
+    'The ticket answers every question the acceptance test needs and carries what its cell’s context standard needs, so it will be built, graded and reviewed. A pull request opens only if its cell routes deliver; the comment on the ticket says which.',
   'pill.intake.not_deliverable':
-    'The change will still be built, but it will be held back rather than offered as a pull request, because the evidence for work of this kind and size does not license delivery.',
+    'This ticket will not be built: its cell has no proven context standard, or the standard is a ceiling or not signed off. The comment names each measured arm and the way forward.',
+  'pill.intake.entry_stop':
+    'Why this ticket will not be built yet, by the entry gate’s code, and what to attach to the ticket. Nothing is spent until it is answered.',
   'pill.intake.queued':
     'This ticket is now a registered item in the frozen backlog and is waiting for a factory run.',
 
@@ -865,6 +883,8 @@ export const HINTS = {
     'The sandbox image the posture runs, by the name the deployment gives it. The posture itself is keyed to the image’s content, so re-pinning the same name to new bytes asks for a new qualification.',
   'text.repo.posture_toolchain':
     'The exact toolchain version read inside the posture. A patch release is a different posture, because a test can pass on one and fail on the other.',
+  'text.repo.posture_environment':
+    'Where the tests get their tools. Declared: on the host they see only the tools the runner lists (its toolchain, git and the basic shell tools), and a change to any of them asks for a new qualification. The image: the sandbox image is the environment. Inherited: this runner does not declare its tools yet, so what is installed on the host can change a result.',
   'pill.repo.provisioning':
     'Whether this deployment provisions a task’s dependencies for the sealed sandbox. Off means a repository whose tests need a third-party module cannot be qualified there, and says so instead of blaming the model.',
   'text.repo.posture_stale':
@@ -1301,16 +1321,34 @@ export const HINTS = {
     'Close the open cell and return to the grid alone.',
   'button.capability.start_replay':
     'Open the run form on a sighted replay for this repository; each graded trial is one observation in its cell.',
+  'field.capability.arm':
+    'The context arm the map reads: what the builder was given. Each cell’s standard reads every cell on the arm its registered reading proved; any other arm shows that arm alone. Two arms are never pooled.',
+  'stat.capability.standard':
+    'The least context proven to pass in this cell: the arm whose registered reading delivered. No proven standard means nothing here can deliver yet; a ceiling means only the commit’s own tests delivered.',
+  'stat.capability.counted':
+    'Distinct commits the reading has read on this arm, each by its first attempt in the sealed posture, in the seeded order, with the Wilson 95% interval and the commits still needed to the next look.',
+  'tile.capability.readings':
+    'Every arm of the reading registered on this cell: its state under the look rule, clean over distinct commits read, the interval, and the commits still needed.',
+  'tile.capability.shortfalls':
+    'Every clause this cell fails, in the rule’s order, with the next measurement and how many; replays and calibration builds cost model money.',
+  'tile.capability.provenance':
+    'What the builders’ briefs carried beyond their arm, such as the loop’s playbook digest. Shown and filterable, never a reason to split the cell.',
+  'banner.capability.apparatus':
+    'The apparatus in force and what it changed: earlier rows stay readable as history and license nothing, and the steps that earn deliver back for a cell.',
+  'tile.capability.route_bar':
+    'The published routing bar, word for word as the code renders it and the README prints it.',
 
   // ── /routing — Routes (screens/Routing/RoutingPage.tsx)
-  'policy.routing.min_n':
-    'The fewest attempts a cell needs before it can route deliver.',
-  'policy.routing.min_point':
-    'The lowest clean rate a cell may have and still route deliver.',
-  'policy.routing.min_ci_low':
-    'The lowest the 95 % Wilson lower bound may be for deliver. It rises toward the point as n grows.',
+  'policy.routing.rule':
+    'The look rule a registered reading is read under. A reading is read only at its looks, never whenever rows arrive, so re-reading cannot make a cell pass.',
+  'policy.routing.looks':
+    'How many of the first distinct commits, in the reading’s seeded order, must be clean on their first attempt at each look for the arm to deliver.',
+  'policy.routing.budget':
+    'The error budget one cell has across every reading and phase: each reading spends its rule’s chance of certifying a cell whose true rate is 0.80.',
   'policy.routing.min_oracle':
-    'The lowest mean mutation strength a cell’s tasks may have for deliver, when measured.',
+    'The lowest mean mutation strength the counted commits may have for deliver. Unmeasured never passes.',
+  'policy.routing.min_oracle_share':
+    'The share of the commits a reading counted that must carry an oracle score for the strength to speak for the cell.',
   'policy.routing.granularize':
     'The size tiers that are split before they are attempted.',
   'policy.routing.min_controls_share':
@@ -1318,7 +1356,7 @@ export const HINTS = {
   'policy.routing.max_escapes':
     'How many controls may escape before deliver is withheld. Zero in the published policy.',
   'tile.routing.rule':
-    'The one rule in words: every clause a cell must clear for deliver and which failures send it to do not ship, granularize, human or calibrate.',
+    'The published bar in words, exactly as the code renders it and the README prints it: every clause a cell must clear for deliver.',
   'stat.routing.route_count':
     'How many cells route this way, out of every measured cell (n). Counts of cells, not attempts.',
   'col.routing.cell':
@@ -1442,7 +1480,7 @@ export const HINTS = {
   'stat.learn.stale_rows':
     'Rows older than the current apparatus out of every row for this repository. Stale evidence is kept as history and licenses nothing.',
   'stat.learn.needed':
-    'Attempts still needed on the current apparatus to bring every stale cell back to the rule’s minimum n, over the cells that are stale.',
+    'Commits still needed on the current apparatus to bring every stale cell to the look rule’s first look (routing.v2), over the cells that are stale. A reading is read only at its looks.',
   'stat.learn.remeasure_cost':
     'Each stale cell’s own mean row cost times the rows it still needs, summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
@@ -1663,6 +1701,12 @@ export const HINTS = {
     'Paste a token to store. Never shown again after saving; only its last four characters are reported.',
   'button.settings.token_save':
     'Store the token on the server for the worker to use.',
+  'pill.settings.builder_login':
+    'Whether the login runs use works: verified means its last check passed within the time shown; unverified means it has not been checked recently; invalid means the last check failed, and no run on it will be queued.',
+  'button.settings.verify_builder_login':
+    'Checks the login runs use by running Claude Code once with no tools on the cheapest model, then records the answer that the next run and the health page read.',
+  'link.builder_login_fix':
+    'Opens the Claude Code login card on Settings, where you can sign in again or store a new token and then verify it.',
   'button.settings.verify_login':
     'Try the stored token once, through the builder’s own environment, and report whether it was accepted; allowed once every 10 seconds.',
   'button.settings.remove_token':
@@ -1833,6 +1877,8 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.refused',
   'flow.counts',
   'flow.not_captured',
+  // ErrorState's way forward from a login refusal (pilot D1): any screen that submits a run
+  'link.builder_login_fix',
 ]
 
 /**
@@ -1857,7 +1903,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/runs': 13,
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
-  '/capability': 29,
+  '/capability': 30,
   '/routing': 20,
   '/oracle': 22,
   '/learn': 44,

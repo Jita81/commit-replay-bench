@@ -41,6 +41,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from crb.core.capability import ReadingBook
 from crb.core.checks import ARM_OFF
 from crb.core.ledger import LedgerIntegrityError
 from crb.core.value import (
@@ -56,6 +57,7 @@ from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep
 from crb.server.prevention_state import all_prevention_records, current_checks_arm, mechanisms
 from crb.server.routes.capability import CHECKS_CURRENT, CHECKS_PATTERN
+from crb.server.routes.readings import budget_by_cell, load_readings
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.ledger import DbLedger, DbReviewLedger
 
@@ -109,7 +111,7 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         mechanisms=mechanisms(rows=grades, repo=repo or ""),
         packs=DbLedger(factory).get_pack,
     )
-    return value_report(
+    report = value_report(
         rows,
         verdicts,
         repo=repo,
@@ -120,6 +122,14 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
         reviews_source=REVIEWS_FROM_STORE,
         checks=checks,
     ).to_dict()
+    # ADR-0026: the repository's registered readings, one state per context arm (the loop on
+    # and off are two arms), with each cell's budget spent — read over every arm's rows
+    if repo is not None:
+        readings = load_readings(db, repo)
+        book = ReadingBook.evaluate(readings, (g for g in grades if g.repo == repo))
+        report["readings"] = [o.to_dict() for o in book.outcomes]
+        report["reading_budgets"] = budget_by_cell(readings)
+    return report
 
 
 __all__ = ["router"]
