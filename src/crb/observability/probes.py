@@ -53,7 +53,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from crb.core.execution import SandboxUnavailable, docker_server_version
-
 from crb.core.fixture_builder_switch import fixture_builder_enabled
 
 log = logging.getLogger("crb.observability.probes")
