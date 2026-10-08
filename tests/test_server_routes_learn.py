@@ -902,18 +902,21 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     assert request["learning"] == "off" and request["kind"] == "replay"
     assert (cell["n_requested"], cell["short_by"]) == (7, 1) and "gold-clean" in cell["note"]
     gated: list[str] = []
+    prechecked: list[str] = []
     real_gate = learn_routes.submit_refusals
 
-    def gate(db: Any, settings: Any, validated: Any, run: Any) -> None:
-        gated.append(run.id)
-        real_gate(db, settings, validated, run)
+    def gate(db: Any, settings: Any, validated: Any, run: Any, *, login: bool = True) -> None:
+        # the whole gate once before the lock, then every refusal but the login check again
+        # on the run it stages, under the lock (P-729)
+        (prechecked if login else gated).append(run.id)
+        real_gate(db, settings, validated, run, login=login)
 
     monkeypatch.setattr(learn_routes, "submit_refusals", gate)
     before = env.get("/runs").json()["total"]
     r = _queue(env, cell=READ_CELL)
     assert r.status_code == 201, r.text
     d = r.json()
-    assert d["run_ids"] == gated and len(gated) == 1 and d["n_needed"] == 8
+    assert d["run_ids"] == gated and len(gated) == len(prechecked) == 1 and d["n_needed"] == 8
     (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
     assert run["status"] == "queued" and run["builder"] == "editblock"
     assert run["task_ids"] == request["task_ids"] and run["mode"] == "sighted"
@@ -1070,7 +1073,8 @@ def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
     in another thread and the first waits (up to 3 s) for it to check as well — which it can
     only do if the check is not held by the first request's lock."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     second = TestClient(env.client.app)
     login(second, "admin")
@@ -1081,7 +1085,7 @@ def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
 
     def run_second() -> None:
         results["second"] = second.post(
-            f"{API_PREFIX}/learn/remeasure/queue?repo={ALPHA}", json={"cell": STALE_CELL}
+            f"{API_PREFIX}/learn/remeasure/queue?repo={ALPHA}", json={"cell": READ_CELL}
         )
 
     thread = threading.Thread(target=run_second)
@@ -1097,7 +1101,7 @@ def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
         return out
 
     monkeypatch.setattr(learn_routes, "in_flight_runs", checked)
-    first = _queue(env, cell=STALE_CELL)
+    first = _queue(env, cell=READ_CELL)
     thread.join(timeout=90)
     assert not thread.is_alive()
     codes = sorted([first.status_code, results["second"].status_code])
@@ -1119,7 +1123,8 @@ def test_a_lost_seq_race_on_the_learn_trace_is_retried_with_nothing_queued_twice
     rolls both back and the queue is written again — never runs on the queue with no event
     behind them, which the page would offer to queue (and pay for) a second time."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     real_commit = Session.commit
     lost = [False]
@@ -1135,7 +1140,7 @@ def test_a_lost_seq_race_on_the_learn_trace_is_retried_with_nothing_queued_twice
         real_commit(self)
 
     monkeypatch.setattr(Session, "commit", commit)
-    r = _queue(env, cell=STALE_CELL)
+    r = _queue(env, cell=READ_CELL)
     assert lost[0]
     assert r.status_code == 201, r.text
     run_ids = r.json()["run_ids"]
@@ -1151,7 +1156,8 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
     one of the ``_QUEUE_ATTEMPTS`` tries, the route answers the documented 409
     ``remeasure_concurrent_write`` — no run on the queue and no event naming one."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     real_commit = Session.commit
     lost = [0]
@@ -1167,7 +1173,7 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
         real_commit(self)
 
     monkeypatch.setattr(Session, "commit", commit)
-    r = _queue(env, cell=STALE_CELL)
+    r = _queue(env, cell=READ_CELL)
     assert lost[0] == learn_routes._QUEUE_ATTEMPTS
     assert r.status_code == 409, r.text
     assert envelope(r)["code"] == "remeasure_concurrent_write"
@@ -1175,28 +1181,38 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
     assert _queued_events(env) == []
 
 
-def test_a_queue_that_fails_part_way_queues_nothing(env: Env, builder_keys: None) -> None:
-    """P-420: a cell is queued whole or not at all. When the second run of a cell cannot be
-    written, the first is not left on the queue with no event naming it."""
+def test_a_queue_that_fails_part_way_queues_nothing(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-420: a cell is queued whole or not at all. A registered reading's top-up is one run
+    (Wave 6), so the write fails part way after that run is written: when the event that names
+    it cannot be written, the run is not left on the queue with no event naming it."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     inserts = [0]
+    refused = [0]
 
-    def refuse_the_second(_mapper: Any, _connection: Any, _target: Any) -> None:
+    def count_the_run(_mapper: Any, _connection: Any, _target: Any) -> None:
         inserts[0] += 1
-        if inserts[0] == 2:
-            raise RuntimeError("the queue refused the second run")
 
-    sa_event.listen(Run, "before_insert", refuse_the_second)
+    def refuse_the_event(_mapper: Any, _connection: Any, target: Any) -> None:
+        if target.action == "learn.remeasure.queued":
+            refused[0] += 1
+            raise RuntimeError("the queue refused the event that names its run")
+
+    sa_event.listen(Run, "before_insert", count_the_run)
+    sa_event.listen(Event, "before_insert", refuse_the_event)
     try:
         try:
-            r = _queue(env, cell=STALE_CELL)
+            r = _queue(env, cell=READ_CELL)
         except RuntimeError:
             r = None
     finally:
-        sa_event.remove(Run, "before_insert", refuse_the_second)
-    assert inserts[0] == 2
+        sa_event.remove(Run, "before_insert", count_the_run)
+        sa_event.remove(Event, "before_insert", refuse_the_event)
+    assert inserts[0] == 1 and refused[0] == 1  # the run was written, then its event refused
     assert r is None or r.status_code == 500
     assert env.get("/runs").json()["total"] == before
     assert _queued_events(env) == []
@@ -1211,7 +1227,8 @@ def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unloc
     carry on as if it held the lock and run the check and the runs unserialised (the P-420
     double spend, with nothing to say so)."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     real = learn_routes.submit_refusals
     opened = [False]
@@ -1225,7 +1242,7 @@ def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unloc
 
     monkeypatch.setattr(learn_routes, "submit_refusals", opens_a_transaction)
     try:
-        r = _queue(env, cell=STALE_CELL)
+        r = _queue(env, cell=READ_CELL)
     except RuntimeError as exc:
         assert "already open" in str(exc)
         r = None
@@ -1366,8 +1383,13 @@ def test_every_learn_write_that_loses_a_seq_race_is_recorded_once_with_its_side_
     bodies = {
         "/learn/refusals/accept": {"group_id": group["group_id"], "verdict": "honest"},
         "/learn/strengthen/register": {"item_ids": [item_id]},
-        "/learn/remeasure/queue": {"cell": STALE_CELL},
+        "/learn/remeasure/queue": {"cell": READ_CELL},
     }
+    if path == "/learn/remeasure/queue":
+        # since Wave 6 only a registered reading's top-up is queued; its commits and its
+        # reading are added after the reports above are read, which they would change
+        _sealed(env, monkeypatch)
+        _add_reading(env)
     runs_before = env.get("/runs").json()["total"]
     real_commit = Session.commit
     lost = [0]
@@ -1772,8 +1794,10 @@ def test_the_login_check_runs_before_the_learn_lock_never_under_it(
 
     monkeypatch.setattr(runs_routes, "login_refusal", login)
     monkeypatch.setattr(learn_routes, "lock_event_writes", lock)
-    _add_stale_rows(env)
-    r = _queue(env, cell=STALE_CELL)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
+    r = _queue(env, cell=READ_CELL)
     assert r.status_code == 201, r.text
-    assert order.count("login") == len(r.json()["run_ids"]) == 2
+    # a registered reading's top-up is one run (Wave 6): it meets the login check once
+    assert order.count("login") == len(r.json()["run_ids"]) == 1
     assert "lock" in order and "login" not in order[order.index("lock") :], order
