@@ -191,13 +191,17 @@ class TestImportedRowsNeverLicense:
     def test_a_readers_view_names_the_imported_rows_behind_every_cell_and_route(
         self, env: Env
     ) -> None:
-        """The skeptic's EI-2 residual: under an explicit apparatus (or ``all``) imported rows
-        are read, and the fabricated ``bug.fix|L`` cell routes ``deliver`` there. That view
-        licenses nothing, but it must say whose evidence it is: every cell and every route
-        decision carries ``rows_imported`` beside ``rows``."""
+        """The skeptic's EI-2 residual: under a named apparatus version (history) imported rows
+        are read. That view licenses nothing, but it must say whose evidence it is: every cell
+        and every route decision carries ``rows_imported`` beside ``rows``. ``all`` pools two
+        apparatus versions and is refused outright (ADR-0025 item 1)."""
         pass_controls(env)
         assert _import(env, _fabricated(env)).status_code == 200
-        for view in (APPARATUS_VERSION, "all"):
+        for path in ("capability-map", "routes"):
+            refused = env.get(f"/{path}?repo={ALPHA}&apparatus=all")
+            assert refused.status_code == 422, refused.text
+            assert refused.json()["error"]["code"] == "apparatus_pooling_refused"
+        for view in (APPARATUS_VERSION,):
             cells = env.get(f"/capability-map?repo={ALPHA}&apparatus={view}").json()["cells"]
             large = next(
                 c for c in cells if c["capability_class"] == "bug.fix" and c["size"] == "L"

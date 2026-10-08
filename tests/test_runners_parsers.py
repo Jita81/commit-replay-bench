@@ -25,8 +25,9 @@ Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/runners/
               src/crb/core/runners/jvm_runner.py and src/crb/core/runners/cargo_runner.py (the
               parsers under test), tests/test_runners_go.py (the same runners on real toolchains)
 Tested by:    tests/test_runners_parsers.py
-Touch when:   adding a runner (docs/CONTRIBUTING.md — a parser case on its real output, a
-              fail-closed case, a scope case); a reporter's output format changes.
+Touch when:   never for a new repository; adding a runner (docs/CONTRIBUTING.md — a parser
+              case on its real output, a fail-closed case, a scope case); a reporter's output
+              format changes.
 """
 
 from __future__ import annotations
@@ -342,9 +343,12 @@ def test_go_parse(tmp_path: Path) -> None:
             '{"Action":"output","Package":"github.com/x/gin/render","Test":"TestJSON","Output":"--- FAIL: TestJSON\\n"}',
             '{"Action":"fail","Package":"github.com/x/gin/render","Test":"TestJSON","Elapsed":0.01}',
             '{"Action":"pass","Package":"github.com/x/gin/render","Test":"TestXML","Elapsed":0.01}',
+            # the test binary's own summary line: it ran to its end (a binary that died has none)
+            '{"Action":"output","Package":"github.com/x/gin/render","Output":"FAIL\\n"}',
             '{"Action":"fail","Package":"github.com/x/gin/render","Elapsed":0.5}',  # package-level: no Test
             "not json at all",
             '{"Action":"fail","Package":"github.com/x/gin/binding","Test":"TestForm/sub"}',
+            '{"Action":"output","Package":"github.com/x/gin/binding","Output":"FAIL\\n"}',
         ]
     )
     run = GoRunner(_cfg(Language.GO)).parse(_res(out), tmp_path)

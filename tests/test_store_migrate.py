@@ -276,6 +276,7 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
         "at_head": False,
         "unversioned_at": None,
         "matches_models": False,
+        "drift": [],
     }
 
     init_db(backend.engine)
@@ -284,7 +285,11 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
     assert created.unversioned_at == head and created.matches_models is True
 
     migrate.upgrade(backend.url)
-    assert migrate.head_status(backend.url) == migrate.HeadStatus(head, head, True)
+    # a migrated store at head is compared with the models too (pilot D7, P-437): its
+    # schema matches, and the reading says so rather than a false that means "not checked"
+    assert migrate.head_status(backend.url) == migrate.HeadStatus(
+        head, head, True, matches_models=True
+    )
     with backend.factory() as s:  # the connection form /health uses (a session's)
         assert migrate.head_status_on(s.connection()).at_head is True
 
@@ -292,6 +297,83 @@ def test_head_status_reads_empty_created_migrated_and_behind_stores(backend: Bac
     behind = migrate.head_status(backend.url)
     assert behind == migrate.HeadStatus(migrate.INITIAL_REVISION, head, False)
     assert migrate.check(backend.url) is False  # ``check`` is ``head_status().at_head``
+
+
+def test_a_migrated_store_at_head_reads_that_its_schema_matches_the_models(
+    backend: Backend,
+) -> None:
+    """Pilot D7 (P-437): the ``migrations`` probe read ``matches_models: false`` on a store
+    migrated to head whose schema equals the models — the field was computed for an
+    unversioned store only and left ``False`` for every versioned one, so the truth ("it
+    matches") and the unknown ("never compared") read the same. A versioned store at head is
+    now compared, by the same ``compare_metadata`` adoption uses, and reads ``True``."""
+    migrate.upgrade(backend.url)
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True
+    assert st.matches_models is True and st.drift == ()
+    assert st.to_dict()["matches_models"] is True and st.to_dict()["drift"] == []
+
+
+def test_a_store_at_head_whose_schema_drifted_names_the_drift(backend: Backend) -> None:
+    """The class D7 belongs to — a reading that cannot tell a matching schema from one that
+    was never compared — is closed only if a real difference reads ``False``: an index
+    dropped outside the migrations leaves the store stamped at head, and the reading names
+    the difference instead of passing it."""
+    migrate.upgrade(backend.url)
+    with backend.engine.begin() as c:
+        c.execute(text("DROP INDEX ix_runs_status"))
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert any("ix_runs_status" in d for d in st.drift), st.drift
+
+
+def test_the_health_reading_compares_again_after_an_out_of_band_change(backend: Backend) -> None:
+    """Why ``/health`` compares the schema on every read and never caches it by revision: an
+    out-of-band change (an index dropped by hand) leaves the revision where it was, so a
+    cache keyed on the revision would keep answering "matches" — the very reading pilot D7
+    closed. The same process reads the store twice, before and after the change."""
+    migrate.upgrade(backend.url)
+    with backend.engine.connect() as c:
+        assert migrate.head_status_on(c).matches_models is True
+    with backend.engine.begin() as c:
+        c.execute(text("DROP INDEX ix_runs_status"))
+    with backend.engine.connect() as c:
+        st = migrate.head_status_on(c)
+    assert st.at_head is True and st.matches_models is False
+
+
+def test_a_dropped_server_default_is_drift_on_postgresql(backend: Backend) -> None:
+    """Q1's review: the probe compared with alembic's defaults, so a server default dropped
+    outside the migrations on PostgreSQL read ``matches_models: True``. PostgreSQL reflects
+    defaults faithfully, so the comparison includes them there (on SQLite the reflection
+    reads a false difference at head, and the DDL parity test guards migrations instead)."""
+    if backend.dialect != "postgresql":
+        pytest.skip(
+            "server defaults are compared on PostgreSQL only (SQLite reflects them loosely)"
+        )
+    migrate.upgrade(backend.url)
+    assert migrate.head_status(backend.url).matches_models is True  # no false positive at head
+    with backend.engine.begin() as c:
+        c.execute(text("ALTER TABLE users ALTER COLUMN session_nonce DROP DEFAULT"))
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert any("session_nonce" in d for d in st.drift), st.drift
+
+
+def test_a_constraint_difference_names_its_table_and_columns() -> None:
+    """An unnamed constraint (a column's ``unique=True``) has no name to print: the drift line
+    names the table and the columns instead of a bare ``add_constraint``."""
+    from sqlalchemy import Column, Integer, MetaData, String, Table, UniqueConstraint
+
+    table = Table("users", MetaData(), Column("id", Integer), Column("email", String))
+    unnamed = UniqueConstraint(table.c.email)
+    assert migrate._describe_difference(("add_constraint", unnamed)) == (
+        "add_constraint users unique(email)"
+    )
+    named = UniqueConstraint(table.c.email, name="uq_users_email")
+    assert migrate._describe_difference(("remove_constraint", named)) == (
+        "remove_constraint users uq_users_email unique(email)"
+    )
 
 
 def test_head_status_of_an_older_release_create_all_schema(backend: Backend) -> None:

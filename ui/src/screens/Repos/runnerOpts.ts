@@ -5,9 +5,12 @@
  * a hand-written key never silently disappears, but the form never invents one.
  *
  * Source of truth, key by key:
- *   base.py       `timeout`, `setup_timeout`                         (every runner)
+ *   base.py       `timeout`, `setup_timeout`                         (every runner);
+ *                 `tools` (the runners with a declared host environment: pytest, the four
+ *                 node runners, go — ADR-0048)
  *   pytest_runner `python`, `pythonpath_suffix`, `pip`, `pip_fallback`, `uninstall`, `env`
- *   node_runners  `npm`, `env` (all four); `node` (node --test only);
+ *   node_runners  `node`, `npm`, `env` (all four: `node` is the declared test node and leads
+ *                 setup's PATH);
  *                 `extra_args` (jest / vitest / mocha — not node); `mocha_require` (mocha)
  *   go_runner     `go`, `cgo`, `gomodcache` (docker)
  *   cargo_runner  `cargo`, `offline`, `cargo_home` (docker)
@@ -39,11 +42,11 @@
  * Tested by:    ui/src/screens/Repos/runnerOpts.test.ts (the key table mirrors the runners;
  *               coercions invent nothing; validation flags the right shapes),
  *               ui/src/screens/Repos/RepoConfigTab.test.tsx
- * Touch when:   a runner starts reading a new `runner_opts` key (src/crb/core/runners/*) —
- *               add its `OptSpec` here in the same commit, or the form cannot offer it; a
- *               new runner needs its entry in `RUNNER_OPTS` and `RUNNERS_BY_LANGUAGE`. For a
- *               new repository: nothing here — set its options through the form
- *               (docs/OPERATOR.md#2-configure-a-repository).
+ * Touch when:   never for a new repository — set its options through the form
+ *               (docs/OPERATOR.md#2-configure-a-repository); a runner starts reading a new
+ *               `runner_opts` key (src/crb/core/runners/*) — add its `OptSpec` here in the
+ *               same commit, or the form cannot offer it; a new runner needs its entry in
+ *               `RUNNER_OPTS` and `RUNNERS_BY_LANGUAGE`.
  */
 
 import type { Language, Runner } from '../../api/types'
@@ -122,12 +125,46 @@ export const COMMON_OPTS: readonly OptSpec[] = [
   },
 ]
 
-/** Shared `env` spec: every runner exports these into the test command. */
+/**
+ * Names the runner refuses in `env` (`crb.core.runners.toolenv.LOOKUP_NAMES`): they choose
+ * which program or library runs, so they would sit over the declared test environment
+ * with its digest unchanged (ADR-0048).
+ */
+export const LOOKUP_NAMES: readonly string[] = [
+  'PATH',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'LD_AUDIT',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'DYLD_FALLBACK_LIBRARY_PATH',
+  'DYLD_FRAMEWORK_PATH',
+]
+
+/** Shared `env` spec: the runners that list it (pytest and the node runners) declare their host environment. */
 const ENV: OptSpec = {
   key: 'env',
   kind: 'env',
   label: 'Environment variables',
-  hint: 'Added to the test command’s environment (and, for the node runners, to npm setup). Put a pinned toolchain first on PATH here, e.g. PATH=/opt/node@24/bin:/usr/bin:/bin.',
+  hint: 'Added to the test command’s environment (and, for the node runners, to npm setup). PATH and library-loader variables are refused: pin a toolchain in its own field (node binary, npm binary, Python interpreter) — a pinned node also leads setup’s PATH — or name a further tool in Extra host tools.',
+}
+
+/** Shared `tools` spec: the runners whose host test environment is declared (ADR-0048). */
+const TOOLS: OptSpec = {
+  key: 'tools',
+  kind: 'list',
+  label: 'Extra host tools',
+  hint: 'On the host, the tests see only the tools the runner declares (its toolchain, git and the POSIX basics). Name each further tool this repository’s tests run, one per row, e.g. make. Any change to a declared tool asks for the tasks to be qualified again.',
+  placeholder: 'make',
+}
+
+/** Shared `node` spec for the four node runners: the declared `node` of the test environment. */
+const NODE: OptSpec = {
+  key: 'node',
+  kind: 'path',
+  label: 'node binary',
+  hint: 'The node every test command runs under (it is the `node` on the tests’ PATH), and the one setup’s npm runs under — pin it here when the repository needs a node the host does not default to. Empty = the host’s node on PATH.',
+  placeholder: '/opt/node@24/bin/node',
 }
 
 /** Shared `npm` spec for the four node runners. */
@@ -195,22 +232,14 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       hint: 'Distributions removed after the install — the repo’s OWN package — so the worktree source on PYTHONPATH is what the tests import, never a stale wheel.',
       placeholder: 'myrepo',
     },
+    TOOLS,
     ENV,
   ],
-  node: [
-    {
-      key: 'node',
-      kind: 'path',
-      label: 'node binary',
-      hint: 'The interpreter for `node --test`. Empty = the host’s node on PATH.',
-      placeholder: '/opt/node@24/bin/node',
-    },
-    NPM,
-    ENV,
-  ],
-  vitest: [NPM, EXTRA_ARGS('vitest'), ENV],
-  jest: [NPM, EXTRA_ARGS('jest'), ENV],
+  node: [NODE, NPM, TOOLS, ENV],
+  vitest: [NODE, NPM, EXTRA_ARGS('vitest'), TOOLS, ENV],
+  jest: [NODE, NPM, EXTRA_ARGS('jest'), TOOLS, ENV],
   mocha: [
+    NODE,
     NPM,
     {
       key: 'mocha_require',
@@ -220,6 +249,7 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       placeholder: 'test/support/env',
     },
     EXTRA_ARGS('mocha'),
+    TOOLS,
     ENV,
   ],
   go: [
@@ -245,6 +275,7 @@ export const RUNNER_OPTS: Record<Runner, readonly OptSpec[]> = {
       placeholder: '/tmp/gomod',
       dockerOnly: true,
     },
+    TOOLS,
   ],
   cargo: [
     {
@@ -375,6 +406,11 @@ export function validateRunnerOpts(runner: Runner | '', opts: Record<string, unk
       case 'env':
         if (!v || typeof v !== 'object' || Array.isArray(v)) errors[spec.key] = 'Input should be an object of NAME: value'
         else if (Object.keys(v as object).some((k) => k.trim() === '')) errors[spec.key] = 'Every variable needs a name'
+        else {
+          const refused = Object.keys(v as object).filter((k) => LOOKUP_NAMES.includes(k.trim()))
+          if (refused.length > 0)
+            errors[spec.key] = `${refused.join(', ')} cannot be set here: pin the toolchain in its own field, or name the tool in Extra host tools`
+        }
         break
       case 'path':
       case 'text':

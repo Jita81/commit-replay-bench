@@ -422,7 +422,7 @@ def _workflows_at(commit: str) -> dict[str, str]:
     """``{file name: text}`` of each workflow at ``commit``, read from this clone's history.
     A clone without ``commit`` fails, naming the fetch, and never skips: the suite jobs hold
     the whole history (tests/test_toolchain_gates.py), and a skipped proof proves nothing
-    while every job stays green (P-750)."""
+    while every job stays green (P-753)."""
 
     def git(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -456,7 +456,7 @@ def test_the_vendored_jobs_are_the_pull_request_workflows_at_the_commit_they_nam
 
 def test_a_clone_without_the_named_commit_fails_the_proof_never_skips() -> None:
     """The proof above skipped on a clone that lacked its commit, so a shallow checkout passed
-    it having proved nothing (P-750). The suite jobs hold the whole history; a clone without
+    it having proved nothing (P-753). The suite jobs hold the whole history; a clone without
     the commit fails, naming the commit and the fetch that brings it."""
     absent = "0" * 40  # well formed, and never a commit
     with pytest.raises((pytest.fail.Exception, pytest.skip.Exception)) as raised:

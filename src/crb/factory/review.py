@@ -10,10 +10,13 @@ its test author (enforced by rung label), and the review is mechanical first:
 * **Belt re-run** — the delivered edits are replayed into a fresh worktree and
   the four belts are graded again with the ordinary grader. A second, independent
   observation of the same verdict.
-* **Mutation strength** — deterministic AST mutants are planted in the delivered
-  source and the oracle must kill them (:mod:`crb.core.oracle.mutation`). A weak
-  oracle is a *major* finding: the change is accepted only with an edit that
-  strengthens the test — and that edit re-enters the loop (RED proof → build →
+* **Mutation strength** — REQUIRED (ADR-0025 item 12): deterministic mutants are
+  planted in the delivered source and the oracle must kill them
+  (:mod:`crb.core.oracle.mutation`). An oracle the probe cannot score is a required
+  failure — the loop stops the item ``oracle_not_scoreable`` before any push — unless an
+  approver waived the probe for the authored test's exact bytes (:class:`ProbeWaiver`).
+  A scored but weak oracle is a *major* finding: the change is accepted only with an
+  edit that strengthens the test — and that edit re-enters the loop (RED proof → build →
   grade → fresh verdict).
 
 Then the reviewer forms its opinion. The mechanical floor overrides the opinion
@@ -31,7 +34,8 @@ What it is:   Independent review — mechanical probes first, then a different i
               opinion that can only tighten the verdict; recorded BEFORE any edit.
 What it does: Re-proves RED from a pristine worktree using the oracle COMMIT's bytes,
               replays the delivered edits into a fresh tree and re-grades the belts, plants
-              deterministic mutants and requires the oracle to kill them; a failed required
+              deterministic mutants and requires the oracle to be scoreable (an approver's
+              waiver bound to the test's bytes is the one exception); a failed required
               probe is ``reject`` whatever the reviewer says, a major finding caps the
               verdict at ``accept_with_edit``; the verdict is appended to the evidence
               ledger before it is returned, and ``permit_edit`` refuses without one.
@@ -69,6 +73,7 @@ from crb.core.evidence import utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, grade
+from crb.core.oracle.mutant import DEFAULT_MAX_MUTANTS
 from crb.core.oracle.mutation import changed_lines_from_diff, score_task
 from crb.core.redact import redact_and_cap
 from crb.core.routing import DEFAULT_POLICY
@@ -97,6 +102,11 @@ SEVERITIES: tuple[str, ...] = (SEVERITY_INFO, SEVERITY_MINOR, SEVERITY_MAJOR, SE
 #: The finding kind that asks for a stronger TEST, not a different change: the loop never
 #: rebuilds against an unchanged oracle on its account (DL-045 rule 3, B-1b finding 3).
 FINDING_WEAK_ORACLE = "weak_oracle"
+#: The strength probe could not score the oracle (no mutant ran to a verdict, the baseline
+#: was not green, the harness failed): a required failure — ``oracle_not_scoreable``.
+FINDING_ORACLE_UNSCOREABLE = "oracle_unscoreable"
+#: An approver waived the strength probe for the authored test's exact bytes.
+FINDING_PROBE_WAIVED = "probe_waived"
 
 #: The ledger's own guard, re-exported under the name the loop speaks.
 EditBeforeVerdict = VerdictBeforeEditViolation
@@ -345,13 +355,22 @@ class BeltRerunProbe:
 
 
 class MutationStrengthProbe:
-    """Mutation-score the oracle against the delivered source. Not required (an
-    unscoreable change is not a defect) but a weak oracle is a MAJOR finding."""
+    """Mutation-score the oracle against the delivered source. REQUIRED (ADR-0025 item
+    12, amending ADR-0021): an oracle the probe cannot score is a required failure — the
+    loop stops the item ``oracle_not_scoreable`` before any push — unless an approver has
+    waived the probe for the authored test's exact bytes (:class:`ProbeWaiver`). A SCORED
+    oracle below the floor is not a required failure: it is a MAJOR ``weak_oracle`` finding,
+    which asks for a stronger test (the rework path, DL-045 rule 3)."""
 
     name = "mutation_strength"
+    #: What the probe requires: that the oracle can be scored at all.
+    required = True
 
     def __init__(
-        self, *, floor: float = DEFAULT_POLICY.min_oracle_strength, max_mutants: int = 12
+        self,
+        *,
+        floor: float = DEFAULT_POLICY.min_oracle_strength,
+        max_mutants: int = DEFAULT_MAX_MUTANTS,
     ) -> None:
         self.floor = floor
         self.max_mutants = max_mutants
@@ -393,9 +412,11 @@ class MutationStrengthProbe:
                     self.name,
                     None,
                     f"not scoreable: {score.note}",
-                    required=False,
+                    required=True,
                     findings=(
-                        ReviewFinding("oracle_unscoreable", SEVERITY_INFO, score.note, self.name),
+                        ReviewFinding(
+                            FINDING_ORACLE_UNSCOREABLE, SEVERITY_INFO, score.note, self.name
+                        ),
                     ),
                     data=data,
                     duration_s=time.monotonic() - t0,
@@ -423,22 +444,75 @@ class MutationStrengthProbe:
                 self.name,
                 True,
                 f"oracle strength {score.oracle_strength:.2f} ({score.killed}/{score.total})",
-                required=False,
+                required=True,
                 data=data,
                 duration_s=time.monotonic() - t0,
             )
         except SandboxUnavailable:
             raise
-        except Exception as exc:
+        except Exception as exc:  # could not be scored: fail closed, like any required probe
             return ProbeResult(
                 self.name,
                 None,
-                f"{type(exc).__name__}: {exc}",
-                required=False,
+                f"not scoreable: {type(exc).__name__}: {exc}",
+                required=True,
+                findings=(
+                    ReviewFinding(
+                        FINDING_ORACLE_UNSCOREABLE,
+                        SEVERITY_INFO,
+                        f"{type(exc).__name__}: {exc}",
+                        self.name,
+                    ),
+                ),
                 duration_s=time.monotonic() - t0,
             )
         finally:
             ws.remove()
+
+
+@dataclass(frozen=True)
+class ProbeWaiver:
+    """An approver's waiver of the strength probe for ONE authored test's exact bytes
+    (ADR-0025 item 12): recorded on the factory chain as ``review.probe_waived`` with the
+    test's SHA-256, it holds only while the test is byte-identical — a strengthened test
+    is a new oracle and meets the probe again."""
+
+    approver: str
+    reason: str
+    test_sha256: str
+    event_id: str = ""
+
+    def applies_to(self, test_sha256: str) -> bool:
+        """Whether this waiver covers a test with ``test_sha256`` (exact bytes only)."""
+        return bool(self.test_sha256) and self.test_sha256 == test_sha256
+
+    def note(self) -> str:
+        """The sentence the pull request carries (the approver and the reason)."""
+        return f"mutation strength probe waived by {self.approver}: {self.reason}"
+
+
+def waive(result: ProbeResult, waiver: ProbeWaiver) -> ProbeResult:
+    """The strength probe's unscoreable result under ``waiver``: no longer required, and
+    carrying the waiver as a finding so the verdict and the chain say who waived it."""
+    return replace(
+        result,
+        required=False,
+        detail=f"{result.detail}; {waiver.note()}",
+        findings=(
+            *result.findings,
+            ReviewFinding(FINDING_PROBE_WAIVED, SEVERITY_INFO, waiver.note(), result.name),
+        ),
+        data={**dict(result.data), "waived_by": waiver.approver, "waiver": waiver.event_id},
+    )
+
+
+def unscoreable(verdict: ReviewVerdict) -> ProbeResult | None:
+    """The strength probe's result when it could not score the oracle and nobody waived
+    it — the loop's ``oracle_not_scoreable`` stop; ``None`` otherwise."""
+    for p in verdict.probes:
+        if p.name == MutationStrengthProbe.name and p.required and p.passed is None:
+            return p
+    return None
 
 
 def default_probes() -> tuple[Probe, ...]:
@@ -587,10 +661,12 @@ def review(
     probes: Sequence[Probe] | None = None,
     timeout: int = 0,
     on_event: EventFn | None = None,
+    waiver: ProbeWaiver | None = None,
 ) -> ReviewVerdict:
     """Run the probes, take the reviewer's opinion, derive the verdict, and RECORD
     IT before returning. Raises :class:`SameIdentityError` if the reviewer is the
-    builder or the test author."""
+    builder or the test author. ``waiver`` — an approver's waiver of the strength probe —
+    applies only to an unscoreable result for the build's own oracle bytes."""
     label = reviewer_label(reviewer)
     assert_distinct_identity(build.rung, label, role="reviewer")
     assert_distinct_identity(proof.author, label, role="reviewer")
@@ -611,6 +687,14 @@ def review(
     results: list[ProbeResult] = []
     for probe in probes if probes is not None else default_probes():
         res = probe.run(ctx)
+        if (
+            waiver is not None
+            and res.name == MutationStrengthProbe.name
+            and res.required
+            and res.passed is None
+            and waiver.applies_to(build.oracle.test_sha256)
+        ):
+            res = waive(res, waiver)
         results.append(res)
         _emit(
             on_event,
@@ -659,6 +743,8 @@ def permit_edit(
 
 
 __all__ = [
+    "FINDING_ORACLE_UNSCOREABLE",
+    "FINDING_PROBE_WAIVED",
     "FINDING_WEAK_ORACLE",
     "SEVERITIES",
     "SEVERITY_BLOCKING",
@@ -675,6 +761,7 @@ __all__ = [
     "MutationStrengthProbe",
     "Probe",
     "ProbeResult",
+    "ProbeWaiver",
     "RedReproductionProbe",
     "ReviewContext",
     "ReviewFinding",
@@ -688,4 +775,6 @@ __all__ = [
     "replay_edits",
     "review",
     "reviewer_label",
+    "unscoreable",
+    "waive",
 ]

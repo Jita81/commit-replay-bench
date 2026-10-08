@@ -718,6 +718,12 @@ class RunCreateRequest(BaseModel):
     #: opt out, never in (the switch is the repository's, thrown by an operator). Stored as
     #: ``params.learning`` only when set; the Phase B campaign's off arm uses it.
     learning: Literal["off"] | None = None
+    #: ``blind`` runs only: the context arm to replay instead of the run's own (ADR-0026
+    #: item 1). ``S1``: the test author (``test_author``, else the deployment's
+    #: ``CRB_FACTORY__TEST_AUTHOR``; never a model on the ladder) writes one failing test in
+    #: a sealed checkout of each commit's parent, it must be RED there, the builder builds
+    #: against it and the grade is the commit's held-out tests. Stored as ``params.arm``.
+    arm: Literal["S1"] | None = None
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into
@@ -735,9 +741,10 @@ class RunCreateRequest(BaseModel):
     deliver: bool | None = None
     deliver_override: bool | None = None
     max_rework: int | None = Field(default=None, ge=0, le=5)
-    #: ``factory`` runs only. The rung that writes the failing test for an item nobody
-    #: authored an oracle for — ``builder:model[:provider]``, the same spelling as a build
-    #: rung, or ``none`` for no author. Absent = the deployment's ``CRB_FACTORY__TEST_AUTHOR``.
+    #: ``factory`` runs, and ``blind`` runs on ``arm: S1``. The rung that writes the failing
+    #: test for an item nobody authored an oracle for (or, on ``S1``, for each replayed
+    #: commit) — ``builder:model[:provider]``, the same spelling as a build rung, or ``none``
+    #: for no author. Absent = the deployment's ``CRB_FACTORY__TEST_AUTHOR``.
     #: The author rung and the build rung are never the same rung: a label that is also on
     #: this run's ladder is refused before anything is built.
     test_author: str | None = Field(default=None, max_length=200)
@@ -1023,12 +1030,20 @@ class EvidenceResponse(BaseModel):
 
 
 class RoutingPolicyOut(BaseModel):
-    min_n: int
-    min_point: float
-    min_ci_low: float
+    """:meth:`crb.core.routing.RoutingPolicy.to_dict` — routing.v2's bar: the look rule
+    (``rule``, its ``looks`` — look size → misses allowed — and its exact chance of
+    delivering a cell whose true rate is 0.80), the per-cell error budget, the oracle clauses
+    and ``description``, the one sentence README carries byte for byte (ADR-0025 item 10)."""
+
+    rule: str
+    looks: dict[str, int]
+    p_deliver_at_0_80: float
+    cell_error_budget: float
     min_oracle_strength: float
+    min_oracle_share: float
     granularize_sizes: list[str]
     version: str
+    description: str
 
 
 class CapabilityCellOut(BaseModel):

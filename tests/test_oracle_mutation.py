@@ -22,7 +22,9 @@ What it does: Pins, on the fixture's lopsided oracle, that the strong ``is_admin
               boundedness (``max_mutants`` truncates a stable prefix); that mutants never touch
               test files and the source is restored byte-exact even when the harness raises; that
               a RED baseline, a harness error or no mutants is ``unscoreable`` never a number; a
-              timeout counts as a kill; the seven-operator set and its hash; the provenance
+              timeout is a kill below apparatus 2.4 (``mutation.v1``) and never one from it
+              (``mutation.v2``; tests/test_oracle_mutation_v2.py holds the rest of v2); the
+              seven-operator set and its hash; the provenance
               stamp; the ``.pyc`` mtime regression on sequential scores; and that the number is
               exactly what routing consumes.
 How:          A GOLD-state workspace on ``fixtures.oracle_repo`` → ``score_task`` with a real
@@ -35,8 +37,9 @@ Works with:   src/crb/core/oracle/mutation.py (under test), src/crb/core/oracle/
               spans), src/crb/core/oracle/adequacy.py (the consumer of the number),
               tests/test_oracle_mutation_text.py (the text mutators for the other languages)
 Tested by:    tests/test_oracle_mutation.py
-Touch when:   a Python operator is added (the operator-set case and its hash change — an
-              apparatus consequence); the scoring rule for timeouts or errors changes (ADR).
+Touch when:   never for a new repository; a Python operator is added (the operator-set case and its
+              hash change — an apparatus consequence); the scoring rule for timeouts or errors
+              changes (ADR).
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ from pathlib import Path
 
 import pytest
 
+from crb.core import version as crb_version
 from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.oracle import mutation as ms
 from crb.core.routing import DEFAULT_POLICY as ROUTING_POLICY
@@ -377,7 +381,15 @@ def test_all_mutants_erroring_is_not_scoreable(gold_ws, task, harness):
     assert "harness error" in score.note
 
 
-def test_timeout_counts_as_a_kill_and_is_recorded(gold_ws, task, harness):
+@pytest.mark.parametrize("apparatus", ["2.3", "2.4"])
+def test_a_timeout_is_a_kill_below_2_4_and_never_one_from_it(
+    gold_ws, task, harness, apparatus, monkeypatch
+):
+    """The scorer follows the apparatus (ADR-0025 items 7 and 14): below 2.4 it is
+    ``mutation.v1``, where a timed-out mutant is a kill (the tests did not pass) recorded
+    ``timed_out`` so a reader can recompute without it; from 2.4 it is ``mutation.v2``, where
+    it is a ``timeout``, counted apart (external assessment A6)."""
+    monkeypatch.setattr(crb_version, "APPARATUS_VERSION", apparatus)
     n = len(ms.generate_mutants(MUT_SRC, MUT_IS_ADMIN_LINES))
     hung = Run(124, frozenset(), "TIMEOUT", True)
     runner = _StubRunner([GREEN, *[hung] * n])
@@ -389,8 +401,17 @@ def test_timeout_counts_as_a_kill_and_is_recorded(gold_ws, task, harness):
         executor=harness["executor"],
         changed_lines={SRC_PATH: set(MUT_IS_ADMIN_LINES)},
     )
-    assert score.killed == score.total == n
-    assert all(o.timed_out for o in score.outcomes)  # recomputable without them
+    assert score.provenance.apparatus_version == apparatus
+    assert all(o.timed_out for o in score.outcomes)  # recomputable either way
+    if apparatus == "2.3":
+        assert score.provenance.mutation_version == ms.MUTATION_V1
+        assert score.killed == score.total == n and score.oracle_strength == 1.0
+        assert score.timeouts == 0
+    else:
+        assert score.provenance.mutation_version == ms.MUTATION_V2
+        assert score.killed == score.total == 0 and score.timeouts == n
+        assert score.oracle_strength is None and "timeouts=" in score.note
+        assert all(o.status == ms.OUTCOME_TIMEOUT for o in score.outcomes)
 
 
 def test_score_invariant_no_strength_without_mutants():
@@ -470,7 +491,11 @@ def test_oracle_strength_stamp(weak):
 def test_provenance_stamps_apparatus_and_operator_set(strong):
     p = strong.provenance
     assert p.apparatus_version == APPARATUS_VERSION
-    assert p.mutation_version == "mutation.v1"
+    # the scorer is the apparatus's (mutation.v1 below 2.4, mutation.v2 from it)
+    assert p.mutation_version == ms.mutation_version(p.apparatus_version)
+    v2 = p.mutation_version == ms.MUTATION_V2
+    assert p.sampler == (ms.SAMPLER_HASH_RR if v2 else "")
+    assert ("sampler" in p.to_dict()) is v2
     assert p.language == "python" and p.mutator == "PythonAstMutator"
     assert p.operator_set_hash == ms.operator_set_hash(ms.PythonAstMutator())
     assert len(p.operator_set_hash) == 64

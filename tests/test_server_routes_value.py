@@ -189,6 +189,10 @@ def test_the_curve_classes_a_belt_5_row_from_its_evidence_pack(env: Env) -> None
     )
     d.pop("failure_kind", None)
     d.pop("cost_known", None)
+    # a row of 2.4 pins its failure kind as a label: the clone derives its own (a red row)
+    # and belt 5 ran on it (ADR-0025 item 5: the lint reason says so)
+    d["labels"] = {k: v for k, v in d["labels"].items() if k != "failure_kind"}
+    d["labels"]["lint_reason"] = "evaluated"
     ledger.append(GradeRow.from_dict(with_posture_labels(d)))
     r = env.get(f"/value?repo={ALPHA}")
     assert r.status_code == 200, r.text

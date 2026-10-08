@@ -475,6 +475,8 @@ const USER_EVENTS = {
   offset: 0,
 }
 const SECRETS = { items: [{ name: 'claude_code_oauth_token', present: true, fingerprint: 'GOOD', set_at: '2026-09-13T10:00:00+00:00', set_by: 'root' }], secrets_dir: '/srv/crb/secrets' }
+/** The login runs use (pilot D1): invalid, so the ratchet sees the state pill, its words and Verify. */
+const BUILDER_LOGINS = { items: [{ builder: 'claude_code', auth: 'cli', state: 'invalid', status: 'invalid', detail: 'authentication failed (HTTP 401)', source: 'keychain', fingerprint: '', cli_version: '2.1.275', checked_at: '2026-09-27T15:47:02+00:00', age_s: 42, ttl_s: 600, trigger: 'submit', reason: '' }] }
 
 // ── the flow reading every screen shows its own stream's numbers from (G-925)
 const flowStream = (stream: string, name: string, key: string) => ({
@@ -613,7 +615,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     route: '/settings',
     path: '/settings',
     element: <SettingsPage />,
-    api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP },
+    api: { 'GET /health': { ...HEALTH, probes: [...HEALTH.probes, { name: 'worker', status: 'ok', detail: 'worker-1 alive', data: {} }] }, 'GET /version': VERSION, 'GET /settings': SETTINGS, 'GET /users': USERS, 'GET /settings/secrets': SECRETS, 'GET /github/app': GITHUB_APP, 'GET /builders/logins': BUILDER_LOGINS },
     roles: ['viewer', 'operator', 'admin'],
   },
   '/tasks/:repo/:taskId': {

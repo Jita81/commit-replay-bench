@@ -67,6 +67,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+from crb.builders.base import MissingCredentialError
 from crb.builders.budget import CostMeter, Pricing, price_for
 
 CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
@@ -138,8 +139,9 @@ def host_provider(url: str) -> str:
     return stamp
 
 
-class MissingCredential(RuntimeError):
-    """The named environment variable is not set. Fail closed before any call."""
+class MissingCredential(MissingCredentialError):
+    """The named environment variable is not set. Fail closed before any call (recorded as a
+    credential fault — ``crb.builders.base.model_error_text``)."""
 
 
 class ProviderMismatch(ValueError):

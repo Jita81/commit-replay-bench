@@ -20,7 +20,6 @@ src/crb/server/schemas.py#3f833cf03add
 src/crb/server/settings.py#286e06d9c0a5
 src/crb/server/worker.py#4f14be913d7a
 src/crb/server/worker.py#b3156f75fbed
-src/crb/server/worker.py#d4c88bbcfaaa
 tests/fixtures/pyrepo.py#6a9c8e7bfb13
 tests/test_deploy_health_probes.py#005251726312
 tests/test_factory_outcomes.py#74a4714b1734

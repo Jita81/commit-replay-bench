@@ -98,8 +98,10 @@ export type MigrationsHeadStatus = {
   at_head: boolean
   /** For an unversioned store with crb tables: the revision its fingerprints correspond to; `null` otherwise. */
   unversioned_at: string | null
-  /** Unversioned store whose schema equals the current models at head — `crb migrate` would only stamp it. */
+  /** The schema was compared with the current models and equals them — a store at head (versioned or not); `false` when a difference was found or nothing at head was compared (pilot D7). */
   matches_models: boolean
+  /** Up to five differences the comparison found, as `<op> <names>` (`remove_index ix_runs_status`); `[]` when it matched or was not compared. */
+  drift?: string[]
 }
 
 /** The `migrations` probe as served: `Probe` with its `data` typed. */
@@ -126,6 +128,8 @@ export interface WorkerProbeWorker {
   alive: boolean
   /** Containers whose `docker kill` the daemon never confirmed and this worker is still reaping (0 on an older server). */
   unconfirmed_containers?: number
+  /** What this worker's metrics listener did at start (pilot D5): `listening` on `addr:port` (the port `auto` chose included), `off` by choice, or `degraded` with the reason; `null` when it recorded nothing. */
+  metrics?: { state: 'listening' | 'off' | 'degraded'; addr: string; port: number; requested: string; reason: string } | null
 }
 
 /**
@@ -1011,6 +1015,26 @@ export interface CapabilityCell {
   belt_set?: string
   /** Every belt set behind `n` (`v4`, `v5`…) — with `apparatus_versions`, the provenance a rate keeps. */
   belt_sets?: string[]
+  // --- routing.v2 (ADR-0025, ADR-0026) ------------------------------------------------
+  /** The one context arm and class-set version the cell reads (never pooled). */
+  context_arm?: string
+  taxonomy?: string
+  apparatus_version?: string
+  /** What the cell's reading says about its arm, and the counts it read at. */
+  look_state?: string
+  reading_id?: string
+  counted?: number
+  counted_clean?: number
+  counted_ci_low?: number
+  counted_ci_high?: number
+  needed?: number
+  next_look?: number | null
+  shortfalls?: Shortfall[]
+  /** Every arm of the reading that speaks for the cell; `null` — none registered. */
+  reading?: ReadingOutcome | null
+  standard?: CellStandard | null
+  /** What the briefs carried beyond their arm (label → distinct values) — never a split. */
+  provenance?: Record<string, string[]>
 }
 
 /** Headline numbers of one map; `false_q1_total` must read 0. */
@@ -1043,16 +1067,88 @@ export interface CapabilityMap {
   policy: RoutingPolicy
   /** F35 — the economics of every row behind the map, folded from the rows (the Baseline's tiles). */
   economics?: Economics
+  /** The one context arm the map reads (`standard` = each cell on its own) and the arms present. */
+  arm?: string
+  arms?: string[]
+  taxonomy?: string
+  /** ADR-0025 item 1: the apparatus in force, the one read, and what earlier ones hold as history. */
+  apparatus?: { current: string; read: string; superseded_rows: number; superseded_versions: string[] }
 }
 
-/** `crb.core.routing.RoutingPolicy.to_dict()` */
+/** `crb.core.routing.RoutingPolicy.to_dict()` — routing.v2 (ADR-0025 as ADR-0026 amends it): the look rule replaces routing.v1's `min_n`, point and Wilson bars. */
 export interface RoutingPolicy {
-  min_n: number
-  min_point: number
-  min_ci_low: number
+  /** The look rule a reading is read under (`look.v1`, `look.v1-strict`, `look.v1-late`). */
+  rule: string
+  /** Look size → the misses allowed at that look (`{"20": 0, "30": 1, "40": 2}`). */
+  looks: Record<string, number>
+  /** The rule's exact chance of delivering a cell whose true first-attempt rate is 0.80. */
+  p_deliver_at_0_80: number
+  /** One error budget per cell (ADR-0026 item 5). */
+  cell_error_budget: number
   min_oracle_strength: number
+  min_oracle_share: number
   granularize_sizes: string[]
   version: string
+  /** The published bar as one sentence — README carries it byte for byte (ADR-0025 item 10). */
+  description: string
+}
+
+/** One clause a cell fails, with what to measure next (ADR-0025 item 8). */
+export interface Shortfall {
+  code: string
+  route: string
+  observed: unknown
+  threshold: unknown
+  /** `register`, `replay`, `qualify`, `mine`, `oracle`, `controls`, `seal`, `config`, `strengthen`, `new_reading`, `calibration_builds`, `build_on_standard`, `split`, `audit`, `none`. */
+  next: string
+  count: number
+  model_money: boolean
+}
+
+/** One arm of a registered reading (`crb.core.reading.ArmReading.to_dict`). */
+export interface ArmReading {
+  arm: string
+  /** `deliver`, `insufficient`, `undecided`, `look_pending`, `descriptive`, `stopped`. */
+  state: string
+  descriptive: boolean
+  stopped_by: string
+  counted: number
+  clean: number
+  misses: number
+  ci_low: number
+  ci_high: number
+  next_look: number | null
+  needed: number
+}
+
+/** A registered reading evaluated (`crb.core.reading.ReadingOutcome.to_dict`). */
+export interface ReadingOutcome {
+  reading_id: string
+  rule: string
+  hierarchy: string[]
+  /** `standard`, `ceiling`, `look_pending`, `insufficient`, `undecided`. */
+  state: string
+  standard: string | null
+  ceiling: boolean
+  chain: string[]
+  stopped_at: string | null
+  needed: number
+  spend: number
+  registered_at: string
+  pool: number
+  pool_sha256: string
+  arms: ArmReading[]
+}
+
+/** A cell's proven context: its standard arm, or `standard: null` — "no proven standard". */
+export interface CellStandard {
+  standard: string | null
+  ceiling: boolean
+  label: string
+  next: string
+  next_count: number
+  budget: number
+  spent: number
 }
 
 /** `crb.core.routing.RouteDecision.to_dict()` */
@@ -1412,8 +1508,9 @@ export interface FactoryBacklog {
 
 /** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
 export interface FactoryRefusal {
-  /** `review` = the rule-3 stop (DL-045): routed human AFTER a verdict, never a readiness refusal. */
-  step: 'readiness' | 'red' | 'delivery' | 'review' | 'dependency'
+  /** `review` = the rule-3 stop (DL-045): routed human AFTER a verdict, never a readiness refusal;
+   *  `entry` = the entry gate stopped the item before any spend (ADR-0026 item 8). */
+  step: 'readiness' | 'red' | 'delivery' | 'review' | 'dependency' | 'entry'
   reason: string
   reason_code: string
   measured_route: string
@@ -1440,7 +1537,10 @@ export interface FactoryEvolutionPrefill {
 /** The stopped item's next action: the evolutions route, one sentence saying what must be
  *  different, whether the POST should carry a stronger oracle, and the draft itself. */
 export interface FactoryWayForward {
-  action: 'register_evolution'
+  /** `register_evolution`: POST the superseding item to `route`; `fund_calibration`: an approver POSTs a
+   *  reason to `route` (ADR-0026 item 8 — one calibration build, never a pull request); `sign_off_cell`:
+   *  a second person signs the cell (`/signoffs`). */
+  action: 'register_evolution' | 'fund_calibration' | 'sign_off_cell'
   route: string
   supersedes: string
   /** One sentence: what must be different about the superseding item. `''` on an older server. */
@@ -1491,6 +1591,31 @@ export interface FactoryTask {
   /** F28 — the capability map's route for the item's (class × size) cell, from the same
    * signed map the delivery gate reads; `route: ''` = nobody has measured the cell. */
   cell_route: { route: string; reason_code: string; reason: string; n: number; point: number; ci_low: number; ci_high: number; apparatus_versions: string[]; deliverable: boolean }
+  /** ADR-0026 item 8 — the entry gate's stop since the last readiness pass: the item was NOT BUILT.
+   *  `code`: `no_proven_standard` · `needs_context` · `unsigned_cell` · `granularize` · `not_licensed` ·
+   *  `unsized`; `needs` is what the ticket must carry. `null` = the item entered (optional for older mocks). */
+  entry?: FactoryEntryStop | null
+  /** An approver's calibration grant no run has spent yet; `null` = none. */
+  calibration?: FactoryCalibrationGrant | null
+  /** The SHA-256 of the test the newest RED proof carries — what a strength-probe waiver names. */
+  test_sha256?: string
+}
+
+/** Why the entry gate stopped an item before any spend (ADR-0026 item 8). */
+export interface FactoryEntryStop {
+  code: string
+  reason: string
+  /** `no_proven_standard`: `none` or `ceiling`; `needs_context`: the arm's base (`S1`, `S2`). */
+  reason_code: string
+  needs: string[]
+}
+
+/** An approver's funded calibration build, not yet built by a run (never a pull request). */
+export interface FactoryCalibrationGrant {
+  approver: string
+  reason: string
+  created: string
+  event: string
 }
 
 /** `GET /factory/catalogue` — what a backlog item may be made of (F24: the freeze form asks these). */
@@ -1684,6 +1809,14 @@ export interface IntakeRow {
   awaiting_approval?: boolean
   /** Who created the ticket, as the tracker names them (the allowlist's input). */
   author?: string
+  /** ADR-0026 item 8 — the entry gate's stop for this ticket (`no_proven_standard`, `needs_context`,
+   *  `unsigned_cell`, `granularize`, `unsized`); `''` = it enters. The item is NOT BUILT while it stands. */
+  entry_stop?: string
+  entry_reason?: string
+  /** What the ticket must carry: the missing slots, or `a failing test`. */
+  entry_needs?: string[]
+  /** The cell's standard arm (`S1@<author>`, `S2`), `''` when none is proven. */
+  standard?: string
 }
 
 /** What the last poll did, and why it stopped if it did. */

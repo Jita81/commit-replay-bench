@@ -59,16 +59,19 @@ from fastapi import APIRouter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from crb.core.ledger import is_v2_apparatus
 from crb.core.oracle.adequacy import (
     DEFAULT_POLICY,
     classify_oracle,
     licenses_autoship,
     routing_decision,
 )
+from crb.core.oracle.mutation import mutation_version
 from crb.core.routing import DEFAULT_POLICY as ROUTING_POLICY
 from crb.core.routing import ControlsVerdict, RoutingPolicy
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.core.stats import mean
+from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope
 from crb.server.routes.repos import get_repo_or_404
@@ -96,18 +99,35 @@ def _latest_controls_event(session: Session, repo: str) -> Event | None:
     ).scalar_one_or_none()
 
 
-def latest_controls_verdict(session: Session, repo: str) -> ControlsVerdict:
-    """The repo's latest negative-controls verdict, for routing.
+def latest_controls_verdict(
+    session: Session, repo: str, *, apparatus: str = APPARATUS_VERSION
+) -> ControlsVerdict:
+    """The repo's latest negative-controls verdict AT ``apparatus`` (controls-gate.v2), for
+    routing.
 
-    Source order: the latest ``controls.report`` event (what ``/oracle/{repo}/controls``
-    serves); else the latest finished ``controls`` run's ``counts_json`` (the worker
-    writes both, so this only matters for a report whose event was pruned); else
-    :meth:`ControlsVerdict.unmeasured`.
+    Source order: the latest ``controls.report`` event of that apparatus (what
+    ``/oracle/{repo}/controls`` serves when it is the latest); else the latest finished
+    ``controls`` run's ``counts_json`` (the worker writes both, so this only matters for a
+    report whose event was pruned) — from 2.4 only when the run's own apparatus stamp
+    (``apparatus_json``) names that apparatus; else :meth:`ControlsVerdict.unmeasured`, naming
+    why. A report of another apparatus is history and never read in this one's place.
     """
-    ev = _latest_controls_event(session, repo)
-    if ev is not None:
-        return ControlsVerdict.from_counts(
+    events = session.execute(
+        select(Event)
+        .where(Event.repo == repo, Event.action == CONTROLS_ACTION)
+        .order_by(Event.id.desc())
+    ).scalars()
+    other = ""
+    for ev in events:
+        verdict = ControlsVerdict.from_counts(
             dict(ev.payload_json or {}), run_id=ev.trace_id, created=ev.timestamp
+        )
+        if not is_v2_apparatus(apparatus) or verdict.apparatus_version == apparatus:
+            return verdict
+        other = other or verdict.apparatus_version or "unstamped"
+    if other:
+        return ControlsVerdict.unmeasured(
+            f"no controls report at apparatus {apparatus}; the latest is of {other} (history)"
         )
     run = session.execute(
         select(Run)
@@ -116,9 +136,15 @@ def latest_controls_verdict(session: Session, repo: str) -> ControlsVerdict:
         .limit(1)
     ).scalar_one_or_none()
     if run is not None and "passed" in (run.counts_json or {}):
-        return ControlsVerdict.from_counts(
-            dict(run.counts_json), run_id=run.id, created=run.finished or run.created
-        )
+        stamp = str(dict(run.apparatus_json or {}).get("apparatus_version", "") or "")
+        if not is_v2_apparatus(apparatus) or stamp == apparatus:
+            return ControlsVerdict.from_counts(
+                {"apparatus_version": stamp, **dict(run.counts_json)},
+                run_id=run.id,
+                created=run.finished or run.created,
+            )
+    if is_v2_apparatus(apparatus):
+        return ControlsVerdict.unmeasured(f"no controls report at apparatus {apparatus}")
     return ControlsVerdict.unmeasured()
 
 
@@ -207,12 +233,34 @@ def _apparatus_of(payload: Mapping[str, Any]) -> str:
     return str(payload.get("apparatus_version", "") or "")
 
 
-def oracle_by_task(session: Session, repo: str) -> dict[str, float | None]:
-    """The repo's latest ``oracle.score`` per task — the reduction ``GET /oracle/{repo}``
-    serves (:func:`oracle_report`) — so the capability map routes every cell under the
-    same oracle strength the sign-off evidences
-    (:func:`~crb.core.capability.task_oracle_strength`)."""
-    return {t.task_id: t.strength for t in oracle_report(session, repo).tasks}
+def oracle_by_task(
+    session: Session, repo: str, *, apparatus: str = APPARATUS_VERSION
+) -> dict[str, float | None]:
+    """Each task's MINIMUM scoreable strength among its ``oracle.score`` events scored at
+    ``apparatus`` under that apparatus's rule (``mutation.v2`` from 2.4) — ADR-0025 item 3. A
+    minimum cannot rise when a flaky suite is re-scored, and a score of another apparatus or
+    rule is history, never read. Below 2.4 the latest score per task is read, as it was. The
+    capability map and the sign-off read this one reduction
+    (:func:`~crb.core.capability.oracle_evidence`)."""
+    if not is_v2_apparatus(apparatus):
+        return {t.task_id: t.strength for t in oracle_report(session, repo).tasks}
+    rule = mutation_version(apparatus)
+    out: dict[str, float | None] = {}
+    for ev in _score_events(session, repo):
+        p = dict(ev.payload_json or {})
+        prov = p.get("provenance") if isinstance(p.get("provenance"), Mapping) else {}
+        assert isinstance(prov, Mapping)
+        if _apparatus_of(p) != apparatus or str(prov.get("mutation_version", "")) != rule:
+            continue
+        strength = _float_or_none(p.get("oracle_strength", p.get("strength")))
+        if _int(p.get("total", p.get("mutants"))) == 0:
+            strength = None
+        tid = str(ev.task_id or p.get("task_id") or p.get("task") or "")
+        if not tid or strength is None:
+            continue
+        prior = out.get(tid)
+        out[tid] = strength if prior is None else min(prior, strength)
+    return out
 
 
 def oracle_report(session: Session, repo: str) -> OracleReportOut:

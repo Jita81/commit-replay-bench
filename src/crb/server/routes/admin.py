@@ -84,7 +84,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from crb.builders.claude_code import CLI_TOKEN_SECRET, VERIFY_STATUSES
+from crb.builders.claude_code import (
+    AUTH_CLI,
+    CLI_TOKEN_SECRET,
+    TOKEN_SOURCE_SECRETS_FILE,
+    VERIFY_STATUSES,
+)
 from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsInsecure
 from crb.core.version import APPARATUS_VERSION
@@ -113,8 +118,16 @@ from crb.server.auth import (
     verify_password,
     would_orphan_admins,
 )
+from crb.server.builder_login import TRIGGER_STORED_TOKEN, record_verification, resolution_of
 from crb.server.claude_login import STATE_DONE, LoginError
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep, client_ip
+from crb.server.deps import (
+    ApiError,
+    DbDep,
+    ErrorEnvelope,
+    SessionFactoryDep,
+    SettingsDep,
+    client_ip,
+)
 from crb.server.routes.runs import (
     append_system_event,
     commit_audited,
@@ -964,10 +977,16 @@ def cancel_claude_login(
     summary="Test the stored token: one no-tool Haiku turn through the builder's own environment",
 )
 def verify_claude_code_token(
-    admin: AdminDep, secrets: SecretsDep, limiter: VerifyLimiterDep, settings: SettingsDep
+    admin: AdminDep,
+    secrets: SecretsDep,
+    limiter: VerifyLimiterDep,
+    settings: SettingsDep,
+    factory: SessionFactoryDep,
 ) -> LoginCheckOut:
-    """Run the builder's login probe with the stored token (429 inside the rate window)."""
-    del admin
+    """Run the builder's login probe with the stored token (429 inside the rate window). When
+    the stored token IS the login a ``cli`` build would use (no token in the worker's
+    environment overrides it), the outcome is recorded for the run preflight and the
+    ``builders`` probe, like Verify under the login card (pilot D1)."""
     retry = limiter.acquire()
     if retry is not None:
         wait = math.ceil(retry)
@@ -984,6 +1003,17 @@ def verify_claude_code_token(
         raise ApiError(409, "secrets_insecure", str(exc)) from None
     if check is None:
         raise ApiError(404, "not_found", "no Claude Code token is stored — save one first")
+    resolution = resolution_of("claude_code", AUTH_CLI)
+    if resolution == (TOKEN_SOURCE_SECRETS_FILE, check.fingerprint):
+        record_verification(
+            factory,
+            "claude_code",
+            AUTH_CLI,
+            check,
+            trigger=TRIGGER_STORED_TOKEN,
+            actor=admin.id,
+            resolution=resolution,
+        )
     return LoginCheckOut(**check.to_dict())
 
 

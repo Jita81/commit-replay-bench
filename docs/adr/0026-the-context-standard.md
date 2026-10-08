@@ -135,14 +135,19 @@ rule makes them prospective (item 10).
    **hierarchy** (arm ids, richest first — item 4), any descriptive arms and their fixed counts,
    the rule (item 3) and the share of the cell's error budget it spends (item 5) — the
    hierarchy's `S1@<author>` arms name the test author's model — and the **frozen pool**: the
-   list of qualified commits and its sha256. The **seeded order** is normative: commits are
+   list of qualified commits and its sha256. The pool is chosen by a rule blind to every
+   outcome — every qualified commit of the cell, or every one authored at or after a date the
+   operator names — and the rule is recorded with it; a hand-picked list is refused
+   `pool_not_blind`, because a list chosen after grading could hold only the commits that
+   passed (DL-097). The **seeded order** is normative: commits are
    read in ascending
    `sha256("crb.reading.v1|" + repo + "|" + canonical cell key + "|" + commit sha)`, one order
    per cell shared by every arm, so the arms are paired and no run incident can reorder a look.
    A registration is refused `pool_seen` if any pool commit already has a graded row under an arm
    of its hierarchy at that apparatus, and `budget_spent` if the cell's budget cannot cover it.
    Within a reading a commit counts once, by its first observed attempt (ADR-0025 item 2) among
-   rows graded after registration, at rung `r1`: for a replayed arm, **in the sealed posture**
+   rows this deployment graded after registration (an imported row is history and never counts,
+   DL-097), on the reading's checks arm, at rung `r1`: for a replayed arm, **in the sealed posture**
    (the builder in the sealed container and the tests in the docker sandbox — ADR-0012,
    ADR-0019, ADR-0023); for `S2`, on factory rows whose held-out acceptance tests stayed outside
    the builder's tree until grading (item 8).
@@ -278,7 +283,9 @@ rule makes them prospective (item 10).
 
 8. **The entry gate: a ticket enters manufacturing only when its cell has a proven standard and
    the ticket carries it.** Readiness reads the cell's standard from the current signed map
-   (`standard_for(repo, cell)`) and asks the ticket for exactly what that arm needs — for `S1`,
+   (`standard_for(repo, cell)` on the repository's checks arm and the deployment's posture
+   class — a reading speaks only for a cell read on the checks arm and posture class it counted
+   its rows on, DL-097) and asks the ticket for exactly what that arm needs — for `S1`,
    the structural slots the test author reads; for `S2`, a failing test a person attached — and
    the builder gets that arm's context and nothing it was not measured with (a person's test
    attached to a ticket in an `S1` cell is kept as a held-out acceptance test, never shown to the
@@ -305,7 +312,13 @@ rule makes them prospective (item 10).
      2026-09-16 (decision 1: build and withhold, and the override of the route) and ADR-0018 as
      drafted (decision 1's build and withhold; decision 3's override of both clauses; decision
      5's "the route alone", which now means the proven standard alone). Wave 4's stream S
-     re-reads ADR-0018 against this item before it merges.
+     re-reads ADR-0018 against this item before it merges. **Who may grant it** is ADR-0003's
+     amendment of 2026-09-27 (GOV-1, GOV-4), which the Wave 2 integration applies to this
+     narrowed override: it is a second approver's evented act on the queued or running run
+     (`POST /runs/{id}/deliver-override`), read live at each item's entry gate, refused on the
+     chain (`override_refused`) when it names the run's own actor or the cell carries any
+     false-Q1 row; that amendment's route-gate override itself no longer exists — the route
+     gate has none.
    - **Size.** A ticket's size comes from story points only once the organisation's
      points-to-churn agreement has passed (item 9's validity report). Until then readiness reads
      the cell the points name and the next larger size's cell and applies the more demanding of

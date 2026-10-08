@@ -66,8 +66,14 @@ from crb.core.mine import qualify
 from crb.core.runners import get_runner
 from crb.core.runners.base import BaseRunner
 from crb.core.spec import Language, RepoConfig, TaskSpec
+from crb.core.version import APPARATUS_VERSION
 from crb.core.workspace import Workspace
 from fixtures.posture import grade_adhoc, grade_witnessed
+
+#: The apparatus the rows here are written at: these tests pin a grade's classification,
+#: which 2.3 and 2.4 share; what a 2.4 row carries besides is pinned in
+#: tests/test_ledger_classification.py and tests/test_context_arm.py.
+GRADE_APPARATUS = "2.3"
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -487,7 +493,7 @@ def test_no_linter_means_belt_five_none_and_clean_unchanged(
     assert res.clean and res.belts.repo_lint_clean is None and res.lint_run is None
     assert res.belts.evaluated == g.CORE_BELT_NAMES
     assert all(p.get("belt") != "repo_lint_clean" for _, p in events)
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.clean and row.belt_set == "v5" and row.repo_lint_clean is None
     assert row.failure_kind == "" and row.body()["repo_lint_clean"] is None
 
@@ -518,7 +524,7 @@ def test_rejecting_linter_is_not_clean_and_is_the_lint_kind(
     assert belt5["value"] is False and belt5["detected"] == "config"
     with pytest.raises(g.FalseQ1Violation):
         g.GradeResult(task.task_id, task.repo, "sighted", clean=True, belts=res.belts)
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert not row.clean and row.repo_lint_clean is False and row.belt_set == "v5"
     assert row.failure_kind == lg.FAILURE_LINT and row.labels["failure_kind"] == "lint"
     assert row.eligible and lg.failure_split([row]).lint == 1
@@ -540,7 +546,7 @@ def test_accepting_linter_is_clean_and_true(
     res = _grade(ws, task, config)
     assert res.clean and res.belts.repo_lint_clean is True
     assert res.belts.evaluated == g.BELT_NAMES
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.clean and row.repo_lint_clean is True and row.failure_kind == ""
 
 
@@ -563,7 +569,7 @@ def test_a_lint_rejection_names_the_gold_witness_only_when_the_gold_passed_belt_
     ws.overlay_sources(task.src_files)
     res = _grade(ws, task, config, gold_lint=gold_lint)
     assert res.belts == g.Belts(True, True, True, True, False) and not res.clean
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     if gold_lint is True:
         assert res.blame_control == g.BLAME_LINT_GOLD_OK and res.error == ""
         assert row.failure_kind == lg.FAILURE_LINT
@@ -597,7 +603,7 @@ def test_lint_timeout_fails_the_belt_closed(
     assert res.belts.repo_lint_clean is False
     assert res.lint_run is not None and res.lint_run.steps[0].timed_out
     assert "timed out" in res.note
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.failure_kind == lg.FAILURE_LINT  # the tool ran; the patch did not pass it
 
 
@@ -613,7 +619,7 @@ def test_linter_that_cannot_run_is_a_harness_error_never_a_pass(
     assert res.clean is False and res.error.startswith("lint:") and "not runnable" in res.error
     assert res.belts.repo_lint_clean is False
     assert res.lint_run is not None and res.lint_run.error and res.lint_run.steps[0].rc == 127
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.failure_kind == lg.FAILURE_HARNESS and not row.clean
     # a tool that ran but crashed (its own abnormal exit) is a harness error too
     script = _script(tmp_path / "bin" / "crash", "echo internal error >&2\nexit 2\n")
@@ -664,7 +670,7 @@ def test_lint_is_not_evaluated_when_the_grade_stops_early(
     res = _grade(ws, task, config)
     assert res.belts.target_green is False and res.belts.repo_lint_clean is None
     assert res.lint_run is None
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.failure_kind == lg.FAILURE_BUILDER_RED
 
 
@@ -681,7 +687,7 @@ def test_lint_fails_and_a_core_belt_fails_is_builder_red_not_lint(
     res = _grade(ws, task, config)
     assert res.belts.no_new_failures is False and res.belts.repo_lint_clean is False
     assert not res.clean
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.failure_kind == lg.FAILURE_BUILDER_RED and not row.lint_only()
 
 
@@ -718,7 +724,7 @@ def test_go_gofmt_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     assert res.belts.target_green is True and res.belts.no_new_failures is True
     assert res.belts.repo_lint_clean is False and res.clean is False
     assert res.lint_run is not None and gorepo.SRC_SUB in res.lint_run.steps[0].tail
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.failure_kind == lg.FAILURE_LINT and row.belt_set == "v5"
     ws.remove()
 
@@ -770,7 +776,7 @@ def test_python_ruff_rejects_a_misformatted_gold_patch(tmp_path: Path) -> None:
     assert res.lint_run.steps[-1].tool == "ruff" and "F401" in res.lint_run.steps[-1].tail
     # the source stays as the builder left it: `ruff check` never fixed it
     assert (ws.root / pyrepo_min.SRC_SUB).read_text().startswith("import os\n")
-    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+    row = lg.grade_row_from_result(res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS)
     assert row.failure_kind == lg.FAILURE_LINT
     ws.remove()
 
@@ -856,7 +862,9 @@ def test_rust_missing_rustfmt_component_is_a_harness_error_not_a_verdict(tmp_pat
     else:
         assert not res.clean and res.belts.repo_lint_clean is False
         assert "not runnable" in res.error and "not installed" in res.error
-        row = lg.grade_row_from_result(res, task, pack_hash="c" * 64)
+        row = lg.grade_row_from_result(
+            res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        )
         assert row.failure_kind == lg.FAILURE_HARNESS  # the instrument, not the model
     ws.remove()
 
@@ -881,7 +889,12 @@ def test_rust_cargo_fmt_rejects_a_misformatted_gold_patch(tmp_path: Path) -> Non
     res = _grade(ws, task, config)
     assert res.belts.target_green is True and res.belts.repo_lint_clean is False
     assert not res.clean
-    assert lg.grade_row_from_result(res, task, pack_hash="c" * 64).failure_kind == "lint"
+    assert (
+        lg.grade_row_from_result(
+            res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        ).failure_kind
+        == "lint"
+    )
     ws.remove()
 
 
@@ -943,7 +956,7 @@ def test_lint_run_is_in_the_evidence_pack_and_survives_the_round_trip(
     d = pack.to_dict()
     assert d["grade"]["lint_run"]["ok"] is False and d["grade"]["repo_lint_clean"] is False
     assert "ghp_" + "b" * 40 not in json.dumps(d)  # redacted at construction
-    assert d["apparatus"]["apparatus_version"] == "2.3"
+    assert d["apparatus"]["apparatus_version"] == APPARATUS_VERSION
     assert os.environ.get("CRB_HOME") is None  # never the live stack
 
 
@@ -1227,7 +1240,12 @@ def test_node_tsc_type_error_in_a_changed_file_is_a_lint_failure(tmp_path: Path)
     assert res.belts.target_green is True and res.belts.repo_lint_clean is False
     assert not res.clean and res.error == ""
     assert (res.lint_run.steps[0].findings_changed, res.lint_run.steps[0].findings_other) == (1, 0)
-    assert lg.grade_row_from_result(res, task, pack_hash="c" * 64).failure_kind == "lint"
+    assert (
+        lg.grade_row_from_result(
+            res, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        ).failure_kind
+        == "lint"
+    )
     ws.remove()
 
 
@@ -1285,7 +1303,12 @@ def test_real_tsc_attributes_type_errors_by_file(tmp_path: Path) -> None:
     assert res2.lint_run is not None and res2.belts.repo_lint_clean is False and not res2.clean
     (step2,) = res2.lint_run.steps
     assert (step2.findings_changed, step2.findings_other) == (1, 1)
-    assert lg.grade_row_from_result(res2, task, pack_hash="c" * 64).failure_kind == "lint"
+    assert (
+        lg.grade_row_from_result(
+            res2, task, pack_hash="c" * 64, apparatus_version=GRADE_APPARATUS
+        ).failure_kind
+        == "lint"
+    )
     ws2.remove()
 
 

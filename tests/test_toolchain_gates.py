@@ -9,7 +9,7 @@ WORKS — ``require_tool`` / ``require_docker`` in tests/conftest_langs.py, run 
 that names the tools it provides in ``CRB_TEST_REQUIRE_TOOLS``, where a tool that does not
 work fails instead of skipping (P-745). These ratchets keep both true, and the same for the
 history: the suite jobs hold all of it, so a test that cannot read a commit fails, naming the
-fetch, instead of skipping the proof it was written to make (P-750).
+fetch, instead of skipping the proof it was written to make (P-753).
 
 Navigation
 ----------
@@ -27,7 +27,7 @@ What it does: Fails when a test skips on its own PATH or version lookup — ``sh
               a test skips on (``pytest.importorskip``) is not installed by the suite jobs'
               ``uv sync`` extras nor named here as one CI does not install (P-707); and when a
               test skips on what a ``git`` command said, or a suite job holds less than the
-              whole history (P-750). Each check also runs on planted shapes so it cannot pass
+              whole history (P-753). Each check also runs on planted shapes so it cannot pass
               vacuously.
 How:          ``ast`` over every ``tests/**/*.py`` except the gate's own module and its unit
               tests; PyYAML over ci.yml's ``env:`` blocks.
@@ -38,7 +38,7 @@ Works with:   tests/conftest_langs.py (the gate), tests/conftest.py (the setup h
               ``fresh-clone-shard``, which declare the tools they provide, whose ``uv sync``
               extras install the packages and whose checkouts hold the whole history),
               pyproject.toml (the extras' packages), docs/PREVENTION.md (P-707, P-744, P-745,
-              P-747, P-748, P-750)
+              P-747, P-748, P-753)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository's own tests (they are not in this suite); a runner
               for a new language adds a tool — gate on it with ``@pytest.mark.toolchain``, give
@@ -110,7 +110,7 @@ def _name(node: ast.AST) -> str:
 #: A version command run by hand in a skip condition is a lookup of its own too: a
 #: ``subprocess`` call whose literal argv asks a tool for its version. Any other command
 #: (``git show`` of a commit a shallow clone lacks) asks about data, not a tool — and a skip
-#: on that is refused by ``history_skip_findings`` below (P-750).
+#: on that is refused by ``history_skip_findings`` below (P-753).
 SUBPROCESS = {"run", "call", "check_call", "check_output", "Popen"}
 VERSION_ARGS = {"version", "--version", "-version", "-v", "-V"}
 
@@ -327,7 +327,7 @@ def test_the_scan_leaves_the_gate_and_a_branch_alone() -> None:
         'def f():\n    langs.require_tool("go")\n    langs.require_docker()\n'
         '    if langs.tool_usable("cargo-fmt"):\n        assert True\n'
         # a lookup that feeds no skip, and a skip on something that is not a tool (the last,
-        # a skip on a commit, is the history scan's to refuse: P-750)
+        # a skip on a commit, is the history scan's to refuse: P-753)
         'def _bin():\n    return shutil.which("ruff") or "ruff"\n'
         'def g():\n    r = subprocess.run([_bin(), "check"])\n    assert r.returncode == 0\n'
         '@pytest.mark.skipif(sys.platform == "win32", reason="posix only")\ndef test_b(): ...\n'
@@ -563,7 +563,7 @@ def _git_taint(body: list[ast.stmt], helpers: set[str], tainted: set[str]) -> se
 def history_skip_findings(source: str, where: str) -> list[str]:
     """Every skip on what a ``git`` command said — a ``skipif``, an ``if`` that calls
     ``pytest.skip``, or an ``except`` that does around a ``git`` command — run there, through a
-    function of any depth that runs it, or through a name assigned from one (P-750). The suite
+    function of any depth that runs it, or through a name assigned from one (P-753). The suite
     jobs hold the whole history, so a commit a test cannot read is a clone to deepen: the test
     fails, naming the fetch, and never skips the proof it was written to make."""
     tree = ast.parse(source)
@@ -607,7 +607,7 @@ def history_skip_findings(source: str, where: str) -> list[str]:
 def test_no_test_skips_on_what_git_said() -> None:
     """The proof that ``workflow_jobs.json`` is the pull-request workflows at its commit
     skipped on a clone that lacked the commit, so a shallow checkout passed it having proved
-    nothing (P-750). The suite jobs hold the whole history: a test that cannot read a commit
+    nothing (P-753). The suite jobs hold the whole history: a test that cannot read a commit
     fails, naming the fetch."""
     found = [
         f
@@ -620,7 +620,7 @@ def test_no_test_skips_on_what_git_said() -> None:
 @pytest.mark.parametrize(
     "planted",
     [
-        # the shape P-750 found: a nested helper, a local, a skip on its exit code
+        # the shape P-753 found: a nested helper, a local, a skip on its exit code
         'def test_a():\n    def git(*a):\n        return subprocess.run(["git", *a])\n'
         '    listed = git("ls-tree", "abc")\n    if listed.returncode != 0:\n'
         '        pytest.skip("a shallow clone")\n',
@@ -651,7 +651,7 @@ def test_the_history_scan_passes_a_fail_and_a_skip_on_something_else() -> None:
 def shallow_suite_findings(ci_text: str) -> list[str]:
     """Each suite job that holds less than the whole history: a checkout without
     ``fetch-depth: 0``, or a ``git clone`` / ``git fetch`` cut by ``--depth``, ``--shallow-*``
-    or ``--single-branch`` (P-750)."""
+    or ``--single-branch`` (P-753)."""
     jobs = yaml.safe_load(ci_text)["jobs"]
     out: list[str] = []
     for job in SUITE_JOBS:
@@ -667,7 +667,7 @@ def shallow_suite_findings(ci_text: str) -> list[str]:
 
 def test_the_suite_jobs_hold_the_whole_history() -> None:
     """Every job that runs the suite checks out the whole history, and the fresh-clone
-    shards' clone of it is whole too: the proofs that read a commit run there (P-750)."""
+    shards' clone of it is whole too: the proofs that read a commit run there (P-753)."""
     assert shallow_suite_findings(CI.read_text(encoding="utf-8")) == []
 
 

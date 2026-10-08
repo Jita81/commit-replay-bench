@@ -18,8 +18,18 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   branch-protection check compared that list with `ci.yml` alone, so it called `commit-subjects`
   a check no job reports. It never saw that the check was missing before. It now finds every
   workflow whose `on:` names `pull_request` and requires each of their jobs. The new reading is
-  saved in `data/branch-protection-2026-10-07/` (P-749). No token that may read the setting is
+  saved in `data/branch-protection-2026-10-07/` (P-752). No token that may read the setting is
   provisioned yet, so the daily workflow stays red (G-930).
+
+- **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
+  (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
+  [#69](https://github.com/Jita81/commit-replay-bench/pull/69)). Apparatus 2.4: every row stamps
+  its context arm and class-set version, never pooled, and a cell delivers only on its standard
+  arm once a pre-registered reading is decided by the look rule (ADR-0025, ADR-0026). An item
+  stops before any spend without a proven standard; a pull request opens only when the delivered
+  change's cell licenses its arm. A dead builder login is refused at submit and claim. Runners
+  see only declared tools; a patch breaking another Go package, or a test run that stops
+  part-way, no longer grades clean.
 
 - **Wave 2, part A: the context standard's record, checkable claims, provable audit, gates and spend**
   (Wave 2, streams T, C, I, H and X; [#68](https://github.com/Jita81/commit-replay-bench/pull/68)).
