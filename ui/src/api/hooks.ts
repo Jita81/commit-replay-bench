@@ -26,6 +26,9 @@
  *               reads as "no session", any other failure is the query's error); `useVersion`
  *               refetches on focus so a restarted API's settings reach an open page;
  *               `normaliseEvidence` folds two server shapes into one.
+ *               `fetchAllRepos` walks every page of `GET /repos`, lists each repository once
+ *               and reads again a list that changed while it was walked, saying `stable`
+ *               only of a read that saw one unchanging list (G-229).
  * How:          `keys` is the single source of every query key → each hook wraps
  *               `api<T>(path)` in `useQuery` / `useMutation` with the key, `enabled` guards on
  *               empty ids and the polling rule → `useRunEvents` owns a `RunEventStream` per
@@ -81,11 +84,16 @@ import type {
   FactoryCatalogue,
   FactoryTask,
   Flow,
+  GoLive,
   ForecastBuild,
   ForecastReadiness,
   GradeListParams,
   GradeRow,
   Health,
+  Invitation,
+  InvitationAccepted,
+  InvitationCreated,
+  InviteRequest,
   LedgerVerify,
   LoginRequest,
   OracleReport,
@@ -111,6 +119,7 @@ import type {
   StepEvent,
   TaskDetail,
   TaskSpec,
+  TwoPersonReadiness,
   User,
   UserCreateRequest,
   ValueReport,
@@ -143,6 +152,7 @@ export function currentData<T>(q: { data: T | undefined; isError: boolean }): T 
 export const keys = {
   health: ['health'] as const,
   version: ['version'] as const,
+  golive: ['golive'] as const,
   me: ['auth', 'me'] as const,
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
@@ -177,6 +187,9 @@ export const keys = {
   flow: (repo: string) => ['flow', repo] as const,
   users: ['users'] as const,
   userEvents: (id: string, p?: PageParams) => ['users', id, 'events', p ?? {}] as const,
+  invitations: ['invitations'] as const,
+  decisionAges: ['decisions', 'ages'] as const,
+  twoPerson: ['two-person-readiness'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
   value: (repo: string) => ['value', repo] as const,
@@ -212,6 +225,39 @@ export function useVersion(): UseQueryResult<Version, ApiError> {
     retry: false,
     staleTime: VERSION_STALE_MS,
     refetchOnWindowFocus: 'always',
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Go-live (ADR-0031)
+// ---------------------------------------------------------------------------
+
+/** `GET /golive` — every go-live line with its state now (any signed-in role). */
+export function useGoLive(): UseQueryResult<GoLive, ApiError> {
+  return useQuery({ queryKey: keys.golive, queryFn: () => api<GoLive>('/golive'), retry: false, staleTime: 30_000 })
+}
+
+/** `PUT /settings/attestations/{line}` (admin) — record that an operator act was done. */
+export function useAttest(): UseMutationResult<GoLive, ApiError, { line: string; statement: string; performed_on: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ line, statement, performed_on }) => api<GoLive>(`/settings/attestations/${enc(line)}`, { method: 'PUT', body: { statement, performed_on } }),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.golive, data)
+      void qc.invalidateQueries({ queryKey: ['flow'] })
+    },
+  })
+}
+
+/** `DELETE /settings/attestations/{line}` (admin) — withdraw the attestation in force. */
+export function useWithdrawAttestation(): UseMutationResult<GoLive, ApiError, { line: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ line }) => api<GoLive>(`/settings/attestations/${enc(line)}`, { method: 'DELETE' }),
+    onSuccess: (data) => {
+      qc.setQueryData(keys.golive, data)
+      void qc.invalidateQueries({ queryKey: ['flow'] })
+    },
   })
 }
 
@@ -318,24 +364,53 @@ export const PAGE_MAX = 500
 /**
  * EVERY repository, walking `/repos` page by page under the documented `limit`/`offset`
  * contract — for the picker, which must not omit a repo that fell outside the first page
- * (CodeRabbit on PR #6). The result keeps the `Page` shape with `total` = the count seen.
+ * (CodeRabbit on PR #6). The result keeps the `Page` shape with `total` = the last page's total.
+ *
+ * Offset paging over a list that changes while it is walked can miss one repository and list
+ * another twice with the counts still agreeing (a repository created ahead of the offset shifts
+ * every later page by one). So each repository is listed once (by name), and a walk whose pages
+ * disagree on the total, repeat a name or stop short is read again, up to `ALL_REPOS_READS`
+ * times; `stable` is false when no read saw one unchanging list, and the Repos count line then
+ * never says "All" (G-229).
  */
-export async function fetchAllRepos(): Promise<Page<RepoSummary>> {
-  const items: RepoSummary[] = []
-  let offset = 0
-  let total = 0
-  for (;;) {
-    const page = await api<Page<RepoSummary>>(`/repos${qs({ limit: PAGE_MAX, offset })}`)
-    items.push(...page.items)
-    total = page.total
-    offset += page.items.length
-    if (page.items.length === 0 || offset >= page.total) break
+export async function fetchAllRepos(): Promise<AllRepos> {
+  let last: AllRepos = { items: [], total: 0, limit: 0, offset: 0, stable: false }
+  for (let read = 0; read < ALL_REPOS_READS; read++) {
+    const seen = new Set<string>()
+    const items: RepoSummary[] = []
+    const totals = new Set<number>()
+    let offset = 0
+    let total = 0
+    let repeated = false
+    for (;;) {
+      const page = await api<Page<RepoSummary>>(`/repos${qs({ limit: PAGE_MAX, offset })}`)
+      for (const r of page.items) {
+        if (seen.has(r.name)) repeated = true
+        else {
+          seen.add(r.name)
+          items.push(r)
+        }
+      }
+      total = page.total
+      totals.add(page.total)
+      offset += page.items.length
+      if (page.items.length === 0 || offset >= page.total) break
+    }
+    const stable = !repeated && totals.size === 1 && items.length === total
+    last = { items, total, limit: items.length, offset: 0, stable }
+    if (stable) break
   }
-  return { items, total, limit: items.length, offset: 0 }
+  return last
 }
 
+/** How many times `fetchAllRepos` reads the whole list before it says the list kept changing. */
+export const ALL_REPOS_READS = 3
+
+/** Every repository, and whether one read saw a list that did not change while it was walked. */
+export type AllRepos = Page<RepoSummary> & { stable: boolean }
+
 /** `useRepos` over every page — the picker's source. Shares the repos cache key family so a created repo invalidates it. */
-export function useAllRepos(): UseQueryResult<Page<RepoSummary>, ApiError> {
+export function useAllRepos(): UseQueryResult<AllRepos, ApiError> {
   return useQuery({ queryKey: [...keys.repos, 'all'] as const, queryFn: fetchAllRepos, retry: false })
 }
 
@@ -539,8 +614,8 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
 }
 
 /**
- * `POST /runs/{id}/deliver-override` — a SECOND approver overrides a factory run's route gate
- * (ADR-0003 amendment 2026-09-27): refused 409 `same_actor` for the run's own actor; the grant
+ * `POST /runs/{id}/deliver-override` — a SECOND approver lifts a factory run's sign-off clause
+ * for that run, never its route gate (ADR-0003 amendment 2026-09-27, ADR-0026 item 8): refused 409 `same_actor` for the run's own actor; the grant
  * is an event on the run's trace and never lifts a false-Q1 cell.
  */
 export function useGrantDeliverOverride(): UseMutationResult<Run, ApiError, string> {
@@ -1050,6 +1125,60 @@ export function useUserEvents(id: string, p: PageParams = {}): UseQueryResult<Pa
     queryKey: keys.userEvents(id, p),
     queryFn: () => api<Page<StepEvent>>(`/users/${enc(id)}/events${qs({ limit: p.limit, offset: p.offset })}`),
     enabled: id.length > 0,
+    retry: false,
+  })
+}
+
+// --- invitations and two-person readiness (G-518) -----------------------------------------
+
+/** `GET /invitations` — admin only, so the caller passes `enabled` from the role check. */
+export function useInvitations(enabled: boolean): UseQueryResult<Page<Invitation>, ApiError> {
+  return useQuery({ queryKey: keys.invitations, queryFn: () => api<Page<Invitation>>('/invitations'), enabled, retry: false })
+}
+
+/**
+ * `POST /invitations` (admin) — the ONE response that carries the link. It is not cached:
+ * the token is in the mutation's result and nowhere else, so a screen that loses it invites
+ * again rather than recovering it.
+ */
+export function useInvite(): UseMutationResult<InvitationCreated, ApiError, InviteRequest> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => api<InvitationCreated>('/invitations', { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.invitations })
+      void qc.invalidateQueries({ queryKey: keys.users })
+      void qc.invalidateQueries({ queryKey: keys.twoPerson })
+    },
+  })
+}
+
+/** `POST /invitations/{id}/revoke` (admin) — withdraw an unused link; the reason is recorded. */
+export function useRevokeInvitation(): UseMutationResult<Invitation, ApiError, { id: string; reason: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }) => api<Invitation>(`/invitations/${enc(id)}/revoke`, { method: 'POST', body: { reason } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.invitations })
+      void qc.invalidateQueries({ queryKey: keys.twoPerson })
+    },
+  })
+}
+
+/** `POST /invitations/accept` — the link's own page; no session, so no cache to invalidate. */
+export function useAcceptInvitation(): UseMutationResult<InvitationAccepted, ApiError, { token: string; password: string }> {
+  return useMutation({ mutationFn: (body) => api<InvitationAccepted>('/invitations/accept', { method: 'POST', body }) })
+}
+
+/**
+ * `GET /two-person-readiness[?repo=]` — every signed-in role reads it. Home's task 7 asks it of
+ * the repository it is showing (G-477: the account that queued every run of it is not its
+ * second person); the Settings card asks it of the deployment.
+ */
+export function useTwoPersonReadiness(repo = ''): UseQueryResult<TwoPersonReadiness, ApiError> {
+  return useQuery({
+    queryKey: [...keys.twoPerson, repo],
+    queryFn: () => api<TwoPersonReadiness>(repo ? `/two-person-readiness?repo=${encodeURIComponent(repo)}` : '/two-person-readiness'),
     retry: false,
   })
 }

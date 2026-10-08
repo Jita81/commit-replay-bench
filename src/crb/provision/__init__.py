@@ -22,10 +22,13 @@ Navigation
 ----------
 What it is:   The dependency providers — host-env, disabled and sealed — and the factory that
               picks one for the deployment's posture.
-What it does: Resolves a task's dependencies from its parent's and gold's lockfiles (git
-              objects only), reusing a sealed set or fetching and sealing one, and binds each
-              role's set; refuses with the ``PROVISION_*`` code when it cannot, before any
-              builder exists; verifies a sealed set on demand.
+What it does: Resolves a task's dependencies from its parent's and gold's lockfiles (git objects
+              only), reusing a sealed set (re-hashed once per provider first; a damaged one is
+              quarantined and sealed afresh) or fetching and sealing one, and binds each role's set;
+              refuses with the ``PROVISION_*`` code when it cannot, before any builder exists;
+              verifies a sealed set on demand, and moves one that failed its digest to quarantine
+              with a ``provision.quarantined`` event, naming its key on the ``BUNDLE_INTEGRITY``
+              refusal so the gate revokes what cites it (G-966).
 How:          ``LockInputs.from_git`` (parent, gold) → per language: ``bundle_key`` /
               ``go_keys`` → ``BundleStore.get`` or ``run_fetch`` + ``seal`` → ``store.mount`` →
               ``DepsBinding`` per role → ``TaskDeps`` with the ``ClosureSelector``.
@@ -38,7 +41,7 @@ Works with:   src/crb/core/deps.py (the protocol and types it implements),
               (a recipe; src/crb/provision/python.py and src/crb/provision/node.py are the
               others), src/crb/provision/config.py (``CRB_PROVISION__*``)
 Tested by:    tests/test_provision_go.py, tests/test_provision_python.py,
-              tests/test_provision_node.py,
+              tests/test_provision_node.py, tests/test_provision_quarantine.py,
               tests/test_posture_e2e_docker.py
 Touch when:   never for a new repository; a new language recipe registers here and in
               src/crb/core/provision.py.
@@ -54,6 +57,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from crb.core.deps import (
+    BUNDLE_INTEGRITY,
     DEPS_MODE_HOST_ENV,
     DEPS_MODE_SEALED,
     ROLE_BUILDER,
@@ -197,6 +201,9 @@ class SealedProvider:
         self._image_ids: dict[str, str] = {}
         self._lock = threading.Lock()
         self._call = threading.local()  # the event sink of the resolve on this thread
+        # keys this provider re-hashed whole on reuse: once per provider, since the grade
+        # path's ``verify`` re-hashes every set before each task's build anyway
+        self._whole: set[str] = set()
 
     def mode(self, config: RepoConfig, executor_name: str) -> str:
         return self.deps_mode
@@ -230,16 +237,57 @@ class SealedProvider:
         return self._image_ids[image]
 
     def verify(self, deps: TaskDeps) -> None:
-        """Re-hash every sealed set ``deps`` cites (``BUNDLE_INTEGRITY`` on a mismatch)."""
+        """Re-hash every sealed set ``deps`` cites. A set that no longer matches its digest is
+        moved to quarantine (never reused, never deleted by hand — G-966), a
+        ``provision.quarantined`` event says so, and ``BUNDLE_INTEGRITY`` names its key in
+        ``keys`` so the caller revokes every qualification that cites it."""
         for key in deps.keys:
-            self.store.verify(key)
+            try:
+                self.store.verify(key)
+            except ProvisionRefused as exc:
+                if exc.code != BUNDLE_INTEGRITY or self.store.find(key) is None:
+                    raise ProvisionRefused(exc.code, exc.message, keys=(key,)) from exc
+                where = self.store.quarantine(key, exc.message)
+                on_event = self._events()
+                _emit(
+                    on_event,
+                    "provision.quarantined",
+                    key=key,
+                    reason=exc.message,
+                    quarantine=where.name,
+                )
+                raise ProvisionRefused(
+                    BUNDLE_INTEGRITY,
+                    f"{exc.message}; the set was moved to quarantine ({where.name}) and the "
+                    "next run fetches and seals it afresh",
+                    keys=(key,),
+                ) from exc
 
     def seal_or_reuse(self, lang: str, key: str, build: Callable[[Path], dict[str, Any]]) -> Sealed:
-        """A store hit, or ``build(stage)`` (which fetches into the stage and returns the
-        manifest fields) and a seal. One fetch at a time in this process."""
+        """A whole store hit, or ``build(stage)`` (which fetches into the stage and returns
+        the manifest fields) and a seal. One fetch at a time in this process. A hit is
+        re-hashed first (once per provider): one that fails its digest is moved to quarantine
+        (``provision.quarantined``) and fetched and sealed afresh, so the resolve path —
+        qualification included — never mounts a damaged set (G-966)."""
         on_event = self._events()
         with self._lock:
             hit = self.store.get(lang, key)
+            if hit is not None and key not in self._whole:
+                try:
+                    self.store.verify(key, lang)
+                    self._whole.add(key)
+                except ProvisionRefused as exc:
+                    if exc.code != BUNDLE_INTEGRITY:
+                        raise
+                    where = self.store.quarantine(key, exc.message)
+                    _emit(
+                        on_event,
+                        "provision.quarantined",
+                        key=key,
+                        reason=exc.message,
+                        quarantine=where.name,
+                    )
+                    hit = None
             if hit is not None:
                 _emit(on_event, "provision.reuse", lang=lang, key=key, digest=hit.digest)
                 return hit

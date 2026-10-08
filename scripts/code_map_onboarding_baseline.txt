@@ -66,18 +66,14 @@ ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
 ui/e2e/walkthrough/06-cancel.spec.ts
 ui/e2e/walkthrough/09-budget-sweep.spec.ts
 ui/e2e/walkthrough/09-review.spec.ts
-ui/src/App.reachability.test.ts
-ui/src/App.tsx
 ui/src/api/repoConfig.ts
 ui/src/api/sse.ts
 ui/src/api/types.test.ts
 ui/src/components/BeltPills.test.tsx
 ui/src/components/BeltPills.tsx
-ui/src/components/Button.tsx
 ui/src/components/CiBar.tsx
 ui/src/components/DataTable.tsx
 ui/src/components/Field.tsx
-ui/src/components/GateBanner.tsx
 ui/src/components/Hint.test.tsx
 ui/src/components/Hint.tsx
 ui/src/components/LiveLog.tsx
@@ -90,8 +86,6 @@ ui/src/components/ShortId.tsx
 ui/src/components/Sparkline.tsx
 ui/src/components/VerdictPill.test.tsx
 ui/src/components/VerdictPill.tsx
-ui/src/help/docs.test.ts
-ui/src/help/docs.ts
 ui/src/help/hints-collector.ts
 ui/src/lib/builder.test.ts
 ui/src/lib/builder.ts
@@ -103,7 +97,6 @@ ui/src/main.tsx
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Connect/GitHubConnectDialog.test.tsx
 ui/src/screens/Connect/GitHubConnectDialog.tsx
-ui/src/screens/Connect/connection.test.ts
 ui/src/screens/Repos/RepoConfigForm.tsx
 ui/src/screens/Repos/RepoConfigTab.tsx
 ui/src/screens/Repos/RepoNewDialog.test.tsx
@@ -114,6 +107,5 @@ ui/src/screens/Repos/repoFixtures.ts
 ui/src/screens/Runs/EvidenceDrawer.tsx
 ui/src/screens/Runs/telemetry.test.ts
 ui/src/screens/Runs/telemetry.ts
-ui/src/screens/Settings/SettingsPage.test.tsx
 ui/src/test/setup.ts
 ui/src/test/utils.tsx

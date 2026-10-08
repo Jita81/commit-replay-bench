@@ -5,9 +5,10 @@ This is the integration the two streams could not prove apart. A Go repository w
 third-party module is qualified through the run's own gate in the shipped sandbox image
 with ``--network=none``, its modules provisioned for THIS task from a ``file://`` mirror
 (no network at all) into one sealed, read-only cache; the gold replays clean through the
-run loop; then the cache is emptied and the same run is refused ``BUNDLE_INTEGRITY``
-before any builder is called, a trial graded past the gate is an environment row
-(``harness``), never ``builder_red``, and a second qualification is ``QUAL_ENV_UNLOADABLE``.
+run loop; then the cache is emptied: a trial graded against it is an environment row
+(``harness``), never ``builder_red``; the same run is refused ``BUNDLE_INTEGRITY`` before
+any builder is called and the damaged set moves to quarantine (G-966); and the next
+resolve fetches and seals it afresh.
 
 Navigation
 ----------
@@ -20,8 +21,8 @@ What it does: Builds the fixture repository and its module mirror, resolves the 
               a non-target test (a read-only tree: belt 3's control is red, an environment
               row) and bloats the trial's own tree past a small copy (the gold's fits: a
               disqualification, nothing revoked); empties the sealed cache and asserts the
-              refusal before any builder call, the witnessed environment row and the
-              unloadable re-qualification.
+              witnessed environment row, the refusal before any builder call with the set
+              quarantined, and the resolve that seals it afresh.
 How:          Real ``docker`` (colima locally, CI's sandbox-images job), the shipped Go
               sandbox image and the pinned Go fetch image; a counting build function stands in
               for a builder, so nothing reaches a model.
@@ -29,8 +30,8 @@ Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0005-fail-closed-docker-sandbox.md
 Works with:   src/crb/server/posture_gate.py (``PostureGate``: admission and ``context_for``),
-              src/crb/provision/__init__.py (``SealedProvider``), src/crb/core/qualify.py
-              (``qualify_task``: the re-qualification refused ``QUAL_ENV_UNLOADABLE``),
+              src/crb/provision/__init__.py (``SealedProvider``: its resolve seals a
+              quarantined set afresh), src/crb/core/qualify.py (``GoldWitness``),
               src/crb/core/grade.py (the witness), src/crb/core/run.py (the run loop),
               tests/fixtures/goproxy.py and tests/fixtures/langs/gorepo_deps.py (the
               repository and its mirror), tests/conftest_langs.py (the images)
@@ -59,14 +60,14 @@ from crb.core.execution import DockerExecutor, DockerSettings
 from crb.core.git import GitRepo
 from crb.core.grade import GradeContext, grade
 from crb.core.mine import change_identity
-from crb.core.qualify import QUAL_ENV_UNLOADABLE, GoldWitness, qualify_task
+from crb.core.qualify import GoldWitness
 from crb.core.run import BuildAttempt, RunSpec, run
 from crb.core.runners import get_runner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from crb.provision import SealedProvider, make_deps_provider
 from crb.provision.config import DEFAULT_GO_IMAGE, ProvisionConfig
-from crb.provision.store import remove_tree
+from crb.provision.store import QUARANTINE, remove_tree
 from crb.server.posture_gate import PostureGate, resolve_run_posture
 
 try:
@@ -262,17 +263,8 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
     # (c) the environment breaks: the sealed module cache is emptied
     assert _empty(store / "go" / deps.gold.key / "gomod") > 0
 
-    # the run's gate refuses BEFORE any builder call, and writes no row
-    g2 = gate()
-    admitted2 = g2.admit([task], known={feat: q})
-    with pytest.raises(ProvisionRefused) as refused:
-        run(spec(g2, "broken"), repo, admitted2, counting_fn)
-    assert refused.value.code == "BUNDLE_INTEGRITY" and refused.value.scope == "run"
-    assert "counting" not in calls
-    assert not (scratch / "ledger-broken.jsonl").exists()
-
-    # past the gate, the grade itself: the do-nothing trial and the gold are both red in
-    # this posture — an environment row, never builder_red
+    # the grade itself, with the damaged set still bound: the do-nothing trial and the gold
+    # are both red in this posture — an environment row, never builder_red
     ws = Workspace.create(repo, feat, scratch / "work" / "noop", config=config)
     try:
         ws.overlay_tests(task.test_files)
@@ -284,16 +276,32 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
     assert not res.blamed and row.failure_kind == lg.FAILURE_HARNESS
     assert row.failure_kind != lg.FAILURE_BUILDER_RED
 
-    # and a second qualification in the broken environment refuses the task
-    q2 = qualify_task(
+    # the run's gate refuses BEFORE any builder call, writes no row, and moves the damaged
+    # set to quarantine (G-966): never mounted again, never deleted
+    g2 = gate()
+    admitted2 = g2.admit([task], known={feat: q})
+    with pytest.raises(ProvisionRefused) as refused:
+        run(spec(g2, "broken"), repo, admitted2, counting_fn)
+    assert refused.value.code == "BUNDLE_INTEGRITY" and refused.value.scope == "run"
+    assert "quarantine" in refused.value.message
+    assert "counting" not in calls
+    assert not (scratch / "ledger-broken.jsonl").exists()
+    assert not (store / "go" / deps.gold.key).exists()
+    assert list((store / QUARANTINE / "go").glob(f"{deps.gold.key}.*"))
+
+    # so the key is a miss: the next resolve fetches and seals the set afresh, under the
+    # same key, and it verifies. Proved in the store, not by a container: on a host whose
+    # daemon reads the store through a file share (colima's virtiofs), a set sealed again at
+    # the same path can be served stale for about a second (G-112)
+    n_seals = events.count("provision.seal")
+    healed = provider.resolve(
         repo,
         config,
-        task,
-        posture=posture,
-        deps=provider,
-        runner=runner,
-        executor=executor,
-        scratch=scratch / "work",
-        timeout=600,
+        gold=feat,
+        parent=repo.parent(feat),
+        executor_name=executor.name,
+        on_event=lambda a, p: events.append(a),
     )
-    assert q2.state == "unqualified" and q2.code == QUAL_ENV_UNLOADABLE, q2.message
+    assert healed.gold.key == deps.gold.key and events.count("provision.seal") == n_seals + 1
+    provider.store.verify(healed.gold.key)
+    assert (store / "go" / healed.gold.key / "gomod" / "cache").is_dir()

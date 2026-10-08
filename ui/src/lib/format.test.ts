@@ -24,7 +24,7 @@
  *               for every screen at once.
  */
 import { describe, expect, it } from 'vitest'
-import { fmtDuration, kOfN } from './format'
+import { fmtDuration, kOfN, sentence } from './format'
 
 describe('kOfN', () => {
   it('names the one running now (done + 1), never past n', () => {
@@ -56,5 +56,13 @@ describe('fmtDuration', () => {
     expect(fmtDuration(undefined)).toBe('—')
     expect(fmtDuration(Number.NaN)).toBe('—')
     expect(fmtDuration(-1)).toBe('—')
+  })
+})
+
+describe('sentence', () => {
+  it('starts a server sentence with a capital where it starts a sentence here, and leaves the rest', () => {
+    expect(sentence('the only account that can sign has never signed in')).toBe('The only account that can sign has never signed in')
+    expect(sentence('')).toBe('')
+    expect(sentence('GitHub App')).toBe('GitHub App')
   })
 })

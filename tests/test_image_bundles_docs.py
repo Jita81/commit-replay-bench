@@ -103,10 +103,16 @@ def bundled_paths() -> list[str]:
     found = re.search(r"DOC_NAMES = \[([^\]]*)\]", DOCS_TS.read_text())
     assert found, "DOC_NAMES is not declared in ui/src/help/docs.ts"
     names = re.findall(r"'([^']+)'", found.group(1))
-    assert len(names) == 8, names
+    assert len(names) == 9, names
+    # a guide kept below docs/ is mapped to its own path (G-481: the Step 6 review guide)
+    nested_block = re.search(r"NESTED[^=]*=\s*\{([^}]*)\}", DOCS_TS.read_text())
+    nested = dict(
+        re.findall(r"'([^']+)':\s*'([^']+)'", nested_block.group(1) if nested_block else "")
+    )
+    assert nested.get("HUMAN-REVIEW-GUIDE") == "reviews/human-review-guide", nested
     adrs = sorted(p.name for p in (ROOT / "docs" / "adr").glob("[0-9][0-9][0-9][0-9]-*.md"))
     assert len(adrs) > 20, adrs
-    return [f"docs/{n}.md" for n in names] + [f"docs/adr/{a}" for a in adrs]
+    return [f"docs/{nested.get(n, n)}.md" for n in names] + [f"docs/adr/{a}" for a in adrs]
 
 
 def test_the_image_context_keeps_every_doc_the_ui_bundles() -> None:

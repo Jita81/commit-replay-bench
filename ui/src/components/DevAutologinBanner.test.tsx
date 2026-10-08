@@ -201,7 +201,7 @@ describe('while the automatic sign-in settles', () => {
       'POST /auth/dev-autologin': () => new Promise<Response>((resolve) => (answer = resolve)),
     })
     renderApp('/login')
-    expect(await screen.findByText('Checking your session…')).toBeInTheDocument()
+    expect(await screen.findByTestId('login-checking-session')).toHaveTextContent('Checking whether you are already signed in…')
     await screen.findByTestId('dev-autologin-banner')
     expect(screen.queryByRole('form', { name: 'Local account sign in' })).toBeNull()
     answer(new Response(JSON.stringify(PRINCIPAL), { status: 200, headers: { 'Content-Type': 'application/json' } }))

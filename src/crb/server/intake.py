@@ -947,6 +947,7 @@ def poll_repository(
     run_active: Callable[[], bool] = lambda: False,
     actor: str = "intake",
     gate: Readers | None = None,
+    require_signed_cell: bool = False,
     now: Callable[[], str] = utc_now_iso,
     force: bool = False,
     max_tickets: int = DEFAULT_MAX_PER_POLL,
@@ -1016,6 +1017,7 @@ def poll_repository(
             home=home,
             route_for=route_for,
             gate=gate,
+            require_signed_cell=require_signed_cell,
             item_url=item_url,
             run_active=run_active,
             actor=actor,
@@ -1063,6 +1065,7 @@ def _poll_column(
     clock: Callable[[], float],
     approval: ApprovalPolicy,
     gate: Readers | None = None,
+    require_signed_cell: bool = False,
 ) -> PollReport:
     """One pass, with no side effect outside the tracker and the chain. See
     :func:`poll_repository`, which is this plus the served view."""
@@ -1135,6 +1138,7 @@ def _poll_column(
             signoffs=signoffs,
             route_for=route_for,
             gate=gate,
+            require_signed_cell=require_signed_cell,
             item_url=item_url,
             run_active=run_active,
             actor=actor,
@@ -1251,12 +1255,15 @@ def _handle_ticket(
     check_budget: Callable[[str], None] = lambda step: None,
     approval: ApprovalPolicy | None = None,
     gate: Readers | None = None,
+    require_signed_cell: bool = False,
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
     ``gate`` — the entry gate's readers (ADR-0026 item 8), the same call the factory's
     pre-build check makes (:func:`crb.factory.standard.gate_for`); ``None`` binds the
-    repository's seams.
+    repository's seams. ``require_signed_cell`` is the deployment's sign-off clause
+    (ADR-0018, ``CRB_FACTORY__REQUIRE_SIGNED_CELL``), passed as the run passes it, so the
+    ticket reads the stop the run would make.
 
     ``check_budget`` is asked before EVERY tracker call (:class:`_BudgetGuard`), so a
     pass that has run out of time starts no further call on somebody's board. ``approval``
@@ -1334,7 +1341,13 @@ def _handle_ticket(
     readiness = assess(draft.item, signoffs)
     route = route_for(draft.item)
     readers = gate if gate is not None else NO_READINGS
-    entry = gate_for(draft.item, readiness, readers, person_test=draft.item.id in home.authored())
+    entry = gate_for(
+        draft.item,
+        readiness,
+        readers,
+        person_test=draft.item.id in home.authored(),
+        require_signed_cell=require_signed_cell,
+    )
     arms = (
         readers.arm_readings(CellRef(draft.item.capability_class, draft.item.size_estimate))
         if draft.item.size_estimate in SIZE_TIER_NAMES

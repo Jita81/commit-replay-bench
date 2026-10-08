@@ -7,7 +7,9 @@
  * What it does: Pins that a fresh repository is at "probe"; that a running probe/mine run
  *               marks its stage in progress; that mined counts, an oracle report, a controls
  *               report and measured rows each complete their stage; that a failed controls
- *               report is `failed`, not done; that stages after a not-done stage are
+ *               report is `failed`, not done; that a passed report the server reads as
+ *               unmeasured (no gold witness, P-372) is `warn` and asks for the controls
+ *               again; that stages after a not-done stage are
  *               `blocked` (so the walk never offers step 4 before step 3); that the first
  *               measurement is the only stage that spends; that a failed or cancelled
  *               measurement with no rows reads as such, never "not started" (J-ONR-6); that
@@ -19,7 +21,7 @@
  * ADRs:         none
  * Works with:   ui/src/screens/Connect/connection.ts (under test)
  * Tested by:    ui/src/screens/Connect/connection.test.ts
- * Touch when:   a stage is added or its evidence source changes.
+ * Touch when:   never for a new repository; a stage is added or its evidence source changes.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -99,6 +101,14 @@ describe('stagesFor', () => {
     // a fully measured walk that still carries a finding summarises as warn, never a plain done
     const measured = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: escaped, measuredRows: 31 })
     expect(stageSummary(measured)).toEqual({ label: 'measured', status: 'warn' })
+  })
+
+  it('a passed report the server reads as unmeasured (no gold witness, before controls.v3) is warn and asks for the controls again, never done (P-372)', () => {
+    const old = { passed: true, n_rows: 7, violations: 0, escapes: 0, not_constructible: 0, apparatus: { controls_version: 'controls.v2' }, verdict: { state: 'unmeasured', measured: false, passed: false, constructible: 0, total: 0, escapes: 0 } } as unknown as ControlsReport
+    expect(controlsFinding(old)).toBe('no gold witness beside its catches (a report from before controls.v3) — run the controls again; deliver is withheld until then')
+    const s = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: old, measuredRows: 0 })
+    expect(s[4]?.status).toBe('warn')
+    expect(s[4]?.detail).toContain('passed with no gold witness beside its catches')
   })
 
   it('a null oracle/controls (404 = never run) is todo once the earlier stages are done', () => {

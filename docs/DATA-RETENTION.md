@@ -55,6 +55,11 @@ running repository code. [measured — `tests/test_redact.py`, `tests/test_execu
 | approver | + sign off cells (human attestation) | manage users |
 | admin | + users, settings (secrets shown only as configured yes/no), ledger import | — |
 
+Every ledger export over the API — JSONL, CSV and the abstract cells — is recorded before
+its first byte is sent: one `ledger.exported` system event names who took it (their opaque
+user id), the format, the filter (the repository, if any) and when. An export that cannot be
+recorded is not served. The events are append-only like every other event.
+
 There is no per-repository visibility control in v2.0: a viewer sees every configured
 repository's evidence. Deploy one instance per trust domain if that is not acceptable.
 

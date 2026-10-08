@@ -92,6 +92,7 @@ from crb.core.learn import (
     triage_refusals,
 )
 from crb.core.ledger import JsonlLedger, rows_for_checks, rows_for_reading
+from crb.core.oracle.controls import controls_verdict_of
 from crb.core.prevention import JsonlPreventionStore, Register, build_register, tick
 from crb.core.review import JsonlReviewLedger
 from crb.core.routing import ControlsVerdict
@@ -395,11 +396,12 @@ def load_controls_export(raw: Any) -> ControlsVerdict:
     """The repo's negative-controls verdict from ``GET /oracle/{repo}/controls`` (a
     ``controls.report`` payload: ``passed``, ``escapes``, ``n_rows``…, plus ``run_id`` /
     ``reported_at``) or from a ``controls`` run body (``GET /runs/{id}`` → ``counts``).
-    Reduced by the same :meth:`ControlsVerdict.from_counts` the server routes on."""
+    Reduced by the same :func:`~crb.core.oracle.controls.controls_verdict_of` the server
+    routes on, so a passed report written before the gold witness licenses nothing (P-372)."""
     if isinstance(raw, Mapping) and isinstance(raw.get("counts"), Mapping):
         counts: Mapping[str, Any] = raw["counts"]
         if "passed" in counts:
-            return ControlsVerdict.from_counts(
+            return controls_verdict_of(
                 counts,
                 run_id=str(raw.get("id", "") or ""),
                 created=str(raw.get("finished", "") or ""),
@@ -409,7 +411,7 @@ def load_controls_export(raw: Any) -> ControlsVerdict:
             "--controls must be a controls report (GET /oracle/<repo>/controls) or a "
             "'controls' run body with counts — no 'passed' field found"
         )
-    return ControlsVerdict.from_counts(raw)
+    return controls_verdict_of(raw)
 
 
 def validate_items(items: list[dict[str, Any]]) -> list[str]:

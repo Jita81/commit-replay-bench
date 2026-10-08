@@ -76,8 +76,8 @@ try:
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
 
-#: The packaged head: 0013, the events chain (north-star Wave 2, stream I).
-HEAD = "0013"
+#: The packaged head: 0016, the context library's acts (north-star Wave 4, stream L).
+HEAD = "0016"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -540,9 +540,9 @@ def test_downgrade_0002_refuses_while_a_v5_row_exists_and_drops_the_column_other
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0001")
-    # the refusal rolls the whole downgrade back — 0008's column, 0007's and 0005's tables, 0006's
-    # column, 0004's index swap and 0003's drop of the (empty) reviews table included — so the database stays
-    # exactly where it was
+    # the refusal rolls the whole downgrade back — 0015's and 0014's tables, 0008's column,
+    # 0007's and 0005's tables, 0006's column, 0004's index swap and 0003's drop of the
+    # (empty) reviews table included — so the database stays exactly where it was
     assert migrate.current(backend.url) == HEAD
 
     fresh = _reset(backend)
@@ -1345,3 +1345,139 @@ def test_0013_refuses_a_row_from_the_release_before_it_and_keeps_recording(
     migrate.upgrade(backend.url)
     report = verify_events(backend.factory)
     assert report.ok and report.rows == 3, report.detail
+
+
+def test_0014_adds_the_invitations_table_and_adoption_tolerates_its_absence(
+    backend: Backend,
+) -> None:
+    """Revision 0014 adds ``invitations`` — the one-time invitation that brings the second
+    person in (G-518). Mutable state, no append-only triggers: the audit trail is the
+    account's ``user.*`` events. An ``init_db`` schema from the release before it (every
+    table but ``invitations``) is a complete schema for that release: adoption stamps it at
+    0013 and 0014 creates the table."""
+    migrate.upgrade(backend.url, revision="0013")
+    assert "invitations" not in set(inspect(backend.engine).get_table_names())
+    migrate.upgrade(backend.url, revision="0014")
+    assert migrate.current(backend.url) == "0014"
+    cols = {c["name"] for c in inspect(backend.engine).get_columns("invitations")}
+    assert cols == {
+        "id",
+        "user_id",
+        "token_hash",
+        "role",
+        "created",
+        "expires",
+        "accepted",
+        "revoked",
+        "created_by",
+        "revoked_reason",
+    }
+    assert not {t for t in backend.trigger_names() if t.startswith("invitations_")}
+    # the token hash is unique — a redeemable token can never be shared by two invitations
+    uniques = inspect(backend.engine).get_unique_constraints("invitations")
+    assert {u["name"]: tuple(u["column_names"]) for u in uniques} == {
+        "uq_invitations_token_hash": ("token_hash",)
+    }
+    assert {i["name"] for i in inspect(backend.engine).get_indexes("invitations")} >= {
+        "ix_invitations_user"
+    }
+    # a pre-0014 create_all database (no alembic_version, no invitations table) adopts at 0013
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE invitations"))
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
+    assert "invitations" in set(inspect(fresh).get_table_names())
+
+
+def test_0015_adds_the_decisions_due_table_and_adoption_tolerates_its_absence(
+    backend: Backend,
+) -> None:
+    """Revision 0015 adds ``decisions_due`` — when each derived decisions-inbox row first
+    became due and when it was last seen (G-516), unique on ``(repo, kind, key)``. A clock
+    over a derivation, not evidence: no append-only triggers, and a downgrade drops it. An
+    ``init_db`` schema from the release before it adopts at 0014 and 0015 creates it."""
+    migrate.upgrade(backend.url, revision="0014")
+    assert "decisions_due" not in set(inspect(backend.engine).get_table_names())
+    migrate.upgrade(backend.url, revision="0015")
+    assert migrate.current(backend.url) == "0015"
+    cols = {c["name"] for c in inspect(backend.engine).get_columns("decisions_due")}
+    assert cols == {
+        "id",
+        "repo",
+        "kind",
+        "key",
+        "title",
+        "role",
+        "first_due",
+        "last_seen",
+        "resolved",
+    }
+    assert not {t for t in backend.trigger_names() if t.startswith("decisions_due")}
+    uniques = inspect(backend.engine).get_unique_constraints("decisions_due")
+    assert {u["name"]: tuple(u["column_names"]) for u in uniques} == {
+        "uq_decisions_due_row": ("repo", "kind", "key")
+    }
+    # a pre-0015 create_all database (no alembic_version, no table) adopts at 0014
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE decisions_due"))
+    assert migrate.current(backend.url) is None
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
+    assert "decisions_due" in set(inspect(fresh).get_table_names())
+
+
+def _insert_library_act(conn: Any, n: int) -> None:
+    """One stored library act with every column revision 0016 requires."""
+    conn.execute(
+        text(
+            "INSERT INTO library_acts (act_id, schema, repo, entry_id, version, act, actor, "
+            "body_json, created, prev_hash, row_hash) VALUES (:id, 'crb.library.v1', 'calc', "
+            "'convention/x', :v, 'propose', :who, '{}', '2026-09-27T00:00:00+00:00', :p, :h)"
+        ),
+        {"id": f"{n:032x}", "v": "v" * 64, "who": "a" * 32, "p": "0" * 64, "h": f"{n:064x}"},
+    )
+
+
+def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
+    backend: Backend,
+) -> None:
+    """Revision 0016 (ADR-0026 item 10) adds ``library_acts`` — the context library's
+    hash-chained acts — with the append-only triggers; a downgrade is refused while any act
+    exists (a signature is never dropped) and otherwise drops the table."""
+    migrate.upgrade(backend.url, revision="0015")
+    assert "library_acts" not in inspect(backend.engine).get_table_names()
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
+    assert {"library_acts_no_update", "library_acts_no_delete"} <= backend.trigger_names()
+    with backend.engine.begin() as c:
+        _insert_library_act(c, 1)
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("UPDATE library_acts SET actor = 'x'"))
+    cfg = migrate.alembic_config(backend.url)
+    with (
+        pytest.raises(RuntimeError, match="refusing to downgrade 0016"),
+        backend.engine.begin() as connection,
+    ):
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0015")
+    assert migrate.current(backend.url) == HEAD
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url)
+    cfg = migrate.alembic_config(backend.url)
+    with fresh.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0015")
+    assert migrate.current(backend.url) == "0015"
+    assert "library_acts" not in inspect(fresh).get_table_names()
+    # a create_all schema from before the library adopts at 0015 and 0016 adds the table
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE library_acts"))
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []

@@ -106,7 +106,7 @@ function Header({ run }: { run: Run }) {
   const cancel = useCancelRun()
   const grant = useGrantDeliverOverride()
   const d = runStatusDisplay(run.status)
-  // GOV-4: the route gate's override is a SECOND approver's act — never offered to the person who queued the run
+  // GOV-4: lifting the sign-off clause is a SECOND approver's act — never offered to the person who queued the run; it never lifts the route gate (ADR-0026 item 8)
   const canGrantOverride =
     run.kind === 'factory' && !!run.factory?.deliver && !run.factory.deliver_override_by && !isRunTerminal(run.status) && can('approver') && !!me && me.id !== run.actor
   return (
@@ -139,8 +139,8 @@ function Header({ run }: { run: Run }) {
             {run.repo}
           </Hint>
           {canGrantOverride && (
-            <Button size="sm" onClick={() => grant.mutate(run.id)} disabled={grant.isPending} hint="button.run.deliver_override">
-              {grant.isPending ? 'Recording…' : 'Override the route gate (second approver)'}
+            <Button size="sm" onClick={() => grant.mutate(run.id)} pending={grant.isPending} hint="button.run.deliver_override">
+              {grant.isPending ? 'Recording…' : 'Lift the sign-off clause for this run (second approver)'}
             </Button>
           )}
           {grant.error && (
@@ -149,7 +149,7 @@ function Header({ run }: { run: Run }) {
             </span>
           )}
           {can('operator') && !isRunTerminal(run.status) && !run.cancel_requested && (
-            <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} disabled={cancel.isPending} hint="button.run.cancel">
+            <Button variant="danger" size="sm" onClick={() => cancel.mutate(run.id)} pending={cancel.isPending} hint="button.run.cancel">
               {cancel.isPending ? 'Requesting…' : 'Cancel run'}
             </Button>
           )}

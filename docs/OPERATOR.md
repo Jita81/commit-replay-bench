@@ -293,15 +293,18 @@ the allowlisting proxy (or from an air-gapped `file://` mirror), sealed under
 `$CRB_HOME/deps` and mounted read-only — Go's module cache at `/deps/gomod`, Python's wheels
 at `/deps/site`, Node's `node_modules` at `/work/node_modules` — with the test container still
 `--network=none`. The same lockfile rules apply whichever repository it is: commit `go.sum`;
-pin Python as `name==version` in `requirements*.txt` or commit a `uv.lock` (or name the
-files in `runner_opts.deps_lock`, where a list of alternatives lets one repository's history
-move from one lock to another, and the uv groups to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
+pin Python as `name==version` in `requirements*.txt`, or commit a `uv.lock`, `poetry.lock`
+or `pylock.toml` (each is read into the same pinned, hashed set; a requirements file wins
+when both are committed), or name the files in `runner_opts.deps_lock` (where a list of
+alternatives lets one repository's history move from one lock to another, and the uv groups
+to read in `runner_opts.deps_groups`); commit a `package-lock.json` (lockfileVersion 2+) and name any
 package whose install script must run in `runner_opts.deps_build_scripts`. A lock this
 version does not provision is refused with its `PROVISION_*` code and the fix
 ([DEPLOYMENT.md §3.4](DEPLOYMENT.md#34-the-workers-sandbox--choose-deliberately)). With
 provisioning off, a repository that declares dependencies is refused `PROVISION_DISABLED`
 under docker before any spend. `crb deps ls | verify | gc` shows, re-proves and trims the
-sealed sets; the `provision` line of `crb doctor` says whether it can work on this host.
+sealed sets, and `crb deps verify --quarantine` moves a damaged set aside and revokes the
+qualifications that cite it, as a run does when it meets one (G-966); the `provision` line of `crb doctor` says whether it can work on this host.
 
 `crb repo setup <name>` (CLI) and the `setup` run kind (`POST /runs {"kind": "setup"}` —
 server) call the same runner method on the host (the local posture). Per language:
@@ -978,7 +981,7 @@ Posture panel lists each with how many tasks it keeps out.
 | `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
 | `POSTURE_DRIFT` | run | the image, toolchain, limits, runner environment or a declared host tool changed after qualification: qualify again |
 | `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
-| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
+| `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify --quarantine`, which moves any damaged set aside and revokes what cites it (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |
 | `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
 | `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the test is not deterministic in this posture |
@@ -1019,7 +1022,16 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 - attempts recorded `harness` with `error: environment: …` — the humans' own change failed
   the same scope in the same posture, so the posture moved under its qualification (a run
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
-  before the next replay — §7a).
+  before the next replay — §7a);
+- a controls report with `witness_failures > 0` — a control read as caught, but the commit's
+  own change graded beside it in the same posture was not clean, so the environment could not
+  build or grade at that moment and the catch proves nothing. Each such row is a `VIOLATION`;
+  fix the posture (qualify again, check the sandbox image and the dependency source) and
+  re-run the controls;
+- a controls verdict that reads `unmeasured` on a repository whose report says passed — the
+  report was written before `controls.v3`, so no gold witness stands beside its catches, and
+  it licenses nothing (the Oracle screen says so). Run the controls again; after an upgrade to
+  `controls.v3`, do this for every connected repository.
 
 A run that stops itself at its spend cap (`counts.stopped_code: spend_cap`,
 `run.spend_cap`) is not a stop condition: it did what it was told. Its attempts are graded
@@ -1083,6 +1095,30 @@ crb users deactivate <name>          # refused for the last active admin (last_a
 crb users activate <name>            # can sign in again; old sessions stay ended
 ```
 
+### Inviting the second person
+
+A sign-off needs a **second person**: the API refuses one from whoever produced the evidence
+(`same_actor`, [ADR-0016](adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md)),
+and no setting waives it. Rather than typing a password on somebody else's behalf, invite them:
+**Settings → Invite an approver** (or `POST /invitations`). That creates the account **inactive**
+with a password nobody knows and mints a one-time link which is shown to you **once** — this
+product sends no email, so you pass the link on yourself, by whatever channel your organisation
+uses. The person opens it, chooses their own password, and the account is activated at that
+moment. A link expires at the time chosen when it is made (in hours: 72 by default, from 1 to 336), works once, and can be withdrawn with a
+recorded reason while it is unused; an accepted one is an account, so deactivate the account
+instead. If you let the person in another way — activate the account or set its password on the
+Users card — the link is withdrawn at that moment, with the reason `superseded` on the
+invitation, so a copy of it that is still in somebody's inbox cannot later reset the password
+they use. Only the link's SHA-256 hash is stored: a lost link is re-invited, never recovered.
+
+The card and Home's task 7 both read `GET /two-person-readiness`, which answers whether a
+sign-off the two-person rule would accept is possible at all — an account that can sign, that
+has signed in, and a second account that has too and can run the measurements or sign them.
+A viewer is not that second account: it can do neither. Home asks it of the repository it shows,
+so task 7 is not completed while the only account that can sign is the one that queued every
+run of that repository — the bootstrap admin alone never completes it. It counts **accounts,
+not people**: one person holding a second account would pass it and still be wrong, and it says so.
+
 **Forgot the admin password?** On the API host: `crb users set-password admin` (the
 bootstrap username, or whichever `crb users list` shows as an active admin), type the new
 password at the prompt, sign in. **Locked out with no admin at all** (every admin
@@ -1100,7 +1136,8 @@ deployment; disabling it at the provider stops it everywhere.
 Every change — by the API or the CLI — is one `system` event on the account's trace
 (`user.created`, `user.role_set`, `user.password_set`, `user.activated`,
 `user.deactivated`, `user.sessions_revoked`, `user.sessions_ended` (a sign-out),
-`user.role_overridden`, `user.role_override_refused`) with the actor (the
+`user.role_overridden`, `user.role_override_refused`, `user.invited`,
+`user.invite_accepted`, `user.invite_revoked`) with the actor (the
 admin's user id, or `cli:<os user>`) and the target; never the password. The History names
 an actor by the account's username; an actor whose account has since been deleted keeps its id. Each sign-in is one
 too: `user.login`, and `user.login_failed` with the actor `anonymous` — a refused name that
@@ -1139,6 +1176,18 @@ apparatus 2.3]**, and the spec fails if it ever takes 60 seconds. By the host do
 2026-09-26 took 1.5 to 2.4 s, but no script in the repository reruns them (G-466)]**. A person
 adds the time to reach an admin or the API host and to read and type **[gap — nobody has
 timed a person doing it; G-466]**.
+
+**Going live leaves no local admin behind.** The *sign-in* line of the go-live checklist
+([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)) reads *proven* on the Deployment page only
+while the product itself can see all four parts: an account from your identity provider has
+signed in, `CRB_LOCAL_AUTH_ENABLED=false`, `CRB_BOOTSTRAP_ADMIN__*` is unset, and every active
+local admin has had a password set since it was created — by either door above — or has been
+deactivated. Until then the line says which part does not hold. The checklist's other acts,
+the ones only you can do on your own infrastructure, are recorded by an admin on this same
+screen under **Go-live attestations**
+([DEPLOYMENT §8.1](DEPLOYMENT.md#81-record-what-only-you-can-prove)); each record is a
+`golive.attested` event naming the admin, on the deployment's own `golive` trace, not on an
+account's History.
 
 **Roles from the identity provider.** The provider's claims set an account's role the first
 time it signs in. After that the role is yours to change on the Settings screen, and the
@@ -1476,3 +1525,88 @@ repository (the product never writes a customer's tests), score the oracle again
 apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
 queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
 
+
+## 14. The context library
+
+The **Context library** of a repository (`/library/<repo>`, from the repository's page) holds
+what people know about it that a test cannot say, in one vocabulary: its **components**, its
+**work types** (kinds of change), the **decisions** in force, its **conventions**, the
+**patterns** that recur and its **standards**. Each entry has the id `<kind>/<slug>`, a
+statement of at most 400 characters and where it came from — a file at a commit, the graded
+rows it was learned from, or the person who wrote it (ADR-0026 item 10, DL-087). Graded rows
+must be rows of this repository's ledger. A file's path, commit and digest are read from the
+clone when a miner proposes the entry, and are as the person gave them when a person does; the
+product then reads the file at the repository's head after each mine, and marks the entry stale
+when it differs. No field of an entry may carry a credential — the
+library is append-only, so a secret written to it could never be removed.
+
+**Two people sign every entry.** An operator proposes an entry and becomes its sponsor; an
+entry a miner or a model proposed waits in Decisions until a person adopts it with
+**Sponsor**. A different approver then **Signs** it. The approver can never be the sponsor —
+the page disables the sponsor's own Sign button and the API refuses it (`409
+library_refused`, `same_person`) — and a miner or a model is never a person. A signature
+names the version the approver read: a changed entry is a new version and needs a new
+signature. For an entry learned from graded rows, an approver who produced one of those rows —
+as the row's actor or the person who queued its run — cannot sign it either (`same_actor`).
+On Decisions, an entry you sponsored reads "waits for another approver", with no Sign.
+
+**Proposals from the repository's files.** *Propose from the files* on the library page (or
+`POST /library/{repo}/mine`, operator) runs the **miners** over the repository's clone at one
+commit — a sha, branch or tag, or its head when you leave it empty — pinned to the full sha
+before anything is read. Each miner reads one kind of file the repository already holds and
+proposes entries from it, citing the file and the commit, with no model call:
+
+| miner | reads | proposes |
+|---|---|---|
+| `adrs` | architecture decision records (`docs/adr/NNNN-*.md` and the like) | a **decision** per record in force, stating the first paragraph of its decision; a superseded, rejected or proposed record is noted, not proposed |
+| `owners` | `CODEOWNERS` and the directory layout | a **component** per part of the system, with the owners `CODEOWNERS` names (an email address is counted, never copied) |
+| `lint` | lint and formatter configurations (`pyproject.toml` tables, `ruff.toml`, `.eslintrc*`, `.golangci.yml`, `go.mod` …), through belt 5's own detectors | a **convention** per tool, naming belt 5's check (`repo_lint_clean`) only where belt 5's own detection finds the tool — and saying which language's runner runs it — and advisory where it does not (a `[format]` table in `ruff.toml`, say, or black beside ruff format) |
+| `tests` | the test files and the runner's configuration | a **standard** per language: a change leads to a failing test, where the tests live, how they are named and run, with examples, scoped to the work types whose commits changed such tests |
+| `change-profile` | the mined commits and the graded rows | a **work-type** candidate per global class and part of the system it changes, with its counts, citing the graded rows — a candidate with no graded rows is noted with its counts, not proposed |
+
+`CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING` are read as data: only a command of a known tool
+whose every argument is a flag or a path the repository holds — no shell operator, no URL, no
+other word — reaches a proposal, inside a fixed sentence — never their prose.
+**No miner signs anything.** Every proposal is `proposed` under `mined:<miner>@<version>` and
+waits in Decisions for a person to **Sponsor** it; a different approver then signs it. The same
+commit, with the same graded rows, proposes nothing new. A later commit, a newly graded row or a
+new miner version proposes an entry again only when the source it cites has changed or the
+miner now reads it differently — a test standard, for one, names the runner's configuration but
+cites an example test, so a new runner is a new version even though the cited file is
+unchanged. A new version needs its two people again. A miner never replaces an entry a person
+wrote, revoked or retired. A refused proposal is named in the run with any credential it
+carried redacted, and nothing of it is written. The run is one
+`library.mined` event naming you, the commit and the counts, and each proposal a
+`library.proposed` event naming its miner. `crb library mine <repo>` prints what a run would
+propose from a workdir repository and writes nothing. A team adds its own miner through the
+registry in `src/crb/core/miners.py` (`register_miner`, and the contract in that module).
+
+**Nothing is edited.** A revocation (the entry was wrong) and a retirement (it no longer
+holds) are appended with a reason and kept as history. An entry read from a file goes
+**stale** when that file changes or goes at the repository's head — the worker reads the
+cited files at the head after every mine, and `POST /library/{repo}/freshness` takes the head
+commit and the files' sha256 from any other reader — returns to Decisions, and counts for nothing
+until an approver signs it again or retires it. Every act is a `system/library.*` event with
+the actor and the entry.
+
+**The page for a work type** says what the kind of change is (its definition and example
+commits), what a ticket of that kind must carry today, the signed context — each entry with
+its sponsor, signer, date, provenance and measured effect — what is proven for each size (the
+standard arm with its distinct commits, interval and apparatus, or "No proven standard" and
+the reading that would prove it), and which of the repository's switched-on checks evidence
+which ISO/IEC 25010 characteristic. A **standard** entry names the characteristic it refines
+and the check that evidences it. It counts as evidence only when the product's quality table
+counts that check for that characteristic and the repository runs it — `target_green` says
+nothing of Security — otherwise it is advisory and counts as no evidence. While the table is
+not on the build, every standard is advisory.
+
+**Time and money.** Proposing and signing an entry spends nothing: no act on the library starts
+a run or calls a model. **[measured — n = 1 scripted pass from the repository's page through
+proposing, the sponsor's refused signature, the second person's signature from Decisions and
+the work type's page; method: `ui/e2e/walkthrough/14-library.spec.ts`, timed by the spec on the
+tier-1 walkthrough stack on 2026-09-27; apparatus 2.3]** the scripted pass took 1.4 seconds,
+with nothing read. How long a person takes to write and check an entry has not been timed.
+
+**No entry reaches a builder's brief in this release.** An entry reaches a brief only inside a
+context arm whose effect was measured against the same arm without it, and the switch for that
+is off. Until then every entry's measured effect reads `unmeasured`.

@@ -16,8 +16,10 @@ Navigation
 What it is:   The worker-side provisioning configuration: registries, fetch images, store,
               limits and the production refusals.
 What it does: Reads ``CRB_PROVISION__*``; derives each recipe's registry hosts (the proxy's
-              exact allowlist) or its air-gapped mirror; refuses a public registry in
-              production without ``allow_public`` and a fetch image without ``@sha256``.
+              exact allowlist) or its air-gapped mirror; names the environment variable that
+              holds a private mirror's credential and says which registries it may be sent
+              to (never a public one); refuses a public registry in production without
+              ``allow_public`` and a fetch image without ``@sha256``.
 How:          ``from_env`` → typed fields → ``production_refusal`` (``PROVISION_PUBLIC_REGISTRY``
               / ``PROVISION_FETCH_IMAGE_UNPINNED``) → ``hosts_for`` / ``mirror_for`` per language.
 Layer:        provision — docs/ARCHITECTURE.md#44-outer-layers
@@ -26,16 +28,18 @@ Works with:   src/crb/provision/__init__.py (``make_deps_provider`` reads it),
               src/crb/server/settings.py (``ProvisionSettings`` mirrors it for the API),
               src/crb/provision/fetch.py (the allowlist and the mirror),
               docs/DEPLOYMENT.md#21-environment-reference (the operator's list)
-Tested by:    tests/test_provision_go.py, tests/test_settings_provision.py
-Touch when:   never for a new repository (a registry or mirror is a deployment setting, not code); a
-              registry or limit becomes configurable (a field here, in ``ProvisionSettings``, in
-              DEPLOYMENT §2.1 and in the Helm/compose templates).
+Tested by:    tests/test_provision_go.py, tests/test_settings_provision.py,
+              tests/test_provision_mirror_credential.py
+Touch when:   never for a new repository; a registry, limit or credential name becomes
+              configurable (a field here, in ``ProvisionSettings``, in DEPLOYMENT §2.1 and
+              in the Helm/compose templates).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -129,6 +133,11 @@ class ProvisionConfig:
     env: str = "prod"
     docker_binary: str = ""
     extra: Mapping[str, str] = field(default_factory=dict)
+    #: The NAME of a worker environment variable that holds the mirror's credential as
+    #: ``user:password`` (G-950). The value is never read into this object, never shown by
+    #: ``view``, never on a command line: :func:`crb.provision.fetch.run_fetch` hands it to the
+    #: fetch container alone, by name, and only for a registry that is not public.
+    mirror_credential_env: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "store", Path(self.store).expanduser())
@@ -137,6 +146,13 @@ class ProvisionConfig:
         object.__setattr__(self, "extra_allow_hosts", hosts)
         if self.max_bundle_mb <= 0 or self.fetch_timeout_s <= 0 or self.max_total_gb <= 0:
             raise ValueError("provisioning limits must be positive")
+        if self.mirror_credential_env and not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*", self.mirror_credential_env
+        ):
+            raise ValueError(
+                "CRB_PROVISION__MIRROR_CREDENTIAL_ENV must be the name of an environment "
+                "variable (letters, digits, underscores), never the credential itself"
+            )
         proxies = [p.strip() for p in self.go_proxy.replace("|", ",").split(",")]
         if len(proxies) != 1 or proxies[0] in {"direct", "off", ""}:
             raise ValueError(
@@ -175,6 +191,7 @@ class ProvisionConfig:
             max_total_gb=float(get("MAX_TOTAL_GB") or 20),
             fetch_timeout_s=int(get("FETCH_TIMEOUT_S") or 900),
             env=str(e.get("CRB_ENV") or "prod").strip().lower(),
+            mirror_credential_env=get("MIRROR_CREDENTIAL_ENV"),
         )
 
     # --- per language --------------------------------------------------------------
@@ -209,6 +226,27 @@ class ProvisionConfig:
         for h in self.extra_allow_hosts:
             out[h] = None
         return tuple(out)
+
+    def registry_url(self, lang: str) -> str:
+        """The configured registry URL for ``lang`` (the proxy, the index, the registry)."""
+        return {
+            LANG_GO: self.go_proxy,
+            LANG_PYTHON: self.pypi_index,
+            LANG_NODE: self.npm_registry,
+        }[lang]
+
+    def mirror_credential_for(self, lang: str) -> tuple[str, str] | None:
+        """``(variable name, registry URL)`` when a fetch for ``lang`` carries the mirror
+        credential: one is configured, the registry is reached over the network (not a
+        ``file://`` mirror) and its host is not a public registry — a credential for your
+        mirror is never sent to anyone else's. ``None`` otherwise."""
+        if not self.mirror_credential_env or self.mirror_for(lang) is not None:
+            return None
+        url = self.registry_url(lang)
+        host = (urlsplit(url).hostname or "").lower()
+        if not host or host in PUBLIC_HOSTS:
+            return None
+        return self.mirror_credential_env, url
 
     def npm_registry_host(self) -> str:
         return (
@@ -263,6 +301,13 @@ class ProvisionConfig:
             "images": {"go": self.go_image, "python": self.python_image, "node": self.node_image},
             "egress_network": self.egress_network,
             "ca_bundle_configured": bool(self.ca_bundle),
+            # the variable's NAME and whether the worker has it set — never its value
+            "mirror_credential_env": self.mirror_credential_env,
+            "mirror_credential_langs": [
+                lang
+                for lang in (LANG_GO, LANG_PYTHON, LANG_NODE)
+                if self.mirror_credential_for(lang) is not None
+            ],
             "max_bundle_mb": self.max_bundle_mb,
             "max_total_gb": self.max_total_gb,
             "fetch_timeout_s": self.fetch_timeout_s,

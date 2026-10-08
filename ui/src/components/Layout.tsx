@@ -14,11 +14,15 @@
  *               fold behind one "Menu" disclosure (F26: `aria-expanded`, Escape closes it and
  *               returns focus to the button, an Escape spent by another layer such as the
  *               evidence drawer leaves it open, following a link closes it), so a phone's
- *               first screen is the page, not three rows of chrome; a health that is not OK
- *               stays on the closed Menu button as the probe's glyph and in its name. The
+ *               first screen is the page, not three rows of chrome; in print the header and the
+ *               skip link are left out (`print:hidden`, as the About block leaves itself out),
+ *               so a printed page is the page and the footer's versions (G-213); a health that
+ *               is not OK stays on the closed Menu button as the probe's glyph and in its name. The
  *               instrument row offers every role the pages its API lets that role read
  *               (G-914). `AboutThisScreen` is mounted once after the outlet so every screen
- *               carries its help with no wiring. The footer carries crb / apparatus /
+ *               carries its help with no wiring. A deep link lands on its target: the shell
+ *               scrolls to `location.hash` once the page renders it (`useScrollToHash`,
+ *               P-399). The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
  *               the provenance of what they are reading — and links to Help and the glossary.
  *               `journeyEyebrow(pathname, sub?)` derives `Journey · 2 of 4 · Baseline` from
@@ -57,6 +61,7 @@ import { NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-rout
 import { useHealth, useLogout, useVersion } from '../api/hooks'
 import { DevAutologinBanner } from './DevAutologinBanner'
 import { useAuth } from '../lib/auth'
+import { useScrollToHash } from '../lib/scrollToHash'
 import { useTheme } from '../lib/theme'
 import type { HintId } from '../help/hints'
 import { Button } from './Button'
@@ -208,6 +213,8 @@ function useShellMenu(): { open: boolean; toggle: () => void } {
  */
 export function Layout() {
   const { me, can } = useAuth()
+  // a deep link (`/settings#invite`) lands on its target once the page has rendered it (P-399)
+  useScrollToHash()
   const instrument = INSTRUMENT.filter((n) => can(n.role))
   const [theme, , cycle] = useTheme()
   const logout = useLogout()
@@ -224,10 +231,12 @@ export function Layout() {
 
   return (
     <div className="flex min-h-screen flex-col bg-surface text-on-surface">
-      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface-container focus:px-3 focus:py-2">
+      {/* the shell is chrome, not the statement: a printed page (the Deployment page prints for a
+          review board, G-213) carries the page, the About-free body and the footer's versions */}
+      <a href="#main" className="print:hidden sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-surface-container focus:px-3 focus:py-2">
         Skip to content
       </a>
-      <header>
+      <header className="print:hidden" data-testid="shell-header">
         <DevAutologinBanner />
         <div className="bg-primary text-on-primary">
           <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-2 gap-y-3 px-5 py-3 sm:gap-6 sm:py-4">

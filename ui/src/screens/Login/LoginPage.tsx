@@ -14,10 +14,10 @@
  *               a session to another host. An already-authenticated visitor is redirected
  *               straight to `next`; until the session check settles (the automatic sign-in
  *               included) a status line stands in for the form, so it never flashes before a
- *               redirect, and a failed check is shown above the form with a retry. While a
- *               development stack has automatic sign-in on, the banner above the form says so
- *               (`DevAutologinBanner`). Both fields and both
- *               sign-in buttons carry a hint
+ *               redirect and nothing typed is lost to one (P-352), and a failed check is shown
+ *               above the form with a retry. While a development stack has automatic sign-in
+ *               on, the banner above the form says so (`DevAutologinBanner`). Both fields and
+ *               both sign-in buttons carry a hint
  *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
  *               focus and tap before a person has any role at all. Every stop names its way
  *               forward where the person meets it: a wrong password's envelope says who sets a
@@ -129,13 +129,14 @@ export function LoginPage() {
 
   if (!loading && me) return <Navigate to={next} replace />
   // Until the session check settles (`/auth/me`, and on a development stack the automatic
-  // sign-in), the form is not shown: a visitor about to be signed in never sees it flash.
+  // sign-in), the form is not shown: a visitor about to be signed in never sees it flash, and
+  // a form shown for that moment takes typing that the redirect then throws away (P-352).
   if (loading) {
     return (
       <div className="flex min-h-screen flex-col bg-surface text-on-surface">
         <DevAutologinBanner />
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-on-surface-muted" role="status">
-          <span>Checking your session…</span>
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-on-surface-muted" role="status" data-testid="login-checking-session">
+          <span>Checking whether you are already signed in…</span>
           {/* the session check waits on `/version` (it says whether automatic sign-in is on), so
               the pending organisation check is named here too, never silent (G-191) */}
           {version.isPending && <span className="text-[11px]">Checking for an organisation sign-in…</span>}

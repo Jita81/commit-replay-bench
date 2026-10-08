@@ -22,7 +22,11 @@ What it does: Pins, per control on the fixture's ``fix`` task: gold goes green w
               selection, the tamper guard re-hashes the oracle, JVM / Rust refused honestly, and
               every transform as a pure function; and that no control worktree's name carries a
               fragment of the task's sha, each mapped on an event instead (assessment
-              2026-09-25 B1).
+              2026-09-25 B1); and that every catch carries a clean gold witness graded
+              beside it in the same posture, while a posture that stops building turns
+              each catch into a VIOLATION (G-952), each witness graded with the very runner,
+              executor, config and grade context of the control beside it; and that only a
+              report stating ``controls.v3`` or later is witnessed (P-372).
 How:          ``fixtures.oracle_repo`` (module-scoped) → ``make_task`` through the real miner →
               ``controls_for_task`` with a real ``PytestRunner`` + ``LocalExecutor``; no docker,
               no network, no model.
@@ -178,6 +182,132 @@ def test_env_poison_is_disqualified_by_belt_1_test_infrastructure(control_matrix
     assert g.changed_files == () and g.target_run is None  # nothing ran: DQ short-circuits
 
 
+# --- G-952: a gold witness beside every catch ---------------------------------------------------
+def test_every_catch_carries_a_clean_gold_witness_from_the_same_posture(control_matrix):
+    """Each control that reads as caught was witnessed: the commit's own change graded clean in
+    a fresh tree beside it. The gold row itself, and an escape, carry no witness."""
+    caught = [
+        r for r in control_matrix.values() if r.control != nc.GOLD and r.verdict == nc.VERDICT_OK
+    ]
+    assert {r.control for r in caught} == {
+        nc.NOOP,
+        nc.TEST_TAMPER,
+        nc.STUB,
+        nc.REGRESSION,
+        nc.ENV_POISON,
+    }
+    for r in caught:
+        assert r.witness == nc.OBS_CLEAN, r.control
+        assert "gold witness clean" in r.note and r.to_dict()["witness"] == "clean"
+    assert control_matrix[nc.GOLD].witness == ""
+    assert control_matrix[nc.HARDCODE_CHEAT].witness == ""  # an escape is not a catch
+    assert control_matrix[nc.GOLD].to_dict()["witness"] is None
+
+
+def test_a_posture_that_stops_building_makes_no_control_look_caught(
+    fixture_repo, fix_task, harness, scratch, monkeypatch
+):
+    """The environment grades the gold row, then cannot build (a sealed posture losing its
+    dependencies mid-task): every later grade reads red. Without a witness the noop and the
+    stub would read "caught"; with one, each is a VIOLATION naming the red witness, and the
+    gate fails."""
+    real_grade = nc.grade
+    calls = {"n": 0}
+
+    def degrading_grade(ws, task, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:  # the gold row: the posture still builds
+            return real_grade(ws, task, **kw)
+        return _gr(task_id=task.task_id, repo=task.repo, belts=Belts(True, False))
+
+    monkeypatch.setattr(nc, "grade", degrading_grade)
+    report = nc.run_controls(
+        fixture_repo.git,
+        [fix_task],
+        scratch=scratch,
+        controls=(nc.GOLD, nc.NOOP, nc.STUB),
+        **harness,
+    )
+    rows = {r.control: r for r in report.rows}
+    assert rows[nc.GOLD].verdict == nc.VERDICT_OK and rows[nc.GOLD].witness == ""
+    for name in (nc.NOOP, nc.STUB):
+        r = rows[name]
+        assert r.observed == nc.OBS_RED  # it LOOKS caught…
+        assert r.verdict == nc.VERDICT_VIOLATION  # …but the witness beside it was red
+        assert r.witness == nc.OBS_RED
+        assert "gold witness graded red beside this control" in r.note
+        assert "instrument failure" in r.note
+    assert not report.passed
+    d = report.to_dict()
+    assert d["witnessed"] == 2 and d["witness_failures"] == 2 and d["violations"] == 2
+    assert "| witness |" in report.render_markdown()
+
+
+def test_the_gold_witness_grades_with_the_very_posture_the_control_graded_with(
+    fixture_repo, fix_task, harness, scratch, monkeypatch
+):
+    """Being "in the same posture" is checked, not assumed: every grade the controls make — each
+    control and each gold witness beside a catch — receives the identical runner, executor,
+    config, grade context and graded spec objects. A witness graded on another executor (a
+    local one outside the sealed sandbox) would grade clean while the sealed posture could not
+    build, so a copy or a fresh instance of any of them fails here."""
+    real_grade = nc.grade
+    calls: list[tuple[str, dict]] = []
+    witnessing: list[str] = []
+
+    def spy(ws, task, **kw):
+        calls.append((witnessing.pop() if witnessing else "control", {"task": task, **kw}))
+        return real_grade(ws, task, **kw)
+
+    def on_event(action, payload):
+        if action == "controls.witness":
+            witnessing.append(f"witness:{payload['control']}")
+
+    monkeypatch.setattr(nc, "grade", spy)
+    rows = nc.controls_for_task(
+        fixture_repo.git,
+        fix_task,
+        scratch=scratch,
+        controls=(nc.GOLD, nc.NOOP, nc.STUB),
+        on_event=on_event,
+        **harness,
+    )
+    assert [r.witness for r in rows] == ["", nc.OBS_CLEAN, nc.OBS_CLEAN]
+    kinds = [k for k, _ in calls]
+    assert kinds == ["control", "control", "witness:noop", "control", "witness:stub"]
+    first = calls[0][1]
+    assert first["executor"] is harness["executor"] and first["runner"] is harness["runner"]
+    assert first["config"] is harness["config"]
+    for kind, kw in calls[1:]:
+        for name in ("executor", "runner", "config", "ctx", "task"):
+            assert kw[name] is first[name], f"{kind} graded with another {name}"
+        for name in ("mode", "timeout", "evaluate_lint"):
+            assert kw[name] == first[name], f"{kind} graded with another {name}"
+
+
+@pytest.mark.parametrize(
+    ("report", "witnessed"),
+    [
+        ({"apparatus": {"controls_version": "controls.v3"}}, True),
+        ({"controls_version": "controls.v4"}, True),
+        ({"controls_version": "controls.v10"}, True),
+        ({"apparatus": {"controls_version": "controls.v2"}}, False),
+        ({"controls_version": "controls.v1"}, False),
+        ({"apparatus": {}}, False),
+        ({}, False),
+        ({"controls_version": "controls.v3-rc"}, False),
+    ],
+)
+def test_only_a_report_from_controls_v3_on_is_witnessed(report, witnessed):
+    """P-372: a report is read as witnessed only when it states controls.v3 or later; an
+    earlier or missing stamp licenses nothing, and a failed report stays failed."""
+    assert nc.report_is_witnessed(report) is witnessed
+    passed = nc.controls_verdict_of({**report, "passed": True, "n_rows": 7})
+    assert passed.measured is witnessed and passed.passed is witnessed
+    failed = nc.controls_verdict_of({**report, "passed": False, "n_rows": 7})
+    assert failed.measured and not failed.passed
+
+
 # --- the other commit shapes -----------------------------------------------------------------
 def test_hardcode_cheat_caught_when_target_test_exceeds_its_literals(
     fixture_repo, harness, scratch
@@ -255,11 +385,14 @@ def test_bad_gold_is_a_violation_and_fails_the_gate(fixture_repo, harness, scrat
         fixture_repo.git, [task], scratch=scratch, controls=(nc.GOLD, nc.NOOP), **harness
     )
     assert not report.passed
-    (gold,) = report.violations
+    # the gold row is a violation, and so is the noop's catch: its gold witness is red too,
+    # so a red noop on this task proves nothing about the instrument (G-952)
+    gold, noop = report.violations
     assert gold.control == nc.GOLD and gold.observed == nc.OBS_RED
     assert "observed=red" in gold.note
+    assert noop.control == nc.NOOP and noop.observed == nc.OBS_RED and noop.witness == nc.OBS_RED
     d = report.to_dict()
-    assert d["violations"] == 1 and d["passed"] is False and d["escapes"] == 0
+    assert d["violations"] == 2 and d["passed"] is False and d["escapes"] == 0
     assert "gate: FAIL" in report.render_markdown()
 
 
@@ -601,7 +734,7 @@ def test_caught_and_escape_notes_name_the_belt_and_the_meaning(control_matrix):
     )
     assert nc._caught_note(nc.OBS_REGRESSED, guard, dq).startswith("caught by belt 3")
     assert nc._caught_note(nc.OBS_RED, guard, dq).startswith("caught by belt 2")
-    assert nc.CONTROLS_VERSION == "controls.v2"
+    assert nc.CONTROLS_VERSION == "controls.v3"
     assert nc.TRANSFORM_LANGUAGES == (Language.PYTHON, Language.GO, Language.JAVASCRIPT)
 
 
@@ -628,7 +761,7 @@ def test_control_worktrees_name_no_fragment_of_the_task_sha(
         on_event=lambda a, p: events.append((a, dict(p))),
         **harness,
     )
-    assert len(made) == 3  # the RED check + one per control
+    assert len(made) == 4  # the RED check, one per control, and the noop catch's gold witness
     mapped = {p.get("worktree") for _, p in events if p.get("task") == fix_task.task_id}
     for dest in made:
         assert leaks(fix_task.task_id, str(dest)) == [], f"control worktree {dest}"

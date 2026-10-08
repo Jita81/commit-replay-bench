@@ -38,7 +38,8 @@ How:          ``formatters_for(plan, root, declared)`` → ``(formatters, skip r
               the worktree writable, hashes again → ``FormatRun.label``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0024-working-by-construction.md, docs/adr/0011-repo-lint-belt.md
-Works with:   src/crb/core/lint.py (the plan whose formatter steps are reused),
+Works with:   src/crb/core/lint.py (the plan whose formatter steps are reused, and the detectors
+              ``black_evidence`` / ``prettier_evidence`` this step asks — never a copy),
               src/crb/core/checks.py (the ``format_step`` switch and ``checks.formatter``),
               src/crb/builders/adapter.py (runs the step after the build),
               src/crb/core/execution.py (Command / Executor)
@@ -51,17 +52,14 @@ Touch when:   onboarding a repository whose formatter the detectors miss — dec
 from __future__ import annotations
 
 import hashlib
-import json
-import re
 import shutil
-import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from crb.core.execution import Command, Executor
-from crb.core.lint import PRETTIER_CONFIGS, LintPlan
+from crb.core.lint import LintPlan, black_evidence, prettier_evidence
 
 #: The belt-5 tools that are FORMATTERS, and how each is spelt in write mode (appended to
 #: the plan's own binary so the version is the one belt 5 applies). Linters with a fix
@@ -90,8 +88,6 @@ SKIP_NOT_FILE_SCOPED = "formatter_not_file_scoped"
 NOT_FILE_SCOPED: frozenset[str] = frozenset({"cargo-fmt"})
 
 DEFAULT_FORMAT_TIMEOUT_S = 300
-
-_PRECOMMIT_BLACK = re.compile(r"^\s*-\s*id:\s*black(?:-jupyter)?\s*$", re.M)
 
 
 @dataclass(frozen=True)
@@ -136,33 +132,16 @@ class FormatRun:
 
 
 def black_configured(root: Path) -> bool:
-    """Does the repository configure black? ``[tool.black]`` in ``pyproject.toml`` or a
-    ``black`` pre-commit hook."""
-    root = Path(root)
-    try:
-        data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        data = {}
-    tool = data.get("tool") if isinstance(data.get("tool"), dict) else {}
-    if isinstance(tool, dict) and isinstance(tool.get("black"), dict):
-        return True
-    try:
-        pc = (root / ".pre-commit-config.yaml").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    return _PRECOMMIT_BLACK.search(pc) is not None
+    """Does the repository configure black? Belt 5's own detector answers
+    (:func:`crb.core.lint.black_evidence`: ``[tool.black]`` or a ``black`` pre-commit hook),
+    so the format step and the lint belt never disagree (P-376)."""
+    return black_evidence(root)
 
 
 def prettier_configured(root: Path) -> bool:
-    """A prettier configuration file, or a ``prettier`` key in ``package.json``."""
-    root = Path(root)
-    if any((root / c).is_file() for c in PRETTIER_CONFIGS):
-        return True
-    try:
-        pkg = json.loads((root / "package.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return isinstance(pkg, dict) and pkg.get("prettier") is not None
+    """A prettier configuration file, or a ``prettier`` key in ``package.json`` — belt 5's
+    own detector answers (:func:`crb.core.lint.prettier_evidence`, P-376)."""
+    return bool(prettier_evidence(root))
 
 
 def formatters_for(

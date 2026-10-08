@@ -226,10 +226,7 @@ published bar"**; until prospective and audited evidence exists it does not mean
 "autonomous delivery is safe". `calibrate` and `human` routes are product successes
 (refusals), reported with the same rigour as passes.
 
-### 6a. What a signed cell may be claimed to mean (`signoff-policy.v2`)
-
-(The heading keeps its `v2` anchor — nine files and the in-app help link to it; the bar in
-force is `signoff-policy.v3`, below.)
+### 6a. What a signed cell may be claimed to mean (`signoff-policy.v3`)
 
 A human sign-off lifts a cell's **verification tier** (`automated-pass` →
 `human-verified` / `ab-confirmed`); it never lifts its route, its point or its interval.
@@ -275,7 +272,14 @@ likely to be wrong. What the sentence does **not** mean:
   a per-change human verdict is the `review` row type (Wave B13), not the sign-off;
 - that the cell stays signed: a later false-Q1 row invalidates the attestation at read
   (`active: false`), an apparatus bump makes its snapshot stale (§4), and a revocation
-  is one append away.
+  is one append away;
+- that a pull request the factory opened in that cell was read by a second person. What a
+  signature licenses in forward mode is the **opening** of a pull request in the cell
+  (ADR-0018: the delivery gate reads the route and the sign-off), never the change inside
+  it; the merge is where a human reads the change. And a pull request opened under an
+  approver's per-run **override** carries no attestation at all — the body says
+  `licence: **unsigned cell**`, and it may only be quoted as "opened under a named override
+  by an approver", never as a signed cell.
 
 A deployment may relax the numeric thresholds and the route / controls switches within
 the published bounds (`docs/API.md`, `/signoffs/policy`); a record then says so

@@ -41,6 +41,7 @@ const HOVER: Record<string, HintId> = {
   '/runs': 'col.runs.progress',
   '/runs/:id': 'stat.run.clean',
   '/tasks/:repo/:taskId': 'tile.task.target_tests',
+  '/library/:repo': 'stat.library.count',
   '/capability': 'stat.capability.coverage',
   '/routing': 'policy.routing.looks',
   '/oracle': 'stat.oracle.mean',

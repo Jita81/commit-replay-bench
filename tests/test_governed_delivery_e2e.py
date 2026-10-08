@@ -76,9 +76,11 @@ from fixtures.server_seed import (
     MODEL,
     PROVIDER,
     RUN_IDS,
+    USERS,
     Env,
     login,
     make_env,
+    user_id,
 )
 from test_factory_loop import TEST_POWER, TEST_POWER_SRC, FakeTestAuthor, MultiBuilder, _creds
 
@@ -593,6 +595,40 @@ def test_the_latest_sign_off_row_deleted_is_seen_through_its_event(
     std = _readers(env).standard_for(CellRef("bug.fix", "XS"))
     assert std is not None and std.signed is False
     _refused(env, pyrepo, tmp_path, fl.STATUS_UNSIGNED_CELL)
+
+
+def test_a_leavers_sign_off_stops_licensing_delivery(
+    env: Env, pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """ADR-0016 amendment (2026-09-28, DL-120): a sign-off is a standing licence, so it is
+    held to P-229's rule — deactivation ends everything the account holds. When the approver
+    who signed a cell is deactivated, the entry gate reads the cell unsigned (it stops
+    ``unsigned_cell`` before any spend); re-activating the account restores it. The chain
+    itself is untouched: the attestation stays on the record, naming who made it. (The
+    map's tier and the decisions inbox read sign-offs by another rule — G-738.)"""
+    _proven_and_signed(env)
+    assert _readers(env).standard_for(CellRef("bug.fix", "XS")).signed  # type: ignore[union-attr]
+    approver = user_id(USERS["approver"])
+
+    def set_active(active: bool) -> None:
+        login(env.client, "admin")
+        r = env.put(f"/users/{approver}/active", json={"active": active})
+        assert r.status_code == 200, r.text
+
+    set_active(False)
+    std = _readers(env).standard_for(CellRef("bug.fix", "XS"))
+    assert std is not None and std.signed is False
+    _refused(env, pyrepo, tmp_path, fl.STATUS_UNSIGNED_CELL)
+    login(env.client, "viewer")
+    assert env.get("/ledger/verify").json()["signoffs"]["chain_ok"] is True  # nothing erased
+    # the listing says so, so the inbox asks another approver to sign again
+    items = env.get("/signoffs", params={"repo": ALPHA}).json()["items"]
+    assert items and all(
+        not i["active"] and i["stale"] and i["stale_reason"] == "verifier_deactivated"
+        for i in items
+    )
+    set_active(True)
+    assert _readers(env).standard_for(CellRef("bug.fix", "XS")).signed  # type: ignore[union-attr]
 
 
 def test_a_build_through_a_provider_no_row_measured_is_not_licensed(

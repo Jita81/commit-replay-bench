@@ -257,8 +257,11 @@ def create_local_user(
     role: str = "viewer",
     display_name: str = "",
     email: str = "",
+    active: bool = True,
 ) -> User:
-    """Create a local account; the caller commits. 409 if the username is taken."""
+    """Create a local account; the caller commits. 409 if the username is taken.
+    ``active=False`` creates it switched off (an invitation's account, which only its
+    one-time link turns on) — a constructor keyword on a row nobody else holds."""
     name = validate_username(username)
     validate_role(role)
     try:
@@ -275,6 +278,7 @@ def create_local_user(
         display_name=display_name or name,
         role=role,
         password_hash=pw_hash,
+        active=active,
     )
     db.add(user)
     db.flush()

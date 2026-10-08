@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
   sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
 
+- **Wave 4: the context library and its miners, the second person, go-live on evidence, truthful
+  screens** (north-star Wave 4, streams L, M, S, P and T;
+  [#73](https://github.com/Jita81/commit-replay-bench/pull/73)). Library entries are proposed by a
+  sponsor or by five no-cost miners over a pinned clone and signed by a different person,
+  hash-chained and evented, and never reach a builder's brief. An admin invites the second approver
+  by a one-time link, and an item whose cell's standard nobody signed stops before spend. `GET
+  /golive` proves five of DEPLOYMENT §8's lines and records ten as attested acts. Failed reads show
+  Retry, ledger exports are recorded, and caught controls carry a witness (`controls.v3`: rerun
+  every repository's controls). DL-109 to DL-120, P-408 to P-411.
+
 - **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
   (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
   [#69](https://github.com/Jita81/commit-replay-bench/pull/69)). Apparatus 2.4: every row stamps

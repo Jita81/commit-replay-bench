@@ -7,7 +7,8 @@
  * horizontal rules, links, emphasis, strong and inline code. Anything else — an HTML tag,
  * an image, a footnote — is shown as the text it is. Links: another bundled guide becomes an
  * in-app link to /help/docs/…, and so does a bundled decision record (`adr/0015-….md` from a
- * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-073); an
+ * guide, `0015-….md` from a sibling record, `../OPERATOR.md` from a record — DL-073), and
+ * so does a bundled guide kept below docs/ (`reviews/human-review-guide.md`, G-481); an
  * in-page `#anchor` stays; `http(s)` gets `rel="noopener noreferrer"`; any other relative
  * path (a source file) renders as text because the UI has no target for it.
  *
@@ -28,7 +29,8 @@
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/screens/Help/DocPage.tsx (the only caller), ui/src/help/docs.ts
- *               (`slugify`, `isDocName`, `docHref` for the link rewrite), ui/src/help/adrs.ts
+ *               (`slugify`, `isDocName`, `docByPath`, `docHref` for the link rewrite),
+ *               ui/src/help/adrs.ts
  *               (`isAdrName`, `adrHref` for a decision record's link), ui/src/help/help.ts
  *               (the `readMore` anchors whose slugs the headings rendered here must satisfy)
  * Tested by:    ui/src/help/markdown.test.tsx
@@ -38,7 +40,7 @@
 import { createElement, Fragment, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { adrHref, isAdrName } from './adrs'
-import { docHref, isDocName, slugify } from './docs'
+import { docByPath, docHref, isDocName, slugify, type DocAnchor } from './docs'
 
 export type Block =
   | { kind: 'heading'; level: number; text: string }
@@ -271,6 +273,12 @@ function renderLink(label: string, href: string, key: string): ReactNode {
     const slug = doc[2] ? doc[2].slice(1) : ''
     const to = docHref(slug ? `${doc[1]}#${slug}` : doc[1]!)
     return createElement(Link, { key, to }, ...children)
+  }
+  // a bundled guide kept below docs/ (`reviews/human-review-guide.md` from a guide, G-481)
+  const nested = /^(?:\.\/)?((?:reviews)\/[A-Za-z0-9-]+)\.md(#[^#]*)?$/.exec(href)
+  const nestedName = nested ? docByPath(nested[1]!) : undefined
+  if (nested && nestedName) {
+    return createElement(Link, { key, to: docHref(nested[2] ? `${nestedName}${nested[2]}` as DocAnchor : nestedName) }, ...children)
   }
   // a bundled decision record: `adr/0015-….md` from a guide, `0015-….md` from a sibling record
   const adr = /^(?:\.\/)?(?:adr\/)?(\d{4})-[A-Za-z0-9-]+\.md(#[^#]*)?$/.exec(href)

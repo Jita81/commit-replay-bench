@@ -186,6 +186,8 @@ def test_register_freezes_hashes_and_records(env: Env) -> None:
         "ci_low": 0.0,
         "ci_high": 0.0,
         "apparatus_versions": [],
+        "verification_tier": "",
+        "signed": False,
         "deliverable": False,
     }
     e = env.get(f"/factory/{ALPHA}/evidence").json()
@@ -418,7 +420,10 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
         cell=THIN_CELL,
     )
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
-    assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is True
+    # ADR-0018 — the route now says deliver and the prediction still says withheld: this
+    # deployment needs a signed cell too, and nobody has signed it
+    assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is False
+    assert by_id["D-1"]["signed"] is False and by_id["D-1"]["verification_tier"] == "automated-pass"
     assert by_id["D-1"]["n"] >= 10 and by_id["D-1"]["reason_code"] == "deliver"
     # the provenance behind the route: the rate, its interval and the apparatus
     d1 = by_id["D-1"]
@@ -426,6 +431,73 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     assert d1["apparatus_versions"] == [APPARATUS_VERSION]
     assert by_id["T-1"]["route"] != "deliver" and by_id["T-1"]["deliverable"] is False
     assert by_id["T-1"]["reason_code"] == "reading_unregistered" and by_id["T-1"]["n"] == 4
+
+
+def test_the_prediction_reads_the_sign_off_on_the_cells_proven_standard(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0018 as amended by ADR-0026 item 8: ``signed`` is the entry gate's own reading —
+    the cell's proven standard carries an active sign-off (``standard_for``) — never the
+    map's verification tier, so the screen's prediction and the gate cannot disagree. A
+    ceiling is never signed; an unsigned standard is not deliverable."""
+    from crb.factory.standard import Readers, Standard
+    from crb.server import factory_standard
+
+    assert _register(env, [{**ITEM, "id": "D-1", "size_estimate": "S"}]).status_code == 201
+    clear_policy(env)
+
+    def cell() -> dict[str, Any]:
+        (route,) = [t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()]
+        return dict(route)
+
+    assert cell()["route"] == "deliver" and cell()["signed"] is False  # no proven standard
+    every_cell_proven(monkeypatch, "S2")
+    signed = cell()
+    assert signed["signed"] is True and signed["deliverable"] is True
+    assert signed["verification_tier"] == "automated-pass"  # the map's tier licenses nothing
+    for std in (Standard("S2", signed=False), Standard("S3", signed=True)):
+        readers = Readers(standard_for=lambda _c, s=std: s)
+        monkeypatch.setattr(factory_standard, "readers_in", lambda *_a, r=readers, **_k: r)
+        got = cell()
+        assert got["signed"] is False and got["deliverable"] is False, std
+
+
+def test_the_prediction_follows_the_deployments_delivery_licence_posture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deployment that has set ``CRB_FACTORY__REQUIRE_SIGNED_CELL=false`` (ADR-0018 §5)
+    predicts what ITS gate would do: the measured route alone makes the cell deliverable,
+    with `signed` still saying the truth — nobody attested it."""
+    monkeypatch.setenv("CRB_FACTORY__REQUIRE_SIGNED_CELL", "false")
+    with make_env(tmp_path / "route-alone") as env:
+        login(env.client, "operator")
+        assert _register(env, [{**ITEM, "id": "D-1", "size_estimate": "S"}]).status_code == 201
+        clear_policy(env)
+        (route,) = [t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()]
+        assert route["route"] == "deliver" and route["signed"] is False
+        assert route["deliverable"] is True
+
+
+def test_a_pending_item_in_an_unsigned_proven_cell_is_told_the_sign_off_stop_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-392 (the Wave 4 attack): ``GET /factory/{repo}/tasks`` previews the entry gate for an
+    item no run has reached with the SERVED sign-off clause — on by default — so the task
+    names ``unsigned_cell`` exactly as the next run's pre-build check will stop it; with
+    ``CRB_FACTORY__REQUIRE_SIGNED_CELL=false`` the same item enters."""
+    every_cell_proven(monkeypatch, "S1@m", signed=False)
+    with make_env(tmp_path / "on") as env:
+        assert env.settings.factory.require_signed_cell is True
+        login(env.client, "operator")
+        assert _register(env, [ITEM]).status_code == 201
+        (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+        assert t["status"] == "pending" and t["entry"]["code"] == "unsigned_cell"
+    monkeypatch.setenv("CRB_FACTORY__REQUIRE_SIGNED_CELL", "false")
+    with make_env(tmp_path / "off") as env:
+        login(env.client, "operator")
+        assert _register(env, [ITEM]).status_code == 201
+        (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+        assert t["entry"] is None
 
 
 def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:

@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { EventSourceLike } from '../../api/sse'
 import { RunEventStream, isPinned, parseStepEvent, runEventsUrl } from '../../api/sse'
 import type { Run } from '../../api/types'
+import { HINTS } from '../../help/hints'
 import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
 import { RunDetailPage } from './RunDetailPage'
 import { containerLine } from './telemetry'
@@ -503,7 +504,7 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     expect(line.textContent).toBe('factory · sighted · editblock · gpt-oss-120b · cerebras · ladder r1,r2 · delivery on (override by Grace)')
   })
 
-  it('a second approver overrides a factory run’s route gate on the run’s page; the run’s own actor is never offered it (GOV-4)', async () => {
+  it('a second approver lifts a factory run’s sign-off clause on the run’s page, and the button and its hint never say it lifts the route gate; the run’s own actor is never offered it (GOV-4)', async () => {
     const factory = { ...RUN, kind: 'factory' as const, factory: { deliver: true, deliver_override_by: null, deliver_override_by_name: null, backlog_hash: 'f'.repeat(64) } }
     const { calls } = mockApi({
       'GET /auth/me': PRINCIPAL,
@@ -513,11 +514,15 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     })
     renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
     const { default: userEvent } = await import('@testing-library/user-event')
-    await userEvent.click(await screen.findByRole('button', { name: 'Override the route gate (second approver)' }))
+    const button = await screen.findByRole('button', { name: 'Lift the sign-off clause for this run (second approver)' })
+    // ADR-0026 item 8: the override lifts the sign-off clause only — the words say so (P-393)
+    expect(HINTS['button.run.deliver_override']).toMatch(/lifts the sign-off clause and nothing else/)
+    expect(HINTS['button.run.deliver_override']).toMatch(/a cell that does not route deliver still opens no pull request/)
+    await userEvent.click(button)
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/runs/run-1/deliver-override')).toBe(true))
   })
 
-  it('the approver who queued a factory run is not offered its route-gate override (GOV-4)', async () => {
+  it('the approver who queued a factory run is not offered the lift of its sign-off clause (GOV-4)', async () => {
     mockApi({
       'GET /auth/me': { ...PRINCIPAL, id: 'ada' },
       'GET /runs/run-1': { ...RUN, kind: 'factory', factory: { deliver: true, deliver_override_by: null, deliver_override_by_name: null, backlog_hash: 'f'.repeat(64) } },
@@ -525,7 +530,7 @@ describe('RunDetailPage — telemetry on the Progress card and the live log (T2)
     })
     renderApp(<RunDetailPage eventSourceFactory={(u) => new FakeEventSource(u)} clock={clock} />, { route: '/runs/run-1', path: '/runs/:id' })
     await screen.findByTestId('run-identity')
-    expect(screen.queryByRole('button', { name: /Override the route gate/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Lift the sign-off clause/ })).toBeNull()
   })
 
   it('live log: a failed belt and an error row carry the red glyph, and every row explains its action', async () => {

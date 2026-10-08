@@ -211,6 +211,9 @@ function Overview({ repo, onStartRun }: { repo: RepoDetailT; onStartRun: () => v
           <LinkButton to={`/runs?repo=${encodeURIComponent(repo.name)}`} hint="button.repo.next_steps">
             Runs
           </LinkButton>
+          <LinkButton to={`/library/${encodeURIComponent(repo.name)}`} hint="button.repo.library">
+            Context library
+          </LinkButton>
         </div>
       </Card>
     </div>

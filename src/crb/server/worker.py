@@ -9,7 +9,8 @@ a time and executes it by ``kind``:
             phase); ``counts_json`` is the :class:`~crb.core.runners.SetupResult`
 ``probe``   run the repo's known-green probe scope; write ``repos.probe_status``;
             runs ``setup`` first when the environment is not ready (``setup.auto``)
-``mine``    :func:`crb.core.mine.mine` → upsert ``tasks`` rows (RED / baseline / gold)
+``mine``    :func:`crb.core.mine.mine` → upsert ``tasks`` rows (RED / baseline / gold); then
+            the context library's files are read at head and changed ones go stale (G-736)
 ``replay``  :func:`crb.core.run.run` in *sighted* mode over the ladder → grade rows,
             evidence packs (file + DB), events
 ``blind``   the same in *blind* mode (held-out tests; the brief carries none)
@@ -124,7 +125,10 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               or not, with the reaper's pending count) and records every worker-side metric,
               including deliveries by outcome and real installation-token mints. Reaps a
               container whose kill went unconfirmed on every poll and puts the outcome on the
-              run's trace.
+              run's trace. On the
+              same idle pass, re-derives every repository's decisions inbox and stamps the
+              clock over it (``refresh_decisions``, G-516), so the age of a decision is the
+              decision's age and not the age of somebody's browser tab.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -136,7 +140,9 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               check-in row the health probe reads is ``WorkerRow`` in src/crb/store/models.py),
               src/crb/observability/metrics.py (the recorders, ``record_event`` on
               the emitter's metering sink, ``crb_queue_depth`` on check-in),
-              src/crb/core/run.py (a replay's task loop), src/crb/builders/adapter.py (the
+              src/crb/server/decisions.py (the decisions derivation and the clock the idle
+              pass stamps), src/crb/core/run.py (a replay's task loop),
+              src/crb/builders/adapter.py (the
               build function, ladder, pre-flight), src/crb/factory/author.py (the factory
               run's test-author rung, from ``CRB_FACTORY__TEST_AUTHOR`` or
               ``params.test_author``), src/crb/core/mine.py (mining; the oracle
@@ -147,16 +153,18 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               of every repository whose listener an operator switched on, ADR-0017),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
-              queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``)
+              queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``),
+              src/crb/store/library.py (``mark_stale`` — the library's staleness after a mine)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_spend.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
-Touch when:   never for a new repository — repository behaviour lives in the runner and the repo
-              config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
-              src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label every
-              run must carry is added (``_RunLedger._stamp``).
+Touch when:   never for a new repository — repository behaviour lives in the runner and the
+              repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
+              src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
+              every run must carry is added (``_RunLedger._stamp``); an idle-loop step is
+              added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``).
 Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
               stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
 
@@ -227,10 +235,12 @@ from crb.core.ledger import (
     FAILURE_HARNESS,
     LABEL_FAILURE_KIND,
     GradeRow,
+    LedgerIntegrityError,
     false_q1_total,
     is_outage_error,
     rows_for_checks,
 )
+from crb.core.library import ACTOR_FRESHNESS, files_cited
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -272,7 +282,7 @@ from crb.factory.delivery import (
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
-from crb.factory.standard import Readers
+from crb.factory.standard import CellRef, Readers
 from crb.factory.testfirst import (
     AuthoredTest,
     TestAuthor,
@@ -293,6 +303,7 @@ from crb.server.builder_login import (
     record_claim_refusal,
     record_refused_login,
 )
+from crb.server.decisions import record_due
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
@@ -320,6 +331,7 @@ from crb.server.routes.capability import (
     rows_for_posture,
     signed_map,
 )
+from crb.server.routes.decisions import rows_for as decision_rows_for
 from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
@@ -362,11 +374,22 @@ from crb.store.jobs import (
     StaleClaim,
 )
 from crb.store.ledger import DbLedger
+from crb.store.library import DbLibraryLedger
 from crb.store.models import EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
 #: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
 DEFAULT_OUTAGE_STOP = 3
+
+#: How often the idle loop re-derives every repository's decisions inbox and stamps the clock
+#: over it (G-516). Five minutes: the age a person reads is a wait measured in hours and days,
+#: and each pass reduces a repository's whole ledger — a cost the idle loop should pay rarely.
+DECISIONS_REFRESH_S = 300.0
+#: The idle loop's own steps, in the order it takes them when no run is queued. Each runs
+#: under the loop's guard (:meth:`Worker._run_idle_steps`), so one that raises is logged and
+#: the worker goes on (P-354). A new idle step is a method name here, never a bare call in
+#: ``run_forever`` — tests/test_worker.py refuses a call there outside the guard.
+IDLE_STEPS: tuple[str, ...] = ("poll_intake", "refresh_decisions")
 
 _LOG = logging.getLogger(__name__)
 
@@ -830,6 +853,9 @@ class Worker:
         # the intake listener's own timer (ADR-0017): the first idle pass polls, then
         # every CRB_INTAKE__POLL_S. Zero means "due now".
         self._intake_last = 0.0
+        # the decisions clock's own timer (G-516): the first idle pass stamps, then every
+        # DECISIONS_REFRESH_S, so a decision has an age whether or not anybody is looking
+        self._decisions_last = 0.0
         self.reaper = ContainerReaper(self.home / STATE_FILENAME, docker=_reaper_docker())
         self._handlers: dict[str, Handler] = {
             KIND_SETUP: self._run_setup,
@@ -893,10 +919,68 @@ class Worker:
                 _LOG.exception("worker loop error")
                 run = None
             if run is None:
-                self.poll_intake()
+                self._run_idle_steps()
                 stop.wait(self.settings.poll_s)
         self.checkin(stopped=True)
         _LOG.info("worker %s stopped", self.worker_id)
+
+    def _run_idle_steps(self) -> None:
+        """Every step of :data:`IDLE_STEPS`, each under the loop's guard: a step that raises
+        is logged and the next one still runs, and so does the next iteration. A step's own
+        "never raises" is a promise; this guard is what keeps the loop alive when a promise
+        is broken — a unique-key race or a ``database is locked`` in the decisions pass
+        ended the worker before it (P-354). Never raises."""
+        for name in IDLE_STEPS:
+            try:
+                getattr(self, name)()
+            except Exception:  # the loop must survive anything an idle step throws
+                _LOG.exception("worker idle step %s failed", name)
+
+    # --- the decisions clock (G-516) -------------------------------------------------
+    def decisions_due_now(self, now: float | None = None) -> bool:
+        """Is a decisions refresh due? ``DECISIONS_REFRESH_S`` since the last one."""
+        t = time.time() if now is None else now
+        return (t - self._decisions_last) >= DECISIONS_REFRESH_S
+
+    def refresh_decisions(self, now: float | None = None) -> int:
+        """Re-derive every repository's decisions inbox and stamp the clock over it, so the
+        age of a decision is the age of the decision and not the age of somebody's browser
+        tab (G-516). Returns how many repositories were refreshed.
+
+        Called from the idle loop only, and never raises: a repository whose map cannot be
+        read is logged and the next pass retries. Each repository is its own transaction, so
+        one that fails — and leaves its session needing a rollback — neither spoils the next
+        nor makes a final commit raise (P-354); a first stamp ``GET /decisions`` committed
+        meanwhile is joined, not collided with (:func:`crb.server.decisions.record_due`). It
+        writes nothing but ``decisions_due`` — no evidence, no ledger row, no event —
+        because it is a clock, not an act.
+        """
+        if not self.decisions_due_now(now):
+            return 0
+        self._decisions_last = time.time() if now is None else now
+        try:
+            with self.factory() as db:
+                repos = list(db.execute(select(Repo.name).order_by(Repo.name)).scalars().all())
+        except Exception:  # a database that cannot be read now is read on the next pass
+            _LOG.exception("decisions refresh could not list the repositories")
+            return 0
+        done = 0
+        for name in repos:
+            try:
+                with self.factory() as db:
+                    rows = decision_rows_for(
+                        db,
+                        self.factory,
+                        self.settings,
+                        name,
+                        cells=self._served_map(name)[0].cells,
+                    )
+                    record_due(db, name, rows)
+                    db.commit()
+                done += 1
+            except Exception:  # the idle loop must survive a repository it cannot read
+                _LOG.exception("decisions refresh failed for %s", name)
+        return done
 
     # --- intake: the enterprise's own board ----------------------------------------
     def intake_due(self, now: float | None = None) -> bool:
@@ -1032,6 +1116,7 @@ class Worker:
             # check will: the store-bound readers, on the repository's own checks arm and
             # this deployment's posture class
             gate=self._standard_readers(repo),
+            require_signed_cell=self.settings.factory.require_signed_cell,
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -2149,7 +2234,48 @@ class Worker:
         if cancelled:
             ctx.emit("mine", "mine.cancelled", **counts)
             return STATUS_CANCELLED, counts, ""
+        self._library_freshness(ctx, ref)
         return STATUS_SUCCEEDED, counts, ""
+
+    def _library_freshness(self, ctx: RunContext, ref: str) -> None:
+        """G-736, DL-115: after a mine, read the repository's head and mark stale every
+        library entry whose source file's bytes there differ from the ones it was signed
+        against — the same rule as ``POST /library/{repo}/freshness``, without a person
+        asking. Only the files entries cite are read (``git cat-file``, no checkout); a file
+        gone at head reads as changed. A failure is evented and never fails the mine: the
+        mine's tasks are sound whatever the library's state."""
+        repo = ctx.run.repo
+        ledger = DbLibraryLedger(self.factory)
+        try:
+            paths = files_cited(ledger.states(repo).values())
+            if not paths:
+                return
+            head = ctx.git.rev_parse(ref)
+            digests: dict[str, str | None] = {}
+            for path in paths:
+                blob = ctx.git.show_blob(head, path)
+                digests[path] = hashlib.sha256(blob).hexdigest() if blob is not None else None
+            marked = ledger.mark_stale(repo, head, digests, ACTOR_FRESHNESS)
+        except (GitError, LedgerIntegrityError) as exc:
+            ctx.emitter.error("mine", "library.freshness", exc)
+            return
+        for act, state in marked:
+            ctx.emit(
+                "mine",
+                "library.stale",
+                entry_id=state.entry_id,
+                path=state.entry.provenance.path,
+                head_commit=head,
+                act_id=act.act_id,
+                actor=ACTOR_FRESHNESS,
+            )
+        ctx.emit(
+            "mine",
+            "library.freshness",
+            head_commit=head,
+            files=len(paths),
+            stale=[state.entry_id for _act, state in marked],
+        )
 
     def _record_qualification(self, q: Qualification) -> None:
         """Append a qualification record (the mine's own posture) — after the task row, so
@@ -2705,6 +2831,9 @@ class Worker:
         lazily, from the same signed map ``GET /capability-map`` serves (sighted rows,
         current apparatus, the repo's latest controls verdict, sign-offs overlaid). ``None``
         for a cell nobody has measured: the loop withholds delivery on it (DL-038).
+        Each decision carries the cell's ``verification_tier`` as well, and ``signed`` — the
+        sign-off the entry gate reads on the cell's proven standard (ADR-0018 as amended by
+        ADR-0026 item 8).
 
         Rows of ``run_id`` — THIS run's own graded builds — are excluded: the map that
         licenses a delivery is the map as it stood before the run, never one the run's own
@@ -2720,17 +2849,34 @@ class Worker:
         than its estimate, GOV-2) answers from that same pre-run reading."""
         cache: dict[str, dict[str, Any] | None] = {}
         computed: dict[str, bool] = {}
+        require_signed = self.settings.factory.require_signed_cell
 
         def compute() -> None:
             cmap, _ = self._served_map(
                 repo, run_id=run_id, posture_class=posture_class, checks_arm=checks_arm
             )
+            # ADR-0018 as amended by ADR-0026 item 8 — "signed" is the entry gate's own
+            # reading: the cell's proven standard carries an active sign-off on its arm,
+            # class-set version and reading (``standard_for``), never a second definition
+            standard_for = self._standard_readers(
+                repo, checks_arm=checks_arm, posture_class=posture_class
+            ).standard_for
             for c in cmap.cells:
                 if c.decision is not None:
                     st = c.stats
+                    std = standard_for(CellRef(c.key.capability_class, c.key.size))
+                    signed = std is not None and std.licenses and std.signed
                     cache[f"{c.key.capability_class}|{c.key.size}"] = {
                         **c.decision.to_dict(),
                         "apparatus_versions": list(st.apparatus_versions) if st else [],
+                        # the map's verification tier, for the record (ADR-0015's overlay)
+                        "verification_tier": c.verification_tier or "",
+                        "signed": signed,
+                        # the WHOLE gate, so a ticket this same lookup labels on the intake
+                        # pass reads what a run would actually do — the API's ``_cell_routes``
+                        # computes it the same way, and the two must not disagree
+                        "deliverable": c.decision.route == ROUTE_DELIVER
+                        and (signed or not require_signed),
                     }
             computed["done"] = True
 
@@ -2913,6 +3059,9 @@ class Worker:
             route_decision_for=self._route_lookup(
                 run.repo, run.id, gate.posture.posture_class, checks_arm=checks.arm
             ),
+            # ADR-0018 — a signed cell licenses delivery; the deployment's stated posture,
+            # served on /settings and the Posture page, never a silent choice
+            require_signed_cell=self.settings.factory.require_signed_cell,
             # GOV-4: the override is a second approver's act, read LIVE at each item's entry
             # gate from the run's row (a grant made while the run works reaches the next
             # item); honoured only for a person with the approver role — the loop refuses the
@@ -3026,7 +3175,8 @@ class Worker:
         return STATUS_SUCCEEDED, counts, ""
 
     def _deliver_override(self, run_id: str) -> str:
-        """Who overrides this factory run's route gate, read from the run's row NOW: the
+        """Who lifts this factory run's SIGN-OFF clause (never its route gate — ADR-0026
+        item 8), read from the run's row NOW: the
         ``params.deliver_override_by`` a second approver granted (``POST
         /runs/{id}/deliver-override``), honoured only when it names an ACTIVE account that
         holds the approver role at the moment of the gate — ``""`` otherwise (GOV-4): a
@@ -3209,7 +3359,7 @@ class Worker:
             },
         )
         ctx.emit("oracle", "controls.report", **report.to_dict())
-        counts = {
+        counts: dict[str, Any] = {
             "tasks": len(report.task_ids),
             "total": total,
             "rows": len(report.rows),
@@ -3217,6 +3367,9 @@ class Worker:
             "escapes": len(report.escapes),
             "not_constructible": len(report.not_constructible),
             "skipped": len(report.skipped),
+            "witnessed": len(report.witnessed),
+            "witness_failures": len(report.witness_failures),
+            "controls_version": CONTROLS_VERSION,
             "passed": report.passed,
             "complete": not cancelled,
         }
@@ -3467,6 +3620,7 @@ def evidence_pack_from_file(evidence_dir: Path, pack_hash: str) -> dict[str, Any
 
 
 __all__ = [
+    "IDLE_STEPS",
     "PROBE_FAILED",
     "PROBE_OK",
     "RunContext",
