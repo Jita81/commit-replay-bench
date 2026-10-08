@@ -17,10 +17,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   (off by default, ADR-0027, DL-240) signs a browser on the same computer in as one local account.
   The server refuses it outside `CRB_ENV=dev`, on a non-loopback bind and with
   `CRB_LOCAL_AUTH_ENABLED=false`, and the container image refuses to start with it set. A request
-  from another machine, through a forwarding proxy (the UI's Vite proxy now marks one) or naming
-  another `Host` is answered as if it were off. The session is the one a password issues — the
-  revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
-  sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
+  from another machine, through a forwarding proxy (the UI's Vite proxy marks one) or naming
+  another `Host` is answered as if it were off. The session is the one a password issues and
+  never touches the rate limit. Every sign-in is audited (`auth.dev_autologin`) and every page
+  shows a banner; an invitee is never signed in, and go-live proves the setting off.
 
 - **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
   ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table
