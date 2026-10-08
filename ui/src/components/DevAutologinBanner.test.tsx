@@ -15,9 +15,13 @@
  *               back in; that an open page's banner follows an API restarted with the setting
  *               changed; that the sign-in page shows a status, not the form, until the
  *               automatic sign-in settles; and that only a 403/404 from the POST (or a failed
- *               `/version`) reads as "no session" — a 5xx or an unreachable API is shown.
+ *               `/version`) reads as "no session" — a 5xx or an unreachable API is shown; that a
+ *               banner already showing stays up, marked as the API's last answer, when a refetch
+ *               of `/version` fails; and that the invitation page shows the banner, never signs
+ *               the invitee in as the stack's account, and its "Sign in" link opens the form.
  * How:          `mockApi` routes for `/auth/me`, `/version`, `/health` and the autologin POST;
- *               the shell as a layout route and the login page on `/login`; `resetDevAutologin`
+ *               the shell as a layout route, the login page on `/login` and the invitation page
+ *               on `/invite`, as App.tsx mounts them; `resetDevAutologin`
  *               between tests stands in for a fresh page load.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0027-dev-autologin-on-loopback.md
@@ -25,6 +29,7 @@
  *               ui/src/api/hooks.ts (`useMe`, `useLogout`, `resetDevAutologin`),
  *               ui/src/components/Layout.tsx (mounts it on every signed-in page),
  *               ui/src/screens/Login/LoginPage.tsx (mounts it on the sign-in page),
+ *               ui/src/screens/Invite/AcceptInvitePage.tsx (mounts it and turns the sign-in off),
  *               ui/src/help/hints.ts (`banner.shell.dev_autologin`)
  * Tested by:    ui/src/components/DevAutologinBanner.test.tsx
  * Touch when:   never for a new repository (nothing here reads a client repository); when the
@@ -38,6 +43,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetDevAutologin } from '../api/hooks'
 import { AuthProvider, RequireAuth } from '../lib/auth'
+import { AcceptInvitePage } from '../screens/Invite/AcceptInvitePage'
 import { LoginPage } from '../screens/Login/LoginPage'
 import { PRINCIPAL, envelope, mockApi } from '../test/utils'
 import { DEV_AUTOLOGIN_SENTENCE } from './DevAutologinBanner'
@@ -47,7 +53,7 @@ const VERSION_ON = { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oid
 const VERSION_OFF = { ...VERSION_ON, dev_autologin: false }
 const HEALTH = { status: 'ok', probes: [] }
 
-/** The app's shape: /login outside the shell, everything else behind the guard. */
+/** The app's shape: /login and /invite outside the shell, everything else behind the guard. */
 function renderApp(route: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } })
   return render(
@@ -56,6 +62,7 @@ function renderApp(route: string) {
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/invite" element={<AcceptInvitePage />} />
             <Route
               element={
                 <RequireAuth>
@@ -133,6 +140,23 @@ describe('the banner follows the stack, not the page load', () => {
       focusManager.setFocused(true)
     })
     await waitFor(() => expect(screen.queryByTestId('dev-autologin-banner')).toBeNull())
+  })
+
+  it('stays up, marked as the last answer, when a refetch of /version fails', async () => {
+    // PR #58 review: a failed refetch kept `data` beside `isError`, and the banner went away —
+    // a blip in the API took the warning down while the setting was still on
+    let down = false
+    mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /version': () => (down ? envelope(500, 'internal', 'boom') : new Response(JSON.stringify(VERSION_ON), { status: 200, headers: { 'Content-Type': 'application/json' } })), 'GET /health': HEALTH, 'GET /repos': { items: [] } })
+    renderApp('/results')
+    await screen.findByTestId('dev-autologin-banner')
+    expect(screen.queryByTestId('dev-autologin-banner-stale')).toBeNull()
+    down = true
+    act(() => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+    expect(await screen.findByTestId('dev-autologin-banner-stale')).toHaveTextContent("the API's last answer")
+    expect(screen.getByTestId('dev-autologin-banner')).toHaveTextContent(DEV_AUTOLOGIN_SENTENCE)
   })
 })
 
@@ -250,6 +274,37 @@ describe('an automatic sign-in that fails is not a refusal', () => {
     expect(await screen.findByText('Could not check for an organisation sign-in')).toBeInTheDocument()
     expect(screen.queryByText('Could not check your session')).toBeNull()
     expect(screen.queryByTestId('dev-autologin-banner')).toBeNull()
+    expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
+  })
+})
+
+describe('the invitation page', () => {
+  // PR #58 review: on a stack with automatic sign-in on, the invitee was signed in as the stack's
+  // account, so the page's "Sign in" link landed them on that account's Home instead of the form.
+  const OK = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+
+  it('shows the banner, never signs the invitee in, and its Sign in link opens the form', async () => {
+    let signedIn = false
+    const { calls } = mockApi({
+      'GET /auth/me': () => (signedIn ? OK(PRINCIPAL) : envelope(401, 'unauthenticated', 'no session')),
+      'GET /version': VERSION_ON,
+      'GET /health': HEALTH,
+      'GET /repos': { items: [] },
+      'POST /invitations/accept': { username: 'walk-approver', display_name: 'Walk Approver', role: 'approver', accepted: '2026-09-23T10:00:00Z' },
+      'POST /auth/dev-autologin': () => {
+        signedIn = true
+        return OK(PRINCIPAL)
+      },
+    })
+    renderApp('/invite?token=a-one-time-token')
+    expect(await screen.findByTestId('dev-autologin-banner')).toHaveTextContent(DEV_AUTOLOGIN_SENTENCE)
+    await userEvent.type(await screen.findByLabelText(/^New password \*/), 'a-long-enough-password')
+    await userEvent.type(screen.getByLabelText(/^New password again/), 'a-long-enough-password')
+    await userEvent.click(screen.getByRole('button', { name: 'Set my password' }))
+    await userEvent.click(await screen.findByRole('link', { name: 'Sign in' }))
+    // the sign-in page shows a status until the session check settles, so the form is its answer
+    expect(await screen.findByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Home' })).toBeNull()
     expect(calls.some((c) => c.path === '/auth/dev-autologin')).toBe(false)
   })
 })

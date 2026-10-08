@@ -9,8 +9,11 @@
  * What it does: Reads `GET /version` (unauthenticated, so the sign-in page can read it before
  *               anyone has a role) and, when it reports `dev_autologin`, renders one hinted
  *               sentence in the warning colour with `role="status"`; renders nothing otherwise,
- *               including while `/version` is loading, and says nothing when it has failed (it
- *               cannot tell; the sign-in page reports the failure). Follows the stack, not the
+ *               including while `/version` is loading, and says nothing when it has failed with
+ *               no answer yet (it cannot tell; the sign-in page reports the failure). Once
+ *               `/version` has said on, a later refetch that fails leaves the banner up with a
+ *               note that this is the API's last answer — a blip never takes the warning down.
+ *               Follows the stack, not the
  *               page load: `useVersion` refetches when the tab regains focus and after a
  *               minute, so an API restarted with the setting changed moves the banner too.
  * How:          `useVersion` → `dev_autologin === true` → a `Hint` with
@@ -35,16 +38,22 @@ export const DEV_AUTOLOGIN_SENTENCE = 'Automatic sign-in is on for this developm
 /** Rendered on every page while `GET /version` reports `dev_autologin`; nothing otherwise. */
 export function DevAutologinBanner() {
   const version = useVersion()
-  // A failed `/version` cannot say whether automatic sign-in is on, so the banner claims nothing;
-  // the sign-in page reports that failure on its own line (P-369).
-  if (version.isError) return null
+  // A `/version` that has never answered cannot say whether automatic sign-in is on, so the banner
+  // claims nothing; the sign-in page reports that failure on its own line (P-369). One that said on
+  // and then failed a refetch keeps its answer beside the error: the warning stays, and says so.
   if (version.data?.dev_autologin !== true) return null
+  const stale = version.isError
   return (
     <div className="border-b-4 border-status-amber bg-status-amber-soft text-on-surface" role="status" data-testid="dev-autologin-banner">
       <div className="mx-auto max-w-[1400px] px-5 py-3 text-[16px] leading-[1.47]">
         <Hint as="strong" id="banner.shell.dev_autologin">
           {DEV_AUTOLOGIN_SENTENCE}
         </Hint>
+        {stale && (
+          <span className="ml-2 text-[14px]" data-testid="dev-autologin-banner-stale">
+            (the API's last answer — it did not answer the latest check)
+          </span>
+        )}
       </div>
     </div>
   )

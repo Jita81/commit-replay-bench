@@ -266,15 +266,26 @@ export function useWithdrawAttestation(): UseMutationResult<GoLive, ApiError, { 
 // ---------------------------------------------------------------------------
 
 /**
- * Set by Sign out: for the rest of this page load the UI does not ask for an automatic sign-in,
- * so signing out lands on the form instead of straight back in. A reload starts again — the
- * same conditions apply to it as to the first load (ADR-0027).
+ * Set by Sign out and by the invitation page: for the rest of this page load the UI does not ask
+ * for an automatic sign-in, so signing out lands on the form instead of straight back in, and an
+ * invitee is never signed in as the stack's account. A reload starts again — the same conditions
+ * apply to it as to the first load (ADR-0027).
  */
 let devAutologinSuppressed = false
 
 /** A fresh page load, for tests: the next `useMe` may ask for an automatic sign-in again. */
 export function resetDevAutologin(): void {
   devAutologinSuppressed = false
+}
+
+/**
+ * The invitation page: for the rest of this page load nobody is signed in automatically. The
+ * person on /invite has no account yet, so signing the browser in as the stack's account signs
+ * in the wrong person, and the page's "Sign in" link would land them on that account's Home
+ * instead of the form (ADR-0027).
+ */
+export function suppressDevAutologin(): void {
+  devAutologinSuppressed = true
 }
 
 /**
