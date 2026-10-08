@@ -11,10 +11,14 @@ What it does: Pins that a green probe on a repository whose ``auto_stages`` swit
               chains nothing more; that nothing is chained with the switch off; that a failed
               stage chains nothing; and that the chain never queues a ``BUILD_KINDS`` kind:
               the constant is disjoint from them, the last free stage chains nothing, and a
-              chain that would name a build kind is refused at the seam.
+              chain that would name a build kind is refused at the seam; and that every
+              attribute the API's submit gate reads for a chain body resolves on the
+              worker's stand-in for the API's settings (P-676).
 How:          ``Harness`` from tests/test_worker.py runs a real probe on ``pyrepo`` through
               the local executor; the switch is seeded on the repository row and its
-              ``repo.updated`` event through ``append_system_event``.
+              ``repo.updated`` event through ``append_system_event``. The stand-in check runs
+              ``submit_refusals`` over the API's own ``Settings`` behind a proxy that
+              records each attribute path read.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the qualify stage in the chain)
 Works with:   src/crb/server/worker.py (under test), src/crb/server/routes/runs.py
@@ -28,14 +32,26 @@ Touch when:   never for a new repository; a stage is added to ``FREE_CHAIN`` or 
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import select
 
+from crb.server import builder_login
 from crb.server import worker as worker_mod
-from crb.server.routes.runs import append_system_event, system_trace_id
+from crb.server.deps import ApiError
+from crb.server.routes.runs import (
+    append_system_event,
+    new_run,
+    submit_refusals,
+    system_trace_id,
+)
 from crb.server.schemas import BUILD_KINDS
+from crb.server.settings import Settings
 from crb.store.jobs import STATUS_FAILED, STATUS_QUEUED, STATUS_SUCCEEDED
 from crb.store.models import Event, Run
 from fixtures import pyrepo as pr
@@ -262,3 +278,91 @@ def test_a_switch_set_at_registration_names_the_registrar_as_the_actor(h: Harnes
     assert [r.kind for r in runs] == ["probe", "mine"]
     assert runs[1].actor == "registrar-3"
     assert _chain_events(h)[0].actor == "registrar-3"
+
+
+class _Reads:
+    """The API's settings behind a proxy that records each attribute path read through it
+    (``factory.test_author``); a nested settings model is proxied in turn. A read the real
+    settings cannot answer raises as it would and is not recorded: a ``getattr`` default
+    the gate would take on the stand-in too."""
+
+    def __init__(self, target: object, seen: set[str], prefix: str = "") -> None:
+        self._target = target
+        self._seen = seen
+        self._prefix = prefix
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._target, name)
+        path = self._prefix + name
+        self._seen.add(path)
+        return _Reads(value, self._seen, path + ".") if isinstance(value, BaseModel) else value
+
+
+def _gate_reads(h: Harness) -> dict[str, set[str]]:
+    """Every attribute path ``submit_refusals`` reads off the API's own ``Settings`` for each
+    body the chain can build — the chain's own ``_chain_body`` for every kind in
+    ``FREE_CHAIN`` (the probe, which nothing chains, included: a superset costs nothing),
+    the gate called as the chain calls it. A refusal is the gate's answer, not drift: the
+    reads made before it count."""
+    api = Settings(env="dev", home=h.home)
+    reads: dict[str, set[str]] = {}
+    with h.factory() as db:
+        for kind in worker_mod.FREE_CHAIN:
+            body = h.worker._chain_body(pr.REPO_NAME, kind)
+            seen: set[str] = set()
+            with contextlib.suppress(ApiError):
+                submit_refusals(db, _Reads(api, seen), body, new_run(body, actor=SWITCHER))
+            reads[kind] = seen
+    return reads
+
+
+def _unresolved(paths: set[str], stand_in: object) -> list[str]:
+    """The paths in ``paths`` that do not resolve on ``stand_in``, sorted."""
+    missing: list[str] = []
+    for path in paths:
+        obj: object = stand_in
+        for part in path.split("."):
+            if not hasattr(obj, part):
+                missing.append(path)
+                break
+            obj = getattr(obj, part)
+    return sorted(missing)
+
+
+def test_the_chain_gate_settings_carry_every_field_the_submit_gate_reads(h: Harness) -> None:
+    """P-676, P-672's class come back: the chain hands ``submit_refusals`` a stand-in for the
+    API's ``Settings``, and ``settings: Any`` keeps mypy blind to a field the gate reads that
+    the stand-in lacks. Wave 4's login check read ``settings.builder``, the stand-in had
+    none, and every chained stage raised — caught and logged, so none was ever queued. Every
+    attribute path the gate reads off the API's own settings, for every body the chain
+    builds, must resolve on the worker's stand-in."""
+    h.add_repo()
+    reads = _gate_reads(h)
+    stand_in = h.worker._chain_gate_settings()
+    missing = {kind: _unresolved(paths, stand_in) for kind, paths in reads.items()}
+    assert not any(missing.values()), (
+        f"the submit gate reads settings the chain's stand-in lacks: {missing} — carry them "
+        "in Worker._chain_gate_settings (docs/PREVENTION.md P-676)"
+    )
+    # the stand-in's builder values feed a login check that cannot fire for a free stage
+    assert set(worker_mod.FREE_CHAIN).isdisjoint(builder_login.GATED_KINDS)
+
+
+def test_the_gate_settings_check_reports_a_stand_in_without_builder(h: Harness) -> None:
+    """The negative control: the check sees the bug it exists for. Today's stand-in without
+    ``builder`` — before 30c08b7b, ``home`` and ``factory`` only — is reported for every
+    chain body, and for nothing else; and without any one field the gate reads, that field
+    is reported."""
+    h.add_repo()
+    reads = _gate_reads(h)
+    fields = vars(h.worker._chain_gate_settings())
+
+    def dropped(name: str) -> SimpleNamespace:
+        return SimpleNamespace(**{k: v for k, v in fields.items() if k != name})
+
+    for kind, paths in reads.items():
+        missing = _unresolved(paths, dropped("builder"))
+        assert missing and {p.split(".")[0] for p in missing} == {"builder"}, (kind, missing)
+    every = set().union(*reads.values())
+    for top in {p.split(".")[0] for p in every}:
+        assert top in _unresolved(every, dropped(top)), top
