@@ -54,6 +54,7 @@ import { useApparatus, useDecisions } from './useDecisionCount'
 const KIND_TAG: Record<DecisionKind, TagTone> = {
   do_not_ship: 'red',
   gap_unsigned: 'amber',
+  not_built: 'amber',
   signoff_due: 'blue',
   rework: 'grey',
   delivery_withheld: 'grey',

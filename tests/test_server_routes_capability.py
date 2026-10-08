@@ -2,8 +2,10 @@
 the controls verdict (ADR-0003 amendment), the failure split, sign-off overlay.
 
 The seed's latest ``controls.report`` (see ``fixtures/server_seed``) PASSED with
-14 rows, 2 not constructible and **1 escape** — so the 40-row cell that delivers on
-the numbers alone routes ``human`` (``controls_escapes``) on the product surface.
+14 rows, 2 not constructible and **1 escape**. Under routing.v2 the seed's host rows never
+deliver (``posture_unsealed``, every other shortfall listed beside it); a test that needs the
+full rule proves the deliver cell in the sealed posture (``prove_deliver_cell``: a reading, 20
+sealed first attempts), where the escape routes it ``human`` (``controls_escapes``).
 Tests that need another controls state append a NEWER ``controls.report`` event
 (the latest wins) or remove them all (``unmeasured``); nothing bypasses the rule.
 
@@ -11,8 +13,9 @@ Navigation
 ----------
 What it is:   ``/capability-map``, ``/routes`` and ``/failure-split``'s test suite — honest
               cells, the one rule, the controls verdict, the failure split, the sign-off overlay.
-What it does: Pins that only measured cells appear, that the seed's controls verdict is on the
-              map and its one escape routes the 40-row cell ``human``, that deliver needs a
+What it does: Pins that only measured cells appear at one apparatus (``apparatus=all`` is
+              422), that the seed's controls verdict is on the map and its one escape routes
+              the proven cell ``human``, that deliver needs a
               passed majority-constructible zero-escape report (a failed gate routes every cell
               human; thin or unmeasured controls withhold deliver; a finished controls run with
               counts but no event still counts), the thin cell calibrates, the legacy cell is a
@@ -26,7 +29,8 @@ What it does: Pins that only measured cells appear, that the seed's controls ver
 How:          ``make_env`` over the seed; newer ``controls.report`` events appended through the
               ORM where a different controls state is needed (the latest wins).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
+ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md,
+              docs/adr/0025-routing-v2.md
 Works with:   src/crb/server/routes/capability.py (under test), src/crb/core/capability.py
               (the map), src/crb/core/routing.py (the rule), tests/fixtures/server_seed.py (the
               seed and its load-bearing counts), tests/fixtures/signoff_seed.py (the overlay
@@ -55,8 +59,9 @@ from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
 from fixtures.posture import posture_row
+from fixtures.proven import S1
 from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env, task_id
-from fixtures.signoff_seed import attested_body, clear_policy, score_oracle
+from fixtures.signoff_seed import attested_body, clear_policy, prove_deliver_cell, score_oracle
 
 CELL_KEYS = {
     "n",
@@ -102,10 +107,8 @@ def env(tmp_path: Path) -> Iterator[Env]:
 
 
 def _cells(env: Env, query: str = "") -> dict[str, dict[str, Any]]:
-    # the seed deliberately mixes census-era (1.0) rows with current ones; these tests
-    # read the pooled view unless a test asks for the current-apparatus default itself
-    if "apparatus=" not in query:
-        query += "&apparatus=all"
+    # the seed deliberately mixes census-era (1.0) rows with current ones; a reading has one
+    # apparatus (ADR-0025 item 1), so these tests read the current one unless they name another
     r = env.get(f"/capability-map?repo={ALPHA}{query}")
     assert r.status_code == 200, r.text
     return {str(c["label"]): c for c in r.json()["cells"]}
@@ -133,7 +136,7 @@ def controls_report(
         seq=1,
         payload={
             "schema": "crb.negative_controls.v1",
-            "apparatus": {"apparatus_version": "2.0", "complete": complete},
+            "apparatus": {"apparatus_version": APPARATUS_VERSION, "complete": complete},
             "n_tasks": 2,
             "n_rows": n_rows,
             "violations": 0 if passed else 7,
@@ -152,6 +155,13 @@ def controls_report(
     with env.factory() as s:
         s.add(Event(**d, payload_json=payload))
         s.commit()
+
+
+def _prove(env: Env) -> None:
+    """The seed's deliver cell proven under routing.v2 in the sealed posture, with a strong
+    oracle on the reading's commits (the seed's own 0.58 on its host tasks is not read)."""
+    rows = prove_deliver_cell(env)
+    score_oracle(env, task_ids=[x.task_id for x in rows])
 
 
 def seed_beta_rows(env: Env, n: int = 40, clean: int = 39) -> None:
@@ -185,7 +195,7 @@ def seed_beta_rows(env: Env, n: int = 40, clean: int = 39) -> None:
 
 class TestCapabilityMap:
     def test_shape_measured_cells_only(self, env: Env) -> None:
-        r = env.get(f"/capability-map?repo={ALPHA}&apparatus=all")
+        r = env.get(f"/capability-map?repo={ALPHA}")
         assert r.status_code == 200
         body = r.json()
         assert set(body) == {
@@ -200,16 +210,30 @@ class TestCapabilityMap:
             "policy",
             "controls",
             "economics",
+            "apparatus",
+            "arm",
+            "arms",
+            "taxonomy",
+            "taxonomies",
         }
         assert body["repo"] == ALPHA and body["by"] == ["capability_class", "size"]
-        assert body["classes"] == ["backend.route.add", "bug.fix", "test.add"]
-        assert body["sizes"] == ["XS", "S", "M"]  # tier order, not alphabetical
+        # one apparatus per reading (ADR-0025 item 1): the census-era test.add rows are
+        # history, named and counted, never read beside the current ones
+        assert body["apparatus"]["read"] == APPARATUS_VERSION
+        assert body["apparatus"]["superseded_versions"] == ["1.0-census"]
+        assert body["arm"] == "standard" and body["arms"] == ["S3"]
+        assert body["taxonomy"] == "global/classes@v1"
+        assert body["classes"] == ["backend.route.add", "bug.fix"]
+        assert body["sizes"] == ["S", "M"]  # tier order, not alphabetical
         assert body["languages"] == ["python"]
-        assert body["models"] == ["gpt-oss-120b", "sonnet"]
+        assert body["models"] == ["gpt-oss-120b"]
         assert body["policy"] == DEFAULT_POLICY.to_dict()
-        assert body["policy"]["controls_version"] == "controls-gate.v1"
+        assert body["policy"]["controls_version"] == "controls-gate.v2"
         labels = {c["label"] for c in body["cells"]}
-        assert labels == {"backend.route.add|M", "bug.fix|S", "test.add|XS"}
+        assert labels == {"backend.route.add|M", "bug.fix|S"}
+        pooled = env.get(f"/capability-map?repo={ALPHA}&apparatus=all")
+        assert pooled.status_code == 422
+        assert envelope(pooled)["code"] == "apparatus_pooling_refused"
         # NOT_YET_MEASURED cells are absent, never fabricated
         assert "docs.update|S" not in labels and "bug.fix|XL" not in labels
         for c in body["cells"]:
@@ -224,12 +248,13 @@ class TestCapabilityMap:
                 "disqualified",
                 "lint_evaluated",
                 "outage",
+                "outage_auth",
                 "api",
             }
             assert c["capability_class"] != "*" and c["size"] != "*" and c["language"] == "*"
 
     def test_the_seeds_controls_verdict_is_on_the_map(self, env: Env) -> None:
-        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
+        body = env.get(f"/capability-map?repo={ALPHA}").json()
         v = body["controls"]
         assert v == {
             "measured": True,
@@ -242,6 +267,8 @@ class TestCapabilityMap:
             "run_id": RUN_IDS["controls"],
             "created": v["created"],
             "state": "escaped",
+            "apparatus_version": APPARATUS_VERSION,  # read at the rows' apparatus only
+            "detail": "",
         }
         assert v["created"]
         # ONE source: the verdict the controls screen serves is the one the map routed under
@@ -252,22 +279,19 @@ class TestCapabilityMap:
         c = _cells(env)["bug.fix|S"]
         assert c["n"] == 40 and c["clean"] == 38 and c["point"] == 0.95
         assert c["ci_low"] == pytest.approx(0.835, abs=0.001)
-        # the numbers deliver; the repo's oracle measures weak (0.58 over 3 of its 4
-        # tasks, the seed's task-level scores — the same strength the sign-off evidences)
-        # → human, and it says why; behind it the controls let a cheat through
-        assert c["route"] == "human" and c["reason_code"] == "oracle_weak"
-        assert "oracle strength 0.58" in str(c["reason"])
+        # routing.v2: the seed's rows were graded on the host, so the target commit was
+        # reachable — nothing here delivers (the first clause) — and every other shortfall is
+        # listed beside it: no registered reading, the weak oracle (0.58 over 3 of 4 tasks,
+        # the same strength the sign-off evidences) and the controls escape
+        assert c["route"] == "calibrate" and c["reason_code"] == "posture_unsealed"
+        codes = [x["code"] for x in c["shortfalls"]]
+        assert codes[:2] == ["posture_unsealed", "reading_unregistered"]
+        assert {"oracle_weak", "controls_escapes"} <= set(codes)
         assert c["oracle_strength_mean"] == pytest.approx(0.5778, abs=1e-4)
         assert c["false_q1"] == 0 and c["verification_tier"] == "automated-pass"
         assert c["apparatus_versions"] == [APPARATUS_VERSION] and c["belt_set"] == "v5"
         assert c["cost_usd_mean"] == pytest.approx(0.012) and c["latency_s_mean"] == 42.0
         assert c["cost_known"] is True
-        # with a strong oracle scored, the controls escape is the reason, and it says why
-        score_oracle(env)
-        c = _cells(env)["bug.fix|S"]
-        assert c["route"] == "human" and c["reason_code"] == "controls_escapes"
-        assert "1 measurement control(s) graded clean" in str(c["reason"])
-        assert f"(controls run {RUN_IDS['controls'][:8]})" in str(c["reason"])
         # the split: 2 builder_red rows, no instrument rows → model point = all-rows point
         assert c["failure_split"] == {
             "builder_red": 2,
@@ -277,25 +301,37 @@ class TestCapabilityMap:
             "harness": 0,
             "disqualified": 0,
             "outage": 0,
+            "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
             "lint_evaluated": 0,  # the seed's repo configures no linter: belt 5 never evaluated
             "api": 0,  # belt 6 is opt-in (ADR-0024): never switched on for the seed
         }
         assert c["n_builder_red"] == 2 and c["model_n"] == 40 and c["model_point"] == 0.95
         assert c["model_ci_low"] == c["ci_low"] and c["model_ci_high"] == c["ci_high"]
+        # proven in the sealed posture with a strong oracle scored, the controls escape is the
+        # reason, and it says why
+        rows = prove_deliver_cell(env)
+        score_oracle(env, task_ids=[x.task_id for x in rows])
+        c = _cells(env)["bug.fix|S"]
+        assert c["context_arm"] == S1 and c["n"] == 20 and c["look_state"] == "deliver"
+        assert c["route"] == "human" and c["reason_code"] == "controls_escapes"
+        assert "1 measurement control(s) graded clean" in str(c["reason"])
+        assert f"(controls run {RUN_IDS['controls'][:8]})" in str(c["reason"])
 
     def test_deliver_only_with_passed_majority_constructible_and_zero_escapes(
         self, env: Env
     ) -> None:
-        score_oracle(env)  # strong: the seed's own 0.58 would refuse first (oracle_weak)
+        _prove(env)
         controls_report(env, escapes=0)
-        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
+        body = env.get(f"/capability-map?repo={ALPHA}").json()
         assert body["controls"]["state"] == "passed" and body["controls"]["run_id"] == "9" * 32
         c = {x["label"]: x for x in body["cells"]}["bug.fix|S"]
         assert c["route"] == "deliver" and c["reason_code"] == "deliver"
-        assert str(c["reason"]).endswith("controls=passed 12/14 escapes=0")
+        assert c["shortfalls"] == [] and c["standard"]["standard"] == S1
+        # the sealed deployment reads the proven cell alone: the thin cell's host rows are
+        # another posture class
         assert body["summary"]["deliver_cells"] == 1 and body["summary"]["cells_by_route"] == {
             "deliver": 1,
-            "calibrate": 2,
+            "calibrate": 0,
             "granularize": 0,
             "human": 0,
             "do_not_ship": 0,
@@ -304,27 +340,24 @@ class TestCapabilityMap:
 
     def test_failed_gate_routes_every_cell_human(self, env: Env) -> None:
         controls_report(env, passed=False)
-        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
+        body = env.get(f"/capability-map?repo={ALPHA}").json()
         assert body["controls"]["state"] == "failed" and body["controls"]["passed"] is False
         for c in body["cells"]:
             assert c["route"] == "human" and c["reason_code"] == "controls_failed", c["label"]
             assert "instrument defect" in str(c["reason"])
         assert body["summary"]["deliver_cells"] == 0
-        assert body["summary"]["cells_by_route"]["human"] == 3
+        assert body["summary"]["cells_by_route"]["human"] == 2
 
     def test_thin_controls_withhold_deliver(self, env: Env) -> None:
-        score_oracle(env)  # strong: the seed's own 0.58 would refuse first (oracle_weak)
+        _prove(env)
         controls_report(env, n_rows=56, not_constructible=32)  # 24/56: cobra / koa
-        body = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()
+        body = env.get(f"/capability-map?repo={ALPHA}").json()
         v = body["controls"]
         assert v["state"] == "thin" and v["constructible"] == 24 and v["total"] == 56
         assert v["share"] == round(24 / 56, 4)
         c = {x["label"]: x for x in body["cells"]}["bug.fix|S"]
         assert c["route"] == "calibrate" and c["reason_code"] == "controls_thin"
         assert "only 24 of 56 control rows were constructible" in str(c["reason"])
-        # the thin cell still names n first — the more actionable reason
-        thin = {x["label"]: x for x in body["cells"]}["backend.route.add|M"]
-        assert thin["reason_code"] == "n_below_min"
 
     def test_unmeasured_controls_withhold_deliver(self, env: Env) -> None:
         seed_beta_rows(env)  # beta: 39/40 clean, never ran controls
@@ -340,17 +373,18 @@ class TestCapabilityMap:
             "run_id": "",
             "created": "",
             "state": "unmeasured",
+            "apparatus_version": "",
+            "detail": f"no controls report at apparatus {APPARATUS_VERSION}",
         }
         c = {x["label"]: x for x in body["cells"]}["bug.fix|S"]
         assert c["n"] == 40 and c["point"] == 0.975 and c["ci_low"] > 0.8
-        assert c["route"] == "calibrate" and c["reason_code"] == "controls_unmeasured"
-        assert "run a 'controls' run" in str(c["reason"])
+        # host rows calibrate first; the unmeasured gate is listed with its next measurement
+        assert c["route"] == "calibrate"
+        (unm,) = [x for x in c["shortfalls"] if x["code"] == "controls_unmeasured"]
+        assert unm["route"] == "calibrate" and unm["next"] == "controls"
         assert body["summary"]["deliver_cells"] == 0
         # alpha's verdict is alpha's: nothing leaks across repos
-        assert (
-            env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["controls"]["measured"]
-            is True
-        )
+        assert env.get(f"/capability-map?repo={ALPHA}").json()["controls"]["measured"] is True
 
     def test_verdict_falls_back_to_the_runs_counts_when_no_event(self, env: Env) -> None:
         """A finished controls RUN with counts but no report event (pruned) still counts."""
@@ -377,6 +411,8 @@ class TestCapabilityMap:
                     },
                     created="2026-09-10T09:00:00+00:00",
                     finished="2026-09-10T09:20:00+00:00",
+                    # controls-gate.v2 reads a run of this apparatus only
+                    apparatus_json={"apparatus_version": APPARATUS_VERSION},
                 )
             )
             s.commit()
@@ -406,8 +442,8 @@ class TestCapabilityMap:
     def test_thin_cell_calibrates(self, env: Env) -> None:
         c = _cells(env)["backend.route.add|M"]
         assert c["n"] == 4 and c["clean"] == 2 and c["errors"] == 1
-        assert c["route"] == "calibrate" and "n=4 < 10" in str(c["reason"])
-        assert c["reason_code"] == "n_below_min"
+        assert c["route"] == "calibrate" and c["reason_code"] == "posture_unsealed"
+        assert "reading_unregistered" in [x["code"] for x in c["shortfalls"]]
         # 1 builder_red + 1 harness (the failed run's sandbox error) → model 2/3 vs all-rows 2/4
         assert c["failure_split"] == {
             "builder_red": 1,
@@ -417,6 +453,7 @@ class TestCapabilityMap:
             "harness": 1,
             "disqualified": 0,
             "outage": 0,
+            "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
             "lint_evaluated": 0,
             "api": 0,
         }
@@ -424,7 +461,8 @@ class TestCapabilityMap:
         assert c["model_ci_low"] < c["model_point"] < c["model_ci_high"]
 
     def test_legacy_cell_is_a_separate_apparatus(self, env: Env) -> None:
-        c = _cells(env)["test.add|XS"]
+        assert "test.add|XS" not in _cells(env)  # history: read only by naming its version
+        c = _cells(env, "&apparatus=1.0-census")["test.add|XS"]
         assert c["belt_set"] == "v3-legacy" and c["belt_sets"] == ["v3-legacy"]
         assert c["apparatus_versions"] == ["1.0-census"]
         assert c["n"] == 6 and c["clean"] == 5 and c["route"] == "calibrate"
@@ -460,59 +498,50 @@ class TestCapabilityMap:
         assert body["economics"] == e
 
     def test_economics_refuse_to_pool_apparatus_versions(self, env: Env) -> None:
-        pooled = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["economics"]
-        assert pooled["pooled"] is True
-        assert pooled["apparatus_versions"] == ["1.0-census", APPARATUS_VERSION]
-        for axis in ("cost_per_attempt", "cost_per_clean", "latency_per_attempt"):
-            assert pooled[axis]["value"] is None and pooled[axis]["ci_low"] is None
-            assert "never pooled across apparatus versions" in pooled[axis]["reason"]
+        # routing.v2 refuses the pooled read outright (ADR-0025 item 1): 422, never a blend
+        pooled = env.get(f"/capability-map?repo={ALPHA}&apparatus=all")
+        assert pooled.status_code == 422
+        assert envelope(pooled)["code"] == "apparatus_pooling_refused"
+        assert envelope(pooled)["detail"]["versions"] == ["1.0-census", APPARATUS_VERSION]
         current = env.get(f"/capability-map?repo={ALPHA}").json()
         assert current["economics"]["pooled"] is False
         assert current["economics"]["apparatus_versions"] == [APPARATUS_VERSION]
         # a cell of imported census rows: one apparatus, no cost ever reported → null, not $0
-        legacy = _cells(env)["test.add|XS"]["economics"]
+        legacy = _cells(env, "&apparatus=1.0-census")["test.add|XS"]["economics"]
         assert legacy["pooled"] is False and legacy["cost_known"] == 0
         assert legacy["cost_per_attempt"]["value"] is None
         assert legacy["cost_per_attempt"]["reason"] == "no attempt recorded a known cost"
 
     def test_summary_without_profile(self, env: Env) -> None:
-        s = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["summary"]
+        s = env.get(f"/capability-map?repo={ALPHA}").json()["summary"]
         assert s["trusted_autonomy_coverage"] is None  # no profile → not fabricated
         assert s["earned_coverage"] is None and s["profile_commits"] is None
-        assert s["measured_cells"] == 3 and s["deliver_cells"] == 0  # the seed's escape
-        assert s["total_cells"] == 9  # 3 classes × 3 sizes seen
-        assert s["cells_by_route"]["human"] == 1 and s["cells_by_route"]["calibrate"] == 2
-        assert s["n_total"] == 50 and s["rows"] == 50 and s["false_q1_total"] == 0
-        assert s["apparatus_versions"] == ["1.0-census", APPARATUS_VERSION]
+        assert s["measured_cells"] == 2 and s["deliver_cells"] == 0  # host rows never deliver
+        assert s["total_cells"] == 4  # 2 classes × 2 sizes seen at the current apparatus
+        assert s["cells_by_route"]["calibrate"] == 2
+        assert s["n_total"] == 44 and s["rows"] == 44 and s["false_q1_total"] == 0
+        assert s["apparatus_versions"] == [APPARATUS_VERSION]
         assert s["signoffs_applied"] == 0
 
     def test_summary_with_profile_has_coverage(self, tmp_path: Path) -> None:
         repo = pr.build(tmp_path / "pyrepo")
         with make_env(tmp_path, clone_path=str(repo.path)) as env:
             assert env.get(f"/repos/{ALPHA}/profile").status_code == 200
-            s = env.get(f"/capability-map?repo={ALPHA}&apparatus=all").json()["summary"]
+            s = env.get(f"/capability-map?repo={ALPHA}").json()["summary"]
             # the fixture repo's change mix is bug.fix/XS — unmeasured here → 0.0 coverage, not null
             assert s["trusted_autonomy_coverage"] == 0.0 and s["earned_coverage"] == 0.0
             assert s["profile_commits"] == 1
 
     def test_projections(self, env: Env) -> None:
         by_lang = _cells(env, "&by=class,size,language")
-        assert set(by_lang) == {
-            "backend.route.add|M|python",
-            "bug.fix|S|python",
-            "test.add|XS|python",
-        }
+        assert set(by_lang) == {"backend.route.add|M|python", "bug.fix|S|python"}
         assert by_lang["bug.fix|S|python"]["language"] == "python"
         by_model = _cells(env, "&by=class,size,model")
-        assert by_model["bug.fix|S|gpt-oss-120b"]["route"] == "human"  # the seed's escape
-        by_class = env.get(f"/capability-map?repo={ALPHA}&by=class&apparatus=all").json()
+        assert by_model["bug.fix|S|gpt-oss-120b"]["route"] == "calibrate"  # host rows
+        by_class = env.get(f"/capability-map?repo={ALPHA}&by=class").json()
         assert by_class["by"] == ["capability_class"]
-        assert {c["label"] for c in by_class["cells"]} == {
-            "backend.route.add",
-            "bug.fix",
-            "test.add",
-        }
-        full = env.get(f"/capability-map?repo={ALPHA}&by=cell&apparatus=all").status_code
+        assert {c["label"] for c in by_class["cells"]} == {"backend.route.add", "bug.fix"}
+        full = env.get(f"/capability-map?repo={ALPHA}&by=cell").status_code
         assert full == 422  # 'cell' is not a field alias
         r = env.get(f"/capability-map?repo={ALPHA}&by=class,colour")
         assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
@@ -529,22 +558,24 @@ class TestCapabilityMap:
 
     def test_signoff_overlay_lifts_tier(self, env: Env) -> None:
         login(env.client, "approver")
-        # under signoff-policy.v2 the seeded cell is REFUSED while the controls gate has
-        # an escape (its route is human) and its oracle measures weak — the sign-off never
-        # lifts a route, so it can only be made once a clean controls run and strong
-        # oracle scores land and the route is deliver
+        # the seeded cell is REFUSED while the controls gate has an escape, its oracle
+        # measures weak and no reading proves its arm — the sign-off never lifts a route, so
+        # it can only be made once the cell is proven in the sealed posture, a clean controls
+        # run and strong oracle scores land and the route is deliver
         cell = {"capability_class": "bug.fix", "size": "S"}
         r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
         assert r.status_code == 409 and envelope(r)["detail"]["code"] == "controls_escapes"
-        assert _cells(env)["bug.fix|S"]["route"] == "human"
+        assert _cells(env)["bug.fix|S"]["route"] == "calibrate"
         clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
         assert r.status_code == 201, r.text
         cells = _cells(env)
         assert cells["bug.fix|S"]["verification_tier"] == "human-verified"
         assert cells["bug.fix|S"]["route"] == "deliver"
-        assert cells["backend.route.add|M"]["verification_tier"] == "automated-pass"
-        assert cells["backend.route.add|M"]["route"] == "calibrate"  # a tier never moves a route
+        # the host rows are another posture class: read there, the thin cell is not lifted
+        host = _cells(env, "&posture=local/inplace/host-env")
+        assert host["backend.route.add|M"]["verification_tier"] == "automated-pass"
+        assert host["backend.route.add|M"]["route"] == "calibrate"  # a tier never moves a route
         summary = env.get(f"/capability-map?repo={ALPHA}").json()["summary"]
         assert summary["signoffs_applied"] == 1
         # the attestation is repo-scoped: beta's (empty) map does not borrow it
@@ -581,80 +612,76 @@ class TestCapabilityMap:
         assert r.status_code == 409
         e = envelope(r)
         assert e["code"] == "false_q1_refused" and e["detail"] == {"exception": "FalseQ1Violation"}
-        assert env.get(f"/routes?repo={ALPHA}&apparatus=all").status_code == 409
+        assert env.get(f"/routes?repo={ALPHA}").status_code == 409
         assert env.get(f"/failure-split?repo={ALPHA}").status_code == 409
         assert env.get(f"/capability-map?repo={BETA}").status_code == 200  # other repos unaffected
 
     def test_viewer_reads(self, env: Env) -> None:
         login(env.client, "viewer")
         assert env.get(f"/capability-map?repo={ALPHA}").status_code == 200
-        assert env.get(f"/routes?repo={ALPHA}&apparatus=all").status_code == 200
+        assert env.get(f"/routes?repo={ALPHA}").status_code == 200
         assert env.get(f"/failure-split?repo={ALPHA}").status_code == 200
 
 
 class TestRoutes:
     def test_decisions_per_full_cell(self, env: Env) -> None:
-        score_oracle(env)  # strong: the seed's own 0.58 would refuse first (oracle_weak)
-        r = env.get(
-            f"/routes?repo={ALPHA}&apparatus=all"
-        )  # the seed mixes a census-era legacy cell in
+        r = env.get(f"/routes?repo={ALPHA}")  # the current apparatus: the census cell is history
         assert r.status_code == 200
         body = r.json()
-        assert set(body) == {"repo", "by", "policy", "decisions", "controls"}
-        assert body["by"] == list(CELL_FIELDS) and body["policy"]["version"] == "routing.v1"
-        assert body["policy"]["controls_version"] == "controls-gate.v1"
+        assert {"repo", "by", "policy", "decisions", "controls"} <= set(body)
+        assert body["by"] == list(CELL_FIELDS) and body["policy"]["version"] == "routing.v2"
+        assert body["policy"]["controls_version"] == "controls-gate.v2"
         assert body["controls"]["state"] == "escaped"
         by_label = {d["label"]: d for d in body["decisions"]}
         green = by_label["replay|bug.fix|S|python|editblock|gpt-oss-120b|cerebras"]
-        assert green["route"] == "human" and green["n"] == 40
-        assert green["reason_code"] == "controls_escapes"
-        assert green["controls_policy"] == "controls-gate.v1"
+        # host rows: the first clause is the posture; the escape is listed beside it
+        assert green["route"] == "calibrate" and green["n"] == 40
+        assert green["reason_code"] == "posture_unsealed"
+        assert "controls_escapes" in [x["code"] for x in green["shortfalls"]]
+        assert green["controls_policy"] == "controls-gate.v2"
         assert green["controls"]["escapes"] == 1 and green["controls"]["state"] == "escaped"
         assert green["cell"] == env.info.deliver_cell
         assert green["point"] == 0.95 and green["ci_low"] == pytest.approx(0.835, abs=0.001)
-        assert green["false_q1"] == 0 and green["policy_version"] == "routing.v1"
-        # the bar as numbers travels with the name (ADR-0003 amendment 2026-09-16)
-        assert (
-            green["policy_thresholds"]["min_n"] == 10
-            and green["policy_thresholds"]["min_ci_low"] == 0.8
-        )
+        assert green["false_q1"] == 0 and green["policy_version"] == "routing.v2"
+        # the bar as numbers travels with the name: the look rule and its exact error
+        assert green["policy_thresholds"]["rule"] == "look.v1"
+        assert green["policy_thresholds"]["looks"] == {"20": 0, "30": 1, "40": 2}
         assert green["verification_tier"] == "automated-pass"
         assert green["apparatus_versions"] == [APPARATUS_VERSION]
         assert green["model_n"] == 40 and green["model_point"] == 0.95
         assert green["failure_split"]["builder_red"] == 2
-        legacy = by_label["replay|test.add|XS|python|claude-code-workflow|sonnet|anthropic"]
-        assert legacy["route"] == "calibrate" and legacy["apparatus_versions"] == ["1.0-census"]
-        assert legacy["reason_code"] == "n_below_min"
         assert set(by_label) == {
             "replay|backend.route.add|M|python|editblock|gpt-oss-120b|cerebras",
             "replay|bug.fix|S|python|editblock|gpt-oss-120b|cerebras",
-            "replay|test.add|XS|python|claude-code-workflow|sonnet|anthropic",
         }
+        legacy = env.get(f"/routes?repo={ALPHA}&apparatus=1.0-census").json()["decisions"]
+        assert [d["label"] for d in legacy] == [
+            "replay|test.add|XS|python|claude-code-workflow|sonnet|anthropic"
+        ]
+        assert legacy[0]["route"] == "calibrate"
+        assert legacy[0]["apparatus_versions"] == ["1.0-census"]
 
     def test_decisions_follow_the_latest_verdict(self, env: Env) -> None:
+        rows = prove_deliver_cell(env)
+        score_oracle(env, task_ids=[x.task_id for x in rows], strength=0.58)
         controls_report(env, escapes=0)
-        by_label = {
-            d["label"]: d
-            for d in env.get(f"/routes?repo={ALPHA}&apparatus=all").json()["decisions"]
-        }
+        by_label = {d["label"]: d for d in env.get(f"/routes?repo={ALPHA}").json()["decisions"]}
         green = by_label["replay|bug.fix|S|python|editblock|gpt-oss-120b|cerebras"]
-        # routed under the seed's task-level oracle (0.58 over 3 of 4 tasks) — the same
+        # routed under the task-level oracle (0.58 on every counted commit) — the same
         # strength the sign-off evidences — the rule says human before it says deliver
         assert green["route"] == "human" and green["reason_code"] == "oracle_weak"
         assert green["oracle_strength"] == pytest.approx(0.58, abs=0.01)
         controls_report(env, passed=False, run_id="8" * 32)
-        r = env.get(f"/routes?repo={ALPHA}&apparatus=all").json()
+        r = env.get(f"/routes?repo={ALPHA}").json()
         assert r["controls"]["run_id"] == "8" * 32 and r["controls"]["state"] == "failed"
         assert {d["reason_code"] for d in r["decisions"]} == {"controls_failed"}
 
     def test_projection_and_empty(self, env: Env) -> None:
-        r = env.get(f"/routes?repo={ALPHA}&by=class&apparatus=all")
+        r = env.get(f"/routes?repo={ALPHA}&by=class")
         assert r.json()["by"] == ["capability_class"]
-        assert {d["label"] for d in r.json()["decisions"]} == {
-            "backend.route.add",
-            "bug.fix",
-            "test.add",
-        }
+        assert {d["label"] for d in r.json()["decisions"]} == {"backend.route.add", "bug.fix"}
+        legacy = env.get(f"/routes?repo={ALPHA}&by=class&apparatus=1.0-census").json()
+        assert {d["label"] for d in legacy["decisions"]} == {"test.add"}
         # the default is the CURRENT apparatus: the seed's census-era test.add rows do not
         # lift a current cell (EVIDENCE-AND-CLAIMS §5 — no claim blends apparatus versions)
         cur = env.get(f"/routes?repo={ALPHA}&by=class")
@@ -689,6 +716,7 @@ class TestFailureSplit:
             "protocol",
             "harness",
             "outage",
+            "authoring",
             "disqualified",
         ]
 
@@ -751,9 +779,15 @@ class TestModeFilter:
         b = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=blind").json()
         assert d["cells"] == s["cells"]
         n_default = sum(c["n"] for c in d["cells"])
-        n_all = sum(c["n"] for c in a["cells"])
         n_blind = sum(c["n"] for c in b["cells"])
-        assert n_blind == 1 and n_all == n_default + 1
+        assert n_blind == 1 and {c["context_arm"] for c in b["cells"]} == {"A0"}
+        # mode=all admits both modes, but a blind row is the A0 context arm and a map reads
+        # one arm per cell (ADR-0026 item 1): the default arm keeps the sighted S3 reading,
+        # and naming A0 reads the blind row alone
+        assert a["arms"] == ["A0", "S3"]
+        assert sum(c["n"] for c in a["cells"]) == n_default
+        a0 = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=all&arm=A0").json()
+        assert sum(c["n"] for c in a0["cells"]) == 1
         r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&mode=other")
         assert r.status_code == 422
 
@@ -1008,13 +1042,15 @@ def test_legacy_host_rows_never_pool_with_another_class(env: Env) -> None:
             )
         )
         s.commit()
-    _posture_rows(env, 2, cls="", pid="", run_id="5" * 32, apparatus_version="2.2")
-    _posture_rows(env, 3, cls="docker/copy/sealed", pid="pst_docker", first=100)
-    pooled = _beta(env, "&apparatus=all&posture=all")
+    # one apparatus (routing.v2 never pools two): the legacy host rows beside rows of a class
+    old = {"apparatus_version": "2.2"}
+    _posture_rows(env, 2, cls="", pid="", run_id="5" * 32, **old)
+    _posture_rows(env, 3, cls="docker/copy/sealed", pid="pst_docker", first=100, **old)
+    pooled = _beta(env, "&apparatus=2.2&posture=all")
     assert [c["n"] for c in pooled["cells"]] == [3]
     assert pooled["summary"]["excluded_posture_divergent"] == 2
-    _posture_rows(env, 1, cls="local/inplace/sealed", pid="pst_ls", first=200)
-    sealed = _beta(env, "&apparatus=all&posture=local/inplace/sealed")
+    _posture_rows(env, 1, cls="local/inplace/sealed", pid="pst_ls", first=200, **old)
+    sealed = _beta(env, "&apparatus=2.2&posture=local/inplace/sealed")
     assert [c["n"] for c in sealed["cells"]] == [1]  # the legacy host rows stay out
-    host = _beta(env, "&apparatus=all&posture=local/inplace/host-env")
+    host = _beta(env, "&apparatus=2.2&posture=local/inplace/host-env")
     assert [c["n"] for c in host["cells"]] == [2]

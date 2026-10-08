@@ -363,6 +363,23 @@ describe('LearnPage', () => {
     expect(screen.getByRole('link', { name: 'Runs' })).toHaveAttribute('href', '/runs?repo=alpha')
   })
 
+  it('a re-measurement refused on a login that does not work shows the refusal and links to where it is fixed (runs.actions.12)', async () => {
+    mockApi(operatorApi({ 'POST /learn/remeasure/queue': () => json({
+            error: {
+              code: 'builder_login_invalid',
+              message: 'the claude_code login a replay run would use does not work: claude_code (auth cli, keychain): invalid 42 s ago — authentication failed (HTTP 401). Nothing was queued and nothing was spent — fix the login under Settings → Claude Code login (sign in again or store a new token, then Verify), and submit again',
+              detail: { builder: 'claude_code', auth: 'cli', source: 'keychain', state: 'invalid', status: 'invalid', age_s: 42, fix: 'Settings → Claude Code login', fix_path: '/settings?auth=cli#claude-code-login' },
+            },
+          }, 422) }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Queue runs' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Queue the runs' }))
+    const title = await screen.findByText('The builder’s login does not work — nothing was queued')
+    const alert = title.closest('[role="alert"]') as HTMLElement
+    expect(alert).not.toBeNull()
+    expect(within(alert).getByTestId('error-login-fix')).toHaveAttribute('href', '/settings?auth=cli#claude-code-login')
+  })
+
   it('a cell whose runs are still in flight shows them in place of Queue, so the estimate is never spent twice', async () => {
     // the plan reads graded rows only, so it still holds a cell whose runs are queued: after a
     // queue the page re-reads the plan and offers the runs, not a second Queue

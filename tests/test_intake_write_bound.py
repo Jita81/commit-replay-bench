@@ -51,6 +51,7 @@ from typing import Any
 import httpx
 import pytest
 
+from crb.factory.standard import Readers, Standard
 from crb.intake import ado, jira
 from crb.intake import client as c
 from crb.server import intake as sv
@@ -82,6 +83,7 @@ def _ready_ticket() -> c.Ticket:
         acceptance_criteria=READY_AC,
         revision="1",
         url=f"https://tracker.invalid/{KEY}",
+        points=2.0,
     )
 
 
@@ -222,6 +224,8 @@ def _poll(home: FactoryHome, tracker: FakeTracker) -> sv.PollReport:
         home=home,
         route_for=lambda item: None,
         item_url=item_url,
+        # a proven cell: the bound is on the life of a ticket that is BUILT (ADR-0026 item 8)
+        gate=Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=True)),
     )
     for row in report.rows:
         if row.awaiting_approval:

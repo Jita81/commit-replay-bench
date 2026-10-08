@@ -78,7 +78,7 @@ Run it on the API host and on the worker host after installing, after changing a
 | `home` | `CRB_HOME` is a persistent path, and the secrets directory is mode `0700` and owned by the user running `crb` | a temporary `CRB_HOME` in `prod` (`warn` in `dev`); a group-readable secrets directory, or one another user owns (the store refuses both) |
 | `github_app` | the app is configured, the key file is readable and parses, GitHub answers `/app/installations`, how many installations can deliver | half configured, an unreadable or malformed key, GitHub refusing (`skip` when not configured; `warn` with no installation yet) |
 | `database` | the store answers and is initialised, every append-only trigger is live (present with the installer's own definition) and an UPDATE and a DELETE are refused, in the trigger's own words, on every append-only table that holds a row (a store whose append-only tables are all empty says no write was tried) — the same reading as `/health` | not initialised, or triggers missing (`n/m present`) — `crb migrate` |
-| `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head; `degraded` (still served) for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
+| `migrations` | the store's Alembic revision is the code's head — the same reading as `/health`, whose contract is [API.md — The `migrations` probe](API.md#the-migrations-probe): `ok` at head with a schema that matches the models; `degraded` (still served) at head with a schema that differs (each difference named in `drift`) and for an unstamped `create_all` schema that matches the head, until `crb migrate` stamps it; `down` (the endpoint answers 503) when the store is behind, ahead, empty or an older unversioned schema (crb tables, no `alembic_version`, fingerprints of a revision behind the head) — revisions named where applicable, with the fix — or when it cannot be read — the fixed detail `migrations could not be read — see the API log, request id <id>`, `data: {}`, the exception in the API log under that id (`crb doctor` runs in the operator's own terminal, so its `migrations` line shows the driver's error type and message — there is no unauthenticated reader to protect; only its `sandbox` and `worker` lines share `/health`'s fixed sentence) | the `down` states: behind, ahead, empty or an older unversioned schema, or cannot be read — `crb migrate` (or the log). `warn` only for an unstamped `create_all` schema that matches the head (complete; `crb migrate` stamps it) |
 | `worker` | the workers' check-ins (the `workers` table), the queue depth and running runs' heartbeats, as `/health` reads them | `warn` when no worker has checked in yet, one stopped checking in (named, with its age), runs are queued and no worker is alive, or a running run's heartbeat is stale (an idle queue with a live worker is `ok`) |
 | `ui` | the built UI the API serves and the help bundle in it (one non-empty chunk per guide) | `warn` without a build, or when `/help/docs/<guide>` would be empty |
 | `build` | the code this checkout holds and the UI bundle the API would serve were built from the same commit (the bundle's `build-stamp.json`, written by `npm run build`; an image carries `CRB_SOURCE_COMMIT`), and how far the checkout trails `origin/main` by the local ref (as of the last fetch — doctor never fetches) | the bundle was built from another commit, or a served bundle carries no stamp — rebuild it (`npm --prefix ui run build`) and restart; `warn` when the checkout is behind `origin/main` (pull, rebuild, restart); `skip` when neither a checkout nor `CRB_SOURCE_COMMIT` names the commit and no UI bundle is served (an image built without `CRB_SOURCE_COMMIT` serves an unstamped bundle, so it fails: rebuild with `--build-arg CRB_SOURCE_COMMIT=$(git rev-parse HEAD)`) |
@@ -192,13 +192,41 @@ kept untouched and listed as "not read by this runner"):
 | Runner | Keys read (`crb.core.runners`) |
 |---|---|
 | every runner | `timeout` (s, one test command), `setup_timeout` (s, one setup step) |
-| `pytest` | `python`, `pythonpath_suffix`, `pip` (list), `pip_fallback` (list), `uninstall` (list), `env` (map) |
-| `node` | `node`, `npm`, `env` — `node --test` takes no extra arguments |
-| `jest` / `vitest` | `npm`, `extra_args` (list), `env` |
-| `mocha` | `npm`, `mocha_require`, `extra_args`, `env` |
-| `go` | `go`, `cgo` (`0`/`1`), `gomodcache` (docker only) |
+| `pytest` | `python`, `pythonpath_suffix`, `pip` (list), `pip_fallback` (list), `uninstall` (list), `tools` (list), `env` (map) |
+| `node` | `node`, `npm`, `tools`, `env` — `node --test` takes no extra arguments |
+| `jest` / `vitest` | `node`, `npm`, `extra_args` (list), `tools`, `env` |
+| `mocha` | `node`, `npm`, `mocha_require`, `extra_args`, `tools`, `env` |
+| `go` | `go`, `cgo` (`0`/`1`), `gomodcache` (docker only), `tools` (list) |
 | `cargo` | `cargo`, `offline` (default true), `cargo_home` (docker only) |
 | `maven` | `mvn`, `maven_flags` (list), `java_home`, `offline` (default true), `writable` (list), `maven_opts` (docker only) |
+
+**The tools a test can run on the host are declared (ADR-0048).** Under the local executor the
+`go`, `pytest` and node runners never hand the tests the worker's `PATH`. The tests see the
+runner's toolchain, `git` and the POSIX basics the sealed images carry, linked into one
+private directory, and nothing else: a tool that happens to be installed (the pilot's
+Homebrew `shellcheck`) cannot change a verdict. If a repository's tests run another tool
+(`make`, `protoc`), name it in `tools`. It is then found on the worker's `PATH` and added. Each
+declared tool's version and bytes are part of the posture (`environment` on the Posture page,
+every qualification and every evidence pack), so upgrading one asks for the pool to be
+qualified again (`POSTURE_DRIFT`). Nothing can be put over the declaration: an `env` that
+sets `PATH` or a library-loader variable (`LD_PRELOAD`, `DYLD_*`) is refused before any test
+runs. Pin a toolchain in its own field (`go`, `python`, `node`, `npm`) instead. No host
+configuration file is read either: a `go env -w` file, `~/.gitconfig` and Python's per-user
+`site-packages` are switched off. A Python repository's own virtualenv `bin` follows the tools
+on the tests' `PATH`, and what is in it is part of the posture too. With no interpreter
+configured, crb's own interpreter runs the tests and crb's own `bin` never reaches them. The
+`cargo` and `maven` runners do not declare their environment yet and still inherit the
+worker's `PATH` (G-791).
+
+**A Go belt narrower than the module still checks that every package builds.** When a Go
+repository's belt scope is not the whole module (the target package alone, as for cobra),
+every belt run is followed by a build of every package and its tests that runs no test. A
+patch that stops any package compiling fails belt 3. The gold must pass the same check, so a
+module with a package that does not build in the posture (one that needs cgo on a host
+without it) has its tasks refused at qualification. A run whose test process stopped before
+every test reported (a test that calls `os.Exit`, an interrupted pytest session, a process
+that exits 0 before its tests run) is unattributed: belt 2 reads it as not green and belt 3
+as failed.
 
 Three shapes we met onboarding NHS repositories, as worked examples — each is what the
 form saves, shown as the stored `runner_opts` / layout it produces:
@@ -211,12 +239,13 @@ sources, so a test *prefix* cannot tell them apart: test mode **suffix** with
 `.test.js|.test.mjs|.test.ts|.test.tsx`. Belt scope **AFFECTED_DIRS**. Runner options:
 *Extra arguments* rows `--selectProjects` and `unit` (one row each — jest's variadic
 option would otherwise swallow the test paths, which is why the runner puts `--` before
-them), and an *Environment variables* row `PATH` = `/opt/homebrew/opt/node@24/bin:/usr/bin:/bin`
-(applies to `npm ci` in setup as well as to every test command). Stored:
+them), and *node binary* = `/opt/homebrew/opt/node@24/bin/node`. That node is the `node`
+on every test command's `PATH`, and it leads the `PATH` of `npm ci` in setup, so an
+engine-strict install runs under it. Stored:
 
 ```json
 {"extra_args": ["--selectProjects", "unit"],
- "env": {"PATH": "/opt/homebrew/opt/node@24/bin:/usr/bin:/bin"}}
+ "node": "/opt/homebrew/opt/node@24/bin/node"}
 ```
 
 **A jest + TypeScript component library whose commits touch snapshots.** Many commits
@@ -651,6 +680,23 @@ the **worker** host with the worker's environment — that is the resolution a b
 The UI's **Verify** button runs the same probe on the **API** host with the stored token
 (at most once every 10 s).
 
+**A run cannot start on a dead login** (pilot D1, 2026-09-27: a canary was queued on a login
+that answered HTTP 401, and every screen read the login as present). The top of the Claude
+Code login card shows **the logins runs use** — one line per auth mode a run could use (the
+default first, then `cli` or `api_key` when its credential is stored or it was checked), each
+`verified`, `not verified` or `invalid`, with its source (`keychain`, `secrets_file`, `env`;
+operators and above) and how long ago it was checked. A replay, measure, budget sweep or
+factory run is refused `builder_login_invalid` before it is queued, and before anything is
+spent, when that login failed its last check; when it was not checked in the last
+`CRB_BUILDER__LOGIN_TTL_S` (`600` seconds by default), the submit checks it once first. A run
+already queued when its login is recorded invalid is failed by the worker when it claims it,
+before anything is built. To repair it: sign in again (or store a new token) on this card,
+then press **Verify** on the line for the mode the refusal names (its link opens this card) —
+the answer is recorded, and the next run and `/health` read it. A row the provider refused
+because the login was rejected is still an `outage` (outside every rate), but from apparatus
+2.4 it says `outage_cause: auth` — "your login", not "the provider" — and
+the scorecard's process-loss line counts the two apart.
+
 **Rotate it** (after a suspected exposure, when a person with access leaves, or on a
 schedule — the token is long-lived):
 
@@ -930,7 +976,7 @@ Posture panel lists each with how many tasks it keeps out.
 | Code | Scope | What to do |
 |---|---|---|
 | `POSTURE_UNQUALIFIED` | run | qualify the repository in this posture (`crb repo qualify`, or leave `qualify_first` on); this costs no model money |
-| `POSTURE_DRIFT` | run | the image, toolchain, limits or runner environment changed after qualification: qualify again |
+| `POSTURE_DRIFT` | run | the image, toolchain, limits, runner environment or a declared host tool changed after qualification: qualify again |
 | `POSTURE_CANARY_FAILED` | run | the gold did not grade clean here: read the canary's tail (the cause is usually provisioning or the image) |
 | `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |

@@ -52,10 +52,12 @@ import pytest
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.evidence import (
     EV_BACKLOG_FROZEN,
+    EV_CALIBRATION_FUNDED,
     EV_DELIVERY,
     EV_DELIVERY_UPDATED,
     EV_GAP_SIGNOFF,
     EV_ITEM_OUTCOME,
+    EV_PROBE_WAIVED,
 )
 from crb.factory.loop import STATUS_ORACLE_NEEDS_STRENGTHENING
 from crb.factory.readiness import ROUTE_HUMAN
@@ -64,7 +66,9 @@ from crb.server.factory_state import FactoryHome
 from crb.server.settings import GitHubAppSettings
 from crb.store.models import GitHubInstallation, Repo, Run
 from fixtures.concurrency import at_once, pause_after
-from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
+from fixtures.proven import add_rows, add_tasks
+from fixtures.proven_cells import every_cell_proven
+from fixtures.server_seed import ALPHA, THIN_CELL, Env, envelope, login, logout, make_env
 from fixtures.signoff_seed import clear_policy
 
 PATHS: list[tuple[str, str, str]] = [
@@ -75,6 +79,8 @@ PATHS: list[tuple[str, str, str]] = [
     ("GET", f"/factory/{ALPHA}/evidence", "viewer"),
     ("POST", f"/factory/{ALPHA}/backlog/evolutions", "operator"),
     ("POST", f"/factory/{ALPHA}/outcomes/sync", "operator"),
+    ("POST", f"/factory/{ALPHA}/items/I-1/probe-waiver", "approver"),
+    ("POST", f"/factory/{ALPHA}/items/I-1/calibration", "approver"),
 ]
 
 #: What the loop writes when it refuses a rebuild against an unchanged oracle (DL-045 rule 3).
@@ -397,11 +403,20 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     deliver = {**ITEM, "id": "D-1", "capability_class": "bug.fix", "size_estimate": "S"}
     thin = {**ITEM, "id": "T-1", "capability_class": "backend.route.add", "size_estimate": "M"}
     assert _register(env, [deliver, thin]).status_code == 201
-    # before the controls gate passes and the oracle is scored, even the strong cell routes
-    # to a human — and the task says so
+    # before a reading proves the cell, the controls gate passes and the oracle is scored,
+    # even the strong cell routes calibrate (routing.v2: unmeasured is never deliver) — and
+    # the task says so
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
-    assert by_id["D-1"]["route"] == "human" and by_id["D-1"]["deliverable"] is False
+    assert by_id["D-1"]["route"] == "calibrate" and by_id["D-1"]["deliverable"] is False
     clear_policy(env)
+    # the deployment now grades in the sealed posture, so the thin cell is measured there
+    # too: four sealed first attempts and no registered reading
+    add_rows(
+        env.factory,
+        add_tasks(env.factory, 4, prefix="thin", cell=THIN_CELL),
+        arm="S3",
+        cell=THIN_CELL,
+    )
     by_id = {t["id"]: t["cell_route"] for t in env.get(f"/factory/{ALPHA}/tasks").json()}
     assert by_id["D-1"]["route"] == "deliver" and by_id["D-1"]["deliverable"] is True
     assert by_id["D-1"]["n"] >= 10 and by_id["D-1"]["reason_code"] == "deliver"
@@ -410,7 +425,7 @@ def test_tasks_carry_the_cell_route_the_delivery_gate_will_read(env: Env) -> Non
     assert d1["point"] >= 0.9 and d1["ci_low"] >= 0.8 and d1["ci_high"] >= d1["point"]
     assert d1["apparatus_versions"] == [APPARATUS_VERSION]
     assert by_id["T-1"]["route"] != "deliver" and by_id["T-1"]["deliverable"] is False
-    assert by_id["T-1"]["reason_code"] and by_id["T-1"]["n"] > 0
+    assert by_id["T-1"]["reason_code"] == "reading_unregistered" and by_id["T-1"]["n"] == 4
 
 
 def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:
@@ -421,6 +436,27 @@ def test_register_refuses_invalid_items_and_unknown_authored(env: Env) -> None:
     r = _register(env, [ITEM], authored={"nope": {"path": "t.py", "content": "x"}})
     assert r.status_code == 422 and "unknown items" in envelope(r)["message"]
     assert env.get(f"/factory/{ALPHA}/backlog").status_code == 404  # nothing was written
+
+
+def test_an_item_registered_without_a_size_is_unsized_and_stops_before_any_spend(
+    env: Env,
+) -> None:
+    """P-297: the operator API froze an item with no estimate as ``S``, a cell it never
+    claimed, and refused ``unsized`` outright (seven characters, four allowed). An item
+    with no size is ``unsized``: registered as such, and told now that the next run's
+    pre-build check stops it ``unsized`` — to a person, before any spend."""
+    bare = {k: v for k, v in ITEM.items() if k != "size_estimate"}
+    r = _register(env, [bare, {**ITEM, "id": "I-3", "size_estimate": "unsized"}])
+    assert r.status_code == 201, r.text
+    backlog = FactoryHome(env.settings.home, ALPHA).load_backlog()
+    assert backlog is not None
+    assert [i.size_estimate for i in backlog.items] == ["unsized", "unsized"]
+    tasks = {t["id"]: t for t in env.get(f"/factory/{ALPHA}/tasks").json()}
+    assert tasks["I-1"]["entry"]["code"] == "unsized"
+    assert tasks["I-3"]["entry"]["code"] == "unsized"
+    # a size outside the ladder is refused, never truncated or defaulted
+    r = _register(env, [{**ITEM, "id": "I-4", "size_estimate": "XXL"}])
+    assert r.status_code == 422, r.text
 
 
 def test_register_refused_while_a_factory_run_is_active(env: Env) -> None:
@@ -468,6 +504,125 @@ def test_gap_signoff_lands_in_ledger_and_evidence_value_slots_refused(env: Env) 
         f"/factory/{ALPHA}/tasks/I-9/signoff-gap", json={"slot": "reproduction", "answer": "x"}
     )
     assert r.status_code == 404
+
+
+def test_a_probe_waiver_is_an_approvers_act_bound_to_the_red_proofs_bytes(env: Env) -> None:
+    """ADR-0025 item 12: the waiver names the test the item's latest RED proof carries —
+    another sha256 is refused 409 ``probe_waiver_stale`` — and lands on the chain as
+    ``review.probe_waived`` naming the approver, the reason and the bytes."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    home.evidence(actor="worker").record_red_proof({"item_id": "I-1", "test_sha256": "a" * 64})
+    login(env.client, "approver")
+    url = f"/factory/{ALPHA}/items/I-1/probe-waiver"
+    r = env.post(url, json={"reason": "a constant table", "test_sha256": "b" * 64})
+    assert r.status_code == 409 and envelope(r)["code"] == "probe_waiver_stale"
+    r = env.post(url, json={"reason": "a constant table", "test_sha256": "a" * 64})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["approver"] and body["test_sha256"] == "a" * 64
+    (waived,) = home.evidence().events_for("I-1", EV_PROBE_WAIVED)
+    assert waived.payload["reason"] == "a constant table"
+    assert waived.payload["approver"] == body["approver"]
+    assert (
+        env.post(
+            f"/factory/{ALPHA}/items/I-9/probe-waiver",
+            json={"reason": "x", "test_sha256": "a" * 64},
+        ).status_code
+        == 404
+    )
+
+
+def test_the_approver_who_queued_a_factory_run_cannot_waive_its_strength_probe(
+    env: Env,
+) -> None:
+    """P-339 (GOV-4 applied to the waiver): the probe waiver lifts a REQUIRED gate, so it is a
+    second person's act, as the route-gate override and the sign-off are. An approver with a
+    factory run on the repository still queued or running is refused 409 ``same_actor``;
+    another approver may waive it."""
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    home.evidence(actor="worker").record_red_proof({"item_id": "I-1", "test_sha256": "a" * 64})
+    login(env.client, "approver")
+    body = {"repo": ALPHA, "kind": "factory", "builder": "editblock", "model": "m"}
+    r = env.post("/runs", json={**body, "deliver": True})
+    assert r.status_code == 201, r.text
+    url = f"/factory/{ALPHA}/items/I-1/probe-waiver"
+    waiver = {"reason": "a constant table", "test_sha256": "a" * 64}
+    r = env.post(url, json=waiver)
+    assert r.status_code == 409 and envelope(r)["code"] == "same_actor", r.text
+    assert not home.evidence().events_for("I-1", EV_PROBE_WAIVED)
+    login(env.client, "admin")  # an admin holds the approver role and queued nothing
+    r = env.post(url, json=waiver)
+    assert r.status_code == 201, r.text
+
+
+def test_a_calibration_build_is_an_approvers_evented_act_for_an_entry_stop_only(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0026 item 8: an item whose cell has no proven standard is told so before any run
+    (the gate the next run's pre-build check makes) and after one (the chain's stop), with
+    the calibration route as its way forward; an approver funds ONE calibration build (the
+    chain names them); a second grant while one waits is refused, and so is a grant for an
+    item the gate would let in."""
+
+    assert _register(env, [ITEM]).status_code == 201
+    home = FactoryHome(env.settings.home, ALPHA)
+    url = f"/factory/{ALPHA}/items/I-1/calibration"
+    login(env.client, "approver")
+    # a proven cell whose standard the item carries: nothing to calibrate
+    with monkeypatch.context() as mp:  # scoped: undo() would drop the autouse guards too
+        every_cell_proven(mp, "S1@m")
+        r = env.post(url, json={"reason": "measure the cell"})
+        assert r.status_code == 409 and envelope(r)["code"] == "calibration_not_answering"
+        (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+        assert t["entry"] is None and t["way_forward"] is None
+    # before any run: the gate as the next run will read it (no reading is registered)
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["status"] == "pending" and t["entry"]["code"] == "no_proven_standard"
+    assert t["way_forward"]["action"] == "fund_calibration"
+    # after a run: the chain's stop
+    ev = home.evidence(actor="worker")
+    ev.record_readiness({"item_id": "I-1", "gaps": [], "route_hint": "build"})
+    reason = "no context standard is proven for the bug.fix XS cell: it is not built"
+    ev.record_entry_refused("I-1", "no_proven_standard", reason, reason_code="none", needs=[])
+    ev.record_route("I-1", "human", reason, reason_code="no_proven_standard", needs=[])
+    ev.record_item_outcome("I-1", status="no_proven_standard", builds=0, error=reason)
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["status"] == "no_proven_standard"
+    assert t["entry"] == {
+        "code": "no_proven_standard",
+        "reason": reason,
+        "reason_code": "none",
+        "needs": [],
+    }
+    assert t["refusal"]["step"] == "entry" and t["refusal"]["reason_code"] == "no_proven_standard"
+    assert t["way_forward"]["action"] == "fund_calibration"
+    assert t["way_forward"]["route"] == f"/factory/{ALPHA}/items/I-1/calibration"
+    r = env.post(url, json={"reason": "measure the cell"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["approver"] and body["answers"] == "no_proven_standard"
+    (funded,) = home.evidence().events_for("I-1", EV_CALIBRATION_FUNDED)
+    assert funded.payload["approver"] == body["approver"]
+    (t,) = env.get(f"/factory/{ALPHA}/tasks").json()
+    assert t["calibration"]["approver"] == body["approver"] and t["way_forward"] is None
+    r = env.post(url, json={"reason": "again"})
+    assert r.status_code == 409 and envelope(r)["code"] == "calibration_pending"
+    # P-730: a second POST that read the task view before the first one's grant landed
+    # passes the route's own check — the store's conditional append still refuses it
+    import dataclasses
+
+    stale = FactoryHome.task_views
+
+    def before_the_grant(self: Any) -> Any:
+        return [dataclasses.replace(v, calibration=None) for v in stale(self)]
+
+    with monkeypatch.context() as mp:
+        mp.setattr(FactoryHome, "task_views", before_the_grant)
+        r = env.post(url, json={"reason": "raced"})
+    assert r.status_code == 409 and envelope(r)["code"] == "calibration_pending"
+    assert len(home.evidence().events_for("I-1", EV_CALIBRATION_FUNDED)) == 1
 
 
 def test_factory_run_pins_the_active_backlog_hash_at_enqueue(env: Env) -> None:
@@ -1366,3 +1521,29 @@ def test_every_freeze_or_evolve_decision_holds_the_registration_lock() -> None:
     } <= seen
     assert set(_UNLOCKED_LOAD_EXEMPT) <= seen
     assert all(why.strip() for why in _UNLOCKED_LOAD_EXEMPT.values())
+
+
+def test_an_s1_author_mismatch_asks_for_the_authors_test_not_a_structural_slot() -> None:
+    """P-726: the entry gate's ``S1@<author>`` mismatch stop needs "a failing test written
+    by <author>, the standard's test author". The way forward matched only the exact words
+    "a failing test", so it asked for that need as a ``slot: text`` structural fact and did
+    not ask for a test at all. Every need that is a test is read as one."""
+    from crb.server.routes.factory import _way_forward
+
+    need = "a failing test written by claude-opus-4-8, the standard's test author"
+    view = {
+        "id": "I-1",
+        "status": "needs_context",
+        "entry": {"code": "needs_context", "needs": [need]},
+    }
+    wf = _way_forward(ALPHA, view)
+    assert wf is not None and wf.needs_authored_test is True
+    assert "slot: text" not in wf.what_to_change and need in wf.what_to_change
+    person = {
+        "id": "I-1",
+        "status": "needs_context",
+        "entry": {"code": "needs_context", "needs": ["a failing test"]},
+    }
+    wf = _way_forward(ALPHA, person)
+    assert wf is not None and wf.needs_authored_test is True
+    assert wf.what_to_change.startswith("Attach a failing test a person wrote")

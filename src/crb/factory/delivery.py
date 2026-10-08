@@ -92,7 +92,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -336,8 +336,13 @@ def pr_body(
     *,
     pack_link: str = "",
     route_decision: Mapping[str, Any] | None = None,
+    waivers: Sequence[str] = (),
 ) -> str:
     """The PR description: the evidence summary a reviewer needs, every string redacted.
+
+    ``waivers`` — the sentences of any approver's waiver the build went through (the
+    strength probe's, ADR-0025 item 12): each names the approver and the reason, shown as
+    written inside a fenced block, because a reason is a person's text, not markup.
 
     Everything a ticket author wrote — the title and the acceptance criteria — is DATA,
     not markup: it appears only inside one fenced block (:func:`fenced`), so it cannot add
@@ -383,6 +388,9 @@ def pr_body(
             f"- route: **{route_decision.get('route', '')}** — {route_decision.get('reason', '')} "
             f"(policy `{route_decision.get('policy_version', '')}`)"
         )
+    if waivers:
+        lines += ["", "### Waivers (an approver let this build past a required probe)", ""]
+        lines += fenced(list(waivers))
     lines += ["", f"changed files: {', '.join(f'`{f}`' for f in build.changed_files) or '(none)'}"]
     return redact("\n".join(lines))
 
@@ -789,6 +797,7 @@ def deliver(
     rework_n: int = 0,
     after_verdict: str = "",
     verdict: str,
+    waivers: Sequence[str] = (),
 ) -> DeliveryResult:
     """Deliver a CLEAN, REVIEWED and ACCEPTED build as a new branch + PR. Order of
     refusals is deliberate: invariant first (before any credential is read), then the
@@ -905,7 +914,7 @@ def deliver(
             comment_error=comment_error,
             repository=repository_of(credentials.remote),
         )
-    body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision)
+    body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision, waivers=waivers)
     push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)
     pr_url, pr_number = open_pr(
         remote=credentials.remote,

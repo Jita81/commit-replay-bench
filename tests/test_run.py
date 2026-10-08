@@ -132,9 +132,8 @@ def test_run_task_disqualifies_a_poison_hidden_in_info_exclude(
     assert outcome.clean is False and outcome.disqualified is True
     (row,) = outcome.rows
     assert "info/exclude" in row.dq_reason
-    assert "conftest.py" not in exclude.read_text(
-        encoding="utf-8"
-    )  # the shared file is clean again
+    # the shared file is read, never rewritten (ADR-0025 item 13; P-123): the line is reported
+    assert "conftest.py" in exclude.read_text(encoding="utf-8")
 
 
 def test_run_task_honest_gold_is_clean_under_the_pre_flight(

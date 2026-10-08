@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   revocable nonce, the session-bound CSRF token — and it never touches the rate limit. Every
   sign-in is an audited `auth.dev_autologin` event, and every page shows a banner.
 
+- **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
+  (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
+  [#69](https://github.com/Jita81/commit-replay-bench/pull/69)). Apparatus 2.4: every row stamps
+  its context arm and class-set version, never pooled, and a cell delivers only on its standard
+  arm once a pre-registered reading is decided by the look rule (ADR-0025, ADR-0026). An item
+  stops before any spend without a proven standard; a pull request opens only when the delivered
+  change's cell licenses its arm. A dead builder login is refused at submit and claim. Runners
+  see only declared tools; a patch breaking another Go package, or a test run that stops
+  part-way, no longer grades clean.
+
 - **Wave 2, part A: the context standard's record, checkable claims, provable audit, gates and spend**
   (Wave 2, streams T, C, I, H and X; [#68](https://github.com/Jita81/commit-replay-bench/pull/68)).
   ADR-0026 proposes the context standard (DL-086, DL-087). The claims gate reads every public

@@ -50,6 +50,7 @@ from sqlalchemy import select
 
 from crb.core import capability as cap
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, RepoChecks, arm_of, resolve
+from crb.core.context_arm import mode_admits
 from crb.core.federated import export_abstract
 from crb.core.ledger import (
     GENESIS_HASH,
@@ -195,7 +196,7 @@ def env(tmp_path: Path) -> Iterator[Env]:
 
 
 def _n(env: Env, query: str = "") -> int:
-    r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&apparatus=all{query}")
+    r = env.get(f"/capability-map?repo={ALPHA}&by=class,size{query}")
     assert r.status_code == 200, r.text
     return sum(c["n"] for c in r.json()["cells"])
 
@@ -244,7 +245,7 @@ def test_every_served_cell_names_the_arm_it_was_read_on(env: Env) -> None:
     PR #57). Each cell carries ``checks_arm``, from ``CellStats`` itself."""
 
     def arms(query: str = "") -> set[str]:
-        r = env.get(f"/capability-map?repo={ALPHA}&by=class,size&apparatus=all{query}")
+        r = env.get(f"/capability-map?repo={ALPHA}&by=class,size{query}")
         assert r.status_code == 200, r.text
         return {c["checks_arm"] for c in r.json()["cells"]}
 
@@ -310,16 +311,22 @@ def test_the_scorecards_headline_reads_one_arm() -> None:
 
 
 def _append_api_rows(
-    env: Env, n: int, *, mode: str = "sighted", cell: tuple[str, str] = ("bug.fix", "S")
+    env: Env, n: int, *, mode: str | None = None, cell: tuple[str, str] = ("bug.fix", "S")
 ) -> list[GradeRow]:
-    """Append ``n`` belt-6 rows (the adapter's stamp) cloned from a clean seeded row of
-    ``cell`` — sighted, current apparatus — through the write path."""
+    """Append ``n`` belt-6 rows (the adapter's stamp) cloned from the newest clean row of
+    ``cell`` the map reads — current apparatus, the posture and arm the cell is read in (a
+    proven cell's sealed rows once ``clear_policy`` ran; its standard ``S1`` arm is written
+    blind, P-338) — through the write path, in the template's own mode unless ``mode``
+    names another."""
     ledger = DbLedger(env.factory)
     template = next(
         r
-        for r in ledger.rows(repo=ALPHA)
-        if r.clean and (r.capability_class, r.size) == cell and r.mode == "sighted"
+        for r in reversed(list(ledger.rows(repo=ALPHA)))
+        if r.clean
+        and (r.capability_class, r.size) == cell
+        and mode_admits(r.mode, r.context_arm, "sighted")
     )
+    mode = mode or template.mode
     out = []
     for i in range(n):
         d = template.to_dict()
@@ -364,7 +371,7 @@ def test_a_signoff_reads_the_repositorys_own_arm(approver_env: Env) -> None:
     assert made.status_code == 201, made.text
     d = made.json()
     assert d["checks_arm"] == "off" and d["checks_arm_current"] == "off"
-    assert d["evidence"]["n"] == n_off and d["schema"] == "crb.signoff.v4"
+    assert d["evidence"]["n"] == n_off and d["schema"] == "crb.signoff.v5"
     with env.factory() as s:
         row = s.execute(select(Signoff).order_by(Signoff.seq.desc())).scalars().first()
         assert row is not None and row.cell_json["evidence_checks_arm"] == "off"

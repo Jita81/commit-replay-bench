@@ -86,8 +86,9 @@ from crb.store.jobs import (
     STATUS_SUCCEEDED,
     JobQueue,
 )
-from crb.store.models import Repo, Run, Task, WorkerRow
+from crb.store.models import Event, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
+from fixtures.proven_cells import every_cell_proven
 
 # --- a scripted builder ----------------------------------------------------------------
 
@@ -156,6 +157,17 @@ class FakeBuilder:
                 done=False,
                 stop_reason=STOP_MODEL_ERROR,
                 errors=("model_error: You've hit your limit · resets 3pm",),
+                budget=budget,
+            )
+        if self.behaviour == "login_refused":  # the pilot's canary (D1): the login answered 401
+            return BuildOutcome(
+                **base,
+                done=False,
+                stop_reason=STOP_MODEL_ERROR,
+                errors=(
+                    "model_error: authentication failed (HTTP 401) — run `claude login` as "
+                    "the worker's user",
+                ),
                 budget=budget,
             )
         return BuildOutcome(**base, done=False, stop_reason=STOP_MAX_TURNS, turns=1, budget=budget)
@@ -382,6 +394,113 @@ def test_replay_stops_after_consecutive_provider_outages(h: Harness) -> None:
     h.enqueue("replay", ladder_json=["fake:m0"], params_json={"outage_stop": 0})
     again = h.run_one()
     assert again.status == STATUS_FAILED and again.error.startswith("all 1 attempt(s) errored")
+
+
+def test_a_build_that_meets_a_refused_login_records_the_login_invalid(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pilot D1 (P-435): the canary met a login that answered HTTP 401. The worker now
+    records that login ``invalid`` the moment a build meets the refusal — a
+    ``builder.login.verified`` event (``trigger: build``) — so the next submit on it is refused
+    at once, without spending a verify; a provider's usage limit records nothing."""
+    from crb.builders.claude_code import LoginCheck, default_auth
+    from crb.server import builder_login as bl
+
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "fake",
+        bl.LoginVerifier(lambda a, b: LoginCheck("ok"), lambda a: ("keychain", ""), default_auth),
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="outage", **cfg)
+    h.enqueue("replay", ladder_json=["fake:m0"], params_json={"outage_stop": 0})
+    h.run_one()
+    with h.factory() as s:
+        assert bl.latest_verification(s, "fake", "cli") is None  # the provider's limit: not a login
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="login_refused", **cfg)
+    h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    h.run_one()
+    with h.factory() as s:
+        last = bl.latest_verification(s, "fake", "cli")
+        assert last is not None
+        assert last["status"] == "invalid" and last["trigger"] == bl.TRIGGER_BUILD
+        assert "authentication failed (HTTP 401)" in last["detail"]
+        state = bl.login_state(s, "fake", "cli", ttl_s=600)
+    assert state.state == bl.STATE_INVALID
+
+
+def test_a_failed_login_record_never_replaces_the_builds_own_outage(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-731: recording the refused login is a database write after the build returned. When
+    it raised, ``core_run`` caught it as a builder failure and wrote the database error in
+    place of the provider's refusal — a ``harness`` row, counted, its cause lost. The record
+    is best effort: the attempt stays the build's own ``outage``."""
+    from crb.server import worker as worker_mod
+
+    def broken(*a: object, **kw: object) -> bool:
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(worker_mod, "record_refused_login", broken)
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: FakeBuilder(behaviour="login_refused", **cfg)
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    h.run_one()
+    (row,) = list(h.worker.ledger.rows(run_id=run.id))
+    assert row.failure_kind == "outage", row.error
+    assert "authentication failed (HTTP 401)" in row.error
+
+
+def test_a_queued_run_whose_login_was_recorded_invalid_is_failed_before_any_build(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: the gate held at submit only. A run queued while its login worked was
+    still claimed and started after that login was recorded invalid — the overnight queue's
+    shape — spending a build attempt and writing an outage row. At claim the worker now reads
+    the login from the cache (no verify, no model call) and fails the run before any build,
+    naming the login, with a ``builder.login.refused`` event."""
+    from crb.builders.claude_code import LoginCheck, default_auth
+    from crb.server import builder_login as bl
+
+    built: list[str] = []
+    monkeypatch.setitem(
+        bl.LOGIN_VERIFIERS,
+        "fake",
+        bl.LoginVerifier(lambda a, b: LoginCheck("ok"), lambda a: ("keychain", ""), default_auth),
+    )
+    builders_pkg._REGISTRY["fake"] = lambda **cfg: (
+        built.append("fake") or FakeBuilder(behaviour="gold", **cfg)
+    )
+    run = h.enqueue(
+        "replay",
+        ladder_json=["fake:m0"],
+        params_json={"outage_stop": 0, "builder_config": {"auth": "cli"}},
+    )
+    bl.record_verification(
+        h.factory,
+        "fake",
+        "cli",
+        LoginCheck("invalid", "authentication failed (HTTP 401)"),
+        trigger=bl.TRIGGER_SETTINGS,
+        resolution=("keychain", ""),
+    )
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith(bl.LOGIN_INVALID_CODE), done.error
+    assert "fake (auth cli" in done.error and "Nothing was built" in done.error
+    assert built == []  # no builder was constructed, nothing spent
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    with h.factory() as s:
+        refused = list(s.execute(select(Event).where(Event.action == bl.REFUSED_ACTION)).scalars())
+    assert [e.payload_json["trigger"] for e in refused] == [bl.TRIGGER_CLAIM]
+    assert refused[0].payload_json["run_id"] == run.id
+    assert any(e.action == "run.refused" for e in h.events(run.id))
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:
@@ -1101,6 +1220,59 @@ def test_once_main(
     assert idle == {"status": "idle", "worker_id": "w-cli"}
 
 
+def test_the_worker_entry_point_records_its_metrics_listener(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q1's review: every D5 test called ``start_metrics`` directly, so ``main()`` going back to
+    the bare ``metrics.start_worker_exposition`` — the base's behaviour, which records nothing —
+    left the suite green while a real worker's ``/health`` read ``metrics: null`` on a bind
+    failure. The long-running path of the real entry point is driven here: a port another
+    process holds reads ``degraded`` for that worker."""
+    import socket
+
+    from crb.server.worker_metrics import exposition_by_worker
+
+    monkeypatch.setenv("CRB_ENV", "dev")
+    monkeypatch.setattr(worker_main.Worker, "run_forever", lambda self, stop: None)
+    monkeypatch.setattr(worker_main.signal, "signal", lambda *a, **k: None)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        rc = worker_main.main(
+            [
+                "--database-url",
+                h.url,
+                "--home",
+                str(h.home),
+                "--worker-id",
+                "w-main",
+                "--metrics-port",
+                str(port),
+                "--log-format",
+                "text",
+            ]
+        )
+    assert rc == worker_main.EXIT_OK
+    recorded = exposition_by_worker(h.factory, ["w-main"])
+    assert recorded["w-main"]["state"] == "degraded", recorded
+    assert str(port) in recorded["w-main"]["reason"]
+
+
+def test_the_worker_reads_the_login_window_the_api_reads(tmp_path: Path) -> None:
+    """The claim check applies the submit gate's window: ``CRB_BUILDER__LOGIN_TTL_S`` read as
+    the API reads it, with its bounds, and no other ``CRB_BUILDER__*`` key refused here."""
+    args = worker_main.build_parser().parse_args(["--once"])
+    home = {"CRB_HOME": str(tmp_path / "h"), "CRB_ENV": "dev"}
+    assert worker_main.settings_from_args(args, home).builder_login_ttl_s == 600
+    got = worker_main.settings_from_args(
+        args, {**home, "CRB_BUILDER__LOGIN_TTL_S": "120", "CRB_BUILDER__MEMORY": "8g"}
+    )
+    assert got.builder_login_ttl_s == 120
+    with pytest.raises(ValueError, match="login_ttl_s"):
+        worker_main.settings_from_args(args, {**home, "CRB_BUILDER__LOGIN_TTL_S": "5"})
+
+
 def test_main_rejects_bad_kinds_and_bad_db(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1187,6 +1359,14 @@ def test_settings_from_args_env_fallbacks(tmp_path: Path) -> None:
     assert s_off.metrics_port == 0 and s_off.metrics_enabled is False
     with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
         worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "70000"})
+    # pilot D5 (P-436): `auto` asks the operating system for a free port, so a second stack
+    # on one machine never fights over 9464; the flag reads the same words
+    s_auto = worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "auto"})
+    assert s_auto.metrics_port == "auto"
+    flag_auto = parser.parse_args(["--once", "--metrics-port", "auto"])
+    assert worker_main.settings_from_args(flag_auto, env).metrics_port == "auto"
+    with pytest.raises(ValueError, match="CRB_METRICS_PORT"):
+        worker_main.settings_from_args(args, {**env, "CRB_METRICS_PORT": "nine"})
     s_all = worker_main.settings_from_args(args, {**env, "CRB_METRICS_HOST": "0.0.0.0"})
     assert s_all.metrics_host == "0.0.0.0"
     flag = parser.parse_args(["--once", "--metrics-host", "10.0.0.5"])
@@ -1285,14 +1465,26 @@ def _multiply_backlog(h: Harness) -> tuple[Any, Any, Any]:
     return home, item, backlog
 
 
-def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -> None:
+def _proven_cells(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every cell has a proven, signed S2 standard (the store-bound readers, patched at their one binding —
+    ADR-0026 item 8), so a factory run BUILDS the operator-authored item."""
+
+    every_cell_proven(monkeypatch, "S2")
+
+
+def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The forward-mode loop as a run kind: a frozen backlog with an operator-authored
-    oracle → readiness → RED proof → build under the belts → (delivery refused, opt-in)
-    → mechanical review → item outcome; a process_step=factory ledger row; the evidence
-    chain under CRB_HOME/factory/<repo>/; live counts on the run."""
+    oracle → readiness → the entry gate → RED proof → build under the belts → (delivery
+    refused, opt-in) → mechanical review → item outcome; a process_step=factory ledger row;
+    the evidence chain under CRB_HOME/factory/<repo>/; live counts on the run. The cell has
+    a proven S2 standard here (the store-bound readers, patched at their one binding)."""
     from crb.core.ledger import PROCESS_FACTORY
     from crb.factory import evidence as fe
     from crb.server.factory_state import FactoryHome
+
+    every_cell_proven(monkeypatch, "S2")
 
     home, _item, backlog = _multiply_backlog(h)
     run = h.enqueue("factory", ladder_json=["fake:m0"])
@@ -1329,7 +1521,7 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     # THE ROUTE GATE (DL-038): with delivery opted in, the worker hands the loop the
     # capability map's decision for the item's cell — the SAME signed map the API serves.
     # The first factory run above wrote one sighted process_step=factory row into the
-    # fixture's bug.fix XS cell, so the map now says `calibrate (n_below_min)` for it →
+    # fixture's bug.fix XS cell, so the map now says `calibrate (reading_unregistered)` for it →
     # delivery WITHHELD (recorded with the measured route, no PR attempted), and the item
     # is still built, reviewed and accepted. The reading is the PRE-run map (DL-045): the
     # first run's row counts (n=1), the gated run's own row does not — and it is on the
@@ -1340,7 +1532,9 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     assert gated.counts_json["by_status"] == {"accepted": 1}
     routes = [e for e in home.events() if e.kind == fe.EV_ROUTE]
     cell = routes[-1].payload["cell_route"]
-    assert cell["route"] == "calibrate" and cell["n"] == 1 and cell["reason_code"] == "n_below_min"
+    # routing.v2: no reading registered for the cell before its first attempt licenses it
+    assert cell["route"] == "calibrate" and cell["n"] == 1
+    assert cell["reason_code"] == "reading_unregistered"
     assert cell["apparatus_versions"] == [rows[0].apparatus_version]
     assert len(list(h.worker.ledger.rows(run_id=gated.id))) == 1  # its own row landed after
     refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
@@ -1348,12 +1542,12 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
         "route gate: the cell routes calibrate"
     )
     assert refused[-1].payload["measured_route"] == "calibrate"
-    assert refused[-1].payload["reason_code"] == "n_below_min"
-    assert refused[-1].payload["policy_version"] == "routing.v1"
+    assert refused[-1].payload["reason_code"] == "reading_unregistered"
+    assert refused[-1].payload["policy_version"] == "routing.v2"
     withheld = [e.action for e in h.events(gated.id) if e.stage == "factory"]
     assert "delivery.withheld" in withheld and "delivery.opened" not in withheld
-    # a second approver's override reaches delivery — which then fails closed on the missing
-    # credentials, the next gate in line — and the override is on the evidence chain
+    # a second approver's override lifts the sign-off clause and nothing else (ADR-0026
+    # item 8): the route gate still withholds, and nothing reaches a remote
     ada = _approver(h, "ada")
     h.enqueue(
         "factory",
@@ -1362,10 +1556,8 @@ def test_factory_run_manufactures_a_frozen_backlog_item_end_to_end(h: Harness) -
     )
     overridden = h.run_one()
     assert overridden.status == STATUS_SUCCEEDED
-    assert overridden.counts_json["by_status"] == {"delivery_failed": 1}
-    routes = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
-    assert routes and routes[-1].payload["override_by"] == ada
-    assert "delivery.override" in [
+    assert overridden.counts_json["by_status"] == {"accepted": 1}
+    assert "delivery.withheld" in [
         e.action for e in h.events(overridden.id) if e.stage == "factory"
     ]
     # a run queued against a backlog that was re-registered before the worker claimed it
@@ -1411,17 +1603,29 @@ def _approver(h: Harness, name: str, role: str = "approver") -> str:
     return uid
 
 
-def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) -> None:
-    """GOV-4 (governance review 2026-09-27): the route gate's override licenses a delivery
-    the map refused, so the worker honours ``deliver_override_by`` only when it names a
-    person with the approver role who is NOT the run's actor — and reads it live at the
-    gate, so a second approver's grant made while the run works reaches it. Anything else
-    is withheld, and a same-actor override is refused on the chain."""
+def test_the_worker_honours_an_override_only_from_a_second_approver(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GOV-4 (governance review 2026-09-27) under ADR-0026 item 8: the override lifts only
+    the sign-off clause at the entry gate, and the worker honours ``deliver_override_by``
+    only when it names a person with the approver role who is NOT the run's actor — read
+    live at each item's gate, so a second approver's grant made while the run works reaches
+    it. A same-actor override is refused on the chain; an id that is no approver is never
+    an override; no override opens a pull request the route gate withheld."""
     from crb.factory import evidence as fe
 
+    _proven_cells(monkeypatch)
     home, _item, _ = _multiply_backlog(h)
     tester = _approver(h, "tester")
-    # the run's own actor named as the approver: refused, recorded
+
+    def refusals() -> list[dict[str, Any]]:
+        return [
+            e.payload
+            for e in home.events()
+            if e.kind == fe.EV_ROUTE and e.payload.get("override_refused")
+        ]
+
+    # the run's own actor named as the approver: refused, recorded, and still no PR
     h.enqueue(
         "factory",
         ladder_json=["fake:m0"],
@@ -1430,11 +1634,12 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
     )
     own = h.run_one()
     assert own.counts_json["by_status"] == {"accepted": 1}
-    refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED]
-    assert refused[-1].payload["override_refused"] == "same_actor"
-    # an id that is no account, and an account below approver: never an override
+    assert refusals()[-1]["override_refused"] == "same_actor"
+    assert refusals()[-1]["override_by"] == tester
+    # an id that is no account, and an account below approver: never an override at all
     viewer = _approver(h, "vera", role="viewer")
     for who in ("approver:ada", viewer):
+        before = len(refusals())
         h.enqueue(
             "factory",
             ladder_json=["fake:m0"],
@@ -1442,56 +1647,59 @@ def test_the_worker_honours_an_override_only_from_a_second_approver(h: Harness) 
             params_json={"deliver": True, "deliver_override_by": who},
         )
         assert h.run_one().counts_json["by_status"] == {"accepted": 1}
+        assert len(refusals()) == before  # the worker never passed it to the gate
         last = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED][-1].payload
-        assert last["reason"].startswith("route gate:") and "override_by" not in last
-    # the live read: the grant lands on the run's row after the claim, before the gate
-    grace = _approver(h, "grace")
+        assert last["reason"].startswith("route gate:")
+    # the live read: a grant written on the run's row after the claim, before the gate,
+    # reaches the gate (the run's own actor here, so the gate's refusal proves it was read)
     run = h.enqueue("factory", ladder_json=["fake:m0"], actor=tester, params_json={"deliver": True})
     real = h.worker._route_lookup
 
     def granting(*a: Any, **kw: Any) -> Callable[[Any], Any]:
-        lookup = real(*a, **kw)
-
-        def read(item: Any) -> Any:
-            with h.factory() as s:
-                row = s.get(Run, run.id)
-                assert row is not None
-                row.params_json = {**dict(row.params_json or {}), "deliver_override_by": grace}
-                s.commit()
-            return lookup(item)
-
-        return read
+        with h.factory() as s:
+            row = s.get(Run, run.id)
+            assert row is not None
+            row.params_json = {**dict(row.params_json or {}), "deliver_override_by": tester}
+            s.commit()
+        return real(*a, **kw)
 
     h.worker._route_lookup = granting  # type: ignore[method-assign]
+    before = len(refusals())
     granted = h.run_one()
-    assert granted.counts_json["by_status"] == {"delivery_failed": 1}  # past the gate
-    overrides = [e for e in home.events() if e.kind == fe.EV_ROUTE and e.payload.get("override_by")]
-    assert overrides[-1].payload["override_by"] == grace
+    assert granted.counts_json["by_status"] == {"accepted": 1}
+    assert len(refusals()) == before + 1 and refusals()[-1]["override_by"] == tester
 
 
-def test_the_worker_never_honours_an_override_from_a_deactivated_approver(h: Harness) -> None:
+def test_the_worker_never_honours_an_override_from_a_deactivated_approver(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """P-229: the worker read the override live at the gate and checked only that its
     approver's account existed with the approver role — not that it was still active. An
     approver who granted an override and was then deactivated (a leaver) still licensed the
     delivery under their name, though deactivation ends everything the account holds. The
-    gate withholds it: no ``override_by`` on the route, the refusal is the route gate's."""
+    worker's live read, the one seam the loop's gate takes the override from, names an
+    active second approver and names nobody once that account is deactivated; the run still
+    works and no pull request opens past the route gate."""
     from crb.factory import evidence as fe
     from crb.store.models import User
 
+    _proven_cells(monkeypatch)
     home, _item, _ = _multiply_backlog(h)
     tester = _approver(h, "tester")
     leaver = _approver(h, "leaver")
-    with h.factory() as s:
-        account = s.get(User, leaver)
-        assert account is not None
-        account.active = False
-        s.commit()
-    h.enqueue(
+    run = h.enqueue(
         "factory",
         ladder_json=["fake:m0"],
         actor=tester,
         params_json={"deliver": True, "deliver_override_by": leaver},
     )
+    assert h.worker._deliver_override(run.id) == leaver  # active: the grant is read
+    with h.factory() as s:
+        account = s.get(User, leaver)
+        assert account is not None
+        account.active = False
+        s.commit()
+    assert h.worker._deliver_override(run.id) == ""  # deactivated: it names nobody
     assert h.run_one().counts_json["by_status"] == {"accepted": 1}
     refused = [e for e in home.events() if e.kind == fe.EV_DELIVERY_REFUSED][-1].payload
     assert refused["reason"].startswith("route gate:") and "override_by" not in refused
@@ -1515,7 +1723,9 @@ def test_every_statement_of_when_the_worker_honours_an_override_names_an_active_
     assert [r for r in rules if "active" not in r] == []
 
 
-def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness) -> None:
+def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """GOV-3 (governance review 2026-09-27): the worker resolves a factory run's ``checks``
     exactly as a replay's (``params.checks`` over the repository's block): the build is
     graded on that arm — belt 6 evaluated, the ``checks`` stamp on its row — the run's
@@ -1523,6 +1733,7 @@ def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness)
     rows of another arm never license it."""
     from crb.factory import evidence as fe
 
+    _proven_cells(monkeypatch)
     home, item, _ = _multiply_backlog(h)
     off = h.enqueue("factory", ladder_json=["fake:m0"])
     assert h.run_one().status == STATUS_SUCCEEDED
@@ -1546,10 +1757,13 @@ def test_a_factory_run_is_graded_and_licensed_on_the_runs_checks_arm(h: Harness)
     assert seen is not None and seen["n"] == 1
 
 
-def test_route_lookup_reads_the_map_as_it_stood_before_the_run(h: Harness) -> None:
+def test_route_lookup_reads_the_map_as_it_stood_before_the_run(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """DL-045 (B-1b finding 2 — PR bodies said ``n=27`` where the freeze saw 26): the
     worker's route lookup for a run EXCLUDES that run's own ledger rows, so a clean build
     cannot nudge the cell that licenses its own delivery. Rows of every other run count."""
+    _proven_cells(monkeypatch)
     home, item, _ = _multiply_backlog(h)
     first = h.enqueue("factory", ladder_json=["fake:m0"])
     assert h.run_one().status == STATUS_SUCCEEDED
@@ -1769,9 +1983,12 @@ def _seed_qualified(h: Harness, task: TaskSpec, *, posture_id: str = "", **kw: A
     return q
 
 
-def test_route_gate_reads_the_deployment_posture_only(h: Harness) -> None:
+def test_route_gate_reads_the_deployment_posture_only(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """ADR-0019 §8: a cell measured in another posture never licenses a delivery here. The
     same factory rows read under the worker's own class count; under another class, none."""
+    _proven_cells(monkeypatch)
     home, item, _ = _multiply_backlog(h)
     first = h.enqueue("factory", ladder_json=["fake:m0"])
     assert h.run_one().status == STATUS_SUCCEEDED
@@ -1804,3 +2021,78 @@ def test_repository_checks_and_run_overrides_reach_the_row_and_belt_six(
     assert done.apparatus_json["extra"]["checks"]["sources"]["api_stable"] == "repo"
     belts = [e for e in harness.events(run.id) if e.action == "grade.belt"]
     assert [e.payload["belt"] for e in belts][-1] == "api_stable"
+
+
+def test_a_run_whose_builder_credential_went_after_it_was_queued_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-050 / G-707: the submit check passed, then the key went (a restore without the
+    secrets store, a token removed in Settings). The worker re-checks the credential's
+    PRESENCE when it claims the run — never reading the secret — and fails it before any
+    attempt with the submit check's code: no row, no builder call."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    run = h.enqueue("replay", ladder_json=["editblock:m"], builder="editblock", model="m")
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: ")
+    assert "nothing was built" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    claimed = [e.action for e in h.events(run.id) if e.stage == "system"]
+    assert "run.credential_refused" in claimed
+
+
+def test_an_s1_run_whose_test_authors_credential_went_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-050 / G-707 for the S1 arm's test author: the claim-time check names every builder
+    the run would call, the author's included, so a dead author key fails the run before
+    any attempt instead of writing an authoring failure per commit."""
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    run = h.enqueue("blind", params_json={"arm": "S1", "test_author": "editblock:gpt-oss-120b"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: ")
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+
+
+def test_a_factory_run_builds_nothing_in_a_cell_with_no_proven_standard(h: Harness) -> None:
+    """ADR-0026 item 8, as the worker runs it: with no registered reading (the seam's truth
+    until stream R lands) the item stops ``no_proven_standard`` before any spend, delivery
+    off — no RED proof, no build, no row — and the stop is on the chain."""
+    from crb.factory import evidence as fe
+
+    home, _item, _backlog = _multiply_backlog(h)
+    run = h.enqueue("factory", ladder_json=["fake:m0"])
+    done = h.run_one()
+    assert done.status == STATUS_SUCCEEDED, done.error
+    assert done.counts_json["by_status"] == {"no_proven_standard": 1}
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    kinds = [e.kind for e in home.events()]
+    assert fe.EV_ENTRY_REFUSED in kinds and fe.EV_RED_PROOF not in kinds
+
+
+def test_a_worker_whose_metrics_port_is_taken_keeps_running_and_records_why(
+    tmp_path: Path, pyrepo: pr.PyRepo
+) -> None:
+    """Pilot D5 (P-436): the worker's metrics listener could not bind 9464 because another
+    stack held it. Starting it must never stop the worker, and what happened is written
+    where ``/health`` reads it — ``degraded`` with the reason — not only to the log."""
+    import dataclasses
+    import socket
+
+    from crb.observability.metrics import EXPOSITION_DEGRADED
+    from crb.server.worker_metrics import exposition_by_worker
+
+    h = Harness(tmp_path, pyrepo)
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        port = held.getsockname()[1]
+        settings = dataclasses.replace(h.worker.settings, metrics_port=port)
+        got = worker_main.start_metrics(h.worker, settings)
+    assert got.state == EXPOSITION_DEGRADED
+    recorded = exposition_by_worker(h.factory, [h.worker.worker_id])
+    assert recorded[h.worker.worker_id]["state"] == "degraded"
+    assert f"127.0.0.1:{port}" in recorded[h.worker.worker_id]["reason"]

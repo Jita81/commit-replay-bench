@@ -5,15 +5,18 @@
  * Navigation
  * ----------
  * What it is:   The Overview card on /repos/:name that reads `GET /repos/{name}/posture`.
- * What it does: Shows the posture class, the image, the exact toolchain and whether dependency
- *               provisioning is on; how many tasks are proven there out of how many; each
+ * What it does: Shows the posture class, the image, the exact toolchain, where the tests get
+ *               their tools (a declared host environment, the image, or inherited from the
+ *               host — ADR-0048) and whether dependency provisioning is on; how many tasks
+ *               are proven there out of how many; each
  *               refusal code with how many tasks it keeps out, its fix and a guide link; why the
  *               record is stale; and — for an operator only — "Qualify for this posture — no
  *               model spend", which queues a `qualify` run and opens it.
  * How:          `useRepoPosture` + `useQualifyRepo`; every element carries a registry hint; the
  *               guide link turns the served `docs/OPERATOR.md#…` anchor into /help/docs.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
- * ADRs:         docs/adr/0019-qualification-is-posture-relative.md
+ * ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
+ *               docs/adr/0048-the-host-posture-declares-its-environment.md
  * Works with:   ui/src/api/hooks.ts (`useRepoPosture`, `useQualifyRepo`), ui/src/api/types.ts
  *               (`RepoPosture`), ui/src/screens/Repos/RepoDetail.tsx (mounts it on Overview),
  *               ui/src/help/hints.ts (the `*.repo.posture*` ids), src/crb/server/posture_view.py
@@ -39,6 +42,22 @@ import { fmtInt } from '../../lib/format'
 export function guideHref(doc: string): string {
   const m = /^docs\/([A-Z-]+)\.md(#.*)?$/.exec(doc)
   return m ? `/help/docs/${m[1]}${m[2] ?? ''}` : '/help'
+}
+
+/** The digest prefix of a declared host environment (`crb.core.runners.toolenv`, ADR-0048). */
+const DECLARED = 'declared:sha256:'
+
+/** Where the tests get their tools: declared (with the digest's first 12 digits and how many
+ * tools are present), the sandbox image, or inherited from the host by a runner that declares
+ * nothing yet. */
+export function environmentText(p: RepoPosture): string {
+  const env = p.posture.environment ?? ''
+  if (env.startsWith(DECLARED)) {
+    const n = (p.posture.environment_tools ?? '').split('; ').filter((t) => t && !t.endsWith('=absent')).length
+    return `declared · ${env.slice(DECLARED.length, DECLARED.length + 12)} · ${n} tool${n === 1 ? '' : 's'}`
+  }
+  if (!p.posture_id) return 'not probed yet'
+  return p.executor === 'docker' ? 'the image' : 'inherited from the host'
 }
 
 function Body({ p }: { p: RepoPosture }) {
@@ -68,6 +87,10 @@ function Body({ p }: { p: RepoPosture }) {
         <dt className="text-on-surface-muted">Toolchain</dt>
         <dd className="font-mono text-xs" data-testid="posture-toolchain">
           <Hint id="text.repo.posture_toolchain">{p.posture.toolchain || 'not probed yet'}</Hint>
+        </dd>
+        <dt className="text-on-surface-muted">Environment</dt>
+        <dd className="font-mono text-xs" data-testid="posture-environment">
+          <Hint id="text.repo.posture_environment">{environmentText(p)}</Hint>
         </dd>
         <dt className="text-on-surface-muted">Provisioning</dt>
         <dd>

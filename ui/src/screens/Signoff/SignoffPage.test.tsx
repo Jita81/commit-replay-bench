@@ -107,7 +107,7 @@ const MAP: CapabilityMapWithControls = {
     },
   ],
   summary: { trusted_autonomy_coverage: 0, total_cells: 1, measured_cells: 1, deliver_cells: 0, n_total: 40, false_q1_total: 0, apparatus_versions: ['2.1'] },
-  policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1', min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
+  policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'A cell routes deliver (routing.v2) only for its standard context arm.', min_controls_share: 0.5, max_controls_escapes: 0, controls_version: 'controls-gate.v1' },
   controls: ESCAPED,
 }
 
@@ -286,6 +286,9 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('95.0%')
     expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('40')
     expect(within(evidence).getByTestId('signoff-tile-ci-low').textContent).toContain('83.5%')
+    // P-733: both tiles name the same denominator — the eligible attempts, never every attempt
+    expect(within(evidence).getByTestId('signoff-tile-point').textContent).toContain('eligible')
+    expect(within(evidence).getByTestId('signoff-tile-ci-low').textContent).toContain('over every eligible attempt')
     expect(within(evidence).getByTestId('signoff-tile-false-q1').textContent).toContain('0')
     expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('0.58')
     expect(within(evidence).getByTestId('signoff-tile-oracle').textContent).toContain('3 of 4 task(s) scored')
@@ -327,6 +330,29 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     await user.type(screen.getByLabelText(/^Attestation statement/), 'Read it.')
     expect(screen.getByRole('button', { name: 'Sign off' })).toBeDisabled()
     expect(screen.getByTestId('signoff-gate')).toHaveAttribute('data-state', 'CLOSED')
+  })
+
+  it('names a cell with no proven standard in its own gate row (signoff-policy.v4): the standard arm’s reading must deliver', async () => {
+    const NOT_STANDARD: SignoffRefusal = { code: 'not_standard:reading_unregistered', message: 'the arm S3 of this cell has no registered reading that delivers (reading_unregistered) — a sign-off is written only for the standard arm', threshold: 'deliver', observed: 'reading_unregistered', overridable: false }
+    const refused = signablePreview({ refusals: [NOT_STANDARD, ATTESTATION_MISSING] })
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'r' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, controls: PASSED, cells: [{ ...MAP.cells[0]!, route: 'deliver', reason: 'ok', reason_code: 'deliver' }] },
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /signoffs/preview': refused,
+    })
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(screen.getByTestId('refusal-not_standard:reading_unregistered')).toBeInTheDocument())
+    const row = gateRow(gate, 'The standard arm’s registered reading delivers')
+    expect(row.textContent).toMatch(/✗\s*not satisfied:/)
+    expect(row.textContent).toContain('the arm reads reading_unregistered — no proven standard to sign')
+    expect(row.querySelector('[data-hint="gate.signoff.reading"]') ?? (row.getAttribute('data-hint') === 'gate.signoff.reading' ? row : null)).not.toBeNull()
+    expect(gate).toHaveAttribute('data-state', 'CLOSED')
   })
 
   it('shows an unmeasured oracle as a non-overridable refusal (signoff-policy.v2): the gate row, the tile and the clause', async () => {

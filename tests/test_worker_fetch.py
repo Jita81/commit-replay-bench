@@ -24,8 +24,8 @@ Works with:   src/crb/server/worker.py (``_fetch_default_branch``, ``_fetch_befo
               ``_sync_outcomes`` — under test), tests/fixtures/remote.py, tests/test_worker.py,
               tests/test_worker_clone.py (the clone half)
 Tested by:    tests/test_worker_fetch.py
-Touch when:   the fetch rule (which kinds, which branch) or its events change (docs/API.md
-              and docs/GITHUB-APP.md §5 first).
+Touch when:   never for a new repository; the fetch rule (which kinds, which branch) or its events
+              change (docs/API.md and docs/GITHUB-APP.md §5 first).
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED
 from crb.store.models import Run
 from fixtures import pyrepo as pr
 from fixtures.langs import git
+from fixtures.proven_cells import every_cell_proven
 from fixtures.remote import bare_remote
 from test_worker import Harness, _multiply_backlog
 from test_worker_clone import add_url_repo
@@ -76,11 +77,14 @@ def _fetch_events(h: Harness, run_id: str) -> list:
 
 
 def test_factory_run_fetches_and_fast_forwards_the_default_branch_before_it_builds(
-    h: Harness, remote: str, tmp_path: Path
+    h: Harness, remote: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """F39 end to end: run 1 clones (a fresh clone is at the remote's head — no fetch);
     a commit lands on the remote; run 2 fetches, fast-forwards ``main`` from the old sha to
-    the new one, records it, and the RED proof and the build start from the NEW base."""
+    the new one, records it, and the RED proof and the build start from the NEW base. The
+    cell has a proven S2 standard (the store-bound readers, patched at their one binding — ADR-0026)."""
+
+    every_cell_proven(monkeypatch, "S2")
     add_url_repo(h, remote)
     home, _item, _backlog = _multiply_backlog(h)
     run1 = h.enqueue("factory", ladder_json=["fake:m0"])

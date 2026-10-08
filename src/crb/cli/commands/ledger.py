@@ -456,17 +456,29 @@ def cmd_stats(args: argparse.Namespace) -> int:
     fields = _group_fields(args.by)
     # one cell per key AND checks arm: rows graded with the format step or belt 6 on are
     # never pooled with rows graded without (ADR-0024)
+    # ... and per apparatus, context arm and class-set version (ADR-0025 item 1, ADR-0026):
+    # a reading never pools two of any, so each is its own line
     groups = [
         (arm, key, rs)
         for arm in ARMS
         for key, rs in sorted(group_by_cell(rows_for_checks(rows, arm), key_fields=fields).items())
     ]
-    stats: list[dict[str, Any]] = []
+    split: list[tuple[str, tuple[str, ...], tuple[str, str, str], list[Any]]] = []
     for arm, key, rs in groups:
+        by_reading: dict[tuple[str, str, str], list[Any]] = {}
+        for r in rs:
+            by_reading.setdefault((r.apparatus_version, r.context_arm, r.taxonomy), []).append(r)
+        split.extend((arm, key, rk, sub) for rk, sub in sorted(by_reading.items()))
+    stats: list[dict[str, Any]] = []
+    for arm, key, (apparatus, context_arm, taxonomy), rs in split:
         s = cell_stats(rs)
         d: dict[str, Any] = dict(zip(fields, key, strict=True))
         d.update(
             {
+                "apparatus": apparatus,
+                "context_arm": context_arm,
+                "taxonomy": taxonomy,
+                "n_tasks": s.n_tasks,
                 "checks": arm,
                 "n": s.n,
                 "clean": s.clean,
@@ -517,6 +529,9 @@ def cmd_stats(args: argparse.Namespace) -> int:
             "belts",
             "apparatus",
             "checks",
+            # the reading key a cell is split by (P-727): two lines of one cell differ here
+            "arm",
+            "class_set",
         ]
         body = [
             [
@@ -532,6 +547,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
                 "+".join(d["belt_sets"]),
                 "+".join(d["apparatus_versions"]),
                 d["checks"],
+                d["context_arm"] or "-",
+                d["taxonomy"] or "-",
             ]
             for d in stats
         ]

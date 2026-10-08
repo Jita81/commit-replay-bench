@@ -33,7 +33,9 @@ What it is:   The executors — ``LocalExecutor`` (host subprocess) and ``Docker
               whose output is read as it runs.
 What it does: Runs one command with a wall clock and a cancel token and reports exit code,
               output, timeout and cancellation honestly; strips the host environment down
-              to an allowlist so a repository's tests never see the operator's secrets; and
+              to an allowlist so a repository's tests never see the operator's secrets — or
+              to nothing when the runner declared the whole environment
+              (``Command.declared_env``, ADR-0048); and
               refuses — ``SandboxUnavailable`` — whenever the container cannot be provided
               exactly as hardened (no binary, no daemon, root user, forbidden mount, launch
               failure). It never falls back to the host. Before a container starts it makes
@@ -45,7 +47,11 @@ How:          ``Command`` (argv, root, writable paths, sealed ``ro_mounts``) →
               re-validated, ``network=True`` refused; asserted on by tests) → ``Popen`` with a
               drain thread polled against the deadline and the cancel token → ``docker
               kill <name>`` / process-group kill → ``ExecResult``; ``make_executor`` picks
-              the kind from configuration and fails closed on ``docker`` without settings.
+              the kind from configuration — ``local`` or ``docker`` only, an empty or other
+              name is an error — and fails closed on ``docker`` without settings. Exit 125 is
+              the sandbox failing to launch only when ``docker_launch_failed`` reads the
+              docker CLI's own words (or silence); otherwise it is the suite's own exit code,
+              on all three launch paths (ADR-0025 item 13).
               An enforced docker kill — on ``DockerStream`` AND on the non-stream
               ``DockerExecutor.run`` path the belt / test runner uses — is
               confirmation-ATTEMPTED, bounded: after ``docker kill`` (its own subprocess
@@ -77,7 +83,7 @@ Works with:   src/crb/core/runners/base.py (builds the Command, binds the depend
               propagate so a run stops), src/crb/server/worker.py (constructs the executor
               from settings and ends the run ``failed: sandbox unavailable``),
               src/crb/observability/probes.py (the health probe that reports the daemon)
-Tested by:    tests/test_execution.py, tests/test_sandbox_docker.py,
+Tested by:    tests/test_execution.py, tests/test_execution_edges.py, tests/test_sandbox_docker.py,
               tests/test_builders_container.py, tests/test_builders_container_docker.py
 Touch when:   never for a new repository (its image, memory and cpu limits are
               ``DockerSettings`` from the repo / deployment config; a toolchain that must
@@ -92,6 +98,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import shutil
 import signal
 import stat
@@ -133,6 +140,16 @@ _HOST_ENV_PASSTHROUGH: tuple[str, ...] = (
     "NODE_OPTIONS",
     "npm_config_cache",
 )
+
+#: The flags every host command carries whatever its environment: parseable test output
+#: (``CI``, ``NO_COLOR``) and no bytecode written into the worktree. A declared environment
+#: (``Command.declared_env``, :mod:`crb.core.runners.toolenv`) carries them too.
+LOCAL_FIXED_ENV: dict[str, str] = {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUNBUFFERED": "1",
+    "CI": "1",
+    "NO_COLOR": "1",
+}
 
 DEFAULT_TIMEOUT_S = 900
 
@@ -239,6 +256,10 @@ class Command:
     ro_mounts: tuple[BundleMount, ...] = ()
     #: False: the command reads nothing of the tree — no mount, no copy, no walk.
     tree: bool = True
+    #: True: ``env`` is the command's WHOLE environment, declared by its runner
+    #: (:mod:`crb.core.runners.toolenv`, ADR-0048) — the host executor inherits nothing, not
+    #: even ``PATH``. A container's environment is its image's, so docker ignores it.
+    declared_env: bool = False
 
     def __post_init__(self) -> None:
         if not self.argv:
@@ -329,15 +350,19 @@ class LocalExecutor:
         bytecode."""
         env = {k: v for k, v in os.environ.items() if k in _HOST_ENV_PASSTHROUGH}
         env.setdefault("LANG", "C.UTF-8")
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        env["PYTHONUNBUFFERED"] = "1"
-        env["CI"] = "1"
-        env["NO_COLOR"] = "1"
+        env.update(LOCAL_FIXED_ENV)
         return env
 
     def tool(self, name: str, host_override: str | None = None) -> str:
         """A configured override, else the binary on PATH, else the bare name."""
         return host_override or shutil.which(name) or name
+
+    @property
+    def base_env(self) -> dict[str, str]:
+        """A copy of the environment this executor gives a command that declares none: the
+        source a runner's declared environment reads its allowlisted names and its tool
+        search ``PATH`` from (ADR-0048)."""
+        return dict(self._base_env)
 
     def describe(self) -> dict[str, Any]:
         return {"executor": self.name}
@@ -359,7 +384,9 @@ class LocalExecutor:
             # a mount is a container concept; on the host a binding's local_env points the
             # toolchain at its set instead, so a mount here is a caller's mistake
             raise ValueError("the local executor cannot bind-mount a dependency set")
-        env = dict(self._base_env)
+        # a declared environment is the WHOLE environment: nothing of the worker's (its
+        # PATH above all) reaches the tests (ADR-0048)
+        env = {} if cmd.declared_env else dict(self._base_env)
         env.update(cmd.env)
         cwd = cmd.root / cmd.cwd_rel
         started = time.monotonic()
@@ -754,7 +781,11 @@ class DockerExecutor:
             kill_confirmed = self._kill(name, proc)
             t.join()
             break
-        if proc.returncode == 125 and not (cancelled or timed_out):
+        if (
+            proc.returncode == 125
+            and not (cancelled or timed_out)
+            and docker_launch_failed(box.get("out", ""), box.get("err", ""))
+        ):
             raise SandboxUnavailable(
                 f"docker failed to launch the container (exit 125): {box.get('err', '')[:400]}"
             )
@@ -892,7 +923,7 @@ class DockerExecutor:
             )
         except FileNotFoundError as e:
             raise SandboxUnavailable(f"docker binary unusable at run time: {e}") from e
-        if r.returncode == 125:
+        if r.returncode == 125 and docker_launch_failed(r.stdout or "", r.stderr or ""):
             # docker-level launch failure is a sandbox/config error, never a RED result
             raise SandboxUnavailable(
                 f"docker failed to launch the container (exit 125): {(r.stderr or r.stdout).strip()[:400]}"
@@ -972,6 +1003,28 @@ def grant_sandbox_read(root: Path, *, skip: Sequence[str] = ()) -> None:
             elif stat.S_ISREG(st.st_mode):
                 extra = stat.S_IXOTH if st.st_mode & stat.S_IXUSR else 0
                 grant(e.path, st, _GRANT_FILE | extra)
+
+
+#: The docker CLI's own words when IT could not launch the container (docker 24 to 29): its
+#: error lines start ``docker: ``, the daemon's refusal says ``Error response from daemon``,
+#: a missing local image says ``Unable to find image``, a bad option ``unknown flag`` /
+#: ``unknown shorthand flag``. Matched at the start of a stderr line.
+_DOCKER_LAUNCH_RE = re.compile(
+    r"^(?:docker: |Error response from daemon|Unable to find image|unknown (?:shorthand )?flag)",
+    re.MULTILINE,
+)
+
+
+def docker_launch_failed(stdout: str, stderr: str) -> bool:
+    """Is an exit 125 the sandbox failing to launch, rather than the suite's own 125?
+
+    Yes when the docker CLI said so on stderr (:data:`_DOCKER_LAUNCH_RE`) or the run printed
+    nothing at all; otherwise the container ran and 125 is its exit code — a test verdict,
+    read like any other. A misread fails closed: the run stops (``SandboxUnavailable``), and
+    a model is still blamed only with a witness (ADR-0019 §5)."""
+    if not (stdout.strip() or stderr.strip()):
+        return True
+    return bool(_DOCKER_LAUNCH_RE.search(stderr))
 
 
 def _env_error(rc: int, stderr: str) -> str:
@@ -1070,9 +1123,10 @@ class DockerStream:
       may still be running (the worker records and reaps it).
     * **stderr never deadlocks stdout**: it goes to a temporary file, of which the last
       4000 characters are kept as :attr:`stderr_tail` (the caller redacts).
-    * **Exit 125 with no output is a launch failure** (bad option, missing image,
-      unusable network) and raises :class:`SandboxUnavailable` when the lines are
-      consumed — never a silent empty stream.
+    * **Exit 125 is a launch failure when docker says so** (:func:`docker_launch_failed`:
+      the CLI's own words on stderr — bad option, missing image, unusable network — or no
+      output at all) and raises :class:`SandboxUnavailable` when the lines are consumed —
+      never a silent empty stream; a container that ran and exited 125 is its own exit.
     * ``timed_out`` / ``cancelled`` are set before the kill, so a reader that sees the
       stream end can tell an honest exit from an enforced one.
     """
@@ -1154,7 +1208,11 @@ class DockerStream:
                 self._stderr = ""
             finally:
                 self._stderr_file.close()
-        if self._proc.returncode == 125 and not saw_output and not self._enforced:
+        if (
+            self._proc.returncode == 125
+            and not self._enforced
+            and docker_launch_failed("x" if saw_output else "", self._stderr)
+        ):
             raise SandboxUnavailable(
                 f"docker failed to launch the container (exit 125): {self._stderr[-400:]}"
             )
@@ -1264,17 +1322,33 @@ def make_executor(
     cancel: CancelFn | None = None,
     on_kill_unconfirmed: KillUnconfirmedFn | None = None,
 ) -> Executor:
-    """``kind`` ∈ {"local", "docker"}. Docker without settings fails closed.
-    ``on_kill_unconfirmed`` reaches the docker executor only (a local kill needs no
-    daemon to confirm it)."""
-    k = (kind or "local").strip().lower()
-    if k in {"", "local", "none", "host"}:
+    """``kind`` ∈ {"local", "docker"}, and nothing else: an empty setting is an error, never
+    the host (ADR-0025 item 13; P-120) — nor are ``none`` and ``host``, which once meant
+    local. Docker without settings fails closed. ``on_kill_unconfirmed`` reaches the docker
+    executor only (a local kill needs no daemon to confirm it)."""
+    if executor_kind(kind) == "local":
         return LocalExecutor(cancel=cancel)
-    if k == "docker":
-        if docker is None:
-            raise SandboxUnavailable("executor 'docker' requires DockerSettings (image)")
-        return DockerExecutor(docker, cancel=cancel, on_kill_unconfirmed=on_kill_unconfirmed)
-    raise ValueError(f"unknown executor kind {kind!r}")
+    if docker is None:
+        raise SandboxUnavailable("executor 'docker' requires DockerSettings (image)")
+    return DockerExecutor(docker, cancel=cancel, on_kill_unconfirmed=on_kill_unconfirmed)
+
+
+#: The executor kinds, and nothing else (P-120).
+EXECUTOR_KINDS: tuple[str, ...] = ("local", "docker")
+
+
+def executor_kind(kind: str) -> str:
+    """``kind`` normalised to one of :data:`EXECUTOR_KINDS`, or ``ValueError`` naming the
+    setting — the one check :func:`make_executor` and every caller that holds an executor
+    setting (the worker's own settings, P-308) apply, so an empty value is refused where
+    it is read and never reaches a caller's default."""
+    k = (kind or "").strip().lower()
+    if k not in EXECUTOR_KINDS:
+        raise ValueError(
+            f"unknown executor kind {kind!r} (the executor setting, CRB_SANDBOX__EXECUTOR or "
+            "a run's 'executor'): expected 'local' or 'docker'"
+        )
+    return k
 
 
 def sequence_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
@@ -1288,8 +1362,10 @@ def sequence_env(*layers: Mapping[str, str] | None) -> dict[str, str]:
 
 __all__: Sequence[str] = (
     "DOCKER_KILL_TIMEOUT_S",
+    "EXECUTOR_KINDS",
     "KILL_CONFIRM_S",
     "KILL_CONFIRM_STEP_S",
+    "LOCAL_FIXED_ENV",
     "SANDBOX_TREES",
     "TREE_COPY",
     "TREE_COPY_MARKER",
@@ -1307,6 +1383,7 @@ __all__: Sequence[str] = (
     "UnconfirmedKill",
     "bundle_mount_args",
     "container_stopped",
+    "executor_kind",
     "make_executor",
     "sequence_env",
     "wait_container_stopped",

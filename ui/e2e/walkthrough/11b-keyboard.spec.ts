@@ -1,14 +1,14 @@
 /**
  * 11b-keyboard — the five controls a keyboard person has to OPERATE, by Tab and keys alone
  * (G-905): a map cell and its reason code (/capability), a reason code on Routes, a term on
- * Oracle (each opening and closing with `aria-expanded`), the sign-off form filled to an
- * enabled Sign off and the revoke confirmation filled to an enabled Revoke sign-off, then left
- * by Cancel (/signoff), and the freeze dialog with focus in, kept in and back (/factory) — plus
+ * Oracle (each opening and closing with `aria-expanded`), the sign-off form filled to a Sign
+ * off that stays closed on a cell with no proven standard (routing.v2; the walk of an enabled
+ * Sign off and of the revoke confirmation waits on G-956), and the freeze dialog with focus in, kept in and back (/factory) — plus
  * a negative control that takes the map cells out of the tab order and requires the same step
  * to fail.
  *
- * It runs in the stateful story, after the specs that make what it operates: 08 seeds and signs
- * `walk-signable` (the attestation it opens a revoke confirmation on), 05 and 04 give the
+ * It runs in the stateful story, after the specs that make what it operates: 08 seeds
+ * `walk-signable` (every clause but the sealed posture and the reading holds), 05 and 04 give the
  * primary repository a measured cell, route decisions and an oracle report, and 10 gives the
  * factory a backlog to freeze. (The five steps were written into 11-screens; when that spec was
  * split out to run by persona on stacks of their own, the steps moved here, where that state
@@ -48,7 +48,7 @@ test.describe.configure({ mode: 'serial' })
 /** The primary repository the story onboarded, measured and froze a backlog on. */
 const REPO = primary().name
 
-/** The repository 08 seeds and the approver signs (`SIGNABLE_NAME` in 08-signoff): it has an active attestation to revoke. */
+/** The repository 08 seeds (`SIGNABLE_NAME` in 08-signoff): every clause but the sealed posture and the reading holds (G-956). */
 const SIGNED_REPO = 'walk-signable'
 
 const USERNAMES = { operator: 'walk-operator', approver: 'walk-approver' } as const
@@ -66,9 +66,9 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
   // 11-screens proves every screen's first hinted controls take focus. These prove
   // the five controls a keyboard person has to OPERATE, each reached by Tab alone from the
   // skip link (`tabTo`) and driven by Enter, Space, typing and Escape — no click, no focus().
-  // They change no data: the sign-off form is filled to an enabled Sign off and the revoke
-  // confirmation filled to an enabled Revoke sign-off, then left by Cancel; the freeze dialog
-  // is opened and closed. Pressing those buttons is proven by 08 and 10, on the same native
+  // They change no data: the sign-off form is filled and Sign off stays closed (no walkthrough
+  // cell has a proven standard under routing.v2 — G-956); the freeze dialog is opened and
+  // closed. Pressing those buttons is proven by 08 and 10, on the same native
   // `<button>`, whose Enter/Space activation the browser guarantees.
 
   test('keyboard: a map cell opens from the keyboard, and the reason code in it opens and closes (/capability)', async ({ page }) => {
@@ -137,7 +137,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     expect(await focusedIs(term), `${where}: closing the term lost focus`).toBe(true)
   })
 
-  test('keyboard: the sign-off form is filled, and the revoke confirmation opened, filled and left, from the keyboard (/signoff)', async ({ page }) => {
+  test('keyboard: the sign-off form is filled from the keyboard, and Sign off stays closed on a cell with no proven standard (/signoff)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await signIn(page, USERNAMES.approver, PASSWORDS.approver)
     await page.goto(`/signoff?repo=${SIGNED_REPO}`)
@@ -156,31 +156,12 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     await expect(page.getByTestId('attest-read')).toBeChecked()
     await tabTo(page, 'textarea[data-testid="attest-statement"]', `${where} (statement)`, { fromTop: false, maxTabs: 30 })
     await page.keyboard.type('walkthrough 11: filled from the keyboard; not submitted.')
-    // Sign off sits in the gate above the form: Shift+Tab back up to it, reachable and enabled
-    // now the form is complete. It is NOT pressed — 08 records the attestation; this spec
-    // changes no data.
-    await tabTo(page, 'button[form="signoff-form"]', `${where} (Sign off)`, { fromTop: false, backwards: true })
-    await expect(page.locator(':focus'), `${where}: Sign off is not enabled once the form is filled`).toBeEnabled()
-    await expect(page.locator(':focus')).toHaveText('Sign off')
-
-    // the revoke confirmation: Revoke opens it and focus moves INTO it; it is filled, its
-    // confirm button reached, then Cancel leaves it and focus comes back to Revoke
-    await tabTo(page, 'button[data-hint="button.signoff.revoke"]', `${where} (Revoke)`, { fromTop: false, maxTabs: 200 })
-    const revokeId = await page.locator(':focus').getAttribute('data-revoke-id')
-    await page.keyboard.press('Enter')
-    const confirm = page.getByTestId('revoke-confirm')
-    await expect(confirm).toBeVisible()
-    expect(await focusedIs(confirm), `${where}: focus did not move into the revoke confirmation when it opened`).toBe(true)
-    await page.keyboard.type('walkthrough 11: reached from the keyboard; not confirmed.')
-    await page.keyboard.press('Tab')
-    await expect(page.locator(':focus'), `${where}: Tab from the reason did not reach Revoke sign-off`).toHaveText('Revoke sign-off')
-    await expect(page.locator(':focus')).toBeEnabled()
-    await page.keyboard.press('Tab')
-    await expect(page.locator(':focus')).toHaveText('Cancel')
-    await page.keyboard.press('Enter')
-    await expect(confirm).toBeHidden()
-    const back = page.locator(`button[data-revoke-id="${revokeId}"]`)
-    expect(await focusedIs(back), `${where}: Cancel did not return focus to the Revoke button that opened the confirmation`).toBe(true)
+    // routing.v2: a walkthrough cell has no proven standard (host posture, no registered
+    // reading — G-956), so the complete form leaves Sign off disabled and the gate names the
+    // reading; the keyboard walk of an enabled Sign off and of the revoke confirmation waits
+    // on G-956 (the revoke's focus is unit-tested in SignoffPage.test.tsx)
+    await expect(page.locator('button[form="signoff-form"]'), `${where}: Sign off opened on a cell with no proven standard`).toBeDisabled()
+    await expect(page.getByTestId('signoff-refusals').getByTestId('refusal-not_standard:reading_unregistered')).toBeVisible()
   })
 
   test('keyboard: the freeze dialog takes focus when it opens and gives it back when it closes (/factory)', async ({ page }) => {

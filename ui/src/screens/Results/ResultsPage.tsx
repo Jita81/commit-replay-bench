@@ -399,7 +399,7 @@ export function ResultsPage() {
                   ))}
                 </div>
                 <p className="mt-3 max-w-[80ch] text-sm text-on-surface-body">
-                  <strong>deliver</strong> means the cell clears the published bar (n ≥ {mapData.policy.min_n}, point ≥ {pct(mapData.policy.min_point)}, Wilson-low ≥ {pct(mapData.policy.min_ci_low)}, false-Q1 = 0, oracle ≥ {pct(mapData.policy.min_oracle_strength)}, controls passed) so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
+                  <strong>deliver</strong> means the cell's standard context arm clears the published bar — {mapData.policy.description} — so the factory may open a branch and a pull request for that class of change under human review. It never means a change is safe to merge or deploy.
                 </p>
                 <h3 className="mb-2 mt-6 text-[24px] font-bold leading-[1.3]">What it can do, by class and size</h3>
                 <p className="m-0 mb-4 max-w-[44em] text-[16px] leading-[1.5] text-on-surface-body">

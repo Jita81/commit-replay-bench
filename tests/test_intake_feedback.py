@@ -11,7 +11,9 @@ What it does: Pins the label ladder (needs-info beats not deliverable beats read
               an unclassified item SAYS it is unclassified rather than showing a class,
               that a cell nobody has measured is named as unmeasured rather than shown as
               zero, that the same inputs render byte-identical text (so a re-post writes
-              nothing), and that every gap names what closes it.
+              nothing), that every gap names what closes it, and that only an entry stop
+              says "not built": a ticket the entry gate admits is ready whatever its cell
+              routes, told whether a pull request opens (P-296).
 How:          Real ``Readiness`` objects from ``crb.factory.readiness.assess`` over drafts
               built by ``crb.intake.draft`` — no hand-written gap fixtures, so a change to
               the catalogue shows up here.
@@ -21,8 +23,9 @@ Works with:   src/crb/intake/feedback.py (under test), src/crb/factory/readiness
               open questions it renders), src/crb/core/routing.py (the route words),
               tests/test_intake_draft.py (the drafts it renders)
 Tested by:    tests/test_intake_feedback.py
-Touch when:   the comment gains a section — say what closes the gap in the same sentence,
-              and keep the renderer deterministic or the idempotent re-post breaks.
+Touch when:   never for a new repository; the comment gains a section — say what closes the gap in
+              the same sentence, and keep the renderer deterministic or the idempotent re-post
+              breaks.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from __future__ import annotations
 from typing import Any
 
 from crb.factory import readiness as rd
+from crb.factory.standard import ArmReading, CellRef, Readers, Standard, gate_for
 from crb.intake import client as c
 from crb.intake import draft as d
 from crb.intake import feedback as fb
@@ -48,6 +52,7 @@ def _ready_ticket() -> c.Ticket:
             "error_contract: 503 when a dependency is down",
         ),
         revision="1",
+        points=2.0,
     )
 
 
@@ -66,9 +71,25 @@ def _deliver_route(**kw: Any) -> dict[str, Any]:
     return base
 
 
-def _render(ticket: c.Ticket, route: dict[str, Any] | None = None) -> fb.Feedback:
+def _proven(cell: CellRef) -> Standard | None:
+    return Standard("S1@claude-sonnet-5", signed=True)
+
+
+PROVEN = Readers(standard_for=_proven)
+
+
+def _render(
+    ticket: c.Ticket,
+    route: dict[str, Any] | None = None,
+    *,
+    readers: Readers = PROVEN,
+    arms: tuple[ArmReading, ...] = (),
+    require_signed_cell: bool = False,
+) -> fb.Feedback:
     draft = d.draft_from(ticket, tracker="ado")
-    return fb.render_feedback(draft, rd.assess(draft.item), cell_route=route)
+    readiness = rd.assess(draft.item)
+    entry = gate_for(draft.item, readiness, readers, require_signed_cell=require_signed_cell)
+    return fb.render_feedback(draft, readiness, entry=entry, cell_route=route, arms=arms)
 
 
 # --- the label ladder ---------------------------------------------------------------
@@ -87,10 +108,98 @@ def test_a_missing_structural_slot_is_needs_info() -> None:
     assert f.ready_to_register is False
 
 
-def test_a_cell_that_does_not_route_deliver_is_not_deliverable_even_when_ready() -> None:
-    f = _render(_ready_ticket(), _deliver_route(route="calibrate", reason_code="n_below_min", n=3))
+#: Words that say a ticket is not built — true only of an entry-gate stop (P-288, P-296).
+NOT_BUILT_WORDS: tuple[str, ...] = (
+    "not be built",
+    "not built",
+    "nothing is built",
+    "will not build",
+    "not build it",
+    "not build anything",
+    "not build this",
+)
+
+
+def test_a_ticket_the_gate_admits_is_built_whatever_its_cells_route() -> None:
+    """The route gate is not the entry gate (P-288's class, in the ticket comment): a ticket
+    the entry gate admits is built, graded and reviewed whatever its cell routes, and only
+    ``deliver`` opens a pull request. For every other route — and an unmeasured cell — the
+    comment says it is built with no pull request, never "not built"; the label is
+    ``crb:ready`` and, once registered, ``crb:queued``: both stay true."""
+    routes: list[dict[str, Any] | None] = [
+        _deliver_route(route=word, reason_code=word, n=3)
+        for word in ("calibrate", "human", "do_not_ship", "granularize")
+    ]
+    for route in [*routes, None]:
+        f = _render(_ready_ticket(), route)
+        word = route["route"] if route else "unmeasured"
+        assert f.entry is not None and f.entry["code"] == "", word
+        assert f.label == c.LABEL_READY and f.ready_to_register is True, word
+        lowered = f.text.lower()
+        assert not [w for w in NOT_BUILT_WORDS if w in lowered], (word, f.text)
+        assert "no pull request opens" in lowered, word
+        assert fb.label_once_registered(f.entry["code"]) == c.LABEL_QUEUED, word
+    ready = _render(_ready_ticket(), _deliver_route())
+    assert "no pull request opens" not in ready.text.lower()
+
+
+def test_only_an_entry_stop_says_not_built() -> None:
+    """The other side: every entry stop the comment renders says the ticket is not built."""
+    none = Readers(standard_for=lambda cell: None)
+    ceiling = Readers(standard_for=lambda cell: Standard("S3", signed=True))
+    unsigned = Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=False))
+    for f in (
+        _render(_ready_ticket(), _deliver_route(), readers=none),
+        _render(_ready_ticket(), _deliver_route(), readers=ceiling),
+        _render(_ready_ticket(), _deliver_route(), readers=unsigned, require_signed_cell=True),
+    ):
+        assert f.label == c.LABEL_NOT_DELIVERABLE
+        assert "will not be built" in f.text
+
+
+def test_a_cell_with_no_proven_standard_is_not_deliverable_naming_each_arm_and_the_way_forward() -> (
+    None
+):
+    """Recovery 23 (ADR-0026 item 8): no proven context standard → `crb:not-deliverable`,
+    NOT BUILT, with each measured arm's state, n and interval and the way forward (measure
+    the cell, or an approver's calibration build that never opens a pull request)."""
+    arms = (
+        ArmReading("S3", "deliver", n=20, clean=20, ci_low=0.84, ci_high=1.0),
+        ArmReading("S1@claude-sonnet-5", "look_pending", n=12, clean=11, ci_low=0.65, ci_high=0.99),
+    )
+    none = Readers(standard_for=lambda cell: None)
+    f = _render(_ready_ticket(), _deliver_route(), readers=none, arms=arms)
+    assert f.label == c.LABEL_NOT_DELIVERABLE and f.ready_to_register is True
+    assert "will not be built" in f.text and "held back" not in f.text
+    assert "`S3`: deliver — 20 of 20 commit(s) clean, 95 % Wilson interval 84 % to 100 %" in f.text
+    assert "`S1@claude-sonnet-5`: look_pending — 11 of 12" in f.text
+    assert "an approver funds one calibration build" in f.text
+    assert fb.GLOSSED["calibration build"] in f.text and fb.GLOSSED["context standard"] in f.text
+    assert f.entry is not None and f.entry["code"] == "no_proven_standard"
+    # with nothing registered yet, it says so — never a zero
+    bare = _render(_ready_ticket(), None, readers=none)
+    assert "No arm of this cell has a registered reading yet" in bare.text
+
+
+def test_a_ticket_lacking_what_its_standard_needs_is_needs_info_naming_it() -> None:
+    s2 = Readers(standard_for=lambda cell: Standard("S2", signed=True))
+    f = _render(_ready_ticket(), _deliver_route(), readers=s2)
+    assert f.label == c.LABEL_NEEDS_INFO and f.ready_to_register is False
+    assert "`a failing test`" in f.text and "Attach it to the ticket" in f.text
+
+
+def test_an_unsigned_cell_names_the_sign_off_and_the_override_that_lifts_only_it() -> None:
+    unsigned = Readers(standard_for=lambda cell: Standard("S1@claude-sonnet-5", signed=False))
+    f = _render(_ready_ticket(), _deliver_route(), readers=unsigned, require_signed_cell=True)
     assert f.label == c.LABEL_NOT_DELIVERABLE
-    assert f.ready_to_register is True  # it is still built and withheld, never dropped
+    assert "a second person's sign-off" in f.text and "lifts only the sign-off" in f.text
+
+
+def test_a_ticket_without_points_asks_for_them() -> None:
+    t = _ready_ticket()
+    f = _render(c.Ticket(**{**t.to_dict(), "points": None}), _deliver_route())
+    assert f.label == c.LABEL_NEEDS_INFO and f.ready_to_register is False
+    assert "Story points" in f.text and "unsized" in f.text
 
 
 def test_needs_info_beats_not_deliverable_so_the_person_is_asked_first() -> None:
@@ -164,8 +273,9 @@ def test_a_false_q1_cell_is_reported_as_the_honesty_floor_breach_it_is() -> None
         _ready_ticket(),
         _deliver_route(route="do_not_ship", reason_code="false_q1", reason="a row credited clean"),
     )
-    assert f.label == c.LABEL_NOT_DELIVERABLE
+    assert f.label == c.LABEL_READY  # admitted by the entry gate: built, never delivered
     assert "do not ship" in f.text.lower() or "do_not_ship" in f.text
+    assert "no pull request opens" in f.text.lower()
 
 
 def test_the_comment_counts_what_it_writes_rather_than_promising_it_writes_little() -> None:

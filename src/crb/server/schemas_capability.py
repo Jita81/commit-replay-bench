@@ -45,7 +45,9 @@ Touch when:   never for a new repository; whenever a core ``to_dict`` here gains
 
 from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 from crb.core.checks import ARMS
 from crb.core.ledger import FAILURE_KINDS
@@ -83,6 +85,10 @@ class ControlsVerdictOut(BaseModel):
     run_id: str
     created: str
     state: str
+    #: controls-gate.v2: the apparatus the report was produced at, and why a verdict is
+    #: unmeasured (no report, a report of another apparatus, a cancelled run).
+    apparatus_version: str = ""
+    detail: str = ""
 
     @field_validator("state")
     @classmethod
@@ -106,6 +112,8 @@ class FailureSplitOut(BaseModel):
     lint_evaluated: int = 0
     #: Provider outages (usage limit / 429 / dead credential): outside n, like DQ.
     outage: int = 0
+    #: Of ``outage``, the rows whose login this deployment presented was refused (pilot D1).
+    outage_auth: int = 0
     #: Belt 6 (opt-in, ADR-0024): working code that changed the public API unlike the gold.
     api: int = 0
 
@@ -147,6 +155,74 @@ class EconomicsOut(BaseModel):
     latency_per_attempt: EstimateOut
 
 
+class ShortfallOut(BaseModel):
+    """:meth:`crb.core.routing.Shortfall.to_dict` — one clause the cell fails, the next
+    measurement it names (``next``), how many (``count``) and whether it spends model money."""
+
+    code: str
+    route: str
+    observed: Any = None
+    threshold: Any = None
+    next: str
+    count: int = 0
+    model_money: bool = False
+
+
+class ArmReadingOut(BaseModel):
+    """One arm of a registered reading (``crb.core.reading.ArmReading.to_dict``): its state
+    under the look rule, the distinct commits read in the seeded order, clean, the Wilson
+    interval, the next look and the commits still needed."""
+
+    arm: str
+    state: str
+    descriptive: bool = False
+    stopped_by: str = ""
+    counted: int = 0
+    clean: int = 0
+    misses: int = 0
+    ci_low: float = 0.0
+    ci_high: float = 1.0
+    next_look: int | None = None
+    needed: int = 0
+    decided_at: int | None = None
+    look_state: str = ""
+    left: list[dict[str, Any]] = Field(default_factory=list)
+    counted_commits: list[str] = Field(default_factory=list)
+
+
+class ReadingOut(BaseModel):
+    """A registered reading evaluated (``crb.core.reading.ReadingOutcome.to_dict``): every arm,
+    the unbroken chain, the standard (or ``null``) and the budget share it spent."""
+
+    reading_id: str
+    rule: str
+    hierarchy: list[str]
+    state: str
+    standard: str | None
+    ceiling: bool
+    chain: list[str]
+    stopped_at: str | None
+    needed: int
+    spend: float
+    registered_at: str
+    pool: int
+    pool_sha256: str
+    arms: list[ArmReadingOut]
+
+
+class CellStandardOut(BaseModel):
+    """What a cell's proven context is: the standard arm (``null`` — "no proven standard"),
+    whether it is only a ceiling, the next measurement and the cell's budget spent."""
+
+    standard: str | None
+    ceiling: bool = False
+    label: str
+    next: str = ""
+    next_count: int = 0
+    budget: float
+    spent: float
+
+
 class CapabilityCellSplitOut(CapabilityCellOut):
     """A measured cell + its failure split, its model point (with n and interval)
     and the routing reason code. ``model_point`` is ``null`` when no fair, finished
@@ -175,6 +251,35 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     checks_arm: str
     #: F35 — this cell's cost and latency with their known counts, intervals and apparatus.
     economics: EconomicsOut
+    # --- routing.v2 (ADR-0025, ADR-0026) ------------------------------------------------
+    #: The one context arm and class-set version the cell reads (never pooled).
+    context_arm: str = ""
+    taxonomy: str = ""
+    apparatus_version: str = ""
+    #: Distinct changes, each by its first observed attempt, and how many routed.
+    n_tasks_eligible: int = 0
+    task_clean: int = 0
+    task_ci_low: float = 0.0
+    task_ci_high: float = 1.0
+    n_unsealed: int = 0
+    #: What the cell's reading says about this arm, and the counts it read at.
+    look_state: str = ""
+    reading_id: str = ""
+    counted: int = 0
+    counted_clean: int = 0
+    counted_ci_low: float = 0.0
+    counted_ci_high: float = 1.0
+    needed: int = 0
+    next_look: int | None = None
+    oracle_scored_tasks: int = 0
+    oracle_share: float = 0.0
+    shortfalls: list[ShortfallOut] = Field(default_factory=list)
+    #: Every arm of the reading that speaks for the cell (``null`` — none registered).
+    reading: ReadingOut | None = None
+    standard: CellStandardOut | None = None
+    #: What the cell's briefs carried beyond their arm (label → distinct values): shown as
+    #: provenance, never a reason to split the cell (ADR-0026 item 1).
+    provenance: dict[str, list[str]] = Field(default_factory=dict)
 
     @field_validator("reason_code")
     @classmethod
@@ -202,6 +307,14 @@ class CapabilityMapWithControlsOut(CapabilityMapOut):
     #: F35 — the economics of every row behind the map (the Baseline's tiles), folded from
     #: the rows themselves: an interval cannot be recombined from the cells' means.
     economics: EconomicsOut
+    #: The one context arm and class-set version the map reads, and the arms and versions
+    #: the repository's rows carry (``?arm=`` / ``?taxonomy=`` select; ``all`` is refused).
+    arm: str = ""
+    arms: list[str] = Field(default_factory=list)
+    taxonomy: str = ""
+    taxonomies: list[str] = Field(default_factory=list)
+    #: ADR-0025 item 1: the apparatus the map reads and what an earlier one holds as history.
+    apparatus: dict[str, Any] = Field(default_factory=dict)
 
 
 class RouteDecisionWithControlsOut(RouteDecisionOut):
@@ -221,12 +334,35 @@ class RouteDecisionWithControlsOut(RouteDecisionOut):
     #: the default ``apparatus=current`` reading; above 0 the route is a reader's view of
     #: someone else's evidence and licenses nothing.
     rows_imported: int = 0
+    # --- routing.v2 --------------------------------------------------------------------
+    n_tasks: int = 0
+    task_clean: int = 0
+    task_point: float = 0.0
+    task_ci_low: float = 0.0
+    task_ci_high: float = 1.0
+    basis: str = ""
+    oracle_scored_tasks: int = 0
+    oracle_share: float = 0.0
+    shortfalls: list[ShortfallOut] = Field(default_factory=list)
+    apparatus_version: str = ""
+    context_arm: str = ""
+    taxonomy: str = ""
+    reading_id: str = ""
+    look_state: str = ""
+    counted: int = 0
+    counted_clean: int = 0
+    needed: int = 0
+    next_look: int | None = None
+    standard: str = ""
 
 
 class RoutesWithControlsResponse(RoutesResponse):
     decisions: list[RouteDecisionWithControlsOut]  # type: ignore[assignment]
     policy: RoutingPolicyWithControlsOut
     controls: ControlsVerdictOut
+    arm: str = ""
+    arms: list[str] = Field(default_factory=list)
+    taxonomy: str = ""
 
 
 class FailureSplitResponse(BaseModel):
@@ -247,6 +383,9 @@ class FailureSplitResponse(BaseModel):
     lint: int = 0
     lint_evaluated: int = 0
     outage: int = 0
+    #: Of ``outage``, the rows whose login this deployment presented was refused — "your
+    #: login", not "the provider" (pilot D1; rows of apparatus 2.4 and later carry the cause).
+    outage_auth: int = 0
     api: int = 0
     point: float
     ci_low: float
@@ -262,14 +401,18 @@ class FailureSplitResponse(BaseModel):
 
 
 __all__ = [
+    "ArmReadingOut",
     "CapabilityCellSplitOut",
     "CapabilityMapWithControlsOut",
+    "CellStandardOut",
     "ControlsVerdictOut",
     "EconomicsOut",
     "EstimateOut",
     "FailureSplitOut",
     "FailureSplitResponse",
+    "ReadingOut",
     "RouteDecisionWithControlsOut",
     "RoutesWithControlsResponse",
     "RoutingPolicyWithControlsOut",
+    "ShortfallOut",
 ]

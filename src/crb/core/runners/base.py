@@ -47,21 +47,28 @@ What it is:   The runner contract (``TestRunner`` protocol, ``BaseRunner`` plumb
 What it does: Resolves target and belt scopes from the repo config; runs one scope through an
               executor and fails closed when a non-zero exit carries no attributable test id;
               runs the one network-permitted setup phase on the host (refused under docker) and
-              keeps its redacted record; starts and stamps the oracle's services. It never
-              decides a verdict — it reports what the toolchain said.
-How:          ``run``: services for the task's era → ``command`` → execute → ``parse`` →
+              keeps its redacted record; starts and stamps the oracle's services; on the host,
+              runs every test command in the runner's declared environment (ADR-0048); runs a
+              belt scope with the module build gate when the scope is narrower than the tree
+              (``run_belt_for``, the one way a belt scope is run). It never decides a verdict —
+              it reports what the toolchain said.
+How:          ``run``: services for the task's era → ``command`` → the dependency binding →
+              ``declare`` (host only) → execute → ``parse`` →
               ``parse_error`` when rc≠0 and nothing parsed. ``setup``: a ``SetupSession``
               records each ``network=True`` step → ``finish_setup`` checks the last step,
               ``environment_ready`` and the services.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
-ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0011-repo-lint-belt.md
+ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md, docs/adr/0011-repo-lint-belt.md,
+              docs/adr/0048-the-host-posture-declares-its-environment.md
 Works with:   src/crb/core/runners/pytest_runner.py (the reference subclass),
+              src/crb/core/runners/toolenv.py (the declared host environment),
               src/crb/core/execution.py (the ``Command``/``Executor`` it drives),
               src/crb/core/services.py (the oracle's services and era selection),
               src/crb/core/grade.py (consumes ``TestRun`` for belts 2 and 3),
               src/crb/core/lint.py (belt 5 plans), src/crb/core/spec.py (``RepoConfig.belt_scope``
               and ``runner_opts``), src/crb/core/runners/__init__.py (the registry)
-Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_services.py
+Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_services.py,
+              tests/test_runners_toolenv.py
 Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``runner_opts`` and
               ``lint`` in the repo config instead (docs/OPERATOR.md); adding a language means a
               new subclass registered in src/crb/core/runners/__init__.py; changing ``TestRun``
@@ -85,6 +92,12 @@ from crb.core.deps import DepsBinding
 from crb.core.execution import Command, ExecResult, Executor, LocalExecutor
 from crb.core.lint import LintPlan, lint_disabled, plan_from_config
 from crb.core.redact import redact_and_cap
+from crb.core.runners.toolenv import (
+    DeclaredEnvironment,
+    ToolSpec,
+    declare_environment,
+    refuse_lookup_names,
+)
 from crb.core.services import (
     SERVICES_SANDBOX_REFUSED,
     ServiceRecord,
@@ -460,7 +473,81 @@ class BaseRunner:
         cmd = self.env_probe_command(Path(root), (), executor=executor, timeout=timeout)
         if cmd is None:
             return None
-        return executor.run(self.bind_deps(cmd, executor))
+        return executor.run(self.declare(self.bind_deps(cmd, executor), executor))
+
+    # --- the declared environment on the host (ADR-0048) ----------------------------
+    def declared_tools(
+        self, executor: Executor, root: Path | None = None
+    ) -> tuple[ToolSpec, ...] | None:
+        """The tools this runner's tests may run by name on the host (``root``: the tree the
+        command runs in, for a repository-relative interpreter). ``None`` — this
+        runner has no declaration yet and its host commands still inherit the worker's
+        allowlisted environment, ``PATH`` included (docs/dod/GAP-ANALYSIS.md names which)."""
+        return None
+
+    def env_passthrough(self) -> tuple[str, ...]:
+        """Names beyond :data:`~crb.core.runners.toolenv.HOST_PASSTHROUGH` this runner's
+        tests may take from the worker's environment (Go: its caches)."""
+        return ()
+
+    def declared_path(
+        self, root: Path | None = None, executor: Executor | None = None
+    ) -> tuple[str, ...]:
+        """Directories this runner owns that follow the tool farm on ``PATH`` (none; a
+        Python virtualenv's ``bin``). What each one holds is part of the digest."""
+        return ()
+
+    def declared_fixed_env(self) -> dict[str, str]:
+        """Values this runner's declared environment always sets, beyond
+        :data:`~crb.core.runners.toolenv.DECLARED_FIXED_ENV` (Go: ``GOENV=off``)."""
+        return {}
+
+    def repo_tools(self) -> tuple[ToolSpec, ...]:
+        """``runner_opts.tools``: the host tools one repository's tests need beyond the
+        runner's list, by name, found on the worker's ``PATH``. Any other shape is refused
+        (``ValueError``) before a test runs, never read as "no extra tools"."""
+        declared = self.opts.get("tools") or ()
+        if isinstance(declared, str):
+            declared = (declared,)
+        if not isinstance(declared, (list, tuple)) or not all(
+            isinstance(n, str) and n.strip() and "/" not in n for n in declared
+        ):
+            raise ValueError("runner_opts.tools must be a list of tool names (no paths)")
+        return tuple(ToolSpec(n.strip()) for n in declared)
+
+    def declared_environment(
+        self, executor: Executor, root: Path | None = None
+    ) -> DeclaredEnvironment | None:
+        """The whole environment a host test command runs in, with its identity — ``None``
+        under a container (the image is the environment) or for a runner that declares
+        nothing. Another tool on the worker's ``PATH`` never reaches it."""
+        if executor.name != "local":
+            return None
+        specs = self.declared_tools(executor, root)
+        if specs is None:
+            return None
+        # a PATH (or a loader variable) in runner_opts.env would sit over the farm with the
+        # digest unchanged: refused, before any test runs, as a malformed ``tools`` is
+        refuse_lookup_names(dict(self.opts.get("env") or {}))
+        # the executor's own host environment is the source (a worker's allowlisted slice
+        # of its process environment, or what a deployment configured on the executor)
+        host_env = getattr(executor, "base_env", None)
+        return declare_environment(
+            (*specs, *self.repo_tools()),
+            passthrough=self.env_passthrough(),
+            host_env=host_env if isinstance(host_env, dict) else None,
+            extra_path=self.declared_path(root, executor),
+            fixed=self.declared_fixed_env(),
+        )
+
+    def declare(self, cmd: Command, executor: Executor) -> Command:
+        """``cmd`` with the declared environment beneath its own (the runner's, the
+        binding's and the services' values win) and ``declared_env`` set, so the host
+        executor inherits nothing; unchanged when nothing is declared."""
+        declared = self.declared_environment(executor, cmd.root)
+        if declared is None:
+            return cmd
+        return dataclasses.replace(cmd, env={**declared.env, **cmd.env}, declared_env=True)
 
     # --- scopes ------------------------------------------------------------------
     def target_scope(self, test_files: Sequence[str]) -> tuple[str, ...]:
@@ -518,7 +605,7 @@ class BaseRunner:
         cmd = self.bind_deps(self.command(root, scope, executor=executor, timeout=t), executor)
         if service_env:
             cmd = _with_env(cmd, service_env)
-        result = executor.run(cmd)
+        result = executor.run(self.declare(cmd, executor))
         if result.env_error:
             # the instrument failed (the tree could not be copied): red, never attributed
             return TestRun(
@@ -580,6 +667,70 @@ class BaseRunner:
             return self.run(executor, root, scope, timeout=timeout)
         finally:
             self.authored, self.deps = previous, previous_deps
+
+    # --- belt 3's instrument: the belt scope and the module build gate -----------------
+    def module_gate_scope(self, scope: Sequence[str]) -> tuple[str, ...] | None:
+        """The scope that builds every package of the tree when the belt ``scope`` does not
+        (Go: ``./...``), or ``None`` — this runner has no gate, or ``scope`` already builds
+        everything. A belt narrower than the tree otherwise never sees a package a patch
+        stopped compiling outside it (stream Q2's verifiers, 2026-09-28)."""
+        return None
+
+    def gate_run(
+        self,
+        executor: Executor,
+        root: Path,
+        scope: Sequence[str],
+        *,
+        timeout: int = 0,
+        authored: str | None,
+        deps: DepsBinding | None = None,
+    ) -> TestRun:
+        """Build ``scope`` and run no test (the module build gate). The base runner has no
+        gate; a runner that answers :meth:`module_gate_scope` overrides this."""
+        raise NotImplementedError(f"the {self.name} runner has no module build gate")
+
+    def run_belt_for(
+        self,
+        executor: Executor,
+        root: Path,
+        scope: Sequence[str],
+        *,
+        timeout: int = 0,
+        authored: str | None,
+        deps: DepsBinding | None = None,
+    ) -> TestRun:
+        """Belt 3's run of ``scope``: :meth:`run_for`, then — when the scope is narrower than
+        the tree — the module build gate. A gate that fails makes the run unattributed, so a
+        package that stopped compiling can never subtract to "no new failures" wherever a
+        belt scope is run (the grade, the baseline and gold of a qualification, the miner,
+        the factory). Every belt-scope run goes through here (a test refuses another)."""
+        run = self.run_for(executor, root, scope, timeout=timeout, authored=authored, deps=deps)
+        gate_scope = self.module_gate_scope(scope)
+        if gate_scope is None or run.env_error or run.timed_out or run.parse_error:
+            return run  # nothing to add: the belt already failed closed, or covers the tree
+        gate = self.gate_run(
+            executor, root, gate_scope, timeout=timeout, authored=authored, deps=deps
+        )
+        duration = run.duration_s + gate.duration_s
+        if gate.env_error:
+            return dataclasses.replace(gate, duration_s=duration)
+        if gate.timed_out:
+            return TestRun(124, run.failing, gate.tail, True, duration, services=run.services)
+        if gate.green:
+            return dataclasses.replace(run, duration_s=duration)
+        why = gate.parse_error or f"rc={gate.returncode}"
+        return TestRun(
+            run.returncode or gate.returncode or 1,
+            run.failing,
+            "\n".join(t for t in (run.tail, gate.tail) if t),
+            False,
+            duration,
+            run.parse_error
+            or f"unattributed failure (the module build gate failed over "
+            f"{' '.join(gate_scope)}: {why})",
+            run.services,
+        )
 
     # --- the posture (ADR-0019) ----------------------------------------------------
     def toolchain_argv(self, executor: Executor) -> tuple[str, ...]:

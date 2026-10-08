@@ -161,7 +161,7 @@ export const keys = {
   grades: (p?: GradeListParams) => ['grades', p ?? {}] as const,
   grade: (rowId: string) => ['grades', rowId] as const,
   evidence: (hash: string) => ['evidence', hash] as const,
-  capability: (repo: string, by: string) => ['capability', repo, by] as const,
+  capability: (repo: string, by: string, arm = '') => ['capability', repo, by, arm] as const,
   routes: (repo: string) => ['routes', repo] as const,
   forecastBuild: (repo: string, mix: string) => ['forecast', 'build', repo, mix] as const,
   forecastReadiness: (repo: string) => ['forecast', 'readiness', repo] as const,
@@ -705,11 +705,13 @@ export function useEvidence(hash: string): UseQueryResult<EvidenceResponse, ApiE
 // ---------------------------------------------------------------------------
 
 /** `GET /capability-map?repo=&by=` — the cells for one projection; 30 s stale. */
-export function useCapabilityMap(repo: string, by: CellField[]): UseQueryResult<CapabilityMap, ApiError> {
+export function useCapabilityMap(repo: string, by: CellField[], arm = ''): UseQueryResult<CapabilityMap, ApiError> {
   const byStr = by.join(',')
   return useQuery({
-    queryKey: keys.capability(repo, byStr),
-    queryFn: () => api<CapabilityMap>(`/capability-map${qs({ repo, by: byStr })}`),
+    queryKey: keys.capability(repo, byStr, arm),
+    // `arm` (ADR-0026 item 1): one context arm per reading; '' = the server's default,
+    // each cell on its own proven standard arm
+    queryFn: () => api<CapabilityMap>(`/capability-map${qs({ repo, by: byStr, arm: arm || undefined })}`),
     enabled: repo.length > 0,
     retry: false,
     staleTime: 30_000,
@@ -895,6 +897,34 @@ export function useSignGap(): UseMutationResult<unknown, ApiError, { repo: strin
   return useMutation({
     mutationFn: ({ repo, itemId, slot, answer }) =>
       api<unknown>(`/factory/${encodeURIComponent(repo)}/tasks/${encodeURIComponent(itemId)}/signoff-gap`, { method: 'POST', body: { slot, answer } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryEvidence(v.repo) })
+    },
+  })
+}
+
+/** `POST /factory/{repo}/items/{id}/calibration` (approver) — fund ONE calibration build of an item the
+ * entry gate stopped for a missing standard or context (ADR-0026 item 8); it never opens a pull request. */
+export function useFundCalibration(): UseMutationResult<unknown, ApiError, { repo: string; itemId: string; reason: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, itemId, reason }) =>
+      api<unknown>(`/factory/${encodeURIComponent(repo)}/items/${encodeURIComponent(itemId)}/calibration`, { method: 'POST', body: { reason } }),
+    onSuccess: (_d, v) => {
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryEvidence(v.repo) })
+    },
+  })
+}
+
+/** `POST /factory/{repo}/items/{id}/probe-waiver` (approver) — waive the required strength probe for the
+ * item's test, bound to its SHA-256 (ADR-0025 item 12); 409 `probe_waiver_stale` for other bytes. */
+export function useWaiveProbe(): UseMutationResult<unknown, ApiError, { repo: string; itemId: string; reason: string; testSha256: string }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, itemId, reason, testSha256 }) =>
+      api<unknown>(`/factory/${encodeURIComponent(repo)}/items/${encodeURIComponent(itemId)}/probe-waiver`, { method: 'POST', body: { reason, test_sha256: testSha256 } }),
     onSuccess: (_d, v) => {
       void qc.invalidateQueries({ queryKey: keys.factoryTasks(v.repo) })
       void qc.invalidateQueries({ queryKey: keys.factoryEvidence(v.repo) })
