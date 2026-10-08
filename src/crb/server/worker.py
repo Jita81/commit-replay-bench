@@ -2780,9 +2780,16 @@ class Worker:
                 body = RunCreateRequest(repo=run.repo, kind=nxt)
                 new = new_run(body, actor=actor)
                 new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
-                submit_refusals(
-                    db, SimpleNamespace(home=self.home, factory=self.settings.factory), body, new
+                # the API's submit gate, whole: the login check reads the worker's shared
+                # CRB_BUILDER__LOGIN_TTL_S and the default binary, as the claim check does
+                gate = SimpleNamespace(
+                    home=self.home,
+                    factory=self.settings.factory,
+                    builder=SimpleNamespace(
+                        login_ttl_s=self.settings.builder_login_ttl_s, claude_binary=""
+                    ),
                 )
+                submit_refusals(db, gate, body, new)
                 stage_queued(db, new)
                 append_system_event(
                     db,
