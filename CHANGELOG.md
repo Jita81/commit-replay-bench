@@ -12,60 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **The Wave 4 attack, fixed: the delivered cell is signed, and focus never falls to the page**
-  ([the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
-  A change bigger than its ticket's estimate is delivered only into a signed cell, and the pull
-  request's licence line is that cell's. A leaver's sign-off licenses nothing. The run page's
-  override button says what it does: it lifts the sign-off clause, never the route gate.
-  Wave 4's forms keep focus while they work, say a refusal beside the form that made it, and
-  deep links land on their target. ADR-0018 now states what the code does (DL-119, DL-120,
-  P-391 to P-399 and P-408 to P-411).
-
-- **The library's miners: proposals from a repository's own files, never signed**
-  (north-star Wave 4, stream M; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
-  *Propose from the files* and `POST /library/{repo}/mine` run five miners over the clone at a
-  pinned commit, at no model cost: decision records, code owners and layout, lint settings,
-  tests, and the change profile. Each proposal cites its file and commit and waits for a
-  person to sponsor it. Guidance files are read as data. An entry is proposed again only when
-  its source or the miner's reading of it changes. A convention names belt 5's check only where
-  belt 5's own detectors find the tool. Teams add miners through a registry (DL-117, DL-118,
-  G-677).
-
-- **The context library: two people sign what a repository's people know, and each work type has a page**
-  (north-star Wave 4, stream L; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
-  Entries of six kinds, with an id `<kind>/<slug>` and their provenance, are proposed by a
-  sponsor and signed by a different approver (`same_person` refused); a miner or a model is
-  never a person. Every act is appended to a hash-chained table (revision 0016) and is an
-  event. An entry read from a file goes stale when a mine finds the file changed or gone.
-  `/library/:repo` shows one page per work type, and Decisions lists entries to sign, gone
-  stale or retired by measurement. No entry reaches a builder's brief (DL-114 to DL-116).
-
-- **The second person is real** (north-star Wave 4, stream S; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
-  An admin invites an approver from Settings with a one-time link that expires and is
-  recorded as an event; the approver chooses their own password at `/invite`. An item whose
-  cell's proven standard nobody has signed stops before any spend, on by default (ADR-0018,
-  re-read against ADR-0026); a second approver's override lifts only that clause, for one run. Home task 7 asks
-  the two-person readiness of the repository it shows, so the bootstrap admin alone never
-  completes it. A decision shows how long it has waited. The sign-off gate shows the
-  evidence's posture class and says what to do after each refusal.
-
-- **Go live on evidence: each checklist line proven, attested or unproven**
-  (north-star Wave 4, stream P; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
-  `GET /golive` reads the fifteen lines of DEPLOYMENT §8: five proven by the product's own
-  checks, ten the operator's acts that an admin records on Settings as dated
-  `golive.attested` events (ADR-0031, DL-109). `/posture` lists both, names every row's
-  source, prints for a review board and carries the go-live journey's eyebrow. A private
-  mirror's credential reaches the fetch alone; uv, poetry and pylock locks are provisioned;
-  a damaged sealed set is quarantined and what cites it revoked (DL-110, DL-111).
-
-- **Truth on the instrument screens: failed reads are said, exports are recorded, catches are witnessed**
-  (north-star Wave 4, stream T; [the integration pull request](https://github.com/Jita81/commit-replay-bench/pull/new/feat/ns4)).
-  A failed read on Connect or the Measure estimate is an error with Retry, and a ratchet stops
-  the next screen showing a fallback instead; Repos reads every page and re-reads a list that
-  moved; the Ledger shows linked filters as chips; every ledger export is recorded first, or
-  not served (DL-113); each caught negative control carries a gold witness from the same
-  posture (`controls.v3`, DL-112). **Upgrading:** a passed controls report from before
-  `controls.v3` licenses nothing — run the controls again on every repository.
+- **Wave 4: the context library and its miners, the second person, go-live on evidence, truthful
+  screens** (north-star Wave 4, streams L, M, S, P and T;
+  [#73](https://github.com/Jita81/commit-replay-bench/pull/73)). Library entries are proposed by a
+  sponsor or by five no-cost miners over a pinned clone and signed by a different person,
+  hash-chained and evented, and never reach a builder's brief. An admin invites the second approver
+  by a one-time link, and an item whose cell's standard nobody signed stops before spend. `GET
+  /golive` proves five of DEPLOYMENT §8's lines and records ten as attested acts. Failed reads show
+  Retry, ledger exports are recorded, and caught controls carry a witness (`controls.v3`: rerun
+  every repository's controls). DL-109 to DL-120, P-408 to P-411.
 
 - **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
   (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
