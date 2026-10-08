@@ -6,7 +6,7 @@ system libraries, and nothing bounds it. On 7 Oct 2026 the runners' Azure Ubuntu
 answering: apt fell back to ``archive.ubuntu.com``, printed its last ``InRelease`` line and then
 waited, silently, until each job's own ``timeout-minutes`` cancelled it — six browser jobs on
 pull requests #58, #66 and #69, 20 to 40 minutes each, every one a required check
-(docs/PREVENTION.md P-749). This wrapper turns the hang into a short, named failure and a retry:
+(docs/PREVENTION.md P-751). This wrapper turns the hang into a short, named failure and a retry:
 
     # in ui/, after npm ci
     python3 ../scripts/ci_install_browser.py
@@ -49,7 +49,7 @@ How:          ``write_apt_timeouts`` (best effort, bounded) → for each attempt
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   .github/workflows/ci.yml (the ``ui-smoke``, ``walkthrough-story`` and
-              ``walkthrough-screens`` jobs run it), docs/PREVENTION.md (P-749 — the class it
+              ``walkthrough-screens`` jobs run it), docs/PREVENTION.md (P-751 — the class it
               closes), scripts/ci_job_budget.py (the guard that measures the rest of the job)
 Tested by:    tests/test_ci_install_browser.py
 Touch when:   never for a new repository (it installs this repository's own CI browser); a CI
@@ -250,7 +250,7 @@ def main(
         sleep(args.backoff)
     print(
         f"::error title=browser install::no attempt succeeded within {args.attempts} attempts "
-        f"and {args.budget:.0f} s (docs/PREVENTION.md P-749): the package mirror or the browser "
+        f"and {args.budget:.0f} s (docs/PREVENTION.md P-751): the package mirror or the browser "
         "download is not answering; rerun the job",
         file=sink,
         flush=True,

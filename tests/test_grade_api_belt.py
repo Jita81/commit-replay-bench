@@ -51,6 +51,11 @@ from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.posture import grade_adhoc, posture_row
 
+#: The apparatus the rows here are written at: these tests pin a grade's classification,
+#: which 2.3 and 2.4 share; what a 2.4 row carries besides is pinned in
+#: tests/test_ledger_classification.py and tests/test_context_arm.py.
+GRADE_APPARATUS = "2.3"
+
 try:
     from tests import conftest_langs as langs
 except ImportError:  # pragma: no cover - run from tests/ as the rootdir
@@ -134,7 +139,9 @@ def test_go_belt_six(tmp_path: Path, executor: LocalExecutor, case: str) -> None
         assert res.api_run is not None
         if finding:
             assert [f.label for f in res.api_run.findings] == [finding]
-            row = grade_row_from_result(res, task, pack_hash="p" * 64)
+            row = grade_row_from_result(
+                res, task, pack_hash="p" * 64, apparatus_version=GRADE_APPARATUS
+            )
             assert row.failure_kind == FAILURE_API and row.labels["api_stable"] == "false"
             assert row.labels["api_findings"] == finding
         else:
@@ -188,7 +195,9 @@ def test_python_belt_six(
         )
         assert res.belts.target_green is True, res.to_dict()
         assert res.belts.api_stable is ok and res.clean is ok
-        row = grade_row_from_result(res, task, pack_hash="p" * 64)
+        row = grade_row_from_result(
+            res, task, pack_hash="p" * 64, apparatus_version=GRADE_APPARATUS
+        )
         assert row.labels["api_stable"] == ("true" if ok else "false")
         assert row.failure_kind == ("" if ok else FAILURE_API)
     finally:
@@ -207,7 +216,9 @@ def test_belt_six_is_off_by_default_and_then_the_grade_and_row_are_unchanged(
         assert res.clean is True and res.api_run is None and res.belts.api_stable is None
         d = res.to_dict()
         assert "api_stable" not in d and "api_run" not in d
-        row = grade_row_from_result(res, task, pack_hash="p" * 64)
+        row = grade_row_from_result(
+            res, task, pack_hash="p" * 64, apparatus_version=GRADE_APPARATUS
+        )
         assert "api_stable" not in row.labels and "api_findings" not in row.labels
     finally:
         ws.remove()
@@ -298,8 +309,9 @@ def test_an_unpinned_row_derives_api_from_its_label_and_the_split_counts_it() ->
         source_changed=True,
         evidence_pack_hash="p" * 64,
         labels={"api_stable": "false"},
+        apparatus_version="2.3",  # unpinned rows exist only below 2.4 (ADR-0025 item 6)
     )
-    assert row.failure_kind == FAILURE_API
+    assert "failure_kind" not in row.labels and row.failure_kind == FAILURE_API
     split = failure_split([row])
     assert split.api == 1 and split.n == 1 and split.model_n == 1
     assert split.to_dict()["api"] == 1

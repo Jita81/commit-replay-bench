@@ -18,7 +18,9 @@ a line is written, and it is built so that nothing from a task can reach one:
   :data:`COMMAND_RE` and come from configuration. A slot that fails is dropped (the
   command-free variant is used), never repaired.
 * **Held out by task.** :func:`held_out` keeps a line for task T only when at least two
-  OTHER tasks taught it.
+  OTHER tasks taught it; :func:`taught_before` keeps it only when every one of those is
+  OLDER than T by commit date (ADR-0026 item 7 — a replay brief never learns from a
+  later commit).
 * **A leak gate.** :func:`leak_gate` drops a line whose slot values share a token of four
   or more characters with T's target tests, test files or source files. The fixed words of
   a template cannot come from a task and are not gated; only slot values can carry a
@@ -32,7 +34,8 @@ What it is:   The playbook compiler — closed templates, checked slots, the hel
               the leak gate for the prevention loop's advisory lines (ADR-0020 §7).
 What it does: Renders a line per class signal from a closed template whose slots pass a
               closed vocabulary; compiles at most seven lines under the character caps; keeps
-              a line for task T only when two other tasks taught it; drops a line whose slot
+              a line for task T only when two other tasks taught it, all older than T by commit
+              date; drops a line whose slot
               values share a token with T's test or source file names. Refuses anything that
               is not a signal or a repository fact.
 How:          ``render_line`` (template → slot checks → command-free fallback → cap) →
@@ -444,6 +447,32 @@ def held_out(
     return kept, dropped
 
 
+def taught_before(
+    lines: Iterable[PlaybookLine],
+    task_id: str,
+    *,
+    task_date: str,
+    dates: Mapping[str, str],
+    min_other: int = 2,
+) -> tuple[list[PlaybookLine], list[str]]:
+    """``(kept, dropped ids)``: the TIME-ORDER rule (ADR-0026 item 7). A line reaches commit
+    T only when at least ``min_other`` OTHER commits taught it and ALL of them are older
+    than T by commit date (``dates``: commit → a date key that sorts in time order). A
+    teacher dated at or after T, or
+    with no date at all, drops the line: a line learned with sight of a later commit could
+    carry that commit's answer back in time. Applied after :func:`held_out`."""
+    kept: list[PlaybookLine] = []
+    dropped: list[str] = []
+    for ln in lines:
+        others = [t for t in ln.taught_by_tasks if t != task_id]
+        older = bool(task_date) and all(dates.get(t, "") and dates[t] < task_date for t in others)
+        if len(others) >= min_other and older:
+            kept.append(ln)
+        else:
+            dropped.append(ln.line_id)
+    return kept, dropped
+
+
 def tokens(text: str) -> set[str]:
     """Every word of ``text`` (split on non-alphanumerics and on camelCase), lower-cased,
     of at least :data:`LEAK_MIN` characters."""
@@ -508,5 +537,6 @@ __all__ = [
     "line_id_for",
     "playbook_digest",
     "render_line",
+    "taught_before",
     "tokens",
 ]

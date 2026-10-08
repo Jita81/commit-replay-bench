@@ -38,7 +38,7 @@ function cell(over: Partial<CapabilityCell>): CapabilityCell {
 function signoff(over: Partial<Signoff>): Signoff {
   return { id: 's1', repo: 'cobra', cell: { capability_class: 'bug.fix', size: 'XS' }, approver: 'a.okafor', created: '2026-09-15T10:00:00Z', revoked: false, active: true, stale: false, apparatus_current: '2.2', evidence: { n: 31, point: 0.74, ci_low: 0.56, ci_high: 0.87, false_q1: 0, apparatus_versions: ['2.2'] }, ...over } as Signoff
 }
-const MAP = (cells: CapabilityCell[]): CapabilityMap => ({ repo: 'cobra', by: ['capability_class', 'size'], classes: ['bug.fix', 'refactor'], sizes: ['XS', 'S', 'M', 'L', 'XL'], languages: [], models: [], cells, summary: { trusted_autonomy_coverage: 0, total_cells: 10, measured_cells: cells.length, deliver_cells: 1, n_total: 31, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { min_n: 10, min_point: 0.9, min_ci_low: 0.8, min_oracle_strength: 0.8, granularize_sizes: ['XL'], version: 'routing.v1' } })
+const MAP = (cells: CapabilityCell[]): CapabilityMap => ({ repo: 'cobra', by: ['capability_class', 'size'], classes: ['bug.fix', 'refactor'], sizes: ['XS', 'S', 'M', 'L', 'XL'], languages: [], models: [], cells, summary: { trusted_autonomy_coverage: 0, total_cells: 10, measured_cells: cells.length, deliver_cells: 1, n_total: 31, false_q1_total: 0, apparatus_versions: ['2.2'] }, policy: { rule: 'look.v1', looks: { '20': 0, '30': 1, '40': 2 }, p_deliver_at_0_80: 0.021, cell_error_budget: 0.05, min_oracle_strength: 0.8, min_oracle_share: 0.5, granularize_sizes: ['XL'], version: 'routing.v2', description: 'A cell routes deliver (routing.v2) only for its standard context arm.' } })
 
 describe('MapTable', () => {
   it('renders the sign-off state on the cell and the honest empty cells', () => {

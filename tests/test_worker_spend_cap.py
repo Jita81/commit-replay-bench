@@ -47,7 +47,16 @@ from crb.core.workspace import Workspace
 from crb.server import spend_cap as sc
 from crb.store.jobs import STATUS_FAILED, STATUS_SUCCEEDED
 from fixtures import pyrepo as pr
+from fixtures.proven_cells import every_cell_proven
 from test_worker import FakeBuilder, Harness, _multiply_backlog
+
+
+@pytest.fixture(autouse=True)
+def _proven(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The factory runs here BUILD, so every cell has a proven, signed standard (ADR-0026
+    item 8): ``S2`` for the operator-authored item; the test author's own ``S1`` arm where
+    a test author writes the oracle (:func:`_paid_author`)."""
+    every_cell_proven(monkeypatch, "S2")
 
 
 class PricedNoop:
@@ -278,6 +287,9 @@ def _paid_author(monkeypatch: pytest.MonkeyPatch, reply: Any) -> None:
         )
 
     monkeypatch.setattr(w.Worker, "_test_author", author)
+    from crb.factory.testfirst import canonical_model
+
+    every_cell_proven(monkeypatch, f"S1@{canonical_model('gpt-oss-120b')}")
 
 
 def test_a_factory_runs_test_author_spends_against_the_cap(

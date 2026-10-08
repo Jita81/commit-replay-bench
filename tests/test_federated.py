@@ -59,6 +59,9 @@ def _row(
     cost: float = 0.0,
     latency: float = 0.0,
     provenance: str = "self-calibrate:acme",
+    arm: str = "S3",
+    taxonomy: str = "global/classes@v1",
+    apparatus: str = "",
 ) -> GradeRow:
     return posture_row(
         repo=repo,
@@ -81,7 +84,15 @@ def _row(
         latency_s=latency,
         evidence_pack_hash=PACK if clean else "",
         provenance=provenance,
-        labels={"story": "STORY-1234"},
+        # a sighted replay row of 2.4 on the global vocabulary: the one kind the export sends
+        # (an unstamped row — ``arm``/``taxonomy`` empty — carries neither key: below 2.4 a
+        # row never holds a 2.4 label, even an empty one, P-317)
+        labels={
+            "story": "STORY-1234",
+            **({"context_arm": arm} if arm else {}),
+            **({"taxonomy": taxonomy} if taxonomy else {}),
+        },
+        **({"apparatus_version": apparatus} if apparatus else {}),
     )
 
 
@@ -347,3 +358,22 @@ def test_consumption_of_shared_priors_is_not_implemented() -> None:
     assert not any(
         name.startswith(("consume", "import_shared", "apply_prior")) for name in dir(fed)
     )
+
+
+def test_the_export_carries_s3_rows_at_the_global_vocabulary_only() -> None:
+    """ADR-0026 item 12: only ``S3`` rows stamped at 2.4 or later under the global class set
+    leave the tenant — a blind row, another arm, an organisation's class set and an unstamped
+    row from before 2.4 stay, and ADR-0007's allowlist does not move."""
+    kept = _row(task_id="1" * 16)
+    stay = [
+        _row(task_id="2" * 16, arm="A0"),
+        _row(task_id="3" * 16, arm="S3+L"),
+        _row(task_id="4" * 16, arm="S1@claude-opus-5"),
+        _row(task_id="5" * 16, taxonomy="acme/classes@v1"),
+        _row(task_id="6" * 16, arm="", taxonomy="", apparatus="2.3"),
+    ]
+    out = fed.export_abstract([kept, *stay])
+    assert [d["n"] for d in out] == [1]
+    assert all(set(d) == set(fed.ABSTRACT_ALLOWLIST) for d in out)
+    assert "context_arm" not in fed.ABSTRACT_ALLOWLIST and "taxonomy" not in fed.ABSTRACT_ALLOWLIST
+    assert fed.export_abstract(stay) == []

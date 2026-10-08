@@ -98,6 +98,7 @@ from crb.core.grade import BELT_NAMES
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
+from crb.server.builder_login import login_refusal
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
@@ -121,6 +122,7 @@ from crb.server.schemas import (
 )
 from crb.server.secrets import secrets_dir_for
 from crb.server.spend_cap import unpriced_rungs
+from crb.store.db import make_session_factory
 from crb.store.events import lock_event_writes
 from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
 from crb.store.models import Event, Grade, Repo, Run, Task, User
@@ -700,11 +702,20 @@ CREDENTIAL_EXEMPT: dict[str, str] = {
 }
 
 
-def run_builders(run: Run) -> list[str]:
+def run_builders(run: Run, *, default_author: str = "") -> list[str]:
     """Every builder the run can call: each rung's, as :func:`run_rungs` reads the ladder
     the worker builds (``rN`` labels, or no ladder, are the run's own builder) — never the
-    run's own builder when no rung calls it (P-706)."""
-    return list(dict.fromkeys(builder for builder, _model in run_rungs(run)))
+    run's own builder when no rung calls it (P-706) — and, on the replay ``S1`` arm
+    (ADR-0026 item 1), its test author's (``params.test_author``, else the deployment's
+    ``default_author``), whose dead key would otherwise write an authoring failure for
+    every commit at $0 (docs/PREVENTION.md P-003's class)."""
+    names = [builder for builder, _model in run_rungs(run)]
+    params = dict(run.params_json or {})
+    if str(params.get("arm") or "") == "S1":
+        author = str(params.get("test_author") or default_author or "").strip()
+        if ":" in author:
+            names.append(author.split(":", 1)[0])
+    return list(dict.fromkeys(n for n in names if n))
 
 
 def credential_refusal(run: Run, settings: Any) -> None:
@@ -717,7 +728,9 @@ def credential_refusal(run: Run, settings: Any) -> None:
     if run.kind not in BUILD_KINDS:
         return
     cfg = dict((run.params_json or {}).get("builder_config") or {})
-    for name in run_builders(run):
+    factory = getattr(settings, "factory", None)
+    default_author = str(getattr(factory, "test_author", "") or "")
+    for name in run_builders(run, default_author=default_author):
         check = CREDENTIAL_CHECKS.get(name)
         if check is None:
             continue
@@ -874,7 +887,9 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
         return
 
 
-def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run) -> None:
+def submit_refusals(
+    db: Session, settings: Any, body: RunCreateRequest, run: Run, *, login: bool = True
+) -> None:
     """Every refusal a run meets at submit, whatever route queues it — the ONE gate, so a
     route that enqueues a run cannot skip one (docs/PREVENTION.md P-160: the Learn queue
     enqueued the plan's runs with no credential check, the class P-003 closed on
@@ -883,12 +898,24 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
 
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
+    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
+      run's test author included (F5b);
     * 422 ``builder_provider_mismatch`` — a rung (or the factory's test author) names a
       provider the configured OpenAI-compatible endpoint is not (P-284);
-    * the ADR-0019 §3 refusal — ``qualify_first: false`` on a build with nothing qualified
-      where it would be graded can only fail ``POSTURE_UNQUALIFIED`` on the worker;
-    * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
-      run's test author included (F5b).
+    * 409 ``posture_unqualified`` — the ADR-0019 §3 refusal: ``qualify_first: false`` on a
+      build with nothing qualified where it would be graded can only fail
+      ``POSTURE_UNQUALIFIED`` on the worker (a database read, so it costs nothing);
+    * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
+      presence check reads, an ``S1`` test author included) has a login whose last
+      verification failed; one that is not fresh is verified once first — LAST, after every
+      refusal that costs nothing, so a run refused for free never spends a verify (pilot D1,
+      P-435, P-462 — presence is not a working login; src/crb/server/builder_login.py;
+      ``tests/test_builder_login.py`` holds the order).
+
+    ``login=False`` skips ONLY the login check, for a caller that re-runs the gate under an
+    events write lock after running it whole before the lock: the check can verify a stale
+    login and record it on a second connection, which would wait on the lock the caller's
+    own transaction holds (P-729).
     """
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
@@ -909,6 +936,16 @@ def submit_refusals(db: Session, settings: Any, body: RunCreateRequest, run: Run
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    if not login:
+        return
+    # last: the only refusal that can cost a verify turn (P-462)
+    login_refusal(
+        make_session_factory(db.get_bind()),  # type: ignore[arg-type]
+        run,
+        ttl_s=settings.builder.login_ttl_s,
+        binary=settings.builder.claude_binary,
+        default_author=str(getattr(factory_settings, "test_author", "")),
+    )
 
 
 @router.post(
@@ -927,12 +964,17 @@ def create_run(
 ) -> RunOut:
     if db.get(Repo, body.repo) is None:
         raise ApiError(404, "not_found", f"no repo {body.repo!r}")
+    s1 = body.arm is not None
+    if s1 and body.kind != "blind":
+        # ADR-0026 item 1: the S1 arm is graded on the commit's HELD-OUT tests
+        raise ApiError(422, "validation_error", "arm S1 applies to blind runs only")
     factory_only = {
         "backlog_hash": body.backlog_hash,
         "deliver": body.deliver,
         "deliver_override": body.deliver_override,
         "max_rework": body.max_rework,
-        "test_author": body.test_author,
+        # a blind run on the S1 arm names its test author too
+        "test_author": None if s1 else body.test_author,
     }
     if body.kind != KIND_FACTORY and any(v is not None for v in factory_only.values()):
         named = sorted(k for k, v in factory_only.items() if v is not None)
@@ -952,6 +994,13 @@ def create_run(
         )
     api = require_jobs()
     run = new_run(body, actor=operator.id)
+    if s1:
+        # set before the refusals: the credential check names the S1 test author's builder
+        run.params_json = {
+            **dict(run.params_json or {}),
+            "arm": body.arm,
+            **({"test_author": body.test_author.strip()} if body.test_author is not None else {}),
+        }
     submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the

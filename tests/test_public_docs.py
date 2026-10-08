@@ -308,22 +308,25 @@ def _cell(clean: int, n: int, n_tasks: int) -> Any:
 
 
 def test_the_summary_states_the_deliver_bar_main_enforces() -> None:
-    """The bar the summary states is the one ``route`` runs. On main an unmeasured oracle,
-    an unevaluated controls verdict and repeated attempts on few tasks do not block
-    ``deliver``; while that holds the rule's sentence must say so, and the day routing.v2
-    refuses them this test fails until the sentence is rewritten."""
+    """The bar the summary states is the one ``route`` runs. Under ``routing.v2`` an
+    unmeasured oracle and a cell with no registered reading never deliver, however many
+    attempts are clean, so the summary must not say an unmeasured oracle "does not block"
+    ``deliver``; if a later rule let either through, this test fails until the sentence says
+    so again."""
     from crb.core import routing
 
     unmeasured = routing.route(_cell(30, 30, 30)).route
-    few_tasks = routing.route(_cell(30, 30, 3), oracle_strength=0.95).route
+    few_tasks = routing.route(
+        _cell(30, 30, 3), oracle=routing.OracleEvidence(strength=0.95, scored_tasks=3, n_tasks=3)
+    ).route
     measures = " ".join(_section(SUMMARY.read_text(encoding="utf-8"), "What it measures").split())
-    rule = next(s for s in re.split(r"(?<=\.) |\| ", measures) if "deliver" in s and "≥" in s)
     qualified = re.search(r"(unmeasured|not scored|not measured).{0,120}does not block", measures)
     if routing.ROUTE_DELIVER in (unmeasured, few_tasks):
-        assert qualified, f"main routes deliver without the full bar; the summary says: {rule}"
-        assert re.search(r"is meant to|published bar", rule), rule
+        assert qualified, "main routes deliver without the full bar: say so in the summary"
     else:
         assert not qualified, "routing.v2 refuses the unmeasured cell: rewrite the summary"
+        assert routing.POLICY_VERSION in measures, "the summary names the rule it describes"
+        assert re.search(r"never measured routes `calibrate`", measures), measures
 
 
 def test_the_summary_says_when_belt_5_counts() -> None:

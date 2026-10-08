@@ -93,10 +93,12 @@ from fixtures.signoff_seed import (
     STATEMENT,
     STRONG_ORACLE,
     accepted_row,
+    add_red_row,
     attestation_for,
     attested_body,
     clear_policy,
     pass_controls,
+    prove_deliver_cell,
     score_oracle,
 )
 
@@ -252,20 +254,21 @@ class TestCreate:
         assert d["code"] == "controls_escapes" and d["threshold"] == 0 and d["observed_value"] == 1
         assert "1 measurement control(s) graded clean" in e["message"]
         assert "max_controls_escapes=0" in e["message"]
-        assert d["policy_version"] == "signoff-policy.v3" and d["thresholds"] == DEFAULT_THRESHOLDS
-        # the map routes the cell under the seed's task-level oracle (0.58): the routing
-        # rule's first refusal is the weak oracle, before the controls escape
+        assert d["policy_version"] == "signoff-policy.v4" and d["thresholds"] == DEFAULT_THRESHOLDS
+        # the map routes the cell under routing.v2: its host rows are not the sealed posture
+        # (the route's first clause), and no reading licenses its arm (never overridable)
         assert _codes(d["refusals"]) == [
             "controls_escapes",
             "oracle_weak",
-            "route_not_deliver:oracle_weak",
+            "route_not_deliver:posture_unsealed",
+            "not_standard:reading_unregistered",
         ]
         obs = d["observed"]
         assert obs["n"] == 40 and obs["point"] == 0.95 and obs["false_q1"] == 0
         # the oracle as the seed's task-level scores measure it: 3 of the cell's 4 tasks
         assert obs["oracle_strength"] == SEED_ORACLE
         assert obs["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
-        assert obs["route"] == "human" and obs["reason_code"] == "oracle_weak"
+        assert obs["route"] == "calibrate" and obs["reason_code"] == "posture_unsealed"
         assert obs["controls"] == {
             "verdict": "escaped",
             "run_id": "0" * 32,
@@ -282,14 +285,14 @@ class TestCreate:
     def test_201_once_the_controls_gate_is_clean_and_the_oracle_is_strong(self, env: Env) -> None:
         clear_policy(env)
         row = accepted_row(env, DELIVER)
-        r = env.post("/signoffs", json=attested_body(env, DELIVER, note="reviewed 40 packs"))
+        r = env.post("/signoffs", json=attested_body(env, DELIVER, note="reviewed 20 packs"))
         assert r.status_code == 201, r.text
         d = r.json()
         assert set(d) == OUT_KEYS
         assert (
             d["repo"] == ALPHA
             and d["tier"] == "human-verified"
-            and d["note"] == "reviewed 40 packs"
+            and d["note"] == "reviewed 20 packs"
         )
         assert d["cell"] == {
             "process_step": "*",
@@ -304,20 +307,22 @@ class TestCreate:
         # the ledger keeps the approver's id; the reader gets the name resolved at read
         assert d["approver"] != "appr1" and d["approver_name"] == "appr1"
         assert d["revoked_by_name"] is None
-        # the evidence snapshot: n, point, the interval, false-Q1, oracle, apparatus
+        # the evidence snapshot: n, point, the interval, false-Q1, oracle, apparatus — the
+        # reading's 20 sealed first attempts on the cell's standard arm (the host rows are
+        # another posture class)
         ev = d["evidence"]
-        assert ev["n"] == 40 and ev["point"] == 0.95
-        assert ev["ci_low"] == pytest.approx(0.835, abs=0.001)
+        assert ev["n"] == 20 and ev["point"] == 1.0
+        assert ev["ci_low"] == pytest.approx(0.839, abs=0.001)
         assert ev["false_q1"] == 0 and ev["apparatus_versions"] == [APPARATUS_VERSION]
         # the rows carry no strength; the stamped one is the task-level measurement
         assert ev["oracle_strength"] == pytest.approx(STRONG_ORACLE)
         # the policy decision
-        assert d["schema"] == "crb.signoff.v4"
-        assert d["policy_version"] == "signoff-policy.v3"
+        assert d["schema"] == "crb.signoff.v5"
+        assert d["policy_version"] == "signoff-policy.v4"
         assert d["verifier_kind"] == "local"  # the seed's users are local accounts
         assert d["policy_thresholds"] == DEFAULT_THRESHOLDS
         assert d["route"]["route"] == "deliver" and d["route"]["reason_code"] == "deliver"
-        assert "n=40" in d["route"]["reason"]
+        assert "20/20" in d["route"]["reason"]
         assert d["controls"] == {
             "verdict": "passed",
             "run_id": CLEAN_CONTROLS_RUN,
@@ -339,23 +344,28 @@ class TestCreate:
         rows = _signoffs(env)
         assert len(rows) == 1 and rows[0].row_hash == signoff_hash(rows[0])
         cj = rows[0].cell_json
-        assert rows[0].evidence_rows == 40 and cj["evidence_n"] == "40"
-        assert cj["policy_version"] == "signoff-policy.v3" and cj["verifier_kind"] == "local"
+        assert rows[0].evidence_rows == 20 and cj["evidence_n"] == "20"
+        assert cj["policy_version"] == "signoff-policy.v4" and cj["verifier_kind"] == "local"
         assert cj["evidence_oracle_strength"] == f"{STRONG_ORACLE:.6f}"
         assert '"require_oracle_measured": true' in cj["policy_thresholds"]
         assert '"require_independent_verifier": true' in cj["policy_thresholds"]
         assert cj["route_reason_code"] == "deliver" and cj["controls_verdict"] == "passed"
         assert cj["controls_run_id"] == CLEAN_CONTROLS_RUN and cj["controls_escapes"] == "0"
+        # the map lifts the cell to human-verified and its route is unchanged (a tier never
+        # moves a route)
+        cells = env.get(f"/capability-map?repo={ALPHA}").json()["cells"]
+        (cell,) = [c for c in cells if (c["capability_class"], c["size"]) == ("bug.fix", "S")]
+        assert cell["verification_tier"] == "human-verified" and cell["route"] == "deliver"
         assert cj["attestation_reviewed_row_hash"] == row.row_hash
         assert verify_signoff_rows(rows) == 1
         # ... and recorded as a system event on the repo's sign-off trace
         (created,) = _events(env, "signoff.created")
-        assert created.payload_json["n"] == 40
+        assert created.payload_json["n"] == 20
         assert created.payload_json["controls_verdict"] == "passed"
         assert created.payload_json["oracle_strength"] == pytest.approx(STRONG_ORACLE)
         assert (created.payload_json["oracle_scored"], created.payload_json["oracle_tasks"]) == (
-            4,
-            4,
+            20,
+            20,
         )
         assert created.payload_json["reviewed_row_hash"] == row.row_hash
         assert created.payload_json["verifier_kind"] == "local"
@@ -364,19 +374,21 @@ class TestCreate:
         assert got.status_code == 200 and got.json() == d
 
     def test_409_oracle_weak_is_the_seed_s_measurement(self, env: Env) -> None:
-        """With the controls gate clean the seed's cell is still refused: its oracle IS
-        measured — 0.58 over 3 of 4 tasks — and below the bar. A deployment may lower
-        the numeric bar (the clause is overridable); the route — the capability map's,
+        """With the cell proven and the controls gate clean the cell is still refused when its
+        oracle IS measured — 0.5 on every counted task — and below the bar. A deployment may
+        lower the numeric bar (the clause is overridable); the route — the capability map's,
         routed under the same task-level strength — refuses independently."""
+        rows = prove_deliver_cell(env)
         pass_controls(env)
+        score_oracle(env, task_ids=[r.task_id for r in rows], strength=0.5)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 409, r.text
         d = envelope(r)["detail"]
         assert d["code"] == "oracle_weak" and d["threshold"] == 0.8
-        assert d["observed_value"] == SEED_ORACLE
+        assert d["observed_value"] == 0.5
         assert _codes(d["refusals"]) == ["oracle_weak", "route_not_deliver:oracle_weak"]
         assert d["refusals"][0]["overridable"] is True
-        assert d["observed"]["oracle"] == {"strength": SEED_ORACLE, "scored": 3, "tasks": 4}
+        assert d["observed"]["oracle"] == {"strength": 0.5, "scored": 20, "tasks": 20}
         assert d["observed"]["route"] == "human"  # the map's route, under the same oracle
         assert _signoffs(env) == []
 
@@ -386,9 +398,9 @@ class TestCreate:
         """signoff-policy.v2: a cell none of whose tasks carries a mutation score cannot be
         signed — under any ``CRB_SIGNOFF__*`` setting; there is no knob, and trying to set
         one is a misconfiguration (503), not a lower bar. A later oracle run clears it."""
+        prove_deliver_cell(env)
         pass_controls(env)
-        # the latest score per task wins: unscoreable scores on every task of the cell
-        # make the cell read as unmeasured (0 of 4)
+        # unscoreable scores on every task of the cell leave the cell unmeasured (0 of 20)
         score_oracle(env, strength=None, run_id="8" * 32)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 409, r.text
@@ -398,11 +410,12 @@ class TestCreate:
         assert d["code"] == "oracle_unmeasured"
         assert d["threshold"] == "measured" and d["observed_value"] is None
         assert "mutation score" in e["message"] and "cannot be relaxed" in e["message"]
-        assert _codes(d["refusals"]) == ["oracle_unmeasured"]
+        # routing.v2 reads the oracle too (ADR-0025 item 9): the route refuses beside it
+        assert _codes(d["refusals"]) == ["oracle_unmeasured", "route_not_deliver:oracle_unmeasured"]
         assert d["refusals"][0]["overridable"] is False
         assert d["observed"]["oracle_strength"] is None
-        assert d["observed"]["oracle"] == {"strength": None, "scored": 0, "tasks": 4}
-        assert d["observed"]["route"] == "deliver"
+        assert d["observed"]["oracle"] == {"strength": None, "scored": 0, "tasks": 20}
+        assert d["observed"]["route"] == "calibrate"
         (ev,) = _events(env, "signoff.refused")
         assert ev.payload_json["code"] == "oracle_unmeasured"
         assert _signoffs(env) == []
@@ -426,7 +439,7 @@ class TestCreate:
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 201, r.text
         assert r.json()["evidence"]["oracle_strength"] == pytest.approx(STRONG_ORACLE)
-        assert r.json()["policy_version"] == "signoff-policy.v3"
+        assert r.json()["policy_version"] == "signoff-policy.v4"
 
     def test_full_cell_scope_and_second_attestation_chains(self, env: Env) -> None:
         clear_policy(env)
@@ -442,7 +455,8 @@ class TestCreate:
         assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 2
 
     def test_409_thin_cell_lists_every_clause_with_observed_vs_threshold(self, env: Env) -> None:
-        clear_policy(env)
+        # the deployment grades on the host, where the thin cell's rows were graded
+        pass_controls(env)
         r = env.post("/signoffs", json=attested_body(env, THIN))
         assert r.status_code == 409, r.text
         e = envelope(r)
@@ -451,14 +465,17 @@ class TestCreate:
         assert d["code"] == "thin_cell" and d["threshold"] == 10 and d["observed_value"] == 4
         assert "n=4 < n_min=10" in e["message"]
         # the thin cell's tasks: one unscoreable seed score, one never scored → unmeasured
+        # routing.v2: host rows never deliver (posture_unsealed), and no reading licenses
+        # the arm (not_standard, never overridable)
         assert _codes(d["refusals"]) == [
             "thin_cell",
             "oracle_unmeasured",
-            "route_not_deliver:n_below_min",
+            "route_not_deliver:posture_unsealed",
+            "not_standard:reading_unregistered",
         ]
         route = d["refusals"][2]
         assert route["threshold"] == "deliver" and route["observed"] == "calibrate"
-        assert [r["overridable"] for r in d["refusals"]] == [True, False, True]
+        assert [r["overridable"] for r in d["refusals"]] == [True, False, True, False]
         assert d["observed"]["oracle"] == {"strength": None, "scored": 0, "tasks": 2}
         assert _signoffs(env) == []
 
@@ -483,9 +500,12 @@ class TestCreate:
             "controls_unmeasured",
             "oracle_unmeasured",
             "route_not_deliver:unrouted",
+            "not_standard:reading_unregistered",
             "attestation_missing",
         ]
-        # a FAILED gate on alpha (the oracle scored strong, so only the gate is at issue)
+        # a FAILED gate on alpha (the cell proven, the oracle scored strong, so only the gate
+        # is at issue)
+        prove_deliver_cell(env)
         score_oracle(env)
         pass_controls(env, passed=False, run_id="6" * 32)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
@@ -593,8 +613,8 @@ class TestCreate:
         r = post("a" * 64)
         assert r.status_code == 422 and envelope(r)["detail"]["errors"][0]["loc"] == loc
         assert "no ledger row" in envelope(r)["message"]
-        # a red row of the cell (T3's r1 attempt) — not accepted
-        red = accepted_row(env, DELIVER, clean=False)
+        # a red row of the cell, in the posture and on the arm it is read on — not accepted
+        red = add_red_row(env)
         r = post(red.row_hash)
         assert r.status_code == 422 and "not an accepted row" in envelope(r)["message"]
         # an accepted row of ANOTHER cell (the thin cell) — outside the attested scope
@@ -638,6 +658,13 @@ class TestCreate:
 # ---------------------------------------------------------------------------
 # The two-person rule (signoff-policy.v3, F7b) and who signed (F34)
 # ---------------------------------------------------------------------------
+
+
+def _deliver_tier(env: Env) -> str:
+    """The verification tier the map serves for the deliver cell (class × size)."""
+    cells = env.get(f"/capability-map?repo={ALPHA}").json()["cells"]
+    (cell,) = [c for c in cells if (c["capability_class"], c["size"]) == ("bug.fix", "S")]
+    return str(cell["verification_tier"])
 
 
 def _set_run_actor(env: Env, run_id: str, actor: str) -> None:
@@ -933,7 +960,7 @@ class TestVerifierKind:
         assert (
             d["verifier_kind"] == "oidc"
             and d["approver"] == uid
-            and d["schema"] == "crb.signoff.v4"
+            and d["schema"] == "crb.signoff.v5"
         )
         (row,) = _signoffs(env)
         assert row.cell_json["verifier_kind"] == "oidc" and row.row_hash == signoff_hash(row)
@@ -987,7 +1014,7 @@ class TestPolicy:
     def test_policy_endpoint_reports_the_defaults(self, env: Env) -> None:
         login(env.client, "viewer")
         d = env.get("/signoffs/policy").json()
-        assert d["policy_version"] == "signoff-policy.v3" and d["relaxed"] is False
+        assert d["policy_version"] == "signoff-policy.v4" and d["relaxed"] is False
         assert {k: d[k] for k in DEFAULT_THRESHOLDS} == DEFAULT_THRESHOLDS
         assert d["non_overridable"] == [
             "false_q1",
@@ -996,6 +1023,8 @@ class TestPolicy:
             "attested_row_not_measured",
             "attested_row_without_pack",
             "same_actor",
+            "look_pending",
+            "not_standard",
         ]
         assert d["bounds"]["n_min"] == [1, 10000]
         assert "require_oracle_measured" not in d["bounds"]  # a switch with no knob
@@ -1004,11 +1033,14 @@ class TestPolicy:
     def test_relaxed_thresholds_are_applied_and_stamped(
         self, env: Env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A deployment allowing one escape and a 0.5 oracle signs the seeded cell WITHOUT
-        a clean re-run — and the record says which bar it cleared."""
+        """A deployment allowing one escape and a 0.5 oracle signs the proven cell under the
+        seed's escaped controls report WITHOUT a clean re-run — and the record says which bar
+        it cleared. No knob reaches the standard-arm clause: the cell is proven first."""
+        rows = prove_deliver_cell(env)
+        score_oracle(env, task_ids=[x.task_id for x in rows], strength=SEED_ORACLE)
         monkeypatch.setenv("CRB_SIGNOFF__MAX_CONTROLS_ESCAPES", "1")
         monkeypatch.setenv("CRB_SIGNOFF__REQUIRE_ROUTE_DELIVER", "false")  # the route is human
-        monkeypatch.setenv("CRB_SIGNOFF__MIN_ORACLE_STRENGTH", "0.5")  # the seed's is 0.58
+        monkeypatch.setenv("CRB_SIGNOFF__MIN_ORACLE_STRENGTH", "0.5")  # the tasks' is 0.58
         assert env.get("/signoffs/policy").json()["relaxed"] is True
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 201, r.text
@@ -1056,12 +1088,16 @@ class TestPolicy:
         assert r.status_code == 409 and envelope(r)["detail"]["code"] == "oracle_unmeasured"
         assert _codes(envelope(r)["detail"]["refusals"]) == [
             "oracle_unmeasured",
+            "not_standard:reading_unregistered",
             "attestation_missing",
         ]
-        # … and a missing attestation
+        # … an arm no registered reading licenses (signoff-policy.v4) …
         score_oracle(env, cell=THIN_CELL)
         r = env.post("/signoffs", json={"repo": ALPHA, "cell": THIN})
-        assert r.status_code == 409 and envelope(r)["detail"]["code"] == "attestation_missing"
+        assert r.status_code == 409
+        assert envelope(r)["detail"]["code"] == "not_standard:reading_unregistered"
+        # … and a missing attestation
+        assert _codes(envelope(r)["detail"]["refusals"])[-1] == "attestation_missing"
 
 
 # ---------------------------------------------------------------------------
@@ -1092,7 +1128,8 @@ class TestPreview:
         assert _codes(d["refusals"]) == [
             "controls_escapes",
             "oracle_weak",
-            "route_not_deliver:oracle_weak",
+            "route_not_deliver:posture_unsealed",
+            "not_standard:reading_unregistered",
             "attestation_missing",
         ]
         esc = d["refusals"][0]
@@ -1100,6 +1137,7 @@ class TestPreview:
         weak = d["refusals"][1]
         assert weak["threshold"] == 0.8 and weak["observed"] == SEED_ORACLE
         assert d["refusals"][3]["overridable"] is False
+        assert d["refusals"][4]["overridable"] is False
         # what the approver must see: n / point / Wilson-low / false-Q1 / oracle / split
         ev = d["evidence"]
         assert (
@@ -1118,6 +1156,7 @@ class TestPreview:
             "lint": 0,
             "lint_evaluated": 0,
             "outage": 0,
+            "outage_auth": 0,  # of the outages, the refused logins (pilot D1)
             "api": 0,
         }
         assert ev["model_n"] == 40 and ev["model_point"] == 0.95
@@ -1126,20 +1165,20 @@ class TestPreview:
         assert d["controls"]["constructible"] == 12 and d["controls"]["total"] == 14
         assert d["controls"]["run_id"] == "0" * 32 and d["controls"]["created"]
         assert d["route"] == {
-            "route": "human",
+            "route": "calibrate",
             "reason": d["route"]["reason"],
-            "reason_code": "oracle_weak",
+            "reason_code": "posture_unsealed",
         }
-        assert "oracle strength 0.58" in d["route"]["reason"]
+        assert "sealed posture" in d["route"]["reason"]
         # the policy in force and what the record would carry
-        assert d["policy"]["policy_version"] == "signoff-policy.v3"
+        assert d["policy"]["policy_version"] == "signoff-policy.v4"
         assert d["policy"]["require_oracle_measured"] is True
         assert d["policy"]["require_independent_verifier"] is True
         wr = d["would_record"]
-        assert wr["n_at_signoff"] == 40 and wr["route_reason_code"] == "oracle_weak"
+        assert wr["n_at_signoff"] == 40 and wr["route_reason_code"] == "posture_unsealed"
         assert wr["controls_verdict"] == "escaped" and wr["controls_escapes"] == 1
         assert wr["oracle_strength_at_signoff"] == pytest.approx(SEED_ORACLE, abs=1e-4)
-        assert wr["policy_version"] == "signoff-policy.v3"
+        assert wr["policy_version"] == "signoff-policy.v4"
         assert wr["policy_thresholds"] == DEFAULT_THRESHOLDS and wr["attestation"] is None
         assert wr["verifier_kind"] == "local"  # the viewer's own account kind, as the POST would
         assert "row_hash" not in wr and "record_id" not in wr
@@ -1152,24 +1191,29 @@ class TestPreview:
 
     def test_preview_lists_oracle_unmeasured_with_observed_null(self, env: Env) -> None:
         """The v2 clause in the preview: ``observed: null`` (nothing was measured — never
-        0), threshold ``measured``, non-overridable; the oracle block says 0 of 4 tasks."""
+        0), threshold ``measured``, non-overridable; the oracle block says 0 of 20 tasks."""
+        prove_deliver_cell(env)
         pass_controls(env)
-        score_oracle(env, strength=None)  # every task of the cell: latest score unscoreable
+        score_oracle(env, strength=None)  # every task of the cell: unscoreable
         d = _preview(env, DELIVER).json()
-        assert _codes(d["refusals"]) == ["oracle_unmeasured", "attestation_missing"]
+        assert _codes(d["refusals"]) == [
+            "oracle_unmeasured",
+            "route_not_deliver:oracle_unmeasured",
+            "attestation_missing",
+        ]
         unm = d["refusals"][0]
         assert unm["observed"] is None and unm["threshold"] == "measured"
         assert unm["overridable"] is False and "mutation score" in unm["message"]
         assert d["evidence"]["oracle_strength"] is None
-        assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 4}
+        assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 20}
         assert d["would_record"]["oracle_strength_at_signoff"] is None
-        assert d["signable"] is False and d["route"]["route"] == "deliver"
+        assert d["signable"] is False and d["route"]["route"] == "calibrate"
 
     def test_preview_becomes_signable_with_a_clean_gate_and_a_named_row(self, env: Env) -> None:
         clear_policy(env)
         d = _preview(env, DELIVER).json()
         assert _codes(d["refusals"]) == ["attestation_missing"] and d["signable"] is False
-        assert d["evidence"]["oracle"] == {"strength": STRONG_ORACLE, "scored": 4, "tasks": 4}
+        assert d["evidence"]["oracle"] == {"strength": STRONG_ORACLE, "scored": 20, "tasks": 20}
         row = accepted_row(env, DELIVER)
         d = _preview(env, DELIVER, reviewed_row_hash=row.row_hash, statement="read-it").json()
         assert d["refusals"] == [] and d["signable"] is True
@@ -1183,13 +1227,13 @@ class TestPreview:
         assert env.post("/signoffs", json=attested_body(env, DELIVER)).status_code == 201
 
     def test_preview_thin_and_unmeasured_cells(self, env: Env) -> None:
-        clear_policy(env)
+        pass_controls(env)  # the deployment grades on the host, where the thin rows were
         d = _preview(env, THIN).json()
         assert d["evidence"]["n"] == 4 and d["refusals"][0]["code"] == "thin_cell"
         assert d["refusals"][0]["observed"] == 4 and d["refusals"][0]["threshold"] == 10
         assert d["refusals"][1]["code"] == "oracle_unmeasured"  # the thin cell's tasks: unscored
         assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 2}
-        assert d["route"]["reason_code"] == "n_below_min"
+        assert d["route"]["reason_code"] == "posture_unsealed"
         assert len(d["accepted_rows"]) == 2
         d = _preview(env, {"capability_class": "docs.update", "size": "S"}).json()
         assert d["evidence"]["measured"] is False and d["evidence"]["n"] == 0
@@ -1201,7 +1245,7 @@ class TestPreview:
 
     def test_preview_validates_the_named_row_like_the_post(self, env: Env) -> None:
         clear_policy(env)
-        red = accepted_row(env, DELIVER, clean=False)
+        red = add_red_row(env)
         r = _preview(env, DELIVER, reviewed_row_hash=red.row_hash)
         assert r.status_code == 422 and "not an accepted row" in envelope(r)["message"]
         r = _preview(env, DELIVER, reviewed_row_hash="zz")
@@ -1405,7 +1449,7 @@ class TestListAndRevoke:
         assert verify_signoff_rows(_signoffs(env)) == 1
         clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
-        assert r.status_code == 201 and r.json()["policy_version"] == "signoff-policy.v3"
+        assert r.status_code == 201 and r.json()["policy_version"] == "signoff-policy.v4"
         assert verify_signoff_rows(_signoffs(env)) == 2
 
     def test_revoke_rbac(self, env: Env) -> None:
@@ -1416,10 +1460,7 @@ class TestListAndRevoke:
     def test_revoke_appends_and_hides(self, env: Env) -> None:
         clear_policy(env)
         sid = env.post("/signoffs", json=attested_body(env, DELIVER)).json()["id"]
-        assert (
-            env.get(f"/capability-map?repo={ALPHA}").json()["cells"][1]["verification_tier"]
-            == "human-verified"
-        )
+        assert _deliver_tier(env) == "human-verified"
         r = env.post(f"/signoffs/{sid}/revoke", json={"note": "evidence re-examined"})
         assert r.status_code == 200, r.text
         d = r.json()
@@ -1448,10 +1489,7 @@ class TestListAndRevoke:
         assert env.get(f"/signoffs?repo={ALPHA}").json()["total"] == 0
         hist = env.get(f"/signoffs?repo={ALPHA}&include_revoked=true").json()
         assert hist["total"] == 1 and hist["items"][0]["revoked"] is True
-        assert (
-            env.get(f"/capability-map?repo={ALPHA}").json()["cells"][1]["verification_tier"]
-            == "automated-pass"
-        )
+        assert _deliver_tier(env) == "automated-pass"
         # twice → 409; unknown → 404; the revocation row itself is not an attestation id
         why = {"note": "again"}
         r = env.post(f"/signoffs/{sid}/revoke", json=why)
@@ -1524,7 +1562,7 @@ class TestPostureClass:
         d = template.to_dict()
         d.update({"row_id": "", "prev_hash": "", "row_hash": ""})
         d["task_id"] = "f" * 40
-        d["labels"] = {**d.get("labels", {}), "posture_class": "docker/copy/sealed"}
+        d["labels"] = {**d.get("labels", {}), "posture_class": "local/inplace/host-env"}
         d.pop("failure_kind", None)
         d.pop("cost_known", None)
         return ledger.append(GradeRowCls.from_dict(d)).row_hash

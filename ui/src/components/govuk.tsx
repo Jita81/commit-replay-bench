@@ -63,7 +63,8 @@ const TAG: Record<TagTone, string> = {
  * The solid status label — uppercase, bold, one of six tones; `hint` makes it the trigger for
  * what the status means. `wrap` lets a long label break onto a second line instead of pushing
  * its row past the viewport (a task list's "No cell routes deliver yet" scrolled Home sideways
- * at 375 px on a deployment with no deliver cell — found by 11-screens on a stack of its own).
+ * at 375 px on a deployment with no deliver cell — found by 11-screens on a stack of its own;
+ * "Backlog frozen — run the factory" did the same, found by stream R: one prop for both).
  */
 export function Tag({ tone, children, className = '', hint, wrap = false, ...rest }: { tone: TagTone; children: ReactNode; className?: string; hint?: HintId; wrap?: boolean; 'aria-label'?: string; 'data-testid'?: string }) {
   const cls = `inline-block rounded-[4px] px-2 py-1 text-[13px] font-bold uppercase leading-tight tracking-[.05em] ${wrap ? 'whitespace-normal' : 'whitespace-nowrap'} ${TAG[tone]} ${className}`

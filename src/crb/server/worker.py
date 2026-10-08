@@ -109,20 +109,22 @@ Honesty properties
 Navigation
 ----------
 What it is:   The worker process — the only thing that executes a run (the API never does).
-What it does: Polls the job queue, claims one run, dispatches by kind (setup, probe, mine,
-              label, replay, blind, oracle, controls, factory), streams StepEvents, writes
-              grade rows through the append-only ledger with the run's labels stamped,
-              records the apparatus, and marks the run succeeded / failed / cancelled
-              honestly (all-attempts-errored is a failure; a provider outage streak stops
-              the run; so does a spend cap, before an attempt or item that could pass it —
-              src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
-              skips it). Fetches and
-              fast-forwards the clone's default branch before a factory run (refusing the
-              run when it cannot) and syncs delivered pull requests' outcomes first. Checks in to the
-              ``workers`` table every ``heartbeat_s`` (idle or not, with the reaper's
-              pending count) and records every worker-side metric, including deliveries
-              by outcome and real installation-token mints. Reaps a container whose kill
-              went unconfirmed on every poll and puts the outcome on the run's trace.
+What it does: Polls the job queue, claims one run — re-checking a build run's builder
+              credential by presence when it claims it, and failing it before any attempt with
+              the submit check's code when it is gone (P-050) — dispatches by kind (setup,
+              probe, mine, label, replay, blind, oracle, controls, factory), streams
+              StepEvents, writes grade rows through the append-only ledger with the run's
+              labels stamped, records the apparatus, and marks the run succeeded / failed /
+              cancelled honestly (all-attempts-errored is a failure; a provider outage streak
+              stops the run; so does a spend cap, before an attempt or item that could pass it
+              — src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
+              skips it). Fetches and fast-forwards the clone's default branch before a factory
+              run (refusing the run when it cannot) and syncs delivered pull requests'
+              outcomes first. Checks in to the ``workers`` table every ``heartbeat_s`` (idle
+              or not, with the reaper's pending count) and records every worker-side metric,
+              including deliveries by outcome and real installation-token mints. Reaps a
+              container whose kill went unconfirmed on every poll and puts the outcome on the
+              run's trace.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -174,6 +176,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -190,6 +193,7 @@ from crb.builders.adapter import (
     rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
+from crb.builders.brief import ARM_S1, S1Arm
 from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
@@ -198,6 +202,7 @@ from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
+from crb.core.context_arm import BASE_S1, REPLAY_MODE
 from crb.core.deps import DepsProvider, ProvisionRefused
 from crb.core.evidence import utc_now_iso
 from crb.core.execution import (
@@ -206,6 +211,7 @@ from crb.core.execution import (
     DockerSettings,
     Executor,
     SandboxUnavailable,
+    executor_kind,
     make_executor,
 )
 from crb.core.git import (
@@ -251,12 +257,13 @@ from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.secrets_file import SecretsStore
-from crb.core.spec import POOL_HARD, POOL_STANDARD, RepoConfig, TaskSpec
+from crb.core.spec import POOL_HARD, POOL_STANDARD, UNCLASSIFIED, RepoConfig, TaskSpec
 from crb.core.stats import mean
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.core.workspace import Workspace, opaque_dest
 from crb.factory.author import author_from_label
-from crb.factory.backlog import BacklogItem
+from crb.factory.backlog import KIND_CODE, BacklogItem
 from crb.factory.delivery import (
     GitCredentials,
     GitCredentialsProvider,
@@ -265,12 +272,28 @@ from crb.factory.delivery import (
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
-from crb.factory.testfirst import AuthoredTest, TestAuthor, author_label
+from crb.factory.standard import Readers
+from crb.factory.testfirst import (
+    AuthoredTest,
+    TestAuthor,
+    assert_distinct_identity,
+    author_label,
+    canonical_model,
+)
 from crb.intake.client import TRACKER_TOKEN_SECRET, TrackerClient, TrackerError
 from crb.observability import metrics
 from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink, StepStatus
+from crb.observability.metrics import parse_metrics_port
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
+from crb.server import factory_standard
+from crb.server.builder_login import (
+    LOGIN_INVALID_CODE,
+    claim_refusal,
+    record_claim_refusal,
+    record_refused_login,
+)
+from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
 from crb.server.github_app import GitHubApp, GitHubAppError
@@ -300,6 +323,7 @@ from crb.server.routes.capability import (
 from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
+from crb.server.routes.runs import credential_refusal
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     ROLE_RANK,
@@ -499,15 +523,21 @@ class WorkerSettings:
     #: ``<home>/evidence/patches`` (crb.core.patches) — ``CRB_RETENTION__PATCHES``.
     store_patches: bool = True
     max_reclaims: int = 3
+    #: How long a builder login's last verification stands (``CRB_BUILDER__LOGIN_TTL_S``, the
+    #: value the API's submit gate reads): at claim, a login recorded invalid within it fails
+    #: the run before any build (Q1's review; src/crb/server/builder_login.py).
+    builder_login_ttl_s: int = 600
     #: The worker's own Prometheus exposition (J-TEL-1): every build / grade / cost series
     #: is recorded in THIS process, so the API's ``/metrics`` never carries them. Served by
     #: ``prometheus_client.start_http_server`` on ``metrics_host:metrics_port``
     #: (``CRB_METRICS_HOST``, default loopback like the API's bind — a container sets
-    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off) when ``metrics_enabled``
-    #: (``CRB_METRICS_ENABLED``, the same switch the API reads) and the client is installed.
+    #: ``0.0.0.0``; ``CRB_METRICS_PORT``, default 9464; ``0`` = off; ``auto`` = a free port
+    #: the operating system picks, reported on ``/health`` — pilot D5) when
+    #: ``metrics_enabled`` (``CRB_METRICS_ENABLED``, the same switch the API reads) and the
+    #: client is installed.
     metrics_enabled: bool = True
     metrics_host: str = "127.0.0.1"
-    metrics_port: int = 9464
+    metrics_port: int | str = 9464
     #: The GitHub App this deployment is registered as (``CRB_GITHUB__*``): the worker
     #: mints installation tokens to clone and deliver linked repositories (ADR-0014).
     github: GitHubAppSettings = field(default_factory=GitHubAppSettings)
@@ -553,10 +583,10 @@ class WorkerSettings:
         object.__setattr__(self, "kinds", tuple(self.kinds))
         if self.poll_s <= 0 or self.heartbeat_s <= 0 or self.stale_after_s <= 0:
             raise ValueError("poll_s, heartbeat_s and stale_after_s must be positive")
-        if not 0 <= int(self.metrics_port) <= 65535:
-            raise ValueError("CRB_METRICS_PORT must be 0 (off) or a port 1-65535")
+        object.__setattr__(self, "metrics_port", parse_metrics_port(self.metrics_port))
         if not str(self.metrics_host).strip():
             raise ValueError("CRB_METRICS_HOST must name an address to bind (127.0.0.1, 0.0.0.0)")
+        executor_kind(self.executor)  # P-308: an empty or unknown kind never starts a worker
 
 
 # ---------------------------------------------------------------------------
@@ -778,6 +808,13 @@ class _RunLedger:
 Handler = Callable[[RunContext], tuple[str, dict[str, Any], str]]
 
 
+def run_executor_kind(params: Mapping[str, Any], settings: WorkerSettings) -> str:
+    """The executor a run asks for: its own ``params.executor``, else the worker's setting —
+    never a default of our own, so an empty kind reaches ``make_executor`` and is refused
+    there (P-308); the unsealed-override stamp reads the same answer."""
+    return str(params.get("executor") or settings.executor)
+
+
 class Worker:
     def __init__(self, settings: WorkerSettings, *, engine: Engine | None = None) -> None:
         self.settings = settings
@@ -991,6 +1028,10 @@ class Worker:
             approval=ApprovalPolicy.from_settings(self.settings.intake),
             lease=intake_lease(self.factory, repo, ttl_s=2 * budget_s + 60),
             then=tell_the_tickets,
+            # the ticket feedback names the SAME entry-gate stop the next run's pre-build
+            # check will: the store-bound readers, on the repository's own checks arm and
+            # this deployment's posture class
+            gate=self._standard_readers(repo),
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -1192,8 +1233,18 @@ class Worker:
         counts: dict[str, Any] = {}
         started = time.monotonic()
         try:
+            refused = "" if self.queue.is_cancel_requested(run.id) else self._credential_gone(run)
             if self.queue.is_cancel_requested(run.id):
                 status, error = STATUS_CANCELLED, ""
+            elif refused:
+                # P-050: the credential went between submit and claim — stop before any
+                # attempt with the submit check's own code (presence only, nothing read)
+                emitter.emit(
+                    "system", "run.credential_refused", status=StepStatus.ERROR, error=refused
+                )
+                status, error = STATUS_FAILED, refused
+            elif (dead := self._dead_login(run, emitter)) is not None:
+                status, error = STATUS_FAILED, dead
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1243,6 +1294,48 @@ class Worker:
             final_status=status,
             counts=counts,
         )
+
+    def _credential_gone(self, run: Run) -> str:
+        """P-050 / G-707: the submit-time credential check (``POST /runs``'s
+        ``credential_refusal``), run again when the worker CLAIMS a build run — queued or
+        reclaimed — because a credential present at submit can be gone by then. PRESENCE
+        ONLY: the check names the variable or the file, never reads a value into anything
+        this returns. ``""`` when every builder the run would call has its credential."""
+        try:
+            credential_refusal(run, SimpleNamespace(home=self.home, factory=self.settings.factory))
+        except ApiError as exc:
+            why = exc.message.removesuffix(" — nothing was queued")
+            return (
+                f"{exc.code}: {why} — the worker checked again when it claimed the run; "
+                "nothing was built"
+            )
+        return ""
+
+    def _dead_login(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when a login it would call was
+        recorded invalid after it was queued — read from the cache, never a verify or a model
+        call (the submit gate's rule, applied again at claim: Q1's review) — else ``None``.
+        The claim hook's second check, after :meth:`_credential_gone` (G-707): a credential
+        that is present can still be one the provider refuses."""
+        login = claim_refusal(
+            self.factory,
+            run,
+            ttl_s=self.settings.builder_login_ttl_s,
+            default_author=str(getattr(self.settings.factory, "test_author", "") or ""),
+        )
+        if login is None:
+            return None
+        error = record_claim_refusal(self.factory, run, login, actor=self.worker_id)
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=LOGIN_INVALID_CODE,
+            builder=login.builder,
+            auth=login.auth,
+        )
+        return error
 
     # --- repo / harness ----------------------------------------------------------
     def _github_installation(self, cfg: Mapping[str, Any]) -> int | None:
@@ -1568,15 +1661,16 @@ class Worker:
         return ctx._runner
 
     def _executor_kind(self, ctx: RunContext) -> str:
-        """The executor this run asks for: its own ``params.executor``, else the worker's."""
-        return str(ctx.params.get("executor") or self.settings.executor or "local")
+        """The executor this run asks for: :func:`run_executor_kind`."""
+        return run_executor_kind(ctx.params, self.settings)
 
     def _executor(self, ctx: RunContext) -> Executor:
         """The run's executor. Docker is fail-closed: no image / no daemon → the
         run fails with ``sandbox unavailable``; there is no local fallback."""
         if ctx._executor is not None:
             return ctx._executor
-        kind = self._executor_kind(ctx)
+        # no default here: an empty kind reaches make_executor and is refused (P-308)
+        kind = run_executor_kind(ctx.params, self.settings)
         if kind != "docker" and self.settings.refuse_unsealed:
             raise SandboxUnavailable(
                 f"production refuses the {kind} executor (ADR-0023): this run asks for it; use "
@@ -2305,6 +2399,7 @@ class Worker:
             # absent label = every switch OFF under the default block (rows as before)
             checks=checks if checks.any_on or not checks.repo.is_default else None,
             learning=learning,
+            s1=self._s1_arm(ctx, ladder, mode),
         )
         self._progress(ctx, 0, total)
 
@@ -2328,6 +2423,19 @@ class Worker:
             if is_outage_error(attempt.error):
                 streak["n"] += 1
                 streak["last"] = attempt.error
+                # pilot D1: a refused LOGIN is recorded invalid at once, so the next submit on
+                # it is refused before it is queued (src/crb/server/builder_login.py). Best
+                # effort: a failed write must never replace the attempt's own error (P-731)
+                try:
+                    record_refused_login(
+                        self.factory,
+                        attempt.builder.name,
+                        str((p.get("builder_config") or {}).get("auth", "") or ""),
+                        attempt.error,
+                        actor=self.worker_id,
+                    )
+                except Exception:
+                    _LOG.exception("could not record the refused login of %s", attempt.builder.name)
             else:
                 streak["n"] = 0
             return attempt
@@ -2398,6 +2506,46 @@ class Worker:
             first = next((r.error for r in self.ledger.rows(run_id=spec.run_id) if r.error), "")
             return STATUS_FAILED, counts, f"all {summary.rows} attempt(s) errored: {first}"[:1000]
         return STATUS_SUCCEEDED, counts, ""
+
+    def _s1_arm(self, ctx: RunContext, ladder: EscalationLadder, mode: str) -> S1Arm | None:
+        """The replay ``S1`` arm (ADR-0026 item 1) when the run asks for it (``params.arm``),
+        else ``None``. Refused before anything is built when it cannot be honest: ``S1``
+        grades on the commit's held-out tests, so it runs blind; it needs a test author; and
+        the author's model is never a build rung's (DL-050, DL-059 C3 — the same identity
+        check the factory applies)."""
+        if str(ctx.params.get("arm") or "") != ARM_S1:
+            return None
+        if mode != REPLAY_MODE[BASE_S1]:
+            raise ValueError(
+                "arm S1 is graded on the commit's held-out tests: run it as a blind replay"
+            )
+        author = self._test_author(ctx, ladder)
+        if author is None:
+            raise ValueError(
+                "arm S1 needs a test author: set CRB_FACTORY__TEST_AUTHOR or the run's "
+                "test_author (a rung whose model is not on this run's ladder)"
+            )
+        label = author_label(author)
+        for i, rung in enumerate(ladder.rungs, start=1):
+            assert_distinct_identity(label, rung.label, role=f"build rung {i}")
+        config = ctx.config
+
+        def write(workspace: Any, subject: str, message: str) -> tuple[str, str]:
+            item = BacklogItem(
+                id="s1-replay",
+                title=(subject or "the change")[:160],
+                kind=KIND_CODE,
+                description=message,
+                capability_class=UNCLASSIFIED,
+            )
+            test = author.author(workspace, item, facts={}, config=config, on_event=ctx.on_event)
+            return test.path, test.content
+
+        return S1Arm(
+            author=write,
+            author_model=canonical_model(author.model) or author.model,
+            author_stamp=str(getattr(author, "provider", "") or author.name),
+        )
 
     def _learning_snapshot(self, ctx: RunContext) -> LearningSnapshot:
         """The prevention loop's snapshot for this run; a chain that cannot be read gives
@@ -2497,8 +2645,8 @@ class Worker:
     def _served_map(
         self, repo: str, *, run_id: str = "", posture_class: str = "", checks_arm: str = ""
     ) -> tuple[CapabilityMap, dict[str, str]]:
-        """The (class × size) map ``GET /capability-map`` serves by default — sighted rows,
-        the current apparatus, the repository's own checks arm (or ``checks_arm``: the arm a
+        """The (class × size) map ``GET /capability-map`` serves by default — sighted rows
+        and every certifying arm's rows (``mode_admits``, P-338), the current apparatus, the repository's own checks arm (or ``checks_arm``: the arm a
         factory run grades on, GOV-3), this deployment's posture class (or
         ``posture_class``), the latest controls verdict, sign-offs overlaid — without the
         rows of ``run_id``; and the scope it was read in (apparatus × posture class × checks
@@ -2592,6 +2740,22 @@ class Worker:
             return cache.get(f"{item.capability_class}|{item.size_estimate}")
 
         return lookup
+
+    def _standard_readers(
+        self, repo: str, *, checks_arm: str = "", posture_class: str = ""
+    ) -> Readers:
+        """The entry gate's readers for ``repo`` (ADR-0026 item 8): the cells' proven
+        standards from the registered readings (routing.v2), their arms' readings and whether
+        the points-to-churn agreement has passed — read ONCE from the store, on one checks arm
+        (the factory run's, GOV-3, else the repository's own) and one posture class (the run's
+        measured one, else this deployment's), so a standard never crosses an arm or a posture
+        (P-319). :func:`crb.server.factory_standard.bind_readers` is the one binding."""
+        return factory_standard.bind_readers(
+            self.factory,
+            repo,
+            checks_arm=checks_arm or current_checks_arm(self.factory, repo),
+            posture_class=posture_class or self._deployment_posture_class(repo),
+        )
 
     def _run_factory(self, ctx: RunContext) -> tuple[str, dict[str, Any], str]:
         """Forward mode (P6): run the repo's FROZEN backlog through the governed loop
@@ -2749,11 +2913,20 @@ class Worker:
             route_decision_for=self._route_lookup(
                 run.repo, run.id, gate.posture.posture_class, checks_arm=checks.arm
             ),
-            # GOV-4: the override is a second approver's act, read LIVE at each gate from the
-            # run's row (a grant made while the run works reaches the next gate); honoured only
-            # for a person with the approver role — the loop refuses the run's own actor
+            # GOV-4: the override is a second approver's act, read LIVE at each item's entry
+            # gate from the run's row (a grant made while the run works reaches the next
+            # item); honoured only for a person with the approver role — the loop refuses the
+            # run's own actor — and it lifts only the sign-off clause (ADR-0026 item 8)
             deliver_override_for=lambda: self._deliver_override(run.id),
             checks=checks,
+            # ADR-0026 item 8 — the entry gate's readers, bound once for this run, before any
+            # build
+            readers=self._standard_readers(
+                run.repo, checks_arm=checks.arm, posture_class=gate.posture.posture_class
+            ),
+            # the loop's overlay and lines reach an item's brief only when its standard arm
+            # carries +L (ADR-0026 item 8); the loop decides per item
+            learning=self._learning_snapshot(ctx),
             run_id=run.id,
             actor=run.actor,
             timeout=ctx.timeout,
@@ -3164,6 +3337,9 @@ class Worker:
                 capability_class=new.capability_class,
                 class_source=new.class_source,
                 previous_class=task.capability_class,
+                # the class-set version this label was read under (ADR-0026 item 9): the
+                # (task, version) table is folded from these events, never a stored row
+                taxonomy=GLOBAL_CLASS_SET,
                 changed=new.capability_class != task.capability_class,
                 cost_usd=labeller.usage.last.get("cost_usd"),
                 latency_ms=int(float(labeller.usage.last.get("latency_s") or 0.0) * 1000),

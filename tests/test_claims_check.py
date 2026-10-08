@@ -1241,3 +1241,37 @@ def test_the_pr_body_rule_reads_the_constants_and_helpers_the_body_uses(tree: Pa
     _write(tree, "src/crb/factory/delivery.py", source)
     found = [(f.path, f.line) for f in cc.check_conformity(tree)]
     assert found == [("src/crb/factory/delivery.py", 1), ("src/crb/factory/delivery.py", 4)]
+
+
+# --- the routing bar (ADR-0025 item 10) ---------------------------------------------------
+
+
+def test_readme_carries_the_routing_bar_the_code_describes() -> None:
+    """README's bar is ``RoutingPolicy.describe()``: the repository passes, and a copy whose
+    bar says anything else — one number moved — fails (docs/PREVENTION.md P-311)."""
+    assert cc.check_routing_bar(ROOT) == []
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert cc.BAR_BEGIN in text and cc.BAR_END in text
+
+
+def test_a_routing_bar_that_drifts_from_the_code_is_a_finding(tmp_path: Path) -> None:
+    bar = cc.published_bar()
+    drifted = bar.replace("20 of the first 20", "16 of the first 16")
+    assert drifted != bar
+    (tmp_path / "README.md").write_text(
+        f"# x\n\n- **Not a licence.** The bar:\n\n  {cc.BAR_BEGIN}\n  {drifted}\n  {cc.BAR_END}\n",
+        encoding="utf-8",
+    )
+    found = cc.check_routing_bar(tmp_path)
+    assert [f.reason for f in found] == [
+        "the routing bar differs from RoutingPolicy.describe() — regenerate it"
+    ]
+    (tmp_path / "README.md").write_text("# x\n\nno bar here\n", encoding="utf-8")
+    assert "no routing-bar markers" in cc.check_routing_bar(tmp_path)[0].reason
+    # the same words wrapped differently are the same bar
+    wrapped = "\n  ".join(bar.split(", "))
+    (tmp_path / "README.md").write_text(
+        f"{cc.BAR_BEGIN}\n  {wrapped.replace(chr(10) + '  ', ', ' + chr(10) + '  ')}\n{cc.BAR_END}\n",
+        encoding="utf-8",
+    )
+    assert cc.check_routing_bar(tmp_path) == []

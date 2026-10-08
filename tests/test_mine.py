@@ -44,6 +44,7 @@ from crb.core import mine as m
 from crb.core.execution import LocalExecutor
 from crb.core.git import GitRepo
 from crb.core.lint import LintRun, LintStep
+from crb.core.qualify import QUAL_BASELINE_UNATTRIBUTED
 from crb.core.runners import base as rb
 from crb.core.runners import get_runner
 from crb.core.runners.pytest_runner import PytestRunner
@@ -171,10 +172,15 @@ def test_qualify_produces_a_gold_clean_task(
     assert task.capability_class == "bug.fix" and task.class_source == "path"
     assert task.gold_clean is True
     assert task.gold_note == ""
-    # ADR-0019: the posture the facts were measured in, and nothing else
-    assert set(task.labels) == {"posture_id", "posture_class"}
-    # the hand-built task the grade tests use is exactly what the miner measures
-    assert task.with_(labels={}) == pyrepo.feat_task()
+    # ADR-0019: the posture the facts were measured in, and the change the commit carries
+    # (G-954: one task per distinct change), and nothing else
+    assert set(task.labels) == {"posture_id", "posture_class", m.LABEL_CHANGE_ID}
+    assert task.labels[m.LABEL_CHANGE_ID] == m.change_identity(pyrepo.repo, pyrepo.feat_sha)
+    # the hand-built task the grade tests use is exactly what the miner measures, its change
+    # identity included (a 2.4 row names it)
+    assert task.with_(labels={m.LABEL_CHANGE_ID: task.labels[m.LABEL_CHANGE_ID]}) == (
+        pyrepo.feat_task()
+    )
     # the mining worktree is gone
     assert not (scratch / f"mine-{pr.REPO_NAME}-{pyrepo.feat_sha[:10]}").exists()
     kinds = [k for k, _ in events]
@@ -284,13 +290,16 @@ def test_qualify_skips_on_baseline_timeout(
     assert calls == [(pr.TEST_SUBTRACT,), ("tests/",), ("tests/",)]
 
 
-def test_qualify_records_baseline_parse_error_as_label(
+def test_qualify_without_gold_skips_a_baseline_whose_output_does_not_parse(
     pyrepo: pr.PyRepo,
     runner: PytestRunner,
     executor: LocalExecutor,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """P-124: a RED that names failing tests leaves nothing to explain an unparsed baseline,
+    so the candidate is refused with ``qualify_task``'s own words (one vocabulary with
+    ADR-0019) — it once became a task that failed belt 3 on every trial."""
     real_run = runner.run
     n = 0
 
@@ -300,6 +309,38 @@ def test_qualify_records_baseline_parse_error_as_label(
         if n == 2:  # the baseline belt run: rc≠0 with no attributable ids
             return rb.TestRun(1, frozenset(), "crash", parse_error="unattributed failure (rc=1)")
         return real_run(ex, root, scope, timeout=timeout)
+
+    monkeypatch.setattr(runner, "run", run)
+    events, on_event = _collector()
+    out = m.qualify(
+        pyrepo.repo,
+        pyrepo.config,
+        _feat_candidate(pyrepo),
+        runner=runner,
+        executor=executor,
+        scratch=tmp_path,
+        gold=False,
+        on_event=on_event,
+    )
+    assert out.task is None
+    assert out.skipped_reason.startswith(
+        f"{QUAL_BASELINE_UNATTRIBUTED}: the belt scope failed at the parent without naming a test"
+    )
+    assert events[-1][0] == "mine.skip" and events[-1][1]["code"] == QUAL_BASELINE_UNATTRIBUTED
+
+
+def test_qualify_without_gold_keeps_an_unparsed_baseline_a_build_failure_red_explains(
+    pyrepo: pr.PyRepo,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of ``qualify_task``'s rule: when the RED was itself a build failure
+    (no failing id), the unparsed baseline is that build failure — recorded, not refused."""
+
+    def run(ex: Any, root: Path, scope: Any, *, timeout: int = 0) -> rb.TestRun:
+        return rb.TestRun(1, frozenset(), "boom", parse_error="unattributed failure (rc=1)")
 
     monkeypatch.setattr(runner, "run", run)
     out = m.qualify(

@@ -9,7 +9,9 @@
  *    (the pack's canonical hash re-computed on read equals its key);
  *  - the Ledger page's chain gate is OPEN with false-Q1 = 0 and the rows are listed;
  *  - the Capability page renders the (class × size) cell with its n, its Wilson
- *    interval and the route `calibrate` (n < 10) — never a fabricated cell;
+ *    interval and the route `calibrate` — never a fabricated cell; under `routing.v2`
+ *    (ADR-0025) the host-posture rows of a walkthrough license nothing, and the detail card
+ *    says the cell's rows were not graded in the sealed posture;
  *  - the Sign-off page refuses to attest a thin cell: under `signoff-policy.v1` the
  *    server's preview lists the failing clauses (`thin_cell`, and the controls escape
  *    04's run found), the gate is CLOSED and the action stays disabled — 08 tells the
@@ -185,14 +187,15 @@ test.describe(`05 replay (${BUILDER})`, () => {
     cellN = n
     expect(n).toBeGreaterThanOrEqual(1)
     expect(n).toBeLessThan(10)
-    expect(m![3], 'a cell with n < 10 routes to calibrate').toBe('calibrate')
+    expect(m![3], 'host-posture rows with no registered reading route calibrate').toBe('calibrate')
     expect(m![6]).toBe('0')
     await expect(cell).toContainText(`n=${n}`)
     await expect(cell).toContainText(/\[\d+%, \d+%\]/) // the Wilson interval
     await expect(cell.getByRole('img', { name: /^Route: calibrate/ })).toBeVisible()
-    // the detail card explains the route with its reason and the policy interval
+    // the detail card explains the route with its reason (routing.v2: the sealed posture
+    // comes first — ADR-0025 row 3a) and the interval
     await cell.click()
-    await expect(page.getByText(`n=${n} < 10`)).toBeVisible()
+    await expect(page.getByText(/were not graded in the sealed posture/).first()).toBeVisible()
     await expect(page.getByText('Pass rate', { exact: true })).toBeVisible()
     await expect(page.getByText('Wilson 95%').first()).toBeVisible()
   })

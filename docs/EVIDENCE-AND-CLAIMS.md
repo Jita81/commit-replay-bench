@@ -153,6 +153,28 @@ stamp is an anecdote.
 `APPARATUS_VERSION` bumps only with an ADR. Model changes are recorded on the cell key
 (`model`, `provider`), so a new model id is a new cell; no capability is inherited.
 
+**The oracle score carries its own rule.** Every oracle-strength score is stamped with its
+`mutation_version`, and the rule follows the apparatus stamp: below apparatus 2.4 the scorer
+is `mutation.v1` as it stood, and `mutation.v2` is the scorer of 2.4 (ADR-0025 items 7 and
+14). So the scores of one apparatus version share one rule, and the 2.4 readers read a cell's
+strength only from scores of its own version and rule: `oracle_by_task`
+(`crb.server.routes.oracle`) keeps a score only when both its apparatus and its
+`mutation_version` are the cell's, so a 2.3 score beside a 2.4 one is history **[measured — n
+= 1 reader; method: `oracle_by_task` read at this commit, beside
+`tests/test_oracle_mutation_v2.py`'s refusal of a score whose rule is not its apparatus's;
+apparatus 2.4, a property of the product's own code, not a graded row]**. `mutation.v2` samples every changed file (`hash-rr.v1`: each file's candidates ranked by a
+hash of the commit and the mutant's place, one file after another in turn), counts a mutant
+whose run timed out or exited 0 without parsed results apart from kills and escapes, and reads
+a task with more than half its mutants excluded as not scoreable. `mutation.v1` took the first
+mutants in file order and counted a timeout as a kill, so its scores are history beside v2's.
+
+**A row names its own classification.** From apparatus 2.4 every measured row carries its
+failure kind from write (`failure_kind`, empty on a clean row), why belt 5 holds what it holds
+(`lint_reason`) and, on a replay row, the change it observed (`change_id`); a row below 2.4
+carries none of these new labels and is read by the failure rule frozen at 2.3, whose code and
+markers are pinned by their hashes, and never re-derived under a later one (ADR-0025 item 6;
+DL-093; DL-094) **[measured — n = 2 rules, the live one and the frozen 2.3 one, each pinned by its hash; method: `tests/test_failure_rule_golden.py`; apparatus n/a, a property of the product's own code, not a graded row]**.
+
 ## 5. The legacy-belt caveat on the census ledger
 
 The census ledger that seeds this product (`grades.jsonl`, **1,071 rows**) was produced by
@@ -313,7 +335,11 @@ engineering", a rate on XL work) is not licensed by anything in the ledger.
 `HEAD`, keeps those that touch both source and test files within the caps (the standard pool:
 1–3 source files), and stops once 25 tasks are found or 1,000 candidates have been examined;
 the repository's `mining` configuration moves the window, the task target and the candidate
-cap; the file caps are fixed per pool. The pool therefore over-represents
+cap; the file caps are fixed per pool. It keeps a single commit per change — of two commits
+with the same patch (`git patch-id --stable`, a cherry-pick) the older, and never a revert,
+whose change is the commit it reverts — and never mines a change the store already holds,
+whichever of its commits the store holds, so a distinct commit is a distinct change (DL-093).
+The pool therefore over-represents
 recent work and work that was tested at the time, and holds nothing older than the window
 **[hypothesis — that a recent, tested-commits-only pool is easier than the repository's other
 work is untested; a pool mined from an older window under the same builder and budget would

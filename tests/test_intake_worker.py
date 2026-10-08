@@ -46,6 +46,7 @@ from crb.server.settings import IntakeSettings
 from crb.server.worker import Worker, WorkerSettings
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.models import Repo, Run
+from fixtures.proven_cells import every_cell_proven
 
 #: The deployment's own address. Every link the listener writes on a ticket is built from
 #: it, and a worker without one stops before it writes anything.
@@ -131,6 +132,9 @@ class Stack:
 @pytest.fixture(autouse=True)
 def _fake_gate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(FAKE_TRACKER_ENV, "1")
+    # these tests pin the listener's MECHANICS on a cell with a proven standard (the store-bound
+    # readers, patched at their one binding — ADR-0026 item 8); the entry gate's stops have their own
+    every_cell_proven(monkeypatch, "S1@claude-sonnet-5")
 
 
 # --- default OFF ----------------------------------------------------------------------

@@ -61,19 +61,25 @@ What it is:   The ledger — the append-only, hash-chained record of every grade
 What it does: Constructs rows that cannot be clean with a failed belt, without an evidence
               pack, or under a belt set their apparatus could not have recorded; chains each
               row to the previous one by SHA-256 and verifies a chain; names why every
-              non-clean row failed by ONE rule; reduces rows to a cell's ``n``, clean count,
+              non-clean row failed by ONE rule (and, from 2.4, why an outage's call never
+              happened: ``outage_cause`` ``auth`` or ``provider`` — pilot D1); reduces rows to
+              a cell's ``n``, clean count,
               Wilson interval, failure split and false-Q1 count (which must read 0); refuses
               to reduce rows of two ``checks`` arms to one cell and keeps one arm on request.
 How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to a row and
-              pins its failure kind and cost-known labels → ``GradeRow.__post_init__``
-              asserts the invariants → ``JsonlLedger.append`` chains on the last row's hash
-              and fsyncs the line → ``verify_chain`` re-hashes every row in order →
+              pins its failure kind and cost-known labels (from apparatus 2.4 through
+              ``row_labels_at_write``, the one helper the factory's row uses too: the kind on
+              every row, ``lint_reason`` and ``change_id``) → ``GradeRow.__post_init__``
+              asserts the invariants (a 2.4 row without its own classification is refused;
+              a row below 2.4 is read by the rule frozen at 2.3) → ``JsonlLedger.append``
+              chains on the last row's hash and fsyncs the line → ``verify_chain`` re-hashes
+              every row in order →
               ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0019-qualification-is-posture-relative.md,
-              docs/adr/0024-working-by-construction.md
+              docs/adr/0024-working-by-construction.md; ADR-0025 items 5 and 6 (stream G)
 Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               src/crb/core/grade.py (the GradeResult a row reduces; the belt vocabulary),
               src/crb/core/evidence.py (pack hash, canonical JSON, sha256, timestamps),
@@ -82,7 +88,8 @@ Works with:   src/crb/core/checks.py (the arm a row's ``checks`` stamp names),
               map built from the rows), src/crb/core/legacy.py (census import — the only
               writer of v3-legacy rows), src/crb/core/stats.py (the Wilson interval)
 Tested by:    tests/test_ledger.py, tests/test_store_ledger.py, tests/test_census_gate.py,
-              tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py
+              tests/test_run.py, tests/test_grade_api_belt.py, tests/test_checks_pooling.py,
+              tests/test_ledger_classification.py, tests/test_failure_rule_golden.py
 Touch when:   never for a new repository; adding a belt, a failure kind, a cell-key field or a
               hashed label changes what the chain commits to — needs an ADR, an apparatus bump
               (src/crb/core/version.py), a store migration (as
@@ -107,7 +114,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core import version as _version
 from crb.core.checks import ARM_OFF, ARMS, LABEL_CHECKS, arm_from_label
+from crb.core.context_arm import (
+    BASE_S1,
+    BASE_S2,
+    LABEL_CONTEXT_ARM,
+    TEST_AUTHORED,
+    TEST_PERSON,
+    ContextArmsPooled,
+    context_arm_for,
+    is_arm,
+    loop_on,
+    parse_arm,
+)
 from crb.core.evidence import BuilderRef, canonical_json, sha256_text, utc_now_iso
 from crb.core.grade import (
     BELT_API_STABLE,
@@ -120,8 +140,16 @@ from crb.core.grade import (
     GradeResult,
     MisattributionViolation,
 )
+from crb.core.lint import LINT_DISABLED_BY_CONFIG, LINT_NOT_REQUESTED, lint_status_violation
 from crb.core.spec import TaskSpec
+from crb.core.spend import is_escalated_trial
 from crb.core.stats import Interval, mean, wilson_interval
+from crb.core.taxonomy import (
+    GLOBAL_CLASS_SET,
+    LABEL_TAXONOMY,
+    ClassSetsPooled,
+    is_class_set_version,
+)
 from crb.core.version import APPARATUS_VERSION
 
 GRADE_SCHEMA = "crb.grade.v2"
@@ -217,6 +245,14 @@ FAILURE_DISQUALIFIED = "disqualified"
 #: quota ran out mid-campaign (2026-09-14) and read as ``harness`` — a harness that
 #: worked perfectly.
 FAILURE_OUTAGE = "outage"
+#: The ``S1`` arm's test author produced no test that is RED at the parent (ADR-0026 item
+#: 1): the builder never got its oracle. It counts against the ARM — in ``n``, never clean —
+#: and is never the model's (not in :data:`MODEL_FAILURE_KINDS`) nor the harness's. A seam
+#: with stream G: it joins G's golden table of kinds in the 2.4 bump.
+FAILURE_AUTHORING = "authoring"
+#: What an ``S1`` attempt's error starts with when the author failed
+#: (``crb.builders.adapter.AUTHORING_PREFIX``; the core cannot import it — pinned by a test).
+AUTHORING_ERROR_PREFIX = "authoring:"
 FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_CLEAN,
     FAILURE_BUILDER_RED,
@@ -226,6 +262,7 @@ FAILURE_KINDS: tuple[str, ...] = (
     FAILURE_PROTOCOL,
     FAILURE_HARNESS,
     FAILURE_OUTAGE,
+    FAILURE_AUTHORING,
     FAILURE_DISQUALIFIED,
 )
 #: Error texts that identify a provider outage (the builders record the provider's own
@@ -253,10 +290,118 @@ def is_outage_error(error: str) -> bool:
     """``True`` when ``error`` is the provider refusing the call (see
     :data:`OUTAGE_ERROR_MARKERS`) — only for ``model_error:`` texts, so a grader
     timeout that happens to say "429" in a test log is not an outage."""
+    return _outage(error, OUTAGE_ERROR_MARKERS)
+
+
+def _outage(error: str, markers: Sequence[str]) -> bool:
     e = error.lower()
     if not e.startswith("model_error"):
         return False
-    return any(m in e for m in OUTAGE_ERROR_MARKERS)
+    return any(m in e for m in markers)
+
+
+#: The outage markers as they stood at apparatus 2.3, FROZEN: the rows of 2.3 and earlier
+#: are read by them and by nothing else (ADR-0025 item 6), so an edit to the live list above
+#: can no longer move an old row's classification or a denominator built from it.
+#: ``tests/test_failure_rule_golden.py`` pins this tuple's SHA-256.
+OUTAGE_ERROR_MARKERS_V1: tuple[str, ...] = (
+    "hit your limit",
+    "usage limit",
+    "rate_limit",
+    "rate limit",
+    "429",
+    "overloaded",
+    "quota",
+    "insufficient credit",
+    "credit balance",
+    "authentication failed",
+    "oauth access token is invalid",
+    "402",
+    "503",
+    "529",
+)
+
+
+def is_outage_error_v1(error: str) -> bool:
+    """:func:`is_outage_error` against the frozen :data:`OUTAGE_ERROR_MARKERS_V1`."""
+    return _outage(error, OUTAGE_ERROR_MARKERS_V1)
+
+
+#: What the ``S1`` author step writes after ``authoring:`` when the RUNNER raised while
+#: proving the authored test RED (``crb.builders.adapter`` imports it): the instrument failed.
+AUTHORING_HARNESS_ERROR = "harness error proving RED:"
+#: What the ``S1`` author step writes after ``authoring:`` when the author's own call RAISED
+#: (``crb.builders.adapter`` imports it); the builder's ``model_error: …`` follows it when that
+#: call failed at its provider, the exception's own name otherwise.
+AUTHORING_AUTHOR_FAILED = "the test author failed:"
+
+
+def authoring_model_error(error: str) -> str:
+    """The author's own ``model_error: …`` in an ``authoring:`` error, or ``""``: read ONLY at
+    the head the adapter writes — ``authoring:``, then optionally
+    :data:`AUTHORING_AUTHOR_FAILED`, then ``model_error`` (any case). Every other word of the
+    error is the model's (the path it chose for its test, an exception it raised), so a
+    ``model_error`` found anywhere else is never the instrument's (P-735)."""
+    if not error.startswith(AUTHORING_ERROR_PREFIX):
+        return ""
+    rest = error[len(AUTHORING_ERROR_PREFIX) :].lstrip()
+    if rest.startswith(AUTHORING_AUTHOR_FAILED):
+        rest = rest[len(AUTHORING_AUTHOR_FAILED) :].lstrip()
+    return rest if rest.lower().startswith("model_error") else ""
+
+
+def authoring_outage(error: str) -> bool:
+    """``True`` when an ``authoring:`` error's cause is the TEST AUTHOR's provider refusing
+    the call — the ``model_error: …`` the author's builder recorded, matched by
+    :func:`is_outage_error`. Such a row observed nothing, so it is an ``outage``, never an
+    ``authoring`` failure counted against the arm (docs/PREVENTION.md P-005's class)."""
+    return is_outage_error(authoring_model_error(error))
+
+
+def authoring_instrument_failure(error: str) -> bool:
+    """``True`` when an ``authoring:`` error names an INSTRUMENT failure, not the author's
+    output: the author's own provider call failed without a refusal (any ``model_error: …`` at
+    the adapter's head, :func:`authoring_model_error`, that :func:`authoring_outage` does not
+    read as an outage — a 400, a 500, a reset) or the runner raised while proving the test RED. Rule 4b then holds for the author as for the builder:
+    the row is ``harness``, never an ``authoring`` miss counted against the arm (DL-360,
+    P-720). Called after :func:`authoring_outage`, which takes the refusals first."""
+    if not error.startswith(AUTHORING_ERROR_PREFIX):
+        return False
+    rest = error[len(AUTHORING_ERROR_PREFIX) :].lstrip()
+    return bool(authoring_model_error(error)) or rest.startswith(AUTHORING_HARNESS_ERROR)
+
+
+#: WHY an ``outage`` row's call never happened — a hashed label from apparatus 2.4, stamped at
+#: write by :func:`row_labels_at_write` and read verbatim (pilot D1, P-435). The kind stays
+#: ``outage`` either way, outside every ``n``; the cause only says whose move it is.
+LABEL_OUTAGE_CAUSE = "outage_cause"
+#: The credential THIS deployment presented was refused (HTTP 401/403, an invalid OAuth token or
+#: API key): a local login fault the operator repairs — "your login", not "the provider".
+OUTAGE_CAUSE_AUTH = "auth"
+#: Every other provider refusal: a usage limit, a quota, a 429, an overload, a 5xx.
+OUTAGE_CAUSE_PROVIDER = "provider"
+OUTAGE_CAUSES: tuple[str, ...] = (OUTAGE_CAUSE_AUTH, OUTAGE_CAUSE_PROVIDER)
+#: The words EVERY builder writes for a credential the provider refused (HTTP 401/403) or
+#: that the worker does not have: ``crb.builders.base.model_error_text`` and
+#: ``crb.builders.claude_code`` write ``model_error: authentication failed (…)`` with this
+#: constant, so a refused login reads ``outage``, cause ``auth``, whichever builder met it.
+AUTH_REFUSED = "authentication failed"
+#: The markers of a refused credential. Matched case-insensitively on an outage row only, so
+#: each must itself be a live outage marker (``OUTAGE_ERROR_MARKERS``) — a marker the failure
+#: rule never reads as an outage is dead (``tests/test_ledger_classification.py``). The
+#: builders write :data:`AUTH_REFUSED`; the CLI's own ``OAuth access token is invalid`` is the
+#: other. ``tests/test_failure_rule_golden.py`` pins this list and the rule's code.
+AUTH_ERROR_MARKERS: tuple[str, ...] = (AUTH_REFUSED, "oauth access token is invalid")
+
+
+def derive_outage_cause(kind: str, error: str) -> str:
+    """THE rule for an outage row's cause: ``""`` unless ``kind`` is ``outage``; then
+    ``auth`` when ``error`` names a refused credential (:data:`AUTH_ERROR_MARKERS`), else
+    ``provider``. Deterministic; it reads only the error text the row hashes."""
+    if kind != FAILURE_OUTAGE:
+        return ""
+    e = error.lower()
+    return OUTAGE_CAUSE_AUTH if any(m in e for m in AUTH_ERROR_MARKERS) else OUTAGE_CAUSE_PROVIDER
 
 
 #: The kinds where the model finished and was judged on its own terms (the
@@ -302,6 +447,30 @@ LABEL_BLAME_CONTROL = "blame_control"
 LABEL_ENV_CODE = "env_code"
 #: The first apparatus whose measured rows must carry their posture and witness.
 POSTURE_APPARATUS: tuple[int, int] = (2, 3)
+#: The first apparatus whose measured rows carry their own classification from write
+#: (ADR-0025 items 5 and 6): ``failure_kind`` (``""`` on a clean row), ``lint_reason`` and,
+#: on a replay row, ``change_id``. Rows below it are read by the rule frozen at 2.3. Nothing
+#: here moves when the constant is read: the row's own stamp decides, and
+#: ``crb.core.version.APPARATUS_VERSION`` decides the stamp a new row gets.
+V2_APPARATUS: tuple[int, int] = (2, 4)
+#: Why belt 5 holds what it holds (``crb.core.lint.LINT_STATUSES``) — hashed, from 2.4.
+LABEL_LINT_REASON = "lint_reason"
+#: The change a replay row observed (``crb.core.mine.change_identity``: the commit's
+#: ``git patch-id --stable``, a revert's that of its original) — hashed, from 2.4, so a
+#: reader counts distinct CHANGES, never two commits of one change.
+LABEL_CHANGE_ID = "change_id"
+#: Where the builder ran (``docker`` = the sealed container of ADR-0012, ``host``) — written
+#: by the builder adapter on every attempt, kept on a row from 2.4: with the posture class it
+#: says whether the row was graded in the SEALED posture a reading counts (ADR-0026 item 2).
+LABEL_BUILDER_EXECUTOR = "builder_executor"
+#: The builder's sealed container (``crb.builders.container.EXECUTOR_DOCKER``).
+BUILDER_EXECUTOR_SEALED = "docker"
+#: Stamped ``true`` on every row the ledger IMPORTED (``DbLedger.import_rows``), with or without
+#: a source hash: an imported row is history — its labels were set elsewhere, so a reading
+#: never counts it as an attempt this deployment graded (ADR-0026 item 2, P-321).
+LABEL_IMPORTED = "imported"
+#: The source ledger's own hash of an imported row, kept for traceability.
+LABEL_SOURCE_ROW_HASH = "source_row_hash"
 #: Belt 6 (ADR-0024) is recorded as this hashed label — ``true`` / ``false`` / ``none``
 #: (switched on, not evaluated) — and is absent when the belt was switched off.
 LABEL_API_STABLE = BELT_API_STABLE
@@ -317,6 +486,11 @@ class ChecksArmsPooled(ValueError):
     """Rows graded under two ``checks`` arms reached one cell (ADR-0024): a row graded with
     the format step or belt 6 on answers a different question from one graded without, so
     a reader must choose one arm (:func:`rows_for_checks`) before it reduces a cell."""
+
+
+class ApparatusPooled(ValueError):
+    """Rows of two apparatus versions reached one cell (ADR-0025 item 1): evidence expires
+    with the apparatus, so a reader chooses one version before it reduces a cell."""
 
 
 @dataclass(frozen=True)
@@ -388,6 +562,14 @@ def derive_failure_kind(
     3. ``error`` or ``builder_error`` starts with
        ``protocol violation:``                              → ``protocol``
        (the builder was refused by a guard; the belts then judge an empty patch)
+    3b. ``error`` starts with ``authoring:``                → ``authoring``
+       (the ``S1`` arm's test author produced no RED test: against the arm, never the
+       builder, never the harness — ADR-0026 item 1) — unless the author's own call was
+       refused by its provider (:func:`authoring_outage`)       → ``outage``
+       (nothing was observed, exactly as rule 4 for the builder: excluded from ``n``) —
+       or the instrument failed (:func:`authoring_instrument_failure`: any other
+       ``model_error: …`` of the author, or the runner raising while proving RED) → ``harness``
+       (rule 4b for the author as for the builder; never the arm's miss — DL-360)
     4. a ``model_error: …`` naming a provider refusal (usage
        limit, 429, quota, dead credential)                   → ``outage``
        (the call never happened: no observation of anything; excluded from ``n``)
@@ -425,6 +607,10 @@ def derive_failure_kind(
         PROTOCOL_VIOLATION_PREFIX
     ):
         return FAILURE_PROTOCOL
+    if error.startswith(AUTHORING_ERROR_PREFIX):
+        if authoring_outage(error):
+            return FAILURE_OUTAGE
+        return FAILURE_HARNESS if authoring_instrument_failure(error) else FAILURE_AUTHORING
     if error:
         return FAILURE_OUTAGE if is_outage_error(error) else FAILURE_HARNESS
     if stop_reason in BUDGET_STOP_REASONS:
@@ -434,6 +620,146 @@ def derive_failure_kind(
     if lint_only:
         return FAILURE_LINT
     return FAILURE_BUILDER_RED
+
+
+def derive_failure_kind_v1(
+    *,
+    clean: bool,
+    disqualified: bool,
+    error: str = "",
+    builder_error: str = "",
+    stop_reason: str = "",
+    lint_only: bool = False,
+    api_only: bool = False,
+) -> str:
+    """The failure rule as it stood at apparatus 2.3, FROZEN (ADR-0025 item 6): the rule a
+    row below :data:`V2_APPARATUS` without a pinned label is read by, over the frozen
+    :data:`OUTAGE_ERROR_MARKERS_V1`. Never edited: a change to the rule goes in
+    :func:`derive_failure_kind` with an apparatus bump, and the golden table in
+    ``tests/test_failure_rule_golden.py`` holds this one to the 2.3 outputs."""
+    if clean:
+        return FAILURE_CLEAN
+    if disqualified:
+        return FAILURE_DISQUALIFIED
+    if error.startswith(PROTOCOL_VIOLATION_PREFIX) or builder_error.startswith(
+        PROTOCOL_VIOLATION_PREFIX
+    ):
+        return FAILURE_PROTOCOL
+    if error:
+        return FAILURE_OUTAGE if is_outage_error_v1(error) else FAILURE_HARNESS
+    if stop_reason in BUDGET_STOP_REASONS:
+        return FAILURE_BUDGET
+    if api_only:
+        return FAILURE_API
+    if lint_only:
+        return FAILURE_LINT
+    return FAILURE_BUILDER_RED
+
+
+def is_v2_apparatus(apparatus_version: str) -> bool:
+    """``True`` for a stamp of :data:`V2_APPARATUS` or later — a row that carries its own
+    classification from write."""
+    parsed = parse_apparatus_version(apparatus_version)
+    return parsed is not None and parsed >= V2_APPARATUS
+
+
+def row_labels_at_write(
+    result: GradeResult,
+    *,
+    apparatus_version: str,
+    error: str,
+    builder_error: str = "",
+    stop_reason: str = "",
+    change_id: str = "",
+    pin_kind_below_v2: bool = True,
+    process_step: str = PROCESS_REPLAY,
+    loop: bool = False,
+    context_arm: str = "",
+    taxonomy: str = GLOBAL_CLASS_SET,
+) -> dict[str, str]:
+    """THE row-labelling helper: the classification a new row carries from write, for a
+    replay row (:func:`grade_row_from_result`) and a factory row
+    (``crb.factory.build.factory_row``) alike (ADR-0025 items 5 and 6).
+
+    From :data:`V2_APPARATUS` every row pins ``failure_kind`` — ``""`` on a clean row —
+    and ``lint_reason`` (the grade's ``lint_status``), and a row that observed a mined
+    commit pins its ``change_id``. It also pins the **context arm** its brief carried
+    (``context_arm``: the composer's statement, else ``crb.core.context_arm.context_arm_for``
+    over the step, the grade's mode and whether the loop reached the brief — ADR-0026 item 1)
+    and the **class-set version** its class was read under (``taxonomy``, the global
+    vocabulary unless an organisation's set is named — item 9). Below it each writer keeps
+    exactly what it always wrote, so a row of 2.3 hashes as it did: a replay row pins a
+    non-empty kind (``pin_kind_below_v2``), a factory row pins none.
+    """
+    kind = derive_failure_kind(
+        clean=result.clean,
+        disqualified=result.disqualified,
+        error=error,
+        builder_error=builder_error,
+        stop_reason=stop_reason,
+        lint_only=lint_only_failure(result.belts.to_dict()),
+        api_only=api_only_failure(
+            {**result.belts.to_dict(), BELT_API_STABLE: result.belts.api_stable}
+        ),
+    )
+    if not is_v2_apparatus(apparatus_version):
+        return {LABEL_FAILURE_KIND: kind} if kind and pin_kind_below_v2 else {}
+    out = {LABEL_FAILURE_KIND: kind, LABEL_LINT_REASON: result.lint_status}
+    if change_id:
+        out[LABEL_CHANGE_ID] = change_id
+    out[LABEL_CONTEXT_ARM] = context_arm or context_arm_for(
+        process_step=process_step, mode=result.mode, loop=loop
+    )
+    out[LABEL_TAXONOMY] = taxonomy
+    cause = derive_outage_cause(kind, error)
+    if cause:  # pilot D1: "your login" or "the provider", pinned at write (P-435)
+        out[LABEL_OUTAGE_CAUSE] = cause
+    return out
+
+
+def context_arm_of_factory_author(test_author: str, canonical: str = "") -> str:
+    """The ``test_source`` / ``test_author`` pair a factory row's arm is decided from:
+    ``operator:<name>`` is a person's failing test (``S2``); a rung label ``name:model`` is an
+    authored one, named by ``canonical`` (the caller's ``canonical_model`` of the model).
+    Returns the arm id (ADR-0026 item 1) with no loop modifier — the caller adds ``+L``."""
+    author = (test_author or "").strip()
+    if author.startswith("operator:"):
+        return context_arm_for(
+            process_step=PROCESS_FACTORY, mode="sighted", test_source=TEST_PERSON
+        )
+    model = canonical or (author.split(":", 1)[1] if ":" in author else author)
+    return context_arm_for(
+        process_step=PROCESS_FACTORY,
+        mode="sighted",
+        test_source=TEST_AUTHORED,
+        test_author=model,
+    )
+
+
+def is_sealed_class(posture_class: str) -> bool:
+    """A posture class whose tests run in the docker sandbox's sealed mode (ADR-0019 §8,
+    ADR-0023): ``docker/<tree>/sealed``."""
+    return posture_class.startswith("docker/") and posture_class.endswith("/sealed")
+
+
+#: The labels only apparatus 2.4 defines (DL-094 (2)): a row below 2.4 never carries one,
+#: whichever writer built it — refused by the row itself, at write and on read (P-309). A
+#: writer that is handed one for an older apparatus writes the row as a 2.3 row always was.
+V2_ONLY_LABELS: frozenset[str] = frozenset(
+    {LABEL_LINT_REASON, LABEL_CHANGE_ID, LABEL_CONTEXT_ARM, LABEL_TAXONOMY, LABEL_OUTAGE_CAUSE}
+)
+#: The labels a replay row KEEPS only from 2.4: the helper's (:data:`V2_ONLY_LABELS`) and
+#: the builder executor the adapter writes on every attempt, which a row below 2.4 drops.
+V2_KEPT_LABELS: frozenset[str] = V2_ONLY_LABELS | {LABEL_BUILDER_EXECUTOR}
+
+
+def labels_at_apparatus(labels: Mapping[str, str], apparatus_version: str) -> dict[str, str]:
+    """The labels a row of ``apparatus_version`` keeps (DL-094 (2), P-317): from 2.4 all of
+    them; below 2.4 none of :data:`V2_KEPT_LABELS` — the row is written as a 2.3 row always
+    was. THE one rule for every writer, and for every test that rewrites a row's apparatus."""
+    if is_v2_apparatus(apparatus_version):
+        return dict(labels)
+    return {k: v for k, v in labels.items() if k not in V2_KEPT_LABELS}
 
 
 def is_environment_error(error: str) -> bool:
@@ -635,11 +961,27 @@ class GradeRow:
                 raise ValueError(
                     f"failure_kind label {kind!r} contradicts disqualified={self.disqualified}"
                 )
+        cause = self.labels.get(LABEL_OUTAGE_CAUSE)
+        if cause is not None:
+            # a 2.4 label on an outage row only (P-305's class: a label below its apparatus)
+            if cause not in OUTAGE_CAUSES:
+                raise ValueError(f"outage_cause label {cause!r} not in {OUTAGE_CAUSES}")
+            if not is_v2_apparatus(self.apparatus_version):
+                raise ValueError(
+                    f"outage_cause label on a row of {self.apparatus_version}: it is written "
+                    "from apparatus 2.4 only"
+                )
+            if self.failure_kind != FAILURE_OUTAGE:
+                raise ValueError(
+                    f"outage_cause label {cause!r} on a row whose failure_kind is "
+                    f"{self.failure_kind!r}, not 'outage'"
+                )
         ck = self.labels.get(LABEL_COST_KNOWN)
         if ck is not None and ck not in ("true", "false"):
             raise ValueError(f"cost_known label must be 'true' or 'false', got {ck!r}")
         self.assert_belt_set_matches_apparatus()
         self.assert_posture_and_witness()
+        self.assert_own_classification()
 
     @property
     def carries_posture(self) -> bool:
@@ -667,6 +1009,76 @@ class GradeRow:
                     f"ledger refuses row {self.task_id[:10]} ({self.repo}): failure_kind="
                     f"{self.failure_kind!r} blames the model without a witness from its posture "
                     f"(blame_control={witness or '-'!r}; expected one of {BLAME_CONTROLS})"
+                )
+
+    @property
+    def carries_classification(self) -> bool:
+        """``True`` for a measured row of :data:`V2_APPARATUS` or later — the rows that
+        carry their own classification from write (ADR-0025 items 5 and 6)."""
+        return self.provenance == "measured" and is_v2_apparatus(self.apparatus_version)
+
+    def assert_own_classification(self) -> None:
+        """ADR-0025 items 5 and 6, at write and at read alike: a measured row of 2.4 or later
+        pins its ``failure_kind`` and a ``lint_reason`` that agrees with belt 5, and a
+        replay row names the change it observed and was gold-checked clean. Rows below 2.4
+        are never re-interpreted, and never carry a label only 2.4 defines
+        (:data:`V2_ONLY_LABELS`, P-309)."""
+        if not is_v2_apparatus(self.apparatus_version):
+            leaked = [k for k in V2_ONLY_LABELS if k in self.labels]
+            if leaked:
+                raise LedgerIntegrityError(
+                    f"ledger refuses row {self.task_id[:10]} ({self.repo}) of "
+                    f"{self.apparatus_version}: {leaked} are labels of apparatus 2.4, which no "
+                    "row below 2.4 carries (DL-094 (2))"
+                )
+        if not self.carries_classification:
+            return
+        where = f"ledger refuses row {self.task_id[:10]} ({self.repo}) of {self.apparatus_version}"
+        if LABEL_FAILURE_KIND not in self.labels:
+            raise LedgerIntegrityError(f"{where}: no failure_kind label (stamped at write)")
+        if self.failure_kind == FAILURE_OUTAGE and LABEL_OUTAGE_CAUSE not in self.labels:
+            raise LedgerIntegrityError(
+                f"{where}: an outage row without its outage_cause label (stamped at write)"
+            )
+        reason = self.labels.get(LABEL_LINT_REASON)
+        if reason is None:
+            raise LedgerIntegrityError(f"{where}: no lint_reason label (stamped at write)")
+        if reason == LINT_NOT_REQUESTED:
+            raise LedgerIntegrityError(
+                f"{where}: lint_reason 'not_requested' — a grade that skipped belt 5 writes no row"
+            )
+        why = lint_status_violation(reason, self.repo_lint_clean, clean=self.clean)
+        if why:
+            raise LedgerIntegrityError(f"{where}: {why}")
+        arm = self.labels.get(LABEL_CONTEXT_ARM, "")
+        if not is_arm(arm):
+            raise LedgerIntegrityError(
+                f"{where}: context_arm {arm!r} is missing or outside the grammar (ADR-0026 "
+                "item 1; stamped at write through context_arm_for)"
+            )
+        base = parse_arm(arm).base
+        if (self.process_step == PROCESS_REPLAY and base == BASE_S2) or (
+            self.process_step == PROCESS_FACTORY and base not in (BASE_S1, BASE_S2)
+        ):
+            raise LedgerIntegrityError(
+                f"{where}: context arm {arm!r} on a {self.process_step} row — S2 is a factory "
+                "arm only, and a factory row's arm is S1@<author> or S2"
+            )
+        taxonomy = self.labels.get(LABEL_TAXONOMY, "")
+        if not is_class_set_version(taxonomy):
+            raise LedgerIntegrityError(
+                f"{where}: taxonomy {taxonomy!r} is missing or not a class-set version "
+                f"(ADR-0026 item 9; the global vocabulary is {GLOBAL_CLASS_SET!r})"
+            )
+        if self.process_step == PROCESS_REPLAY:
+            if self.gold_clean is not True:
+                raise LedgerIntegrityError(
+                    f"{where}: a replay row must be gold-checked clean (gold_clean="
+                    f"{self.gold_clean!r}); qualify the task in this posture first"
+                )
+            if not self.labels.get(LABEL_CHANGE_ID):
+                raise LedgerIntegrityError(
+                    f"{where}: a replay row names the change it observed (change_id)"
                 )
 
     @property
@@ -714,22 +1126,76 @@ class GradeRow:
         return self.labels.get(LABEL_STOP_REASON, "")
 
     @property
+    def lint_reason(self) -> str:
+        """Why belt 5 holds what it holds (``crb.core.lint.LINT_STATUSES``) — pinned on every
+        measured row of apparatus 2.4 or later; ``""`` on an older row (never re-derived).
+        What routing.v2 reads to leave a row graded with belt 5 switched off out of a cell's
+        count (``disabled_by_config``)."""
+        return self.labels.get(LABEL_LINT_REASON, "")
+
+    @property
+    def change_id(self) -> str:
+        """The change this row observed (``crb.core.mine.change_identity``) — pinned on every
+        measured replay row of apparatus 2.4 or later; ``""`` when the row does not carry
+        it. A reader that counts distinct commits counts distinct values of this."""
+        return self.labels.get(LABEL_CHANGE_ID, "")
+
+    @property
+    def context_arm(self) -> str:
+        """The context arm the row's brief carried (``labels.context_arm``, ADR-0026 item 1) —
+        pinned on every measured row of apparatus 2.4 or later; ``""`` on an older row, which
+        is never re-derived."""
+        return self.labels.get(LABEL_CONTEXT_ARM, "")
+
+    @property
+    def taxonomy(self) -> str:
+        """The class-set version the row's class was read under (``labels.taxonomy``,
+        ADR-0026 item 9); ``""`` on a row from before 2.4."""
+        return self.labels.get(LABEL_TAXONOMY, "")
+
+    @property
+    def builder_executor(self) -> str:
+        """Where the builder ran (``docker`` = its sealed container), when the row kept it."""
+        return self.labels.get(LABEL_BUILDER_EXECUTOR, "")
+
+    @property
+    def imported(self) -> bool:
+        """Imported into this ledger from another (:data:`LABEL_IMPORTED`, or the older
+        ``source_row_hash`` marker): never an attempt this deployment graded."""
+        return self.labels.get(LABEL_IMPORTED) == "true" or LABEL_SOURCE_ROW_HASH in self.labels
+
+    @property
+    def sealed(self) -> bool:
+        """Graded in the SEALED posture (ADR-0026 item 2; ADR-0025 as amended): the tests in
+        the docker sandbox's sealed mode (a ``docker/<tree>/sealed`` posture class, ADR-0019)
+        and the builder in its sealed container (ADR-0012). A row that does not record where
+        its builder ran is not sealed — fail closed."""
+        return is_sealed_class(self.posture_class) and (
+            self.builder_executor == BUILDER_EXECUTOR_SEALED
+        )
+
+    @property
     def failure_kind(self) -> str:
         """Why the row is not clean (``""`` when it is) — see :func:`derive_failure_kind`.
 
-        The label pinned at write time is the record; a row without one (written
-        before the label existed) derives the kind from its own hashed fields.
-        Such a row can never read ``budget`` — its stop reason was not recorded —
-        and says ``builder_red`` for it, which is what the old rule said too.
+        From apparatus 2.4 the label pinned at write IS the kind, read verbatim (a measured
+        row cannot exist without it; an imported one without it derives by the live rule).
+        Below 2.4 the rule frozen at 2.3 reads the row (:func:`derive_failure_kind_v1`):
+        the pinned label, re-read as ``outage`` only against the frozen
+        :data:`OUTAGE_ERROR_MARKERS_V1`; a row without one derives its kind from its own
+        hashed fields, can never read ``budget`` (its stop reason was not recorded) and
+        says ``builder_red`` for it, which is what the old rule said too.
         """
         pinned = self.labels.get(LABEL_FAILURE_KIND)
+        v2 = is_v2_apparatus(self.apparatus_version)
         if pinned is not None:
-            # a row pinned ``harness`` before ``outage`` existed reads as the outage it
-            # was — the error text is hashed into the row, so the re-reading is honest
-            if pinned == FAILURE_HARNESS and is_outage_error(self.error):
+            # below 2.4, a row pinned ``harness`` before ``outage`` existed reads as the
+            # outage it was — the error text is hashed into the row and the markers frozen
+            if not v2 and pinned == FAILURE_HARNESS and is_outage_error_v1(self.error):
                 return FAILURE_OUTAGE
             return pinned
-        return derive_failure_kind(
+        rule = derive_failure_kind if v2 else derive_failure_kind_v1
+        return rule(
             clean=self.clean,
             disqualified=self.disqualified,
             error=self.error,
@@ -738,6 +1204,13 @@ class GradeRow:
             lint_only=self.lint_only(),
             api_only=self.api_only(),
         )
+
+    @property
+    def outage_cause(self) -> str:
+        """Why an outage row's call never happened — ``auth`` (the credential this
+        deployment presented was refused) or ``provider`` — as pinned at write from 2.4;
+        ``""`` on every other row and on a row below 2.4 (never derived after the fact)."""
+        return self.labels.get(LABEL_OUTAGE_CAUSE, "")
 
     @property
     def cost_known(self) -> bool:
@@ -853,6 +1326,8 @@ def grade_row_from_result(
     language: str = "",
     labels: Mapping[str, str] | None = None,
     builder_error: str = "",
+    apparatus_version: str = "",
+    context_arm: str = "",
 ) -> GradeRow:
     """Reduce a :class:`GradeResult` + its evidence-pack hash to the ledger row.
 
@@ -872,23 +1347,31 @@ def grade_row_from_result(
     (:func:`derive_cost_known` over the :class:`BuilderRef`) are pinned into
     ``labels`` here — the ONE place the classification is decided at write time —
     so the hash chain commits to them. The builder's stop reason travels as
-    ``labels['stop_reason']`` so the ``budget`` kind stays re-derivable.
+    ``labels['stop_reason']`` so the ``budget`` kind stays re-derivable. From apparatus 2.4
+    the labels come from :func:`row_labels_at_write` (the kind on every row, belt 5's
+    reason and the task's ``change_id``, the context arm and the class-set version);
+    ``apparatus_version`` is the stamp, read from ``crb.core.version`` at call time when not
+    given. ``context_arm`` is the brief composer's statement of the arm it built (a
+    ``context_arm`` label among ``labels`` says the same); without either the arm is decided
+    from the mode and whether the run's loop reached the brief (the ``learn`` label).
     """
     b = builder or BuilderRef(mode=result.mode)
+    apparatus = apparatus_version or _version.APPARATUS_VERSION
     # the grader's own error always wins; the builder's trouble surfaces as `error`
     # only on a non-clean row (on a clean row it is a label — the belts judged the tree)
     error = result.error or ("" if result.clean else builder_error)
     stop_reason = builder_stop_reason(builder)
-    kind = derive_failure_kind(
-        clean=result.clean,
-        disqualified=result.disqualified,
+    given = dict(labels or {})
+    written = row_labels_at_write(
+        result,
+        apparatus_version=apparatus,
         error=error,
         builder_error=builder_error,
         stop_reason=stop_reason,
-        lint_only=lint_only_failure(result.belts.to_dict()),
-        api_only=api_only_failure(
-            {**result.belts.to_dict(), BELT_API_STABLE: result.belts.api_stable}
-        ),
+        change_id=str(task.labels.get(LABEL_CHANGE_ID, "")),
+        process_step=process_step,
+        loop=loop_on(given),
+        context_arm=context_arm or str(given.get(LABEL_CONTEXT_ARM, "")),
     )
     cost_known = derive_cost_known(
         cost_usd=b.cost_usd,
@@ -938,14 +1421,18 @@ def grade_row_from_result(
         latency_s=b.latency_s,
         gold_clean=task.gold_clean,
         evidence_pack_hash=pack_hash,
+        apparatus_version=apparatus,
         belt_set=BELT_SET_V5,
         provenance="measured",
         labels={
             "rung": trial,
-            **{k: str(v) for k, v in task.labels.items()},
+            # the change identity is a 2.4 label (DL-094 (2)): a mined task carries it at
+            # any apparatus, but a row below 2.4 is written as a 2.3 row always was — as
+            # are the builder executor, the context arm and the class-set version
+            **labels_at_apparatus({k: str(v) for k, v in task.labels.items()}, apparatus),
             **({"builder_error": builder_error[:300]} if builder_error else {}),
-            **dict(labels or {}),
-            **({LABEL_FAILURE_KIND: kind} if kind else {}),
+            **labels_at_apparatus(given, apparatus),
+            **written,
             **(
                 {LABEL_COST_KNOWN: _bool_label(cost_known)}
                 if cost_known != cost_known_default
@@ -1120,7 +1607,7 @@ class FailureSplit:
 
     ``n`` counts ELIGIBLE rows (not disqualified, oracle not known-bad) — the same
     denominator :class:`CellStats` routes on — so ``n == clean + builder_red +
-    lint + budget + protocol + harness``; ``disqualified`` and ``outage`` are counted
+    lint + api + budget + protocol + harness + authoring``; ``disqualified`` and ``outage`` are counted
     over all rows and sit outside ``n``. ``point`` is the all-rows rate (``clean / n``): the
     fail-closed number, where every instrument error counts against autonomy.
     ``model_point`` is ``clean / (clean + builder_red + lint)`` — how often the
@@ -1150,12 +1637,20 @@ class FailureSplit:
     #: Provider outages (usage limit, 429, dead credential): the call never happened.
     #: Counted over all rows, outside ``n`` — like ``disqualified``.
     outage: int = 0
+    #: The ``S1`` arm's test author produced no RED test (ADR-0026 item 1): inside ``n``
+    #: (against the arm), never in ``model_n`` and never an instrument failure.
+    authoring: int = 0
+    #: Of ``outage``, the rows whose cause is ``auth``: the login THIS deployment presented
+    #: was refused — "your login", not "the provider" (pilot D1; rows of 2.4 and later).
+    outage_auth: int = 0
 
     def __post_init__(self) -> None:
+        if not 0 <= self.outage_auth <= self.outage:
+            raise ValueError("a FailureSplit's outage_auth must be a part of its outage")
         # the split must partition n exactly: a kind that is dropped or double-counted
         # would let a rate be quoted over a denominator nobody can reconstruct
         kinds = self.clean + self.builder_red + self.lint + self.api + self.budget + self.protocol
-        if self.n != kinds + self.harness:
+        if self.n != kinds + self.harness + self.authoring:
             raise ValueError("a FailureSplit's n must equal the sum of its eligible kinds")
 
     @property
@@ -1198,8 +1693,10 @@ class FailureSplit:
             "budget": self.budget,
             "protocol": self.protocol,
             "harness": self.harness,
+            "authoring": self.authoring,
             "disqualified": self.disqualified,
             "outage": self.outage,
+            "outage_auth": self.outage_auth,
             "rows": self.rows,
             "lint_evaluated": self.lint_evaluated,
             "point": round(self.point, 4),
@@ -1238,6 +1735,12 @@ def failure_split(rows: Iterable[GradeRow]) -> FailureSplit:
         lint_evaluated=sum(1 for r in eligible if r.repo_lint_clean is not None),
         api=kinds[FAILURE_API],
         outage=sum(1 for r in rs if r.failure_kind == FAILURE_OUTAGE),
+        authoring=kinds[FAILURE_AUTHORING],
+        outage_auth=sum(
+            1
+            for r in rs
+            if r.failure_kind == FAILURE_OUTAGE and r.outage_cause == OUTAGE_CAUSE_AUTH
+        ),
     )
 
 
@@ -1265,6 +1768,8 @@ class CellStats:
     n_protocol: int = 0
     n_harness: int = 0
     n_outage: int = 0  # provider outages: outside n, reported so a reader sees the gap
+    #: Of ``n_outage``, the rows whose login this deployment presented was refused (pilot D1).
+    n_outage_auth: int = 0
     #: DISTINCT tasks among the eligible rows. ``n`` counts attempts: a cell of 16 rows on
     #: 4 commits is a statement about 4 commits — the clustering EVIDENCE-AND-CLAIMS §3
     #: forbids hiding (decider pass 2, 2026-09-15). Shown next to ``n`` everywhere.
@@ -1288,6 +1793,30 @@ class CellStats:
     #: ``cost_usd_mean``. ``0`` means the mean is unknown, never ``$0``: a reader decides
     #: known-ness from this count, never by comparing the mean with zero (P-131).
     n_cost_known: int = 0
+    # --- routing.v2 (ADR-0025 items 1 and 2 as ADR-0026 amends them) -------------------
+    #: The one apparatus, context arm and class-set version every row of the cell carries
+    #: (``""`` for a row from before the stamp) — a cell never pools two of any.
+    apparatus_version: str = ""
+    context_arm: str = ""
+    taxonomy: str = ""
+    #: Distinct tasks among the eligible rows (the pre-2.4 meaning of ``n_tasks``).
+    n_tasks_eligible: int = 0
+    #: The ROUTING tasks: distinct changes, each counted once by its first observed attempt
+    #: (:func:`first_attempts`), gold-checked and graded with belt 5 not switched off.
+    task_clean: int = 0
+    task_ci: Interval = field(default_factory=lambda: Interval(0.0, 1.0))
+    n_tasks_gold_unchecked: int = 0
+    n_tasks_lint_disabled: int = 0
+    #: Routing tasks whose first observed attempt was graded in the sealed posture.
+    n_tasks_sealed: int = 0
+    #: Eligible rows NOT graded in the sealed posture (``GradeRow.sealed``): a replayed arm's
+    #: cell holding any routes ``calibrate`` (``posture_unsealed``) — ADR-0025 as amended.
+    n_unsealed: int = 0
+
+    @property
+    def task_point(self) -> float:
+        """``task_clean / n_tasks`` — ``0.0`` for no routing task."""
+        return self.task_clean / self.n_tasks if self.n_tasks else 0.0
 
     @property
     def n_disqualified(self) -> int:
@@ -1324,6 +1853,7 @@ class CellStats:
             "n_protocol": self.n_protocol,
             "n_harness": self.n_harness,
             "n_outage": self.n_outage,
+            "n_outage_auth": self.n_outage_auth,
             "n_disqualified": self.n_disqualified,
             "n_lint_evaluated": self.n_lint_evaluated,
             "model_n": self.model_n,
@@ -1331,7 +1861,115 @@ class CellStats:
             "model_ci_low": round(self.model_ci.low, 4),
             "model_ci_high": round(self.model_ci.high, 4),
             "checks_arm": self.checks_arm,
+            "apparatus_version": self.apparatus_version,
+            "context_arm": self.context_arm,
+            "taxonomy": self.taxonomy,
+            "n_tasks_eligible": self.n_tasks_eligible,
+            "task_clean": self.task_clean,
+            "task_point": round(self.task_point, 4),
+            "task_ci_low": round(self.task_ci.low, 4),
+            "task_ci_high": round(self.task_ci.high, 4),
+            "n_tasks_gold_unchecked": self.n_tasks_gold_unchecked,
+            "n_tasks_lint_disabled": self.n_tasks_lint_disabled,
+            "n_tasks_sealed": self.n_tasks_sealed,
+            "n_unsealed": self.n_unsealed,
         }
+
+
+#: The hashed label a factory row carries when its first attempt was graded on held-out
+#: acceptance tests the builder never saw (ADR-0026 item 8) — the only factory row that routes,
+#: and only for arm ``S2`` (ADR-0026 item 6, amending ADR-0025 item 2).
+LABEL_HELD_OUT = "held_out_acceptance"
+
+
+@dataclass(frozen=True)
+class FirstAttempt:
+    """One distinct change of a cell, read by its first observed attempt (ADR-0025 item 2)."""
+
+    change: str
+    row: GradeRow
+    #: ``False`` when every non-escalated eligible row of the change was ``harness``: the
+    #: first of them stands, as a failed task, until an attempt observes the builder.
+    observed: bool = True
+
+    @property
+    def task_id(self) -> str:
+        return self.row.task_id
+
+    @property
+    def clean(self) -> bool:
+        return self.observed and self.row.clean
+
+    @property
+    def gold_checked(self) -> bool:
+        """A replay row whose gold was checked clean, or a factory ``S2`` row graded on
+        held-out acceptance tests. Every other factory row is graded on a test a model
+        wrote: the factory never licenses itself."""
+        if self.row.process_step == PROCESS_FACTORY:
+            return (
+                is_arm(self.row.context_arm)
+                and parse_arm(self.row.context_arm).base == BASE_S2
+                and self.row.labels.get(LABEL_HELD_OUT) == "true"
+            )
+        return self.row.gold_clean is True
+
+    @property
+    def lint_disabled(self) -> bool:
+        return self.row.lint_reason == LINT_DISABLED_BY_CONFIG
+
+    @property
+    def routes(self) -> bool:
+        """Counts toward the bar: gold-checked, and not an attempt belt 5 could have changed
+        while it was switched off (:func:`lint_could_change`) — a lint-disabled MISS still
+        counts, so switching belt 5 off never helps a cell (ADR-0025 item 5, P-342)."""
+        return self.gold_checked and not lint_could_change(self.row)
+
+
+def lint_could_change(row: GradeRow) -> bool:
+    """Whether belt 5, switched off by configuration for ``row``, could have changed its
+    outcome: only an attempt that passed every other belt (clean with belt 5 off, not
+    disqualified) — a red target or a disqualified build fails whatever the linter says. The
+    one rule a reading's count and a cell's first attempts apply (P-342)."""
+    return row.lint_reason == LINT_DISABLED_BY_CONFIG and bool(row.clean) and not row.disqualified
+
+
+def change_of(row: GradeRow) -> str:
+    """The distinct unit a row observed: its ``change_id`` (two cherry-picks of one change,
+    or a revert and its original, share one), else its task id."""
+    return row.change_id or row.task_id
+
+
+def first_attempts(rows: Iterable[GradeRow]) -> list[FirstAttempt]:
+    """Each distinct change's first observed attempt, in LEDGER order (ADR-0025 item 2): the
+    first row that is eligible, is not an escalation rung (:func:`is_escalated_trial`) and
+    observed the builder (its failure kind is not ``harness``). A change whose every such row
+    is ``harness`` counts, by its first, as not clean. Distinct means distinct change
+    (:func:`change_of`), never distinct commit id. Order: first seen."""
+    observed: dict[str, FirstAttempt] = {}
+    harness: dict[str, GradeRow] = {}
+    order: dict[str, None] = {}
+    for r in rows:
+        if not r.eligible or is_escalated_trial(r.trial):
+            continue
+        ch = change_of(r)
+        if ch in observed:
+            continue
+        order.setdefault(ch, None)
+        if r.failure_kind == FAILURE_HARNESS:
+            harness.setdefault(ch, r)
+            continue
+        observed[ch] = FirstAttempt(ch, r)
+    return [observed.get(ch) or FirstAttempt(ch, harness[ch], observed=False) for ch in order]
+
+
+def _one(rows: Sequence[GradeRow], attr: str, what: str, exc: type[ValueError]) -> str:
+    values = sorted({getattr(r, attr) for r in rows})
+    if len(values) > 1:
+        raise exc(
+            f"one cell holds rows of {len(values)} {what}s ({', '.join(v or '-' for v in values)}): "
+            f"a reading has one {what} — choose one before reducing a cell"
+        )
+    return str(values[0])
 
 
 def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
@@ -1348,8 +1986,16 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
             "with the format step or belt 6 on is a different measurement from one graded "
             "without (ADR-0024) — choose one arm with rows_for_checks before reducing a cell"
         )
+    # ADR-0025 item 1 and ADR-0026 items 1 and 9: one apparatus, one context arm and one
+    # class-set version per reading, refused like two checks arms (ADR-0024)
+    apparatus = _one(rs, "apparatus_version", "apparatus version", ApparatusPooled)
+    arm = _one(rs, "context_arm", "context arm", ContextArmsPooled)
+    taxonomy = _one(rs, "taxonomy", "class-set version", ClassSetsPooled)
     cell = rs[0].cell
     eligible = [r for r in rs if r.eligible]
+    firsts = first_attempts(rs)
+    routing = [a for a in firsts if a.routes]
+    task_clean = sum(1 for a in routing if a.clean)
     n = len(eligible)
     clean = sum(1 for r in eligible if r.clean)
     # re-checked at read time over ALL rows, not just eligible ones: the write-time
@@ -1382,7 +2028,18 @@ def cell_stats(rows: Iterable[GradeRow]) -> CellStats:
         n_protocol=split.protocol,
         n_harness=split.harness,
         n_outage=split.outage,
-        n_tasks=len({r.task_id for r in eligible if r.task_id}),
+        n_tasks=len(routing),
+        n_tasks_eligible=len({r.task_id for r in eligible if r.task_id}),
+        task_clean=task_clean,
+        task_ci=wilson_interval(task_clean, len(routing)),
+        n_tasks_gold_unchecked=sum(1 for a in firsts if not a.gold_checked),
+        n_tasks_lint_disabled=sum(1 for a in firsts if a.gold_checked and a.lint_disabled),
+        n_tasks_sealed=sum(1 for a in routing if a.row.sealed),
+        n_unsealed=sum(1 for r in eligible if not r.sealed),
+        apparatus_version=apparatus,
+        context_arm=arm,
+        taxonomy=taxonomy,
+        n_outage_auth=split.outage_auth,
         model_n=split.model_n,
         model_point=split.model_point,
         model_ci=split.model_ci,
@@ -1424,6 +2081,33 @@ def pool_scope(row: GradeRow) -> tuple[str, ...]:
     return tuple(str(getattr(row, axis)) for axis in NEVER_POOL_AXES)
 
 
+#: The arm a reader that names none reads (``S3``: the arm every sighted replay row of 2.4
+#: carries — the commit's own tests). The capability map reads each cell's own standard.
+DEFAULT_READ_ARM = "S3"
+
+
+def rows_for_reading(
+    rows: Iterable[GradeRow],
+    *,
+    apparatus: str,
+    arm: str = DEFAULT_READ_ARM,
+    taxonomy: str = GLOBAL_CLASS_SET,
+) -> list[GradeRow]:
+    """The rows ONE reading may reduce (ADR-0025 item 1, ADR-0026 items 1 and 9): one
+    apparatus; from 2.4 also one context arm and one class-set version. A row below 2.4
+    carries neither stamp and is kept at its own apparatus (the reader splits it by mode, as
+    it always did). Use before ``cell_stats`` / ``build_capability_map`` over mixed rows."""
+    out: list[GradeRow] = []
+    for r in rows:
+        if r.apparatus_version != apparatus:
+            continue
+        stamped = bool(r.context_arm or r.taxonomy)
+        if stamped and (r.context_arm != arm or r.taxonomy != taxonomy):
+            continue
+        out.append(r)
+    return out
+
+
 def group_by_cell(
     rows: Iterable[GradeRow], *, key_fields: Sequence[str] = CELL_FIELDS
 ) -> dict[tuple[str, ...], list[GradeRow]]:
@@ -1436,11 +2120,23 @@ def group_by_cell(
     return groups
 
 
+def reading_key(row: GradeRow) -> tuple[str, str, str, str]:
+    """What one reading of a cell never pools: the checks arm (ADR-0024), the apparatus
+    (ADR-0025), the context arm and the class-set version (ADR-0026)."""
+    return (row.checks_arm, row.apparatus_version, row.context_arm, row.taxonomy)
+
+
 def all_cell_stats(rows: Iterable[GradeRow]) -> list[CellStats]:
-    """One :class:`CellStats` per full cell key and ``checks`` arm present in ``rows`` — two
-    arms of one key are two cells, never one (ADR-0024)."""
+    """One :class:`CellStats` per full cell key, ``checks`` arm, apparatus, context arm and
+    class-set version present in ``rows`` — two of any of those are two cells, never one."""
     rs = list(rows)
-    return [cell_stats(g) for arm in ARMS for g in group_by_cell(rows_for_checks(rs, arm)).values()]
+    out: list[CellStats] = []
+    for arm in ARMS:
+        groups: dict[tuple[str, ...], list[GradeRow]] = {}
+        for r in rows_for_checks(rs, arm):
+            groups.setdefault((*reading_key(r), *r.cell.to_tuple()), []).append(r)
+        out.extend(cell_stats(g) for g in groups.values())
+    return out
 
 
 def false_q1_total(rows: Iterable[GradeRow]) -> int:

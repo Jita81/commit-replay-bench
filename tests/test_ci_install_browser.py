@@ -2,7 +2,7 @@
 
 On 7 Oct 2026 ``npx playwright install --with-deps chromium`` hung silently in apt on six
 required browser jobs, on pull requests #58, #66 and #69, until each job's own timeout cancelled
-it 20 to 40 minutes later (docs/PREVENTION.md P-749). ``scripts/ci_install_browser.py`` stops
+it 20 to 40 minutes later (docs/PREVENTION.md P-751). ``scripts/ci_install_browser.py`` stops
 an attempt that goes quiet, kills its whole process group and retries within a budget; these
 tests drive it with real child processes and sub-second timeouts, and hold every CI job to
 calling it. Later that evening the mirror slowed to 15 to 70 kB/s instead, and healthy attempts
@@ -28,7 +28,7 @@ How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_install_browser.py (the wrapper), .github/workflows/ci.yml (the jobs),
-              docs/PREVENTION.md (P-749), tests/test_ci_job_budget.py (the job parser this
+              docs/PREVENTION.md (P-751), tests/test_ci_job_budget.py (the job parser this
               mirrors)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); a CI job starts
@@ -137,7 +137,7 @@ def test_a_failing_install_is_retried_and_running_out_is_an_error() -> None:
     assert out.count("::warning title=browser install::") == 2
     assert "exited 100" in out
     assert "::error title=browser install::no attempt succeeded within 2 attempts" in out
-    assert "P-749" in out
+    assert "P-751" in out
     assert cleanups == [1, 1]
 
 
@@ -277,7 +277,7 @@ def test_no_workflow_runs_playwright_install_itself() -> None:
     for wf in sorted(WORKFLOWS.glob("*.y*ml")):
         assert _direct_installs(wf.read_text("utf-8")) == [], (
             f"{wf.name} runs playwright install directly; call scripts/ci_install_browser.py "
-            "(docs/PREVENTION.md P-749)"
+            "(docs/PREVENTION.md P-751)"
         )
 
 

@@ -25,7 +25,9 @@ its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item th
 gap id the record defines or has retired; a gap the order of work ranks that no table of
 the plan names, and a plan heading that quotes a rank; a retired id that neither the
 artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
-generated file never vouches for itself); a twin left in old words — a clause of at least
+generated file never vouches for itself); a new gap id that the base's history at the
+merge-base already used for a gap closed there (P-463: one id, two meanings); a twin left in
+old words — a clause of at least
 ``TWIN_MIN_WORDS`` words that a criterion reworded since the merge-base with the base branch
 dropped, still said by another criterion that does not wait on the same gap (P-236); a
 criterion or gap line that states a value a Proposed ADR leaves to the operator without
@@ -50,7 +52,8 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               prevention register's pending rows, each with its claim tag); refuses a gap
               line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
               table of the plan, a plan heading that quotes a rank, a retired id that git
-              history does not vouch for, a twin criterion left in the words another
+              history does not vouch for, a new gap id the base's history already closed
+              (P-463), a twin criterion left in the words another
               criterion dropped since the base (P-236), and a value a Proposed ADR leaves to
               the operator stated as settled (P-237); --check exits
               non-zero on any defect or drift.
@@ -996,8 +999,8 @@ def _own_work_tree(root: Path) -> bool:
     return top is not None and Path(top.strip()).resolve() == root.resolve()
 
 
-def history_gap_ids(root: Path) -> set[str]:
-    """Every gap id that a commit reachable from ``HEAD`` added to an artefact or the register:
+def history_gap_ids(root: Path, rev: str = "HEAD") -> set[str]:
+    """Every gap id that a commit reachable from ``rev`` added to an artefact or the register:
     a gap line (``- **G-nnn** — …``), or the gap cell of a criterion or pending register row
     (the only way a backlog ``F``/``B`` id becomes a gap). Merges are read against their first
     parent, so a line written while resolving a merge counts too. Empty when ``root`` is not
@@ -1012,7 +1015,7 @@ def history_gap_ids(root: Path) -> set[str]:
         "--no-ext-diff",
         "--diff-merges=first-parent",
         "--format=",
-        "HEAD",
+        rev,
         "--",
         *HISTORY_PATHS,
     )
@@ -1046,6 +1049,30 @@ def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
         return set()
     open_ids, retired = previous_ids(text)
     return open_ids | retired
+
+
+_OPEN_GAP_LINE = r"^- \*\*G-[0-9]{3}\*\*"
+
+
+def reused_gap_ids(root: Path, base: str, defined: set[str]) -> list[str]:
+    """The gap ids in ``defined`` that are new here — ``base`` has no open gap by that id —
+    but that a commit reachable from the merge-base of ``HEAD`` and ``base`` already used as a
+    gap (P-463: Wave 2 opened G-945, G-946, G-963 and G-964 while `feat/ns1`'s history had
+    used all four for gaps it had closed, so one id carried two meanings). A gap id is free
+    in the whole history; this reads the part of it a pull request can see — the base's
+    lineage — so a base that squash-merged a branch cannot see the ids that branch opened
+    and closed. Empty when ``root`` is not its own work tree or the base does not resolve."""
+    if not _own_work_tree(root):
+        return []
+    mb = _git(root, "merge-base", "HEAD", base)
+    if mb is None:
+        return []
+    open_on_base = _git(root, "grep", "-hoE", _OPEN_GAP_LINE, base, "--", *HISTORY_PATHS)
+    kept = set(re.findall(r"G-\d{3}", open_on_base or ""))
+    new = {gid for gid in defined if re.fullmatch(r"G-\d{3}", gid)} - kept
+    if not new:
+        return []
+    return sorted(new & history_gap_ids(root, mb.strip()), key=_gap_key)
 
 
 def validate_retired(bad: list[str], base: str, root: Path) -> list[str]:
@@ -1577,6 +1604,13 @@ def main(argv: list[str] | None = None) -> int:
     vouched = history_gap_ids(ROOT) | base_gap_analysis_ids(ROOT, args.base)
     retired = [gid for gid in carried if gid in vouched]
     unvouched = validate_retired([g for g in carried if g not in vouched], args.base, ROOT)
+    errors.extend(
+        f"{gid} is defined here as a new gap, but the history of {args.base} (at the "
+        "merge-base) already used it for a gap that is closed there, so one id would carry "
+        "two meanings — a gap id is free in the whole history: renumber it to one "
+        "`git log --all -S` has never seen and move every reference (P-463)"
+        for gid in reused_gap_ids(ROOT, args.base, defined)
+    )
     items, plan_errors = plan_items(PLAN)
     errors.extend(plan_errors)
     errors.extend(validate_plan(items, defined | set(retired)))

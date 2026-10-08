@@ -38,6 +38,8 @@ What it does: Makes the short-cuts non-constructible: a blind brief cannot carry
               write, a ``.git`` write, a path outside the worktree, git history, the shared
               stash, the network and package installs before they happen (tool loops) or
               records them after the fact (subprocess agents). The belts stay the authority.
+              ``model_error_text`` writes every builder's model-call error, and a refused or
+              absent credential in the ledger's own words (outage, cause auth).
 How:          Frozen dataclasses with ``__post_init__`` invariants → the guards: path
               normalisation + symlink resolution for ``TestFileGuard``; for the shell guard,
               heredoc stripping → substitution hoisting → newline splitting → ``shlex`` →
@@ -53,7 +55,8 @@ Works with:   src/crb/builders/adapter.py (turns a ``Builder`` into the core's `
               src/crb/core/evidence.py (``BuilderRef`` — the pack view of an outcome),
               src/crb/core/grade.py (the verdict this module never produces),
               tests/fixtures/shell_corpus.txt (the honest-shell corpus the guard must pass)
-Tested by:    tests/test_builders_base.py, tests/test_builders_guard_corpus.py
+Tested by:    tests/test_builders_base.py, tests/test_builders_guard_corpus.py,
+              tests/test_ledger_classification.py (``model_error_text``)
 Touch when:   never for a new repository; a guard false positive on honest shell is fixed
               here AND added as a corpus line (tests/fixtures/shell_corpus.txt) first; a new
               stop reason or outcome field changes ``BuilderRef`` in src/crb/core/evidence.py
@@ -77,6 +80,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from crb.core.evidence import BuilderRef
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED, MODES
+from crb.core.ledger import AUTH_REFUSED
 from crb.core.playbook import HEADING as PLAYBOOK_HEADING
 from crb.core.redact import redact_and_cap, redact_and_cap_head
 from crb.core.spec import Language, RepoConfig, TaskSpec
@@ -339,6 +343,55 @@ class BuildBrief:
             **({"gate_note": self.gate_note} if self.gate_note else {}),
             **({"playbook": list(self.playbook)} if self.playbook else {}),
         }
+
+
+# ---------------------------------------------------------------------------
+# A refused credential, in the ledger's words
+# ---------------------------------------------------------------------------
+
+#: The HTTP statuses that mean the provider refused the credential this deployment presented.
+CREDENTIAL_REFUSED_STATUSES: frozenset[int] = frozenset({401, 403})
+
+
+class MissingCredentialError(RuntimeError):
+    """The builder has no credential to present (its key's environment variable is not set).
+    A builder's own error types for this subclass it, so :func:`model_error_text` names it."""
+
+
+def http_status_of(exc: BaseException) -> int | None:
+    """The HTTP status an exception carries — on itself (``status_code``, ``status``), on its
+    ``response``, or on the exception it was raised from — else ``None``."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        for attr in ("status_code", "status"):
+            v = getattr(cur, attr, None)
+            if isinstance(v, int) and not isinstance(v, bool):
+                return v
+        v = getattr(getattr(cur, "response", None), "status_code", None)
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v
+        cur = cur.__cause__ or cur.__context__
+    return None
+
+
+def model_error_text(exc: BaseException) -> str:
+    """THE ``model_error:`` line a builder records for an exception from its model call.
+
+    A credential the provider refused (HTTP 401/403) or that the worker does not have is
+    written ``model_error: authentication failed (…) — <type>: <message>``, in the ledger's
+    own words (:data:`crb.core.ledger.AUTH_REFUSED`), so the row reads ``outage`` with cause
+    ``auth`` — "your login", outside every ``n`` — and the worker records the login invalid.
+    Anything else keeps the builder's words: ``model_error: <type>: <message>`` (Q1's review:
+    an OpenAI-compatible builder's refused key read ``harness``)."""
+    body = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, MissingCredentialError):
+        return f"model_error: {AUTH_REFUSED} (no credential) — {body}"
+    status = http_status_of(exc)
+    if status in CREDENTIAL_REFUSED_STATUSES:
+        return f"model_error: {AUTH_REFUSED} (HTTP {status}) — {body}"
+    return f"model_error: {body}"
 
 
 # ---------------------------------------------------------------------------
@@ -2364,6 +2417,7 @@ class GitArchaeologyGuard:
 
 
 __all__ = [
+    "CREDENTIAL_REFUSED_STATUSES",
     "DEFAULT_RULES",
     "GIT_ALLOWED",
     "NETWORK_TOOLS",
@@ -2384,7 +2438,10 @@ __all__ = [
     "EventFn",
     "GitArchaeologyGuard",
     "GuardRefused",
+    "MissingCredentialError",
     "Rung",
     "TestFileGuard",
     "emit",
+    "http_status_of",
+    "model_error_text",
 ]
