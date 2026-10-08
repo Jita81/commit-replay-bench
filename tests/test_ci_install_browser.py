@@ -5,7 +5,8 @@ required browser jobs, on pull requests #58, #66 and #69, until each job's own t
 it 20 to 40 minutes later (docs/PREVENTION.md P-749). ``scripts/ci_install_browser.py`` stops
 an attempt that goes quiet, kills its whole process group and retries within a budget; these
 tests drive it with real child processes and sub-second timeouts, and hold every CI job to
-calling it.
+calling it. Later that evening the mirror slowed to 15 to 70 kB/s instead, and healthy attempts
+sat silent for up to 237 s mid-package, so the defaults are pinned against that measurement too.
 
 Navigation
 ----------
@@ -19,7 +20,9 @@ What it does: Pins that a quick install succeeds on attempt 1; that a silent att
               ``\\r`` counts as output; that a refused apt-config write is only a warning. For
               the configuration: no workflow line runs ``playwright install`` itself, the
               ``ui-smoke``, ``walkthrough-story`` and ``walkthrough-screens`` jobs call the
-              wrapper, and its budget is at most half of each one's ``timeout-minutes``.
+              wrapper, each passing a ``--budget`` of at most half its ``timeout-minutes``;
+              the default idle timeout outlasts the slow mirror's measured silences, and the
+              attempts outlast every job's budget, so the budget, not the count, binds.
 How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands, a recording
               cleanup and a no-op apt writer; reads ``ci.yml`` as text, job by job.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -30,7 +33,8 @@ Works with:   scripts/ci_install_browser.py (the wrapper), .github/workflows/ci.
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); a CI job starts
               installing a Playwright browser (add it to ``INSTALLING``); the wrapper's
-              defaults change.
+              defaults change; a healthy install is measured silent for longer than
+              ``SLOW_MIRROR_SILENCE_S``.
 """
 
 from __future__ import annotations
@@ -51,6 +55,9 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
 #: Every job that needs a Playwright browser, and so must install it through the wrapper.
 INSTALLING = ("ui-smoke", "walkthrough-story", "walkthrough-screens")
+#: The longest silence of a healthy attempt on the slow mirror of 7 Oct 2026 (15 to 70 kB/s; run
+#: 37683365608, jobs 113004810354 and 113004810596): apt prints nothing while a package downloads.
+SLOW_MIRROR_SILENCE_S = 237
 PY = sys.executable
 
 
@@ -95,7 +102,7 @@ def test_a_quick_install_succeeds_on_the_first_attempt() -> None:
     rc, out = _main(["--idle-timeout", "5", *_py("print('installed chromium')")], cleanups)
     assert rc == 0
     assert "installed chromium" in out
-    assert "attempt 1 of 3 succeeded" in out
+    assert "attempt 1 of 5 succeeded" in out
     assert "::warning" not in out and "::error" not in out
     assert cleanups == []
 
@@ -116,8 +123,8 @@ def test_a_silent_attempt_is_stopped_and_retried_and_the_retry_can_succeed(tmp_p
     assert time.monotonic() - started < 20, (
         "the stalled attempt was not stopped at the idle timeout"
     )
-    assert "attempt 1 of 3 printed nothing for the idle timeout" in out
-    assert "attempt 2 of 3 succeeded" in out
+    assert "attempt 1 of 5 printed nothing for the idle timeout" in out
+    assert "attempt 2 of 5 succeeded" in out
     assert cleanups == [1], "a stopped attempt must be followed by the apt cleanup"
 
 
@@ -186,7 +193,7 @@ def test_a_progress_bar_redrawn_in_place_counts_as_output() -> None:
     )
     rc, out = _main(["--idle-timeout", "0.5", *_py(code)])
     assert rc == 0, out
-    assert "attempt 1 of 3 succeeded" in out
+    assert "attempt 1 of 5 succeeded" in out
 
 
 def test_a_refused_apt_config_write_is_only_a_warning() -> None:
@@ -210,7 +217,8 @@ def test_the_apt_timeouts_keep_apt_silent_for_less_than_the_idle_timeout() -> No
 
 
 def _defaults() -> dict[str, float]:
-    """The wrapper's argparse defaults, read by parsing an empty command line."""
+    """The wrapper's argparse defaults (idle timeout, budget, attempts), read by running ``main``
+    with an empty command line and an attempt that succeeds at once."""
     seen: dict[str, float] = {}
 
     def run(_cmd: object, *, idle_timeout_s: float, deadline: float, out: object) -> object:
@@ -219,10 +227,18 @@ def _defaults() -> dict[str, float]:
         return _mod().Attempt("ok", 0, 0.0)
 
     now = 1000.0
-    _mod().main(
-        [], run=run, apt=lambda: True, cleanup=lambda: None, clock=lambda: now, out=io.StringIO()
-    )
+    out = io.StringIO()
+    _mod().main([], run=run, apt=lambda: True, cleanup=lambda: None, clock=lambda: now, out=out)
+    attempts = re.search(r"attempt 1 of (\d+)", out.getvalue())
+    assert attempts is not None
+    seen["attempts"] = float(attempts.group(1))
     return seen
+
+
+def test_the_default_idle_timeout_outlasts_a_slow_mirrors_silence() -> None:
+    # A healthy attempt on a slow mirror is silent while each package downloads; stopping it
+    # there costs a reconnect for nothing. The margin is for a mirror a little slower still.
+    assert _defaults()["idle_timeout"] > SLOW_MIRROR_SILENCE_S
 
 
 # --- the CI configuration -------------------------------------------------------------------
@@ -274,14 +290,49 @@ def test_the_ban_refuses_a_planted_direct_install() -> None:
     assert _direct_installs("      # npx playwright install is banned here\n") == []
 
 
-@pytest.mark.parametrize("job", INSTALLING)
-def test_each_browser_job_installs_through_the_wrapper_within_half_its_timeout(job: str) -> None:
-    body = _jobs(CI.read_text("utf-8"))[job]
+def _budgets(job: str, text: str | None = None) -> tuple[list[float], int]:
+    """The ``--budget`` each of ``job``'s wrapper calls passes, and the job's ``timeout-minutes``."""
+    body = _jobs(CI.read_text("utf-8") if text is None else text)[job]
     calls = [ln for ln in body if "ci_install_browser.py" in ln and not ln.lstrip().startswith("#")]
     assert calls, f"{job} must install its browser through scripts/ci_install_browser.py"
+    budgets = []
+    for ln in calls:
+        m = re.search(r"--budget[ =](\d+(?:\.\d+)?)", ln)
+        assert m is not None, f"{job} must pass its own --budget: {ln.strip()}"
+        budgets.append(float(m.group(1)))
     timeout = next(
         int(m.group(1)) for ln in body if (m := re.match(r"^    timeout-minutes:\s*(\d+)", ln))
     )
-    assert _defaults()["budget"] <= timeout * 60 / 2, (
-        f"the install budget would take more than half of {job}'s {timeout}-minute timeout"
+    return budgets, timeout
+
+
+@pytest.mark.parametrize("job", INSTALLING)
+def test_each_browser_job_installs_through_the_wrapper_within_half_its_timeout(job: str) -> None:
+    budgets, timeout = _budgets(job)
+    for budget in budgets:
+        assert budget <= timeout * 60 / 2, (
+            f"{job}'s install budget of {budget:.0f} s is more than half its {timeout}-minute timeout"
+        )
+
+
+@pytest.mark.parametrize("job", INSTALLING)
+def test_the_attempts_outlast_each_jobs_budget(job: str) -> None:
+    # Attempts stopped at the idle timeout must not run out before the budget does: on a slow
+    # mirror each retry resumes where the last one stopped, so the budget is what should bind.
+    d = _defaults()
+    for budget in _budgets(job)[0]:
+        assert d["attempts"] * d["idle_timeout"] >= budget, (
+            f"{d['attempts']:.0f} attempts of {d['idle_timeout']:.0f} s run out before "
+            f"{job}'s {budget:.0f} s budget"
+        )
+
+
+def test_the_budget_check_refuses_a_call_with_no_budget() -> None:
+    # A call that falls back to the default budget would escape the half-timeout check.
+    planted = (
+        "jobs:\n  x:\n    timeout-minutes: 20\n    steps:\n      - run: |\n"
+        "          python3 ../scripts/ci_install_browser.py\n"
     )
+    with pytest.raises(AssertionError, match="must pass its own --budget"):
+        _budgets("x", planted)
+    assert _budgets("x", planted.replace(".py\n", ".py --budget 600\n")) == ([600.0], 20)

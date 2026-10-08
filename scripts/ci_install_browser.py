@@ -12,16 +12,24 @@ pull requests #58, #66 and #69, 20 to 40 minutes each, every one a required chec
     python3 ../scripts/ci_install_browser.py
 
 Each attempt runs the install in its own process group. An attempt that prints nothing for
-``--idle-timeout`` seconds is stopped (the longest silence in a healthy install on main's push run
-of 7 Oct 2026, at ``8fa2d73a``, was 48 s, and the slowest healthy install took 457 s: the default
-180 s and 600 s leave room for both): TERM to the group, then KILL, then a bounded
+``--idle-timeout`` seconds is stopped: TERM to the group, then KILL, then a bounded
 ``sudo -n pkill -x apt-get`` so a root apt left behind cannot hold the package lock against the
-next attempt. Attempts repeat, up to ``--attempts``, while the overall ``--budget`` lasts; the
-budget, not a per-attempt cap, bounds the step, so a slow install that keeps printing is never
-cut short while there is time. Before the first attempt it writes apt network timeouts into
-``/etc/apt/apt.conf.d`` (best effort: a runner that refuses ``sudo -n`` gets a warning, not a
-failure), so most stalls end inside apt itself. Every stopped or failed attempt is a
-``::warning``; running out is an ``::error`` and exit 1.
+next attempt. A slow mirror is not a dead one. apt prints one ``Get:`` line as each package
+starts and nothing while it downloads, so on 7 Oct 2026, with the mirror serving 15 to 70 kB/s
+(run 37683365608, jobs 113004810354 and 113004810596), healthy attempts sat silent for up to
+237 s mid-package; the default 300 s outlasts that, and a dead socket ends sooner, inside apt
+(the timeouts below give up after 90 s). Stopping a slow attempt costs a reconnect, not its
+progress: apt keeps the packages it has fetched and resumes a partial one, so on job
+113004810354 the third attempt finished in 40 s a 7.5 MB package the first two had spent 258 s
+on, and job 113004810596's 686 s install passed on its third attempt. So attempts repeat, up to
+``--attempts``, while the overall ``--budget`` lasts, and the budget, not the attempt count,
+decides how slow a mirror a job survives: each job passes at most half its own
+``timeout-minutes``, and less where the rest of the job would leave a longer install no room
+to pass its job-budget guard (the screens shards: 700 s, against 485 to 682 s for the rest).
+Before the first attempt it writes apt network timeouts into ``/etc/apt/apt.conf.d`` (best
+effort: a runner that refuses ``sudo -n`` gets a warning, not a failure), so most stalls end
+inside apt itself. Every stopped or failed attempt is a ``::warning``; running out is an
+``::error`` and exit 1.
 
 Navigation
 ----------
@@ -67,7 +75,8 @@ from typing import TextIO
 #: The install every browser job needs: Chromium and the system libraries it links against.
 DEFAULT_COMMAND = ("npx", "playwright", "install", "--with-deps", "chromium")
 #: apt's own network bounds, written before the first attempt so a dead mirror times out in apt.
-#: Three tries of 30 s is 90 s of silence at most, inside the idle timeout, so apt gives up first.
+#: A dead socket gives up after three tries of 30 s, about 90 s, well inside the idle timeout;
+#: a slow download is never cut short by them, since its bytes keep arriving while apt is silent.
 APT_CONF_PATH = "/etc/apt/apt.conf.d/99crb-ci-network-timeouts"
 APT_CONF = 'Acquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::Retries "2";\n'
 #: What is left after a stopped attempt that can still hold the package lock: a root apt-get.
@@ -203,8 +212,8 @@ def main(
 ) -> int:
     sink = out if out is not None else sys.stdout
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--attempts", type=int, default=3)
-    parser.add_argument("--idle-timeout", type=float, default=180.0, help="seconds of silence")
+    parser.add_argument("--attempts", type=int, default=5)
+    parser.add_argument("--idle-timeout", type=float, default=300.0, help="seconds of silence")
     parser.add_argument("--budget", type=float, default=600.0, help="seconds, all attempts")
     parser.add_argument("--backoff", type=float, default=10.0, help="seconds between attempts")
     parser.add_argument("--no-apt-timeouts", action="store_true")

@@ -638,7 +638,7 @@ jobs:
         working-directory: ui
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          python3 ../scripts/ci_install_browser.py
+          python3 ../scripts/ci_install_browser.py --budget 600
       - name: Smoke (ui/e2e/smoke.spec.ts — the config builds the bundle and serves it)
         working-directory: ui
         env:
@@ -1027,7 +1027,7 @@ jobs:
         working-directory: ui
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          python3 ../scripts/ci_install_browser.py
+          python3 ../scripts/ci_install_browser.py --budget 1200
       - name: Build the UI bundle the API serves
         working-directory: ui
         run: npm run build
@@ -1098,7 +1098,7 @@ jobs:
         working-directory: ui
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          python3 ../scripts/ci_install_browser.py
+          python3 ../scripts/ci_install_browser.py --budget 700
       - name: Build the UI bundle the API serves
         working-directory: ui
         run: npm run build
