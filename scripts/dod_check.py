@@ -25,7 +25,9 @@ its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item th
 gap id the record defines or has retired; a gap the order of work ranks that no table of
 the plan names, and a plan heading that quotes a rank; a retired id that neither the
 artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
-generated file never vouches for itself); a twin left in old words — a clause of at least
+generated file never vouches for itself); a new gap id that the base's history at the
+merge-base already used for a gap closed there (P-463: one id, two meanings); a twin left in
+old words — a clause of at least
 ``TWIN_MIN_WORDS`` words that a criterion reworded since the merge-base with the base branch
 dropped, still said by another criterion that does not wait on the same gap (P-236); a
 criterion or gap line that states a value a Proposed ADR leaves to the operator without
@@ -46,10 +48,12 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               (tests, vitest titles, walkthrough specs, hint registry and ratchet, API routes,
               code symbols, doc anchors, CI jobs, ADRs, decision-log rows), computes the
               four-level roll-up and writes docs/dod/GAP-ANALYSIS.md (the order of work, the
-              gaps by fan-out, the gap ids retired, and every open criterion); refuses a gap
+              gaps by fan-out, the gap ids retired, and every open criterion, and the
+              prevention register's pending rows, each with its claim tag); refuses a gap
               line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
               table of the plan, a plan heading that quotes a rank, a retired id that git
-              history does not vouch for, a twin criterion left in the words another
+              history does not vouch for, a new gap id the base's history already closed
+              (P-463), a twin criterion left in the words another
               criterion dropped since the base (P-236), and a value a Proposed ADR leaves to
               the operator stated as settled (P-237); --check exits
               non-zero on any defect or drift.
@@ -199,6 +203,10 @@ PREVENTION_LEVELS: tuple[str, ...] = ("construction", "gate", "mistake-proofing"
 PREVENTION_STATES: tuple[str, ...] = ("closed", "pending")
 EXECUTABLE_PREFIXES: tuple[str, ...] = ("test", "vitest", "spec", "ci")
 _PREVENTION_ID_RE = re.compile(r"^P-\d{3}$")
+#: The opening of a claim tag (docs/EVIDENCE-AND-CLAIMS.md §1; the words are
+#: scripts/claims_check.py's ``TAGS``): a register row's finding carries one, in its bug cell
+#: or its first-seen cell, and the gap analysis projects it with the row (P-433).
+_CLAIM_TAG_RE = re.compile(r"\[(?:measured|hypothesis|aspiration|gap)\b", re.I)
 _ART_ID_RE = re.compile(r"^dod\.(page|journey|stream)\.[a-z0-9][a-z0-9-]*$|^dod\.product$")
 
 
@@ -586,6 +594,40 @@ class Prevention:
     line: int
 
 
+def claim_tags(text: str) -> list[str]:
+    """Every claim tag in a register cell, verbatim, in order: from ``[measured`` (or
+    ``[hypothesis``, ``[aspiration``, ``[gap``) to its closing bracket. A tag inside a code
+    span is not one, a ``]`` inside a code span does not end one, and a Markdown link's text
+    (``[gap analysis](…)``) is not one."""
+    tags: list[str] = []
+    in_code = False
+    i = 0
+    while i < len(text):
+        if text[i] == "`":
+            in_code = not in_code
+        elif not in_code and _CLAIM_TAG_RE.match(text, i):
+            j, code = i + 1, False
+            while j < len(text) and (code or text[j] != "]"):
+                code = code != (text[j] == "`")
+                j += 1
+            if j == len(text):
+                break  # an unclosed bracket is no tag
+            if not text.startswith("(", j + 1):
+                tags.append(text[i : j + 1])
+            i = j
+        i += 1
+    return tags
+
+
+def projected_finding(r: Prevention) -> str:
+    """The bug cell as the gap analysis shows it: the finding with the claim tags its row
+    carries — those in the bug cell stay where they are, those in the first-seen cell follow
+    it — so a projected claim keeps its provenance (P-433)."""
+    own = claim_tags(r.bug)
+    extra = [t for t in claim_tags(r.first_seen) if t not in own]
+    return " ".join([r.bug, *extra])
+
+
 def parse_prevention(path: Path) -> tuple[list[Prevention], dict[str, str], list[str]]:
     """The register's rows and its ``## Gaps`` lines (the same grammar as an artefact's)."""
     if not path.is_file():
@@ -671,6 +713,12 @@ def validate_prevention(
                     f"recurs — cite a resolving {'/'.join(EXECUTABLE_PREFIXES)} reference"
                 )
         if r.status == "pending":
+            if not claim_tags(f"{r.bug} {r.first_seen}"):
+                errors.append(
+                    f"{where}: its finding carries no claim tag for the gap analysis to "
+                    "project — tag the bug or first-seen cell ([measured — n, method, "
+                    "apparatus] / [hypothesis — …] / [aspiration — …])"
+                )
             if not r.gap:
                 errors.append(f"{where}: pending needs a gap id (an owner and the change)")
             elif r.gap.startswith("G-") and r.gap not in gaps:
@@ -681,7 +729,8 @@ def validate_prevention(
 
 
 def render_prevention(rows: list[Prevention], gaps: dict[str, str]) -> list[str]:
-    """The register's section of GAP-ANALYSIS.md: the counts, then every pending row."""
+    """The register's section of GAP-ANALYSIS.md: the counts, then every pending row with
+    the claim tag its register row carries (P-433)."""
     closed = [r for r in rows if r.status == "closed"]
     pending = [r for r in rows if r.status == "pending"]
     by_level = ", ".join(
@@ -693,16 +742,19 @@ def render_prevention(rows: list[Prevention], gaps: dict[str, str]) -> list[str]
         "## Our own bugs — the prevention register",
         "",
         f"**{len(rows)} registered · {len(closed)} closed ({by_level or 'none'}) · "
-        f"{len(pending)} pending.** A defect is closed only with the artefact that fails if its "
-        "class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.",
+        f"{len(pending)} pending.** [measured — n = {len(rows)} rows of the `## Register` table "
+        "in `docs/PREVENTION.md`, counted by status and level; method: `scripts/dod_check.py` "
+        "over that file at this commit; apparatus n/a, a count of the register] A defect is "
+        "closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` "
+        "§7); the register is `docs/PREVENTION.md`.",
         "",
     ]
     if pending:
         out += [
-            "| id | bug | level | gap | what is missing |",
+            "| id | bug, with its claim tag | level | gap | what is missing |",
             "|---|---|---|---|---|",
             *(
-                f"| {r.id} | {r.bug} | {r.level} | {r.gap} | {gaps.get(r.gap, '')} |"
+                f"| {r.id} | {projected_finding(r)} | {r.level} | {r.gap} | {gaps.get(r.gap, '')} |"
                 for r in pending
             ),
             "",
@@ -947,8 +999,8 @@ def _own_work_tree(root: Path) -> bool:
     return top is not None and Path(top.strip()).resolve() == root.resolve()
 
 
-def history_gap_ids(root: Path) -> set[str]:
-    """Every gap id that a commit reachable from ``HEAD`` added to an artefact or the register:
+def history_gap_ids(root: Path, rev: str = "HEAD") -> set[str]:
+    """Every gap id that a commit reachable from ``rev`` added to an artefact or the register:
     a gap line (``- **G-nnn** — …``), or the gap cell of a criterion or pending register row
     (the only way a backlog ``F``/``B`` id becomes a gap). Merges are read against their first
     parent, so a line written while resolving a merge counts too. Empty when ``root`` is not
@@ -963,7 +1015,7 @@ def history_gap_ids(root: Path) -> set[str]:
         "--no-ext-diff",
         "--diff-merges=first-parent",
         "--format=",
-        "HEAD",
+        rev,
         "--",
         *HISTORY_PATHS,
     )
@@ -997,6 +1049,30 @@ def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
         return set()
     open_ids, retired = previous_ids(text)
     return open_ids | retired
+
+
+_OPEN_GAP_LINE = r"^- \*\*G-[0-9]{3}\*\*"
+
+
+def reused_gap_ids(root: Path, base: str, defined: set[str]) -> list[str]:
+    """The gap ids in ``defined`` that are new here — ``base`` has no open gap by that id —
+    but that a commit reachable from the merge-base of ``HEAD`` and ``base`` already used as a
+    gap (P-463: Wave 2 opened G-945, G-946, G-963 and G-964 while `feat/ns1`'s history had
+    used all four for gaps it had closed, so one id carried two meanings). A gap id is free
+    in the whole history; this reads the part of it a pull request can see — the base's
+    lineage — so a base that squash-merged a branch cannot see the ids that branch opened
+    and closed. Empty when ``root`` is not its own work tree or the base does not resolve."""
+    if not _own_work_tree(root):
+        return []
+    mb = _git(root, "merge-base", "HEAD", base)
+    if mb is None:
+        return []
+    open_on_base = _git(root, "grep", "-hoE", _OPEN_GAP_LINE, base, "--", *HISTORY_PATHS)
+    kept = set(re.findall(r"G-\d{3}", open_on_base or ""))
+    new = {gid for gid in defined if re.fullmatch(r"G-\d{3}", gid)} - kept
+    if not new:
+        return []
+    return sorted(new & history_gap_ids(root, mb.strip()), key=_gap_key)
 
 
 def validate_retired(bad: list[str], base: str, root: Path) -> list[str]:
@@ -1528,6 +1604,13 @@ def main(argv: list[str] | None = None) -> int:
     vouched = history_gap_ids(ROOT) | base_gap_analysis_ids(ROOT, args.base)
     retired = [gid for gid in carried if gid in vouched]
     unvouched = validate_retired([g for g in carried if g not in vouched], args.base, ROOT)
+    errors.extend(
+        f"{gid} is defined here as a new gap, but the history of {args.base} (at the "
+        "merge-base) already used it for a gap that is closed there, so one id would carry "
+        "two meanings — a gap id is free in the whole history: renumber it to one "
+        "`git log --all -S` has never seen and move every reference (P-463)"
+        for gid in reused_gap_ids(ROOT, args.base, defined)
+    )
     items, plan_errors = plan_items(PLAN)
     errors.extend(plan_errors)
     errors.extend(validate_plan(items, defined | set(retired)))

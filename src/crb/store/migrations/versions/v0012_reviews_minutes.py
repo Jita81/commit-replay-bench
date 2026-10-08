@@ -10,11 +10,14 @@ What it does: Lets the decide stream show the reviewer minutes each decision cos
               exactly as before, so the review chain still verifies. ``reviews`` is
               append-only: the triggers are re-installed after the change. ``downgrade`` is
               refused while any review states its minutes (dropping the column would erase a
-              hashed field), and otherwise drops it.
+              hashed field) and, on SQLite, while ``reviews`` holds any row (SQLite drops a
+              column only by rewriting the table, and a migration never rewrites the rows
+              of an append-only table); otherwise it drops the column.
 How:          ``op.add_column`` guarded by an existence check (an ``init_db`` schema from this
               release already has it) → ``install_append_only_triggers_on`` with the tables of
-              this revision; the downgrade uses batch mode (SQLite's move-and-copy) and
-              re-installs the triggers on the copied table.
+              this revision; the downgrade counts the rows first, then uses batch mode
+              (a plain ALTER on PostgreSQL; on SQLite the move-and-copy of an EMPTY table)
+              and re-installs the triggers on the new table.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/models.py (``Review.minutes`` is declared LAST so the column order
@@ -71,7 +74,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Refused while any review states its minutes: the field is hashed, and dropping it
-    would break every such record's chain hash. With none stated the column is empty."""
+    would break every such record's chain hash. Refused on SQLite while ``reviews`` holds
+    any row: SQLite drops a column only by copying every row into a new table (batch mode's
+    move-and-copy, and its native ``DROP COLUMN`` alike), and a migration never rewrites the
+    rows of an append-only table. PostgreSQL drops the column in place."""
     if not _column_exists() and not context.is_offline_mode():
         return
     bind = op.get_bind()
@@ -80,8 +86,15 @@ def downgrade() -> None:
     ).scalar_one()
     if n:
         raise RuntimeError(f"refusing to downgrade 0012: {n} review(s) state their minutes")
-    # batch mode is "move and copy" on SQLite (the only way to drop a column there) and a
-    # plain ALTER elsewhere; the copy fires no row trigger, and the triggers are re-installed
+    if bind.dialect.name == "sqlite":
+        rows: int = bind.execute(sa.text("SELECT COUNT(*) FROM reviews")).scalar_one()
+        if rows:
+            raise RuntimeError(
+                f"refusing to downgrade 0012 on SQLite: dropping the column would copy all "
+                f"{rows} review(s) into a new table, and reviews is append-only"
+            )
+    # batch mode is "move and copy" on SQLite (here only ever of an empty table) and a plain
+    # ALTER elsewhere; the triggers are re-installed on the table that results
     with op.batch_alter_table(TABLE) as batch:
         batch.drop_column(COLUMN)
     install_append_only_triggers_on(bind, APPEND_ONLY_AT_0012)

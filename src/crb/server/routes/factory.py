@@ -115,7 +115,16 @@ from crb.factory.backlog import (
 )
 from crb.factory.evidence import EV_RED_PROOF, verify_events
 from crb.factory.readiness import CATALOGUE, SLOT_VALUE, assess, sign, slots_for
-from crb.factory.standard import CALIBRATABLE, CellRef, Entry, Readers, StandardFor, gate_for
+from crb.factory.standard import (
+    CALIBRATABLE,
+    NEED_FAILING_TEST,
+    CellRef,
+    Entry,
+    Readers,
+    StandardFor,
+    gate_for,
+    is_test_need,
+)
 from crb.factory.testfirst import AuthoredTest
 from crb.intake.client import (
     REASON_LEASE_LOST,
@@ -661,10 +670,13 @@ def _way_forward(
     if "needs_context" in (status, entry_code):
         entry = dict(view.get("entry") or {})
         needs = [str(n) for n in entry.get("needs") or ()]
-        test = "a failing test" in needs
+        tests = [n for n in needs if is_test_need(n)]  # S2's test, or S1's author's (P-726)
+        test = bool(tests)
         what = (
             "Attach a failing test a person wrote, then register this item with it."
-            if test
+            if tests == [NEED_FAILING_TEST]
+            else f"Attach {tests[0]}, then register this item with it."
+            if tests
             else "Add the structural facts the cell's standard needs, each as a `slot: text` "
             f"line: {', '.join(needs)}."
         )
@@ -1462,6 +1474,12 @@ def fund_calibration(  # noqa: PLR0917 — FastAPI dependencies + path/body
     event = home.evidence(actor=approver.id).record_calibration(
         item_id, approver=approver.id, reason=body.reason, answers=stop
     )
+    if event is None:  # another approver's grant landed after the view above was read (P-730)
+        raise ApiError(
+            409,
+            "calibration_pending",
+            "a calibration build is already funded for this item and no run has built it yet",
+        )
     return CalibrationOut(
         item_id=item_id,
         approver=approver.id,

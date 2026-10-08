@@ -235,7 +235,7 @@ def test_the_platform_stream_counts_the_lines_as_golive_reads_them(client: TestC
 
 
 def test_below_admin_nobody_withdraws_an_attestation(client: TestClient) -> None:
-    """``settings.actions.15``: the API refuses both writes below admin — the withdrawal too,
+    """``settings.actions.16``: the API refuses both writes below admin — the withdrawal too,
     which would otherwise let an operator turn an attested line back to unproven."""
     login(client)
     body = {"statement": "egress to 1.1.1.1 from worker-0 timed out", "performed_on": YESTERDAY}

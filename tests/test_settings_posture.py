@@ -501,7 +501,7 @@ def _helm_render(*sets: str) -> list[dict[str, Any]]:
     return [d for d in yaml.safe_load_all(out.stdout) if d]
 
 
-@pytest.mark.skipif(__import__("shutil").which("helm") is None, reason="helm not on PATH")
+@pytest.mark.toolchain("helm")
 class TestHelmOneBuilderPosture:
     """The API serves the posture on /health; the worker runs the builds. If the chart gives
     them different builder executors, /health says "sealed" while every build runs on the

@@ -141,7 +141,9 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
   const reading = q.data
   const s: StreamFlow | undefined = reading?.streams.find((x) => x.stream === stream)
   if (!reading || !s) return null
-  const apparatus = `apparatus ${reading.apparatus} · median · ${reading.method}`
+  // a median of stamp pairs and a sum of prices have no interval: `ci={null}` prints the row
+  // as a dash, and each apparatus line says why
+  const apparatus = `apparatus ${reading.apparatus} · median, no interval · ${reading.method}`
   const counts = Object.entries(s.counts)
   return (
     <Card
@@ -158,6 +160,7 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
             label={lt.label}
             value={fmtDuration(lt.median_s)}
             n={lt.n}
+            ci={null}
             apparatus={apparatus}
             hint={FLOW_HINTS[lt.key] ?? 'flow.lead_time'}
             footer={footerOf(lt)}
@@ -168,7 +171,8 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
           label="Spend"
           value={fmtUsd(s.spend.usd)}
           n={s.spend.rows_priced}
-          apparatus={`apparatus ${reading.apparatus} · sum of the rows whose cost is a measurement${versionsOf(s.spend)}`}
+          ci={null}
+          apparatus={`apparatus ${reading.apparatus} · sum of the rows whose cost is a measurement, no interval${versionsOf(s.spend)}`}
           hint="flow.spend"
           footer={`${s.spend_label}. ${pricedOf(s.spend)}`}
           data-testid={`flow-spend-${stream}`}
@@ -178,7 +182,8 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
             label="Cumulative spend, this repository"
             value={fmtUsd(reading.spend.usd)}
             n={reading.spend.rows_priced}
-            apparatus={`apparatus ${reading.apparatus} · every graded row counted once${versionsOf(reading.spend)}`}
+            ci={null}
+            apparatus={`apparatus ${reading.apparatus} · every graded row counted once, a sum with no interval${versionsOf(reading.spend)}`}
             hint="flow.spend_total"
             footer={`Measuring, the factory and every other stream together; each stream’s own spend is a part of this. ${pricedOf(reading.spend)}`}
             data-testid="flow-spend-total"
@@ -189,7 +194,8 @@ export function FlowPanel({ stream, repo, title }: FlowPanelProps) {
             label={`Cost ${s.per_unit_label}`}
             value={fmtUsd(s.per_unit)}
             n={s.per_unit_units}
-            apparatus={`apparatus ${reading.apparatus} · the price of the rows it covers, divided by n${versionsOf(s.per_unit_spend)}`}
+            ci={null}
+            apparatus={`apparatus ${reading.apparatus} · the price of the rows it covers, divided by n, no interval${versionsOf(s.per_unit_spend)}`}
             hint="flow.per_unit"
             footer={s.per_unit === null ? `${s.per_unit_reason}.` : perUnitOf(s.per_unit_spend)}
             data-testid={`flow-per-unit-${stream}`}

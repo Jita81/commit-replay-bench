@@ -925,11 +925,7 @@ def docker_root() -> Iterator[Path]:
     """A bind-mountable scratch root under the tests cache for the docker-marked cases; skipped
     with the probe's reason when no daemon answers.
     """
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
-    if not shutil.which("docker"):  # pragma: no cover — covered by the probe above
-        pytest.skip("docker binary not on PATH")
+    langs.require_docker()  # a daemon that answers with its version, not the CLI alone (P-744)
     # under tests/.cache (below /Users on macOS): the VM behind colima / Docker Desktop
     # mounts it; pytest's tmp_path under /private/var/folders would be empty inside
     root = langs.CACHE_DIR / "services" / f"run-{os.getpid()}-{uuid.uuid4().hex[:8]}"

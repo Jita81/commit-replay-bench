@@ -31,6 +31,7 @@ Touch when:   never for a new repository; the look rule or the counting changes 
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -185,6 +186,23 @@ def test_a_readings_top_up_is_its_pending_commits_in_the_seeded_order() -> None:
     done = rows + rows_for([True] * 9, [pool[5], *pool[12:20]])
     after = _plan(done, reading)
     assert after.cells == () and after.up_to_date == (f"{LABEL}|S3",)
+
+
+def test_the_api_docs_describe_up_to_date_as_the_served_label_and_arm() -> None:
+    """P-428: each ``up_to_date`` entry is ``<cell label>|<arm>`` — the cell whose reading has
+    delivered, with the arm it delivered on — not a bare cell label, so a client that compares
+    it with ``cells[].label`` never finds a match. Every ``docs/API.md`` description of the
+    field must name the shape the plan serves."""
+    reading = register_reading(commits(40), hierarchy=("S3",))
+    rows = rows_for([True] * 20, reading.pool)
+    (entry,) = _plan(rows, reading).up_to_date
+    label, _, arm = entry.rpartition("|")
+    assert (label, arm) == (LABEL, "S3") and label.count("|") == 6
+    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text()
+    described = [line for line in api.splitlines() if "up_to_date[]" in line]
+    assert len(described) == 2
+    for line in described:
+        assert "up_to_date[] (one `<cell label>|<arm>` string" in line, line
 
 
 def test_the_plan_reads_the_numbers_the_capability_page_reads() -> None:

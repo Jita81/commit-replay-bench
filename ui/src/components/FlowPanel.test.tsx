@@ -119,6 +119,18 @@ describe('FlowPanel', () => {
     expect(tile.textContent).toContain('derived from the stored')
   })
 
+  it('every tile prints its interval row, a dash because a median of pairs or a sum has none', async () => {
+    mount('measure', { ...FLOW, streams: [MEASURE] })
+    await screen.findByTestId('flow-spend-measure')
+    const tiles = Array.from(screen.getByTestId('flow-tiles-measure').querySelectorAll('[data-component="stat-tile"]'))
+    expect(tiles.length).toBeGreaterThan(2)
+    for (const tile of tiles) {
+      const term = Array.from(tile.querySelectorAll('dt')).find((dt) => dt.textContent === '95% CI')
+      expect(term?.nextElementSibling?.textContent).toBe('—')
+      expect(tile.textContent).toContain('no interval')
+    }
+  })
+
   it('says a pair with an unreadable or out-of-order stamp was left out', async () => {
     mount()
     const tile = await screen.findByTestId('flow-registered_to_pr')

@@ -37,7 +37,7 @@ import { useEffect, useState } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Probe } from '../api/types'
 import { hintText } from '../help/hints'
@@ -405,6 +405,46 @@ describe('Layout: the phone menu (F26)', () => {
     expect(button).toHaveAttribute('aria-expanded', 'true')
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', { name: 'Factory' }))
     expect(await screen.findByRole('heading', { name: 'Factory' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('stays closed when browser Back returns to the address it was opened on (P-423)', async () => {
+    mockApi(API)
+    /** A screen with the browser's Back, as history.back() would take it. */
+    function Back({ title }: { title: string }) {
+      const navigate = useNavigate()
+      return (
+        <>
+          <h1>{title}</h1>
+          <button type="button" onClick={() => navigate(-1)}>
+            Browser back
+          </button>
+        </>
+      )
+    }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/results']}>
+          <AuthProvider>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/results" element={<h1>Baseline</h1>} />
+                <Route path="/factory" element={<Back title="Factory" />} />
+              </Route>
+            </Routes>
+          </AuthProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: 'Menu' }))
+    expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', { name: 'Factory' }))
+    expect(await screen.findByRole('heading', { name: 'Factory' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Browser back' }))
+    expect(await screen.findByRole('heading', { name: 'Baseline' })).toBeInTheDocument()
+    // the menu was opened on /results, but it was closed by leaving: coming back is not a press
     expect(screen.getByRole('button', { name: 'Menu' })).toHaveAttribute('aria-expanded', 'false')
   })
 })

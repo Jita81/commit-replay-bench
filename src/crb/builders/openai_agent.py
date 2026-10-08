@@ -67,6 +67,7 @@ from crb.builders.base import (
     GuardRefused,
     TestFileGuard,
     emit,
+    model_error_text,
 )
 from crb.builders.budget import BudgetTracker, CostMeter, price_for
 from crb.builders.editblock import apply_edit_blocks, compile_check
@@ -579,7 +580,7 @@ class OpenAIAgentBuilder:
         try:
             model_fn = self._model()
         except Exception as exc:
-            errors.append(f"model_error: {type(exc).__name__}: {exc}")
+            errors.append(model_error_text(exc))
             return finish(done=False, stop=STOP_MODEL_ERROR)
 
         method = SIGHTED_METHOD if brief.sighted else BLIND_METHOD
@@ -604,7 +605,7 @@ class OpenAIAgentBuilder:
             try:
                 turn: ModelTurn = model_fn(messages, schema)
             except Exception as exc:
-                errors.append(f"model_error: {type(exc).__name__}: {exc}")
+                errors.append(model_error_text(exc))
                 return finish(done=tools.target_green, stop=STOP_MODEL_ERROR)
             meter.add(
                 turn.tokens_in, turn.tokens_out, cached_in=turn.cached_in, cost_usd=turn.cost_usd

@@ -224,6 +224,19 @@ def test_forecast_class_only_key_uses_class_projection() -> None:
     assert f.deliver == 0 and f.calibrate == 3
 
 
+def test_a_class_only_key_is_priced_on_the_arm_it_is_routed_on() -> None:
+    """P-725: a size-less component is routed on the class projection's standard rows —
+    one arm per class — so it is priced on those rows too, never on the class × size rows,
+    which can hold another arm in another size (here ``S3`` in S and ``S1@…`` in M)."""
+    rows = _cell_rows("bug.fix", "S", cost=0.5, labels={"context_arm": "S3"}) + _cell_rows(
+        "bug.fix", "M", cost=9.5
+    )
+    f = forecast({"bug.fix": 1}, rows)
+    (c,) = f.per_component
+    assert c.n == 40  # routed on the S3 rows alone
+    assert c.unit_cost_usd == pytest.approx(0.5)  # and priced on them, not on the M rows
+
+
 def test_forecast_uncosted_cells_are_reported_not_priced() -> None:
     # uncosted = no price was known for the builder's model (``cost_known`` pinned false), not
     # a builder-reported $0, which is a known $0 and prices at $0 (P-131: test_economics.py)

@@ -67,7 +67,9 @@ What it does: Reduces rows (``ValueRow``, adapted from ``GradeRow`` or read from
               defaults to the current version (pooling is explicit and flagged), whose
               headline reads one checks
               arm (named in ``checks``) and whose cells never pool two, and whose time-ordered
-              measures use only prior data. Never writes, never calls a model.
+              measures use only prior data; its process loss counts outage rows by cause
+              ("your login" apart from "the provider", pilot D1). Never writes, never calls a
+              model.
 How:          ``select_rows`` (repo, apparatus) → the ``checks`` arm → ``north_star``
               (``Rate`` × ``precision``) → ``process_loss`` → ``learning_curve``
               (``BugRegister.class_of`` per attempt, windows, ``statuses`` → shares) →
@@ -109,6 +111,7 @@ from crb.core.ledger import (
     FAILURE_KINDS,
     FAILURE_OUTAGE,
     FAILURE_PROTOCOL,
+    OUTAGE_CAUSES,
     PROTOCOL_VIOLATION_PREFIX,
     CellKey,
     GradeRow,
@@ -201,6 +204,9 @@ class ValueRow:
     builder: str = ""
     model: str = ""
     provider: str = ""
+    #: Why an ``outage`` row's call never happened, as the row pinned it from 2.4: ``auth``
+    #: (this deployment's login was refused), ``provider``, or ``""`` (not recorded).
+    outage_cause: str = ""
     #: The ``checks`` arm the row was graded under (ADR-0024): a cell never pools two
     checks_arm: str = ARM_OFF
     #: The context arm and class-set version (ADR-0026 items 1 and 9) — ``""`` before 2.4;
@@ -303,6 +309,7 @@ def value_row_from_grade(row: GradeRow) -> ValueRow:
         context_arm=row.context_arm,
         taxonomy=row.taxonomy,
         change=row.change_id or row.task_id,
+        outage_cause=row.outage_cause,
         grade=row,
     )
 
@@ -744,6 +751,10 @@ class ProcessLoss:
     usd_per_gbp: float
     #: Rows whose cost is not a measurement: in ``rows`` but in no dollar sum.
     rows_unpriced: int = 0
+    #: The ``outage`` rows by cause (pilot D1): ``auth`` = this deployment's login was refused
+    #: ("your login"), ``provider`` = the provider refused a working one, ``unrecorded`` = a
+    #: row below 2.4, which carries no cause.
+    outage_causes: dict[str, int] = field(default_factory=dict)
 
     def _gbp(self, usd: float | None) -> float | None:
         return None if usd is None else usd / self.usd_per_gbp
@@ -769,6 +780,9 @@ class ProcessLoss:
             "all_usd": _money(self.usd_total),
             "valid_failures": self.valid_failures,
             "rows_unpriced": self.rows_unpriced,
+            "outage_causes": {
+                c: int(self.outage_causes.get(c, 0)) for c in (*OUTAGE_CAUSES, "unrecorded")
+            },
             "budget_protocol_share_of_valid_failures": (
                 _r(bp / self.valid_failures) if self.valid_failures else None
             ),
@@ -787,6 +801,10 @@ def process_loss(
             by_kind[r.failure_kind].append(r)
     kinds = {k: (len(rs), spend_of_rows(rs).usd) for k, rs in by_kind.items()}
     total = spend_of_rows(rows)
+    causes: dict[str, int] = {}
+    for r in by_kind[FAILURE_OUTAGE]:
+        key = r.outage_cause or "unrecorded"
+        causes[key] = causes.get(key, 0) + 1
     return ProcessLoss(
         kinds=kinds,
         rows=len(rows),
@@ -794,6 +812,7 @@ def process_loss(
         valid_failures=sum(1 for r in rows if r.valid and not r.clean),
         usd_per_gbp=usd_per_gbp,
         rows_unpriced=total.rows_unpriced,
+        outage_causes=causes,
     )
 
 
@@ -961,13 +980,28 @@ class RoutingPrecision:
         }
 
 
+def _reading_outcome(r: ValueRow) -> bool | None:
+    """What a registered reading reads off ``r`` as its change's first attempt
+    (:func:`crb.core.reading.arm_reading`): ``None`` when ``r`` observed nothing of the
+    builder — an outage, a ``harness`` row, a gold-red commit or an escalation rung — so the
+    change's next row is read; ``False`` for a disqualified attempt (the builder's miss,
+    never skipped); otherwise whether it was clean (P-721)."""
+    if r.failure_kind in (FAILURE_OUTAGE, FAILURE_HARNESS) or r.gold_clean is False:
+        return None
+    if r.trial and r.trial.strip().lower() != "r1":
+        return None
+    return False if r.failure_kind == FAILURE_DISQUALIFIED else r.clean
+
+
 def prospective_routing(
     rows: Iterable[ValueRow], *, policy: RoutingPolicy = DEFAULT_POLICY
 ) -> RoutingPrecision:
     """Replay routing.v2's look rule forward in time; score every ``deliver`` on the row it
     let in. A PROXY: per (repository, mode, checks arm, apparatus, context arm, class set,
     full cell) the rows are read in arrival order as if a reading had been registered before
-    the first — each distinct change counted once, by its first row — so a cell delivers from
+    the first — each distinct change counted once, by its first observed ``r1`` attempt as the
+    reading reads it (:func:`_reading_outcome`: a ``harness`` row is skipped, a disqualified
+    one is a miss; only an eligible row gets a decision) — so a cell delivers from
     the first look its running first attempts clear (ADR-0026 item 3), reads ``human`` once a
     miss puts the last look out of reach, and ``calibrate`` before either; a size the policy
     splits reads ``granularize``; an arm that does not certify — ``S3`` (a ceiling) or ``A0``
@@ -980,8 +1014,6 @@ def prospective_routing(
     delivered: list[ValueRow] = []
     scored = 0
     for r in _ordered(rows):
-        if not r.eligible:
-            continue
         key = (
             r.repo,
             r.mode,
@@ -992,27 +1024,29 @@ def prospective_routing(
             *r.cell.to_tuple(),
         )
         so_far = outcomes.setdefault(key, [])
-        if r.cell.size in policy.granularize_sizes:
-            decision = ROUTE_GRANULARIZE
-        elif r.context_arm and not parse_arm(r.context_arm).certifies:
-            decision = ROUTE_CALIBRATE  # a ceiling (S3) or descriptive (A0) arm never delivers
-        else:
-            state = look_state(so_far, policy.rule).state
-            decision = (
-                ROUTE_DELIVER
-                if state == STATE_DELIVER
-                else ROUTE_HUMAN
-                if state == STATE_INSUFFICIENT
-                else ROUTE_CALIBRATE
-            )
-        decisions[decision] += 1
-        scored += 1
-        if decision == ROUTE_DELIVER:
-            delivered.append(r)
+        if r.eligible:  # only an eligible row gets a decision, made before its own outcome
+            if r.cell.size in policy.granularize_sizes:
+                decision = ROUTE_GRANULARIZE
+            elif r.context_arm and not parse_arm(r.context_arm).certifies:
+                decision = ROUTE_CALIBRATE  # S3 (a ceiling) or A0 (descriptive) never delivers
+            else:
+                state = look_state(so_far, policy.rule).state
+                decision = (
+                    ROUTE_DELIVER
+                    if state == STATE_DELIVER
+                    else ROUTE_HUMAN
+                    if state == STATE_INSUFFICIENT
+                    else ROUTE_CALIBRATE
+                )
+            decisions[decision] += 1
+            scored += 1
+            if decision == ROUTE_DELIVER:
+                delivered.append(r)
+        outcome = _reading_outcome(r)  # every row, eligible or not, as the reading reads it
         change = r.change or r.task_id
-        if change not in seen.setdefault(key, set()):
+        if outcome is not None and change not in seen.setdefault(key, set()):
             seen[key].add(change)
-            so_far.append(r.clean)
+            so_far.append(outcome)
     by_mode: dict[str, int] = {}
     for r in delivered:
         by_mode[r.mode] = by_mode.get(r.mode, 0) + 1

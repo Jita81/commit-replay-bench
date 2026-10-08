@@ -637,7 +637,7 @@ describe('ResultsPage', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(empty.calls.some((c) => c.method === 'POST')).toBe(false)
   })
-  it('the oracle tile’s tone and the door back to the walk are one reading, never two rules (P-403)', () => {
+  it('the oracle tile’s tone and the door back to the walk are one reading, never two rules (P-411)', () => {
     // a scored oracle with no bar to read it against is not amber: nothing says it is under the bar
     expect(oracleTone(0.7, null)).toBe('muted')
     expect(oracleTone(null, 0.8)).toBe('muted')

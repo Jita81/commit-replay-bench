@@ -41,12 +41,14 @@ describe('NotFoundPage', () => {
     mockApi({ 'GET /auth/me': PRINCIPAL })
     renderApp(<NotFoundPage />, { route: '/nowhere/at/all' })
     const cause = await screen.findByTestId('notfound-cause')
-    // the causes: typed or copied wrongly; a link from an older version; a run or task deleted
+    // the causes: typed or copied wrongly; a link from an older version
     expect(cause).toHaveTextContent('If you typed or copied the address, check it for a mistake and try again.')
     expect(cause).toHaveTextContent('an older version of this product')
-    expect(cause).toHaveTextContent('a run or task that has since been deleted')
+    // never a deleted record: /runs/:id still matches its route and shows the API's own
+    // not-found on that page, so a deleted run or task cannot bring anyone here
+    expect(cause).not.toHaveTextContent(/deleted/)
     // and the move for a followed link: where to start, and who to tell
-    expect(cause).toHaveTextContent('start from Home, or look for the run on Runs, and tell whoever sent you the link.')
+    expect(cause).toHaveTextContent('start from Home and tell whoever sent you the link.')
     expect(screen.getByTestId('notfound-nongoal')).toHaveTextContent('This page does not search for what you meant, guess a near match or report the broken link to anyone.')
   })
 })

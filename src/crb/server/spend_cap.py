@@ -12,7 +12,7 @@ run's spend past it:
 * **the reserve** is the most the next attempt may cost: its own cost cap when it has one
   (the builder stops once its cost reaches it, so by at most the call that reached it),
   else the dearest attempt the run has made so far (a guard, not a guarantee: nothing
-  bounds a first attempt with no cost cap, G-963). A factory item is reserved at every
+  bounds a first attempt with no cost cap, G-938). A factory item is reserved at every
   rung, once and again for each rework, and at one authoring pass;
 * **a factory run's test author** spends too, and writes no row: each model call's cost is
   on its ``author.attempt`` event, summed by :meth:`Spend.with_authoring`;

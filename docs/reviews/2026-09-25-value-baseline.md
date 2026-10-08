@@ -109,9 +109,10 @@ patches; by each review's headline verdict it is style 3, defect 4 and public in
 
 **Correction, 2026-09-27.** The "three rows on tasks whose own gold failed" are the export's
 three factory rows: a factory item has no gold commit, and the export writes the absent gold as
-`gold_clean` 0 **[measured — n = 3 rows, the only rows of the export with step `factory` and the
-only ones with `gold_clean` 0, all cobra, sighted and clean; method: the export's `step` and
-`gold_clean` columns; apparatus 2.2]**.
+`gold_clean` 0 **[hypothesis, recorded as measured — n = 3 rows, the only rows of the export with
+step `factory` and the only ones with `gold_clean` 0, all cobra, sighted and clean; method: the
+export's `step` and `gold_clean` columns, on the operator's stack and not in this repository;
+apparatus 2.2]**.
 
 ## Why the value leaks
 

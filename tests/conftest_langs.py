@@ -3,9 +3,12 @@
 Deliberately NOT a ``conftest.py`` (that file belongs to the core test suite):
 test modules import this explicitly. It owns three things:
 
-* **availability probes** — :func:`has_tool`, :func:`docker_available`, and
-  :func:`require_network` (the gate ``tests/conftest.py`` runs before every
-  ``@pytest.mark.network`` test);
+* **availability gates** — :func:`require_tool` and :func:`require_docker` (the gates
+  ``tests/conftest.py`` runs before every ``@pytest.mark.toolchain`` and
+  ``@pytest.mark.docker`` test: a tool must WORK, not merely be on PATH, and a daemon must
+  answer with its version; a skip with the reason, or a failure when the job declares in
+  ``CRB_TEST_REQUIRE_TOOLS`` that it provides the tool), and :func:`require_network` (the
+  gate before every ``@pytest.mark.network`` test);
 * **once-per-session warm-ups** — the npm dev-dependency caches under
   ``tests/.cache/node_modules_<tool>``, the Maven local-repository warm-up, and
   the sandbox image builds (the inline python test image, and the shipped
@@ -25,33 +28,42 @@ Navigation
 ----------
 What it is:   Shared helpers for the toolchain and sandbox integration suites (imported
               explicitly; not a conftest).
-What it does: Answers "is go/node/mvn/cargo/docker available" and "can this host reach the
-              registry a network test installs from", warms the npm dev-dependency
-              caches, the Maven local repository and the sandbox images once per session — the
+What it does: Answers "does go/node/mvn/cargo/… work" (a bounded, memoised probe per tool —
+              on PATH is not enough), "does a docker daemon answer with its version" and
+              "can this host reach the registry a network test installs from"; skips a test
+              whose tool or daemon is unavailable, or fails it when the job names that tool
+              in ``CRB_TEST_REQUIRE_TOOLS`` (the tools the job provides); warms the npm
+              dev-dependency caches, the Maven local repository and the sandbox images once per
+              session — the
               inline python test image (``CRB_TEST_SANDBOX_IMAGE`` names a present one instead)
               and the shipped reference images built from ``deploy/sandbox/Dockerfile.<lang>``
               (``CRB_TEST_SANDBOX_IMAGE_<LANG>`` likewise) — and performs the two instrument
               steps every language module repeats — mine the feat candidate, open a trial
               worktree at the parent with the tests overlaid. A warm-up that cannot complete is
               a skip with the reason offline and a failure in CI (``CRB_TEST_STRICT_WARMUP``); an
-              unreachable registry follows the same policy; a missing tool or daemon is always
-              a skip.
-How:          Memoised probes (``docker info``; an HTTPS ``HEAD`` per registry host, where any
-              HTTP status is an answer) → on-disk caches under ``tests/.cache`` → ``docker
-              build`` from stdin or from a Dockerfile + context → ``iter_candidates`` +
-              ``Workspace.create`` + ``overlay_tests`` through the real runner and executor.
+              unreachable registry follows the same policy; a missing tool or daemon is a
+              skip, except for a tool the job declares it provides.
+How:          Memoised probes (``<tool> --version`` or the tool's own quick command from
+              ``TOOL_PROBES``; ``docker_server_version`` from src/crb/core/execution.py; an
+              HTTPS ``HEAD`` per registry host, where any HTTP status is an answer) → on-disk
+              caches under ``tests/.cache`` → ``docker build`` from stdin or from a Dockerfile +
+              context → ``iter_candidates`` + ``Workspace.create`` + ``overlay_tests`` through the
+              real runner and executor.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         none
 Works with:   tests/fixtures/langs/__init__.py (the two-commit fixture shape these steps rely
               on), src/crb/core/mine.py (``iter_candidates``), src/crb/core/workspace.py (the
               trial), src/crb/core/runners/__init__.py (``get_runner``), tests/test_runners_node.py
               and tests/test_runners_jvm.py (typical callers)
-Tested by:    tests/test_conftest_langs.py (the warm-up policy, hermetically),
+Tested by:    tests/test_conftest_langs.py (the warm-up policy and the tool and docker gates,
+              hermetically), tests/test_toolchain_gates.py (every test gates through here),
               tests/test_runners_go.py, tests/test_runners_node.py, tests/test_runners_jvm.py,
               tests/test_runners_cargo.py, tests/test_sandbox_docker.py,
               tests/test_sandbox_images_docker.py (every consumer)
-Touch when:   adding a runner for a new language (add its availability probe and any per-session
-              warm-up here, the fixture under tests/fixtures/langs/, and a ``test_runners_<lang>``
+Touch when:   onboarding a repository in a language no runner serves yet (add its tool's probe
+              to ``TOOL_PROBES`` when ``--version`` does not prove it works, any per-session
+              warm-up here, the tool to the ``CRB_TEST_REQUIRE_TOOLS`` of every CI job that
+              provides it, the fixture under tests/fixtures/langs/, and a ``test_runners_<lang>``
               module); a reference sandbox image is added under deploy/sandbox (extend
               ``SHIPPED_SANDBOX_LANGS`` and tests/test_sandbox_images_docker.py together); the
               per-session cache directory (``.cache`` under the tests tree) moves.
@@ -73,7 +85,7 @@ from typing import NoReturn
 
 import pytest
 
-from crb.core.execution import LocalExecutor
+from crb.core.execution import LocalExecutor, SandboxUnavailable, docker_server_version
 from crb.core.git import GitRepo
 from crb.core.mine import Candidate, iter_candidates
 from crb.core.runners import get_runner
@@ -97,16 +109,107 @@ DOCKER_BUILD_TIMEOUT_S = 900
 # ---------------------------------------------------------------------------
 
 
-def has_tool(name: str) -> bool:
-    """True when ``name`` resolves on PATH (a toolchain gate, never a verdict)."""
-    return shutil.which(name) is not None
+#: The environment variable a CI job sets to the tools it PROVIDES (names separated by
+#: commas or spaces — the names ``@pytest.mark.toolchain`` takes, and ``docker`` for the
+#: daemon). A tool it names that does not work fails the test that needs it instead of
+#: skipping it, so a runner image that drops or breaks a toolchain turns the build red
+#: instead of quietly running fewer tests (docs/PREVENTION.md P-745).
+REQUIRE_TOOLS_ENV = "CRB_TEST_REQUIRE_TOOLS"
+
+#: How a tool proves it works: the argv (and stdin) of a quick, offline command that exits
+#: 0 only when the tool can run. A tool not listed answers ``<name> --version``; ``jdk`` is
+#: the JDK the JVM fixture chooses, which answers ``<its home>/bin/java -version``.
+TOOL_PROBES: dict[str, tuple[tuple[str, ...], str | None]] = {
+    "go": (("go", "version"), None),
+    "gofmt": (("gofmt", "-l"), "package p\n"),
+    "helm": (("helm", "version", "--short"), None),
+    # the rustfmt component, which a rustup install may lack while cargo itself works
+    "cargo-fmt": (("cargo", "fmt", "--version"), None),
+}
+#: The bound on one probe: generous, because the suite runs several at once on a loaded
+#: machine, and a JVM (``mvn``) starts slowly.
+TOOL_PROBE_TIMEOUT_S = 60
+_TOOLS: dict[str, str] = {}
+
+
+def tool_unusable_reason(name: str) -> str:
+    """'' when ``name`` WORKS; else why not (memoised per process).
+
+    On PATH is not enough: a rustup proxy is on PATH for a user with no toolchain (root on
+    the fresh-clone job, whose ``cargo`` answered every call with exit 1 — P-744), so the
+    tool must answer its probe (:data:`TOOL_PROBES`) with exit 0 within
+    :data:`TOOL_PROBE_TIMEOUT_S`.
+    """
+    if name in _TOOLS:
+        return _TOOLS[name]
+    argv, stdin = TOOL_PROBES.get(name, ((name, "--version"), None))
+    if name == "jdk":  # the JDK the JVM fixture hands Maven (brew openjdk, else $JAVA_HOME)
+        home = fixture_module("jvmrepo").java_home()
+        argv = (str(Path(home) / "bin" / "java"), "-version") if home else ()
+    binary = shutil.which(argv[0]) if argv else None
+    if not argv:
+        reason = "no JDK: neither brew openjdk nor $JAVA_HOME"
+    elif not binary:
+        reason = f"{argv[0]} is not on PATH"
+    else:
+        shown = " ".join(argv)
+        try:
+            p = subprocess.run(
+                [binary, *argv[1:]],
+                input=stdin,
+                capture_output=True,
+                text=True,
+                timeout=TOOL_PROBE_TIMEOUT_S,
+                check=False,
+            )
+            said = (p.stderr or p.stdout).strip()[:300]
+            reason = "" if p.returncode == 0 else f"`{shown}` exits {p.returncode}: {said}"
+        except subprocess.TimeoutExpired:
+            reason = f"`{shown}` did not answer within {TOOL_PROBE_TIMEOUT_S}s"
+        except (OSError, subprocess.SubprocessError) as e:
+            reason = f"`{shown}` cannot be run: {e}"
+    _TOOLS[name] = reason
+    return reason
+
+
+def tool_usable(name: str) -> bool:
+    """True when ``name`` answers its probe (for a test that branches on it, never a skip)."""
+    return tool_unusable_reason(name) == ""
+
+
+def required_tools() -> frozenset[str]:
+    """The tools this run declares it provides (:data:`REQUIRE_TOOLS_ENV`)."""
+    raw = os.environ.get(REQUIRE_TOOLS_ENV, "")
+    return frozenset(t for t in raw.replace(",", " ").split() if t)
+
+
+def _unavailable(name: str, reason: str) -> NoReturn:
+    """Skip — or fail, when this run declared it provides ``name``."""
+    if name in required_tools():
+        pytest.fail(
+            f"[{REQUIRE_TOOLS_ENV} names {name}] {reason} — this job declares that it "
+            f"provides {name}, so a test that needs it must run, not skip",
+            pytrace=False,
+        )
+    pytest.skip(f"{name} unavailable: {reason}")
+
+
+def require_tool(*names: str) -> None:
+    """The one toolchain gate: each named tool must WORK. ``@pytest.mark.toolchain(...)``
+    calls this for every test it marks (tests/conftest.py); a fixture calls it directly."""
+    for name in names:
+        reason = tool_unusable_reason(name)
+        if reason:
+            _unavailable(name, reason)
 
 
 _DOCKER_REASON: dict[str, str] = {}
 
 
 def docker_unavailable_reason() -> str:
-    """'' when a daemon answers ``docker info``; else why not (memoised per process)."""
+    """'' when a daemon answers ``docker info`` with its version; else why not (memoised
+    per process). The question is :func:`crb.core.execution.docker_server_version`'s, so
+    a CLI that exits 0 with its daemon stopped is not an answer (P-744)."""
     if "reason" in _DOCKER_REASON:
         return _DOCKER_REASON["reason"]
     docker = shutil.which("docker")
@@ -114,27 +217,23 @@ def docker_unavailable_reason() -> str:
         reason = "docker binary not on PATH"
     else:
         try:
-            p = subprocess.run(
-                [docker, "info", "--format", "{{.ServerVersion}}"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-            reason = (
-                ""
-                if p.returncode == 0
-                else f"docker daemon not reachable: {(p.stderr or p.stdout).strip()[:200]}"
-            )
+            docker_server_version(docker, timeout=30)
+            reason = ""
+        except SandboxUnavailable as e:
+            reason = str(e)[:300]
         except (OSError, subprocess.SubprocessError) as e:
             reason = f"docker probe failed: {e}"
     _DOCKER_REASON["reason"] = reason
     return reason
 
 
-def docker_available() -> bool:
-    """True when a daemon answered ``docker info`` (memoised per process)."""
-    return docker_unavailable_reason() == ""
+def require_docker() -> None:
+    """The one docker gate: a daemon must answer. ``@pytest.mark.docker`` calls this for
+    every test it marks (tests/conftest.py); a fixture calls it directly. A skip, or a
+    failure when this run declared that it provides ``docker``."""
+    reason = docker_unavailable_reason()
+    if reason:
+        _unavailable("docker", reason)
 
 
 #: The hosts a ``@pytest.mark.network`` test needs when its marker names none: the Python
@@ -240,9 +339,7 @@ def npm_cache(tool: str) -> Path:
     prefix = _cache_dir() / f"node_modules_{tool}"
     nm = prefix / "node_modules"
     if not (nm / ".bin" / tool).exists():
-        if not has_tool("npm"):
-            _NPM[tool] = reason = "npm not on PATH"
-            pytest.skip(reason)
+        require_tool("npm")
         prefix.mkdir(parents=True, exist_ok=True)
         try:
             p = subprocess.run(
@@ -367,9 +464,9 @@ def require_docker_image(tag: str, named_by: str) -> None:
         if _IMAGES[tag]:
             warmup_unavailable(_IMAGES[tag])
         return
-    reason = docker_unavailable_reason()
-    if reason:  # no daemon is environmental — a plain skip every time, never memoised
-        pytest.skip(reason)  # against the tag (that would fail a later caller under strict)
+    # no daemon is environmental — a skip every time (a failure only where the job declares
+    # docker), never memoised against the tag (that would fail a later caller under strict)
+    require_docker()
     if not _image_present(tag):
         _IMAGES[tag] = reason = (
             f"docker image {tag!r} ({named_by}) is not present; build or load it"
@@ -407,9 +504,9 @@ def ensure_docker_image(tag: str, dockerfile: str | Path, *, context: Path | Non
         if _IMAGES[tag]:
             warmup_unavailable(_IMAGES[tag])
         return
-    reason = docker_unavailable_reason()
-    if reason:  # no daemon is environmental — a plain skip, never a failure; not memoised
-        pytest.skip(reason)  # against the tag (that would fail a later caller under strict)
+    # no daemon is environmental — a skip (a failure only where the job declares docker);
+    # never memoised against the tag (that would fail a later caller under strict)
+    require_docker()
     docker = shutil.which("docker") or "docker"
     if not _image_present(tag):
         if context is None:

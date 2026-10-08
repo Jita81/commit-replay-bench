@@ -16,9 +16,8 @@ Works with:   src/crb/server/routes/forecast.py (under test), src/crb/core/forec
               numbers), tests/fixtures/server_seed.py, tests/fixtures/signoff_seed.py,
               tests/test_forecast.py (the core suite), docs/API.md
 Tested by:    tests/test_server_routes_forecast.py
-Touch when:   never for a new repository; the mix grammar or a readiness gap kind changes
-              (mirror tests/test_forecast.py
-              and ui/src/api/types.ts).
+Touch when:   never for a new repository; the mix grammar or a readiness gap kind changes (mirror
+              tests/test_forecast.py and ui/src/api/types.ts).
 """
 
 from __future__ import annotations

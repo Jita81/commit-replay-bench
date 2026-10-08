@@ -158,6 +158,8 @@ from crb.core.finish_gate import (
 from crb.core.formatting import FormatRun, formatters_for, run_formatters
 from crb.core.grade import MODE_SIGHTED
 from crb.core.ledger import (
+    AUTHORING_AUTHOR_FAILED,
+    AUTHORING_HARNESS_ERROR,
     BUILDER_EXECUTOR_SEALED,
     LABEL_BUILDER_EXECUTOR,
     GradeRow,
@@ -230,8 +232,9 @@ def author_error(exc: BaseException) -> str:
     in the chain) is written ``model_error: …``, the head every builder writes for the same
     failure, so :func:`crb.core.ledger.authoring_outage` classifies the author's rate limit,
     quota, overloaded server or refused key as an ``outage`` exactly as it would the
-    builder's (docs/PREVENTION.md P-005, P-293). Any other exception — the author ran and
-    could not produce a test — stays as it is, an ``authoring`` failure."""
+    builder's (docs/PREVENTION.md P-005, P-293), and any other failed call as ``harness``,
+    as rule 4b reads the builder's (DL-360, P-720). Any other exception — the author ran
+    and could not produce a test — stays as it is, an ``authoring`` failure."""
     seen: set[int] = set()
     cur: BaseException | None = exc
     while cur is not None and id(cur) not in seen:
@@ -802,8 +805,9 @@ def build_fn_for(
         """The ``S1`` arm's author step (ADR-0026 items 1 and 7): the configured test author
         writes ONE failing test in a sealed one-commit checkout of the parent — in every
         posture — from the message and the parent's example tests; it must be RED at the
-        parent here. Any failure is an ``authoring:`` attempt: it counts against the arm and
-        is never the builder's."""
+        parent here. Any failure is an ``authoring:`` attempt, never the builder's: it counts
+        against the arm unless the provider refused the author (``outage``) or the instrument
+        failed (``harness``: rule 4b, DL-360)."""
         assert s1 is not None
         rung = index.get(rung_label)
         ref = BuilderRef(
@@ -839,7 +843,7 @@ def build_fn_for(
         except SandboxUnavailable:
             raise
         except Exception as exc:
-            return fail(f"the test author failed: {author_error(exc)}")
+            return fail(f"{AUTHORING_AUTHOR_FAILED} {author_error(exc)}")
         path = path.strip().lstrip("/")
         if not path or ".." in path.split("/") or not config.is_test(path):
             return fail(f"{path!r} is not a test path for {config.name!r}")
@@ -857,7 +861,7 @@ def build_fn_for(
             raise
         except Exception as exc:
             remove_authored(ws)
-            return fail(f"harness error proving RED: {type(exc).__name__}: {exc}")
+            return fail(f"{AUTHORING_HARNESS_ERROR} {type(exc).__name__}: {exc}")
         if red is None or red.timed_out or red.green or red.parse_error or not red.failing:
             remove_authored(ws)
             why = (

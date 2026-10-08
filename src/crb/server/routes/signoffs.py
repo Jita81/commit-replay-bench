@@ -1588,6 +1588,7 @@ def preview_signoff(
                 lint_evaluated=cell.stats.n_lint_evaluated if cell.stats is not None else 0,
                 api=cell.stats.n_api if cell.stats is not None else 0,
                 outage=cell.n_outage,
+                outage_auth=cell.stats.n_outage_auth if cell.stats is not None else 0,
             ),
         ),
         route=SignoffRouteOut(route=cell.route, reason=cell.reason, reason_code=cell.reason_code),

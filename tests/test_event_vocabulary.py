@@ -56,6 +56,9 @@ EMITTERS = {
     # the account trail's writer (src/crb/server/routes/admin.py): it forwards ``action`` to
     # ``append_system_event``, so its callers name the ``user.*`` actions (P-151)
     "record_user_event",
+    # the Learn writes' one serialised step (src/crb/server/routes/learn.py): it forwards
+    # ``action`` to ``append_system_event``, so its callers name the ``learn.*`` actions (P-431)
+    "_learn_step",
 }
 #: Functions that forward an ``action`` parameter to an emitter but are only ever handed on
 #: as an ``on_event`` callback — their call sites are ``on_event("…")``, which the walker reads.

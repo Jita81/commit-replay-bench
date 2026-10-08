@@ -35,7 +35,6 @@ Touch when:   never for a new repository; the candidate rule changes (what count
 from __future__ import annotations
 
 import re
-import shutil
 import stat
 import sys
 from collections.abc import Callable
@@ -771,10 +770,7 @@ def _qualify_sha(
     return out, events
 
 
-@pytest.mark.toolchain("go")
-@pytest.mark.skipif(
-    not (langs.has_tool("go") and langs.has_tool("gofmt")), reason="go/gofmt not on PATH"
-)
+@pytest.mark.toolchain("go", "gofmt")
 def test_go_gold_that_gofmt_rejects_is_not_gold_clean(tmp_path: Path) -> None:
     """The fixture's feat commit is gofmt-clean: the gold passes belt 5 (``lint=True``).
     A later commit whose source the maintainers left un-gofmt'd — cobra #1559's shape,
@@ -810,14 +806,6 @@ def test_go_gold_that_gofmt_rejects_is_not_gold_clean(tmp_path: Path) -> None:
     assert [p["lint"] for k, p in events if k == "mine.gold"] == [False]
 
 
-def _ruff_binary() -> str | None:
-    sibling = Path(sys.executable).parent / "ruff"
-    if sibling.exists():
-        return str(sibling)
-    return shutil.which("ruff")
-
-
-@pytest.mark.skipif(_ruff_binary() is None, reason="ruff not available")
 def test_python_gold_that_ruff_rejects_is_not_gold_clean(tmp_path: Path) -> None:
     """click's apparatus (``[tool.ruff]`` + the ``ruff-format`` hook): the feat gold is
     clean; a later gold with an unused import is flagged, and the note names the plan."""

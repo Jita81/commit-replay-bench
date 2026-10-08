@@ -374,6 +374,8 @@ def test_controls_verdict_state_and_to_dict() -> None:
     assert verdict(escapes=1).state(**kw) == rt.CONTROLS_ESCAPED
     assert verdict(constructible=3, total=7).state(**kw) == rt.CONTROLS_THIN
     assert verdict(complete=False).state(**kw) == rt.CONTROLS_UNMEASURED
+    # escaped outranks thin: a control a wrong patch got past is the graver finding
+    assert verdict(escapes=1, constructible=1, total=7).state(**kw) == rt.CONTROLS_ESCAPED
     assert verdict().state(**kw) == rt.CONTROLS_PASSED
     assert verdict(passed=False, escapes=2, constructible=1).state(**kw) == rt.CONTROLS_FAILED
     assert set(rt.CONTROLS_STATES) == {"unmeasured", "failed", "thin", "escaped", "passed"}

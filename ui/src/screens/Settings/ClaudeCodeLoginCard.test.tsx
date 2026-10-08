@@ -319,3 +319,92 @@ describe('ClaudeCodeLoginCard', () => {
     expect(open()).toEqual([])
   })
 })
+
+describe('ClaudeCodeLoginCard — the login runs use (pilot D1)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  const OPERATOR: Principal = { ...PRINCIPAL, role: 'operator' }
+  const INVALID_LOGIN = { builder: 'claude_code', auth: 'cli', state: 'invalid', status: 'invalid', detail: 'authentication failed (HTTP 401)', source: 'keychain', fingerprint: '', cli_version: '2.1.275', checked_at: '2026-09-27T15:47:02+00:00', age_s: 42, ttl_s: 600, trigger: 'submit', reason: '' }
+  const VERIFIED_LOGIN = { ...INVALID_LOGIN, state: 'verified', status: 'ok', detail: 'pong', age_s: 1, trigger: 'settings' }
+
+  it('shows an invalid login as refusing runs, with its age and source, and Verify records a new answer', async () => {
+    const user = userEvent.setup()
+    let current: unknown = INVALID_LOGIN
+    const { calls } = setup(OPERATOR, {
+      'GET /settings/secrets': VIEWER_LIST,
+      'GET /builders/logins': () => json({ items: [current] }),
+      'POST /builders/claude_code/login/verify': () => {
+        current = VERIFIED_LOGIN
+        return json(VERIFIED_LOGIN)
+      },
+    })
+    const line = await screen.findByTestId('claude-runs-login')
+    expect(line).toHaveAttribute('data-state', 'invalid')
+    expect(screen.getByTestId('claude-runs-login-state')).toHaveTextContent('invalid — runs are refused')
+    expect(screen.getByTestId('claude-runs-login-meta')).toHaveTextContent('auth: cli · keychain · checked 42 s ago')
+    expect(screen.getByTestId('claude-runs-login-why')).toHaveTextContent('No run on this login will be queued until it works')
+    await user.click(screen.getByTestId('claude-runs-login-verify'))
+    await waitFor(() => expect(screen.getByTestId('claude-runs-login')).toHaveAttribute('data-state', 'verified'))
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/builders/claude_code/login/verify')).toHaveLength(1)
+  })
+
+  it('a viewer reads the state but has no Verify', async () => {
+    setup(VIEWER, { 'GET /settings/secrets': VIEWER_LIST, 'GET /builders/logins': { items: [INVALID_LOGIN] } })
+    await screen.findByTestId('claude-runs-login')
+    expect(screen.queryByTestId('claude-runs-login-verify')).not.toBeInTheDocument()
+  })
+
+  it('shows every auth mode a run could use and verifies the one whose Verify was pressed', async () => {
+    // Q1's review: a `cli` login recorded invalid on an `api_key`-default deployment was
+    // invisible here, and Verify checked `api_key` — the refused run stayed refused
+    const user = userEvent.setup()
+    const API_KEY_DEFAULT = { ...INVALID_LOGIN, auth: 'api_key', state: 'unverified', status: '', detail: '', source: 'env', age_s: null, checked_at: null, reason: 'never verified', present: false, default: true }
+    const CLI_INVALID = { ...INVALID_LOGIN, present: true, default: false }
+    const { calls } = setup(OPERATOR, {
+      'GET /settings/secrets': VIEWER_LIST,
+      'GET /builders/logins': { items: [API_KEY_DEFAULT, CLI_INVALID] },
+      'POST /builders/claude_code/login/verify': json({ ...CLI_INVALID, state: 'verified', status: 'ok' }),
+    })
+    const lines = await screen.findAllByTestId('claude-runs-login')
+    expect(lines.map((l) => l.getAttribute('data-auth'))).toEqual(['api_key', 'cli'])
+    expect(lines[0]).toHaveTextContent('the default')
+    const cli = lines[1]!
+    expect(cli).toHaveAttribute('data-state', 'invalid')
+    await user.click(within(cli).getByTestId('claude-runs-login-verify'))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1))
+    const post = calls.find((c) => c.method === 'POST')!
+    expect(post.path).toBe('/builders/claude_code/login/verify')
+    expect(post.url).toContain('auth=cli')
+  })
+
+  it('while one mode verifies, every mode’s Verify is disabled — the limiter is deployment-wide (P-732)', async () => {
+    // a second Verify pressed on another mode inside the window met the server's 429
+    const user = userEvent.setup()
+    const API_KEY_DEFAULT = { ...INVALID_LOGIN, auth: 'api_key', state: 'unverified', status: '', detail: '', source: 'env', age_s: null, checked_at: null, reason: 'never verified', present: true, default: true }
+    const CLI_INVALID = { ...INVALID_LOGIN, present: true, default: false }
+    let settle: (r: Response) => void = () => {}
+    setup(OPERATOR, {
+      'GET /settings/secrets': VIEWER_LIST,
+      'GET /builders/logins': { items: [API_KEY_DEFAULT, CLI_INVALID] },
+      'POST /builders/claude_code/login/verify': () => new Promise<Response>((resolve) => { settle = resolve }),
+    })
+    const [apiKey, cli] = await screen.findAllByTestId('claude-runs-login')
+    await user.click(within(cli!).getByTestId('claude-runs-login-verify'))
+    await waitFor(() => expect(within(cli!).getByTestId('claude-runs-login-verify')).toHaveTextContent('Verifying…'))
+    expect(within(cli!).getByTestId('claude-runs-login-verify')).toBeDisabled()
+    // the other mode keeps its own label, and cannot be pressed until the request settles
+    expect(within(apiKey!).getByTestId('claude-runs-login-verify')).toHaveTextContent('Verify the api_key login')
+    expect(within(apiKey!).getByTestId('claude-runs-login-verify')).toBeDisabled()
+    settle(json({ ...CLI_INVALID, state: 'verified', status: 'ok' }))
+    await waitFor(() => expect(within(apiKey!).getByTestId('claude-runs-login-verify')).toBeEnabled())
+  })
+
+  it('a viewer is served presence and state only, and the line reads without the operator fields', async () => {
+    const PRESENCE = { builder: 'claude_code', auth: 'cli', state: 'invalid', status: 'invalid', present: true, default: true, checked_at: '2026-09-27T15:47:02+00:00', age_s: 42, ttl_s: 600, reason: '' }
+    setup(VIEWER, { 'GET /settings/secrets': VIEWER_LIST, 'GET /builders/logins': { items: [PRESENCE] } })
+    const line = await screen.findByTestId('claude-runs-login')
+    expect(line).toHaveAttribute('data-state', 'invalid')
+    expect(line).not.toHaveTextContent('undefined')
+    expect(screen.getByTestId('claude-runs-login-meta')).toHaveTextContent('auth: cli · checked 42 s ago')
+  })
+})

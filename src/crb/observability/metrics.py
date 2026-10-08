@@ -37,7 +37,10 @@ What it does: Counts runs, graded tasks by outcome, belt failures, builder token
               denied (``crb_egress_denied_total{repo}``, metered from the worker's
               ``builder.egress_denied`` event, G-400); renders the exposition for the API's
               ``/metrics`` less the worker-only series (``render_api``, P-268) and starts the
-              worker's, the whole registry, on its port.
+              worker's, the whole registry, on its port — a fixed one, ``0`` (off) or ``auto``
+              (a free port) — returning what it did as an ``Exposition`` (listening on which
+              port, off, or ``degraded`` with the reason) that the worker records for
+              ``/health``; a bind failure never raises into the worker (pilot D5).
 How:          Import-time try/except picks the real registry or ``_Noop``; every metric is
               a module-level object created through ``_counter``/``_gauge``/``_histogram``;
               call-sites use ``record_grade``/``record_build``/``record_event``/
@@ -50,7 +53,9 @@ Works with:   src/crb/server/worker.py (calls the recorders after each grade and
               ``builder.egress_denied`` from src/crb/builders/container.py among them, since
               the builders layer may not import this one — and sets the queue gauge on
               check-in),
-              src/crb/server/worker_main.py (``start_worker_exposition`` before the loop),
+              src/crb/server/worker_main.py and src/crb/server/worker_metrics.py
+              (``start_worker_exposition`` before the loop; the ``Exposition`` it returns is
+              recorded for ``/health``),
               src/crb/server/routes/system.py (``/metrics`` renders ``render()`` after
               refreshing the ledger and controls gauges),
               src/crb/server/routes/signoffs.py (``record_signoff`` after each decision),
@@ -70,6 +75,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 try:  # pragma: no cover — exercised only when the extra is installed
@@ -501,23 +507,98 @@ LOOPBACK = "127.0.0.1"
 ALL_INTERFACES = "0.0.0.0"  # noqa: S104 — opted into per container, never the default
 
 
-def start_worker_exposition(port: int, *, enabled: bool = True, addr: str = LOOPBACK) -> bool:
+#: ``CRB_METRICS_PORT=auto``: the operating system picks a free port, and the worker reports
+#: the one it got — two stacks on one machine never fight over 9464 (pilot D5, P-436).
+METRICS_PORT_AUTO = "auto"
+#: What :func:`start_worker_exposition` returns as ``Exposition.state``.
+EXPOSITION_LISTENING = "listening"
+EXPOSITION_OFF = "off"
+EXPOSITION_DEGRADED = "degraded"
+
+
+@dataclass(frozen=True)
+class Exposition:
+    """What the worker's metrics listener did at start: ``listening`` on ``addr:port``,
+    ``off`` by choice (disabled, port 0, the client not installed) or ``degraded`` — asked
+    for and not served, with the reason and the way forward. The worker records it and
+    ``/health`` shows it, so a listener that could not bind is never only a log line."""
+
+    state: str
+    addr: str = ""
+    #: The port it is serving on (``0`` unless ``listening``).
+    port: int = 0
+    #: What ``CRB_METRICS_PORT`` asked for: a number, ``auto`` or ``0``.
+    requested: str = ""
+    reason: str = ""
+
+    @property
+    def listening(self) -> bool:
+        return self.state == EXPOSITION_LISTENING
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "addr": self.addr,
+            "port": self.port,
+            "requested": self.requested,
+            "reason": self.reason,
+        }
+
+
+def parse_metrics_port(value: object) -> int | str:
+    """``CRB_METRICS_PORT`` as the worker reads it: a port ``1``–``65535``, ``0`` (off) or
+    ``auto`` (any case, a free port the operating system picks). ``ValueError`` names the
+    setting for anything else."""
+    text = str(value).strip().lower()
+    if text == METRICS_PORT_AUTO:
+        return METRICS_PORT_AUTO
+    try:
+        port = int(text)
+    except ValueError:
+        port = -1
+    if not 0 <= port <= 65535:
+        raise ValueError(
+            f"CRB_METRICS_PORT must be 0 (off), a port 1-65535 or 'auto' (a free port), "
+            f"got {value!r}"
+        )
+    return port
+
+
+def start_worker_exposition(
+    port: int | str, *, enabled: bool = True, addr: str = LOOPBACK
+) -> Exposition:
     """Serve this process's registry on ``addr:port`` (J-TEL-1) — the worker's ``/metrics``,
     where the build / grade / cost series live. ``addr`` defaults to loopback
-    (``CRB_METRICS_HOST``). ``True`` when a server was started; ``False`` when metrics are
-    disabled, ``port`` is 0, or the client is absent (each is logged once so an operator
-    scraping nothing knows why). A port that cannot be bound is logged and the worker
-    still runs: a missing dashboard must not stop measurement."""
-    if not enabled or int(port) <= 0:
+    (``CRB_METRICS_HOST``); ``port`` is a number, ``0`` (off) or :data:`METRICS_PORT_AUTO`
+    (a free port, reported). Returns what happened as an :class:`Exposition` and logs it
+    once. A port that cannot be bound NEVER raises into the worker: a missing dashboard must
+    not stop measurement, and the returned ``degraded`` state — which the worker records for
+    ``/health`` — names the port, the operating system's reason and the fix (pilot D5)."""
+    requested = str(port).strip().lower()
+    if not enabled:
         _LOG.info("worker metrics exposition off (enabled=%s port=%s)", enabled, port)
-        return False
-    if not _AVAILABLE or registry is None:  # pragma: no cover
+        return Exposition(EXPOSITION_OFF, addr, 0, requested, "disabled")
+    if requested != METRICS_PORT_AUTO and int(requested) <= 0:
+        _LOG.info("worker metrics exposition off (enabled=%s port=%s)", enabled, port)
+        return Exposition(EXPOSITION_OFF, addr, 0, requested, "port 0")
+    if not _AVAILABLE or registry is None:
         _LOG.warning("worker metrics exposition off: prometheus_client is not installed")
-        return False
+        return Exposition(EXPOSITION_OFF, addr, 0, requested, "prometheus_client missing")
+    ask = 0 if requested == METRICS_PORT_AUTO else int(requested)
     try:
-        start_http_server(int(port), addr=addr, registry=registry)  # pragma: no cover
-    except OSError as exc:  # pragma: no cover — bind failure
-        _LOG.error("worker metrics exposition could not bind port %s: %s", port, exc)
-        return False
-    _LOG.info("worker metrics exposition on %s:%s/metrics", addr, port)  # pragma: no cover
-    return True  # pragma: no cover
+        started = start_http_server(ask, addr=addr, registry=registry)
+    except (OSError, UnicodeError, ValueError) as exc:
+        # the port is taken, the address is not this host's, or the host cannot even be
+        # encoded (a label over 63 characters is a UnicodeError; a NUL a ValueError) — none
+        # may end the worker (Q1's review)
+        why = getattr(exc, "strerror", None) or exc
+        reason = (
+            f"could not bind {addr[:80]}:{requested}: {why} — set "
+            "CRB_METRICS_PORT=auto (a free port) or another free port; 0 switches it off"
+        )
+        _LOG.error("worker metrics exposition %s", reason)
+        return Exposition(EXPOSITION_DEGRADED, addr, 0, requested, reason)
+    server = started[0] if isinstance(started, tuple) and started else None
+    bound = int(getattr(server, "server_port", 0) or ask)
+    _LOG.info("worker metrics exposition on %s:%s/metrics (asked for %s)", addr, bound, requested)
+    return Exposition(EXPOSITION_LISTENING, addr, bound, requested)

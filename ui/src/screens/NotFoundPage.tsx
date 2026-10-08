@@ -9,8 +9,9 @@
  *               address that was requested (path, query string and hash — the link the person
  *               followed, not a trimmed copy of it: G-197), says why an address fails here and
  *               what to do for each cause (typed or copied wrongly: check it; a link from an
- *               older version, or to a run or task since deleted: start from Home or Runs, and
- *               tell whoever sent it), states what the page will not do (search, guess a near
+ *               older version: start from Home and tell whoever sent it — never a deleted run
+ *               or task, whose address still matches its route and shows the API's not-found
+ *               on that page), states what the page will not do (search, guess a near
  *               match, report the link: G-196), and offers one way back: Home, the start of
  *               the journey (never the legacy repository list, which is not in the journey nav).
  * How:          `useLocation` for the address; `PageHeader` + `EmptyState`; no API call, so it
@@ -44,7 +45,7 @@ export function NotFoundPage() {
               {address}
             </span>
             <span className="mt-3 block" data-testid="notfound-cause">
-              If you typed or copied the address, check it for a mistake and try again. If you followed a link, it may come from an older version of this product, or point to a run or task that has since been deleted: start from Home, or look for the run on Runs, and tell whoever sent you the link.
+              If you typed or copied the address, check it for a mistake and try again. If you followed a link, it may come from an older version of this product, whose addresses have since changed: start from Home and tell whoever sent you the link.
             </span>
             <span className="mt-3 block" data-testid="notfound-nongoal">
               This page does not search for what you meant, guess a near match or report the broken link to anyone.

@@ -5,17 +5,20 @@ environment carried the SDK, so every local run passed; CI installs only the ``s
 ``postgres``, ``mcp`` and ``dev`` extras from the lock, none of which reaches ``openai``, so the
 test failed on a fresh clone with ``ModuleNotFoundError`` — and it was the typed evidence of a
 met criterion (docs/PREVENTION.md P-330). This gate reads what CI resolves, not what the
-developer's environment happens to hold.
+developer's environment happens to hold. Since P-707 the suite jobs install the ``openai``
+extra, so its tests run in CI; the planted case below uses the ``claude`` extra, which they
+do not install.
 
 Navigation
 ----------
 What it is:   The gate between the suite's imports and the packages CI installs.
 What it does: Resolves, from ``uv.lock``, every distribution the extras of the jobs that run
-              the whole suite (``test-shard`` and ``fresh-clone`` in ``.github/workflows/
-              ci.yml``) reach, and fails when a module under ``tests/`` imports a third-party
-              package outside that set without a guard (``pytest.importorskip`` of it, or a
-              ``try`` whose handler catches ``ImportError``). The check runs on a planted
-              bare import so it cannot pass vacuously.
+              the whole suite (``test-shard`` and ``fresh-clone-shard`` in
+              ``.github/workflows/ci.yml``) reach, and fails when a module under ``tests/``
+              imports a third-party package outside that set without a guard
+              (``pytest.importorskip`` of it, or a ``try`` whose handler catches
+              ``ImportError``). The check runs on a planted bare import so it cannot pass
+              vacuously.
 How:          ``tomllib`` reads the lock and walks each package's dependencies and the extras
               named on each edge; PyYAML reads the jobs' ``uv sync`` lines; ``ast`` finds every
               import in every test module; ``importlib.metadata.packages_distributions`` maps
@@ -46,7 +49,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 #: The jobs that run the whole suite; the extras every one of them installs are what a test
 #: may import unguarded.
-SUITE_JOBS = ("test-shard", "fresh-clone")
+SUITE_JOBS = ("test-shard", "fresh-clone-shard")
 PROJECT = "commit-replay-bench"
 
 
@@ -159,12 +162,15 @@ def test_every_test_import_is_installed_by_the_jobs_that_run_the_suite() -> None
 
 
 def test_the_check_refuses_a_planted_bare_import_of_an_optional_extra() -> None:
+    """The planted extra is ``claude`` (import ``claude_agent_sdk``): the suite jobs install
+    ``openai`` since P-707, so a bare ``import openai`` is no longer the shape this refuses."""
     allowed = resolved(ci_extras())
-    assert "openai" not in allowed and "pytest" in allowed and "sqlalchemy" in allowed
-    planted = "def f():\n    import openai\n    return openai\n"
+    assert "claude-agent-sdk" not in allowed and "openai" in allowed
+    assert "pytest" in allowed and "sqlalchemy" in allowed
+    planted = "def f():\n    import claude_agent_sdk\n    return claude_agent_sdk\n"
     assert findings({"tests/test_planted.py": planted}, allowed)
-    guarded = "import pytest\nopenai = pytest.importorskip('openai')\n"
+    guarded = "import pytest\nsdk = pytest.importorskip('claude_agent_sdk')\n"
     assert not findings({"tests/test_planted.py": guarded}, allowed)
-    tried = "try:\n    import openai\nexcept ImportError:\n    openai = None\n"
+    tried = "try:\n    import claude_agent_sdk\nexcept ImportError:\n    claude_agent_sdk = None\n"
     assert not findings({"tests/test_planted.py": tried}, allowed)
-    assert unguarded_imports(planted) == [(2, "openai")]
+    assert unguarded_imports(planted) == [(2, "claude_agent_sdk")]

@@ -207,11 +207,8 @@ def _config(**opts: object) -> RepoConfig:
 
 @pytest.fixture(scope="module")
 def rig() -> Iterator[Rig]:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
-    if shutil.which("go") is None:
-        pytest.skip("the host needs go to write go.sum and fill the module cache offline")
+    langs.require_docker()
+    langs.require_tool("go")  # the host writes go.sum and fills the module cache offline
     shipped = langs.ensure_shipped_sandbox_image("go")
     root = langs.CACHE_DIR / "sandbox" / f"posture-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)

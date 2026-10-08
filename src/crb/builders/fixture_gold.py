@@ -200,7 +200,9 @@ class FixtureGoldBuilder:
             done=False,  # never a claim: the grader decides
             summary=f"fixture overlay of {len(files)} source file(s)",
             turns=1,
-            tool_calls=len(files),
+            # one per overlaid file, plus the attempted shell call its ``build.tool`` event
+            # records — refused or not (P-425)
+            tool_calls=len(files) + (1 if self.attempt else 0),
             tokens_in=0,
             tokens_out=0,
             cost_usd=0.0,

@@ -4,8 +4,8 @@ The stores already hold the moments: a repository's ``repo.created`` event, a ru
 ``created`` and its graded rows, a ``controls.report`` event, a sign-off's ``created`` and the
 row its approver attested, the factory chain's ``intake.registered`` / ``backlog.frozen`` /
 ``delivery.opened`` / ``delivery.merged``, a ``user.password_set`` event and the account's next
-sign-in. Nothing here writes anything: this module reads those records, hands the pairs to
-:mod:`crb.core.flow`, and returns one :class:`~crb.core.flow.FlowReading`.
+``user.signed_in`` event. Nothing here writes anything: this module reads those records, hands
+the pairs to :mod:`crb.core.flow`, and returns one :class:`~crb.core.flow.FlowReading`.
 
 **The milestone pairs, per stream** (each is the pair its MEASURE criterion names in
 ``docs/dod/streams/``):
@@ -25,7 +25,7 @@ sign-in. Nothing here writes anything: this module reads those records, hands th
 | manufacture-and-deliver | item registered → pull request opened → merged |
 | learn | a refusal raised → the strengthening item that supersedes it registered; a |
 | | class first seen → the first decided look of a change targeting it (G-536) |
-| run-the-platform | an admin set an account's password → that account signed in again; |
+| run-the-platform | an admin set an account's password → that account's next sign-in; |
 | | the install → the first green ``/health`` (both recorded, ADR-0028) |
 
 **Money is counted once.** Every graded row belongs to exactly one stream's spend
@@ -166,6 +166,8 @@ REPO_CREATED = "repo.created"
 CONTROLS_REPORT = "controls.report"
 #: The event an admin's password reset writes (src/crb/server/routes/admin.py).
 RESET_ACTION = "user.password_set"
+#: The event every successful sign-in writes (src/crb/server/routes/auth.py, ADR-0028 §8).
+SIGNED_IN_ACTION = "user.signed_in"
 #: How many rows a cell needs before the map will route on it (docs/adr/0003-one-routing-rule.md).
 CELL_N_BAR = 10
 #: The method every figure in a reading carries, so no number reads as a live measurement of
@@ -809,13 +811,16 @@ def run_the_platform(
 
     This is the deployment's figure, not the repository's: the accounts are the deployment's.
     A recovery counts only when someone else set the password (an admin recovering a person,
-    not a person changing their own) and the account has signed in since. The account counts
+    not a person changing their own). It is timed to the account's FIRST recorded sign-in
+    after the reset and before the account's next password change — never to
+    ``User.last_login``, which every sign-in overwrites — and only when the deployment had
+    already recorded a sign-in by the time of the reset (an older reset may have been followed
+    by a sign-in nothing recorded). The account counts
     and the recovery lead time are served only to an admin (``admin``); anyone else reads the
     lead time as unmeasured with :data:`ADMIN_ONLY` and no account count at all — the same
     line ``GET /admin/users`` draws.
     """
     users = list(session.execute(select(User)).scalars())
-    last_login = {u.id: u.last_login for u in users}
     installed_at, moment, healthy_at = install_moments(session)
     observed = bool(installed_at) and moment == MOMENT_OBSERVED
     install_reason = (
@@ -826,20 +831,37 @@ def run_the_platform(
         if not installed_at
         else "this deployment has not yet read green on /health"
     )
-    resets = session.execute(
-        select(Event).where(Event.action == RESET_ACTION).order_by(Event.id.asc())
-    ).scalars()
+    moments = [
+        (at, ev)
+        for ev in session.execute(
+            select(Event)
+            .where(Event.action.in_((RESET_ACTION, SIGNED_IN_ACTION)))
+            .order_by(Event.id.asc())
+        ).scalars()
+        if (at := parse_ts(ev.timestamp)) is not None
+    ]
+    moments.sort(key=lambda m: m[0])  # stable: a tie keeps the store's order
     pairs: list[tuple[str, str]] = []
-    recovered = 0
-    for ev in resets:
+    open_reset: dict[str, str] = {}  # account → the admin reset still waiting for a sign-in
+    recovered = untimed = 0
+    signins_recorded = False
+    for _, ev in moments:
         target = str((ev.payload_json or {}).get("target") or "")
-        if not target or target == ev.actor:
+        if not target:
+            continue
+        if ev.action == SIGNED_IN_ACTION:
+            signins_recorded = True
+            if target in open_reset:
+                pairs.append((open_reset.pop(target), ev.timestamp))
+            continue
+        open_reset.pop(target, None)  # any later change of the password ends the wait
+        if target == ev.actor:
             continue
         recovered += 1
-        back = last_login.get(target, "")
-        set_at, back_at = parse_ts(ev.timestamp), parse_ts(back)
-        if set_at is not None and back_at is not None and back_at >= set_at:
-            pairs.append((ev.timestamp, back))
+        if signins_recorded:
+            open_reset[target] = ev.timestamp
+        else:
+            untimed += 1
     accounts = {
         "accounts": len(users),
         "accounts_active": sum(1 for u in users if u.active),
@@ -855,9 +877,14 @@ def run_the_platform(
                 "Password reset by an admin → the person signed in again",
                 pairs if admin else [],
                 reason=(
-                    "no account on this deployment has been recovered by an admin yet"
-                    if admin
-                    else ADMIN_ONLY
+                    ADMIN_ONLY
+                    if not admin
+                    else "no account on this deployment has been recovered by an admin yet"
+                    if not recovered
+                    else "every reset by an admin came before this deployment recorded "
+                    "sign-ins, so the first sign-in after it is not known"
+                    if untimed == recovered
+                    else "no account an admin recovered has signed in since"
                 ),
             ),
             lead_time(

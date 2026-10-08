@@ -118,8 +118,9 @@ supplying anything (the review's play-01 finding: structure helps, values leak).
 escaped mutants are listed *when the oracle run recorded them* (`CommitOracleScore.outcomes`
 or the report's `escaped_mutants`); otherwise the item carries the count and says so. A held
 cell with no per-task score gets one cell-level item, and so does a held cell whose scored
-tasks are all strong — the controls hold it, so the item names the escaped control as the test
-work — so a flag is never dropped silently.
+tasks are all strong, chosen by the hold's reason: a controls hold names the escaped control as
+the test work, and an `oracle_weak` hold names the re-measurement that lets the scores reach the
+route — so a flag is never dropped silently.
 
 Item ids are `sha(cell, repo, task)` — a re-run produces the same backlog; `--since <apparatus>`
 keeps only cells and scores stamped at or after that version. `--out backlog.json` writes an
@@ -195,7 +196,9 @@ changed on 2026-09-23 (G-532) is *where* the person accepts — on the screen th
 reason, not as a command on the host. The decision itself is no more automatic than it was: each
 write is operator-gated, takes no `decided_by` field (the signed-in operator is the decider, so a
 decision cannot be filed under somebody else's name), and re-derives the thing it writes from the
-ledger, so a request names an id and never supplies a body.
+ledger: a request carries only the decision or selection fields (a class id with its verdict and
+note, item ids, a cell), and the server composes the corpus line, the backlog item and the run
+requests itself — none of them is ever in a request.
 
 | Step | Who | Where | Why the product must not decide it |
 |---|---|---|---|

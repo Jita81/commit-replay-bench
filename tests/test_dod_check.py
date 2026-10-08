@@ -19,7 +19,8 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               ``--check`` fails on a stale GAP-ANALYSIS.md; and that the prevention register
               (docs/PREVENTION.md) must exist and refuses an entry closed without an
               executable artefact that resolves, an advisory closure, a pending entry with no
-              gap, an unknown level or status, a duplicate id and a missing first-seen; that a
+              gap, an unknown level or status, a duplicate id, a missing first-seen and a
+              pending entry with no claim tag, and projects a pending row with its tag; that a
               gap line no criterion (or pending row) cites is refused; and that a PLAN.md wave
               item must be a gap id, while a gap the wave closes stays a valid item through the
               generated "Gap ids retired" list; that a retired id is admitted only when the
@@ -162,7 +163,7 @@ REGISTER = """# Prevention register
 | id | bug | class | first seen | artefact | level | status | gap |
 |---|---|---|---|---|---|---|---|
 | P-001 | A long job name | ci-name | PR #48 | `test:tests/test_x.py::test_one` · `ci:code-map` | gate | closed | |
-| P-002 | Patches thrown away | retention | 2026-09-25 export | pending | construction | pending | G-701 |
+| P-002 | Patches thrown away | retention | 2026-09-25 export [hypothesis — read from the export] | pending | construction | pending | G-701 |
 
 ## Gaps
 - **G-701** — clean patches are not kept · store the graded patch · server
@@ -681,7 +682,7 @@ def test_an_open_value_criterion_outranks_every_other_open_criterion(
 
 def _register_row(row: str) -> str:
     return REGISTER.replace(
-        "| P-002 | Patches thrown away | retention | 2026-09-25 export | pending | construction | pending | G-701 |",
+        "| P-002 | Patches thrown away | retention | 2026-09-25 export [hypothesis — read from the export] | pending | construction | pending | G-701 |",
         row,
     )
 
@@ -707,6 +708,10 @@ def _register_row(row: str) -> str:
         ("| P-001 | x | c | e | pending | gate | pending | G-701 |", "duplicate id P-001"),
         ("| P-002 | x | c | | pending | gate | pending | G-701 |", "needs a first-seen"),
         ("| P-002 | x | c | e | pending | gate | pending | G-799 |", "gap G-799 is not defined"),
+        (
+            "| P-002 | x | c | e | pending | gate | pending | G-701 |",
+            "its finding carries no claim tag for the gap analysis to project",
+        ),
     ],
 )
 def test_the_prevention_register_refuses_an_entry_without_a_working_artefact(
@@ -755,8 +760,16 @@ def test_the_register_must_exist_and_its_counts_reach_the_gap_analysis(
     out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
     assert "## Our own bugs — the prevention register" in out
     assert "**2 registered · 1 closed (gate 1) · 1 pending.**" in out
+    # the totals are a count the reader can re-derive: tagged with n, method and apparatus
     assert (
-        "| P-002 | Patches thrown away | construction | G-701 | clean patches are not kept" in out
+        "[measured — n = 2 rows of the `## Register` table in `docs/PREVENTION.md`, counted by "
+        "status and level; method: `scripts/dod_check.py` over that file at this commit; "
+        "apparatus n/a, a count of the register]" in out
+    )
+    # a pending row reaches it with the claim tag its register row carries (P-433)
+    assert (
+        "| P-002 | Patches thrown away [hypothesis — read from the export] | construction | "
+        "G-701 | clean patches are not kept" in out
     )
     (root / "docs/PREVENTION.md").unlink()
     assert mod.main(["--check"]) == 1
@@ -971,6 +984,49 @@ def test_a_retired_id_must_have_been_a_gap_in_the_artefacts_history(
     assert "retires G-555" in capsys.readouterr().out
     assert mod.main(["--check", "--base", "base-under-test"]) == 0
     capsys.readouterr()
+
+
+def test_a_new_gap_never_reuses_an_id_the_bases_history_closed(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-463: Wave 2 defined G-945, G-946, G-963 and G-964 as new gaps,
+    but `feat/ns1` had used all four on 2026-09-25 for dependency-provisioning gaps it then
+    closed, so one id carried two meanings and nothing refused it. A gap this branch defines
+    that the base does not have open must not appear as a gap in the base's history at the
+    merge-base."""
+    mod, root = tree
+    plan = root / "docs/dod/PLAN.md"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-701"), encoding="utf-8")
+    assert mod.main([]) == 0
+    _commit(root, "G-001 is a gap")
+    _write_all(root)
+    assert mod.main([]) == 0
+    base = _commit(root, "close G-001")
+    _git(root, "branch", "-q", "base-under-test", base)
+    capsys.readouterr()
+    # the branch opens a new gap under the closed id, with another meaning
+    other = "the map hides its filters"
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page = root / "docs/dod/pages/results.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("non-goals not on the About block", other),
+        encoding="utf-8",
+    )
+    assert mod.main([]) == 0  # the default base (origin/main) does not exist here
+    assert mod.main(["--base", "base-under-test"]) == 1
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert "G-001" in said and "P-463" in said and "base-under-test" in said
+    # an id the history never used passes
+    page.write_text(page.read_text(encoding="utf-8").replace("G-001", "G-002"), encoding="utf-8")
+    plan.write_text(PLAN.replace("G-701", "G-001, G-002, G-701"), encoding="utf-8")
+    assert mod.main(["--base", "base-under-test"]) == 0
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
+    capsys.readouterr()
+    # a gap the base still has open is the same gap, not a reuse
+    assert mod.reused_gap_ids(root, "base-under-test", {"G-002"}) == []
+    assert mod.reused_gap_ids(root, "no-such-base", {"G-001"}) == []
 
 
 def test_the_retired_list_never_reads_another_repositorys_history(tmp_path: Path) -> None:
@@ -1279,3 +1335,31 @@ def test_the_check_refuses_an_operator_value_stated_as_settled(
     capsys.readouterr()
     assert mod.main(["--check"]) == 1
     assert 'product.truth.4 states "of the first 20"' in capsys.readouterr().out
+
+
+def test_a_projected_row_carries_its_claim_tag_verbatim_wherever_the_register_put_it(
+    tree: tuple[ModuleType, Path],
+) -> None:
+    """P-433 (CodeRabbit on PR #65): the pending rows reached the gap analysis without their
+    claim tags, because the tag sits in the register's first-seen cell and only the bug cell
+    was projected. The tag is carried verbatim — a ``]`` inside a code span does not end it,
+    a tag inside a code span is not one, and a tag already in the bug cell is not doubled."""
+    mod, root = tree
+    _write_all(root)
+    measured = (
+        "[measured — n = 2 tests failing, method: a rival commit staged before `seq[0]` is "
+        "read; apparatus n/a, a finding about our own code]"
+    )
+    row = (
+        "| P-002 | The route counts `[measured]` tags [hypothesis — read from the code] | "
+        f"retention | a review, 2026-09-28 {measured} | pending | construction | pending "
+        "| G-701 |"
+    )
+    (root / "docs/PREVENTION.md").write_text(_register_row(row), encoding="utf-8")
+    assert mod.main([]) == 0
+    out = (root / "docs/dod/GAP-ANALYSIS.md").read_text(encoding="utf-8")
+    assert (
+        "| P-002 | The route counts `[measured]` tags [hypothesis — read from the code] "
+        f"{measured} | construction | G-701 |" in out
+    )
+    assert mod.claim_tags("the `[gap]` word, a [gap analysis](x.md) link, no tag") == []

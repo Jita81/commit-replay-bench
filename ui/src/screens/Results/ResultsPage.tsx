@@ -127,7 +127,7 @@ const NOT_LOADED = 'not loaded'
 const SHOWN = 6
 
 /**
- * The Oracle strength tile's tone, read once for the tile and the gate (P-403: one rule, one
+ * The Oracle strength tile's tone, read once for the tile and the gate (P-411: one rule, one
  * reader): muted until a mean is scored and a bar is loaded to read it against, green at or
  * over the bar, amber under it.
  */

@@ -11,8 +11,8 @@ run whose output did not parse as kills (external assessment 2026-09-25, A6). v2
 * counts a ``timeout`` and an ``unattributed`` run apart — neither a kill nor an escape;
 * reads a score with more than half its planned mutants excluded as not scoreable.
 
-v2 is the scorer of apparatus 2.4 (ADR-0025 item 14): these tests set the stamp stream R's
-bump will set, and one test pins that below 2.4 the scorer is v1 as it stood (P-303).
+v2 is the scorer of apparatus 2.4 (ADR-0025 item 14): these tests pin the stamp to 2.4
+explicitly, and one test pins that below 2.4 the scorer is v1 as it stood (P-303).
 
 Navigation
 ----------
@@ -118,8 +118,8 @@ def _score(tmp_path: Path, *runs: Run, task_id: str = "a" * 40, **kw: Any) -> ms
 
 @pytest.fixture(autouse=True)
 def _at_apparatus_2_4(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``mutation.v2`` is the scorer of apparatus 2.4 (ADR-0025 item 14): these tests run
-    the stamp stream R's bump will set; below it the scorer is ``mutation.v1``."""
+    """``mutation.v2`` is the scorer of apparatus 2.4 (ADR-0025 item 14): this fixture pins
+    the stamp to 2.4 explicitly; below it the scorer is ``mutation.v1``."""
     monkeypatch.setattr(crb_version, "APPARATUS_VERSION", "2.4")
 
 

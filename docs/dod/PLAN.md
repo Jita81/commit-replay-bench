@@ -68,7 +68,7 @@ eight, after `feat/ns1`'s `P-227` to `P-234` (P-334), their other ids renumbered
 binding, `crb.server.factory_standard`); it awaits the operator's merge after `feat/ns1`. Wave
 4's streams (T4, P, S, then L with M) are integrated on `feat/ns4`, cut from `feat/ns2` and
 brought to its later head, `8ba71fda`, by a merge on 28 September, with their ids renumbered after
-Wave 2's (DL-106 to DL-120, P-350 to P-403, ADR-0031, Alembic revisions 0014 to 0016) and their
+Wave 2's (DL-106 to DL-120, P-350 to P-399 and P-408 to P-411, ADR-0031, Alembic revisions 0014 to 0016) and their
 seams wired; what it closed and what it left are under Wave 4 below. It awaits the operator's
 merge after `feat/ns2`. Wave 3 and Wave 5 need the operator and have not started.
 
@@ -86,7 +86,7 @@ criteria met; G-925 into G-556 (`connect-and-prove.measure.14`) and G-584
 |---|---|---|
 | D0 · the artefacts | G-930, G-661, G-662, G-663, G-664, G-703, G-403, G-480, G-500, G-548, G-907, G-976, G-977, G-978, G-979 | `product.evidence.6` kept `partial` on G-930, cut to what remains: `scripts/check_branch_protection.py` compares the required-check list with ci.yml's jobs, and a daily workflow runs it once the operator provisions its token; criteria 202 to 205 `partial`, citing what landed, each gap line cut to what remains; P-008 closed with #56's tests; the external assessment vendored as `docs/reviews/2026-09-25-external-assessment.md`; F42 and F43 given their own backlog rows and F5b re-scoped against the assessment's C8; the orphan gap lines (G-931, G-940 to G-944, the stray copies of G-905) deleted and G-605 folded into G-929; each duplicated change that no other stream owns carried by one id; the non-goals that contradicted a gap rewritten; the Results throughput copy, README's status paragraph and the `/health` probe list in the guides corrected; this plan rewritten |
 | D0 · registered, not yet closed | G-970, G-971, G-972 | the docker-wait flake class, the five executor and mining defects (the assessment's B5) and the append-only probe (A5(c)) registered in `docs/PREVENTION.md`, each pending with its gap |
-| D0 · the integration's own links | G-997 | the changelog entries of this integration link GitHub's create-a-pull-request form (`pull/new/feat/ns1`), which never becomes the pull request's page; they are replaced with `pull/<n>` when the operator opens it, and the changelog test then refuses a create-form link |
+| D0 · the integration's own links | G-997 | the changelog entries of this integration linked GitHub's create-a-pull-request form (`pull/new/feat/ns1`, and part A's `pull/new/feat/ns1-a`), which never becomes the pull request's page; they now link #64 and #65, and the changelog test refuses a create-form link (P-191 closed) |
 | D0 · the criteria Wave 2 needs | G-973, G-974, G-975 | the criteria the assessment's A3 (`lint_status`), A6 (`mutation.v2`) and C4 (the delivered change's own cell) need before Wave 2 may build them, added `unmet` |
 
 D1, the checker, closes in the same change the register rows that name it (P-118, "the record
@@ -158,7 +158,10 @@ of that stream stays in Wave 4.
 | X · a configured builder endpoint | G-611 | every OpenAI-compatible builder and the labeller call the endpoint `CRB_OPENAI_BASE_URL` names, stamp its provider and use its timeout, reply length and retry count (`product.truth.26`, brought in from the parked `feat/w3-x`); the factory's test author stamps the provider of the endpoint it calls and refuses a rung naming another (`product.truth.27`) |
 
 **Status on `feat/ns2`.** Built and verified: T, G, R, F, H, I (but G-709), X and C's claims
-work (but G-994, G-996, G-995 and G-998). Not built, and carried forward to the list after Wave 4: E2
+work (but G-994, G-996, G-995 and G-998) **[measured — n = 8 streams, method: each stream's
+criteria read met by `scripts/dod_check.py --check` only on evidence that resolves, and the
+full test suite run on the branch; apparatus n/a, a finding about the product's own code, not
+a graded row]**. Not built, and carried forward to the list after Wave 4: E2
 (G-989, G-990, G-991 — `measure.truth.30` and `truth.31` stay unmet), S0 (G-477 —
 `home.truth.13` and `sign-off-a-cell.truth.3` stay unmet), C's check that a criterion kept its
 words (G-994), its scheduled mutation pass (G-996), one owner per shared defect class (G-995)
@@ -212,10 +215,10 @@ re-derivation test pass in CI (claims.201 met); posture.23 and go-live.18 read m
 | LIB · the context library · new, after S | G-673, G-677, G-675, G-676, G-735, G-737 | the entry record and its two-person sign-off ledger; the miner registry and its miners over a pinned commit; entry sets registered as arms and kept or retired by the look rule and the harm clause, the brief switch off by default; `/library/:repo` with one page per work type |
 | CLS · the organisation's classes · new, after S | G-672 | class-set versions per organisation with the global classes as parents; the derivation and confirmation split by commit; one rule over ticket-time fields at replay and at intake, with the linked-ticket reader; the validity report with its size-agreement clause; the two-person sign-off; the class set as a DL-044 seam |
 | FWD · the forward reading · new, after S | G-679 | held-out acceptance tests a second person writes for a calibration build; the `acceptance: held_out` stamp on its `S2` row; the registered `S2` reading that alone promotes an `S3` ceiling |
-| CL · claims on the decision records · new | G-945, G-946 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
+| CL · claims on the decision records · new | G-936, G-937 | `docs/adr/*.md` and `CHANGELOG.md` read by the claims gate, each page tagged or corrected in its own change, so every public page the repository carries is gated; each count of a list in the code on a gated page bound to a test that re-derives it, or removed (claims.218) |
 
 **Status on `feat/ns4`.** Built and verified, then attacked and fixed (DL-119, DL-120, P-391 to
-P-403): S (all but G-478, and G-477 carried from Wave 2 closed), P (all but G-321), V as stream T4
+P-411): S (all but G-478, and G-477 carried from Wave 2 closed), P (all but G-321), V as stream T4
 (all but G-143, G-992 and G-993) and LIB as streams L and M (G-673, G-676, G-677 and G-736 closed;
 G-735 and G-737 open). Not built, and carried to the list after Wave 4: LIB's entry sets as arms
 (G-675, so `product.truth.212` stays unmet), CLS (G-672, so `product.truth.208` stays unmet), FWD
@@ -279,7 +282,7 @@ These are not wave items; each unblocks the work named beside it.
 | doors and wayfinding | G-907, G-977, G-236, G-444, G-253, G-260, G-293, G-366, G-228, G-396, G-979 |
 | proof through each journey's own doors | G-428, G-300, G-380, G-399, G-446, G-109, G-119, G-125, G-133, G-238, G-256, G-268, G-183 |
 | time, cost and non-goals in words | G-302, G-401, G-430, G-447, G-978, G-908, G-382, G-402, G-429, G-140, G-185, G-207, G-262, G-263, G-269 |
-| what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-963, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
+| what Wave 2 left open: the walkthrough's sealed reading, a spend cap that is a ceiling, the approver task, economics in one scope, the migration job's owner URL, the fresh-clone job's first CI run, and C's evidence checks | G-956, G-938, G-477, G-990, G-991, G-989, G-709, G-664, G-994, G-996, G-995, G-998 |
 | what the Wave 2 review found in our own process: the gate environment, the plan's record, accepted ADRs and a stale base | G-766, G-767, G-768, G-769 |
 | what Wave 4 left open: the Decisions inbox's sign-off reader, the read-then-insert ratchet, the failed-read ratchet, controls disabled while pending, and the streams not built (LIB's arms, CLS, FWD, CL) | G-738, G-720, G-732, G-739, G-675, G-672, G-679, G-945, G-946 |
 | the product | F43, G-604, F21, G-600 |

@@ -91,7 +91,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from crb.builders.claude_code import CLI_TOKEN_SECRET, VERIFY_STATUSES
+from crb.builders.claude_code import (
+    AUTH_CLI,
+    CLI_TOKEN_SECRET,
+    TOKEN_SOURCE_SECRETS_FILE,
+    VERIFY_STATUSES,
+)
 from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsInsecure
 from crb.core.version import APPARATUS_VERSION
@@ -120,8 +125,16 @@ from crb.server.auth import (
     verify_password,
     would_orphan_admins,
 )
+from crb.server.builder_login import TRIGGER_STORED_TOKEN, record_verification, resolution_of
 from crb.server.claude_login import STATE_DONE, LoginError
-from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SettingsDep, client_ip
+from crb.server.deps import (
+    ApiError,
+    DbDep,
+    ErrorEnvelope,
+    SessionFactoryDep,
+    SettingsDep,
+    client_ip,
+)
 from crb.server.routes.runs import (
     append_system_event,
     commit_audited,
@@ -283,6 +296,25 @@ def supersede_invitations(db: Session, user: User, *, actor: str, how: str) -> i
         )
         withdrawn += 1
     return withdrawn
+
+
+def sign_in_trace_id(user_id: str) -> str:
+    """The ``system`` trace every sign-in of one account lands on (``signins:<id>``) — apart
+    from the account trail, because a sign-in changes nothing about the account."""
+    return system_trace_id("signins", user_id)
+
+
+def record_sign_in(db: Session, *, user: User, by: str) -> None:
+    """One ``user.signed_in`` event, in the caller's transaction: every successful sign-in,
+    so a recovery is timed to the first after a reset (ADR-0028 §8, DL-220). The payload
+    names the account and the way in — never a password or a hash."""
+    append_system_event(
+        db,
+        trace_id=sign_in_trace_id(user.id),
+        action="user.signed_in",
+        actor=user.id,
+        payload={"target": user.id, "by": by},
+    )
 
 
 def _username(user: User) -> str:
@@ -670,37 +702,68 @@ def _record_secret_change(
     )
 
 
-def _stored(db: Session, actor: str, secret: str, stored: Any) -> SecretStatusOut:
-    """Record a store the API made and answer its status."""
-    commit_audited(
-        db,
-        lambda: _record_secret_change(
-            db,
-            removed=False,
-            actor=actor,
-            secret=secret,
-            fingerprint=stored.fingerprint,
-            via="api",
-        ),
-    )
-    return _status_out(stored)
+def _stored(
+    db: Session, actor: str, secrets: Any, secret: str, token: str, *, set_by: str
+) -> SecretStatusOut:
+    """Store ``token`` as ``secret`` and record it, answering its status; 422
+    ``invalid_token`` on a bad shape, 409 ``secrets_insecure`` when the directory is refused.
+
+    Inside the audited write, the event is recorded and flushed FIRST, with the fingerprint
+    worked out from the value, and the file is written last, so only the commit follows
+    it (P-440, P-443): writing it before the lock, or before the event, let a refused lock
+    or a database error while recording answer 500 with the token already replaced and no
+    event (EI-8). A file cannot join the transaction, so a crash, or a commit that fails
+    after the write, can still leave the change unrecorded; a lost ``seq`` race writes the
+    same value again, which is safe."""
+    out: dict[str, Any] = {}
+
+    def write() -> None:
+        try:
+            fp = secrets.fingerprint_of(secret, token)
+        except ValueError as exc:
+            raise ApiError(422, "invalid_token", str(exc)) from None
+        _record_secret_change(
+            db, removed=False, actor=actor, secret=secret, fingerprint=fp, via="api"
+        )
+        db.flush()
+        try:
+            out["status"] = secrets.set(secret, token, set_by=set_by)
+        except ValueError as exc:
+            raise ApiError(422, "invalid_token", str(exc)) from None
+        except SecretsInsecure as exc:
+            raise ApiError(409, "secrets_insecure", str(exc)) from None
+
+    commit_audited(db, write)
+    return _status_out(out["status"])
 
 
 def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatusOut:
     """Remove ``secret``, record the removal (with whether anything was there) and answer
-    the now-absent status; 409 ``secrets_insecure`` when the directory is refused."""
-    try:
-        existed = bool(secrets.status(secret).present)
-        gone = secrets.delete(secret)
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
-    commit_audited(
-        db,
-        lambda: _record_secret_change(
-            db, removed=True, actor=actor, secret=secret, existed=existed, via="api"
-        ),
-    )
-    return _status_out(gone)
+    the now-absent status; 409 ``secrets_insecure`` when the directory is refused.
+
+    Removed inside the audited write after its event is recorded and flushed, as
+    :func:`_stored` stores (P-440, P-443). A lost ``seq`` race runs ``write`` again and the
+    removal is safe to repeat, but a run after the file went finds nothing, so whether the
+    secret existed is read on the first run only."""
+    out: dict[str, Any] = {}
+
+    def write() -> None:
+        try:
+            if "existed" not in out:
+                out["existed"] = bool(secrets.status(secret).present)
+        except SecretsInsecure as exc:
+            raise ApiError(409, "secrets_insecure", str(exc)) from None
+        _record_secret_change(
+            db, removed=True, actor=actor, secret=secret, existed=out["existed"], via="api"
+        )
+        db.flush()
+        try:
+            out["status"] = secrets.delete(secret)
+        except SecretsInsecure as exc:
+            raise ApiError(409, "secrets_insecure", str(exc)) from None
+
+    commit_audited(db, write)
+    return _status_out(out["status"])
 
 
 def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> None:
@@ -805,13 +868,14 @@ def put_claude_code_token(
 ) -> SecretStatusOut:
     """Store the token; the response is its status, never the value. Recorded as
     ``settings.secret_set`` naming the admin (EI-8)."""
-    try:
-        stored = secrets.set(CLI_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id)
-    except ValueError as exc:
-        raise ApiError(422, "invalid_token", str(exc)) from None
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
-    return _stored(db, admin.id, CLI_TOKEN_SECRET, stored)
+    return _stored(
+        db,
+        admin.id,
+        secrets,
+        CLI_TOKEN_SECRET,
+        body.token,
+        set_by=admin.display_name or admin.id,
+    )
 
 
 @router.delete(
@@ -842,15 +906,14 @@ def put_tracker_token(
     fingerprint and who set it when — never the value. One credential per deployment: the
     listener on every repository polls with it (ADR-0017). Recorded as
     ``settings.secret_set`` naming the admin (EI-8)."""
-    try:
-        stored = secrets.set(
-            TRACKER_TOKEN_SECRET, body.token, set_by=admin.display_name or admin.id
-        )
-    except ValueError as exc:
-        raise ApiError(422, "invalid_token", str(exc)) from None
-    except SecretsInsecure as exc:
-        raise ApiError(409, "secrets_insecure", str(exc)) from None
-    return _stored(db, admin.id, TRACKER_TOKEN_SECRET, stored)
+    return _stored(
+        db,
+        admin.id,
+        secrets,
+        TRACKER_TOKEN_SECRET,
+        body.token,
+        set_by=admin.display_name or admin.id,
+    )
 
 
 @router.delete(
@@ -965,10 +1028,16 @@ def cancel_claude_login(
     summary="Test the stored token: one no-tool Haiku turn through the builder's own environment",
 )
 def verify_claude_code_token(
-    admin: AdminDep, secrets: SecretsDep, limiter: VerifyLimiterDep, settings: SettingsDep
+    admin: AdminDep,
+    secrets: SecretsDep,
+    limiter: VerifyLimiterDep,
+    settings: SettingsDep,
+    factory: SessionFactoryDep,
 ) -> LoginCheckOut:
-    """Run the builder's login probe with the stored token (429 inside the rate window)."""
-    del admin
+    """Run the builder's login probe with the stored token (429 inside the rate window). When
+    the stored token IS the login a ``cli`` build would use (no token in the worker's
+    environment overrides it), the outcome is recorded for the run preflight and the
+    ``builders`` probe, like Verify under the login card (pilot D1)."""
     retry = limiter.acquire()
     if retry is not None:
         wait = math.ceil(retry)
@@ -985,6 +1054,17 @@ def verify_claude_code_token(
         raise ApiError(409, "secrets_insecure", str(exc)) from None
     if check is None:
         raise ApiError(404, "not_found", "no Claude Code token is stored — save one first")
+    resolution = resolution_of("claude_code", AUTH_CLI)
+    if resolution == (TOKEN_SOURCE_SECRETS_FILE, check.fingerprint):
+        record_verification(
+            factory,
+            "claude_code",
+            AUTH_CLI,
+            check,
+            trigger=TRIGGER_STORED_TOKEN,
+            actor=admin.id,
+            resolution=resolution,
+        )
     return LoginCheckOut(**check.to_dict())
 
 

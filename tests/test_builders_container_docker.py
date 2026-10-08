@@ -139,9 +139,7 @@ FAKE_CLAUDE = textwrap.dedent(
 
 @pytest.fixture(scope="module", autouse=True)
 def _sandbox_ready() -> None:
-    reason = langs.docker_unavailable_reason()
-    if reason:
-        pytest.skip(reason)
+    langs.require_docker()
     langs.ensure_sandbox_test_image()
 
 

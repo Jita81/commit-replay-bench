@@ -508,6 +508,23 @@ describe('FactoryPage — the shipped contract', () => {
     expect(await screen.findByRole('link', { name: /run ffffffff/ })).toHaveAttribute('href', `/runs/${'f'.repeat(32)}`)
   })
 
+  it('a factory run refused on a login that does not work shows the refusal and links to where it is fixed (runs.actions.12)', async () => {
+    mockApi(base({ 'POST /runs': () => json({
+            error: {
+              code: 'builder_login_invalid',
+              message: 'the claude_code login a factory run would use does not work: claude_code (auth cli, keychain): invalid 42 s ago — authentication failed (HTTP 401). Nothing was queued and nothing was spent — fix the login under Settings → Claude Code login (sign in again or store a new token, then Verify), and submit again',
+              detail: { builder: 'claude_code', auth: 'cli', source: 'keychain', state: 'invalid', status: 'invalid', age_s: 42, fix: 'Settings → Claude Code login', fix_path: '/settings?auth=cli#claude-code-login' },
+            },
+          }, 422) }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const { default: userEvent } = await import('@testing-library/user-event')
+    await userEvent.click(await screen.findByRole('button', { name: 'Run the factory — estimated $0.27 to $0.41' }))
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByText('The builder’s login does not work — nothing was queued')).toBeInTheDocument()
+    expect(within(alert).getByText(/authentication failed \(HTTP 401\)/)).toBeInTheDocument()
+    expect(within(alert).getByTestId('error-login-fix')).toHaveAttribute('href', '/settings?auth=cli#claude-code-login')
+  })
+
   it('a spend cap typed in Before you run is named by the button and the Budget cap row, and sent (F5b)', async () => {
     const { calls } = mockApi(base({ 'POST /runs': () => json({ id: 'e'.repeat(32), repo: 'alpha', kind: 'factory', status: 'queued' }, 201) }))
     renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })

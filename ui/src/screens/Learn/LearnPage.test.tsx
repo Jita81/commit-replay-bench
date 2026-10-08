@@ -368,6 +368,23 @@ describe('LearnPage', () => {
     expect(screen.getByRole('link', { name: 'Runs' })).toHaveAttribute('href', '/runs?repo=alpha')
   })
 
+  it('a re-measurement refused on a login that does not work shows the refusal and links to where it is fixed (runs.actions.12)', async () => {
+    mockApi(operatorApi({ 'POST /learn/remeasure/queue': () => json({
+            error: {
+              code: 'builder_login_invalid',
+              message: 'the claude_code login a replay run would use does not work: claude_code (auth cli, keychain): invalid 42 s ago — authentication failed (HTTP 401). Nothing was queued and nothing was spent — fix the login under Settings → Claude Code login (sign in again or store a new token, then Verify), and submit again',
+              detail: { builder: 'claude_code', auth: 'cli', source: 'keychain', state: 'invalid', status: 'invalid', age_s: 42, fix: 'Settings → Claude Code login', fix_path: '/settings?auth=cli#claude-code-login' },
+            },
+          }, 422) }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Queue runs' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Queue the runs' }))
+    const title = await screen.findByText('The builder’s login does not work — nothing was queued')
+    const alert = title.closest('[role="alert"]') as HTMLElement
+    expect(alert).not.toBeNull()
+    expect(within(alert).getByTestId('error-login-fix')).toHaveAttribute('href', '/settings?auth=cli#claude-code-login')
+  })
+
   it('a cell whose runs are still in flight shows them in place of Queue, so the estimate is never spent twice', async () => {
     // the plan reads graded rows only, so it still holds a cell whose runs are queued: after a
     // queue the page re-reads the plan and offers the runs, not a second Queue
@@ -553,6 +570,29 @@ describe('LearnPage', () => {
     expect(done.textContent).not.toContain('The plan estimated')
   })
 
+  it('a cut class opens with its recorded example in the full-command field, so the person types only the tail (P-424)', async () => {
+    const cut = 'NODE_ENV=test /opt/homebrew/bin/node --test --test-reporter-destinat'
+    const truncated: RefusalGroup = { ...GROUP, examples: [cut], truncated: true, candidate_honest: cut, candidate_refused: `${cut}\tarchaeology:` }
+    const { calls } = mockApi(
+      operatorApi({
+        'GET /learn/refusals': { ...REFUSALS, groups: [truncated] },
+        'POST /learn/refusals/accept': { repo: 'alpha', group_id: 'g1', verdict: 'honest', decided_by: 'root', honest_added: [`${cut}ion=out.xml`], refused_added: [], skipped: [], already_present: false, corpus_dir: '/c', honest_path: '/c/shell_corpus.txt', refused_path: '/c/shell_corpus_refused.txt' },
+      }),
+    )
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    await userEvent.click(await screen.findByRole('button', { name: 'Decide' }))
+    // the server takes a command only when it continues a recorded cut example byte for
+    // byte, so the field starts from that example rather than empty
+    const field = screen.getByLabelText(/The full command/) as HTMLInputElement
+    expect(field.value).toBe(cut)
+    expect(screen.getByText(/Complete the command after the cut example/)).toBeInTheDocument()
+    await userEvent.type(field, 'ion=out.xml')
+    await userEvent.click(screen.getByRole('button', { name: 'Record this decision' }))
+    await screen.findByText(/Recorded as honest by root/)
+    const posted = JSON.parse(String(calls.find((c) => c.method === 'POST')!.init!.body)) as { command: string }
+    expect(posted.command).toBe(`${cut}ion=out.xml`)
+  })
+
   it('the note is one line: the Why field takes no line break, because it is written as a corpus comment (P-161)', async () => {
     const { calls } = mockApi(operatorApi({ 'POST /learn/refusals/accept': { repo: 'alpha', group_id: 'g1', verdict: 'honest', decided_by: 'root', honest_added: ['curl https://x'], refused_added: [], skipped: [], already_present: false, corpus_dir: '/c', honest_path: '/c/shell_corpus.txt', refused_path: '/c/shell_corpus_refused.txt' } }))
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
@@ -662,21 +702,26 @@ describe('LearnPage', () => {
     expect(within(cost).getByRole('link', { name: 'What strengthening costs' })).toHaveAttribute('href', '/help/docs/LEARNING-LOOP#24-what-strengthening-costs-a-person')
   })
   it('the plan can be read against a named apparatus before a bump, and a what-if plan queues nothing (G-983)', async () => {
+    // the running plan holds a cell (so it offers Queue runs); the what-if plan holds another
+    const whatIf: RemeasureCell = { ...CELL, label: 'replay|bug.fix|M|python|editblock|m|cerebras' }
     const { calls } = mockApi(
       operatorApi({
         'GET /learn/remeasure': (url: string) =>
-          url.includes('apparatus=9.9') ? json({ ...REMEASURE, current_apparatus: '9.9', rows_stale: 12, cells: [CELL] }) : json(REMEASURE),
+          url.includes('apparatus=9.9')
+            ? json({ ...REMEASURE, current_apparatus: '9.9', rows_stale: 12, cells: [whatIf] })
+            : json({ ...REMEASURE, rows_stale: 12, cells: [CELL] }),
       }),
     )
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
     const card = await waitFor(() => {
       const c = document.getElementById('remeasure')
-      if (!c || !within(c).queryByText('Nothing to top up or register')) throw new Error('not yet')
+      if (!c || !within(c).queryByText(CELL.label)) throw new Error('not yet')
       return c
     })
+    expect(within(card).getByRole('button', { name: 'Queue runs' })).toBeInTheDocument()
     await userEvent.type(within(card).getByLabelText(/^Plan against apparatus/), '9.9')
     await userEvent.click(within(card).getByRole('button', { name: 'Plan' }))
-    expect(await within(card).findByText(CELL.label)).toBeInTheDocument()
+    expect(await within(card).findByText(whatIf.label)).toBeInTheDocument()
     expect(within(card).getByTestId('learn-plan-whatif')).toHaveTextContent('planned against apparatus 9.9')
     // a what-if plan is a preview: its runs would grade under the running apparatus, so none is offered
     expect(within(card).queryByRole('button', { name: 'Queue runs' })).toBeNull()
@@ -684,6 +729,9 @@ describe('LearnPage', () => {
     expect(calls.filter((c) => c.method === 'POST')).toEqual([])
     // back to the running version: the plan, and the Queue control, return
     await userEvent.click(within(card).getByRole('button', { name: 'Plan for the running version' }))
-    expect(await within(card).findByText('Nothing to top up or register')).toBeInTheDocument()
+    expect(await within(card).findByText(CELL.label)).toBeInTheDocument()
+    expect(within(card).queryByText(whatIf.label)).toBeNull()
+    expect(within(card).queryByTestId('learn-plan-whatif')).toBeNull()
+    expect(within(card).getByRole('button', { name: 'Queue runs' })).toBeInTheDocument()
   })
 })
