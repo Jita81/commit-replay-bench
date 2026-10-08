@@ -1414,13 +1414,19 @@ export interface ChainVerify {
   detail: string
 }
 
+/** One builder's disqualified rows in the window — mirrors `DisqualifiedBuilderOut`. */
+export interface LedgerDisqualifiedBuilder {
+  builder: string
+  n: number
+}
+
 /** The `disqualified` block of `GET /ledger/verify` (G-400, DL-312): rows graded
  *  `disqualified` in the last `window_days`, per builder; `over` = the builders at or past
- *  `threshold`. Read by the Ledger's disqualified tile (stream pgs). */
+ *  `threshold`. Mirrors `DisqualifiedOut`; read by the Ledger's disqualified tile (stream pgs). */
 export interface LedgerDisqualified {
   window_days: number
   threshold: number
-  by_builder: Array<{ builder: string; n: number }>
+  by_builder: LedgerDisqualifiedBuilder[]
   over: string[]
 }
 

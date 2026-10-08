@@ -46,6 +46,8 @@ MIRRORS: dict[str, str] = {
     "RoutingPolicyOut": "RoutingPolicy",
     "RunFactoryOut": "RunFactory",
     "StepEventOut": "StepEvent",
+    "DisqualifiedOut": "LedgerDisqualified",
+    "DisqualifiedBuilderOut": "LedgerDisqualifiedBuilder",
 }
 
 
