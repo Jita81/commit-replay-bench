@@ -786,12 +786,16 @@ As the owner, before you restart the API and the worker, grant them the rest:
 GRANT SELECT, INSERT, UPDATE, DELETE ON invitations, decisions_due TO crb_app;
 ```
 
-Without it those writes are refused with `permission denied`: the two invitation routes and
-`GET /decisions` answer 500, and the worker logs `decisions refresh failed` for every
-repository (P-754). If your grants were made before §3.3 had its two `ALTER DEFAULT
-PRIVILEGES` lines (before 2026-09-28), run those as the owner too, and grant `SELECT,
-INSERT` on `library_acts` (`0016`). On SQLite, or where the application owns its tables,
-there is nothing to do.
+Without it the application's `UPDATE` and `DELETE` on both tables are refused with
+`permission denied` **[measured — n = 2 tables; method:
+`tests/test_store_db.py::test_the_upgrade_notes_grant_lets_the_application_rewrite_each_later_table`
+on PostgreSQL, a store granted as §3.3 read before revision `0014` and upgraded to head,
+refused before the grant above and allowed after it; apparatus n/a, a property of the
+product's own code, not a graded row]**, so accepting or revoking an invitation and reading
+the decisions inbox fail, and the worker logs `decisions refresh failed` (P-754). If your
+grants were made before §3.3 had its two `ALTER DEFAULT PRIVILEGES` lines (before
+2026-09-28), run those as the owner too, and grant `SELECT, INSERT` on `library_acts`
+(`0016`). On SQLite, or where the application owns its tables, there is nothing to do.
 
 **Upgrading to the chart with the evidence store** (`evidenceStore`, P-045): before it, the
 worker kept its kept patches, evidence packs and transcripts on its own work claim, at
