@@ -337,8 +337,12 @@ def pr_body(
     pack_link: str = "",
     route_decision: Mapping[str, Any] | None = None,
     waivers: Sequence[str] = (),
+    licence_line: str = "",
 ) -> str:
     """The PR description: the evidence summary a reviewer needs, every string redacted.
+
+    ``licence_line`` — the sentence naming what licensed this delivery at the entry gate (a
+    signed cell, or an approver's per-run override of the sign-off clause; ADR-0018).
 
     ``waivers`` — the sentences of any approver's waiver the build went through (the
     strength probe's, ADR-0025 item 12): each names the approver and the reason, shown as
@@ -388,6 +392,11 @@ def pr_body(
             f"- route: **{route_decision.get('route', '')}** — {route_decision.get('reason', '')} "
             f"(policy `{route_decision.get('policy_version', '')}`)"
         )
+    # ADR-0018: the reader who merges this is told which licence opened it — a signed cell,
+    # or an approver's per-run override of the sign-off clause (one person, one run, never
+    # a human attestation of the cell) — as the entry gate decided it (``licence_line``).
+    if licence_line:
+        lines.append(f"- licence: {licence_line}")
     if waivers:
         lines += ["", "### Waivers (an approver let this build past a required probe)", ""]
         lines += fenced(list(waivers))
@@ -798,6 +807,7 @@ def deliver(
     after_verdict: str = "",
     verdict: str,
     waivers: Sequence[str] = (),
+    licence_line: str = "",
 ) -> DeliveryResult:
     """Deliver a CLEAN, REVIEWED and ACCEPTED build as a new branch + PR. Order of
     refusals is deliberate: invariant first (before any credential is read), then the
@@ -914,7 +924,14 @@ def deliver(
             comment_error=comment_error,
             repository=repository_of(credentials.remote),
         )
-    body = pr_body(item, build, pack_link=pack_link, route_decision=route_decision, waivers=waivers)
+    body = pr_body(
+        item,
+        build,
+        pack_link=pack_link,
+        route_decision=route_decision,
+        waivers=waivers,
+        licence_line=licence_line,
+    )
     push(repo, branch=branch, refspec=f"{branch}:{branch}", credentials=credentials, expected=None)
     pr_url, pr_number = open_pr(
         remote=credentials.remote,

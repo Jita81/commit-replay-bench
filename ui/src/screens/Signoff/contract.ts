@@ -44,7 +44,7 @@
  *               the gate row in ui/src/screens/Signoff/SignoffPage.tsx.
  * Claims:       What a signed cell may be claimed to mean is fixed by the policy version
  *               stamped on the record
- *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3).
  */
 
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
@@ -190,6 +190,10 @@ export interface SignoffPreviewEvidence {
   oracle_strength: number | null
   oracle: SignoffOracle
   apparatus_versions: string[]
+  /** The posture class the evidence was graded in (`executor/tree/dependency-mode`, ADR-0019); `""` on an older server. */
+  posture_class?: string
+  /** Whether that class is the sealed posture Step 6 asks for — docker with sealed dependencies (G-480). Advisory. */
+  sealed_posture?: boolean
   belt_sets: string[]
   model_n: number
   model_point: number | null
@@ -306,6 +310,47 @@ export const REFUSAL_DISPLAY: Record<string, string> = {
   attested_row_not_measured: 'the row you named was imported, not measured here — attest to a row this deployment graded; no policy can waive this',
   attested_row_without_pack: 'the row you named has no stored, verified evidence pack, so there is no diff to have read; no policy can waive this',
   same_actor: 'you produced this evidence — you queued the run that graded the attested row, or every accepted row in the cell is yours; a second approver must sign; no policy can waive this',
+}
+
+/**
+ * What a person does next about a NUMBER-based refusal, and the screen that changes the number
+ * (G-476). The other clauses already say their way forward in their own line
+ * (`REFUSAL_DISPLAY`): the false-Q1 floor, an unmeasured oracle or controls, the attestation and
+ * the two-person rule. These four fail on a number the approver cannot move from here, so each
+ * names who moves it and where.
+ */
+export interface RefusalNext {
+  /** One sentence: what changes the number, and who does it. */
+  text: string
+  /** The link's words. */
+  label: string
+  /** The screen that changes the number, for the repository being signed. */
+  to: (repo: string) => string
+}
+
+const enc = encodeURIComponent
+
+export const REFUSAL_NEXT: Record<string, RefusalNext> = {
+  thin_cell: {
+    text: 'An operator queues more attempts on this cell; each graded attempt raises n and narrows the interval.',
+    label: 'Measure more of this repository',
+    to: (repo) => `/connect/${enc(repo)}/measure`,
+  },
+  controls_escapes: {
+    text: 'A deliberate cheat graded clean, so the tests cannot tell a real change from it. Strengthen the tests, then an operator runs the negative controls again on the walk.',
+    label: 'Run the controls again',
+    to: (repo) => `/connect/${enc(repo)}`,
+  },
+  oracle_weak: {
+    text: 'Too many mutants survive the tests this cell grades on. The Learn page lists the tests to strengthen; then an operator runs an oracle run again.',
+    label: 'Strengthen the tests on Learn',
+    to: (repo) => `/learn?repo=${enc(repo)}`,
+  },
+  route_not_deliver: {
+    text: 'The routing rule sends this cell elsewhere. Its reason names what moves it — usually more attempts or stronger tests.',
+    label: 'Read why on Routing',
+    to: (repo) => `/routing?repo=${enc(repo)}`,
+  },
 }
 
 /** A refusal's threshold / observed values, rendered as the approver reads them. */

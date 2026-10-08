@@ -61,7 +61,7 @@ An organisation that signs in with OIDC creates one local service account for it
 |---|---|
 | `viewer` | read everything (map, routes, tasks, runs, evidence, ledger verify, sign-offs) |
 | `operator` | also register/update/probe repositories, start and cancel runs, freeze a factory backlog |
-| `approver` | the route gate's override on another person's factory run is `POST /runs/{id}/deliver-override` — not an MCP tool (a second approver's act, ADR-0003 amendment 2026-09-27) |
+| `approver` | lifting the sign-off clause on another person's factory run (never the route gate) is `POST /runs/{id}/deliver-override` — not an MCP tool (a second approver's act, ADR-0003 amendment 2026-09-27) |
 
 Environment variables:
 

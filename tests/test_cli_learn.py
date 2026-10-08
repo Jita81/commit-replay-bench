@@ -356,6 +356,7 @@ def test_strengthen_without_oracle_emits_cell_item(run: Run, tmp_path: Path) -> 
                 "not_constructible": 0,
                 "passed": True,
                 "apparatus_version": APPARATUS_VERSION,  # read at the rows' apparatus only
+                "controls_version": "controls.v3",
             }
         ),
         encoding="utf-8",
@@ -506,6 +507,7 @@ def test_load_controls_export_reads_the_report_or_a_run_body() -> None:
 
     report = {
         "schema": "crb.negative_controls.v1",
+        "apparatus": {"controls_version": "controls.v3"},
         "n_rows": 14,
         "escapes": 1,
         "not_constructible": 2,
@@ -522,10 +524,23 @@ def test_load_controls_export_reads_the_report_or_a_run_body() -> None:
         "id": "ctl-2",
         "kind": "controls",
         "finished": "2026-09-14T01:00:00+00:00",
-        "counts": {"rows": 10, "escapes": 0, "not_constructible": 0, "skipped": 0, "passed": True},
+        "counts": {
+            "rows": 10,
+            "escapes": 0,
+            "not_constructible": 0,
+            "skipped": 0,
+            "passed": True,
+            "controls_version": "controls.v3",
+        },
     }
     v2 = load_controls_export(run_body)
     assert v2.measured and v2.escapes == 0 and v2.total == 10 and v2.run_id == "ctl-2"
+    # a passed report written before the gold witness licenses nothing here either (P-372)
+    for old in (
+        {**report, "apparatus": {"controls_version": "controls.v2"}},
+        {**report, "apparatus": {}},
+    ):
+        assert not load_controls_export(old).measured
     for bad in ({"escapes": 1}, {"counts": {"rows": 3}}, [], "x"):
         with pytest.raises(CliError, match="--controls must be"):
             load_controls_export(bad)
@@ -546,6 +561,7 @@ def test_strengthen_controls_flag_routes_the_cells_as_the_server_does(
                 "not_constructible": 0,
                 "passed": True,
                 "apparatus_version": APPARATUS_VERSION,  # read at the rows' apparatus only
+                "controls_version": "controls.v3",
             }
         ),
         encoding="utf-8",

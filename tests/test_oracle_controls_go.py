@@ -506,5 +506,5 @@ def test_report_apparatus_stamps_controls_v2(base):
         controls=(nc.GOLD, nc.STUB),
     )
     assert report.passed
-    assert report.apparatus["controls_version"] == nc.CONTROLS_VERSION == "controls.v2"
+    assert report.apparatus["controls_version"] == nc.CONTROLS_VERSION == "controls.v3"
     assert report.apparatus["runner"] == "go"

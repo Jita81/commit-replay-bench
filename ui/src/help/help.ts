@@ -106,6 +106,7 @@ export const HELP: ScreenHelp[] = [
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-3--prove-the-instrument-on-this-repository-operator-0', label: 'Prove the instrument for £0' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
+      { to: 'OPERATOR#9-users', label: 'Users, roles and inviting an approver' },
     ],
   },
   {
@@ -144,14 +145,15 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Record that a named approver reviewed a cell’s evidence and read one accepted change. The server refuses a sign-off that does not meet the published policy; a refusal is the gate working, not an error.',
     next: {
       viewer: 'Only an approver can sign. The attestations table shows every sign-off and revocation for this repository.',
-      approver: 'Choose the cell, choose the accepted row you read, read the diff shown, tick the affirmation, write what you read and why it is acceptable, then Sign off. The green panel gives you a reference.',
+      approver: 'Choose the cell, choose the accepted row you read, read the diff shown, tick the affirmation, write what you read and why it is acceptable, then Sign off. The green panel gives you a reference. Your review of the diff itself is recorded on the run’s Review panel: the diff block links the run.',
     },
     numbers: 'Each gate row shows the observed value against the policy threshold (n, point, Wilson lower bound, oracle strength, controls constructed and escaped). The policy version and apparatus are stamped on the record and served back verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['signoff', 'cell', 'wilson', 'false_q1', 'oracle_strength', 'negative_controls', 'deliver', 'controls_escape', 'apparatus', 'belt'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-7--sign-off-approver', label: 'Sign off' },
-      { to: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2', label: 'What a signed cell may be claimed to mean' },
+      { to: 'EVIDENCE-AND-CLAIMS#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3', label: 'What a signed cell may be claimed to mean' },
       { to: 'OPERATOR#5-sign-off', label: 'Sign-off in the operator guide' },
+      { to: 'HUMAN-REVIEW-GUIDE', label: 'The human-review guide (Step 6: read before anyone signs)' },
     ],
   },
   {
@@ -159,10 +161,10 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Deliver new work under the same rules as replay: a frozen backlog, an item built only when its cell has a proven context standard and the item carries what it needs, a failing test proved before any build, a build inside the sandbox, and a branch and pull request only where the change’s own cell licenses it. Every step is on the evidence chain.',
     next: {
       viewer: 'Read each item’s chain: readiness, RED proof, build, delivery, review, outcome. A PR link opens the pull request in the repository.',
-      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a deliver cell today; the rest open no pull request.',
-      approver: 'Items blocked on a structural gap wait for your signature, and an item whose cell has no proven standard waits for a calibration build only you can fund. Lifting a missing sign-off for one run is recorded on the chain under your name.',
+      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a cell this deployment would deliver from today. An item whose cell’s standard nobody has signed off is not built at all; the rest open no pull request.',
+      approver: 'Items blocked on a structural gap wait for your signature, and an item whose cell has no proven standard waits for a calibration build only you can fund. Lifting a missing sign-off for one run is recorded on the chain under your name; it never lifts the route gate.',
     },
-    numbers: '“k of m items sit in a cell that routes deliver” is read from the map at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
+    numbers: '“k of m items sit in a cell this deployment would deliver from” is read from the map and the sign-offs at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['red_proof', 'route_gate', 'cell', 'deliver', 'evidence_pack', 'apparatus', 'belt', 'wilson'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },
@@ -188,8 +190,8 @@ export const HELP: ScreenHelp[] = [
     route: '/posture',
     purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
     next: {
-      viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin.',
-      admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence.',
+      viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin. The page changes nothing: its one button prints it. It shows the go-live checklist’s state, line by line, but it is not the checklist and ticks nothing — an admin records the operator’s own acts on Settings.',
+      admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence. Record each go-live act only you can do on Settings, under Go-live attestations.',
     },
     numbers: 'Ledger rows, chain state and false-Q1 total come from the live verification; the belt set and policy names are the versions in force. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['apparatus', 'belt', 'false_q1', 'cell'],
@@ -197,6 +199,8 @@ export const HELP: ScreenHelp[] = [
       { to: 'SECURITY#2-trust-boundaries', label: 'Trust boundaries' },
       { to: 'DATA-RETENTION#2-retention-defaults-zero-raw-retention', label: 'Retention defaults' },
       { to: 'DEPLOYMENT', label: 'Deploying Commit Replay Bench' },
+      { to: 'DEPLOYMENT#8-go-live-checklist', label: 'The go-live checklist' },
+      { to: 'OPERATOR#9-users', label: 'Users, and what to do when nobody can sign in' },
     ],
   },
   {
@@ -231,8 +235,8 @@ export const HELP: ScreenHelp[] = [
     route: '/capability',
     purpose: 'The full map for one repository: one cell per class and size (and, projected, language or model) with its rate, interval, false-Q1 count, cost, latency, oracle strength and the route the evidence licenses.',
     next: {
-      viewer: 'Read a cell’s route and interval; an empty cell says not measured, never zero.',
-      operator: 'Open a cell for every number with its method and links to its rows and its route decision. Export CSV gives the rows behind the map.',
+      viewer: 'Read a cell’s route and interval; an empty cell says not measured, never zero. Anyone signed in can press Export CSV for the rows behind the map; each export is recorded with who took it.',
+      operator: 'Open a cell for every number with its method and links to its rows and its route decision. Anyone signed in can press Export CSV for the rows behind the map; each export is recorded with who took it.',
     },
     numbers: 'point = clean / n; the bracket is the 95 % Wilson interval; fQ1 is the false-Q1 count and must be 0; “or” is the mean oracle strength; the glyph is the verification tier. Cells with more than one apparatus version are flagged mixed, never averaged.',
     terms: ['cell', 'wilson', 'false_q1', 'oracle_strength', 'apparatus', 'deliver', 'calibrate', 'human', 'granularize', 'reason_code', 'belt'],
@@ -248,7 +252,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'Read the reason code beside each cell; the policy card shows the thresholds in force.',
       operator: 'A calibrate reason names what is missing: a reading to register, commits still needed to the next look, the oracle, the controls or the sealed posture. A human reason will not change with more attempts: strengthen the tests, run the controls or register a richer arm.',
     },
-    numbers: 'Route counts are cells, not attempts. The thresholds are the ones on the policy card, read from the served policy with its sentence: the look rule, the error budget per cell, the oracle clauses and the controls gate.',
+    numbers: 'Route counts are cells, not attempts. The thresholds are the ones on the Policy in force card, read from the served policy with its sentence: the look rule, the error budget per cell, the oracle clauses and the controls gate. A deployment may tighten them, so this block never repeats them.',
     terms: ['cell', 'route_gate', 'reason_code', 'deliver', 'calibrate', 'human', 'granularize', 'wilson', 'oracle_strength', 'controls_escape', 'belt'],
     readMore: [
       { to: 'EVIDENCE-AND-CLAIMS#6-permitted-claim-shapes-by-maturity', label: 'What a route licenses' },
@@ -262,7 +266,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'The gate rows name what held and what did not; escapes are findings about the tests, not failures of the grader.',
       operator: 'If the controls gate is not open, run the controls. If a task is weak, the strengthen report on Learn turns it into test work.',
     },
-    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong ≥ 0.80, adequate, weak.',
+    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong at or above the policy’s deliver floor, adequate at or above its adequate floor, weak below it; the Strong and Adequate tiles name the floors this deployment serves.',
     terms: ['oracle_strength', 'negative_controls', 'controls_escape', 'wilson', 'human', 'cell', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#31-oracle-adequacy--mutation-scoring', label: 'Oracle adequacy: mutation scoring' },
@@ -330,6 +334,18 @@ export const HELP: ScreenHelp[] = [
     ],
   },
   {
+    route: '/library/:repo',
+    purpose: 'What people know about one repository that a test cannot say, in one vocabulary, with one page per kind of change. Each entry needs a sponsor and a different approver, and nothing here reaches a builder until an arm has measured it.',
+    next: {
+      viewer: 'Pick a work type to read what it is, what a ticket must carry, the signed context and what is proven for each size.',
+      operator: 'Propose an entry and you become its sponsor, or propose from the repository’s files and adopt a mined proposal with Sponsor. A different approver then signs it.',
+      approver: 'Sign entries someone else sponsored; you cannot sign one you sponsored. Revoke or retire with a reason, and both are kept on the record.',
+    },
+    numbers: 'A proven standard shows its distinct commits, its 95 % Wilson interval and the apparatus it was proven under; with none, the page names the reading that would prove it. A measured effect reads unmeasured until an arm is read with and without the entry.',
+    terms: ['cell', 'wilson', 'apparatus', 'signoff'],
+    readMore: [{ to: 'OPERATOR#14-the-context-library', label: 'The context library' }],
+  },
+  {
     route: '/tasks/:repo/:taskId',
     purpose: 'One replayable commit: its specification (the failing test, the source files, the belt scope) and every graded trial against it.',
     next: {
@@ -344,15 +360,17 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The instrument’s health, the builder sign-in, the GitHub App, your own password and, for admins, the non-secret configuration and user accounts. Secrets are never returned by the API and never shown here.',
     next: {
       viewer: 'Read the health probes and change your own password; ask an admin for anything else.',
-      admin: 'Register the GitHub App, store the builder token, create an approver account. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. A probe that is not ok explains itself in its detail line.',
+      admin: 'Register the GitHub App, store the builder token, invite the approver who will sign cells off. In the Users card you can also set an account’s password, turn it off when someone leaves and read its history. Under Go-live attestations, record each act only you can do, with the day and what was done. A probe that is not ok explains itself in its detail line.',
     },
-    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and deactivating an account ends every session it held, so reactivating it brings none of them back.',
-    terms: ['apparatus', 'negative_controls'],
+    numbers: 'The version line is what every claim cites: crb (the package), apparatus (the instrument) and policy (the routing rule). A password is at least 12 characters; setting one ends that account’s other sessions, and deactivating an account ends every session it held, so reactivating it brings none of them back. The two-person reading counts accounts that can sign and accounts that have signed in — accounts, not people.',
+    terms: ['apparatus', 'negative_controls', 'cell', 'signoff'],
     readMore: [
       { to: 'GITHUB-APP#2-register-the-app-once-per-deployment', label: 'Register the GitHub App' },
       { to: 'SECURITY#33-credentials', label: 'How credentials are held' },
       { to: 'OPERATOR#7-when-the-sandbox-is-unavailable', label: 'When the sandbox is unavailable' },
       { to: 'OPERATOR#9-users', label: 'Users, and what to do when nobody can sign in' },
+      { to: 'DEPLOYMENT#8-go-live-checklist', label: 'The go-live checklist' },
+      { to: 'DEPLOYMENT#81-record-what-only-you-can-prove', label: 'Record what only you can prove' },
     ],
   },
   // The four shell screens (G-926): the sign-in page, the help pages and the catch-all carry an
@@ -366,6 +384,17 @@ export const HELP: ScreenHelp[] = [
     },
     readMore: [
       { to: 'OPERATOR#9-users', label: 'Accounts, roles and password resets' },
+      { to: 'SECURITY', label: 'How sign-in and sessions are secured' },
+    ],
+  },
+  {
+    route: '/invite',
+    purpose: 'This is where an invited person joins. An admin created your account switched off and gave you a one-time link; choosing your own password here switches it on.',
+    next: {
+      viewer: 'Choose a password as long as the form asks, then sign in with your username and that password. If the link is refused it was used, withdrawn or out of date: ask the admin who invited you for a new one.',
+    },
+    readMore: [
+      { to: 'OPERATOR#9-users', label: 'Accounts, roles and invitations' },
       { to: 'SECURITY', label: 'How sign-in and sessions are secured' },
     ],
   },

@@ -45,7 +45,10 @@ function tree(opts: { names: string[]; guides: string[]; adrs?: string[] | null;
   const root = mkdtempSync(join(tmpdir(), 'crb-docs-'))
   made.push(root)
   mkdirSync(join(root, 'docs'))
-  for (const g of opts.guides) writeFileSync(join(root, 'docs', `${g}.md`), `# ${g}\n`)
+  for (const g of opts.guides) {
+    if (g.includes('/')) mkdirSync(join(root, 'docs', g.split('/')[0]!), { recursive: true })
+    writeFileSync(join(root, 'docs', `${g}.md`), `# ${g}\n`)
+  }
   if (opts.adrs !== null) {
     mkdirSync(join(root, 'docs', 'adr'))
     for (const a of opts.adrs ?? []) writeFileSync(join(root, 'docs', 'adr', a), '# ADR\n')
@@ -73,6 +76,14 @@ function build(where: { docs: URL; registry: URL; adrRegistry: URL }): void {
 describe('requireBundledDocs', () => {
   it('passes when every listed guide and a decision record are in the context', () => {
     expect(() => build(tree({ names: ['OPERATOR', 'SECURITY'], guides: ['OPERATOR', 'SECURITY'], adrs: ['0001-x.md'] }))).not.toThrow()
+  })
+
+  it('follows a guide kept below docs/ to its own path, and names that path when it is missing (G-481)', () => {
+    const registry = "export const DOC_NAMES = ['OPERATOR', 'HUMAN-REVIEW-GUIDE'] as const\nconst NESTED: Partial<Record<DocName, string>> = { 'HUMAN-REVIEW-GUIDE': 'reviews/human-review-guide' }\n"
+    const gone = tree({ names: [], guides: ['OPERATOR'], adrs: ['0001-x.md'], registry })
+    expect(() => build(gone)).toThrow(/missing docs\/reviews\/human-review-guide\.md/)
+    const here = tree({ names: [], guides: ['OPERATOR', 'reviews/human-review-guide'], adrs: ['0001-x.md'], registry })
+    expect(() => build(here)).not.toThrow()
   })
 
   it('fails the build naming the guide that is missing', () => {

@@ -14,7 +14,8 @@
  *               a map whose refetch fails shows the error and no controls pill, the page
  *               reading every query only through `currentData` (PR #54 review); and that
  *               the open cell's cost and latency carry their known n, interval and apparatus,
- *               an unknown reading as the dash (F35).
+ *               an unknown reading as the dash (F35); and that Export CSV is offered to a
+ *               viewer, as the About block and the button's hint say (G-102).
  * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
  *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
  *               `controls-*` test ids; `qc.refetchQueries()` for a refetch; the page's own
@@ -32,6 +33,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
+import { helpFor } from '../../help/help'
 import { hintText } from '../../help/hints'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
@@ -283,6 +285,20 @@ describe('CapabilityPage', () => {
     })
     renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
     expect(await screen.findByRole('link', { name: 'Start a replay run' })).toBeInTheDocument()
+  })
+
+  it('a viewer is offered Export CSV, and the About block and the hint say anyone signed in can take it (G-102)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    const link = await screen.findByRole('link', { name: /Export CSV/ })
+    expect(link.getAttribute('href')).toContain('/ledger/export?format=csv&repo=sqlalchemy')
+    // the viewer's own About line names the export, so the button is offered to the role the copy says
+    expect(helpFor('/capability')!.next.viewer).toContain('Anyone signed in can press Export CSV')
+    expect(hintText('button.capability.export')).toContain('Anyone signed in can take it')
   })
 
   it('renders the error envelope honestly when the map fails', async () => {

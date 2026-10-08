@@ -14,7 +14,9 @@ with every path rendered as a link.
 
 ``--check`` fails on: a file with no block; a missing required key; a key out of order; a path
 in ``Layer``/``ADRs``/``Works with``/``Tested by``/``Touch when``/``Claims`` that does not exist
-in the repository (anchors are stripped before the check); a ``Tested by`` that is blank;
+in the repository (anchors are stripped before the check) — "in the repository" meaning what a
+fresh clone would hold: tracked, or new and not ignored, never a git-ignored build output that
+happens to be on this disk (P-355); a ``Tested by`` that is blank;
 a ``Touch when`` whose first clause does not address onboarding a client repository (files
 older than that rule are listed in ``scripts/code_map_onboarding_baseline.txt``, which only
 shrinks — with ``--changed-since REF``, as CI runs it on a pull request, a listed file the
@@ -32,7 +34,8 @@ What it does: Parses every source file's Navigation block, validates keys, order
               docs/CODE-MAP.md, and in --check mode exits non-zero on any defect or drift.
 How:          Walk the source roots → extract the docstring / leading comment per language →
               parse ``Key: value`` lines (continuations indented) → resolve every path against
-              the repository → render Markdown tables grouped by top-level package.
+              what a fresh clone holds (``git ls-files`` tracked + untracked-not-ignored, the
+              disk outside a checkout) → render Markdown tables grouped by top-level package.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   docs/FILE-HEADER-STANDARD.md (the format it enforces), docs/CODE-MAP.md (its
@@ -46,6 +49,7 @@ Touch when:   never for a new repository; a new source root or language is added
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import subprocess
 import sys
@@ -266,6 +270,58 @@ def _onboarding_problems(rel: str, fields: dict[str, str], baseline: frozenset[s
     ]
 
 
+@functools.lru_cache(maxsize=8)
+def _clone_paths(root: Path) -> frozenset[str] | None:
+    """Every file and directory a fresh clone of ``root`` would hold — tracked, or new and
+    not ignored — or ``None`` when ``root`` is not the top of a git checkout (an exported
+    tree, where nothing was ignored and the disk is the answer).
+
+    A header that cites a git-ignored path (``ui/.tsbuild/``, the type-check's build info)
+    resolved in the checkout that had built it and not in CI's fresh clone, so the gate
+    passed on a dirty tree and failed in the required job (P-355). Resolving against this
+    set instead of the disk makes the answer the same in every checkout."""
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        if Path(top).resolve() != root.resolve():
+            return None
+        listed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+            ],
+            capture_output=True,
+            check=True,
+        ).stdout.decode("utf-8", errors="replace")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    out: set[str] = set()
+    for rel in filter(None, listed.split("\0")):
+        parts = rel.split("/")
+        out.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
+    return frozenset(out)
+
+
+def resolves(target: str) -> bool:
+    """Whether a header path names something a fresh clone of the repository holds: it is on
+    this disk AND (inside a git checkout) tracked or new-and-not-ignored."""
+    rel = target.rstrip("/")
+    if not (ROOT / rel).exists():
+        return False
+    listed = _clone_paths(ROOT)
+    return listed is None or rel in listed
+
+
 def _paths_in(value: str) -> list[str]:
     return [p.split("#", 1)[0].rstrip(".,;:)") for p in _PATH_RE.findall(value)]
 
@@ -280,7 +336,7 @@ def read_header(path: Path) -> Header:
     problems += _onboarding_problems(rel, fields, onboarding_baseline())
     for key in LINK_KEYS:
         for target in _paths_in(fields.get(key, "")):
-            if not (ROOT / target).exists():
+            if not resolves(target):
                 problems.append(f"{key}: {target} does not exist")
     return Header(rel, summary, fields, problems)
 
@@ -314,7 +370,7 @@ def _linkify(value: str) -> str:
         raw = m.group(1)
         target = raw.split("#", 1)[0].rstrip(".,;:)")
         trail = raw[len(target) :]
-        return f"[`{target}`](../{target}){trail}" if (ROOT / target).exists() else raw
+        return f"[`{target}`](../{target}){trail}" if resolves(target) else raw
 
     return _PATH_RE.sub(repl, value).replace("|", "\\|")
 
@@ -385,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         "to the baseline (CI passes the pull request's base branch)",
     )
     args = ap.parse_args(argv)
+    _clone_paths.cache_clear()  # one reading of the checkout per run, never a stale one
     headers: list[Header] = []
     exempt: dict[str, str] = {}
     for p in source_files():

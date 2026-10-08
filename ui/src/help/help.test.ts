@@ -13,8 +13,14 @@
  *               "apparatus", "belt", "Wilson", "false-Q1" or "oracle" only when that term is
  *               in the screen's `terms[]`; every string is plain (no exclamation mark) and
  *               `next.viewer` always exists; (5) the /learn About block says the product
- *               decides nothing on its own, in the words its DoD criteria cite.
- * How:          Reads `ui/src/App.tsx` and the eight guides as `?raw` text so the ratchet
+ *               decides nothing on its own, in the words its DoD criteria cite; (6) no About
+ *               block states a policy threshold as a number — in symbols (`≥ 0.80`, `>= 10`,
+ *               `n = 10`), in words (`at least 10`) or as the rule's own values — every
+ *               threshold is the served policy's, which a deployment may tighten, so the
+ *               copy points at the card that shows it (G-255, G-204); the matcher is pinned
+ *               on its own strings, and the one non-policy number (the password floor) is on
+ *               a list that only shrinks.
+ * How:          Reads `ui/src/App.tsx` and the nine guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
@@ -26,12 +32,12 @@
  */
 import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'
-import { isDocName, slugify, type DocAnchor } from './docs'
+import { docPath, isDocName, slugify, type DocAnchor } from './docs'
 import { TERMS, type TermId } from './glossary'
 import { HELP, helpFor } from './help'
 
 /** The guides' text, eagerly, keyed by file name — the same files ui/src/help/docs.ts bundles. */
-const DOC_TEXT = import.meta.glob('../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+const DOC_TEXT = import.meta.glob(['../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', '../../../docs/reviews/human-review-guide.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 /** Every `<Route path="…">` in App.tsx, read from the source so the ratchet cannot drift from the table. */
 function appRoutePaths(): string[] {
@@ -45,7 +51,7 @@ function concrete(pattern: string): string {
 
 /** The heading slugs of a bundled doc, with GitHub's -1/-2 suffixes for duplicates. */
 function headingSlugs(name: string): Set<string> {
-  const text = DOC_TEXT[`../../../docs/${name}.md`] ?? ''
+  const text = DOC_TEXT[`../../../docs/${isDocName(name) ? docPath(name) : name}.md`] ?? ''
   const seen = new Map<string, number>()
   const out = new Set<string>()
   let fence = false
@@ -136,6 +142,12 @@ describe('HELP ratchet', () => {
     expect(learn.purpose).toContain('The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.')
   })
 
+  it('the /signoff About block links the Step 6 human-review guide and says where the read of a diff is recorded (G-481)', () => {
+    const h = helpFor('/signoff')!
+    expect(h.readMore.map((r) => r.to)).toContain('HUMAN-REVIEW-GUIDE')
+    expect(h.next.approver).toContain('run’s Review panel')
+  })
+
   it('copy lint: a term word appears only when the term is on the screen; plain English throughout', () => {
     for (const h of HELP) {
       const strings = [h.purpose, ...Object.values(h.next), h.numbers ?? '']
@@ -149,4 +161,80 @@ describe('HELP ratchet', () => {
       }
     }
   })
+
+  it('no About block states a policy threshold as a number: the served policy may be tightened, and the copy would drift (G-255, G-204)', () => {
+    for (const h of HELP) {
+      for (const s of [h.purpose, ...Object.values(h.next), h.numbers ?? '']) {
+        const rest = NOT_A_POLICY_THRESHOLD.filter((x) => x.route === h.route).reduce((acc, x) => acc.replace(x.phrase, ''), s)
+        expect(statesAThreshold(rest), `${h.route}: a hard-coded threshold: ${s}`).toBe(false)
+      }
+    }
+    // the list only shrinks: a phrase no longer in its block is removed from it
+    for (const x of NOT_A_POLICY_THRESHOLD) {
+      const h = helpFor(x.route)!
+      expect([h.purpose, ...Object.values(h.next), h.numbers ?? ''].join(' '), x.phrase).toContain(x.phrase)
+    }
+    expect(helpFor('/routing')!.numbers).toContain('the ones on the Policy in force card')
+  })
+
+  it('the threshold matcher finds a threshold however it is written, and passes a number that is not one', () => {
+    for (const s of [
+      'n ≥ 10',
+      'strong ≥ 0.80',
+      'n >= 10',
+      'point <= 0.9',
+      'Wilson lower > 0.8',
+      'n at least 10, point at least 0.90',
+      'a Wilson lower bound of at least 0.80',
+      'at most 0 escapes',
+      'no less than 0.8',
+      'no fewer than 10 attempts',
+      'not below 0.9',
+      'n = 10',
+      'n=10',
+      'a minimum of 10',
+      'the oracle floor is 0.80',
+      'a point of 0.9',
+      'half (0.5) constructed',
+    ]) {
+      expect(statesAThreshold(s), s).toBe(true)
+    }
+    for (const s of [
+      'the bracket is the 95 % Wilson interval',
+      'point = clean / n',
+      'Route counts are cells, not attempts.',
+      'fQ1 is the false-Q1 count and must be 0',
+      'the least n, point and Wilson lower bound',
+      'one cell per class and size',
+      '375 px',
+    ]) {
+      expect(statesAThreshold(s), s).toBe(false)
+    }
+  })
 })
+
+/**
+ * Numbers an About block states that are not a routing or adequacy policy value, each with where
+ * it is pinned to the server instead. Only shrinks.
+ */
+const NOT_A_POLICY_THRESHOLD: ReadonlyArray<{ route: string; phrase: string; why: string }> = [
+  {
+    route: '/settings',
+    phrase: 'at least 12 characters',
+    why: 'the password floor (MIN_PASSWORD_LENGTH), a server constant no deployment policy tightens; the hints that state it are pinned to it by tests/test_server_auth.py::test_the_recovery_hints_state_the_numbers_the_server_enforces',
+  },
+]
+
+/**
+ * True when copy states a policy threshold as a number, in any of the ways it is written: a
+ * comparator before a number (`≥ 0.80`, `>= 10`, `n = 10`), a worded one (`at least 10`, `no
+ * less than 0.8`, `a minimum of 10`), or one of the published rule's values themselves (ADR-0003:
+ * 0.80, 0.90 and the controls' half, in any decimal spelling) standing as a number.
+ */
+function statesAThreshold(s: string): boolean {
+  const comparator = /(?:[≥≤]|[<>]=?|=>|=<)\s*\d/
+  const nEquals = /\bn\s*=\s*\d/
+  const worded = /\b(?:at least|at most|no less than|no more than|no fewer than|not less than|not below|not above|a minimum of|a maximum of)\s+\d/i
+  const ruleValue = /(?<![\d.])0?\.(?:80?|90?|50?)(?![\d])/
+  return comparator.test(s) || nEquals.test(s) || worded.test(s) || ruleValue.test(s)
+}

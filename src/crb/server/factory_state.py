@@ -180,7 +180,9 @@ def _refusal_of(ev: FactoryEvent) -> Refusal | None:
         return None
     if ev.kind == EV_ROUTE and str(p.get("route", "")) == ROUTE_HUMAN_WORD:
         step = "review" if p.get("after_verdict") else "readiness"
-        return Refusal(step, str(p.get("reason", "")))
+        # the stop's own code when it has one (``unsigned_cell``, ADR-0018): the screen
+        # names a stop before any spend differently from a route to a person
+        return Refusal(step, str(p.get("reason", "")), reason_code=str(p.get("reason_code", "")))
     if ev.kind == EV_RED_REFUSED:
         return Refusal("red", str(p.get("reason", "")))
     if ev.kind == EV_DELIVERY_REFUSED:

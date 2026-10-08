@@ -22,6 +22,9 @@ Invariants:
   and the key must match ``^dep_[0-9a-f]{64}$``. The executor checks it again at use.
 * **Integrity is re-provable.** :meth:`verify` re-hashes a set; a mismatch is
   ``BUNDLE_INTEGRITY`` (run scope). ``crb deps verify`` runs it over every set.
+* **A damaged set is quarantined, not reused** (G-966). :meth:`quarantine` moves it to
+  ``.quarantine/<lang>/<key>.<stamp>`` with a record of why; the key is then a miss, so the
+  next run fetches and seals it afresh, and the damaged bytes are never mounted again.
 * **The daemon must see it.** :meth:`visible_to_daemon` writes a marker and reads it back
   through a throwaway container — under colima or dind a path the worker can write is not
   always one the daemon can mount (``PROVISION_STORE_NOT_VISIBLE``).
@@ -33,6 +36,7 @@ What it is:   The content-addressed store of sealed dependency sets and the only
 What it does: Stages a fetch (0700), refuses an output whose links leave it, seals it
               (digest over every file and link, ``bundle.json``, ``a-w``, atomic rename; a
               lost race keeps the winner), hands out read-only mounts, re-verifies a set,
+              quarantines one that failed its digest,
               collects garbage without ever removing a cited key, and proves the docker
               daemon can see the root.
 How:          ``stage`` → the fetch writes ``out`` → ``seal`` (unsafe links → walk → sha256
@@ -44,7 +48,7 @@ Works with:   src/crb/core/deps.py (``BundleMount``, ``register_store_root``, th
               src/crb/provision/fetch.py (fills a stage), src/crb/provision/__init__.py (the
               provider that seals and binds), src/crb/core/execution.py (re-validates each
               mount), src/crb/cli/commands/deps.py (``crb deps ls | verify | gc``)
-Tested by:    tests/test_provision_store.py
+Tested by:    tests/test_provision_store.py, tests/test_provision_quarantine.py
 Touch when:   never for a new repository; the manifest schema changes only with a new
               ``crb.bundle/N`` and a reader for the old one.
 """
@@ -77,6 +81,9 @@ from crb.core.deps import (
 SCHEMA = "crb.bundle/1"
 MANIFEST = "bundle.json"
 STAGING = ".staging"
+#: Where a set that failed its digest is moved (G-966): kept for the investigation, never
+#: mounted again — ``get`` / ``sets`` / ``find`` read only ``<root>/<lang>/<key>``.
+QUARANTINE = ".quarantine"
 #: The suffix of a stage's lease file, beside it under :data:`STAGING`.
 _LEASE = ".lease"
 #: How many fresh names ``stage()`` tries when a gc removes its lease before the lock.
@@ -422,7 +429,7 @@ class BundleStore:
         """Every sealed set, oldest first."""
         out: list[Sealed] = []
         for lang_dir in sorted(p for p in self.root.iterdir() if p.is_dir()):
-            if lang_dir.name == STAGING:
+            if lang_dir.name in (STAGING, QUARANTINE):
                 continue
             for d in sorted(lang_dir.iterdir()):
                 if KEY_RE.fullmatch(d.name):
@@ -467,6 +474,48 @@ class BundleStore:
                     "BUNDLE_INTEGRITY", f"{sealed.lang}/{key}: {p.name} is writable (unsealed)"
                 )
         return sealed
+
+    def quarantine(self, key: str, reason: str) -> Path:
+        """Move the sealed set ``key`` out of the store, to
+        ``<root>/.quarantine/<lang>/<key>.<stamp>``, with ``<…>.json`` beside it saying why
+        and when (G-966). The key is then a miss, so the next run that needs it fetches and
+        seals it afresh; the damaged bytes stay for whoever investigates, and are never
+        mounted again. Raises ``KeyError`` when no set has that key."""
+        sealed = self.find(key)
+        if sealed is None:
+            raise KeyError(key)
+        stamp = _dt.datetime.now(_dt.UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        dest_dir = self.root / QUARANTINE / sealed.lang
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"{key}.{stamp}"
+        # renaming a directory across parents updates its "..": POSIX needs write permission
+        # on the directory itself, which a sealed set does not have; the link check keeps the
+        # chmod on the set the store made, never on anything a link points at
+        if sealed.path.is_symlink():
+            raise KeyError(key)
+        sealed.path.chmod(0o755)
+        os.replace(sealed.path, dest)
+        dest.chmod(0o555)
+        record = {
+            "key": key,
+            "lang": sealed.lang,
+            "digest_sealed": sealed.digest,
+            "reason": reason,
+            "quarantined": _now(),
+        }
+        _write_new(dest_dir / f"{key}.{stamp}.json", json.dumps(record, indent=1, sort_keys=True))
+        return dest
+
+    def quarantined(self) -> list[dict[str, Any]]:
+        """Every quarantine record, oldest first (what ``crb deps ls`` and an operator read)."""
+        base = self.root / QUARANTINE
+        if not base.is_dir():
+            return []
+        out: list[dict[str, Any]] = []
+        for f in sorted(base.glob("*/*.json")):
+            with contextlib.suppress(OSError, ValueError):
+                out.append(dict(json.loads(f.read_text(encoding="utf-8"))))
+        return sorted(out, key=lambda r: str(r.get("quarantined", "")))
 
     def gc(self, keep: Iterable[str], max_total_gb: float) -> list[str]:
         """Remove the oldest sets until the store is under ``max_total_gb``, never one whose
@@ -549,6 +598,7 @@ class BundleStore:
 
 __all__ = [
     "MANIFEST",
+    "QUARANTINE",
     "SCHEMA",
     "BundleStore",
     "Sealed",

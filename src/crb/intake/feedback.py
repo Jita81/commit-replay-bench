@@ -209,6 +209,12 @@ def _route_block(item_class: str, size: str, route: Mapping[str, Any] | None) ->
     reason = str(route.get("reason") or "")
     if reason:
         lines.append(f"Why that route: {reason}.")
+    if word == "deliver" and route.get("deliverable") is False:
+        lines.append(
+            "A change of this kind would not be built yet: this deployment builds and "
+            "delivers only when a person has signed off the cell's proven standard, and "
+            "nobody has signed this one yet."
+        )
     return lines
 
 
@@ -296,6 +302,8 @@ def _label_for(readiness: Readiness, route: Mapping[str, Any] | None, entry: Ent
     if not readiness.ready or not readiness.catalogued or entry.code in _ASK_STOPS:
         return LABEL_NEEDS_INFO
     if not entry.enters:
+        # the sign-off clause (ADR-0018) is one of the entry gate's stops (``unsigned_cell``),
+        # read here from the same gate call the run makes — never from the route
         return LABEL_NOT_DELIVERABLE
     return LABEL_READY
 

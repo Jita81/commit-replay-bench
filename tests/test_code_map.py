@@ -4,11 +4,13 @@ Navigation
 ----------
 What it is:   Unit tests for the code-map generator (the file-header gate).
 What it does: Pins that a valid Navigation block parses into its keys, that a missing key, a
-              key out of order, a dangling link and a blank Tested by are refused, that the
+              key out of order, a dangling link and a blank Tested by are refused, that a
+              path git ignores is dangling even when it is on the disk (P-355), that the
               three languages (Python docstring, TS leading comment, shell comment) are read,
               and that --check fails on a stale map.
-How:          Writes tiny files under tmp_path, points the module's ROOT at it via
-              monkeypatch, and calls read_header / render / main directly.
+How:          Writes tiny files under tmp_path (a ``git init`` there where ignoring
+              matters), points the module's ROOT at it via monkeypatch, and calls
+              read_header / render / main directly.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/code_map.py (the code under test), docs/FILE-HEADER-STANDARD.md (the
@@ -247,3 +249,36 @@ def test_check_with_changed_since_refuses_an_edited_baseline_file(repo: Path, ca
     assert cm.main(["--check", "--changed-since", "main~1"]) == 1
     assert "src/crb/core/old.py" in capsys.readouterr().err
     assert cm.main(["--check", "--changed-since", "no-such-ref"]) == 1  # fails closed
+
+
+def test_a_path_git_ignores_does_not_resolve_even_when_it_is_on_disk(repo: Path) -> None:
+    """P-355: a header named ``ui/.tsbuild/``, the type-check's build info.
+    The directory is ignored by git, so it existed in the builder's checkout (after
+    ``npm run typecheck``) and not in CI's fresh clone: the gate passed on the dirty tree
+    and failed on the clean one. A path resolves only if a fresh clone would have it —
+    tracked, or new and not ignored — whatever happens to be on this disk."""
+    _git(repo, "init", "-q")
+    (repo / ".gitignore").write_text("docs/built/\n", encoding="utf-8")
+    (repo / "docs/built").mkdir()
+    (repo / "docs/built/info.json").write_text("{}\n", encoding="utf-8")
+    ignored = BLOCK.replace(
+        "Works with:   src/crb/core/other.py (why)",
+        "Works with:   src/crb/core/other.py (why), docs/built/ (the build info)",
+    )
+    h = cm.read_header(_py(repo, "src/crb/core/thing.py", ignored))
+    assert any("docs/built/ does not exist" in p for p in h.problems), h.problems
+    # a new file that is not ignored resolves before anybody runs ``git add``
+    assert cm.read_header(_py(repo, "src/crb/core/thing.py", BLOCK)).problems == []
+    # and a tracked file that has been deleted from the disk does not
+    _git(repo, "add", "-A")
+    (repo / "src/crb/core/other.py").unlink()
+    h = cm.read_header(_py(repo, "src/crb/core/thing.py", BLOCK))
+    assert any("src/crb/core/other.py does not exist" in p for p in h.problems), h.problems
+
+
+def test_outside_a_git_checkout_the_disk_is_the_answer(repo: Path) -> None:
+    """An exported tree (``git archive``) has no ``.git``: nothing in it was ignored, so the
+    disk is what a fresh clone would hold, and the gate reads the disk."""
+    (repo / "docs/built").mkdir()
+    listed = BLOCK.replace("Tested by:    tests/test_thing.py", "Tested by:    docs/built/")
+    assert cm.read_header(_py(repo, "src/crb/core/thing.py", listed)).problems == []

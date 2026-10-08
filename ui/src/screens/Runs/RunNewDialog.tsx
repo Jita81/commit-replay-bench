@@ -43,7 +43,7 @@
  *               first).
  */
 import { useEffect, useState, type FormEvent } from 'react'
-import { useCreateRun, useRepoPosture, useRepos, useSettings } from '../../api/hooks'
+import { useAllRepos, useCreateRun, useRepoPosture, useSettings } from '../../api/hooks'
 import { RUN_KINDS, type GradeMode, type LadderEntry, type LadderRung, type Run, type RunBudget, type RunCreateRequest, type RunKind } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Dialog } from '../../components/Dialog'
@@ -201,7 +201,7 @@ export function parseTaskIds(text: string): string[] {
 }
 
 export function RunNewDialog({ open, onClose, repo: presetRepo, initialKind = 'replay', initialTaskIds, from, onCreated }: Props) {
-  const repos = useRepos()
+  const repos = useAllRepos() // every page: a repository past the first page must be choosable (P-366)
   const create = useCreateRun()
   const { can } = useAuth()
   const settings = useSettings(can('admin'))

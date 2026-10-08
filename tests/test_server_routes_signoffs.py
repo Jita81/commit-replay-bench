@@ -1577,6 +1577,30 @@ class TestPostureClass:
         (listed,) = [s for s in env.get("/signoffs").json()["items"] if s["id"] == d["id"]]
         assert listed["posture_class"] == d["posture_class"]
 
+    def test_the_preview_says_whether_the_evidence_is_the_sealed_posture(self, env: Env) -> None:
+        """G-480: before anyone signs, the gate says which posture class the evidence was
+        graded in and whether that is the sealed posture ONBOARDING Step 6 asks for (the
+        docker executor, sealed dependencies). Advisory: no clause refuses on it, so the
+        preview's refusals are the same either way. The seeded deployment as shipped grades
+        on the host (``clear_policy`` would move it to the sealed posture routing.v2 reads),
+        so its evidence is a development reading and the preview says so."""
+        ev = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()["evidence"]
+        assert ev["posture_class"].startswith("local/") and ev["sealed_posture"] is False
+
+    def test_a_deployment_that_grades_in_docker_reads_its_evidence_as_the_sealed_posture(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half of G-480: the preview's ``sealed_posture`` is the deployment's own
+        reading, not a constant. The same repository on a deployment whose executor is
+        docker is graded in ``docker/<tree>/sealed``, and the gate says the evidence is the
+        sealed posture — a route that always answered False would call a sealed
+        deployment's evidence a development reading and fail here."""
+        clear_policy(env)
+        monkeypatch.setattr(env.settings.sandbox, "executor", "docker")
+        ev = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()["evidence"]
+        assert ev["posture_class"].startswith("docker/") and ev["posture_class"].endswith("/sealed")
+        assert ev["sealed_posture"] is True
+
     def test_a_row_of_another_class_neither_counts_nor_can_be_attested(self, env: Env) -> None:
         clear_policy(env)
         before = env.get("/signoffs/preview", params={"repo": ALPHA, **DELIVER}).json()

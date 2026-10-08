@@ -370,7 +370,7 @@ export function UsersCard() {
         {setActive.isError && <ErrorState compact error={setActive.error} />}
         {revoke.isError && <ErrorState compact error={revoke.error} />}
         {shown && <AccountHistory user={shown} users={rows} />}
-        <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
+        <form onSubmit={submit} className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3" aria-label="Create a local user">
           <TextField label="Username" hint="field.settings.new_username" required value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
           <TextField label="Display name" hint="field.settings.new_display" required value={display} onChange={(e) => setDisplay(e.target.value)} />
           <TextField label="Email" hint="field.settings.new_email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />

@@ -23,9 +23,8 @@
  *               file), ui/src/screens/NotFoundPage.tsx (the `*` route)
  * Tested by:    ui/e2e/smoke.spec.ts (login and the shell), ui/e2e/walkthrough/01-login.spec.ts;
  *               screen tests mount screens directly through ui/src/test/utils.tsx
- * Touch when:   a screen is added — one `<Route>` here, its `NAV` entry in
- *               ui/src/components/Layout.tsx and its `HELP` entry in ui/src/help/help.ts;
- *               never for a new repository.
+ * Touch when:   never for a new repository; a screen is added — one `<Route>` here, its `NAV` entry
+ *               in ui/src/components/Layout.tsx and its `HELP` entry in ui/src/help/help.ts.
  */
 import { Navigate, Route, Routes } from 'react-router'
 import { Layout } from './components/Layout'
@@ -36,11 +35,13 @@ import { MeasurePage } from './screens/Connect/MeasurePage'
 import { HomePage } from './screens/Home/HomePage'
 import { PosturePage } from './screens/Posture/PosturePage'
 import { DecisionsPage } from './screens/Decisions/DecisionsPage'
+import { LibraryPage } from './screens/Library/LibraryPage'
 import { FactoryPage } from './screens/Factory/FactoryPage'
 import { IntakePage } from './screens/Factory/IntakePage'
 import { DocPage } from './screens/Help/DocPage'
 import { HelpPage } from './screens/Help/HelpPage'
 import { LedgerPage } from './screens/Ledger/LedgerPage'
+import { AcceptInvitePage } from './screens/Invite/AcceptInvitePage'
 import { LoginPage } from './screens/Login/LoginPage'
 import { NotFoundPage } from './screens/NotFoundPage'
 import { LearnPage } from './screens/Learn/LearnPage'
@@ -64,6 +65,7 @@ export function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/invite" element={<AcceptInvitePage />} />
         <Route
           element={
             <RequireAuth>
@@ -79,6 +81,7 @@ export function App() {
           <Route path="/posture" element={<PosturePage />} />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/decisions" element={<DecisionsPage />} />
+          <Route path="/library/:repo" element={<LibraryPage />} />
           <Route path="/repos" element={<ReposPage />} />
           <Route path="/repos/:name" element={<RepoDetail />} />
           <Route path="/runs" element={<RunsPage />} />

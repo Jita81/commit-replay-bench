@@ -27,6 +27,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
+import { LIBRARY, PROPOSED } from '../Library/library.fixture'
 import { DecisionsPage } from './DecisionsPage'
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22', reason_code: 'deliver', verification_tier: 'automated-pass', apparatus_versions: ['2.2'] }
@@ -64,6 +65,72 @@ describe('DecisionsPage', () => {
     const human = screen.getByText(/bug.fix × S routed to a human/).closest('li')!
     expect(within(human).getByRole('button', { name: 'oracle_weak' })).toBeInTheDocument()
     expect(human).toHaveTextContent('oracle too weak to license auto-delivery')
+  })
+
+  it('a row says how long it has been waiting, from the server’s clock (G-516)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': map('alpha', [CELL]),
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /decisions': {
+        items: [{ repo: 'alpha', kind: 'signoff_due', key: 'bug.fix|XS', title: 'x', role: 'approver', due_since: '2026-09-12T09:00:00+00:00', age_s: 950400 }],
+        total: 1,
+        as_of: '2026-09-23T09:00:00+00:00',
+        repos: ['alpha'],
+      },
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    const age = await screen.findByTestId('decision-age-signoff_due-bug.fix|XS')
+    expect(age).toHaveTextContent('Waiting 11 days — since 2026-09-12')
+  })
+
+  it('a decision the server has not stamped yet says nothing rather than "just now"', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': map('alpha', [CELL]),
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /decisions': () => envelope(503, 'unavailable', 'no clock today'),
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    await waitFor(() => expect(screen.getByText('bug.fix × XS clears the bar — attest it or decline')).toBeInTheDocument())
+    expect(screen.queryByTestId('decision-age-signoff_due-bug.fix|XS')).not.toBeInTheDocument()
+  })
+
+  it('a library entry waiting for its second person is a decision even before the repository is measured', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': () => envelope(404, 'not_found', 'never measured'),
+      'GET /signoffs': () => envelope(404, 'not_found', 'none'),
+      'GET /library/alpha': LIBRARY,
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    await waitFor(() => expect(screen.getByText('convention/context-first waits for a second person to sign it')).toBeInTheDocument())
+    const row = screen.getByText('convention/context-first waits for a second person to sign it').closest('li')!
+    expect(within(row).getByRole('link', { name: 'Sign' })).toHaveAttribute('href', '/library/alpha#index')
+    expect(row).toHaveTextContent('Library entry to sign')
+    expect(screen.getByText('convention/lint went stale: .golangci.yml changed or went')).toBeInTheDocument()
+  })
+
+  it('the sponsor of an entry is offered no Sign for it: another approver signs', async () => {
+    const own = { ...PROPOSED, sponsor: PRINCIPAL.id, sponsor_name: PRINCIPAL.display_name }
+    mockApi({
+      'GET /auth/me': PRINCIPAL, // an approver
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
+      'GET /capability-map': () => envelope(404, 'not_found', 'never measured'),
+      'GET /signoffs': () => envelope(404, 'not_found', 'none'),
+      'GET /library/alpha': { ...LIBRARY, entries: [own] },
+    })
+    renderApp(<DecisionsPage />, { route: '/decisions' })
+    const title = 'convention/context-first waits for another approver to sign it — you sponsored it'
+    await waitFor(() => expect(screen.getByText(title)).toBeInTheDocument())
+    const row = screen.getByText(title).closest('li')!
+    expect(within(row).queryByRole('link', { name: 'Sign' })).toBeNull()
+    expect(within(row).getByRole('link', { name: 'Read' })).toHaveAttribute('href', '/library/alpha#index')
   })
 
   it('the kicker names the apparatus as a term', async () => {

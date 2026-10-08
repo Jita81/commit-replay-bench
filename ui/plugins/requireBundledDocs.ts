@@ -40,12 +40,15 @@ export function requireBundledDocs({
       const text = readFileSync(registry, 'utf8')
       const names = Array.from(/DOC_NAMES = \[([^\]]*)\]/.exec(text)?.[1]?.matchAll(/'([^']+)'/g) ?? [], (m) => m[1]!)
       if (names.length === 0) this.error('requireBundledDocs: could not read DOC_NAMES from ui/src/help/docs.ts')
+      // a guide kept below docs/ is mapped in `NESTED` (`'HUMAN-REVIEW-GUIDE': 'reviews/human-review-guide'`, G-481)
+      const nested = new Map(Array.from(/NESTED[^=]*=\s*\{([^}]*)\}/.exec(text)?.[1]?.matchAll(/'([^']+)':\s*'([^']+)'/g) ?? [], (m) => [m[1]!, m[2]!] as const))
+      const pathOf = (n: string) => nested.get(n) ?? n
       // every record /help links (ADR_TITLES), not "some record": one present file is not the
       // list present, and a listed record the build cannot see is a link that fails (P-422)
       const adrText = readFileSync(adrRegistry, 'utf8')
       const listed = Array.from(/ADR_TITLES[^=]*=\s*\[([\s\S]*?)\n\]/.exec(adrText)?.[1]?.matchAll(/\[\s*'(\d{4})'/g) ?? [], (m) => m[1]!)
       if (listed.length === 0) this.error('requireBundledDocs: could not read ADR_TITLES from ui/src/help/adrs.ts')
-      const missing = names.filter((n) => !existsSync(new URL(`${n}.md`, docs))).map((n) => `docs/${n}.md`)
+      const missing = names.filter((n) => !existsSync(new URL(`${pathOf(n)}.md`, docs))).map((n) => `docs/${pathOf(n)}.md`)
       const adrDir = new URL('adr/', docs)
       const adrs = existsSync(adrDir) ? readdirSync(adrDir).filter((f) => /^\d{4}-.*\.md$/.test(f)) : []
       if (adrs.length === 0) missing.push('docs/adr/*.md')

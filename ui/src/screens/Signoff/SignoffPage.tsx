@@ -68,7 +68,7 @@
  *               ui/src/screens/Signoff/contract.ts.
  * Claims:       A sign-off lifts the verification tier, never the route; it is refused
  *               outright on any false-Q1 row
- *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv2).
+ *               (docs/EVIDENCE-AND-CLAIMS.md#6a-what-a-signed-cell-may-be-claimed-to-mean-signoff-policyv3).
  */
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
@@ -102,11 +102,12 @@ import { controlsDisplay, useCapabilityMapWithControls, type CapabilityCellSplit
 import { ControlsPill, FailureSplitPills, ModelPointLine } from '../Capability/FailureSplit'
 import {
   REFUSAL_DISPLAY,
-  SIGNOFF_POLICY_VERSION,
+  REFUSAL_NEXT,
   fmtBound,
   isSignoffRefused,
   refusalFamily,
   useCreateSignoffWithAttestation,
+  useSignoffPolicy,
   useSignoffPreview,
   type SignoffPreview,
   type SignoffRefusal,
@@ -117,12 +118,13 @@ import {
 const cellLabel = (c: Record<string, string>) => [c.capability_class, c.size, c.language, c.model].filter((v) => v && v !== '*').join(' · ')
 
 /** The gate's check-rows, derived from the preview's refusals — never asserted. */
-function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, attested: boolean): GateCriterion[] {
+function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, attested: boolean, servedPolicy = ''): GateCriterion[] {
   if (!preview) {
     return [
       { label: 'Cell is measured', ok: null, detail: cellChosen ? 'evaluating…' : 'choose a measured cell', hint: 'gate.signoff.measured' },
       { label: 'false-Q1 = 0', ok: null, hint: 'gate.signoff.false_q1' },
-      { label: `Evidence meets ${SIGNOFF_POLICY_VERSION}`, ok: null, hint: 'gate.signoff.thin_cell' },
+      // G-284: the policy the SERVER serves, never a version built into the page
+      { label: servedPolicy ? `Evidence meets ${servedPolicy}` : 'Evidence meets the policy in force', ok: null, hint: 'gate.signoff.thin_cell' },
       { label: 'Negative controls passed', ok: null, hint: 'gate.signoff.controls' },
       { label: 'Route = deliver', ok: null, hint: 'gate.signoff.route' },
       { label: 'The standard arm’s registered reading delivers', ok: null, hint: 'gate.signoff.reading' },
@@ -161,6 +163,19 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
       detail: fam.has('look_pending') ? 'the reading waits for its next look — a sign-off is never written before it' : fam.has('not_standard') ? `the arm reads ${notStandardState(preview.refusals) || 'no proven standard'} — no proven standard to sign` : 'the cell is read on its proven standard arm',
       hint: 'gate.signoff.reading',
     },
+    // G-480 — advisory: the server refuses nothing on it, so it never holds the gate, but the
+    // approver reads before signing whether the evidence is the sealed posture Step 6 asks for
+    {
+      label: 'Graded in the sealed posture',
+      advisory: true,
+      ok: ev.posture_class ? ev.sealed_posture === true : null,
+      detail: !ev.posture_class
+        ? 'the server did not say which posture graded this evidence'
+        : ev.sealed_posture
+          ? `${ev.posture_class} — the docker executor with sealed dependencies, as Step 6 asks`
+          : `${ev.posture_class} — not the sealed posture, so this is a development reading (Step 6). Advisory: signing is not refused on it`,
+      hint: 'gate.signoff.posture',
+    },
     { label: 'Accepted row read and affirmed', ok: !fam.has('attestation_missing') && attested, detail: preview.attestation ? `${shortId(preview.attestation.reviewed_row_hash)} · ${preview.attestation.subject || preview.attestation.reviewed_task_id}` : 'pick a row below and tick “I have read this accepted diff”', hint: 'gate.signoff.attestation' },
     {
       label: 'Signed by a second person',
@@ -186,7 +201,7 @@ function VerifierKindTag({ kind }: { kind: string | undefined }) {
 }
 
 /** Every failing clause with its code, one-line meaning, observed vs threshold and the non-overridable mark. */
-function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: SignoffRefusal[]; testId?: string }) {
+function RefusalList({ refusals, repo, testId = 'signoff-refusals' }: { refusals: SignoffRefusal[]; repo: string; testId?: string }) {
   if (refusals.length === 0) return null
   return (
     <ul data-testid={testId} className="mt-3 list-none space-y-1.5 p-0">
@@ -204,6 +219,7 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
           <div className="num mt-0.5 text-xs text-on-surface-muted">
             observed <span className="font-semibold text-on-surface">{fmtBound(r.observed)}</span> · threshold <span className="font-semibold text-on-surface">{fmtBound(r.threshold)}</span> — {r.message}
           </div>
+          <RefusalNextStep code={r.code} repo={repo} />
         </Hint>
       ))}
     </ul>
@@ -214,6 +230,20 @@ function RefusalList({ refusals, testId = 'signoff-refusals' }: { refusals: Sign
 function notStandardState(refusals: Array<{ code: string }>): string {
   const r = refusals.find((x) => x.code.startsWith('not_standard:'))
   return r ? r.code.slice('not_standard:'.length) : ''
+}
+
+/** The way forward for a number-based refusal (G-476): who moves the number, and the screen where it moves. */
+function RefusalNextStep({ code, repo }: { code: string; repo: string }) {
+  const next = REFUSAL_NEXT[refusalFamily(code)]
+  if (!next || !repo) return null
+  return (
+    <p className="m-0 mt-1 text-xs text-on-surface" data-testid={`refusal-next-${refusalFamily(code)}`}>
+      {next.text}{' '}
+      <Hint as={Link} id="link.signoff.refusal_next" to={next.to(repo)} className="text-primary underline">
+        {next.label}
+      </Hint>
+    </p>
+  )
 }
 
 /** "What you would be signing": the tiles, the controls verdict, the route and the split — the snapshot the record will carry. */
@@ -316,7 +346,9 @@ export function SignoffPage() {
   const previewData = preview.data
   const current = preview.isPlaceholderData ? undefined : preview.data
   const attested = read && rowHash.length > 0 && statement.trim().length > 0
-  const criteria = criteriaFor(current, cell !== null, attested)
+  // G-284 — the policy in force as the server serves it, for the eyebrow and the pending row
+  const servedPolicy = useSignoffPolicy()
+  const criteria = criteriaFor(current, cell !== null, attested, servedPolicy.data?.policy_version ?? '')
   const refusals = current?.refusals ?? []
   const signable = Boolean(current?.signable) && attested
   const previewFailed = preview.isError
@@ -338,7 +370,7 @@ export function SignoffPage() {
                 Audit the ledger before trying again — <Link to="/ledger">verify chain</Link>.
               </>
             )}
-            <RefusalList refusals={err.detail.refusals ?? []} testId="signoff-refused-list" />
+            <RefusalList refusals={err.detail.refusals ?? []} repo={repo} testId="signoff-refused-list" />
           </>
         ),
       }
@@ -461,8 +493,8 @@ export function SignoffPage() {
     revoke.mutate({ id: revoking.id, repo: revoking.repo, note: revokeReason.trim() }, { onSuccess: () => { setRevoking(null); setRevokeReason('') } })
   }
 
-  const policyVersion = previewData?.policy.policy_version ?? SIGNOFF_POLICY_VERSION
-  const relaxed = previewData?.policy.relaxed
+  const policyVersion = previewData?.policy.policy_version ?? servedPolicy.data?.policy_version ?? ''
+  const relaxed = previewData?.policy.relaxed ?? servedPolicy.data?.relaxed
 
   return (
     <>
@@ -491,7 +523,10 @@ export function SignoffPage() {
             <li>
               a route other than <Term id="deliver">deliver</Term>;
             </li>
-            <li>no attestation that you read an accepted diff — this clause cannot be relaxed.</li>
+            <li>no attestation that you read an accepted diff — this clause cannot be relaxed;</li>
+            <li>
+              you produced the evidence you would sign — you queued the run behind the attested row, or every accepted row in the cell is yours (the two-person rule, <code>same_actor</code>) — this clause cannot be relaxed.
+            </li>
           </ul>
           <p className="mb-0">
             The gate below shows every clause with the observed value against the threshold, before you try. A <Term id="signoff">sign-off</Term> lifts the verification tier and never the route.
@@ -507,7 +542,7 @@ export function SignoffPage() {
           <Hint as="div" id="gate.signoff.banner" tabStop={false}>
             <GateBanner
               title={cell ? `Attest ${cell.capability_class} × ${cell.size}` : 'Attest a cell'}
-              eyebrow={`policy ${policyVersion}${relaxed ? ' (relaxed by this deployment)' : ''}`}
+              eyebrow={policyVersion ? `policy ${policyVersion}${relaxed ? ' (relaxed by this deployment)' : ''}` : servedPolicy.isError ? 'policy — the server’s policy could not be read' : 'policy …'}
               criteria={criteria}
               refused={refusal}
               data-testid="signoff-gate"
@@ -525,7 +560,7 @@ export function SignoffPage() {
           {cell && refusals.length > 0 && !refusal && (
             <div className="-mt-2" data-testid="signoff-refusal-block">
               <p className="text-xs text-on-surface-muted">The server would refuse this sign-off right now ({refusals.length} clause{refusals.length === 1 ? '' : 's'}):</p>
-              <RefusalList refusals={refusals} />
+              <RefusalList refusals={refusals} repo={repo} />
             </div>
           )}
           {previewFailed && (

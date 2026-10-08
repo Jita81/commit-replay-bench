@@ -3,8 +3,9 @@
 ``task_qualifications`` holds every :class:`~crb.core.qualify.Qualification` a deployment
 has measured — one per (repository, task, posture) measurement, never edited. The one in
 force for a task in a posture is the latest row; a revocation (a trial's gold control was
-red in the posture, a sealed dependency set failed its digest) is a NEW row with state
-``revoked`` and the code that revoked it. A ``legacy`` row (the back-fill of revision 0011)
+red in the posture, a sealed dependency set failed its digest — ``revoke_citing`` revokes
+every record whose bindings cite the damaged set) is a NEW row with state ``revoked`` and the
+code that revoked it. A ``legacy`` row (the back-fill of revision 0011)
 is kept for the record and never selected by a gate.
 
 Navigation
@@ -25,9 +26,9 @@ Works with:   src/crb/store/models.py (``TaskQualification``, ``Task``),
               src/crb/server/routes/repos.py (the posture view),
               src/crb/store/migrations/versions/v0011_task_qualifications.py (the table)
 Tested by:    tests/test_store_qualifications.py, tests/test_store_migrate.py,
-              tests/test_worker.py
-Touch when:   never for a new repository; a gate needs a new reading of the records (add it here,
-              never an UPDATE).
+              tests/test_worker.py, tests/test_provision_quarantine.py
+Touch when:   never for a new repository; a gate needs a new reading of the records (add it
+              here, never an UPDATE).
 """
 
 from __future__ import annotations
@@ -189,6 +190,36 @@ def revoke(
     return append(s, revoked)
 
 
+def revoke_citing(
+    s: Session,
+    keys: Iterable[str],
+    code: str,
+    actor: str,
+    reason: str,
+    *,
+    run_id: str = "",
+) -> list[Qualification]:
+    """Revoke every qualification in force — the latest record for its repository, task and
+    posture, and ``qualified`` — whose dependency bindings cite one of ``keys`` (commits each
+    revocation). A sealed set that failed its digest was measured on bytes no longer there,
+    so nothing qualified on it stands (G-966). Returns the revoked records."""
+    wanted = set(keys)
+    if not wanted:
+        return []
+    latest: dict[tuple[str, str, str], TaskQualification] = {}
+    for row in s.execute(select(TaskQualification).order_by(TaskQualification.seq)).scalars():
+        latest[(row.repo, row.task_id, row.posture_id)] = row
+    out: list[Qualification] = []
+    for row in latest.values():
+        if row.state != STATE_QUALIFIED:
+            continue
+        deps = dict((row.body_json or {}).get("deps") or {})
+        if wanted & {str(k) for k in deps.get("keys") or []}:
+            q = Qualification.from_dict(row.body_json)
+            out.append(revoke(s, q, code, actor, reason, run_id=run_id))
+    return out
+
+
 __all__ = [
     "append",
     "counts_by_code",
@@ -198,4 +229,5 @@ __all__ = [
     "latest_posture_for",
     "qualified_specs",
     "revoke",
+    "revoke_citing",
 ]

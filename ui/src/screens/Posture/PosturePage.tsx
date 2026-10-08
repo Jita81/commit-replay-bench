@@ -27,7 +27,8 @@
  * Works with:   ui/src/components/govuk.tsx (SummaryList), ui/src/components/Help.tsx (`Term`,
  *               `DocLink`), ui/src/screens/Settings/SettingsPage.tsx (where an admin acts),
  *               src/crb/server/worker.py (`_delivery_credentials` — what the Delivery rows
- *               describe), src/crb/factory/loop.py (the route gate and the override event),
+ *               describe), src/crb/factory/loop.py (the route gate, the sign-off clause of
+ *               ADR-0018 and the override event),
  *               ui/src/components/FlowPanel.tsx (the platform stream's own recovery lead time),
  *               docs/SECURITY.md §2 (the trust boundaries these rows describe), docs/DEPLOYMENT.md
  * Tested by:    ui/src/components/govuk.test.tsx (the page is covered there)
@@ -40,12 +41,14 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useAllRepos, useGitHubApp, useHealth, useLedgerVerify, useSettings, useVersion } from '../../api/hooks'
 import type { DeploymentPosture } from '../../api/types'
+import { Button } from '../../components/Button'
 import { FlowPanel } from '../../components/FlowPanel'
 import { DocLink, Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { InsetText, Kicker, PageTitle, SummaryList, type SummaryRow } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
-import { SIGNOFF_POLICY_VERSION } from '../Signoff/contract'
+import { deployEyebrow } from '../../lib/deployJourney'
+import { GoLiveList } from './GoLiveList'
 
 /** The next step after a value that is not the production posture: the sentence, the guide, and Settings for an admin. */
 function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolean; doc?: ReactNode }) {
@@ -67,6 +70,26 @@ function NextStep({ children, admin, doc }: { children: ReactNode; admin: boolea
 }
 
 const POSTURE_DOC = <DocLink to="DEPLOYMENT#21-environment-reference">Environment reference (DEPLOYMENT)</DocLink>
+
+/**
+ * Where each row's value comes from (G-212): a live read of the API, or — for a row that states
+ * a rule — the code that enforces it, so a review board can check every line of the statement.
+ */
+const SRC = {
+  version: 'Source: GET /version, read now',
+  health: 'Source: GET /health, read now',
+  settings: 'Source: GET /settings, read now (admins only)',
+  github: 'Source: GET /github/app, read now',
+  ledger: 'Source: GET /ledger/verify, read now',
+  licence: 'Source: GET /version — the package’s licence in pyproject.toml',
+  roles: 'Source: the role ladder in the code (src/crb/server/settings.py, ROLE_LADDER), enforced on every route',
+  separation: 'Source: the sign-off policy in the code (src/crb/core/signoff.py), refused at write',
+  secrets: 'Source: the settings and secrets code (src/crb/server/settings.py, src/crb/server/secrets.py)',
+  delivery: 'Source: the delivery code (src/crb/server/worker.py and docs/GITHUB-APP.md §5)',
+  override: 'Source: the sign-off clause in the code (src/crb/factory/loop.py and src/crb/factory/standard.py), each lift an event',
+  retention: 'Source: the retention settings (docs/DATA-RETENTION.md §2, ADR-0006)',
+  export: 'Source: the ledger routes (src/crb/server/routes/ledger.py)',
+} as const
 
 /**
  * What happens to a factory run (ADR-0023), said after a sealed posture: a factory build runs
@@ -125,9 +148,19 @@ export function PosturePage() {
   // a probe's sentence, or why there is none: "…" while loading, and the truth when the health
   // check itself could not be read (never a silent ellipsis)
   const probeText = (name: string) => (health.isError ? 'the health check could not be read' : (probe(name)?.detail ?? '…'))
+  // a version value, or why there is none: "…" while loading, and a sentence when /version
+  // itself could not be read (G-212 — never a silent ellipsis for ever)
+  const v = (value: string | undefined): string =>
+    value !== undefined ? value : version.isError ? 'the version could not be read' : version.data ? 'not reported by this deployment' : '…'
   const s = settings.data
   const admin = can('admin')
+  // ADR-0018 — the delivery licence posture, from the deployment's own settings; `undefined`
+  // when this reader is not an admin (the settings query is not even issued for them)
+  const signedCellRequired = s?.raw?.factory?.require_signed_cell
   const adminOnly = (v: unknown): ReactNode => (admin ? String(v ?? '—') : 'shown to admins')
+  // a row fed by the admin's settings, before they answer: why there is no value — "…" while
+  // loading, the failure when the read failed (P-398), never a bare dash for ever
+  const settingsUnread = (): ReactNode => (admin ? (settings.isError ? 'the settings could not be read' : '…') : 'shown to admins')
 
   // the executor as the deployment reports it: the admin's settings when they answer,
   // else the health probe's own `executor` (never a guess)
@@ -141,20 +174,21 @@ export function PosturePage() {
     {
       name: 'Build and apparatus',
       rows: [
-        { key: 'Version', hint: 'summary.posture.version', value: version.data ? `crb ${version.data.crb}` : '…' },
+        { key: 'Version', hint: 'summary.posture.version', value: version.data ? `crb ${version.data.crb}` : v(undefined), note: SRC.version },
         {
           key: <Term id="apparatus">Apparatus</Term>,
           hint: 'summary.posture.apparatus',
           value: version.data ? (
             <>
-              {version.data.apparatus} · <Term id="belt">belt set</Term> v5 · routing {version.data.policy}
+              {version.data.apparatus} · <Term id="belt">belt set</Term> {v(version.data.belt_set)} · routing {version.data.policy}
             </>
           ) : (
-            '…'
+            v(undefined)
           ),
+          note: SRC.version,
         },
-        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${version.data?.policy ?? '…'} (routing) · ${SIGNOFF_POLICY_VERSION}` },
-        { key: 'Licence', hint: 'summary.posture.licence', value: 'Apache-2.0' },
+        { key: 'Policies in force', hint: 'summary.posture.policies', value: `${v(version.data?.policy)} (routing) · ${v(version.data?.signoff_policy)}`, note: SRC.version },
+        { key: 'Licence', hint: 'summary.posture.licence', value: v(version.data?.licence), note: SRC.licence },
       ],
     },
     {
@@ -163,8 +197,9 @@ export function PosturePage() {
         {
           key: 'Sign-in',
           hint: 'summary.posture.sign_in',
+          note: SRC.version,
           value: !version.data ? (
-            '…'
+            v(undefined)
           ) : version.data.oidc_enabled ? (
             'OpenID Connect (organisation account) + local accounts'
           ) : (
@@ -176,11 +211,12 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Roles', hint: 'summary.posture.roles', value: 'viewer · operator · approver · admin' },
-        { key: 'Separation of duties', hint: 'summary.posture.separation', value: 'Enforced at write: the API refuses a sign-off (409 same_actor) when the approver queued the run that produced the attested row, or is the only person behind the cell — never overridable by any setting; every record says what kind of account signed (verifier_kind)' },
+        { key: 'Roles', hint: 'summary.posture.roles', value: 'viewer · operator · approver · admin', note: SRC.roles },
+        { key: 'Separation of duties', hint: 'summary.posture.separation', value: 'Enforced at write: the API refuses a sign-off (409 same_actor) when the approver queued the run that produced the attested row, or is the only person behind the cell — never overridable by any setting; every record says what kind of account signed (verifier_kind)', note: SRC.separation },
         {
           key: 'Source control',
           hint: 'summary.posture.source_control',
+          note: SRC.github,
           value: !gh.data ? (
             gh.isError ? (
               'GitHub App status unavailable'
@@ -206,8 +242,13 @@ export function PosturePage() {
         {
           key: 'Test executor',
           hint: 'summary.posture.executor',
+          note: s ? SRC.settings : SRC.health,
           value: !executorKnown ? (
-            '…'
+            health.isError && !s ? (
+              'the health check could not be read'
+            ) : (
+              '…'
+            )
           ) : executor === 'docker' ? (
             'docker (sealed)'
           ) : executor === '' ? (
@@ -226,24 +267,27 @@ export function PosturePage() {
         {
           key: 'Production posture',
           hint: 'summary.posture.production',
+          note: SRC.health,
           value: postureValue(health.data?.posture, health.isError, admin),
         },
         {
           key: 'Dependency provisioning',
           hint: 'summary.posture.provisioning',
+          note: SRC.settings,
           value: s
             ? adminOnly(
                 s.raw?.provision?.enabled
                   ? 'on — each task’s dependencies are fetched outside the test container and mounted read-only'
                   : 'off — a repository whose tests need a third-party module cannot be qualified in the sealed sandbox, and the Posture panel says so instead of blaming the model',
               )
-            : adminOnly(undefined),
+            : settingsUnread(),
         },
-        { key: 'Builder posture', hint: 'summary.posture.builder', value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : adminOnly(undefined) },
-        { key: 'Toolchains', hint: 'summary.posture.toolchains', value: probeText('toolchains') },
+        { key: 'Builder posture', hint: 'summary.posture.builder', note: SRC.settings, value: s ? adminOnly(s.raw?.builder?.executor ? `${s.raw.builder.executor}${s.raw.builder.egress_network ? ` · egress ${s.raw.builder.egress_network}` : ''}` : 'not reported by this deployment') : settingsUnread() },
+        { key: 'Toolchains', hint: 'summary.posture.toolchains', value: probeText('toolchains'), note: SRC.health },
         {
           key: 'Worker',
           hint: 'summary.posture.worker',
+          note: SRC.health,
           // the worker probe's own sentence (queued runs, last check-in, a stopped worker):
           // degraded, never a 503 — the API pod's readiness is not the worker's liveness
           value: (
@@ -268,18 +312,23 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Secrets', hint: 'summary.posture.secrets', value: 'Read from the environment or mounted files; never persisted, never returned by the API' },
+        { key: 'Secrets', hint: 'summary.posture.secrets', value: 'Read from the environment or mounted files; never persisted, never returned by the API', note: SRC.secrets },
       ],
     },
     {
       name: 'Delivery',
       rows: [
-        { key: 'Writes', hint: 'summary.posture.writes', value: 'a branch named by the item and one pull request against the repository’s default branch; the factory never writes to the default branch' },
+        { key: 'Writes', hint: 'summary.posture.writes', value: 'a branch named by the item and one pull request against the repository’s default branch; the factory never writes to the default branch', note: SRC.delivery },
         {
           key: 'Permissions',
           hint: 'summary.posture.permissions',
+          note: SRC.github,
           value: !gh.data ? (
-            '…'
+            gh.isError ? (
+              'GitHub App status unavailable'
+            ) : (
+              '…'
+            )
           ) : !gh.data.configured ? (
             <>
               the GitHub App installation must hold Contents: write and Pull requests: write; installations without them measure only. No app is configured, so no repository can deliver.{' '}
@@ -301,18 +350,38 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Route gate', hint: 'summary.posture.route_gate', value: `a pull request opens only for a cell the capability map routes deliver under ${version.data?.policy ?? '…'}` },
-        { key: 'Override', hint: 'summary.posture.override', value: 'an approver may override the gate for one run; the override is an event on the chain naming the approver and the route it overrode' },
-        { key: 'Credentials', hint: 'summary.posture.credentials', value: 'installation tokens minted per push, never stored' },
+        { key: 'Route gate', hint: 'summary.posture.route_gate', value: `a pull request opens only for a cell the capability map routes deliver under ${v(version.data?.policy)}`, note: SRC.version },
+        // ADR-0018 — the second clause of the same gate. Admins read the deployment's own
+        // setting; everyone else reads the default, which is what a deployment that has not
+        // changed it is running. Never presented as "on" without having read it.
+        {
+          key: 'Delivery licence',
+          hint: 'summary.posture.delivery_licence',
+          note: SRC.settings,
+          // no bare environment-variable token in a viewer's row: an unbreakable name this
+          // long sets the summary list's min-content width and the page scrolls sideways at
+          // 375 px (J-FAC-14). The admin's row prints it with break-all, as the sandbox row does.
+          value: signedCellRequired === undefined ? (admin ? (s ? 'not reported by this deployment' : settingsUnread()) : 'a signed cell as well as a deliver route, unless this deployment has turned that off — the setting itself is shown to admins') : signedCellRequired ? 'a signed cell as well as a deliver route: the factory does not build an item until a person has signed off its cell’s proven standard, on the current apparatus (a sign-off expires with the apparatus)' : (
+            <>
+              the route alone — this deployment has turned the sign-off clause off (<code className="break-all">CRB_FACTORY__REQUIRE_SIGNED_CELL=false</code>), so a measured cell licenses a pull request with no human attestation.{' '}
+              <NextStep admin={admin} doc={<DocLink to="ONBOARDING-A-REPO#step-7--sign-off-approver">Sign off (ONBOARDING)</DocLink>}>
+                To require a person before any pull request, unset it.
+              </NextStep>
+            </>
+          ),
+        },
+        { key: 'Override', hint: 'summary.posture.override', value: 'a second approver — never the person who queued the run — may lift the sign-off clause for one run, and never the route; the override is an event on the chain naming the approver and the clause. It licenses one run and is never an attestation of the cell', note: SRC.override },
+        { key: 'Credentials', hint: 'summary.posture.credentials', value: 'installation tokens minted per push, never stored', note: SRC.delivery },
       ],
     },
     {
       name: 'Data and audit',
       rows: [
-        { key: 'Raw retention', hint: 'summary.posture.retention', value: 'Zero by default. Worktrees and transcripts are opt-in per run.' },
+        { key: 'Raw retention', hint: 'summary.posture.retention', value: 'Zero by default. Worktrees and transcripts are opt-in per run.', note: SRC.retention },
         {
           key: 'Ledger',
           hint: 'summary.posture.ledger',
+          note: SRC.ledger,
           value: !verify.data ? (
             probeText('ledger')
           ) : verify.data.ok ? (
@@ -332,18 +401,25 @@ export function PosturePage() {
             </>
           ),
         },
-        { key: 'Append-only triggers', hint: 'summary.posture.append_only', value: probeText('append_only') },
-        { key: 'Export', hint: 'summary.posture.export', value: 'JSONL export and evidence packs by hash' },
+        { key: 'Append-only triggers', hint: 'summary.posture.append_only', value: probeText('append_only'), note: SRC.health },
+        { key: 'Export', hint: 'summary.posture.export', value: 'JSONL export and evidence packs by hash', note: SRC.export },
       ],
     },
   ]
 
   return (
     <>
-      <div>
+      <Hint as="div" id="nav.deploy_position" className="label">
+        {deployEyebrow('/posture')}
+      </Hint>
+      <div className="flex flex-wrap items-center gap-4">
         <Kicker>For an architecture review board · printable</Kicker>
+        <Button size="sm" variant="outlined" className="print:hidden" hint="button.posture.print" onClick={() => window.print()} data-testid="posture-print">
+          Print this page
+        </Button>
       </div>
       <PageTitle>About this deployment</PageTitle>
+      <GoLiveList admin={admin} />
       {groups.map((g) => (
         <section key={g.name} className="mb-8 max-w-[60em]" aria-labelledby={`posture-${g.name.replace(/\s+/g, '-').toLowerCase()}`}>
           <h2 id={`posture-${g.name.replace(/\s+/g, '-').toLowerCase()}`} className="mb-2 text-[24px] font-bold leading-[1.3]">

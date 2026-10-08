@@ -241,10 +241,10 @@ def test_pip_includes_hashes_and_alternative_locks(tmp_path: Path) -> None:
     assert got.require_hashes is True
     assert set(got.lock_paths) == {"requirements.txt", "reqs/base.txt"}
     repo, (sha,) = _repo(
-        tmp_path / "b", {"poetry.lock": "x\n", "pyproject.toml": "[project]\nname='x'\n"}
+        tmp_path / "b", {"Pipfile.lock": "{}\n", "pyproject.toml": "[project]\nname='x'\n"}
     )
     err = _refused("PROVISION_LOCK_UNSUPPORTED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
-    assert "poetry.lock" in err.message
+    assert "Pipfile.lock" in err.message and "a uv.lock, poetry.lock or pylock.toml" in err.message
     repo, (sha,) = _repo(
         tmp_path / "c", {"pyproject.toml": "[project]\nname='x'\ndependencies=['left']\n"}
     )
@@ -917,3 +917,210 @@ def test_refusals_carry_scope_fix_and_doc() -> None:
     assert d["doc"].startswith("docs/DEPLOYMENT.md#34")
     with pytest.raises(KeyError):
         ProvisionRefused("PROVISION_MADE_UP", "x")
+
+
+# --- the structured Python locks: uv, poetry, PEP 751 pylock (G-951, DL-110) --------------
+
+H1, H2, H3 = ("sha256:" + c * 64 for c in "123")
+
+UV_LOCK = f"""version = 1
+requires-python = ">=3.10"
+
+[[package]]
+name = "fx"
+version = "0.1.0"
+source = {{ editable = "." }}
+dependencies = [{{ name = "left" }}, {{ name = "tomli", marker = "python_version < '3.11'" }}]
+
+[package.dev-dependencies]
+dev = [{{ name = "pytest" }}]
+
+[[package]]
+name = "member"
+version = "0.2.0"
+source = {{ virtual = "packages/member" }}
+
+[[package]]
+name = "left"
+version = "1.0.0"
+source = {{ registry = "https://pypi.org/simple" }}
+sdist = {{ url = "https://files.pythonhosted.org/left-1.0.0.tar.gz", hash = "{H1}", size = 10 }}
+wheels = [{{ url = "https://files.pythonhosted.org/left-1.0.0-py3-none-any.whl", hash = "{H2}", size = 9 }}]
+
+[[package]]
+name = "tomli"
+version = "2.0.1"
+source = {{ registry = "https://pypi.org/simple" }}
+wheels = [{{ url = "https://files.pythonhosted.org/tomli-2.0.1-py3-none-any.whl", hash = "{H3}", size = 9 }}]
+
+[[package]]
+name = "pytest"
+version = "8.3.3"
+source = {{ registry = "https://pypi.org/simple" }}
+wheels = [{{ url = "https://files.pythonhosted.org/pytest-8.3.3-py3-none-any.whl", hash = "{H1}", size = 9 }}]
+"""
+
+POETRY_LOCK = f"""[[package]]
+name = "left"
+version = "1.0.0"
+optional = false
+python-versions = ">=3.8"
+files = [{{file = "left-1.0.0-py3-none-any.whl", hash = "{H2}"}}]
+
+[package.dependencies]
+tomli = {{version = ">=1", markers = "python_version < \\"3.11\\""}}
+
+[[package]]
+name = "tomli"
+version = "2.0.1"
+optional = false
+python-versions = ">=3.7"
+files = [{{file = "tomli-2.0.1-py3-none-any.whl", hash = "{H3}"}}]
+
+[[package]]
+name = "private-lib"
+version = "3.1.0"
+optional = false
+python-versions = "*"
+files = [{{file = "private_lib-3.1.0-py3-none-any.whl", hash = "{H1}"}}]
+
+[package.source]
+type = "legacy"
+url = "https://mirror.example/simple"
+reference = "corp"
+
+[metadata]
+lock-version = "2.0"
+"""
+
+PYLOCK = f"""lock-version = "1.0"
+created-by = "pip"
+
+[[packages]]
+name = "left"
+version = "1.0.0"
+index = "https://pypi.org/simple"
+wheels = [{{ name = "left-1.0.0-py3-none-any.whl", url = "https://files.pythonhosted.org/x.whl", hashes = {{ sha256 = "{H2[7:]}" }} }}]
+
+[[packages]]
+name = "tomli"
+version = "2.0.1"
+marker = "python_version < '3.11'"
+sdist = {{ name = "tomli-2.0.1.tar.gz", url = "https://files.pythonhosted.org/t.tar.gz", hashes = {{ sha256 = "{H3[7:]}" }} }}
+"""
+
+
+def test_a_uv_lock_is_read_into_hashed_pins_and_the_project_is_not_fetched(tmp_path: Path) -> None:
+    repo, (sha,) = _repo(
+        tmp_path / "r", {"uv.lock": UV_LOCK, "pyproject.toml": "[project]\nname='fx'\n"}
+    )
+    # the project's own dependencies, and the group ``runner_opts.deps_groups`` names (DL-101)
+    assert pv.LockInputs.from_git(repo, sha, _cfg("pytest")).pins == (
+        "left==1.0.0",
+        "tomli==2.0.1",
+    )
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest", deps_groups=["dev"]))
+    assert got.recipe == pv.RECIPE_PY
+    assert got.pins == ("left==1.0.0", "pytest==8.3.3", "tomli==2.0.1")
+    by = {p.norm: p for p in got.py_pins}
+    # the wheel's hash: the fetch takes wheels only (``--only-binary``), DL-101
+    assert by["left"].hashes == (H2,) and by["left"].marker == ""
+    # needed only on an old Python: the edge's marker travels with the pin
+    assert by["tomli"].marker == "; python_version < '3.11'"
+    assert got.require_hashes is True and got.lock_paths == ("uv.lock",)
+    # the lock pip reads is written from the pins, never the repository's file
+    from crb.provision.python import lock_text
+
+    text = lock_text(got).decode()
+    assert f"left==1.0.0 --hash={H2}" in text
+    assert "tomli==2.0.1 ; python_version < '3.11' --hash=" in text
+    assert "fx" not in text and "member" not in text
+
+
+def test_a_poetry_lock_is_read_and_a_private_index_is_fetched_from_the_configured_one(
+    tmp_path: Path,
+) -> None:
+    repo, (sha,) = _repo(
+        tmp_path / "r", {"poetry.lock": POETRY_LOCK, "pyproject.toml": "[tool.poetry]\nname='fx'\n"}
+    )
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert got.pins == ("left==1.0.0", "private-lib==3.1.0", "tomli==2.0.1")
+    by = {p.norm: p for p in got.py_pins}
+    assert by["tomli"].marker == '; python_version < "3.11"' and by["tomli"].hashes == (H3,)
+    assert got.require_hashes is True
+
+
+def test_a_pylock_is_read_and_a_later_lock_version_is_refused(tmp_path: Path) -> None:
+    repo, (sha,) = _repo(tmp_path / "r", {"pylock.toml": PYLOCK})
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert got.pins == ("left==1.0.0", "tomli==2.0.1")
+    by = {p.norm: p for p in got.py_pins}
+    assert by["left"].hashes == (H2,) and by["tomli"].marker == "; python_version < '3.11'"
+    repo, (sha,) = _repo(tmp_path / "v2", {"pylock.toml": PYLOCK.replace('"1.0"', '"2.0"', 1)})
+    _refused("PROVISION_LOCK_UNSUPPORTED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+    # a named lock is read in its own format, wherever it sits
+    repo, (sha,) = _repo(tmp_path / "named", {"locks/pylock.test.toml": PYLOCK})
+    assert pv.LockInputs.from_git(
+        repo, sha, _cfg("pytest", deps_lock="locks/pylock.test.toml")
+    ).pins == ("left==1.0.0", "tomli==2.0.1")
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        (
+            "uv.lock",
+            'version = 1\n[[package]]\nname = "proj"\nversion = "1.0"\nsource = { editable = "." }\ndependencies = [{ name = "left" }]\n[[package]]\nname = "left"\nversion = "1.0.0"\nsource = { git = "https://github.com/x/left?rev=v1#abc" }\n',
+        ),
+        (
+            "uv.lock",
+            'version = 1\n[[package]]\nname = "proj"\nversion = "1.0"\nsource = { editable = "." }\ndependencies = [{ name = "left" }]\n[[package]]\nname = "left"\nversion = "1.0.0"\nsource = { url = "https://example.com/left.whl" }\n',
+        ),
+        (
+            "uv.lock",
+            'version = 1\n[[package]]\nname = "proj"\nversion = "1.0"\nsource = { editable = "." }\ndependencies = [{ name = "left" }]\n[[package]]\nname = "left"\nversion = "1.0.0"\nsource = { editable = "../outside" }\n',
+        ),
+        (
+            "poetry.lock",
+            '[[package]]\nname = "left"\nversion = "1.0.0"\n[package.source]\ntype = "git"\nurl = "https://github.com/x/left"\n',
+        ),
+        (
+            "poetry.lock",
+            '[[package]]\nname = "left"\nversion = "1.0.0"\n[package.source]\ntype = "directory"\nurl = "../left"\n',
+        ),
+        (
+            "pylock.toml",
+            'lock-version = "1.0"\n[[packages]]\nname = "left"\nversion = "1.0.0"\nvcs = { type = "git", url = "https://github.com/x/left", commit-id = "abc" }\n',
+        ),
+        (
+            "pylock.toml",
+            'lock-version = "1.0"\n[[packages]]\nname = "left"\ndirectory = { path = "./left" }\n',
+        ),
+    ],
+)
+def test_a_structured_lock_with_a_git_url_or_path_source_is_refused(
+    tmp_path: Path, name: str, text: str
+) -> None:
+    repo, (sha,) = _repo(tmp_path / "r", {name: text})
+    err = _refused("PROVISION_SOURCE_REFUSED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+    assert name in err.message
+
+
+def test_a_structured_lock_without_an_exact_version_or_readable_toml_is_refused(
+    tmp_path: Path,
+) -> None:
+    repo, (sha,) = _repo(
+        tmp_path / "r",
+        {
+            "uv.lock": 'version = 1\n[[package]]\nname = "proj"\nversion = "1.0"\nsource = { editable = "." }\ndependencies = [{ name = "left" }]\n[[package]]\nname = "left"\nsource = { registry = "https://pypi.org/simple" }\n'
+        },
+    )
+    _refused("PROVISION_UNPINNED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+    repo, (sha,) = _repo(tmp_path / "t", {"poetry.lock": "[[package\n"})
+    _refused("PROVISION_LOCK_UNSUPPORTED", pv.LockInputs.from_git, repo, sha, _cfg("pytest"))
+
+
+def test_a_requirements_lock_still_wins_over_a_structured_one(tmp_path: Path) -> None:
+    repo, (sha,) = _repo(tmp_path / "r", {"requirements.txt": "right==2.0.0\n", "uv.lock": UV_LOCK})
+    got = pv.LockInputs.from_git(repo, sha, _cfg("pytest"))
+    assert got.pins == ("right==2.0.0",) and got.lock_paths == ("requirements.txt",)
