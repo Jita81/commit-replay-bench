@@ -3,9 +3,10 @@
 docs/DEPLOYMENT.md §8 lists what must hold before a deployment goes live. Some lines are
 checks this product can run itself — the health check is green, the ledger verifies, people
 sign in through the organisation's provider, every repository qualifies in the sealed
-posture, tests and the builder run sealed, automatic sign-in is off. The others are acts only the operator can do on
-their own infrastructure — an egress test from a worker pod, a rehearsed restore, a
-penetration test. Before this module the product said nothing about any of them.
+posture, tests and the builder run sealed, automatic sign-in is off. The others are acts
+only the operator can do on their own infrastructure — an egress test from a worker pod, a
+rehearsed restore, a penetration test. Before this module the product said nothing about
+any of them.
 
 Every line now has one state:
 
