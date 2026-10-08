@@ -12,15 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **Wave 6: the seven north-star streams land together** (lrn, dec, pgs, fac, ops, cnx
-  and prf; [pull request #71](https://github.com/Jita81/commit-replay-bench/pull/71), a
-  provisional link until it opens). Learn shows the guard's false-positive rate and offers a
-  reading its top-up (lrn). `GET /decisions` serves the inbox once; a refused cancel says why
-  (dec). Exports report what they downloaded; every route decision is a door (pgs). Factory,
-  Home and Baseline start at the board and close the loop (fac). Every stop condition has a
-  surface; the operator guide states the costs (ops). The walk chains its free stages and
-  turns mine notes into decisions (cnx). Tier-1 proof walks each journey through its own
-  doors (prf). DL-300 to DL-320, P-600 to P-665.
+- **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
+  fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
+  the guard's false-positive rate and tops up only the rows a registered reading counts. `GET
+  /decisions` serves the inbox once, and a refused cancel says why. Exports report what they
+  downloaded, and every route decision is a door. Factory, Home and Baseline start at the board and
+  close the loop on screen. Every stop condition has a surface, and the operator guide states what
+  operating costs. The walk chains its free stages and turns mine notes into decisions. Tier-1 proof
+  walks each journey through its own doors. DL-300 to DL-320, P-600 to P-672.
 
 - **Wave 4: the context library and its miners, the second person, go-live on evidence, truthful
   screens** (north-star Wave 4, streams L, M, S, P and T;
