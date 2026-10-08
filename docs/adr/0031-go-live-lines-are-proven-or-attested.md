@@ -22,8 +22,8 @@ and whether tests and the builder run sealed. The other ten are acts only the op
 do on their own infrastructure, such as an egress test from a worker pod, a rehearsed restore,
 a PostgreSQL role that does not own the ledger tables (§3.3) or a penetration test. The
 product cannot see them. (A sixteenth line, `dev-autologin-off`, came with automatic sign-in,
-ADR-0027: the operator attests it from `crb doctor`, since the product's own pages say `off`
-to any caller that could not use it.)
+ADR-0027. The product proves it from the setting its own sign-in route acts on, so six
+lines are proven by the product and ten are attested.)
 
 Three operating gaps kept the sealed posture from going live without a person's hand:
 

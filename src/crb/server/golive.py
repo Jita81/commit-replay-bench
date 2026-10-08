@@ -3,7 +3,7 @@
 docs/DEPLOYMENT.md §8 lists what must hold before a deployment goes live. Some lines are
 checks this product can run itself — the health check is green, the ledger verifies, people
 sign in through the organisation's provider, every repository qualifies in the sealed
-posture, tests and the builder run sealed. The others are acts only the operator can do on
+posture, tests and the builder run sealed, automatic sign-in is off. The others are acts only the operator can do on
 their own infrastructure — an egress test from a worker pod, a rehearsed restore, a
 penetration test. Before this module the product said nothing about any of them.
 
@@ -30,7 +30,8 @@ What it does: Defines the sixteen lines of DEPLOYMENT §8 (id, title, who proves
               the caller passes in (the health body, the ledger verification, the settings,
               whether an organisation sign-in is configured) and from the users,
               qualifications (each repository's latest docker posture), runs (the worker's
-              own stamp of where it ran) and events tables — never from a setting alone;
+              own stamp of where it ran) and events tables — never from a setting alone,
+              except automatic sign-in, whose route acts on that very setting;
               names stale local admins only to an admin; reads the attestation in force per
               operator line; writes ``golive.attested`` / ``golive.withdrawn`` events, the
               day of the act bounded on both sides with a day's slack; counts the lines by
@@ -128,11 +129,10 @@ LINES: tuple[Line, ...] = (
     ),
     Line(
         "dev-autologin-off",
-        "Automatic sign-in is off: crb doctor on the API host reads its dev_autologin line as "
-        "ok, off, and CRB_AUTH__DEV_AUTOLOGIN is set nowhere",
-        BY_OPERATOR,
-        "an admin's attestation (crb doctor reads it on the API host; the product's own pages "
-        "say off to any caller that could not use it, ADR-0027)",
+        "Automatic sign-in is off: CRB_AUTH__DEV_AUTOLOGIN names no account in the API process",
+        BY_PRODUCT,
+        "the API process's own settings, read when this page was loaded — the setting the "
+        "sign-in route acts on (ADR-0027)",
     ),
     Line(
         "ledger-role",
@@ -614,6 +614,20 @@ def _check_sealed(session: Session, health: Mapping[str, Any]) -> tuple[bool, st
     )
 
 
+def _check_dev_autologin(settings: Settings) -> tuple[bool, str]:
+    """Automatic sign-in (ADR-0027) is a setting of the API process serving this reading, and
+    the sign-in route acts on that same setting, so reading it is reading what acts: no admin's
+    word stands in for it. ``/health`` says ``off`` to any caller that could not use it; this
+    reads the setting itself, as ``crb doctor`` does. It names no account (``crb doctor`` on the
+    API host does)."""
+    if settings.auth.dev_autologin:
+        return False, (
+            "automatic sign-in is on in this API process: CRB_AUTH__DEV_AUTOLOGIN names a local "
+            "account (unset it and restart the API)"
+        )
+    return True, "off in this API process: CRB_AUTH__DEV_AUTOLOGIN names no account"
+
+
 def evaluate(
     session: Session,
     settings: Settings,
@@ -634,6 +648,7 @@ def evaluate(
         ),
         "repos-qualified": lambda: _check_repos(session, health),
         "sealed-posture": lambda: _check_sealed(session, health),
+        "dev-autologin-off": lambda: _check_dev_autologin(settings),
     }
     records = attestations(session)
     out: list[LineState] = []

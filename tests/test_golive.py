@@ -204,7 +204,7 @@ def test_the_acts_the_product_does_not_perform_are_operator_lines() -> None:
 # --- the product checks ----------------------------------------------------------------
 
 
-def test_a_production_deployment_proves_all_five_product_lines(
+def test_a_production_deployment_proves_all_six_product_lines(
     backend: Backend, tmp_path: Path
 ) -> None:
     init_db(backend.engine)
@@ -215,6 +215,7 @@ def test_a_production_deployment_proves_all_five_product_lines(
     got = states(read(backend, st))
     assert [k for k, v in got.items() if v == golive.PROVEN] == [
         "health-green",
+        "dev-autologin-off",
         "ledger-verified",
         "sign-in",
         "repos-qualified",
@@ -223,6 +224,30 @@ def test_a_production_deployment_proves_all_five_product_lines(
     assert {v for k, v in got.items() if golive.LINES_BY_ID[k].proves == golive.BY_OPERATOR} == {
         golive.UNPROVEN
     }
+
+
+def test_automatic_sign_in_on_leaves_its_line_unproven_and_names_no_account(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """The sign-in route acts on the API process's own setting, so the product reads that
+    setting — never an admin's word for it — and an admin cannot attest the line while it is
+    on (ADR-0027, ADR-0031)."""
+    init_db(backend.engine)
+    r = read(backend, settings(tmp_path, auth={"dev_autologin": "ada"}))
+    assert states(r)["dev-autologin-off"] == golive.UNPROVEN
+    why = detail(r, "dev-autologin-off")
+    assert "automatic sign-in is on in this API process" in why and "ada" not in why
+    assert states(read(backend, settings(tmp_path)))["dev-autologin-off"] == golive.PROVEN
+    with backend.factory() as s, pytest.raises(golive.ProvenByProduct):
+        golive.attest(
+            s,
+            "dev-autologin-off",
+            actor="a",
+            by="A",
+            statement="crb doctor reads off",
+            performed_on=TODAY,
+            today=TODAY,
+        )
 
 
 def test_a_degraded_probe_leaves_the_health_line_unproven_and_names_it(

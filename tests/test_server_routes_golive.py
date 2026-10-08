@@ -131,6 +131,7 @@ def test_every_signed_in_role_reads_every_line_with_its_state_and_source(
         assert c["lines"] == 16 == c["proven"] + c["attested"] + c["unproven"]
         # a development stack: local executor, local sign-in on, the bootstrap admin configured
         assert line(body, "sealed-posture")["state"] == "unproven"
+        assert line(body, "dev-autologin-off")["state"] == "proven"
         assert "local sign-in is on" in line(body, "sign-in")["detail"]
         assert line(body, "egress-denied")["detail"] == "no attestation is recorded"
 

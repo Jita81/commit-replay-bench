@@ -875,11 +875,13 @@ backup rehearsal, the digest check, the alert rules and the penetration test are
       reason you have written down; no `fail`. It covers what `/health` cannot see from
       inside a pod — the GitHub App's installations, the secrets directory mode, the
       `CRB_HOME` location and the help bundle ([OPERATOR.md §1.1](OPERATOR.md#11-check-the-installation-crb-doctor)).
-- [ ] **`dev-autologin-off`** · operator attests — Automatic sign-in is off: `crb doctor` on the API host shows its `dev_autologin` line
-      as `ok` with the detail `off`, and `CRB_AUTH__DEV_AUTOLOGIN` is not set anywhere. A
-      `prod` server and the image both refuse to start with it set (ADR-0027), so this line
-      fails only on a stack that is not what it claims to be. Read `crb doctor`, not
-      `GET /api/v1/health`: `/health` says `off` to any caller that could not use it.
+- [ ] **`dev-autologin-off`** · product proves — Automatic sign-in is off: `CRB_AUTH__DEV_AUTOLOGIN` names no account in the API
+      process. The product reads the setting its own sign-in route acts on, so no attestation
+      stands in for it; `crb doctor` on the API host reads the same setting and names the
+      account while it is on. A `prod` server and the image both refuse to start with it set
+      (ADR-0027), so this line fails only on a stack that is not what it claims to be. Do not
+      read it from `GET /api/v1/health`: `/health` says `off` to any caller that could not use
+      it.
 - [ ] **`ledger-role`** · operator attests — On PostgreSQL, the API and the worker connect as a role that does not own the ledger
       tables (§3.3) — or the reason your platform cannot is written down.
 - [ ] **`ledger-verified`** · product proves — `GET /api/v1/ledger/verify` reads `chain intact, false_q1=0` with `events.chain_ok:
