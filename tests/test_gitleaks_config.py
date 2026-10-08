@@ -1,4 +1,4 @@
-"""gitleaks passes exactly the product's dependency-store keys, and no path in docs/src/deploy.
+"""gitleaks passes exactly the dep_ store keys and ADR-0025's label; no path in docs/src/deploy.
 
 #56 committed review evidence carrying ``dep_<sha256>`` keys under ``"...key"`` fields, and
 gitleaks' ``generic-api-key`` rule read each one as an API key: main's security job went red
@@ -7,12 +7,15 @@ on 406ff747's push and every pull request whose scan range reaches that commit f
 tests hold that allowlist to ``crb.core.deps.KEY_RE`` — the one place the product defines the
 shape — so a key format change cannot leave the scanner allowlisting the old shape (and
 failing on the new one), and a loosened regex cannot start passing credentials that merely
-begin like a key.
+begin like a key. The full-history scan found one more value of the same class — ADR-0025's
+public HMAC label ``crb.ledger.anchor.v1``, read as a key on #69's push 435d2a49 — and its
+entry is held to the ADR's text the same way.
 
 Navigation
 ----------
 What it is:   The gate that ties .gitleaks.toml's dependency-store-key allowlist to the
-              product's key shape and keeps the config's path doctrine.
+              product's key shape, its anchor-label allowlist to ADR-0025, and keeps the
+              config's path doctrine.
 What it does: Reads .gitleaks.toml with tomllib; finds the allowlist whose secret-target
               regexes pass a key made the way the dependency store makes one
               (``crb.core.provision.bundle_key``) and requires exactly one, scoped to
@@ -21,8 +24,10 @@ What it does: Reads .gitleaks.toml with tomllib; finds the allowlist whose secre
               real keys, keys one hex digit short or long, upper-case, prefixed, suffixed,
               embedded, mis-separated; requires every secret-target regex in the config to be
               anchored at both ends (a secret is passed whole or not at all); passes every key
-              the committed evidence that first tripped the rule carries; and refuses any
-              allowlisted path that names a file under docs/, src/ or deploy/.
+              the committed evidence that first tripped the rule carries; refuses any
+              allowlisted path that names a file under docs/, src/ or deploy/; and passes
+              ADR-0025's anchor label alone, literally, while the ADR still derives the
+              anchor key from it.
 How:          Each allowlist regex is evaluated the way gitleaks evaluates it — an unanchored
               search over the captured secret (Go's ``MatchString``); the patterns used here
               mean the same in RE2 and Python's ``re`` (no sample ends in a newline, where
@@ -32,9 +37,9 @@ How:          Each allowlist regex is evaluated the way gitleaks evaluates it �
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md
 Works with:   .gitleaks.toml (under test), src/crb/core/deps.py (``KEY_RE``),
-              src/crb/core/provision.py (``bundle_key``), .github/workflows/ci.yml (the
-              ``security`` job that runs gitleaks 8.30.1), docs/PREVENTION.md (P-675 — the bug
-              this closes)
+              src/crb/core/provision.py (``bundle_key``), docs/adr/0025-routing-v2.md (the
+              anchor label), .github/workflows/ci.yml (the ``security`` job that runs
+              gitleaks 8.30.1), docs/PREVENTION.md (P-675 — the bug this closes)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; the dependency store's key shape changes (move
               KEY_RE and the allowlist together); an allowlist entry is added to .gitleaks.toml.
@@ -254,3 +259,33 @@ def test_the_path_check_refuses_a_planted_path(planted: str) -> None:
     """The path check is not vacuous: an allowlisted path that reaches a guarded tree fails."""
     allowlists = [*_allowlists(_config()), {"paths": [planted]}]
     assert _path_violations(allowlists, _guarded_files())
+
+
+#: ADR-0025's ledger-anchor HMAC label: a public domain-separation string, not a key.
+ANCHOR_LABEL = "crb.ledger.anchor.v1"
+ADR_0025 = ROOT / "docs" / "adr" / "0025-routing-v2.md"
+
+
+def test_the_adr_0025_anchor_label_is_passed_alone() -> None:
+    """The label generic-api-key read as an API key on #69's push 435d2a49 is passed — and
+    only that label, as the whole secret, for that rule (P-675)."""
+    assert f'HMAC(key, "{ANCHOR_LABEL}")' in ADR_0025.read_text("utf-8"), (
+        "ADR-0025 no longer derives the anchor key from this label: drop the allowlist entry"
+    )
+    entries = [
+        e
+        for e in _allowlists(_config())
+        if _targets_secret(e) and any(_passes(p, ANCHOR_LABEL) for p in e.get("regexes", []))
+    ]
+    assert len(entries) == 1, f"expected one allowlist passing {ANCHOR_LABEL!r}, got {entries}"
+    (entry,) = entries
+    assert entry.get("targetRules") == ["generic-api-key"], entry
+    (pattern,) = entry["regexes"]
+    for s in [
+        "crbXledgerXanchorXv1",  # an unescaped dot passes any character
+        "crb.ledger.anchor.v2",
+        "crb.ledger.anchor.v1" + "A1b2C3d4E5f6G7h8",
+        "Z9y8X7w6" + "crb.ledger.anchor.v1",
+        "crb.ledger.anchor.v1.token",
+    ]:
+        assert not _passes(pattern, s), f"{pattern!r} passes {s!r}"
