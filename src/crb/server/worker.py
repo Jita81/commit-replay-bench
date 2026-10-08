@@ -2777,19 +2777,10 @@ class Worker:
                     )
                     return
                 actor = self._auto_stages_actor(db, run.repo) or run.actor
-                body = RunCreateRequest(repo=run.repo, kind=nxt)
+                body = self._chain_body(run.repo, nxt)
                 new = new_run(body, actor=actor)
                 new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
-                # the API's submit gate, whole: the login check reads the worker's shared
-                # CRB_BUILDER__LOGIN_TTL_S and the default binary, as the claim check does
-                gate = SimpleNamespace(
-                    home=self.home,
-                    factory=self.settings.factory,
-                    builder=SimpleNamespace(
-                        login_ttl_s=self.settings.builder_login_ttl_s, claude_binary=""
-                    ),
-                )
-                submit_refusals(db, gate, body, new)
+                submit_refusals(db, self._chain_gate_settings(), body, new)
                 stage_queued(db, new)
                 append_system_event(
                     db,
@@ -2808,6 +2799,30 @@ class Worker:
                 _LOG.info("chain: %s queued after %s (%s)", nxt, run.id[:8], run.repo)
         except Exception:
             _LOG.exception("chain: queuing the next stage after %s failed", run.id[:8])
+
+    @staticmethod
+    def _chain_body(repo: str, kind: str) -> RunCreateRequest:
+        """The request the chain queues ``kind`` with — what ``POST /runs`` would be sent
+        (``qualify_first`` unset, so on)."""
+        return RunCreateRequest(repo=repo, kind=kind)
+
+    def _chain_gate_settings(self) -> SimpleNamespace:
+        """The settings ``submit_refusals`` is handed for a body :meth:`_chain_body` builds
+        — not the whole gate: the ``qualify_first: false`` branch reads ``settings.sandbox``,
+        which no chained body reaches. ``builder`` is here because the gate reads
+        ``settings.builder`` for every kind before the login check looks at the kind; the
+        check cannot fire for a free stage (``builder_login.GATED_KINDS`` is ``BUILD_KINDS``,
+        disjoint from ``FREE_CHAIN``, and the chain refuses a build kind), so the TTL and
+        the binary carry no meaning today. ``tests/test_worker_chain.py`` records every
+        attribute the gate reads off the API's ``Settings`` for each chain body and fails
+        when one does not resolve here (docs/PREVENTION.md P-672, P-676)."""
+        return SimpleNamespace(
+            home=self.home,
+            factory=self.settings.factory,
+            builder=SimpleNamespace(
+                login_ttl_s=self.settings.builder_login_ttl_s, claude_binary=""
+            ),
+        )
 
     @staticmethod
     def _next_free_stage(kind: str) -> str | None:
