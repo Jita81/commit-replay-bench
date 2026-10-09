@@ -74,10 +74,10 @@ Works with:   docs/dod/STANDARD.md (the format it enforces, and the ``## Operato
               docs/dod/GAP-ANALYSIS.md (its output),
               docs/reviews/2026-09-17-enterprise-front-end.md §9 (the F-/B- backlog a gap
               may cite), ui/src/App.tsx and ui/src/components/Layout.tsx (the routes
-              and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts,
-              ui/src/help/hints-ratchet.instrument.tsx, ui/src/help/hints-ratchet.onramp.tsx,
-              ui/src/help/hints-ratchet.shell.tsx and ui/src/help/hints-ratchet.test.tsx
-              (hint: references; read by glob, so a new ratchet file is read too),
+              and JOURNEY_STEPS every artefact must cover), ui/src/help/hints.ts and its
+              ratchet files (hint: references; read by glob, so a new ratchet file is read
+              too: today hints-ratchet.instrument.tsx, hints-ratchet.onramp.tsx,
+              hints-ratchet.shell.tsx and hints-ratchet.test.tsx, all in ui/src/help/),
               docs/API.md (route: references),
               .github/workflows/ci.yml (the dod job that runs --check, with full history and
               the pull request's base in DOD_BASE, since the artefacts' git history vouches
