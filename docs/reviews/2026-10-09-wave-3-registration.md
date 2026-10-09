@@ -186,11 +186,16 @@ records it; apparatus 2.0–2.2]**. A review's headline verdict is `ok`, `defect
 merge this as-is", and a regression is never mergeable. Who wrote those verdicts is being
 corrected in PR #80, still open; this record cites only their scale.
 
-**Paul's 10.** Paul reviews 10 of the clean blind patches himself, drawn once, when the
-campaign's last run has ended **[aspiration — the draw decision 7 asks for; not yet made]**:
+**Paul's 10.** Paul reviews 10 of the clean blind patches himself. They are drawn once, after
+the campaign's last run has ended and Claude has filed a verdict on every clean blind row a
+reading counts **[aspiration — the draw decision 7 asks for; not yet made]**. The draw is salted
+with a word Paul chooses and sends only then. It is recorded in the decision log with the draw.
+Without that salt the 10 would be computable from the commits in advance, so the reviewer could
+know which of its verdicts Paul will check:
 
 1. order the commits that have at least one clean blind patch by ascending
-   `sha256("crb.wave3.review.v1|" + repo + "|" + commit sha)`, both repositories together;
+   `sha256("crb.wave3.review.v1|" + salt + "|" + repo + "|" + commit sha)`, both repositories
+   together;
 2. walk them in that order and take one patch from each, from the first of `A0`, `A0+L` and
    `S1@<author>` that has one, until 10 are taken;
 3. if fewer than 10 commits qualify, walk again for a second patch from each, in the same arm
@@ -296,7 +301,7 @@ and stops and reports at the first step whose success condition fails.
 | 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the record is committed under `docs/reviews/` | not yet run |
 | 9 | stage 2 | Paul releases it in writing; the release is recorded in the decision log; Claude Code resumes step 6 with the line at $108.00 | the release is recorded before any stage-2 run is queued | not yet run |
 | 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 5 | not yet run |
-| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3); Claude Code draws Paul's 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals | not yet run |
+| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals | not yet run |
 
 The registration body for cobra XS:
 
