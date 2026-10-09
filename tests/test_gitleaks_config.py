@@ -4,30 +4,37 @@
 gitleaks' ``generic-api-key`` rule read each one as an API key: main's security job went red
 on 406ff747's push and every pull request whose scan range reaches that commit fails
 (docs/PREVENTION.md P-675). ``.gitleaks.toml`` now allowlists the key's exact shape. These
-tests hold that allowlist to ``crb.core.deps.KEY_RE`` — the one place the product defines the
-shape — so a key format change cannot leave the scanner allowlisting the old shape (and
-failing on the new one), and a loosened regex cannot start passing credentials that merely
-begin like a key. The full-history scan found one more value of the same class — ADR-0025's
-public HMAC label ``crb.ledger.anchor.v1``, read as a key on #69's push 435d2a49 — and its
-entry is held to the ADR's text the same way.
+tests hold that allowlist's regex to ``crb.core.deps.KEY_RE`` — the one place the product
+defines the shape — string for string, so a key format change cannot leave the scanner
+allowlisting the old shape (and failing on the new one), and a loosened regex cannot start
+passing credentials that merely begin like a key. The full-history scan found one more value
+of the same class — ADR-0025's public HMAC label ``crb.ledger.anchor.v1``, read as a key on
+#69's push 435d2a49 — and its entry is held to the label the ADR derives the key from the
+same way. A sample of near-misses cannot prove two regexes agree (an alternation slips past
+any sample), so agreement is exact, and the whole allowlist is pinned entry by entry: a new
+entry is a new decision, made in this file with its reason.
 
 Navigation
 ----------
-What it is:   The gate that ties .gitleaks.toml's dependency-store-key allowlist to the
-              product's key shape, its anchor-label allowlist to ADR-0025, and keeps the
-              config's path doctrine.
+What it is:   The gate that holds .gitleaks.toml's allowlist regexes to the product's own
+              definitions (``KEY_RE``'s pattern, ADR-0025's anchor label), pins the whole
+              allowlist inventory, and keeps the config's path doctrine.
 What it does: Reads .gitleaks.toml with tomllib; finds the allowlist whose secret-target
               regexes pass a key made the way the dependency store makes one
               (``crb.core.provision.bundle_key``) and requires exactly one, scoped to
               ``generic-api-key``, matched against the captured secret, with nothing but
-              regexes; requires that it and ``KEY_RE`` accept and refuse the same strings —
-              real keys, keys one hex digit short or long, upper-case, prefixed, suffixed,
-              embedded, mis-separated; requires every secret-target regex in the config to be
-              anchored at both ends (a secret is passed whole or not at all); passes every key
-              the committed evidence that first tripped the rule carries; refuses any
-              allowlisted path that names a file under docs/, src/ or deploy/; and passes
-              ADR-0025's anchor label alone, literally, while the ADR still derives the
-              anchor key from it.
+              regexes, whose one regex is ``KEY_RE.pattern`` string for string (and
+              ``KEY_RE`` flag-free) — near-misses (keys one hex digit short or long,
+              upper-case, prefixed, suffixed, embedded, mis-separated) are kept as
+              documentation; requires every secret-target regex in the config to be anchored
+              at both ends (a secret is passed whole or not at all); passes every key the
+              committed evidence that first tripped the rule carries; refuses any allowlisted
+              path that names a file under docs/, src/ or deploy/; passes ADR-0025's anchor
+              label alone, as ``^`` + ``re.escape(label)`` + ``$`` with the label read from the
+              ADR (no code constant defines it yet), while the ADR still derives the anchor key
+              from it; and requires the config's allowlists, each by its shape (scope and every
+              key but ``description``), to equal ``EXPECTED_ALLOWLISTS`` — planted extra,
+              widened, unscoped and removed entries are refused, a reworded description is not.
 How:          Each allowlist regex is evaluated the way gitleaks evaluates it — an unanchored
               search over the captured secret (Go's ``MatchString``); the patterns used here
               mean the same in RE2 and Python's ``re`` (no sample ends in a newline, where
@@ -35,22 +42,27 @@ How:          Each allowlist regex is evaluated the way gitleaks evaluates it �
               here: no test job installs it, and a test may not skip on its own tool lookup
               (P-744, P-747).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
-ADRs:         docs/adr/0019-qualification-is-posture-relative.md
+ADRs:         docs/adr/0019-qualification-is-posture-relative.md, docs/adr/0025-routing-v2.md
 Works with:   .gitleaks.toml (under test), src/crb/core/deps.py (``KEY_RE``),
               src/crb/core/provision.py (``bundle_key``), docs/adr/0025-routing-v2.md (the
               anchor label), .github/workflows/ci.yml (the ``security`` job that runs
               gitleaks 8.30.1), docs/PREVENTION.md (P-675 — the bug this closes)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository; the dependency store's key shape changes (move
-              KEY_RE and the allowlist together); an allowlist entry is added to .gitleaks.toml.
+              KEY_RE, the allowlist and ``EXPECTED_ALLOWLISTS`` together); the product defines
+              the anchor label in code (read it from that constant here instead of the ADR);
+              an allowlist entry is added, changed or removed in .gitleaks.toml (change
+              ``EXPECTED_ALLOWLISTS`` with its one-line reason).
 """
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import tomllib
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -72,17 +84,25 @@ def _config() -> dict[str, Any]:
         return tomllib.load(fh)
 
 
-def _allowlists(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Every allowlist the config declares: the top-level ``[[allowlists]]``, the legacy
-    single ``[allowlist]`` and any rule's own."""
-    out: list[dict[str, Any]] = list(config.get("allowlists", []))
+def _scoped_allowlists(config: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Every allowlist the config declares, with where it applies: the top-level
+    ``[[allowlists]]`` and the legacy single ``[allowlist]`` (``global``), and any rule's own
+    (``rule <id>``)."""
+    for entry in config.get("allowlists", []):
+        yield "global", entry
     if "allowlist" in config:
-        out.append(config["allowlist"])
+        yield "global", config["allowlist"]
     for rule in config.get("rules", []):
-        out.extend(rule.get("allowlists", []))
+        scope = f"rule {rule.get('id', '?')}"
+        for entry in rule.get("allowlists", []):
+            yield scope, entry
         if "allowlist" in rule:
-            out.append(rule["allowlist"])
-    return out
+            yield scope, rule["allowlist"]
+
+
+def _allowlists(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every allowlist the config declares, wherever it applies."""
+    return [entry for _, entry in _scoped_allowlists(config)]
 
 
 def _targets_secret(entry: dict[str, Any]) -> bool:
@@ -160,7 +180,20 @@ def test_the_dep_key_allowlist_is_scoped_to_one_rule_and_the_secret_alone() -> N
 
 
 def test_the_allowlist_accepts_exactly_what_key_re_accepts() -> None:
+    """Exactly: the allowlist's one regex is ``KEY_RE``'s own pattern, string for string, and
+    ``KEY_RE`` carries no flag that would read that pattern differently. A sample cannot prove
+    two regexes agree — ``^(dep_[0-9a-f]{64}|[A-Za-z0-9]{20,40})$`` agrees with ``KEY_RE`` on
+    every near-miss below and passes a 32-character token — so the near-misses are kept as
+    documentation of what the shape refuses, not as the proof."""
     (pattern,) = _dep_key_allowlist()["regexes"]
+    assert pattern == KEY_RE.pattern, (
+        f"the allowlist regex {pattern!r} is not crb.core.deps.KEY_RE's pattern "
+        f"{KEY_RE.pattern!r}: move them together, and EXPECTED_ALLOWLISTS with them (P-675)"
+    )
+    assert KEY_RE.flags == re.UNICODE, (
+        f"KEY_RE carries flags {KEY_RE.flags!r}: the allowlist regex cannot carry them, so "
+        "the two no longer read the same pattern the same way (P-675)"
+    )
     for key in _real_keys():
         for s in [key, *_near_misses(key)]:
             assert _passes(pattern, s) == bool(KEY_RE.fullmatch(s)), (
@@ -261,26 +294,49 @@ def test_the_path_check_refuses_a_planted_path(planted: str) -> None:
     assert _path_violations(allowlists, _guarded_files())
 
 
-#: ADR-0025's ledger-anchor HMAC label: a public domain-separation string, not a key.
+#: ADR-0025's ledger-anchor HMAC label: a public domain-separation string, not a key. The
+#: product defines it only in the ADR (no constant under src/ yet); the test reads it from
+#: there and requires this copy, which names the samples below, to match.
 ANCHOR_LABEL = "crb.ledger.anchor.v1"
 ADR_0025 = ROOT / "docs" / "adr" / "0025-routing-v2.md"
+#: How ADR-0025 writes the derivation: ``HMAC(key, "<label>")``.
+ADR_LABEL_RE = re.compile(r'HMAC\(key, "([^"]+)"\)')
+
+
+def _adr_anchor_label() -> str:
+    """The one label ADR-0025 derives the ledger anchor's key from."""
+    labels = sorted(set(ADR_LABEL_RE.findall(ADR_0025.read_text("utf-8"))))
+    assert len(labels) == 1, (
+        f"ADR-0025 derives the anchor key from {labels}, not one label: with none, drop the "
+        "allowlist entry and its EXPECTED_ALLOWLISTS row; with several, decide each (P-675)"
+    )
+    return labels[0]
 
 
 def test_the_adr_0025_anchor_label_is_passed_alone() -> None:
     """The label generic-api-key read as an API key on #69's push 435d2a49 is passed — and
-    only that label, as the whole secret, for that rule (P-675)."""
-    assert f'HMAC(key, "{ANCHOR_LABEL}")' in ADR_0025.read_text("utf-8"), (
-        "ADR-0025 no longer derives the anchor key from this label: drop the allowlist entry"
+    only that label, as the whole secret, for that rule (P-675). The entry's one regex is
+    ``^`` + ``re.escape(label)`` + ``$`` string for string, the label read from the ADR; the
+    look-alikes below document what that refuses, they are not the proof."""
+    label = _adr_anchor_label()
+    assert label == ANCHOR_LABEL, (
+        f"ADR-0025's label is now {label!r}: move ANCHOR_LABEL, the allowlist entry and "
+        "EXPECTED_ALLOWLISTS with it"
     )
     entries = [
         e
         for e in _allowlists(_config())
-        if _targets_secret(e) and any(_passes(p, ANCHOR_LABEL) for p in e.get("regexes", []))
+        if _targets_secret(e) and any(_passes(p, label) for p in e.get("regexes", []))
     ]
-    assert len(entries) == 1, f"expected one allowlist passing {ANCHOR_LABEL!r}, got {entries}"
+    assert len(entries) == 1, f"expected one allowlist passing {label!r}, got {entries}"
     (entry,) = entries
     assert entry.get("targetRules") == ["generic-api-key"], entry
     (pattern,) = entry["regexes"]
+    literal = "^" + re.escape(label) + "$"
+    assert pattern == literal, (
+        f"the label allowlist regex {pattern!r} is not the literal, anchored label {literal!r}: "
+        "move them together, and EXPECTED_ALLOWLISTS with them (P-675)"
+    )
     for s in [
         "crbXledgerXanchorXv1",  # an unescaped dot passes any character
         "crb.ledger.anchor.v2",
@@ -289,3 +345,152 @@ def test_the_adr_0025_anchor_label_is_passed_alone() -> None:
         "crb.ledger.anchor.v1.token",
     ]:
         assert not _passes(pattern, s), f"{pattern!r} passes {s!r}"
+
+
+#: The two secret-target regexes as EXPECTED_ALLOWLISTS pins them — literals, so the inventory
+#: does not move when KEY_RE or the ADR does (the tests above tie them to those).
+DEP_KEY_REGEX = "^dep_[0-9a-f]{64}$"
+LABEL_REGEX = r"^crb\.ledger\.anchor\.v1$"
+
+#: The whole allowlist .gitleaks.toml may carry, entry by entry, each with why it may exist —
+#: written as the entry's shape (every key but ``description``; all apply globally). Adding,
+#: widening, narrowing or removing an entry fails test_the_allowlist_inventory_is_pinned until
+#: this table changes with its reason (P-675).
+EXPECTED_ALLOWLISTS: tuple[tuple[str, dict[str, Any]], ...] = (
+    (
+        "the test tree, by path alone: redaction tests carry deliberately fake credentials",
+        {"paths": ["^tests/"]},
+    ),
+    (
+        "one whole dependency-store key (KEY_RE: dep_ + sha256 hex), for generic-api-key alone",
+        {"targetRules": ["generic-api-key"], "regexes": [DEP_KEY_REGEX]},
+    ),
+    (
+        "ADR-0025's ledger-anchor HMAC label, whole and literal, for generic-api-key alone",
+        {"targetRules": ["generic-api-key"], "regexes": [LABEL_REGEX]},
+    ),
+    (
+        "documentation placeholders ([REDACTED], sk-xxxxxxxx, key = <...>), on the whole match",
+        {
+            "regexTarget": "match",
+            "regexes": [
+                r"(?i)\[REDACTED[A-Z-]*\]",
+                r"(?i)sk-(?:live|test|proj|ant)?-?x{8,}",
+                r"(?i)(?:secret|token|password|api[_-]?key)\s*[=:]\s*<[^>]+>",
+            ],
+        },
+    ),
+)
+
+#: One allowlist's shape: where it applies and every key but ``description``, lists sorted
+#: (gitleaks reads each list as a set).
+Shape = tuple[tuple[str, object], ...]
+
+
+def _shape(entry: dict[str, Any], scope: str) -> Shape:
+    fields: dict[str, object] = {"(scope)": scope}
+    for key, value in entry.items():
+        if key != "description":
+            fields[key] = tuple(sorted(value)) if isinstance(value, list) else value
+    return tuple(sorted(fields.items()))
+
+
+def _inventory_drift(config: dict[str, Any]) -> list[str]:
+    """Every allowlist shape the config carries that EXPECTED_ALLOWLISTS does not, and every
+    expected shape the config lacks — counted, so a duplicate is drift too."""
+    found = Counter(_shape(entry, scope) for scope, entry in _scoped_allowlists(config))
+    expected = Counter(_shape(entry, "global") for _, entry in EXPECTED_ALLOWLISTS)
+    return [f"not in EXPECTED_ALLOWLISTS: {dict(s)}" for s in (found - expected).elements()] + [
+        f"missing from .gitleaks.toml: {dict(s)}" for s in (expected - found).elements()
+    ]
+
+
+def test_the_allowlist_inventory_is_pinned() -> None:
+    """The whole allowlist is EXPECTED_ALLOWLISTS, shape for shape: a widened, loosened, added
+    or removed entry — or one moved into a rule — fails until the table changes with its
+    reason, so no allowlist decision is made in .gitleaks.toml alone."""
+    for reason, entry in EXPECTED_ALLOWLISTS:
+        assert reason.strip() and "\n" not in reason, f"{entry} needs a one-line reason"
+    assert _inventory_drift(_config()) == []
+
+
+def _entry_with(config: dict[str, Any], field: str, value: str) -> dict[str, Any]:
+    (entry,) = [e for e in config["allowlists"] if value in e.get(field, [])]
+    return entry
+
+
+def _plant_broad_entry(config: dict[str, Any]) -> None:
+    config["allowlists"].append(
+        {
+            "description": "planted",
+            "targetRules": ["generic-api-key"],
+            "regexes": ["^[A-Za-z0-9]{32}$"],
+        }
+    )
+
+
+def _plant_dep_key_alternation(config: dict[str, Any]) -> None:
+    _entry_with(config, "regexes", DEP_KEY_REGEX)["regexes"] = [
+        "^(dep_[0-9a-f]{64}|[A-Za-z0-9]{20,40})$"
+    ]
+
+
+def _plant_label_alternation(config: dict[str, Any]) -> None:
+    _entry_with(config, "regexes", LABEL_REGEX)["regexes"] = [
+        r"^(crb\.ledger\.anchor\.v1|[A-Za-z0-9]{32,40})$"
+    ]
+
+
+def _plant_unscoped_dep_key(config: dict[str, Any]) -> None:
+    del _entry_with(config, "regexes", DEP_KEY_REGEX)["targetRules"]
+
+
+def _plant_docs_path(config: dict[str, Any]) -> None:
+    _entry_with(config, "paths", "^tests/")["paths"].append("^docs/")
+
+
+def _plant_stopword(config: dict[str, Any]) -> None:
+    _entry_with(config, "regexes", DEP_KEY_REGEX)["stopwords"] = ["key"]
+
+
+def _plant_removed_label(config: dict[str, Any]) -> None:
+    config["allowlists"].remove(_entry_with(config, "regexes", LABEL_REGEX))
+
+
+def _plant_rule_allowlist(config: dict[str, Any]) -> None:
+    config["rules"] = [{"id": "generic-api-key", "allowlists": [{"regexes": ["^dep_"]}]}]
+
+
+def _plant_legacy_allowlist(config: dict[str, Any]) -> None:
+    config["allowlist"] = {"paths": ["^tests/"]}
+
+
+PLANTS: dict[str, Callable[[dict[str, Any]], None]] = {
+    "an extra broad entry": _plant_broad_entry,
+    "an alternation in the dep_ key regex": _plant_dep_key_alternation,
+    "an alternation in the label regex": _plant_label_alternation,
+    "the dep_ key entry unscoped from its rule": _plant_unscoped_dep_key,
+    "a docs/ path on the test-tree entry": _plant_docs_path,
+    "a stopword on the dep_ key entry": _plant_stopword,
+    "the label entry removed": _plant_removed_label,
+    "a rule's own allowlist": _plant_rule_allowlist,
+    "a duplicate entry in the legacy [allowlist] table": _plant_legacy_allowlist,
+}
+
+
+@pytest.mark.parametrize("plant", sorted(PLANTS))
+def test_the_inventory_refuses_a_planted_change(plant: str) -> None:
+    """The negative control: each change, planted in a parsed copy of the config, is drift —
+    from a baseline with none, so the refusal is the plant's and not the config's."""
+    config = copy.deepcopy(_config())
+    assert _inventory_drift(config) == [], "the control needs the config to match the inventory"
+    PLANTS[plant](config)
+    assert _inventory_drift(config), f"the inventory let {plant!r} through"
+
+
+def test_the_inventory_ignores_descriptions() -> None:
+    """The positive control: rewording every description changes no entry's shape."""
+    config = copy.deepcopy(_config())
+    for entry in config["allowlists"]:
+        entry["description"] = "reworded"
+    assert _inventory_drift(config) == []
