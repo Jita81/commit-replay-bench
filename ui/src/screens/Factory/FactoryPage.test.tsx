@@ -44,6 +44,7 @@ import type { FactoryBacklog, FactoryEvolutionPrefill, FactoryTask } from '../..
 import { HINTS } from '../../help/hints'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
 import { FactoryPage, deliverableCount, estimateFromMap, nextId, refusalSentence, stepsFor, withEvolution } from './FactoryPage'
+import { ACCEPTANCE } from './acceptance.fixture'
 
 const NO_ROUTE = { route: '', reason_code: '', reason: '', n: 0, point: 0, ci_low: 0, ci_high: 0, apparatus_versions: [], deliverable: false }
 const DELIVER = { route: 'deliver', reason_code: 'deliver', reason: 'ok', n: 40, point: 0.95, ci_low: 0.835, ci_high: 0.985, apparatus_versions: ['2.2'], verification_tier: 'human-verified', signed: true, deliverable: true }
@@ -399,6 +400,48 @@ describe('FactoryPage — the shipped contract', () => {
     await userEvent.click(within(form).getByRole('button', { name: 'Fund a calibration build' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/factory/alpha/items/I-1/calibration')).toBe(true))
     expect(JSON.parse(String(calls.find((c) => c.method === 'POST')!.init?.body))).toEqual({ reason: 'measure the cell once' })
+  })
+
+  it('a funded calibration build links to where a second person writes its held-out tests (ADR-0026 item 8)', async () => {
+    const funded: FactoryTask = { ...TASKS[0]!, calibration: { approver: 'u-1', reason: 'forward reading', event: 'e1', created: '2026-09-28T10:00:00+00:00' } }
+    mockApi(base({ 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /factory/alpha/tasks': [funded] }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    const link = within(row).getByTestId('acceptance-link-I-1')
+    expect(link).toHaveAttribute('href', '/factory/acceptance?repo=alpha')
+    expect(link).toHaveTextContent('Held-out acceptance tests')
+    expect(link.closest('[data-hint]')).toHaveAttribute('data-hint', 'link.factory.acceptance')
+  })
+
+  it('a funded calibration build with no held-out tests yet warns its item and the run preview (verify_fwd_user)', async () => {
+    const funded: FactoryTask = { ...TASKS[0]!, calibration: { approver: 'u-1', reason: 'forward reading', event: 'e1', created: '2026-09-28T10:00:00+00:00' } }
+    const open = { ...ACCEPTANCE.assignments[0]!, item_id: 'I-1' }
+    mockApi(base({ 'GET /factory/alpha/tasks': [funded], 'GET /factory/alpha/acceptance': { repo: 'alpha', assignments: [open] } }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    const state = await within(row).findByTestId('acceptance-state-I-1')
+    expect(state).toHaveTextContent('Held-out tests are not written yet: if a run builds it now, its first attempt is not graded on them and no forward reading counts it.')
+    expect(state).toHaveAttribute('data-hint', 'item.factory.acceptance_state')
+    const box = await screen.findByTestId('before-you-start')
+    await waitFor(() => expect(box).toHaveTextContent('1 funded calibration build has no held-out tests yet: built now, its first attempt is not graded on them and no forward reading counts it'))
+  })
+
+  it('a failed read of the held-out tests is said on the item, never shown as nothing to warn about', async () => {
+    const funded: FactoryTask = { ...TASKS[0]!, calibration: { approver: 'u-1', reason: 'forward reading', event: 'e1', created: '2026-09-28T10:00:00+00:00' } }
+    mockApi(base({ 'GET /factory/alpha/tasks': [funded], 'GET /factory/alpha/acceptance': () => envelope(500, 'internal', 'the store is down') }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    expect(await within(row).findByTestId('acceptance-state-I-1')).toHaveTextContent('Whether its held-out tests are written could not be read (the store is down)')
+  })
+
+  it('a funded calibration build whose held-out tests are written says the next run grades on them', async () => {
+    const funded: FactoryTask = { ...TASKS[0]!, calibration: { approver: 'u-1', reason: 'forward reading', event: 'e1', created: '2026-09-28T10:00:00+00:00' } }
+    const written = { ...ACCEPTANCE.assignments[0]!, item_id: 'I-1', status: 'written' as const, can_write: false }
+    mockApi(base({ 'GET /factory/alpha/tasks': [funded], 'GET /factory/alpha/acceptance': { repo: 'alpha', assignments: [written] } }))
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    const row = await screen.findByTestId('factory-item-I-1')
+    expect(await within(row).findByTestId('acceptance-state-I-1')).toHaveTextContent('Held-out tests are written: the next run grades its first attempt on them.')
+    expect(await screen.findByTestId('before-you-start')).not.toHaveTextContent('no held-out tests yet')
   })
 
   it('a stopped item shows what to change and the replacement item already drafted (G-904)', async () => {

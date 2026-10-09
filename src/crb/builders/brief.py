@@ -74,6 +74,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from crb.builders.base import DEFAULT_RULES, BuildBrief
+from crb.core import acceptance as _acceptance
 from crb.core import context_arm as _arms
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_BLIND
@@ -111,12 +112,12 @@ CTX_LABELS: tuple[str, ...] = (
 TICKET_MESSAGE = "message"
 
 #: How a factory ``S2`` row was graded (ADR-0026 items 2 and 8): ``held_out`` only when a
-#: second person's acceptance tests, kept outside the builder's tree, were graded too
-#: (``product.truth.215`` — not built yet); ``none`` when the grade read only the test the
-#: builder saw. Only ``held_out`` makes an ``S2`` row a routing first attempt.
-LABEL_ACCEPTANCE = "acceptance"
-ACCEPTANCE_HELD_OUT = "held_out"
-ACCEPTANCE_NONE = "none"
+#: second person's acceptance tests, kept outside the builder's tree, were graded too;
+#: ``none`` when the grade read only the test the builder saw. The vocabulary is the core's
+#: (``crb.core.acceptance``), ONE spelling for the writer and every reader (P-690).
+LABEL_ACCEPTANCE = _acceptance.LABEL_ACCEPTANCE
+ACCEPTANCE_HELD_OUT = _acceptance.ACCEPTANCE_HELD_OUT
+ACCEPTANCE_NONE = _acceptance.ACCEPTANCE_NONE
 
 #: The shortest identifier the leak guard compares; shorter words are too common to say
 #: anything about the commit (the playbook's leak gate uses the same floor).
@@ -163,13 +164,10 @@ def arm_base(arm: str) -> str:
 
 def counts_as_s2_first_attempt(labels: Mapping[str, str]) -> bool:
     """Whether a factory row may count toward an ``S2`` reading (ADR-0026 items 2 and 8):
-    only an ``S2`` row that carries POSITIVE evidence of held-out acceptance grading. A row
-    graded only on the test the builder saw is clean almost by construction, so the
-    absence of the stamp — or ``none`` — never counts. The reading (stream R) reads this."""
-    return (
-        arm_base(labels.get(LABEL_CONTEXT_ARM, "")) == ARM_S2
-        and labels.get(LABEL_ACCEPTANCE, "") == ACCEPTANCE_HELD_OUT
-    )
+    only an ``S2`` row that carries POSITIVE evidence of held-out acceptance grading — the
+    core's one rule, :func:`crb.core.acceptance.held_out_graded`, which the reading and the
+    ledger's routing first attempts apply too (P-690)."""
+    return _acceptance.held_out_graded(labels)
 
 
 def arm_carries_loop(arm: str) -> bool:

@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 4b: an organisation's own classes of work, and calibration builds graded on a second
+  person's held-out tests** (north-star Wave 4b, streams CLS and FWD;
+  [#74](https://github.com/Jita81/commit-replay-bench/pull/74)). `/classes` lets an organisation
+  propose its own class set: each class a child of a global class, with one rule reading only what
+  a ticket carries; commits held out by derivation and confirmation sets; other people label a
+  sample blind; a second person signs; unsigned, it routes nothing. On `/factory/acceptance`
+  a second person writes held-out tests from the ticket alone; a calibration build's first attempt
+  is graded on them, stamped `S2`, and opens no pull request; only a forward reading's delivery
+  promotes a ceiling. DL-330 to DL-335, P-680 to P-696, P-770 to P-772.
+
 - **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
   ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table
   the application updates, `invitations` and `decisions_due`. A split-role PostgreSQL store

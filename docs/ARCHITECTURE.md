@@ -482,7 +482,19 @@ Layering: `crb.core.taxonomy` (data) ← `crb.core.classify` (label, evidence, r
 reply parser, prompt) ← `crb.core.spec` (task spec); `crb.builders.labeller` adds its
 transports (OpenAI-compatible chat; `claude -p` with `--tools ""`, one turn, structured
 output, the same `auth = api_key | cli` environment as the builder). Extending the
-vocabulary changes the instrument (§7.4).
+global vocabulary changes the instrument (§7.4).
+
+**An organisation's own classes** (ADR-0026 item 9, DL-330) are a third source that never
+moves the cell key: a class-set version `<org>/classes@vN` (`crb.core.class_sets`) whose
+classes are children of the global ones and whose one rule reads only ticket-time fields
+(`TicketFields`: text, work-item type, component, labels, points — no path, line count or
+churn). The rule's class of each commit is written to the label table (`class_labels`); every
+row from apparatus `2.4` on records the version in `labels.taxonomy`; a reading of a single
+class carries `org_class`, which gives it a cell, a seeded order and a budget of its own; the entry gate's
+`CellRef` carries the version and the class. A version is held out by commit (derivation and
+confirmation sets), checked by its validity report and signed by two people through the
+library's one rule (`crb.core.library.refuse_same_person`); until then it routes nothing.
+Adding an organisation's class is data, never an apparatus bump.
 
 ---
 

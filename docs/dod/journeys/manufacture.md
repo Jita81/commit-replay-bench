@@ -4,7 +4,7 @@ level: journey
 name: Manufacture (freeze → run → PR → outcome)
 scope: manufacture
 parent: dod.stream.manufacture-and-deliver
-children: [dod.page.factory, dod.page.tasks-repo-taskid]
+children: [dod.page.factory, dod.page.tasks-repo-taskid, dod.page.factory-acceptance]
 persons: [operator, approver, viewer]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand

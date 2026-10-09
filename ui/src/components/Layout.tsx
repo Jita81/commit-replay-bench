@@ -115,6 +115,8 @@ const STEP_OF: Array<{ pattern: string; step: number; sub?: string }> = [
   // intake is a sub-step of the factory, reached by a link ON /factory rather than by a nav
   // entry of its own (ui/src/App.reachability.test.ts holds that the link exists)
   { pattern: '/factory/intake', step: 3, sub: 'intake' },
+  // held-out tests are a sub-step too, reached from a funded calibration build on /factory
+  { pattern: '/factory/acceptance', step: 3, sub: 'held-out tests' },
 ]
 
 /**
