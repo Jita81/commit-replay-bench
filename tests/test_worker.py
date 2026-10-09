@@ -2210,6 +2210,42 @@ def test_an_s1_run_whose_test_authors_credential_went_stops_at_claim(
     assert list(h.worker.ledger.rows(run_id=run.id)) == []
 
 
+def test_an_s1_run_on_the_deployments_test_author_whose_credential_went_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-676's claim seam, at its call site: an ``S1`` run that names no ``test_author`` of
+    its own calls the deployment's (``CRB_FACTORY__TEST_AUTHOR``), which the claim-time
+    check reads off ``factory`` in the settings ``_credential_gone`` hands it. Those must be
+    exactly ``Worker._claim_check_settings`` — ``home`` and ``factory``, the stand-in the
+    read-recording tests in tests/test_worker_chain.py check — never a narrower one built
+    in place: ``credential_refusal`` reads ``factory`` with a ``getattr`` default, so a
+    stand-in without it checks no author at all and the run goes past the claim."""
+    from dataclasses import replace as dc_replace
+
+    from crb.server.settings import FactorySettings
+
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    h.worker.settings = dc_replace(
+        h.worker.settings, factory=FactorySettings(test_author="editblock:gpt-oss-120b")
+    )
+    handed: list[Any] = []
+    check = worker_mod.credential_refusal
+
+    def recorded(run: Run, settings: Any) -> None:
+        handed.append(settings)
+        check(run, settings)
+
+    monkeypatch.setattr(worker_mod, "credential_refusal", recorded)
+    run = h.enqueue("blind", params_json={"arm": "S1"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: "), done.error
+    assert "nothing was built" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert [vars(s) for s in handed] == [vars(h.worker._claim_check_settings())]
+
+
 def test_a_factory_run_builds_nothing_in_a_cell_with_no_proven_standard(h: Harness) -> None:
     """ADR-0026 item 8, as the worker runs it: with no registered reading (the seam's truth
     until stream R lands) the item stops ``no_proven_standard`` before any spend, delivery
