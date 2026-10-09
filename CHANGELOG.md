@@ -19,7 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   downloaded, and every route decision is a door. Factory, Home and Baseline start at the board and
   close the loop on screen. Every stop condition has a surface, and the operator guide states what
   operating costs. The walk chains its free stages and turns mine notes into decisions. Tier-1 proof
-  walks each journey through its own doors. DL-300 to DL-320, P-600 to P-672.
+  walks each journey through its own doors. DL-300 to DL-320, P-600 to P-677.
 
 - **Wave 4: the context library and its miners, the second person, go-live on evidence, truthful
   screens** (north-star Wave 4, streams L, M, S, P and T;
