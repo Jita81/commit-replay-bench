@@ -1431,7 +1431,7 @@ class Worker:
         ONLY: the check names the variable or the file, never reads a value into anything
         this returns. ``""`` when every builder the run would call has its credential."""
         try:
-            credential_refusal(run, SimpleNamespace(home=self.home, factory=self.settings.factory))
+            credential_refusal(run, self._claim_check_settings())
         except ApiError as exc:
             why = exc.message.removesuffix(" — nothing was queued")
             return (
@@ -1439,6 +1439,16 @@ class Worker:
                 "nothing was built"
             )
         return ""
+
+    def _claim_check_settings(self) -> SimpleNamespace:
+        """The settings ``credential_refusal`` is handed at claim (:meth:`_credential_gone`)
+        — a stand-in for the API's ``Settings`` carrying what the check reads: ``factory``
+        (its ``test_author``, an ``S1`` run's default author) and ``home`` (the secrets
+        directory, ``secrets_dir_for``). ``tests/test_worker_chain.py`` records every
+        attribute the check reads off the API's own ``Settings`` for a run of every kind the
+        worker can claim and fails when one does not resolve here (docs/PREVENTION.md
+        P-672, P-676)."""
+        return SimpleNamespace(home=self.home, factory=self.settings.factory)
 
     def _dead_login(self, run: Run, emitter: Emitter) -> str | None:
         """The error that fails ``run`` before any build when a login it would call was
@@ -2776,10 +2786,7 @@ class Worker:
                         nxt,
                     )
                     return
-                actor = self._auto_stages_actor(db, run.repo) or run.actor
-                body = self._chain_body(run.repo, nxt)
-                new = new_run(body, actor=actor)
-                new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
+                body, new = self._chain_request(db, run, nxt)
                 submit_refusals(db, self._chain_gate_settings(), body, new)
                 stage_queued(db, new)
                 append_system_event(
@@ -2787,7 +2794,7 @@ class Worker:
                     trace_id=system_trace_id("repo", run.repo),
                     action=CHAIN_EVENT,
                     repo=run.repo,
-                    actor=actor,
+                    actor=new.actor,
                     payload={
                         "chained_from": run.id,
                         "from_kind": run.kind,
@@ -2800,22 +2807,31 @@ class Worker:
         except Exception:
             _LOG.exception("chain: queuing the next stage after %s failed", run.id[:8])
 
-    @staticmethod
-    def _chain_body(repo: str, kind: str) -> RunCreateRequest:
-        """The request the chain queues ``kind`` with — what ``POST /runs`` would be sent
-        (``qualify_first`` unset, so on)."""
-        return RunCreateRequest(repo=repo, kind=kind)
+    def _chain_request(self, db: Session, run: Run, nxt: str) -> tuple[RunCreateRequest, Run]:
+        """The request the chain queues ``nxt`` with after ``run``, and the run made of it —
+        the ONE construction of what the chain submits: the body ``POST /runs`` would be
+        sent (``qualify_first`` unset, so on), ``new_run`` under the person whose switch-on
+        the repository's trace records (else ``run``'s actor), ``params.chained_from``
+        naming ``run``. :meth:`_chain_next_stage` hands exactly this pair to
+        ``submit_refusals``, and ``tests/test_worker_chain.py`` gates exactly this pair
+        over the API's own ``Settings`` (docs/PREVENTION.md P-676)."""
+        actor = self._auto_stages_actor(db, run.repo) or run.actor
+        body = RunCreateRequest(repo=run.repo, kind=nxt)
+        new = new_run(body, actor=actor)
+        new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
+        return body, new
 
     def _chain_gate_settings(self) -> SimpleNamespace:
-        """The settings ``submit_refusals`` is handed for a body :meth:`_chain_body` builds
-        — not the whole gate: the ``qualify_first: false`` branch reads ``settings.sandbox``,
-        which no chained body reaches. ``builder`` is here because the gate reads
-        ``settings.builder`` for every kind before the login check looks at the kind; the
-        check cannot fire for a free stage (``builder_login.GATED_KINDS`` is ``BUILD_KINDS``,
-        disjoint from ``FREE_CHAIN``, and the chain refuses a build kind), so the TTL and
-        the binary carry no meaning today. ``tests/test_worker_chain.py`` records every
-        attribute the gate reads off the API's ``Settings`` for each chain body and fails
-        when one does not resolve here (docs/PREVENTION.md P-672, P-676)."""
+        """The settings ``submit_refusals`` is handed for a request :meth:`_chain_request`
+        makes — not the whole gate: the ``qualify_first: false`` branch reads
+        ``settings.sandbox``, which no chained body reaches. ``builder`` is here because the
+        gate reads ``settings.builder`` for every kind before the login check looks at the
+        kind; the check cannot fire for a free stage (``builder_login.GATED_KINDS`` is
+        ``BUILD_KINDS``, disjoint from ``FREE_CHAIN``, and the chain refuses a build kind),
+        so the TTL and the binary carry no meaning today. ``tests/test_worker_chain.py``
+        records every attribute the gate reads off the API's ``Settings`` for each request
+        the chain makes and fails when one does not resolve here (docs/PREVENTION.md P-672,
+        P-676)."""
         return SimpleNamespace(
             home=self.home,
             factory=self.settings.factory,
