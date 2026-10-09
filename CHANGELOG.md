@@ -31,6 +31,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   Retry, ledger exports are recorded, and caught controls carry a witness (`controls.v3`: rerun
   every repository's controls). DL-109 to DL-120, P-408 to P-411.
 
+- **CI bounds and retries the Playwright browser install** (P-751;
+  [#71](https://github.com/Jita81/commit-replay-bench/pull/71)). On 7 October the browser install
+  sat silent in apt on six required browser jobs until each job's own timeout cancelled it.
+  `scripts/ci_install_browser.py` now runs the install in its own process group, stops an
+  attempt that prints nothing for 300 s, kills the group and any `apt-get` left behind, and
+  retries up to five times within a budget each job sets at no more than half its timeout. A
+  workflow that runs `playwright install` itself fails a test.
+
 - **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
   (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
   [#69](https://github.com/Jita81/commit-replay-bench/pull/69)). Apparatus 2.4: every row stamps
