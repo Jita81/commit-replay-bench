@@ -146,6 +146,7 @@ from crb.builders.budget import CostMeter, price_for
 from crb.core.execution import (
     POST_KILL_DRAIN_S,
     SandboxUnavailable,
+    kill_group_if_unreaped,
     read_lines,
     reap_after_kill,
 )
@@ -408,9 +409,11 @@ class SubprocessHandle:
 
     A watchdog timer kills the process group at the deadline even if it is
     silent (a blocked ``readline`` would otherwise wait forever). After a kill the
-    stdout pipe is read for at most :attr:`POST_KILL_DRAIN_S` more: one a process outside
-    the group still holds is abandoned with the lines read so far (P-774). stderr goes to
-    a temporary file so it can never fill a pipe and deadlock the stdout reader.
+    stdout pipe is read for at most :attr:`POST_KILL_DRAIN_S` more, however much is still
+    written; then the group is killed once more (on macOS a child forked as the first
+    signal was sent survives it, still in the group — P-774), and a pipe a process outside
+    the group still holds after that is abandoned with the lines read so far. stderr goes
+    to a temporary file so it can never fill a pipe and deadlock the stdout reader.
     """
 
     #: After a kill, the most :meth:`lines` waits on the stdout pipe and the reap (module
@@ -434,6 +437,9 @@ class SubprocessHandle:
             start_new_session=True,
         )
         self._timed_out = False
+        #: Held around every signal to the group, and so around the reap a ``Popen.kill``
+        #: fallback does: the second group kill is never sent to a reaped pid.
+        self._signal_lock = threading.Lock()
         self._killed_at: float | None = None
         self._stderr = ""
         self._watchdog = threading.Timer(timeout_s, self._on_deadline)
@@ -452,6 +458,7 @@ class SubprocessHandle:
                 killed_at=lambda: self._killed_at,
                 bound_s=self.POST_KILL_DRAIN_S,
                 what=what,
+                kill_again=self._kill_again,
             )
         finally:
             self._watchdog.cancel()
@@ -475,12 +482,20 @@ class SubprocessHandle:
     def kill(self) -> None:
         """SIGKILL the whole process group (the CLI spawns its own children), falling back
         to the process alone when the group is already gone."""
-        try:
-            os.killpg(self._proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            self._proc.kill()
+        with self._signal_lock:
+            try:
+                os.killpg(self._proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                self._proc.kill()
         if self._killed_at is None:
             self._killed_at = time.monotonic()
+
+    def _kill_again(self) -> bool:
+        """The second group kill :func:`read_lines` sends at the bound. Only the reader's
+        own thread reaps the child, after the lines end; a ``Popen.kill`` fallback in
+        :meth:`kill` may reap it too, under the same lock."""
+        with self._signal_lock:
+            return kill_group_if_unreaped(self._proc)
 
     @property
     def returncode(self) -> int | None:

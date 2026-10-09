@@ -421,7 +421,7 @@ def _execute(
         start_new_session=True,
         env=client,
     )
-    drain = OutputDrain(proc)
+    drain = OutputDrain(proc, leads_group=True)
     breach = ""
     deadline = started + config.fetch_timeout_s
     while not drain.join(_POLL_S):
@@ -438,7 +438,7 @@ def _execute(
         except (ProcessLookupError, PermissionError):
             with contextlib.suppress(OSError):
                 proc.kill()
-        # bounded: a process the kill missed may hold the pipes for ever (P-774)
+        # bounded, with a second group kill: a process the kill missed may hold the pipes (P-774)
         drain.finish_after_kill(POST_KILL_DRAIN_S, f"fetch container {name}")
         break
     out, err = drain.text()
