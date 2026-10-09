@@ -35,6 +35,7 @@ import { INSTRUMENT_SCREENS } from './hints-ratchet.instrument'
 const HOVER: Record<string, HintId> = {
   '/factory': 'pill.factory.frozen',
   '/factory/intake': 'pill.intake.queued',
+  '/factory/acceptance': 'tag.acceptance.status',
   '/posture': 'summary.posture.apparatus',
   '/repos': 'col.repos.probe',
   '/repos/:name': 'stat.repo.gold',
@@ -42,6 +43,7 @@ const HOVER: Record<string, HintId> = {
   '/runs/:id': 'stat.run.clean',
   '/tasks/:repo/:taskId': 'tile.task.target_tests',
   '/library/:repo': 'stat.library.count',
+  '/classes': 'stat.classes.count',
   '/capability': 'stat.capability.coverage',
   '/routing': 'policy.routing.looks',
   '/oracle': 'stat.oracle.mean',

@@ -225,6 +225,41 @@ test.describe('10 factory (fixture_gold)', () => {
     await expect(box).toContainText(/a planning range, not a measured interval|measured mean over n = \d+ attempts with a known cost at apparatus/)
   })
 
+  // ADR-0026 item 8 — a second person writes the held-out acceptance tests the calibration build's
+  // first attempt is graded on: the approver persona, who neither wrote I-1 nor funded its build
+  // (the admin did both, and runs it), from the ticket alone — never its failing test
+  test('a second person writes I-1’s held-out acceptance tests from the ticket alone', async ({ page, browser }) => {
+    await ensureApprover(page)
+    // the admin wrote the ticket and funded the build: the page says why they may not
+    await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-1`)
+    // before anyone writes them, the item says a run now would build it without them
+    await expect(page.getByTestId('acceptance-state-I-1')).toContainText('Held-out tests are not written yet')
+    await page.getByTestId('acceptance-link-I-1').click()
+    await expect(page).toHaveURL(/\/factory\/acceptance\?repo=/)
+    await expect(page.getByTestId('acceptance-why-I-1')).toContainText(/ticket.s author/)
+    const context = await browser.newContext()
+    const second = await context.newPage()
+    try {
+      await signIn(second, APPROVER, APPROVER_PASS)
+      await second.goto(`/factory/acceptance?repo=${encodeURIComponent(t.name)}`)
+      const card = second.getByTestId('acceptance-I-1')
+      await expect(card).toContainText('calc needs a multiply(a, b) function.')
+      await expect(second.getByTestId('acceptance-status-I-1')).toContainText('tests needed')
+      // the ticket's own failing test is never on the page
+      await expect(card).not.toContainText('assert multiply(3, 4) == 12')
+      // no forward reading is registered on this cell in the walk: the page says none will count them
+      await expect(card).toContainText('no reading will count the result')
+      const form = card.getByRole('form', { name: 'Write the held-out tests for I-1' })
+      await form.getByLabel('Test file').fill('tests/test_multiply_held_out.py')
+      await form.getByLabel('Held-out acceptance tests').fill('from calc import multiply\n\n\ndef test_multiply_held_out():\n    assert multiply(7, 6) == 42\n')
+      await form.getByRole('button', { name: 'Save the held-out tests' }).click()
+      await expect(second.getByTestId('acceptance-saved-I-1')).toContainText('The builder never sees them')
+      await expect(second.getByTestId('acceptance-status-I-1')).toContainText('tests written')
+    } finally {
+      await context.close()
+    }
+  })
+
   test('Run the factory with the fixture builder → the run succeeds and the chain moves', async ({ page }) => {
     await page.goto(`/factory?repo=${encodeURIComponent(t.name)}`)
     const box = page.getByTestId('before-you-start')
@@ -271,6 +306,30 @@ test.describe('10 factory (fixture_gold)', () => {
     await expect(drawer).toContainText('fixture_gold')
     await page.keyboard.press('Escape')
     await expect(drawer).toBeHidden()
+
+    // ADR-0026 item 8 — the calibration build's first attempt was graded on the second person's
+    // held-out tests and stamped S2 inside its row; it opened no pull request (step-I-1-delivery
+    // above), and the page reads the result (the fixture builds no source, so it fails them)
+    const chain = (await (await page.request.get(`${env.baseUrl}/api/v1/factory/${encodeURIComponent(t.name)}/evidence?item_id=I-1`)).json()) as {
+      items: Array<{ kind: string; payload: { row_hash?: string; result?: string; oracle_commit?: string } }>
+    }
+    const graded = chain.items.filter((e) => e.kind === 'acceptance.graded')
+    expect(graded).toHaveLength(1)
+    const build = chain.items.find((e) => e.kind === 'build.graded' && e.payload.row_hash === graded[0]!.payload.row_hash)!
+    const grades = (await (await page.request.get(`${env.baseUrl}/api/v1/grades?repo=${encodeURIComponent(t.name)}&task_id=${build.payload.oracle_commit}`)).json()) as {
+      items: Array<{ row_hash: string; trial: string; labels: Record<string, string> }>
+    }
+    const row = grades.items.find((g) => g.row_hash === graded[0]!.payload.row_hash)!
+    expect(row.trial).toBe('r1')
+    expect(row.labels.context_arm).toBe('S2')
+    expect(row.labels.acceptance).toBe('held_out')
+    expect(row.labels.acceptance_result).toBe(graded[0]!.payload.result)
+    expect(chain.items.some((e) => e.kind === 'delivery.opened')).toBe(false)
+    await page.goto(`/factory/acceptance?repo=${encodeURIComponent(t.name)}`)
+    await expect(page.getByTestId('acceptance-status-I-1')).toContainText('graded')
+    await expect(page.getByTestId('acceptance-I-1')).toContainText('First attempt')
+    await expect(page.getByTestId('acceptance-I-1')).toContainText('No forward reading counts it')
+    await page.goto(`/factory?repo=${encodeURIComponent(t.name)}&item=I-2`)
 
     // I-2: the entry gate stopped it before any spend — NOT BUILT, and the sentence says the
     // way forward (measure the cell, or an approver's calibration build); its unsigned gap

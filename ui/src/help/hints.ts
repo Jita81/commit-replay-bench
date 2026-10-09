@@ -536,7 +536,17 @@ export const HINTS = {
   'col.library.interval':
     'The 95 % Wilson interval of the proven standard’s first-attempt clean rate.',
   'col.library.next':
-    'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go.',
+    'The apparatus the standard was proven under, or what would prove the cell: a registered reading and how far its pool of commits has to go. For a ceiling, what a calibration build needs and where its forward reading stands.',
+  'item.library.forward':
+    'The forward reading of this ceiling: calibration builds graded on held-out acceptance tests a second person wrote after it was registered, counted in the order their tests were written. n is how many tickets’ first attempts it has read, and how many of them passed; “collecting” means it has not reached its next look yet. It delivers only under the look rule, and only then does the ceiling become a standard.',
+  'field.library.forward_builder':
+    'The builder the calibration builds run on, as a factory run’s ladder names it. A ticket built by another builder leaves the forward reading instead of counting.',
+  'field.library.forward_model':
+    'The model the calibration builds run on. A ticket built by another model leaves the forward reading instead of counting.',
+  'field.library.forward_provider':
+    'The provider that serves the model, as the factory records it on each row. A ticket built through another provider leaves the forward reading instead of counting.',
+  'button.library.register_forward':
+    'Register the forward reading now, under your name. It spends from this cell’s one error budget and cannot be withdrawn; it counts only calibration builds whose held-out tests are written after this moment.',
   'col.library.characteristic':
     'One of the nine product quality characteristics of ISO/IEC 25010:2023. Named, never claimed: the product does not certify conformity.',
   'col.library.checks':
@@ -591,6 +601,127 @@ export const HINTS = {
     'The commit the miners read: a sha, a branch or a tag the repository’s clone holds. Leave it empty for the clone’s head. The run is pinned to the full sha, so a branch that moves later does not move it.',
   'button.library.mine':
     'Read the repository’s own files at that commit — its decision records, code owners and layout, lint and formatter settings, tests and change history — and propose entries from them. No model is called. Nothing is signed: each proposal waits for a person to sponsor it and a different approver to sign it. The same commit, with the same graded rows, proposes nothing new.',
+
+  'link.library.classes':
+    'Your organisation’s own classes of work: the kinds of change it makes, each a child of one global class, proposed by one person and signed by another.',
+
+  // ── /classes (screens/Classes/ClassesPage.tsx) — an organisation’s classes, ADR-0026 item 9
+  'link.classes.back':
+    'Back to the context library of the version’s repository, where this page’s door is. A class set waiting for its second person is not listed on Decisions yet: find it here.',
+  'stat.classes.count':
+    'How many class-set versions exist, and how many route. A version routes only when a second person has signed it and its validity report passes.',
+  'col.classes.version':
+    'The version’s name: the organisation, then classes@v and its number. A new number is a new version; nothing is ever edited.',
+  'col.classes.status':
+    'Proposed until an approver who is not its sponsor signs it; revoked when an approver withdraws it with a reason.',
+  'tag.classes.status':
+    'Where the version stands: proposed, signed by a second person, or revoked. Only a signed version whose report passes routes.',
+  'col.classes.sponsor':
+    'The person who proposed the version and so put it forward. They can never also sign it.',
+  'col.classes.approver':
+    'The approver who signed the version. It is always a different person from its sponsor.',
+  'col.classes.routes':
+    'Whether tickets and readings may use this version. It routes nothing while it is unsigned, revoked or failing its validity report.',
+  'tag.classes.routes':
+    'Routes means two people signed it and its validity report passes. Routes nothing means tickets are read by the global classes and no reading can license its classes.',
+  'col.classes.open':
+    'Open the version to read its classes, its validity report and how its commits were held out.',
+  'button.classes.open':
+    'Show this version’s classes, report and split below, and its labelling screen when you can label.',
+  'col.classes.class':
+    'The class’s short name, used on tickets as crb:class= and on every screen that names it.',
+  'col.classes.definition':
+    'What the work in this class is, in the organisation’s own words. Read its page for the whole description.',
+  'col.classes.parent':
+    'The global class this one refines. The cell key keeps the parent, so the class splits a global cell and never changes what is shared outside the organisation.',
+  'col.classes.derivation_n':
+    'How many derivation commits the rule puts in this class. Only these are labelled, shown as examples and used to judge the rule.',
+  'col.classes.confirmation_n':
+    'How many confirmation commits the rule puts in this class. Only these can license it, through a reading registered after the version was signed.',
+  'col.classes.page':
+    'Each class has a page that says what it is, what a ticket in it must carry and what is proven for each size.',
+  'button.classes.page':
+    'Open the page for this class below: what the work is, examples, what a ticket carries, the context and what is proven.',
+  'col.classes.measure':
+    'One check of the validity report. Every check but the points check must pass before the version routes; the points check decides only whether story points size a ticket.',
+  'col.classes.result':
+    'The check’s result: a share of commits, κ for agreement with a person, or the number of cells with enough confirmation commits.',
+  'col.classes.n':
+    'How many commits, labels or tickets the result was read over. A small number is why a check fails even when the result looks good.',
+  'col.classes.state':
+    'Pass, fail, or not applicable when the check has too few linked tickets to apply. Withheld means you are part-way through labelling the sample, so its agreement is kept from you until you finish.',
+  'tag.classes.measure_state':
+    'Whether this check meets the threshold the architecture decision sets. Not applicable counts as passing; a failing check stops the version routing. Withheld is the agreement, kept from a person until they have labelled all their sample.',
+  'tag.classes.points':
+    'Whether story points size a ticket in this organisation. Points not used means tickets are sized by the churn tiers, reading their size and the next larger one; it never stops the version routing.',
+  'col.classes.words':
+    'What the result means, in words, with the counts behind it.',
+  'col.classes.threshold':
+    'The bar the check must clear. The values are proposals the operator fixes; the page shows the ones in force.',
+  'col.classes.repo':
+    'A repository whose commits this version describes.',
+  'col.classes.derivation':
+    'Commits held for deriving the classes: about one in three, chosen by a seeded hash before any class was proposed.',
+  'col.classes.confirmation':
+    'Commits held for licensing: the rest. A commit used to derive or check a class never licenses it.',
+  'button.classes.sign':
+    'Sign the version you read. The signature names its exact content, so a changed version needs a new signature.',
+  'button.classes.sign_own':
+    'You proposed this version, so you cannot sign it. A different approver must.',
+  'field.classes.reason':
+    'Why the version is being withdrawn. The reason is kept on the record next to your name.',
+  'button.classes.revoke':
+    'Withdraw the version. It routes nothing from now on; the record keeps it and the reason.',
+  'col.classes.size_repo':
+    'The repository this size’s cell is read in. A reading speaks for one repository.',
+  'col.classes.size':
+    'The size tier of the change, from the churn of the merged commit at replay.',
+  'col.classes.size_confirmation':
+    'Qualified confirmation commits of this class and size. A first look needs 20 of them, in a reading registered after the version was signed.',
+  'col.classes.standard':
+    'The least context a registered reading proved for this class and size, or no proven standard. A ceiling admits calibration builds only.',
+  'col.classes.next':
+    'What would prove this cell: the reading to register and how many confirmation commits it has, or the reading that proved it. While the set routes nothing, the reason is said once above the table.',
+  'col.classes.entry':
+    'A signed library entry scoped to this class or its parent, as kind/slug.',
+  'col.classes.statement':
+    'What the entry says, as two people signed it.',
+  'col.classes.people':
+    'The person who put the entry forward and the different person who signed it.',
+  'col.classes.effect':
+    'Whether giving a builder this entry changed its pass rate. It reads unmeasured until an arm is read with and without it.',
+  'row.classes.definition':
+    'What the work in this class is, in the organisation’s words, and the global class it refines.',
+  'row.classes.rule':
+    'The one rule that puts a ticket in this class. It reads only what a ticket carries, and the same rule reads a replayed commit’s ticket or message.',
+  'row.classes.examples':
+    'Up to five derivation commits the rule puts in this class, from the one in eight set aside as examples. They are never offered for labelling, so no one labels a commit they were shown as the rule’s answer; confirmation commits are never shown, because they are kept for the licence.',
+  'row.classes.ticket':
+    'The questions a ticket in this class must answer before it enters manufacturing: the readiness slots of its parent, and any the signed work type adds. Some parents set none yet; the page then says so.',
+  'row.classes.context':
+    'The signed project knowledge for this kind of work, from each repository’s library. It reaches a builder only once an arm has measured it.',
+  'row.classes.label_message':
+    'The commit’s message, as it was written. It may name the fix, which is why a linked ticket is preferred when there is one.',
+  'row.classes.label_ticket':
+    'The ticket the commit links, as it stood before the change was made, or a note that the message stands in for one.',
+  'row.classes.label_diff':
+    'How many source and test files changed, and how many lines. It helps you read the commit; the rule never reads it.',
+  'field.classes.label':
+    'The class you read this commit as. What each class means is listed below. Choose none of these when no class fits; that is an answer too.',
+  'row.classes.label_definitions':
+    'Each class’s title and what it means, in the organisation’s words, so you label by meaning. The rule that puts a ticket in a class is not shown here.',
+  'button.classes.label':
+    'Save your label. It is recorded under your name, no one else’s label is shown to you, and the next commit takes its place.',
+  'field.classes.org':
+    'The organisation whose classes these are. Its versions are numbered in order from 1.',
+  'field.classes.repos':
+    'The repositories whose commits the version describes, separated by commas.',
+  'field.classes.lines':
+    'One class per line: its short name, its global parent, a title, what it is, and the words a ticket in it uses, separated by semicolons. The global classes a parent can be are listed below the field.',
+  'row.classes.global_parents':
+    'Every global class a class of yours can refine, with what it means. Your class splits its parent’s cell and never changes what is shared outside the organisation.',
+  'button.classes.propose':
+    'Record the version with you as its sponsor and read every commit by its rule. Nothing routes until a different approver signs it and its report passes.',
 
   // ── /decisions (screens/Decisions/DecisionsPage.tsx)
   'stat.decisions.apparatus':
@@ -917,6 +1048,36 @@ export const HINTS = {
     'What happens to a ticket when the pull request this product opened is merged or closed. With nothing configured, the product never changes anybody’s ticket state.',
   'stat.intake.last_poll':
     'What the last read did: how many tickets were in the column, how many were read this time, how many were already handled at that revision, and how many became items.',
+  'banner.acceptance.second_person':
+    'The two-person rule for held-out tests (ADR-0026 item 8): the person who writes them is never the ticket’s author, never the approver who funded the calibration build and never the person whose run builds it.',
+  'tag.acceptance.status':
+    'Where the held-out tests stand: tests needed (none written), tests written (waiting for the build), being built (a run claimed it, so tests written now could not be held out) or graded (its first attempt was run against them). Built, not graded means the build ran without them, and the sentence below says why; cannot be graded means the ticket was attempted before, so no later attempt is graded on them.',
+  'stat.acceptance.forward':
+    'Whether a forward reading will count this ticket. A forward reading counts only tickets whose held-out tests were written after it was registered on this kind and size; without one, the tests still grade the build, but no reading counts the result.',
+  'stat.acceptance.cell':
+    'The kind of change and its estimated size — the cell whose ceiling this calibration build helps to test forward.',
+  'stat.acceptance.description':
+    'The ticket’s description exactly as it was written. Write your tests from this and the criteria below, not from any code.',
+  'stat.acceptance.criteria':
+    'The ticket’s acceptance criteria as written. The ticket’s own failing test is deliberately not shown: your tests must be independent of it.',
+  'stat.acceptance.funded':
+    'The approver who funded this calibration build, by name, and when. They may not write its held-out tests.',
+  'stat.acceptance.record':
+    'Who wrote the held-out tests, when, the SHA-256 digest of the files and their paths. The tests themselves are stored whole and never shown again.',
+  'stat.acceptance.result':
+    'Whether the build’s first attempt passed your tests, and whether a forward reading counts it. Only a first attempt is ever graded on them; a later attempt never counts. A build that hangs on your tests fails them.',
+  'item.acceptance.why_not':
+    'Why you cannot write held-out tests for this build, or why they were not used: you wrote the ticket or funded the build, your role cannot write tests, they are already written, the build has started or ran without them, or the ticket was attempted before.',
+  'field.acceptance.path':
+    'Where the test file goes in the repository. It is filled in with a path this repository’s test runner treats as a test; it must not be the ticket’s own test file.',
+  'field.acceptance.content':
+    'The held-out tests: what a correct change must do, written from the ticket alone. They are run against the build only after the builder has finished, and the builder never sees them.',
+  'button.acceptance.save':
+    'Store your held-out tests under your name, with the time and their digest. One set per calibration build; it cannot be changed afterwards.',
+  'link.factory.acceptance':
+    'Open the held-out acceptance tests for this calibration build: who may write them, whether they are written, and the first attempt’s result once it is built.',
+  'item.factory.acceptance_state':
+    'Whether a second person’s held-out acceptance tests are ready for this calibration build. Without them, the build’s first attempt is graded on the ticket’s own test only, and no forward reading counts it.',
   'button.intake.switch_on':
     'Start reading the watched column on this repository. This is the consent to read that board and to comment and label on its tickets; it is recorded under your name.',
   'button.intake.switch_off':
@@ -2244,9 +2405,14 @@ export const MIN_HINTS: Record<string, number> = {
   '/decisions': 6,
   // a signed entry, an unsigned one and a work type with slots, sizes and the quality table
   '/library/:repo': 30,
+  // a signed version with its report and split, a class's page and the labelling screen
+  '/classes': 40,
   '/signoff': 30,
   '/factory': 28,
   '/factory/intake': 16,
+  // one open assignment with its form and one written one: the status tag, six summary rows,
+  // the two fields, the Save button and the two-person banner
+  '/factory/acceptance': 12,
   // the five groups plus the go-live checklist (both its lists) and the print control
   '/posture': 39,
   '/repos': 8,

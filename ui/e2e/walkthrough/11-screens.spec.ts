@@ -133,6 +133,22 @@ const VIEWPORTS = [
   { width: 375, height: 812 },
 ] as const
 
+/**
+ * A persona × width pass's time limit, from the routes it walks. It was a fixed six minutes, and
+ * the two routes PR #74 added took three of the four 1280 passes past it, part-way through a
+ * late route's axe sweep (P-771). Main's passes took 5.1 to 5.3 min over 25 routes, about 13 s
+ * a route [measured — n = 4 persona × width passes; method: the Playwright durations in CI run
+ * 37830002438 at c7136999, shards 2 and 3; apparatus n/a, a CI timing, not a graded row]. The
+ * limit allows 20 s a route and a minute for signing in, so a route added is time added. It is
+ * a hang detector, not a budget: the job's own budget still fails a job that creeps past 80 %
+ * of its timeout (scripts/ci_job_budget.py, P-051).
+ */
+const PASS_SIGN_IN_MS = 60_000
+const PASS_PER_ROUTE_MS = 20_000
+function passTimeoutMs(routeCount: number): number {
+  return PASS_SIGN_IN_MS + routeCount * PASS_PER_ROUTE_MS
+}
+
 const test = base
 test.describe.configure({ mode: 'serial' })
 
@@ -177,6 +193,7 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/signoff', 'signoff'],
     ['/factory', 'factory'],
     ['/factory/intake', 'factory-intake'],
+    ['/factory/acceptance', 'factory-acceptance'],
     ['/posture', 'posture'],
     ['/runs', 'runs'],
     [c.runId ? `/runs/${c.runId}` : '/runs/none', 'runs-detail'],
@@ -184,6 +201,9 @@ function routes(c: Ctx): Array<{ path: string; slug: string; about: boolean }> {
     ['/repos', 'repos'],
     [`/repos/${r}`, 'repos-detail'],
     [`/library/${r}`, 'library-repo'],
+    // an organisation's classes of work: the index a persona reaches from the library's door
+    // (spec 15 opens a class's page and the labelling form and sweeps those with axe; P-687)
+    ['/classes', 'classes'],
     ['/capability', 'capability'],
     ['/routing', 'routing'],
     ['/oracle', 'oracle'],
@@ -601,7 +621,7 @@ test.describe('11-screens: every route × persona × width, with the About block
   for (const persona of SHARD_PERSONAS) {
     for (const vp of VIEWPORTS) {
       test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
-        test.setTimeout(6 * 60_000)
+        test.setTimeout(passTimeoutMs(routes(ctx).length))
         await page.setViewportSize({ width: vp.width, height: vp.height })
         // /login as the signed-out screen first — checked like every other route, before
         // anyone signs in (G-192)

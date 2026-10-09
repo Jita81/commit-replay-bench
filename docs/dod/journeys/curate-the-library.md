@@ -4,7 +4,7 @@ level: journey
 name: Curate the context library
 scope: curate-the-library
 parent: dod.stream.decide-and-license
-children: [dod.page.library-repo]
+children: [dod.page.library-repo, dod.page.classes]
 persons: [operator, approver, viewer, admin]
 owner: ui
 status: partial                # WRITTEN BY THE CHECKER — never by hand

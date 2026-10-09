@@ -55,6 +55,8 @@ from crb.store.ledger import _to_model
 from crb.store.models import (
     APPEND_ONLY_TABLES,
     Base,
+    ClassLabelRow,
+    ClassSetActRow,
     Event,
     EvidencePackRow,
     LibraryActRow,
@@ -83,18 +85,37 @@ def _deployment_grants() -> str:
     return found[0]
 
 
-def _grant_as_the_guide_says(c: Any, *, role: str, password: str, schema: str) -> None:
-    """Run DEPLOYMENT §3.3's grants on connection ``c`` (the owner's) for ``role``, with
-    the test's database and schema in place of ``crb`` and ``public``."""
+#: A table grant in the guide's SQL: its privileges, then the tables it names.
+_TABLE_GRANT = r"GRANT ([A-Z, ]+?) ON (?!ALL |SCHEMA |DATABASE |TABLES |SEQUENCES )([\w, ]+?) TO"
+
+
+def _grant_as_the_guide_says(
+    c: Any,
+    *,
+    role: str,
+    password: str = "",
+    schema: str,
+    sql: str = "",
+    without: frozenset[str] = frozenset(),
+) -> None:
+    """Run DEPLOYMENT §3.3's grants (or ``sql``, another of the guide's blocks) on
+    connection ``c`` (the owner's) for ``role``, with the test's database and schema in
+    place of ``crb`` and ``public``. ``without`` drops tables from each table grant: the
+    block as it read before a revision added them."""
     import re
 
+    def drop(m: re.Match[str]) -> str:
+        kept = [t.strip() for t in m.group(2).split(",") if t.strip() not in without]
+        return f"GRANT {m.group(1)} ON {', '.join(kept)} TO"
+
     database = c.execute(text("SELECT current_database()")).scalar_one()
-    sql = _deployment_grants()
+    sql = sql or _deployment_grants()
     sql = re.sub(r"\bcrb_app\b", role, sql).replace("'<secret>'", f"'{password}'")
     sql = sql.replace("DATABASE crb ", f"DATABASE {database} ")
     sql = sql.replace("SCHEMA public", f"SCHEMA {schema}")
     lines = [ln for ln in sql.splitlines() if not ln.lstrip().startswith("--")]
-    for stmt in " ".join(lines).split(";"):
+    joined = re.sub(_TABLE_GRANT, drop, " ".join(lines))
+    for stmt in joined.split(";"):
         if stmt.strip():
             c.execute(text(stmt))
 
@@ -170,6 +191,31 @@ def _one_row(table: str) -> object:
             prev_hash=GENESIS_HASH,
             row_hash="e" * 64,
         )
+    if table == "class_set_acts":
+        return ClassSetActRow(
+            act_id="k" * 32,
+            schema="crb.class_set.v1",
+            org="acme",
+            version_id="acme/classes@v1",
+            digest="d" * 64,
+            act="propose",
+            actor="operator@example.org",
+            body_json={"version": {}},
+            created="2026-09-28T12:00:00+00:00",
+            prev_hash=GENESIS_HASH,
+            row_hash="f" * 64,
+        )
+    if table == "class_labels":
+        return ClassLabelRow(
+            label_id="m" * 32,
+            taxonomy="acme/classes@v1",
+            repo="r",
+            task_id="x" * 40,
+            capability_class="parser-fix",
+            source="person",
+            labeller="operator@example.org",
+            created="2026-09-28T12:00:00+00:00",
+        )
     raise AssertionError(table)
 
 
@@ -182,7 +228,15 @@ def _pk(table: str) -> str:
         "reviews": "seq",
         "task_qualifications": "seq",
         "library_acts": "seq",
+        "class_set_acts": "seq",
+        "class_labels": "seq",
     }[table]
+
+
+def _col(table: str) -> str:
+    """The text column a tampering UPDATE rewrites: the repository, or — for the class sets'
+    acts, which belong to an organisation — the organisation."""
+    return "org" if table == "class_set_acts" else "repo"
 
 
 def _count(b: Backend, table: str) -> int:
@@ -385,10 +439,12 @@ def test_append_only_table_refuses_update(backend: Backend, table: str) -> None:
         s.add(_one_row(table))
         s.commit()
     with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
-        c.execute(text(f"UPDATE {table} SET repo = 'tampered'"))
+        c.execute(text(f"UPDATE {table} SET {_col(table)} = 'tampered'"))
     with backend.engine.connect() as c:
         assert (
-            c.execute(text(f"SELECT COUNT(*) FROM {table} WHERE repo = 'tampered'")).scalar_one()
+            c.execute(
+                text(f"SELECT COUNT(*) FROM {table} WHERE {_col(table)} = 'tampered'")
+            ).scalar_one()
             == 0
         )
     assert _count(backend, table) == 1
@@ -470,7 +526,7 @@ def test_replace_cannot_rewrite_an_append_only_row(backend: Backend, table: str,
         del verb  # one statement stands for both spellings
         stmt = (
             f"INSERT INTO {table} SELECT * FROM {table} "
-            f"ON CONFLICT ({_pk(table)}) DO UPDATE SET repo = 'tampered'"
+            f"ON CONFLICT ({_pk(table)}) DO UPDATE SET {_col(table)} = 'tampered'"
         )
     else:
         stmt = f"{verb} {table} SELECT * FROM {table}"
@@ -478,7 +534,9 @@ def test_replace_cannot_rewrite_an_append_only_row(backend: Backend, table: str,
         c.execute(text(stmt))
     with backend.engine.connect() as c:
         assert (
-            c.execute(text(f"SELECT COUNT(*) FROM {table} WHERE repo = 'tampered'")).scalar_one()
+            c.execute(
+                text(f"SELECT COUNT(*) FROM {table} WHERE {_col(table)} = 'tampered'")
+            ).scalar_one()
             == 0
         )
     assert _count(backend, table) == 1
@@ -814,9 +872,7 @@ def test_the_guides_grants_name_every_table_and_only_the_owner_writes_the_versio
         ln for ln in _deployment_grants().splitlines() if not ln.lstrip().startswith("--")
     )
     grants: dict[str, str] = {}
-    for privs, tables in re.findall(
-        r"GRANT ([A-Z, ]+?) ON (?!ALL |SCHEMA |DATABASE |TABLES |SEQUENCES )([\w, ]+?) TO", sql
-    ):
+    for privs, tables in re.findall(_TABLE_GRANT, sql):
         for t in (x.strip() for x in tables.split(",")):
             assert t not in grants, f"{t} is granted twice"
             grants[t] = " ".join(privs.split())
@@ -826,6 +882,124 @@ def test_the_guides_grants_name_every_table_and_only_the_owner_writes_the_versio
     assert grants["alembic_version"] == "SELECT"
     assert "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT ON TABLES" in sql
     assert "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES" in sql
+
+
+#: The first revision released after DEPLOYMENT §3.3 began giving a later release's tables
+#: the default ``SELECT, INSERT`` grant (PR #63, 2026-09-28). A table a revision from here
+#: on adds reaches an upgraded split-role store with that grant alone.
+_DEFAULT_GRANT_FROM = "0013"
+
+
+def _later_rewritable_tables() -> list[tuple[str, str]]:
+    """``(revision, table)`` for each table §3.3 grants ``UPDATE, DELETE`` that a revision
+    from :data:`_DEFAULT_GRANT_FROM` on added: on a store upgraded across that revision it
+    holds the default grant alone."""
+    import re
+
+    from crb.store.migrate import REVISION_TABLES
+
+    sql = " ".join(
+        ln for ln in _deployment_grants().splitlines() if not ln.lstrip().startswith("--")
+    )
+    rewritable = {
+        t.strip()
+        for privs, tables in re.findall(_TABLE_GRANT, sql)
+        if " ".join(privs.split()) == "SELECT, INSERT, UPDATE, DELETE"
+        for t in tables.split(",")
+    }
+    return [(r, t) for r, t in REVISION_TABLES if r >= _DEFAULT_GRANT_FROM and t in rewritable]
+
+
+def _upgrade_notes() -> dict[str, str]:
+    """DEPLOYMENT §6's "Upgrading to revision" notes, keyed by each revision their heading
+    names. A note runs to the next one, so its ``sql`` block is part of it."""
+    import re
+
+    page = DEPLOYMENT.read_text(encoding="utf-8")
+    upgrade = page.split("\n## 6. Upgrade\n", 1)[1].split("\n## 7. ", 1)[0]
+    notes: dict[str, str] = {}
+    for note in re.split(r"\n(?=\*\*Upgrading to )", upgrade):
+        head = re.match(r"\*\*Upgrading to revisions? ([^*]+)\*\*", note)
+        for rev in re.findall(r"`(\d{4})`", head.group(1)) if head else []:
+            notes[rev] = notes.get(rev, "") + "\n" + note
+    return notes
+
+
+def test_a_later_table_the_application_rewrites_has_an_upgrade_note_that_grants_it() -> None:
+    """A table §3.3 grants ``UPDATE, DELETE`` that a revision after the default grant added
+    is only ``SELECT, INSERT`` on a split-role store upgraded across that revision, so the
+    application's first rewrite of it is refused with ``permission denied``. Revisions 0014
+    and 0015 shipped ``invitations`` and ``decisions_due`` that way with no note (P-754).
+    §3.3 says the release's upgrade notes name the grant: §6 must hold an "Upgrading to
+    revision" note that names the revision, the table and ``UPDATE, DELETE``."""
+    import re
+
+    later, notes = _later_rewritable_tables(), _upgrade_notes()
+    assert later, "no later table is rewritable: the check reads nothing"
+    missing = [
+        f"{t} (revision {r})"
+        for r, t in later
+        if not re.search(rf"\b{t}\b", notes.get(r, ""))
+        or "UPDATE, DELETE" not in " ".join(notes.get(r, "").split())
+    ]
+    assert not missing, f"DEPLOYMENT §6 has no upgrade note granting UPDATE, DELETE on {missing}"
+
+
+def test_the_upgrade_notes_grant_lets_the_application_rewrite_each_later_table(
+    backend: Backend,
+) -> None:
+    """P-754 on PostgreSQL: a split-role store granted as §3.3 read before the later tables
+    existed, then upgraded to head by the owner, refuses the application ``UPDATE`` and
+    ``DELETE`` on each later table it rewrites; the ``sql`` block of that table's §6 note,
+    run as the owner, lets it."""
+    import re
+    import secrets
+
+    from sqlalchemy.engine import make_url
+
+    from crb.store import migrate
+    from crb.store.migrate import REVISION_TABLES
+
+    if backend.dialect != "postgresql":
+        pytest.skip("SQLite has no roles: there is no grant to miss (DEPLOYMENT §3.3)")
+    later, notes = _later_rewritable_tables(), _upgrade_notes()
+    added = frozenset(t for r, t in REVISION_TABLES if r >= _DEFAULT_GRANT_FROM)
+    migrate.upgrade(backend.url, revision=f"{int(_DEFAULT_GRANT_FROM) - 1:04d}")
+    role, password = f"crb_app_{secrets.token_hex(4)}", secrets.token_hex(16)
+    with backend.engine.begin() as c:
+        schema = c.execute(text("SELECT current_schema()")).scalar_one()
+        _grant_as_the_guide_says(c, role=role, password=password, schema=schema, without=added)
+    migrate.upgrade(backend.url)  # the owner's migration job, across the later revisions
+    app_url = (
+        make_url(backend.url)
+        .set(username=role, password=password)
+        .render_as_string(hide_password=False)
+    )
+    app = store_db.make_engine(app_url)
+
+    def rewrites(table: str) -> tuple[str, str]:
+        col = next(c.name for c in Base.metadata.tables[table].columns if not c.primary_key)
+        return f"UPDATE {table} SET {col} = {col}", f"DELETE FROM {table}"
+
+    try:
+        for _, table in later:
+            for stmt in rewrites(table):
+                with pytest.raises(DBAPIError, match="permission denied"), app.begin() as c:
+                    c.execute(text(stmt))
+        blocks = {re.search(r"```sql\n(.*?)```", notes.get(r, ""), re.S) for r, _ in later}
+        assert None not in blocks, "a later table's upgrade note holds no sql block"
+        with backend.engine.begin() as c:
+            for sql in sorted({b.group(1) for b in blocks if b}):
+                _grant_as_the_guide_says(c, role=role, schema=schema, sql=sql)
+        for _, table in later:
+            for stmt in rewrites(table):
+                with app.begin() as c:
+                    c.execute(text(stmt))
+    finally:
+        app.dispose()
+        with backend.engine.begin() as c:
+            c.execute(text(f"DROP OWNED BY {role}"))
+            c.execute(text(f"DROP ROLE {role}"))
 
 
 def test_a_trigger_missing_on_a_split_role_store_is_restored_by_the_owner_not_the_application(
