@@ -55,7 +55,8 @@ READ = re.compile(
     r"|allTextContents|allInnerTexts|boundingBox|all|evaluate|evaluateAll)\("
 )
 #: A line holding one of these retries the read on it.
-RETRIES = ("expect.poll(", ".toPass(")
+#: ``.poll(`` also catches an ``expect`` chained onto the next line.
+RETRIES = (".poll(", ".toPass(")
 
 # Why a read cannot see an earlier render. Each entry in SETTLED names one.
 #: A web-first wait just above proved this content drawn, and nothing redraws it after.
@@ -97,6 +98,12 @@ SETTLED: tuple[tuple[str, str, str], ...] = (
         RETRIED,
     ),
     (
+        "04b-connect-walk.spec.ts",
+        "const label = (await stagePill(page, id).getAttribute('aria-label')) ?? ''",
+        RETRIED,
+    ),
+    ("04b-connect-walk.spec.ts", "const before = (await door.getAttribute('href'))!", WAITED),
+    (
         "05-replay-fake.spec.ts",
         "cellClass = (await first.locator('td').nth(1).textContent())?.trim() ?? ''",
         SAME_COMMIT,
@@ -118,6 +125,11 @@ SETTLED: tuple[tuple[str, str, str], ...] = (
         SAME_COMMIT,
     ),
     ("07-settings-and-a11y.spec.ts", "return (await main.textContent()) ?? ''", SETTLES),
+    (
+        "06c-map-doors.spec.ts",
+        "const waitingN = Number(/^(\\d+) /.exec((await eyebrow.textContent()) ?? '')![1])",
+        WAITED,
+    ),
     (
         "07-settings-and-a11y.spec.ts",
         "const apparatus = (await page.getByTestId('settings-apparatus').textContent())?.trim()",
@@ -481,6 +493,7 @@ def test_the_scan_sees_a_racy_read_and_passes_over_a_retried_one() -> None:
     settled = (
         "// await page.locator('main').textContent()\n"
         "await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(1)\n"
+        "  .poll(async () => (await pill.getAttribute('aria-label')) ?? '', { timeout: 5_000 })\n"
         "await expect(async () => expect(await tile.textContent()).toBe('3')).toPass()\n"
         "const [a, b] = await Promise.all([one(), two()])\n"
     )
