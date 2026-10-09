@@ -1,0 +1,44 @@
+# Pull Docker Hub images through Google's pull-through cache, mirror.gcr.io (P-783).
+#
+# On 2026-10-09 Docker Hub refused GitHub's runners: run 37989331696 lost the same eight jobs
+# on both attempts, all 16 to "429 Too Many Requests … unauthenticated pull rate limit" or to
+# 504s and timeouts from its token endpoint, while dockerstatus.com reported no incident. A runner's address is shared, so its
+# unauthenticated allowance is spent by whoever ran there before. mirror.gcr.io needs no
+# account and no secret; on a miss the daemon falls back to Docker Hub, so it is never worse.
+#
+# The docker daemon reads `registry-mirrors` for `docker pull`, `docker run` and the default
+# builder's `docker build`. BuildKit in a docker-container builder does not: every
+# `docker/setup-buildx-action` passes the same mirror in `buildkitd-config-inline`.
+# Use this step before a job's first docker command, and before `setup-buildx-action` —
+# restarting the daemon would stop a builder container already running.
+# tests/test_ci_docker_hub_mirror.py holds every workflow to both.
+name: Docker Hub through mirror.gcr.io
+description: >-
+  Adds https://mirror.gcr.io to the docker daemon's registry mirrors, keeping the runner's
+  own daemon.json, restarts the daemon and fails unless `docker info` lists the mirror.
+runs:
+  using: composite
+  steps:
+    - name: Add mirror.gcr.io to the docker daemon's registry mirrors, and prove the daemon uses it
+      shell: bash
+      run: |
+        set -euo pipefail
+        cfg=/etc/docker/daemon.json
+        current='{}'
+        if sudo test -s "$cfg"; then current="$(sudo cat "$cfg")"; fi
+        # merge, never overwrite: the runner image's daemon.json carries its own settings
+        merged="$(printf '%s' "$current" | jq -c '.["registry-mirrors"] = (((.["registry-mirrors"] // []) - ["https://mirror.gcr.io"]) + ["https://mirror.gcr.io"])')"
+        sudo mkdir -p /etc/docker
+        printf '%s\n' "$merged" | sudo tee "$cfg" >/dev/null
+        echo "daemon.json: $merged"
+        sudo systemctl restart docker
+        for _ in $(seq 1 30); do
+          if docker info >/dev/null 2>&1; then break; fi
+          sleep 1
+        done
+        mirrors="$(docker info --format '{{json .RegistryConfig.Mirrors}}')"
+        echo "registry mirrors: $mirrors"
+        case "$mirrors" in
+          *'https://mirror.gcr.io'*) ;;
+          *) echo "::error::the docker daemon does not list https://mirror.gcr.io as a registry mirror"; exit 1 ;;
+        esac

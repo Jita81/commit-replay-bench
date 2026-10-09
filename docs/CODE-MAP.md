@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-831 files with a header · 1 exempt (listed at the end).
+832 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -316,7 +316,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py), [`tests/test_provision_quarantine.py`](../tests/test_provision_quarantine.py) | never for a new repository; a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (332 files)
+## `tests` (333 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -385,6 +385,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_check_commit_subject.py`](../tests/test_check_commit_subject.py) | Unit tests for the commit-subject gate (Conventional Commits, an imperative subject, at most 72 characters). | (this is a test file) | never for a new repository; a Conventional Commits type is added to the convention, or the imperative heuristic changes (add the case here in the same change). |
 | [`tests/test_checks.py`](../tests/test_checks.py) | The suite for ``RepoConfig.checks`` / ``RepoChecks`` / ``resolve`` and the two API surfaces that write them (``PUT /repos/{name}`` and ``POST /runs``). | [`tests/test_checks.py`](../tests/test_checks.py) | never for a new repository; a switch is added to the surface or its resolution rule changes. |
 | [`tests/test_checks_pooling.py`](../tests/test_checks_pooling.py) | The pooling ratchet for the "clean means working" switches. | [`tests/test_checks_pooling.py`](../tests/test_checks_pooling.py) | never for a new repository; a switch is added to ``RepoChecks`` (decide which side of the arm it is on, here and in ADR-0024) or a new reader groups rows into cells. |
+| [`tests/test_ci_docker_hub_mirror.py`](../tests/test_ci_docker_hub_mirror.py) | The gate on how CI reaches Docker Hub. | (this is a test file) | never for a new repository — client repositories are not built here; a job starts using docker; the mirror moves; Docker Hub is reached another way. |
 | [`tests/test_ci_gitleaks.py`](../tests/test_ci_gitleaks.py) | Tests of the security job's scan range and of the CI configuration that runs it. | (this is a test file) | never for a new repository (it reads this repository's own CI); ci.yml gains a trigger; the scanner's version or command line changes. |
 | [`tests/test_ci_install_browser.py`](../tests/test_ci_install_browser.py) | Tests of the bounded, retried browser install and of the CI configuration that runs it. | (this is a test file) | never for a new repository (it reads this repository's own CI); a CI job starts installing a Playwright browser (add it to ``INSTALLING``); the wrapper's defaults change; a healthy install is measured silent for longer than ``SLOW_MIRROR_SILENCE_S``. |
 | [`tests/test_ci_job_budget.py`](../tests/test_ci_job_budget.py) | Tests of the job-budget guard and of the CI configuration that runs it and the split tier-1 walkthrough. | (this is a test file) | never for a new repository (it reads this repository's own CI); a long CI job is added (start its clock and add it to ``GUARDED``); the walkthrough is split differently. |

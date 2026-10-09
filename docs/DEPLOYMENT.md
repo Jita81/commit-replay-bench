@@ -559,6 +559,13 @@ characters — a `name:` longer than that can never satisfy the context it is re
 (it blocked PR #48 until its long job names were shortened). Keep every job's `name:` in a
 pull-request workflow under 100 characters.
 
+Every job that uses docker pulls Docker Hub images through `mirror.gcr.io`, Google's
+pull-through cache, which needs no account: its first docker step is preceded by
+`./.github/actions/docker-hub-mirror`, and each `docker/setup-buildx-action` names the same
+mirror in `buildkitd-config-inline`. GitHub's runners share addresses, so Docker Hub's
+anonymous pull allowance can be spent before a job starts; on a miss the daemon still asks
+Docker Hub (P-783). `tests/test_ci_docker_hub_mirror.py` refuses a job or builder without it.
+
 ## 4. Azure
 
 ### 4.1 Entra ID → `CRB_OIDC__*`

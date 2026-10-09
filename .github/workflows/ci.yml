@@ -294,6 +294,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # fixture replays and mining tests walk git history
+      - uses: ./.github/actions/docker-hub-mirror # Docker Hub through mirror.gcr.io (P-783)
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.11.3"
@@ -828,11 +829,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: ./.github/actions/docker-hub-mirror # Docker Hub through mirror.gcr.io (P-783)
       - name: hadolint deploy/Dockerfile
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: deploy/Dockerfile
       - uses: docker/setup-buildx-action@v4
+        with:
+          # BuildKit in this builder does not read the daemon's registry-mirrors (P-783)
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build deploy/Dockerfile (no push; GHA layer cache)
         uses: docker/build-push-action@v7
         with:
@@ -901,6 +908,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: ./.github/actions/docker-hub-mirror # Docker Hub through mirror.gcr.io (P-783)
       - name: hadolint deploy/sandbox/Dockerfile.python
         uses: hadolint/hadolint-action@v3.5.0
         with:
@@ -914,6 +922,11 @@ jobs:
         with:
           dockerfile: deploy/sandbox/Dockerfile.go
       - uses: docker/setup-buildx-action@v4
+        with:
+          # BuildKit in this builder does not read the daemon's registry-mirrors (P-783)
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build deploy/sandbox/Dockerfile.python (no push; GHA layer cache)
         uses: docker/build-push-action@v7
         with:
