@@ -679,6 +679,33 @@ def _git_taint(body: list[ast.stmt], helpers: Collection[str], tainted: set[str]
             return names
 
 
+#: Every dotted name a module or package under ``tests/`` can be imported by: pytest puts
+#: ``tests/`` on the path (``test_worker``, ``fixtures.langs``), and a test may put a folder
+#: under it there too (``builders_repo`` from ``tests/fixtures``), so each slice of the path.
+_TEST_MODULES = frozenset(
+    ".".join(parts[i:j])
+    for p in TESTS.rglob("*.py")
+    if ".cache" not in p.parts
+    for parts in [p.relative_to(TESTS).with_suffix("").parts]
+    for i in range(len(parts))
+    for j in range(i + 1, len(parts) + 1)
+    if parts[j - 1] != "__init__"
+)
+
+
+def _from_a_test_module(node: ast.ImportFrom) -> bool:
+    """Whether ``node`` imports from another test module — a relative import, ``tests.…``, or
+    a module or package under ``tests/`` (``test_worker``, ``fixtures.langs``,
+    ``builders_repo``) — so a name it brings in can be that module's git helper. A name from the package under test or a
+    library never is, whatever it is called: ``from crb.core import lint`` is not
+    ``test_formatting``'s ``lint``."""
+    return (
+        bool(node.level)
+        or (node.module or "").split(".")[0] == "tests"
+        or (node.module in _TEST_MODULES)
+    )
+
+
 def _git_scope(tree: ast.Module, extern: Collection[str] = ()) -> tuple[set[str], set[str]]:
     """The module's git helpers — functions of any depth (a method, a fixture) that run git,
     and names it imports from a test module that holds one (``extern``) — and the names that
@@ -689,7 +716,7 @@ def _git_scope(tree: ast.Module, extern: Collection[str] = ()) -> tuple[set[str]
     imported = {
         a.asname or a.name
         for n in ast.walk(tree)
-        if isinstance(n, ast.ImportFrom)
+        if isinstance(n, ast.ImportFrom) and _from_a_test_module(n)
         for a in n.names
         if a.name in extern
     }
@@ -991,7 +1018,8 @@ def test_the_history_scan_finds_each_shape_of_a_skip_on_git(planted: str) -> Non
 
 def test_the_history_scan_follows_a_helper_or_fixture_of_another_module() -> None:
     """A conftest fixture or a helper another module exports is followed: ``git_helpers``
-    names it, and a test that takes or imports it and skips on it is refused."""
+    names it, and a test that takes or imports it and skips on it is refused. A name of the
+    same spelling imported from the package under test is not that helper."""
     conftest = ast.parse(
         '@pytest.fixture\ndef history():\n    return subprocess.run(["git", "ls-tree", "a"])\n'
         'def has_commit(c):\n    return Git(ROOT).show_file(c, "x") is not None\n'
@@ -1003,9 +1031,21 @@ def test_the_history_scan_follows_a_helper_or_fixture_of_another_module() -> Non
         "from tests.helpers import has_commit\ndef test_a():\n"
         '    if not has_commit("abc"):\n        pytest.skip("shallow")\n'
     )
-    for planted in (taken, imported):
+    sibling = imported.replace("tests.helpers", "test_worker")
+    package = imported.replace("tests.helpers", "fixtures.langs")
+    on_path = imported.replace("tests.helpers", "builders_repo")
+    relative = imported.replace("tests.helpers", ".helpers")
+    for planted in (taken, imported, sibling, package, on_path, relative):
         assert history_skip_findings(planted, "planted") == [], planted
         assert history_skip_findings(planted, "planted", extern), planted
+    # A name from the package under test is never another module's helper, whatever it is
+    # called. The scan read ``from crb.core import lint as lint_mod`` as test_formatting's git
+    # helper ``lint``, and refused a test's return on ``lint_mod.LINT_NOT_REQUESTED``.
+    product = (
+        "from crb.core import has_commit as hc\ndef test_a(status):\n"
+        "    if status == hc.NOT_REQUESTED:\n        return\n"
+    )
+    assert history_skip_findings(product, "planted", extern) == []
 
 
 def test_the_history_scan_passes_a_fail_and_a_skip_on_something_else() -> None:
