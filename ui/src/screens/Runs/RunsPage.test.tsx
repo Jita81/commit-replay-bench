@@ -8,7 +8,10 @@
  *               probe and label included, not only the kinds the dialog starts), that the
  *               purpose and empty-state copy name the factory, that a factory run lists, and
  *               that `?new=<kind>` opens the start dialog only for a role that can start a
- *               run (J-FAC-12) — a viewer reads who acts instead.
+ *               run (J-FAC-12) — a viewer reads who acts instead, and an operator arriving from
+ *               Oracle's Run oracle or Run controls finds the kind and the repository chosen
+ *               (G-205); that a list longer than the page says it shows the newest 200 of n, and
+ *               that the page says where probe, label and factory runs start (G-269).
  * How:          `renderApp` at `/runs` with `mockApi`; assertions on the select's options
  *               and the header copy.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -19,7 +22,7 @@
  * Touch when:   never for a new repository; a run kind is added — extend the expected option list;
  *               the role that may start a run changes — update the ?new= gate test.
  */
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Run } from '../../api/types'
@@ -97,6 +100,53 @@ describe('RunsPage', () => {
     expect(screen.queryByRole('dialog', { name: 'Start a run' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Start a run' })).toBeNull()
     expect(screen.getByText(/An operator starts a run/)).toBeInTheDocument()
+    // G-205: the operator half — Oracle's Run oracle and Run controls land here with the kind and the repository chosen
+    for (const kind of ['oracle', 'controls']) {
+      vi.unstubAllGlobals()
+      cleanup()
+      mockApi({
+        'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+        'GET /repos': { items: [{ name: 'alpha' }, { name: 'beta' }], total: 2, limit: 200, offset: 0 },
+        'GET /runs': { items: [], total: 0, limit: 200, offset: 0 },
+      })
+      renderApp(<RunsPage />, { route: `/runs?repo=alpha&new=${kind}`, path: '/runs' })
+      const dialog = await screen.findByRole('dialog', { name: 'Start a run' })
+      expect(within(dialog).getByLabelText(/^Kind/)).toHaveValue(kind)
+      await waitFor(() => expect(within(dialog).getByLabelText(/^Repo/)).toHaveValue('alpha'))
+    }
+  })
+
+  it('a list longer than the page says it shows the newest 200 of n', async () => {
+    const many = Array.from({ length: 200 }, (_, i) => ({ ...RUN, id: `run-${String(i).padStart(4, '0')}` }))
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [], total: 0, limit: 200, offset: 0 },
+      'GET /runs': { items: many, total: 437, limit: 200, offset: 0 },
+    })
+    renderApp(<RunsPage />, { route: '/runs', path: '/runs' })
+    const line = await screen.findByTestId('runs-limit')
+    expect(line).toHaveTextContent('Showing the newest 200 of 437 runs — narrow them with the filters.')
+    expect(line.closest('[data-hint]') ?? line).toHaveAttribute('data-hint', 'stat.runs.limit')
+    // a list that fits says nothing
+    cleanup()
+    vi.unstubAllGlobals()
+    mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /repos': { items: [], total: 0, limit: 200, offset: 0 }, 'GET /runs': { items: [RUN], total: 1, limit: 200, offset: 0 } })
+    renderApp(<RunsPage />, { route: '/runs', path: '/runs' })
+    await screen.findByText('run-fact')
+    expect(screen.queryByTestId('runs-limit')).toBeNull()
+  })
+
+  it('the kind filter names where probe, label and factory runs start', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [], total: 0, limit: 200, offset: 0 },
+      'GET /runs': { items: [RUN], total: 1, limit: 200, offset: 0 },
+    })
+    renderApp(<RunsPage />, { route: '/runs', path: '/runs' })
+    const note = await screen.findByText(/Probe runs start from a repository’s page/)
+    expect(note).toHaveTextContent('factory runs from the Factory page (Run the factory)')
+    expect(note).toHaveTextContent('label runs through the API (POST /runs with kind label)')
+    expect(note.closest('[data-hint]')).toHaveAttribute('data-hint', 'stat.runs.kind_origin')
   })
   it('?new=&tasks= arrives pre-filled: the kind and the tasks a hand-off named are what is sent (G-352)', async () => {
     const a = 'a'.repeat(40)

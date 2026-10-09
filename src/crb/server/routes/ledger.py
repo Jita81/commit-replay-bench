@@ -28,8 +28,9 @@ What it is:   The ``/ledger/*`` route module — verify the chain, export it, ex
 What it does: ``verify`` walks the stored rows recomputing every hash from the columns (a
               tampered or false-Q1 row is REPORTED, never hidden behind an exception),
               re-counts false-Q1 in SQL, walks the ``events`` chain (only the new events
-              between full walks; in full on an operator's ``?full=true``) and serves both
-              heads;
+              between full walks; in full on an operator's ``?full=true``), serves both
+              heads and the ``disqualified`` block — rows disqualified per builder over the
+              last seven days against DL-312's threshold, the Ledger tile's figure (G-400);
               ``export`` streams rows verbatim as JSONL (verifies standalone when
               unfiltered) or formula-safe CSV; ``export/abstract`` emits
               only the allowlisted cell fields; every export first commits one
@@ -47,13 +48,15 @@ Works with:   src/crb/core/ledger.py (``GradeRow.body`` — the hashing this mus
               src/crb/store/ledger.py (``import_rows`` / ``count``),
               src/crb/store/events.py (``verify_events_in`` — the audit trail's walk),
               src/crb/core/federated.py (``export_abstract`` and its allowlist),
-              src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``),
+              src/crb/server/routes/grades.py (``grade_to_dict`` / ``ROW_FIELDS``) and
+              src/crb/server/routes/system.py (``disqualified_counts`` — the block verify
+              serves),
               src/crb/server/routes/signoffs.py (``FALSE_Q1_PREDICATE``),
               src/crb/server/routes/runs.py (``append_system_event`` — the export's audit
               event, DATA-RETENTION §4),
               src/crb/cli/commands/ledger.py (the CLI twin, incl. ``import-census``, whose
               verify procedure REPRODUCING-THE-CENSUS walks end to end)
-Tested by:    tests/test_server_routes_ledger.py
+Tested by:    tests/test_server_routes_ledger.py, tests/test_ledger_disqualified.py
 Touch when:   never for a new repository; when ``GradeRow.body`` changes what it hashes
               (``row_hash_from_stored`` must change identically, and the ADR); when a
               field is added to the abstract export (that is the allowlist in
@@ -99,7 +102,14 @@ from crb.server.routes.grades import ROW_FIELDS, grade_to_dict, pack_verified
 from crb.server.routes.reviews import verify_reviews
 from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.routes.signoffs import FALSE_Q1_PREDICATE, verify_signoffs
-from crb.server.schemas import ChainVerifyOut, EventsVerifyOut, LedgerImportOut, LedgerVerifyOut
+from crb.server.routes.system import disqualified_counts
+from crb.server.schemas import (
+    ChainVerifyOut,
+    DisqualifiedOut,
+    EventsVerifyOut,
+    LedgerImportOut,
+    LedgerVerifyOut,
+)
 from crb.server.schemas_review import ReviewVerifyOut
 from crb.store.events import EventChainVerifier, verify_events_in
 from crb.store.ledger import DbLedger
@@ -165,7 +175,8 @@ def verify_ledger(
 ) -> LedgerVerifyOut:
     """The chain walk + false-Q1 in SQL + the clean rows with no evidence to show
     (:func:`clean_without_pack`) + the sign-off and review chains (EI-6) + the audit trail's
-    chain; never raises — the first break is reported by ``seq`` and the walk continues to
+    chain + the ``disqualified`` count per builder over the last seven days
+    (:func:`crb.server.routes.system.disqualified_counts`, G-400); never raises — the first break is reported by ``seq`` and the walk continues to
     count rows. The audit trail is walked by ``events_verifier`` (the app's, which re-hashes
     only new events between full walks — P-257) or, without one, in full."""
     rows = 0
@@ -220,6 +231,9 @@ def verify_ledger(
         verified_at=_now(),
         head_row_hash=prev if rows else "",
         events=EventsVerifyOut(**events.to_dict()),
+        # the rising-disqualified stop condition, served beside the chains (G-400, DL-312):
+        # a count the Ledger tile and OPERATOR §8 read; it never changes ``ok``
+        disqualified=DisqualifiedOut(**disqualified_counts(session)),
     )
 
 

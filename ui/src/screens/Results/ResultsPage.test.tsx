@@ -48,14 +48,14 @@
  * Touch when:   never for a new repository; a headline fact or the deliver wording changes.
  */
 
-import { screen, waitFor, within } from '@testing-library/react'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { helpFor } from '../../help/help'
 import { unhinted } from '../../help/hints-collector'
 import { queryDataReads } from '../../test/source-ratchets'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
-import { ResultsPage } from './ResultsPage'
+import { ResultsPage, gateOpen, oracleTone } from './ResultsPage'
 import pageSource from './ResultsPage.tsx?raw'
 import testSource from './ResultsPage.test.tsx?raw'
 
@@ -66,6 +66,22 @@ const CONTROLS = { schema: 'x', apparatus: { apparatus_version: '2.2', controls_
 const ORACLE = { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }, { task_id: 't2', strength: 0.7 }], cells: [], apparatus_versions: ['2.2'] }
 const REPO = { name: 'alpha', language: 'python', runner: 'pytest', url: '', last_run: null, created: '2026-09-01T00:00:00Z', updated: '2026-09-02T00:00:00Z', config: {} }
 
+/**
+ * `GET /decisions?repo=alpha` as the server serves it to `role`: the unsigned deliver cell (an
+ * approver's Attest) and the held human cell (an operator's Strengthen the tests, G-535), each
+ * fitted to the reader — the act only for a role that can take it, `Read` otherwise.
+ */
+function inbox(role: 'viewer' | 'approver', extra: object[] = []) {
+  const acts = role !== 'viewer'
+  const row = (over: object) => ({ repo: 'alpha', evidence: '', reason_code: '', signoff: null, due_since: '2026-09-28T09:00:00+00:00', age_s: 60, ...over })
+  const items = [
+    row({ kind: 'signoff_due', key: 'bug.fix|XS', title: 'bug.fix × XS clears the bar — attest it or decline', role: 'approver', act: acts ? 'Attest' : 'Read', can_act: acts, href: '/signoff?repo=alpha&cell=bug.fix%7CXS' }),
+    row({ kind: 'strengthen', key: 'bug.fix|S', title: 'bug.fix × S is held until its tests are stronger', role: 'operator', act: acts ? 'Strengthen the tests' : 'Read', can_act: acts, href: '/learn?repo=alpha#strengthen' }),
+    ...extra.map(row),
+  ]
+  return { items, total: items.length, as_of: '2026-09-28T09:01:00+00:00', repos: ['alpha'], measured: ['alpha'], errors: [] }
+}
+
 const ROUTES = {
   'GET /auth/me': PRINCIPAL,
   'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
@@ -75,6 +91,7 @@ const ROUTES = {
   'GET /oracle/alpha': ORACLE,
   'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
   'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+  'GET /decisions': inbox('approver'),
 }
 
 describe('ResultsPage', () => {
@@ -209,12 +226,14 @@ describe('ResultsPage', () => {
   })
 
   it('a viewer is never offered an act they cannot take: Read and who acts, and "sign-off due" as plain text', async () => {
-    mockApi({ ...ROUTES, 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    mockApi({ ...ROUTES, 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' }, 'GET /decisions': inbox('viewer') })
     renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
     await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
     expect(screen.queryByRole('link', { name: 'Attest' })).toBeNull()
-    expect(screen.getByRole('link', { name: 'Read' })).toHaveAttribute('href', '/signoff?repo=alpha&cell=bug.fix%7CXS')
+    // two acts a viewer cannot take: the approver's Attest and the operator's Strengthen the tests (a held cell, G-535)
+    expect(screen.getAllByRole('link', { name: 'Read' }).map((a) => a.getAttribute('href'))).toEqual(['/signoff?repo=alpha&cell=bug.fix%7CXS', '/learn?repo=alpha#strengthen'])
     expect(screen.getByText('approver acts')).toBeInTheDocument()
+    expect(screen.getByText('operator acts')).toBeInTheDocument()
     const due = screen.getByTestId('cell-bug.fix-XS')
     expect(due).toHaveTextContent('sign-off due')
     expect(within(due).queryByRole('link')).toBeNull()
@@ -491,26 +510,50 @@ describe('ResultsPage', () => {
     const cell = screen.getByTestId('cell-bug.fix-XS')
     expect(cell).not.toHaveTextContent(/signed 15 Sep/)
     expect(cell).toHaveTextContent('sign-off not loaded')
-    // without the sign-offs the page cannot say what waits on a person, so it never says nothing does
-    expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
-    expect(screen.queryByRole('list', { name: 'Decisions for alpha' })).toBeNull()
-    expect(screen.getByTestId('decisions-failed')).toHaveTextContent('the request failed')
+    // what waits on a person is the server's inbox, which read the sign-offs itself: it is still served
+    expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument()
+    expect(screen.queryByTestId('decisions-failed')).toBeNull()
     // Try again asks again
     await userEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(calls).toBe(3))
   })
 
-  it('factory tasks that fail on a refetch never leave their decisions shown as current', async () => {
-    const TASK = { id: 'T-1', title: 'Add a retry', capability_class: 'bug.fix', size: 'XS', kind: 'feature', status: 'ready', outcome_reason: '', dor_gaps: ['acceptance'], value_gaps: [], route_hint: '', red_proof: null, build_status: '', pr_url: null, review_verdict: null, last_event: '' }
+  it('an inbox that fails on a refetch never leaves its decisions shown as current', async () => {
     let calls = 0
-    mockApi({ ...ROUTES, 'GET /factory/alpha/tasks': () => (++calls === 1 ? json([TASK]) : envelope(500, 'internal', 'boom')) })
+    mockApi({ ...ROUTES, 'GET /decisions': () => (++calls === 1 ? json(inbox('approver')) : envelope(500, 'internal', 'boom')) })
     const { qc } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
-    await waitFor(() => expect(screen.getByText('T-1 Add a retry is blocked on 1 structural gap')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('bug.fix × XS clears the bar — attest it or decline')).toBeInTheDocument())
     await qc.refetchQueries()
-    await waitFor(() => expect(screen.getByTestId('decisions-failed')).toBeInTheDocument())
+    const failed = await screen.findByTestId('decisions-failed')
     expect(calls).toBe(2)
-    expect(screen.queryByText('T-1 Add a retry is blocked on 1 structural gap')).toBeNull()
+    expect(failed).toHaveTextContent('The inbox did not load (HTTP 500 · internal)')
+    expect(screen.queryByText('bug.fix × XS clears the bar — attest it or decline')).toBeNull()
     expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
+    // Try again asks again
+    await userEvent.click(within(failed).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(calls).toBe(3))
+  })
+
+  it('a repository whose inputs the server could not read is said, never shown as nothing waiting', async () => {
+    mockApi({ ...ROUTES, 'GET /decisions': { ...inbox('approver'), items: [], total: 0, errors: [{ repo: 'alpha', status: 500, code: 'internal_error', message: 'x' }] } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const failed = await screen.findByTestId('decisions-failed')
+    expect(failed).toHaveTextContent('could not read this repository’s inputs')
+    expect(screen.queryByText('Nothing is waiting on a person here')).toBeNull()
+  })
+
+  it('the panel’s count is the served count for this repository, every kind included — the number its Decisions card shows', async () => {
+    // a re-measurement is a kind the browser never derived; the served count includes it
+    const remeasure = { kind: 'remeasure', key: 'replay|bug.fix|XS|python|editblock|m|p|sighted', title: 'bug.fix × XS (sighted) was measured under apparatus 2.1, not 2.2', role: 'operator', act: 'Queue re-measurement', can_act: true, href: '/learn?repo=alpha#remeasure' }
+    const served = inbox('approver', [remeasure])
+    const { calls } = mockApi({ ...ROUTES, 'GET /decisions': served })
+    const { container } = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    const list = await screen.findByRole('list', { name: 'Decisions for alpha' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(served.items.length)
+    expect(container.querySelector('[data-hint="stat.results.waiting_count"]')).toHaveTextContent(`${served.items.length} for this repository`)
+    expect(within(list).getByRole('link', { name: 'Queue re-measurement' })).toHaveAttribute('href', '/learn?repo=alpha#remeasure')
+    // one request, for this repository
+    expect(calls.filter((c) => c.path === '/decisions').map((c) => c.url.replace(/^\/api\/v1/, ''))).toEqual(['/decisions?repo=alpha'])
   })
 
   it('a repository that fails on a refetch never leaves an old in-flight banner shown as current', async () => {
@@ -560,13 +603,15 @@ describe('ResultsPage', () => {
     oracle: 'every instrument tile tells a failed request from a missing report',
     pool: 'a failed pool request says so and offers a retry',
     signoffs: 'sign-offs that fail on a refetch',
-    tasks: 'factory tasks that fail on a refetch',
+    inbox: 'an inbox that fails on a refetch',
     repoDetail: 'a repository that fails on a refetch',
     run: 'a run poll that fails says so with a retry',
   }
 
   it('every query the page reads has a test for what the page shows when it fails', () => {
-    const read = [...pageSource.matchAll(/currentData\((\w+)\)/g)].map((m) => m[1]).sort()
+    // the inbox is read through `useDecisions`, which keeps no old rows after a failed read
+    const inboxRead = /\bconst (\w+) = useDecisions\(/.exec(pageSource)?.[1]
+    const read = [...[...pageSource.matchAll(/currentData\((\w+)\)/g)].map((m) => m[1]), ...(inboxRead ? [inboxRead] : [])].sort()
     expect(read).toEqual(Object.keys(FAILURE_PINNED).sort())
     for (const name of Object.values(FAILURE_PINNED)) expect(testSource).toContain(`it('${name}`)
   })
@@ -591,5 +636,99 @@ describe('ResultsPage', () => {
     await waitFor(() => expect(empty.calls.some((c) => c.path === '/capability-map')).toBe(true))
     await new Promise((r) => setTimeout(r, 50))
     expect(empty.calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+  it('the oracle tile’s tone and the door back to the walk are one reading, never two rules (P-411)', () => {
+    // a scored oracle with no bar to read it against is not amber: nothing says it is under the bar
+    expect(oracleTone(0.7, null)).toBe('muted')
+    expect(oracleTone(null, 0.8)).toBe('muted')
+    expect(oracleTone(0.7, 0.8)).toBe('amber')
+    expect(oracleTone(0.8, 0.8)).toBe('green')
+    // the gate reads the tile's tone, so the two cannot disagree on any pair
+    for (const [mean, bar] of [
+      [0.7, null],
+      [null, 0.8],
+      [0.7, 0.8],
+      [0.8, 0.8],
+      [null, null],
+    ] as const) {
+      const tone = oracleTone(mean, bar)
+      expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleTone: tone })).toBe(tone === 'amber')
+    }
+  })
+  it('an amber or not-run gate offers one click back to the walk; all-green gates and a failed read do not (G-236, G-444)', async () => {
+    // all green: controls passed, the oracle mean (0.8) meets the bar (0.8) — no door in the gates card
+    mockApi(ROUTES)
+    const green = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('80%')).toBeInTheDocument())
+    expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
+    green.unmount()
+    vi.unstubAllGlobals()
+    // not run: the controls 404 — the door is there, to the walk that runs them
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': () => envelope(404, 'not_found', 'not run') })
+    const notRun = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('not run'))
+    const door = await screen.findByTestId('gates-back-to-walk')
+    expect(door).toHaveAttribute('href', '/connect/alpha')
+    expect(door).toHaveAttribute('data-hint', 'button.results.back_to_walk')
+    expect(door).toHaveTextContent('Back to the walk')
+    notRun.unmount()
+    vi.unstubAllGlobals()
+    // amber: the oracle mean under the bar
+    mockApi({ ...ROUTES, 'GET /oracle/alpha': { ...ORACLE, tasks: [{ task_id: 't1', strength: 0.7 }, { task_id: 't2', strength: 0.7 }] } })
+    const amber = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('70%')).toBeInTheDocument())
+    expect(await screen.findByTestId('gates-back-to-walk')).toHaveAttribute('href', '/connect/alpha')
+    amber.unmount()
+    vi.unstubAllGlobals()
+    // a thin verdict is amber too
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': { ...CONTROLS, verdict: { ...CONTROLS.verdict, state: 'thin', complete: false } } })
+    const thin = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('thin'))
+    expect(await screen.findByTestId('gates-back-to-walk')).toBeInTheDocument()
+    thin.unmount()
+    vi.unstubAllGlobals()
+    // a failed read is not an open gate: its way forward is Retry, not the walk
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': () => envelope(500, 'internal', 'controls unreadable') })
+    const failed = renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('not loaded'))
+    expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
+    failed.unmount()
+    vi.unstubAllGlobals()
+    // a red escape is not either: stronger tests, on Learn, are its way forward
+    mockApi({ ...ROUTES, 'GET /oracle/alpha/controls': { ...CONTROLS, escapes: 1, passed: false, verdict: { ...CONTROLS.verdict, state: 'escaped', passed: false, escapes: 1 } } })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByTestId('tile-negative-controls')).toHaveTextContent('escaped'))
+    expect(screen.queryByTestId('gates-back-to-walk')).toBeNull()
+    // the empty state's own door carries the same hint
+    expect(gateOpen({ controlsNotRun: false, verdictState: 'passed', oracleNotRun: false, oracleTone: oracleTone(0.9, 0.8) })).toBe(false)
+    expect(gateOpen({ controlsNotRun: false, verdictState: 'unmeasured', oracleNotRun: false, oracleTone: oracleTone(0.9, 0.8) })).toBe(true)
+  })
+
+  it('the Waiting on a person card says how many rows it is not showing when it cuts the list', async () => {
+    // eight human-routed cells, and the served inbox (P-619: the card reads the server, never a
+    // fold of the map) raising eight rows; the card shows six and says "and 2 more"
+    const sizes = ['XS', 'S', 'M', 'L', 'XL', 'XXS', 'XXL', 'XXXL']
+    const cells = sizes.map((size, i) => ({ ...HUMAN, size, n: 10 + i }))
+    const held = sizes.slice(2).map((size) => ({ kind: 'strengthen', key: `bug.fix|${size}`, title: `bug.fix × ${size} is held until its tests are stronger`, role: 'operator', act: 'Strengthen the tests', can_act: true, href: '/learn?repo=alpha#strengthen' }))
+    mockApi({ ...ROUTES, 'GET /capability-map': { ...MAP, sizes, cells, summary: { ...MAP.summary, total_cells: 8, measured_cells: 8, deliver_cells: 0 } }, 'GET /decisions': inbox('approver', held) })
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
+    expect(within(screen.getByRole('list', { name: 'Decisions for alpha' })).getAllByRole('listitem')).toHaveLength(6)
+    const more = screen.getByTestId('decisions-more')
+    expect(more).toHaveTextContent('and 2 more — All decisions')
+    expect(within(more).getByRole('link', { name: 'All decisions' })).toHaveAttribute('href', '/decisions')
+    expect(more).toHaveAttribute('data-hint', 'stat.results.waiting_more')
+    // the eyebrow still counts them all
+    expect(screen.getByText('8 for this repository')).toBeInTheDocument()
+    // G-238 — each route tile carries a test id the walkthrough can read
+    expect(screen.getByTestId('tile-route-human')).toHaveTextContent('8')
+    expect(screen.getByTestId('tile-route-deliver')).toHaveTextContent('0')
+    vi.unstubAllGlobals()
+    cleanup()
+    // a list of six or fewer says nothing about more
+    mockApi(ROUTES)
+    renderApp(<ResultsPage />, { route: '/results?repo=alpha' })
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Decisions for alpha' })).toBeInTheDocument())
+    expect(screen.queryByTestId('decisions-more')).toBeNull()
   })
 })

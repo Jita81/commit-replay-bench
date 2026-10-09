@@ -312,6 +312,39 @@ export interface RepoConfig {
   runner_opts: Record<string, unknown>
   sandbox_image: string
   mining: MiningConfig
+  /** Chain the £0 stages (DL-315): present, and true, only once an operator switched it on. */
+  auto_stages?: boolean
+}
+
+/**
+ * @contract API.md "GET /repos/{name}/config-candidates" — one config change the mine's gold
+ * notes and skips imply (DL-316): `field` is the dotted config path (`runner_opts.timeout`,
+ * `lint.timeout`) or, for a `deployment` scope, the variable an operator sets; `observed` is
+ * the configured limit that was hit; `proposed` what Accept applies.
+ */
+export interface ConfigCandidate {
+  id: string
+  kind: 'raise_test_timeout' | 'raise_lint_timeout' | 'provisioning_on' | string
+  scope: 'repo' | 'deployment'
+  field: string
+  observed: number | boolean | null
+  proposed: number | boolean | null
+  reason: string
+  sources: string[]
+}
+
+export interface ConfigCandidates {
+  repo: string
+  items: ConfigCandidate[]
+}
+
+/** @contract API.md "POST /repos/{name}/config-candidates/{id}/accept|reject". */
+export interface CandidateDecision {
+  repo: string
+  id: string
+  decision: 'accepted' | 'rejected'
+  candidate: ConfigCandidate
+  config: RepoConfig
 }
 
 /** @contract API.md "Repos: list with probe status, task counts, last run". */
@@ -621,6 +654,14 @@ export interface RunCreateRequest {
   qualify_first?: boolean
   /** ADR-0019 — stop after this many consecutive environment rows (default 2; 0 = off). */
   env_stop?: number
+  /**
+   * The belt-5 pre-flight: after an honest build the repository's own formatter and linter
+   * plan runs on the changed files, fixes what it can and gives the builder ONE bounded repair
+   * call. The rows record the builder as `<name>+preflight` — a separate arm, never pooled
+   * with plain rows — and the repair call is the attempt's spend. Sent only when `true`
+   * (the Measure page's switch, off by default). @contract API.md "POST /runs".
+   */
+  preflight?: boolean
 }
 
 /** One refusal code of a repository's posture, with what to do (ADR-0019 §9). */
@@ -1373,6 +1414,22 @@ export interface ChainVerify {
   detail: string
 }
 
+/** One builder's disqualified rows in the window — mirrors `DisqualifiedBuilderOut`. */
+export interface LedgerDisqualifiedBuilder {
+  builder: string
+  n: number
+}
+
+/** The `disqualified` block of `GET /ledger/verify` (G-400, DL-312): rows graded
+ *  `disqualified` in the last `window_days`, per builder; `over` = the builders at or past
+ *  `threshold`. Mirrors `DisqualifiedOut`; read by the Ledger's disqualified tile (stream pgs). */
+export interface LedgerDisqualified {
+  window_days: number
+  threshold: number
+  by_builder: LedgerDisqualifiedBuilder[]
+  over: string[]
+}
+
 /**
  * `GET /ledger/verify` — mirrors `LedgerVerifyOut`. `ok` holds only when the grade chain, the
  * audit trail's chain, false-Q1 = 0 and every clean row's pack all hold; `chain_ok` and
@@ -1393,6 +1450,7 @@ export interface LedgerVerify {
   /** The grade ledger's last `row_hash` (`""` when empty), to record outside the store. */
   head_row_hash: string
   events: EventsVerify
+  disqualified: LedgerDisqualified
 }
 
 /** `GET /ledger/export?format=`. */
@@ -1555,6 +1613,66 @@ export interface FactoryBacklog {
    * rather than guess — the field is optional so that fallback stays type-checked.
    */
   delivery?: FactoryDeliveryPreflight
+  /**
+   * B-9 / F30 — the pull requests the factory delivered on this repository and how they
+   * ended, as COUNTS (a merge is a human act, never a rate — DL-049); `last_synced` is the
+   * newest outcome's record time, `''` when none was ever read. Optional for a mock built
+   * before G-368; the server always sends it.
+   */
+  outcomes?: FactoryOutcomesSummary
+}
+
+/** `FactoryBacklogOut.outcomes` (`OutcomesSummaryOut`): delivered / merged / closed / open, by count. */
+export interface FactoryOutcomesSummary {
+  delivered: number
+  merged: number
+  closed: number
+  open: number
+  last_synced: string
+}
+
+/** The newest delivered pull request's fate (`DeliveryOutcomeOut`): `open` = delivered and no
+ *  outcome recorded yet (the other fields `''`); `merged` / `closed` from the newest
+ *  `delivery.merged` / `delivery.closed` event, `synced_at` its record time. */
+export interface FactoryDeliveryOutcome {
+  state: 'open' | 'merged' | 'closed' | string
+  pr_number: number
+  pr_url: string
+  merged_at: string
+  merged_by: string
+  merge_sha: string
+  closed_at: string
+  synced_at: string
+}
+
+/** `POST /factory/{repo}/outcomes/sync` (`OutcomeSyncOut`): what one sync did, and the summary after it. */
+export interface FactoryOutcomeSync {
+  checked: number
+  merged: number
+  closed: number
+  open: number
+  errors: string[]
+  outcomes: FactoryOutcomesSummary
+}
+
+/** The body `POST /factory/{repo}/backlog/evolutions` takes (`EvolutionRegisterIn`, F32): the
+ *  superseding item — a backlog item plus `supersedes` — and, when the stop was about the test,
+ *  the operator-authored failing test that goes with it. */
+export interface FactoryEvolutionBody {
+  item: {
+    id: string
+    title: string
+    kind: string
+    description: string
+    capability_class: string
+    size_estimate: string
+    structural_facts: string[]
+    acceptance_criteria: string[]
+    depends_on: string[]
+    level: string
+    supersedes: string
+  }
+  authored?: { path: string; content: string }
 }
 
 /** J-FAC-4 — why the loop stopped an item, as recorded on the chain; `step` names where. */
@@ -1651,6 +1769,11 @@ export interface FactoryTask {
   calibration?: FactoryCalibrationGrant | null
   /** The SHA-256 of the test the newest RED proof carries — what a strength-probe waiver names. */
   test_sha256?: string
+  /** B-9 / F30 — the newest delivered pull request's fate; `null` until a delivery (optional for older mocks). */
+  outcome?: FactoryDeliveryOutcome | null
+  /** F32 — the supersession chain: the id this item replaced, and the evolution that replaced it (`''` = neither). */
+  supersedes?: string
+  superseded_by?: string
 }
 
 /** Why the entry gate stopped an item before any spend (ADR-0026 item 8). */
@@ -2525,6 +2648,52 @@ export interface LibraryProposeRequest {
   characteristic?: string
   check?: string
   parent_class?: string
+}
+
+/**
+ * One row of `GET /decisions` (F6): a due decision as the person reading it may act on it, with the
+ * server's clock. `act` is the row's verb when `can_act`, else `Read`; `signoff` rides on a
+ * `signoff_stale` row. src/crb/server/routes/decisions.py `DecisionOut`.
+ */
+export interface DecisionRowOut {
+  repo: string
+  kind: string
+  key: string
+  title: string
+  role: 'approver' | 'operator' | 'viewer'
+  evidence: string
+  reason_code: string
+  act: string
+  href: string
+  can_act: boolean
+  signoff: Signoff | null
+  due_since: string
+  age_s: number
+}
+
+/** A repository whose inbox inputs could not be read: the count is incomplete while one is listed. */
+export interface DecisionReadError {
+  repo: string
+  status: number
+  code: string
+  message: string
+}
+
+/** `GET /decisions[?repo=]`. `measured` = the repositories with at least one measured cell. */
+export interface DecisionList {
+  items: DecisionRowOut[]
+  total: number
+  as_of: string
+  repos: string[]
+  measured: string[]
+  errors: DecisionReadError[]
+}
+
+/** `GET /decisions?count=1` — the nav badge's reading; it never writes the clock. */
+export interface DecisionCount {
+  total: number
+  by_role: Record<string, number>
+  errors: string[]
 }
 
 // ─── /classes — an organisation's own classes of work (ADR-0026 item 9) ──────────────────

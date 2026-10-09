@@ -19,9 +19,12 @@ What it does: Pins the parser on the exact ``builder_error`` shapes the live row
               corpus line of its own — P-161; a command only completes a cut example — P-183;
               two deciders at once never leave a line in both corpora — P-186), that oracle-weak
               cells become ``test.add`` items that pass the factory's DoR gate, that only oracle
-              reasons are flagged, that the re-measurement plan queues nothing, determinism
-              (same rows → byte-identical output), and the ``rows_to_clear_bar`` Wilson minimum
-              (three 10/10 cells read ``ci_low_below_bar`` on 2.2, 2026-09-15).
+              reasons are flagged, determinism (same rows → byte-identical output), and that
+              ``rows_to_clear_bar`` is the look rule's first look; that the guard's
+              false-positive rate counts only decided classes and bounds the undecided rows
+              (G-536) and serves the rows no class holds apart; and that rows of a legacy belt
+              set are stale and offered a reading. The plan read from registered readings is
+              tests/test_learn_remeasure.py's (G-565, P-602).
 How:          Rows as a ledger returns them (hashed, chained) → ``triage_refusals`` /
               ``strengthening_backlog`` / ``remeasure_plan``; a temp corpus directory for apply.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -385,6 +388,88 @@ class TestTriage:
         assert a == b == c
         rep = learn.triage_refusals(rows)
         assert [g.n for g in rep.groups] == sorted((g.n for g in rep.groups), reverse=True)
+        # the false-positive rate is derived from the same rows and the same decisions in any
+        # order of the rows: byte-identical too (G-536)
+        decided = [{"group_id": rep.groups[0].group_id, "verdict": "honest"}]
+        fp = [
+            learn.dumps(learn.guard_false_positives(learn.triage_refusals(r), decided).to_dict())
+            for r in (rows, list(reversed(rows)))
+        ]
+        assert fp[0] == fp[1]
+
+    def test_guard_false_positives_count_only_decided_groups_and_bound_the_undecided(
+        self, tmp_path: Path
+    ) -> None:
+        """G-536: the guard's false-positive rate per apparatus version and calendar month,
+        from the verdicts people recorded. A row in a class decided honest is a false
+        positive; a row with any class decided refuse was rightly refused; a row nobody has
+        judged (or whose text named no class) is undecided and is never counted as either —
+        the rate is the bound [honest ÷ n, (honest + undecided) ÷ n]."""
+
+        def on(day: str) -> str:
+            return f"{day}T10:00:00+00:00"
+
+        rows = _chained(
+            [
+                _protocol(ERR_GIT_STASH, task_id="1" * 40, created=on("2026-09-14")),
+                _protocol(ERR_UV_RUN, task_id="2" * 40, created=on("2026-09-20")),
+                # two classes in one row: the first decided honest, the second refuse
+                _protocol(ERR_NHS_TWO, task_id="3" * 40, created=on("2026-09-21")),
+                # a protocol row whose text names no class: undecided whatever anyone decides
+                _row(
+                    task_id="4" * 40,
+                    error="protocol violation:",
+                    labels={LABEL_FAILURE_KIND: FAILURE_PROTOCOL},
+                    created=on("2026-09-22"),
+                ),
+                _protocol(ERR_NPX_JEST, task_id="5" * 40, created=on("2026-10-02")),
+                _protocol(
+                    ERR_UV_RUN, task_id="6" * 40, apparatus_version="2.2", created=on("2026-10-03")
+                ),
+                _clean(task_id="7" * 40, created=on("2026-09-15")),  # not a refusal at all
+            ],
+            tmp_path,
+        )
+        rep = learn.triage_refusals(rows)
+
+        def gid(prefix: str, head: str) -> str:
+            return next(
+                g.group_id for g in rep.groups if g.prefix == prefix and g.shape.startswith(head)
+            )
+
+        decisions = [
+            {"group_id": gid("archaeology", "git stash"), "verdict": "honest"},
+            # a later verdict on the same class replaces the earlier one
+            {"group_id": gid("network", "uv run"), "verdict": "refuse"},
+            {"group_id": gid("network", "uv run"), "verdict": "honest"},
+            {"group_id": gid("archaeology", "find"), "verdict": "honest"},
+            {"group_id": gid("network", "curl"), "verdict": "refuse"},
+            # "unsure" is not a verdict: the class stays undecided
+            {"group_id": gid("network", "npx jest"), "verdict": "unsure"},
+        ]
+        fp = learn.guard_false_positives(rep, decisions)
+        got = [
+            (p.apparatus_version, p.month, p.rows_protocol, p.honest, p.refuse, p.undecided)
+            for p in fp.periods
+        ]
+        assert got == [
+            ("2.1", "2026-09", 4, 2, 1, 1),
+            ("2.1", "2026-10", 1, 0, 0, 1),
+            ("2.2", "2026-10", 1, 1, 0, 0),
+        ]
+        sept = fp.periods[0]
+        assert (sept.rate_low, sept.rate_high) == (0.5, 0.75)
+        assert (fp.periods[1].rate_low, fp.periods[1].rate_high) == (0.0, 1.0)
+        assert (fp.rows_protocol, fp.honest, fp.refuse, fp.undecided) == (6, 3, 1, 2)
+        assert (fp.decided_groups, fp.undecided_groups) == (4, 1)
+        d = fp.to_dict()
+        assert d["periods"][0]["rate_low"] == 0.5 and d["periods"][0]["rate_high"] == 0.75
+        # the row whose text named no class is undecided for ever: no decision can reach it,
+        # so it is served apart and the page never says a decision will narrow it
+        assert fp.unclassed == 1 and d["unclassed"] == 1
+        # with no decision at all, every row is undecided: nothing is inferred
+        none = learn.guard_false_positives(rep, [])
+        assert (none.honest, none.refuse, none.undecided, none.unclassed) == (0, 0, 6, 1)
 
     def test_empty_and_no_protocol_rows(self, tmp_path: Path) -> None:
         rep = learn.triage_refusals([])
@@ -1053,207 +1138,20 @@ class TestStrengthen:
 # ===========================================================================
 
 
-def _stale_ledger(tmp_path: Path) -> list[GradeRow]:
-    rows = [
-        # cell A: 7 rows at 2.0 (sighted, cobra) + 1 at 2.0 blind → all stale, none current
-        *[
-            _clean(task_id=f"{i:040x}", apparatus_version="2.0", cost_usd=0.24, latency_s=62)
-            for i in range(1, 8)
-        ],
-        _clean(
-            task_id="9" * 40, apparatus_version="2.0", mode="blind", cost_usd=0.39, latency_s=122
-        ),
-        # cell B (click): 5 stale + 8 current → needs 2
-        *[
-            _clean(
-                task_id=f"{i:040x}",
-                repo="click",
-                language="python",
-                apparatus_version="2.0",
-                cost_usd=0.43,
-            )
-            for i in range(20, 25)
-        ],
-        *[
-            _clean(
-                task_id=f"{i:040x}",
-                repo="click",
-                language="python",
-                apparatus_version="2.1",
-                cost_usd=0.41,
-            )
-            for i in range(30, 38)
-        ],
-        # cell C (koa): 3 stale + 20 current → up to date (20 reaches the first look)
-        *[
-            _clean(task_id=f"{i:040x}", repo="koa", language="javascript", apparatus_version="2.0")
-            for i in range(40, 43)
-        ],
-        *[
-            _clean(task_id=f"{i:040x}", repo="koa", language="javascript", apparatus_version="2.1")
-            for i in range(50, 70)
-        ],
-        # cell D: only current rows → not in the plan at all
-        _clean(task_id="e" * 40, repo="cobra", size="M", apparatus_version="2.1"),
-    ]
-    return _chained(rows, tmp_path)
+# The plan is read from the registered readings: tests/test_learn_remeasure.py (P-602).
 
 
-def test_the_api_docs_describe_up_to_date_as_the_served_label_and_mode(tmp_path: Path) -> None:
-    """P-428: each ``up_to_date`` entry is ``<cell label>|<mode>``, not a bare cell label,
-    so a client that compares it with ``cells[].label`` never finds a match. Every
-    ``docs/API.md`` description of the field must name the shape the plan serves."""
-    plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
-    (entry,) = plan.up_to_date
-    label, _, mode = entry.rpartition("|")
-    assert mode in ("sighted", "blind") and label.count("|") == 6
-    api = (Path(__file__).resolve().parents[1] / "docs" / "API.md").read_text()
-    described = [line for line in api.splitlines() if "up_to_date[]" in line]
-    assert len(described) == 2
-    for line in described:
-        assert "up_to_date[] (one `<cell label>|<mode>` string" in line, line
-
-
-class TestRemeasure:
-    """``remeasure_plan``: stale cells, rows needed, cost, and valid ``POST /runs`` bodies — nothing
-    queued.
-    """
-
-    def test_cells_n_needed_cost_and_requests(self, tmp_path: Path) -> None:
-        """One entry per (cell, MODE) — sighted and blind never pool (a blended rate hid
-        koa's sighted cell, 2026-09-15); a blind request is priced at the ladder's rungs."""
-        plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
-        assert plan.rows_stale == 16 and plan.min_n == 20  # look.v1's first look
-        by = {(c.cell.label, c.mode): c for c in plan.cells}
-        go = "replay|bug.fix|XS|go|claude_code|claude-sonnet-5|anthropic"
-        py = "replay|bug.fix|XS|python|claude_code|claude-sonnet-5|anthropic"
-        assert set(by) == {(go, "sighted"), (go, "blind"), (py, "sighted")}
-        assert plan.up_to_date == (
-            "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic|sighted",
-        )
-        a = by[(go, "sighted")]
-        assert (a.n_stale, a.n_current, a.n_needed) == (7, 0, 20)  # the first look
-        assert a.stale_versions == ("2.0",) and a.repos == ("cobra",)
-        assert (a.tasks_stale, a.tasks_current, a.relabelled) == (7, 0, ())
-        assert a.cost_usd_mean == pytest.approx(0.24) and a.cost_known
-        assert a.est_cost_usd == pytest.approx(0.24 * 20)  # sighted: one attempt per row
-        assert a.est_minutes == pytest.approx(62 * 20 / 60)
-        (req, rest) = a.requests
-        assert req.kind == "replay" and req.mode == "sighted" and len(req.task_ids) == 7
-        assert req.limit == 7 and rest.limit == 13 and rest.task_ids == ()  # 20 − 7 named
-        bl = by[(go, "blind")]
-        assert (bl.n_stale, bl.n_needed, bl.tasks_stale) == (1, 20, 1)
-        assert bl.cost_usd_mean == pytest.approx(0.39)
-        assert bl.est_cost_usd == pytest.approx(0.39 * 20 * 3)  # blind: up to 3 rungs per row
-        (breq, brest) = bl.requests
-        assert breq.kind == "blind" and breq.task_ids == ("9" * 40,) and breq.limit == 1
-        assert brest.limit == 19 and "remainder" in brest.note
-        for c in (a, bl):
-            for r in c.requests:
-                assert r.repo == "cobra" and r.builder == "claude_code"
-                assert r.model == "claude-sonnet-5" and r.provider == "anthropic"
-        b = by[(py, "sighted")]
-        assert (b.n_stale, b.n_current, b.n_needed) == (5, 8, 12)  # 8 current: 12 to the look
-        assert (b.tasks_stale, b.tasks_current) == (5, 8)
-        req, rest = b.requests  # 5 named stale tasks + a limit-only remainder of 7
-        assert req.limit == 5 and len(req.task_ids) == 5 and req.kind == "replay"
-        assert rest.limit == 7 and rest.task_ids == ()
-
-    def test_relabelled_stale_tasks_are_left_out_and_named(self, tmp_path: Path) -> None:
-        """A stale task whose CURRENT label moved (an intent relabel) would put its new
-        rows in another cell: the request skips it and the plan names it."""
-        rows = _stale_ledger(tmp_path)
-        moved = f"{3:040x}"  # one of cobra's 7 sighted stale tasks
-        plan = learn.remeasure_plan(
-            rows,
-            current_apparatus="2.1",
-            task_labels={moved: ("feature.add", "XS")},
-        )
-        go = next(c for c in plan.cells if c.cell.language == "go" and c.mode == "sighted")
-        assert go.relabelled == (moved,)
-        req = go.requests[0]
-        assert moved not in req.task_ids and len(req.task_ids) == 6 and go.requests[1].limit == 14
-
-    def test_requests_are_valid_post_runs_bodies(self, tmp_path: Path) -> None:
-        pydantic = pytest.importorskip("pydantic")
-        del pydantic
-        from crb.server.schemas import RunCreateRequest
-
-        plan = learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
-        for c in plan.cells:
-            for r in c.requests:
-                body = r.to_dict()
-                body.pop("note", None)
-                req = RunCreateRequest(**body)
-                assert req.kind in ("replay", "blind") and req.builder
-
-    def test_unknown_cost_is_honest(self, tmp_path: Path) -> None:
-        rows = _chained(
-            # an unknown cost is one nobody reported (an imported row), not a builder's
-            # $0, which is a known $0 and prices at $0 (P-131: test_economics.py pins it)
-            [
-                _clean(
-                    task_id="1" * 40,
-                    apparatus_version="2.0",
-                    cost_usd=0.0,
-                    latency_s=0.0,
-                    provenance="imported:census",
-                )
-            ],
-            tmp_path,
-        )
-        assert not rows[0].cost_known
-        plan = learn.remeasure_plan(rows, current_apparatus="2.1")
-        (c,) = plan.cells
-        assert not c.cost_known and c.est_cost_usd == 0.0 and c.n_needed == 20
-        assert plan.to_dict()["summary"]["cost_known_cells"] == 0
-        assert "?" in learn.render_remeasure(plan)
-
-    def test_nothing_stale(self, tmp_path: Path) -> None:
-        rows = _chained([_clean(task_id="1" * 40, apparatus_version="2.1")], tmp_path)
-        plan = learn.remeasure_plan(rows, current_apparatus="2.1")
-        assert plan.cells == () and plan.up_to_date == () and plan.rows_stale == 0
-        assert learn.remeasure_plan([]).cells == ()
-
-    def test_legacy_belt_set_rows_are_stale(self, tmp_path: Path) -> None:
-        r = _clean(
-            task_id="1" * 40,
-            apparatus_version="1.0-census",
-            belt_set="v3-legacy",
-            source_changed=None,
-            provenance="imported:census",
-        )
-        plan = learn.remeasure_plan([r], current_apparatus="2.1")
-        assert plan.cells[0].stale_versions == ("1.0-census",)
-
-    def test_policy_rule_sets_the_first_look(self, tmp_path: Path) -> None:
-        plan = learn.remeasure_plan(
-            _stale_ledger(tmp_path),
-            current_apparatus="2.1",
-            policy=RoutingPolicy(rule=RULE_LOOK_V1_LATE),
-        )
-        by = {(c.cell.label, c.mode): c for c in plan.cells}
-        # koa has 20 current rows; look.v1-late's first look is 30 → 10 more
-        koa = "replay|bug.fix|XS|javascript|claude_code|claude-sonnet-5|anthropic"
-        assert by[(koa, "sighted")].n_needed == 10 and plan.min_n == 30
-
-    def test_deterministic(self, tmp_path: Path) -> None:
-        rows = _stale_ledger(tmp_path)
-        a = learn.dumps(learn.remeasure_plan(rows, current_apparatus="2.1").to_dict())
-        b = learn.dumps(
-            learn.remeasure_plan(list(reversed(rows)), current_apparatus="2.1").to_dict()
-        )
-        assert a == b
-        d = json.loads(a)
-        assert d["schema"] == learn.REMEASURE_SCHEMA and "nothing here was sent" in d["note"]
-
-    def test_render(self, tmp_path: Path) -> None:
-        text = learn.render_remeasure(
-            learn.remeasure_plan(_stale_ledger(tmp_path), current_apparatus="2.1")
-        )
-        assert (
-            "apparatus 2.1" in text and "cells to renew: 3" in text and "nothing was sent" in text
-        )
+def test_legacy_belt_set_rows_are_stale_and_offered_a_reading() -> None:
+    r = _clean(
+        task_id="1" * 40,
+        apparatus_version="1.0-census",
+        belt_set="v3-legacy",
+        source_changed=None,
+        provenance="imported:census",
+    )
+    (c,) = learn.remeasure_plan([r], current_apparatus="2.1").cells
+    assert c.stale_versions == ("1.0-census",) and c.reason == learn.REASON_STALE
+    assert c.next_act == learn.NEXT_REGISTER and c.requests == ()
 
 
 def test_version_key_orders_versions_and_tolerates_legacy() -> None:

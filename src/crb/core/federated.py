@@ -45,7 +45,9 @@ What it is:   The federated export boundary — ``AbstractCell`` (exactly the al
               fields of one cell), ``export_abstract`` (what leaves an organisation) and
               ``aggregate_abstract_cells`` (the k-anonymous, optionally noised merge across
               organisations).
-What it does: Projects ``CellStats`` onto the allowlist and nothing else; refuses at import
+What it does: Projects ``CellStats`` onto the allowlist and nothing else — of the rows that may
+              leave: the default instrument's ``S3`` rows at 2.4+ on the global vocabulary,
+              never a ``fixture_gold`` instrument-check row; refuses at import
               time to let the dataclass and the allowlist drift; releases a cross-org cell
               only when ``min_cohort_k`` distinct organisations contributed; keeps a
               contributor's false-Q1 visible in the sum so averaging cannot hide it; adds
@@ -66,9 +68,10 @@ Works with:   src/crb/core/ledger.py (CellStats and the cell key — the abstrac
               src/crb/server/routes/ledger.py (``GET /ledger/export/abstract``)
 Tested by:    tests/test_federated.py, tests/test_server_routes_ledger.py,
               tests/test_checks_pooling.py
-Touch when:   never for a new repository; adding a field to the export is a privacy decision
-              — it must be added to ``ABSTRACT_ALLOWLIST`` on purpose (the import-time
-              assertion and tests/test_federated.py refuse a drift), justified in
+Touch when:   never for a new repository; the fixture builder changes its ``PROVIDER`` (keep
+              ``INSTRUMENT_PROVIDER`` the same string); adding a field to the export is a
+              privacy decision — it must be added to ``ABSTRACT_ALLOWLIST`` on purpose (the
+              import-time assertion and tests/test_federated.py refuse a drift), justified in
               docs/adr/0007-abstract-cell-export-only.md and
               docs/DATA-RETENTION.md#5-cross-organisation-sharing.
 Claims:       DP here is a designed boundary with a nominal sensitivity, not a calibrated
@@ -221,6 +224,10 @@ def to_abstract_cell(stats: CellStats) -> AbstractCell:
 
 #: The one context arm whose rows the abstract export carries (ADR-0026 item 12).
 EXPORT_ARM = "S3"
+#: The provider the test-only ``fixture_gold`` builder stamps on every row it writes
+#: (src/crb/builders/fixture_gold.py ``PROVIDER`` — forced, whatever the rung says): rows of
+#: an instrument check, which never leave the tenant as builder measurements.
+INSTRUMENT_PROVIDER = "fixture"
 
 
 def export_abstract(rows: Iterable[GradeRow]) -> list[dict[str, Any]]:
@@ -232,13 +239,17 @@ def export_abstract(rows: Iterable[GradeRow]) -> list[dict[str, Any]]:
     same reason only context arm ``S3`` rows leave, stamped at apparatus 2.4 or later under
     the global vocabulary (``global/classes@v1``): blind rows, other arms, organisation class
     sets and unstamped rows from before 2.4 stay in the tenant (ADR-0026 item 12 — it narrows
-    which rows leave and adds no field, so ADR-0007's allowlist does not move)."""
+    which rows leave and adds no field, so ADR-0007's allowlist does not move). An instrument
+    check never leaves either: a ``fixture_gold`` row (provider :data:`INSTRUMENT_PROVIDER`)
+    measures the grader, not a builder, and as a shared cell it would reach another
+    organisation as a measurement of a model nobody can buy (P-665)."""
     exported = [
         r
         for r in rows_for_checks(rows, ARM_OFF)
         if r.context_arm == EXPORT_ARM
         and r.taxonomy == GLOBAL_CLASS_SET
         and is_v2_apparatus(r.apparatus_version)
+        and r.provider != INSTRUMENT_PROVIDER
     ]
     cells = [to_abstract_cell(s) for s in all_cell_stats(exported)]
     cells.sort(key=lambda c: c.key)

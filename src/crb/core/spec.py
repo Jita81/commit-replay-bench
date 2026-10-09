@@ -361,6 +361,11 @@ class RepoConfig:
         ``finish_gate``, ``api_stable`` (belt 6), declared ``commands`` and ``formatter``.
         Empty (the default) ⇒ every switch OFF. The ONE surface the prevention loop writes;
         validated by :meth:`crb.core.checks.RepoChecks.from_config`.
+    auto_stages:
+        Chain the £0 stages (DL-315): when a ``probe`` / ``mine`` / ``qualify`` / ``oracle``
+        run succeeds AND its own pass fact holds, the worker queues the next free stage
+        under the person who switched this on. OFF by default; a stage that spends model
+        money is never chained.
     path:
         Local clone path (host). Optional in the config; the CLI and server fill it.
     sandbox_image:
@@ -393,6 +398,7 @@ class RepoConfig:
     sandbox_tree: str = ""
     spend: Mapping[str, Any] = field(default_factory=dict)
     checks: Mapping[str, Any] = field(default_factory=dict)
+    auto_stages: bool = False
 
     def __post_init__(self) -> None:
         # the name is a ledger key, a directory name and a URL segment: one safe charset
@@ -509,6 +515,8 @@ class RepoConfig:
         d = asdict(self)
         if not self.sandbox_tree:
             d.pop("sandbox_tree")  # a stored config is unchanged unless it chooses a tree
+        if not self.auto_stages:
+            d.pop("auto_stages")  # likewise: the switch is stored only once it is on
         d["language"] = self.language.value
         d["belt_scope"] = (
             list(self.belt_scope) if isinstance(self.belt_scope, tuple) else self.belt_scope
@@ -557,6 +565,7 @@ class RepoConfig:
             sandbox_tree=str(d.get("sandbox_tree") or ""),
             spend=dict(d.get("spend") or {}),
             checks=dict(d.get("checks") or {}),
+            auto_stages=bool(d.get("auto_stages", False)),
         )
 
 

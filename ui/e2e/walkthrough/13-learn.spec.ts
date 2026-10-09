@@ -1,5 +1,6 @@
 /**
- * 13 — the learning loop acts from the page (G-532, G-913, G-349, G-175, G-176, G-916).
+ * 13 — the learning loop acts from the page (G-532, G-913, G-349, G-175, G-176, G-916, G-536,
+ * G-565).
  *
  *  - A real refusal is made on the live stack: a `fixture_gold` replay queued through the
  *    Runs dialog with `builder_config {"attempt": "git log -p"}` puts that command to the
@@ -11,7 +12,8 @@
  *    controls escape (or a weak oracle) holds it — so the strengthen report has a row.
  *  - The operator (`walk-operator`, a real operator account) reads the loop's position line,
  *    the register card with the refused class on it, the refusal tile with its n and
- *    interval, the refusal row, the strengthening row and the re-measurement plan; closes
+ *    interval, the refusal row, the guard's false positives by apparatus (G-536), the
+ *    strengthening row and the plan, where the held cell is offered as thin (G-565); closes
  *    the Decide dialog by Cancel, its close button and Escape and finds focus back on
  *    Decide each time (P-162); decides
  *    the refusal (refused, with a note) and reads what it wrote and under whose name;
@@ -124,10 +126,11 @@ async function personaPageAdmin(browser: Browser, viewport: { width: number; hei
 
 /** Every card of the page has painted: the four eyebrows and each report's table or empty state. */
 async function learnRendered(page: Page): Promise<void> {
-  for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale evidence']) await expect(page.getByText(eyebrow, { exact: true }).first()).toBeVisible()
+  for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale or thin evidence']) await expect(page.getByText(eyebrow, { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('table', { name: /Refusal classes/ })).toBeVisible()
   await expect(page.getByRole('table', { name: /Strengthening backlog/ })).toBeVisible()
-  await expect(page.getByRole('table', { name: /predates the current apparatus/ })).toBeVisible()
+  await expect(page.getByRole('table', { name: /Cells to top up, or to register a reading on/ })).toBeVisible()
+  await expect(page.getByRole('table', { name: /The guard's false positives, by apparatus/ })).toBeVisible()
   await expect(page.getByText(/^Deriving /)).toHaveCount(0)
 }
 
@@ -176,16 +179,26 @@ test.describe('13 learn: the loop acts from the page', () => {
     // a row of the refusals and of the strengthening backlog, from this stack's own rows
     await expect(page.getByRole('table', { name: /Refusal classes/ }).getByRole('row').filter({ hasText: 'git log' }).first()).toBeVisible()
     await expect(page.getByRole('table', { name: /Strengthening backlog/ }).locator('tbody tr').first()).toContainText(/strengthen-/)
-    // the plan: a fresh stack's rows all carry the running apparatus, so it says so, with its n
+    // the guard's false positives by apparatus: the refused rows, none decided yet (G-536)
+    const fp = page.getByTestId('learn-false-positives')
+    await expect(fp.getByRole('table', { name: /The guard's false positives, by apparatus/ }).locator('tbody tr').first()).toBeVisible()
+    await expect(fp).toContainText(/refused rows are undecided/)
+    // the plan: a fresh stack's rows all carry the running apparatus, so nothing is stale —
+    // but no reading is registered on the held cell, so its rows cannot count and it is
+    // offered registration first, never a replay (ADR-0026 item 2, P-602), and says why
     const plan = page.locator('#remeasure')
-    await expect(plan.getByText('Nothing stale')).toBeVisible()
     await expect(page.locator('[data-hint="stat.learn.stale_rows"]')).toContainText(/n =\s*\d+/)
+    const thinRow = plan.getByRole('table', { name: /Cells to top up, or to register a reading on/ }).locator('tbody tr').filter({ hasText: 'thin' }).first()
+    await expect(thinRow).toBeVisible()
+    await expect(thinRow.getByText('Register a reading first')).toBeVisible()
+    await expect(thinRow).toContainText(/register a reading of this cell at apparatus/)
+    await expect(thinRow.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
     // and read against a future apparatus (what a bump would cost, G-983) every row is stale:
     // a row of the plan, naming the runs it would queue — and no Queue control on a preview
     await plan.getByLabel(/^Plan against apparatus/).fill(WHAT_IF)
     await plan.getByRole('button', { name: 'Plan', exact: true }).click()
     await expect(plan.getByTestId('learn-plan-whatif')).toContainText(`planned against apparatus ${WHAT_IF}`)
-    const planRow = plan.getByRole('table', { name: /predates the current apparatus/ }).locator('tbody tr').first()
+    const planRow = plan.getByRole('table', { name: /Cells to top up, or to register a reading on/ }).locator('tbody tr').first()
     await expect(planRow).toBeVisible()
     await expect(planRow).toContainText(/\S+\|\S+/)
     await expect(plan.getByRole('button', { name: 'Queue runs' })).toHaveCount(0)
@@ -270,9 +283,11 @@ test.describe('13 learn: the loop acts from the page', () => {
     const plan = page.locator('#remeasure')
     await plan.getByLabel(/^Plan against apparatus/).fill(WHAT_IF)
     await plan.getByRole('button', { name: 'Plan', exact: true }).click()
-    const runs = plan.getByRole('table', { name: /predates the current apparatus/ }).locator('tbody tr').first()
+    const runs = plan.getByRole('table', { name: /Cells to top up, or to register a reading on/ }).locator('tbody tr').first()
     await expect(runs).toBeVisible()
-    await expect(page.locator('[data-hint="stat.learn.needed"]')).toContainText(/n =\s*[1-9]/)
+    // no reading is registered at the future apparatus, so each cell names registration first
+    await expect(runs).toContainText(new RegExp(`register a reading of this cell at apparatus ${WHAT_IF.replace('.', '\\.')}`))
+    await expect(page.locator('[data-hint="stat.learn.needed"]')).toContainText(/need a reading registered first/)
   })
 
   test('a viewer reads the reports and is offered none of the decisions', async ({ browser }) => {

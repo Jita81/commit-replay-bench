@@ -212,6 +212,7 @@ def rig() -> Iterator[Rig]:
     shipped = langs.ensure_shipped_sandbox_image("go")
     root = langs.CACHE_DIR / "sandbox" / f"posture-{os.getpid()}-{uuid.uuid4().hex[:8]}"
     root.mkdir(parents=True, exist_ok=True)
+    baked = ""
     try:
         proxy = _file_proxy(root / "proxy")
         gomod = root / "ctx" / "gomod"
@@ -228,7 +229,9 @@ def rig() -> Iterator[Rig]:
         write_files(repo_dir, _FEAT)
         feat = commit_all(repo_dir, "feat: add sub")
         # the derived image: the shipped one + the dependency's module cache, no network
-        baked = "crb-posture-go-baked:test"
+        # a tag of this run's own: suites in sibling worktrees share the daemon, and a fixed
+        # tag let one run's rebuild take the image another run had pinned (P-671)
+        baked = f"crb-posture-go-baked:{root.name}"
         (root / "ctx" / "Dockerfile").write_text(f"FROM {shipped}\nCOPY gomod /opt/gomod\n")
         subprocess.run(
             ["docker", "build", "-q", "-t", baked, str(root / "ctx")],
@@ -268,6 +271,8 @@ def rig() -> Iterator[Rig]:
             root / "scratch",
         )
     finally:
+        if baked:
+            subprocess.run(["docker", "rmi", "-f", baked], check=False, capture_output=True)
         _rmtree(root)
 
 

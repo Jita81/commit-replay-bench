@@ -50,7 +50,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
-import { HomePage, factoryStatusFor } from './HomePage'
+import { HomePage, factoryStatusFor, probesNeedingAttention } from './HomePage'
 
 const REPO = {
   name: 'alpha',
@@ -575,5 +575,128 @@ describe('HomePage', () => {
     const tag = rows[4]!.querySelector('[data-hint="task.home.measure"]')!
     expect(tag).not.toHaveAttribute('tabindex')
     await expectHintOpens(tag, 'task.home.measure')
+  })
+  it('task 8 says work enters from the board and whether intake is listening', async () => {
+    const intake = { repo: 'alpha', listener: { enabled: true, column: '', switched_by: 'Ada', switched_at: '2026-09-22T09:00:00Z', since: '' }, connection: { tracker: 'ado', url: 'https://dev.azure.invalid/contoso', project: 'Widgets', column: 'Ready for manufacture', poll_s: 300, outcome_map: {}, configured: true, credential_set: true, credential_fingerprint: 'AB12' }, last_poll: null, rows: [] }
+    const routes = {
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+      'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+      'GET /repos/alpha': REPO,
+      'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+      'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+      'GET /capability-map': EMPTY_MAP,
+      'GET /health': { status: 'ok', probes: [{ name: 'sandbox', status: 'ok', detail: '', data: {} }] },
+      'GET /two-person-readiness': READY,
+      'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+      'GET /factory/alpha/tasks': [],
+      'GET /factory/alpha/intake': intake,
+      'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+      'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+    }
+    mockApi(routes)
+    const first = renderApp(<HomePage />, { route: '/home' })
+    const note = await screen.findByTestId('home-task-8-note')
+    await waitFor(() => expect(note).toHaveTextContent('Task 8. Work enters from your board: listening on “Ready for manufacture”'))
+    expect(note).toHaveTextContent('a ready ticket waits for an operator’s Register act')
+    expect(note).not.toHaveTextContent(/will build/)
+    expect(within(note).getByRole('link')).toHaveAttribute('href', '/factory/intake?repo=alpha')
+    expect(note).toHaveAttribute('data-hint', 'stat.home.intake_state')
+    first.unmount()
+    vi.unstubAllGlobals()
+    // the listener off: configured but not listening; a failed read: not known, never not configured
+    mockApi({ ...routes, 'GET /factory/alpha/intake': { ...intake, listener: { ...intake.listener, enabled: false } } })
+    const second = renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByTestId('home-task-8-note')).toHaveTextContent('configured but not listening — an operator switches this repository’s listener on'))
+    second.unmount()
+    vi.unstubAllGlobals()
+    mockApi({ ...routes, 'GET /factory/alpha/intake': () => envelope(500, 'internal', 'intake unreadable') })
+    const third = renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByTestId('home-task-8-note')).toHaveTextContent('intake state not known'))
+    expect(screen.getByTestId('home-task-8-note')).not.toHaveTextContent('not configured')
+    // and the failed read is named in the envelope with the others (G-164)
+    expect(screen.getByRole('alert')).toHaveTextContent('Not read: the board intake')
+    third.unmount()
+    vi.unstubAllGlobals()
+    // a read still on its way is not a failed read: the note says the state is being read
+    mockApi({ ...routes, 'GET /factory/alpha/intake': () => new Promise<Response>(() => {}) })
+    renderApp(<HomePage />, { route: '/home' })
+    const pending = await screen.findByTestId('home-task-8-note')
+    await waitFor(() => expect(pending).toHaveTextContent('Task 8. Work enters from your board: being read — the intake state has not arrived yet'))
+    expect(pending).not.toHaveTextContent('failed')
+    expect(pending).not.toHaveTextContent('not known')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  const healthRoutes = (health: unknown) => ({
+    'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+    'GET /github/app': { configured: false, app_slug: '', install_url: '', api_url: '', installations: [] },
+    'GET /repos': { items: [REPO], total: 1, limit: 500, offset: 0 },
+    'GET /repos/alpha': REPO,
+    'GET /oracle/alpha': { repo: 'alpha', policy: {}, tasks: [{ task_id: 't1', strength: 0.9 }], cells: [], apparatus_versions: ['2.2'] },
+    'GET /oracle/alpha/controls': { passed: true, n_rows: 42, violations: 0, escapes: 0, not_constructible: 6 },
+    'GET /capability-map': EMPTY_MAP,
+    'GET /health': health,
+    'GET /two-person-readiness': READY,
+    'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
+    'GET /factory/alpha/tasks': [],
+    'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
+    'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
+  })
+
+  it('a degraded or down probe other than the sandbox raises the Important banner with its name, detail and guide section', async () => {
+    // G-397: a store behind head or an absent worker showed only as a one-word pill in the
+    // header, so an operator could start a run into either without being told
+    mockApi(
+      healthRoutes({
+        status: 'down',
+        probes: [
+          { name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} },
+          { name: 'migrations', status: 'down', detail: 'database at 0041 is behind code head 0042', data: {} },
+          { name: 'worker', status: 'degraded', detail: 'no worker has checked in', data: {} },
+          { name: 'append_only', status: 'degraded', detail: 'the trigger is missing', data: {} },
+        ],
+      }),
+    )
+    const { container } = renderApp(<HomePage />, { route: '/home' })
+    const list = await screen.findByTestId('home-probe-banner')
+    const region = screen.getByRole('region', { name: 'Important' })
+    expect(region).toHaveTextContent('3 health probes need attention.')
+    const rows = within(list).getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
+    // a probe's identifier is not a word: the sentence names it in plain English
+    expect(rows[2]).toHaveTextContent('The append-only store probe is degraded: the trigger is missing.')
+    expect(rows[2]).not.toHaveTextContent('append_only')
+    expect(within(rows[2]!).getByRole('link', { name: 'What to do' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#33-postgresql')
+    expect(rows[0]).toHaveTextContent('The migrations probe is down: database at 0041 is behind code head 0042.')
+    expect(within(rows[0]!).getByRole('link', { name: 'What to do' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#6-upgrade')
+    expect(rows[1]).toHaveTextContent('The worker probe is degraded: no worker has checked in.')
+    expect(within(rows[1]!).getByRole('link', { name: 'What to do' })).toHaveAttribute('href', '/help/docs/DEPLOYMENT#93-health')
+    for (const r of rows) expect(r).toHaveAttribute('data-hint', 'banner.home.probe')
+    // the sandbox rule is unchanged: ok here, so no sandbox banner
+    expect(screen.queryByText(/The sandbox probe is/)).toBeNull()
+    expect(unhinted(container)).toEqual([])
+  })
+
+  it('a skipped probe raises no banner and a false-Q1 ledger is left to the stop-condition banner', async () => {
+    mockApi(
+      healthRoutes({
+        status: 'down',
+        probes: [
+          { name: 'sandbox', status: 'ok', detail: 'docker 28', data: {} },
+          { name: 'provision', status: 'skipped', detail: 'provisioning is off', data: {} },
+          { name: 'ledger', status: 'down', detail: 'false_q1=1 — honesty floor breached', data: { false_q1: 1 } },
+        ],
+      }),
+    )
+    renderApp(<HomePage />, { route: '/home' })
+    await waitFor(() => expect(screen.getByText(/You have completed \d of 8 tasks\./)).toBeInTheDocument())
+    expect(screen.queryByTestId('home-probe-banner')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Important' })).toBeNull()
+    // a ledger down for another reason (the record altered) is this banner's
+    expect(probesNeedingAttention([{ name: 'ledger', status: 'down', detail: 'row 3 — the record was altered', data: { false_q1: 0 } }])).toHaveLength(1)
+    expect(probesNeedingAttention([{ name: 'ledger', status: 'down', detail: 'false_q1=1', data: { false_q1: 1 } }])).toHaveLength(0)
+    expect(probesNeedingAttention([{ name: 'toolchains', status: 'skipped', detail: '', data: {} }])).toHaveLength(0)
+    expect(probesNeedingAttention([{ name: 'sandbox', status: 'down', detail: '', data: {} }])).toHaveLength(0)
   })
 })

@@ -97,6 +97,23 @@ const RUN = {
 }
 /** A stale sign-off on another cell, so the deliver cell stays "sign-off due" beside it. */
 const STALE = { id: 's1', repo: 'alpha', cell: { capability_class: 'bug.fix', size: 'M' }, revoked: false, active: false, stale: true, apparatus_current: '2.2', approver: 'u9', approver_name: 'Grace', created: '2026-09-01T10:00:00Z', evidence: { n: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, apparatus_versions: ['2.1'] } }
+/** `GET /decisions` — one row of every kind a role acts on, the stale sign-off in its own section (G-132). */
+const DECISION = { repo: 'alpha', reason_code: '', signoff: null, due_since: '2026-09-20T09:00:00+00:00', age_s: 691200 }
+const DECISIONS = {
+  items: [
+    { ...DECISION, kind: 'signoff_due', key: 'bug.fix|XS', title: 'bug.fix × XS clears the bar — attest it or decline', role: 'approver', evidence: 'n=22 on 9 tasks · 100% [85%, 100%] · deliver', reason_code: 'deliver', act: 'Attest', href: '/signoff?repo=alpha&cell=bug.fix%7CXS' },
+    { ...DECISION, kind: 'rework', key: 'I-2', title: 'I-2 Parse — the review said reject', role: 'operator', evidence: 'build clean · rejected', act: 'Review', href: '/factory?repo=alpha&item=I-2' },
+    { ...DECISION, kind: 'item_human', key: 'I-3', title: 'I-3 Retry routed to a human', role: 'operator', evidence: 'bug.fix × S · pending', act: 'Decide', href: '/factory?repo=alpha&item=I-3' },
+    { ...DECISION, kind: 'strengthen', key: 'bug.fix|M', title: 'bug.fix × M is held until its tests are stronger', role: 'operator', evidence: 'n=20 on 20 tasks · 95% [76%, 99%] · oracle_weak', reason_code: 'oracle_weak', act: 'Strengthen the tests', href: '/learn?repo=alpha#strengthen' },
+    { ...DECISION, kind: 'routed_human', key: 'bug.fix|S', title: 'bug.fix × S routed to a human — the reading decided against the arm', role: 'viewer', evidence: 'n=13 on 13 tasks · 92% [67%, 99%] · insufficient', reason_code: 'insufficient', act: 'Read why', href: '/routing?repo=alpha' },
+    { ...DECISION, kind: 'signoff_stale', key: 's1', title: 'bug.fix × M was signed on an earlier instrument — revoke or re-sign', role: 'approver', evidence: 'signed 2026-09-01 by Grace · apparatus_moved', act: 'Revoke or re-sign', href: '/signoff?repo=alpha&cell=bug.fix%7CM', signoff: STALE },
+  ],
+  total: 6,
+  as_of: '2026-09-28T09:00:00+00:00',
+  repos: ['alpha'],
+  measured: ['alpha'],
+  errors: [],
+}
 /** `GET /value` — a measured north star, so the Home tile renders its full evidence. */
 const VALUE = {
   schema: 'crb.value.v1',
@@ -159,10 +176,10 @@ const SIGNED = {
 }
 
 // ── the flow reading every screen shows its own stream's numbers from (G-925)
-const flowStream = (stream: string, name: string, key: string) => ({
+const flowStream = (stream: string, name: string, keys: string[]) => ({
   stream,
   name,
-  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  lead_times: keys.map((key) => ({ key, label: `${name} lead time ${key}`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' })),
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   spend_label: 'the replay and blind attempts graded for this repository',
   per_unit: null,
@@ -171,7 +188,7 @@ const flowStream = (stream: string, name: string, key: string) => ({
   per_unit_units: 0,
   per_unit_reason: 'no merged pull request yet to divide by',
   counts: { graded_rows: 44 },
-  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
+  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of step 2 (the guide’s “real work”), as the developer spent them', why: 'the work happens outside this product; the span from the first red probe or qualify to the first qualified task is timed above and stands in for it', gap: 'G-556' }] : [],
 })
 const FLOW = {
   repo: 'alpha',
@@ -180,12 +197,12 @@ const FLOW = {
   method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   streams: [
-    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
-    flowStream('measure', 'Measure', 'queued_to_graded'),
-    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
-    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
-    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
-    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+    flowStream('connect-and-prove', 'Connect & prove', ['registered_to_controls', 'registered_to_probe_green', 'step_2_span', 'mine_run', 'oracle_run', 'controls_run']),
+    flowStream('measure', 'Measure', ['queued_to_graded']),
+    flowStream('decide-and-license', 'Decide & license', ['accepted_to_signed']),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', ['registered_to_pr']),
+    flowStream('learn', 'Learn', ['refusal_to_strengthening', 'finding_to_remeasurement']),
+    flowStream('run-the-platform', 'Run the platform', ['password_set_to_signed_in']),
   ],
 }
 
@@ -196,6 +213,8 @@ const ALPHA_WALK = {
   'GET /capability-map': MAP,
   'GET /runs/r9': RUN,
   'GET /flow': FLOW,
+  // the mine stage reads the config candidates (DL-316); the fixture implies none
+  'GET /repos/alpha/config-candidates': { repo: 'alpha', items: [] },
 }
 
 /** The on-ramp routes, keyed by App.tsx pattern. */
@@ -216,6 +235,8 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
       'GET /users': { items: [], total: 0, limit: 50, offset: 0 },
       'GET /factory/alpha/backlog': () => envelope(404, 'not_found', 'no backlog'),
       'GET /factory/alpha/tasks': [],
+      // G-548 — task 8's note reads the listener's state
+      'GET /factory/alpha/intake': { repo: 'alpha', listener: { enabled: false, column: '', switched_by: '', switched_at: '', since: '' }, connection: { tracker: 'ado', url: 'https://dev.azure.invalid/contoso', project: 'Widgets', column: 'Ready for manufacture', poll_s: 300, outcome_map: {}, configured: true, credential_set: true, credential_fingerprint: 'AB12' }, last_poll: null, rows: [] },
       'GET /signoffs': { items: [], total: 0, limit: 50, offset: 0 },
       'GET /runs': { items: [], total: 0, limit: 20, offset: 0 },
     },
@@ -279,12 +300,11 @@ export const ONRAMP_SCREENS: Record<string, OnrampScreen> = {
     element: <DecisionsPage />,
     api: {
       'GET /version': { crb: '0', apparatus: '2.2', policy: 'routing.v1' },
-      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 500, offset: 0 },
-      'GET /capability-map': MAP,
-      'GET /signoffs': { items: [STALE], total: 1, limit: 50, offset: 0 },
-      'GET /factory/alpha/tasks': () => envelope(404, 'not_found', 'no backlog'),
+      // the served inbox (F6); `can_act` is left out so each role's own branch renders (G-132):
+      // an operator's Decide and Review on the factory rows, an approver's Attest, a viewer's Read
+      'GET /decisions': DECISIONS,
     },
-    roles: ['viewer', 'approver'],
+    roles: ['viewer', 'operator', 'approver'],
   },
   '/signoff': {
     route: '/signoff?repo=r&cell=bug.fix%7CS',

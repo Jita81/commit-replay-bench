@@ -18,7 +18,12 @@ What it does: Pins the health shape and its append-only probe (an UPDATE is prov
               can be disabled); the version carrying apparatus and policy; and the settings view
               requiring admin and redacting; and that ``/health`` serves the served commits
               (server, checkout, UI bundle) with a ``stale`` flag and a degraded ``build``
-              probe on any disagreement (docs/PREVENTION.md P-002).
+              probe on any disagreement (docs/PREVENTION.md P-002); that ``/metrics`` carries a
+              route-labelled request counter per learning report (G-534) and each
+              repository's ``crb_controls_verdict`` one-hot, refreshed at scrape (G-920); and
+              the ``redaction`` probe: ``down`` naming the pack hash (never the value) when a
+              stored pack carries a credential shape, not fooled by the redactor's own
+              truncated marker, ``degraded`` when one pack cannot be read (G-400).
 How:          ``create_app`` over a temp SQLite factory with probes patched at the function seam.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md
@@ -48,15 +53,21 @@ import pytest
 from alembic import command
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.ledger import BELT_SET_V3_LEGACY
+from crb.core.redact import redact, redact_and_cap_head
 from crb.core.routing import POLICY_VERSION
 from crb.core.version import APPARATUS_VERSION, __version__
 from crb.observability import metrics
 from crb.observability.probes import ProbeResult, failure_detail
 from crb.server.app import API_PREFIX, create_app
+from crb.server.routes import system as system_mod
+from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
 from crb.server.routes.system import (
+    REDACTION_PROBE_PACKS,
+    carries_secret_shape,
     collect_health,
     ledger_counts,
     migrations_result,
@@ -67,7 +78,8 @@ from crb.server.routes.system import (
 from crb.server.settings import Settings
 from crb.store import migrate
 from crb.store.db import make_engine, make_session_factory
-from crb.store.models import Grade, Repo, Run, WorkerRow
+from crb.store.models import Event, EvidencePackRow, Grade, Repo, Run, WorkerRow
+from fixtures.server_seed import ALPHA, BETA, assert_rbac, make_env
 
 ROOT_PW = "correct-horse-battery-staple"
 PROBE_NAMES = {
@@ -76,6 +88,7 @@ PROBE_NAMES = {
     "migrations",
     "append_only",
     "ledger",
+    "redaction",
     "sandbox",
     "provision",
     "toolchains",
@@ -94,6 +107,9 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
+    # the redaction probe reuses an ``ok`` reading per store for a heartbeat; a test's store
+    # is its own, but the process-wide cache is emptied so no test reads another's
+    system_mod._redaction_cache.clear()
 
 
 def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
@@ -918,6 +934,258 @@ class TestMetrics:
             r = c.get(f"{API_PREFIX}/metrics")
             assert r.status_code == 404
             assert r.json()["error"]["code"] == "metrics_disabled"
+
+    def test_each_learning_report_has_its_own_request_series(self, tmp_path: Path) -> None:
+        """G-534: the three learning reports are metered as served — one
+        ``crb_http_requests_total`` series per report route (the route template, never the
+        repository in the query string), which is the counter per report DEPLOYMENT §9.1's
+        learn query sums. It counts reports SERVED to any caller, not a person reading them."""
+        if not metrics.available():
+            pytest.skip("prometheus_client not installed")
+        with make_env(tmp_path) as env:
+            for report in ("refusals", "strengthen", "remeasure"):
+                assert env.get(f"/learn/{report}?repo={ALPHA}").status_code == 200, report
+            text = env.get("/metrics").text
+        for report in ("refusals", "strengthen", "remeasure"):
+            series = (
+                f'crb_http_requests_total{{method="GET",route="{API_PREFIX}/learn/{report}",'
+                'status="200"}'
+            )
+            assert series in text, f"no series for the {report} report"
+        # the repository is a query parameter, never part of the route label
+        assert f"/learn/refusals?repo={ALPHA}" not in text and "?repo=" not in text
+
+    def test_metrics_scrape_carries_each_repositorys_controls_verdict_one_hot(
+        self, tmp_path: Path
+    ) -> None:
+        """G-920: every repository's latest controls verdict is on ``/metrics`` as
+        ``crb_controls_verdict{repo,state}``, exactly one state at 1 and the other four at 0,
+        computed at SCRAPE time from the same read the router makes — the seed's ``alpha``
+        has a ``controls.report``, ``beta`` has none and reads ``unmeasured``. A fresh
+        registry (an API restart) carries it again on the next scrape."""
+        if not metrics.available():
+            pytest.skip("prometheus_client not installed")
+        states = ("unmeasured", "failed", "escaped", "thin", "passed")
+        with make_env(tmp_path) as env:
+            with env.factory() as s:
+                alpha_state = verdict_dict(latest_controls_verdict(s, ALPHA))["state"]
+            assert alpha_state != "unmeasured"  # the seed's report is read, not defaulted
+
+            def hot(text: str, repo: str) -> dict[str, float]:
+                out = {}
+                for state in states:
+                    line = f'crb_controls_verdict{{repo="{repo}",state="{state}"}} '
+                    assert line in text, f"{repo}/{state} is not on /metrics"
+                    out[state] = float(text.split(line, 1)[1].split("\n", 1)[0])
+                return out
+
+            text = env.get("/metrics").text
+            assert hot(text, ALPHA) == {st: float(st == alpha_state) for st in states}
+            assert hot(text, BETA) == {st: float(st == "unmeasured") for st in states}
+            # a restart: the registry starts empty and the next scrape fills it again
+            saved = metrics.snapshot_binding()
+            try:
+                metrics.fresh_registry()
+                text = env.get("/metrics").text
+                assert hot(text, ALPHA)[alpha_state] == 1.0
+            finally:
+                metrics.restore_binding(saved)
+
+
+def _pack(pack_hash: str, **strings: Any) -> EvidencePackRow:
+    """A stored evidence pack whose ``notes`` carry ``strings`` (a real pack's body shape is
+    irrelevant to the probe: it walks every string)."""
+    return EvidencePackRow(
+        pack_hash=pack_hash,
+        repo="demo",
+        task_id="t1",
+        run_id="r" * 32,
+        body_json={"schema": "crb.evidence.v1", "notes": dict(strings), "pack_hash": pack_hash},
+    )
+
+
+class TestRedactionProbe:
+    def test_redaction_probe_is_down_when_a_stored_pack_carries_a_secret_shape(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """G-400: a pack written past the redactor (here: straight through the ORM) that
+        carries a credential shape the redactor knows makes ``/health`` 503 with the pack's
+        hash in the detail — never the value; a clean pack beside it is not named."""
+        leak = "ghp_" + "a" * 36
+        with factory() as s:
+            s.add(_pack("c" * 64, log="all green"))
+            s.add(_pack("d" * 64, log=f"Authorization: token {leak} used"))
+            s.commit()
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 503
+        probe = _probe(r.json(), "redaction")
+        assert probe["status"] == "down"
+        assert "d" * 64 in probe["detail"] and "stop delivery" in probe["detail"]
+        assert leak not in r.text and "ghp_" not in r.text
+        assert probe["data"] == {
+            "packs": 2,
+            "window": REDACTION_PROBE_PACKS,
+            "leaking": ["d" * 64],
+            "acknowledged": [],
+            "unreadable": [],
+        }
+        # a reading that is not ok is never cached, so an acknowledged pack is seen at once
+        # (the evidence table is append-only and a pack is never deleted: the way back is the
+        # approver's acknowledgement, DL-313 — the next test)
+        assert not system_mod._redaction_cache
+        assert _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")["status"] == "down"
+
+    def test_redaction_probe_does_not_read_its_own_truncated_marker_as_a_secret(
+        self, client: TestClient, factory: sessionmaker[Session]
+    ) -> None:
+        """The plan critique's false alarm: ``redact_and_cap_head`` truncates, so a stored
+        ``api_key=[REDACT …`` re-matches the ``key=value`` rule and a naive
+        ``redact(s) != s`` reads a secret where the redactor already did its job. P-640,
+        extended by the Wave 6 verifiers (2026-09-29): cutting the marker to an empty string
+        made ``token=[REDACTED] mismatch`` read as ``token= mismatch`` — the rule re-matches
+        the next word — and the six-character cut ``[REDAC`` (``max_chars=1997`` here) is a
+        value the rule accepts. The rule now: the redactor would ADD a marker the pack does
+        not already carry (its own markers, whole or cut at the end, are counted first)."""
+        assert not carries_secret_shape("api_key=[REDACTED] and token=[REDACTED-GH]")
+        assert not carries_secret_shape("api_key=[REDACT …")
+        assert carries_secret_shape("api_key=[REDACTED] but password=hunter22 too")
+        # the shapes the redactor itself writes at pack-write time (redact_and_cap on a
+        # test-output tail, redact_and_cap_head on an error string), followed by a word
+        for written in (
+            "api_key=abcdef123456 invalid",
+            "token=abcdef1234 expired",
+            "Authorization: Bearer abcdefghijklmnop returned 401",
+            "E  AssertionError: token=abcdef123 mismatch",
+            "SECRET_KEY=abcdefgh1234 loaded",
+            "https://crb:s3cretpassw0rd@db.internal/crb refused",
+            "TOKEN: abcdefgh12 rejected",
+        ):
+            stored = redact(written)
+            assert stored != written, written  # the redactor did change it at write time
+            assert not carries_secret_shape(stored), stored
+        # every cut position of the head cap over a redacted marker, the six-character cut
+        # (``[REDAC``) included
+        tail = "x" * 1980 + " api_key=abcdefghijklmnop rest of line"
+        for n in range(1985, 2020):
+            cut = redact_and_cap_head(tail, max_chars=n)
+            assert not carries_secret_shape(cut), (n, cut[-24:])
+        # a real secret beside a cut marker is still seen
+        assert carries_secret_shape("password=hunter22 and api_key=[REDAC …")
+        assert carries_secret_shape("ghp_" + "a" * 36)
+        assert carries_secret_shape("AKIA" + "B" * 16)
+        with factory() as s:
+            s.add(_pack("e" * 64, error="model_error: api_key=[REDACT …"))
+            s.add(_pack("f" * 64, log="Authorization: Bearer [REDACTED]\nkey=[REDACTED-KEY]"))
+            s.add(_pack("1" * 64, log=redact("E  AssertionError: token=abcdef123 mismatch")))
+            s.add(_pack("2" * 64, error=redact_and_cap_head(tail, max_chars=1997)))
+            s.commit()
+        probe = _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")
+        assert probe["status"] == "ok", probe["detail"]
+        assert probe["data"]["packs"] == 4 and probe["data"]["leaking"] == []
+        assert "known shapes only" in probe["detail"]
+
+    def test_an_acknowledged_pack_returns_readiness_and_is_on_the_chain(
+        self, tmp_path: Path
+    ) -> None:
+        """The way back from ``down`` (DL-313): the evidence table is append-only and a pack
+        is never deleted, so an approver acknowledges the named pack — after rotating the
+        credential — with a reason; the act is a ``redaction.acknowledged`` system event on
+        the audit chain, the probe reads ``ok`` again naming the acknowledged pack, and a
+        pack acknowledged is not silence: a NEW leaking pack is ``down`` again. The act needs
+        the approver role; a pack the store does not hold is 404; one that carries no shape is
+        409 (nothing to acknowledge)."""
+        leak = "ghp_" + "b" * 36
+        with make_env(tmp_path, role="approver") as env:
+            with env.factory() as s:
+                s.add(_pack("d" * 64, log=f"Authorization: token {leak} used"))
+                s.commit()
+            system_mod._redaction_cache.clear()
+            r = env.get("/health")
+            assert r.status_code == 503 and _probe(r.json(), "redaction")["status"] == "down"
+            assert "acknowledge" in _probe(r.json(), "redaction")["detail"]
+            path = f"/system/redaction/{'d' * 64}/acknowledge"
+            r = env.post(path, json={"reason": "token rotated 2026-09-29, incident INC-12"})
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["pack_hash"] == "d" * 64 and body["actor"] and body["acknowledged_at"]
+            assert body["reason"] == "token rotated 2026-09-29, incident INC-12"
+            assert leak not in r.text
+            r = env.get("/health")
+            assert r.status_code == 200, r.text
+            probe = _probe(r.json(), "redaction")
+            assert probe["status"] == "ok" and "d" * 64 in probe["detail"]
+            assert probe["data"]["leaking"] == [] and probe["data"]["acknowledged"] == ["d" * 64]
+            # on the chain, with the actor and the reason — never the value
+            with env.factory() as s:
+                ev = s.execute(
+                    select(Event).where(Event.action == "redaction.acknowledged")
+                ).scalar_one()
+                assert ev.stage == "system" and ev.payload_json["pack_hash"] == "d" * 64
+                assert ev.actor == body["actor"]
+            # acknowledging twice is idempotent (200, the first record); a pack the store
+            # does not hold is 404; a clean pack has nothing to acknowledge (409)
+            r = env.post(path, json={"reason": "again"})
+            assert r.status_code == 200 and r.json()["reason"].startswith("token rotated")
+            r = env.post(f"/system/redaction/{'0' * 64}/acknowledge", json={"reason": "rotated"})
+            assert r.status_code == 404
+            with env.factory() as s:
+                s.add(_pack("c" * 64, log="all green"))
+                s.commit()
+            r = env.post(f"/system/redaction/{'c' * 64}/acknowledge", json={"reason": "rotated"})
+            assert r.status_code == 409
+            # a new leak after the acknowledgement is a new stop (seen within a heartbeat:
+            # the ok reading is reused for REDACTION_PROBE_TTL_S, cleared here)
+            with env.factory() as s:
+                s.add(_pack("9" * 64, log="AKIA" + "Q" * 16))
+                s.commit()
+            system_mod._redaction_cache.clear()
+            r = env.get("/health")
+            assert r.status_code == 503
+            assert _probe(r.json(), "redaction")["data"]["leaking"] == ["9" * 64]
+            assert_rbac(env, "POST", path, min_role="approver", json={"reason": "rotated"})
+
+    def test_redaction_probe_is_degraded_not_down_when_one_pack_cannot_be_read(
+        self, client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One pack whose strings cannot be walked is ``degraded`` naming its hash; the
+        others are still checked; a secret in another pack still wins (``down``)."""
+        with factory() as s:
+            s.add(_pack("a" * 64, log="fine"))
+            s.add(_pack("b" * 64, log="BOOM"))
+            s.commit()
+        real = carries_secret_shape
+
+        def flaky(text_: str) -> bool:
+            if text_ == "BOOM":
+                raise OSError("this pack's body could not be decoded")
+            return real(text_)
+
+        monkeypatch.setattr(system_mod, "carries_secret_shape", flaky)
+        r = client.get(f"{API_PREFIX}/health")
+        assert r.status_code == 200
+        probe = _probe(r.json(), "redaction")
+        assert probe["status"] == "degraded" and "b" * 64 in probe["detail"]
+        assert probe["data"]["unreadable"] == ["b" * 64] and probe["data"]["leaking"] == []
+        with factory() as s:
+            s.add(_pack("9" * 64, log="AKIA" + "Q" * 16))
+            s.commit()
+        probe = _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")
+        assert probe["status"] == "down" and probe["data"]["leaking"] == ["9" * 64]
+
+    def test_redaction_probe_reuses_an_ok_reading_for_one_heartbeat(
+        self, client: TestClient, factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An ``ok`` reading is reused for ``REDACTION_PROBE_TTL_S`` (a readiness poll every
+        few seconds must not walk fifty packs each time) and re-read after it."""
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(system_mod, "_monotonic", lambda: clock["t"])
+        assert _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")["data"]["packs"] == 0
+        with factory() as s:
+            s.add(_pack("1" * 64, log="ok"))
+            s.commit()
+        assert _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")["data"]["packs"] == 0
+        clock["t"] += system_mod.REDACTION_PROBE_TTL_S + 0.1
+        assert _probe(client.get(f"{API_PREFIX}/health").json(), "redaction")["data"]["packs"] == 1
 
 
 class TestVersion:

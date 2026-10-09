@@ -45,7 +45,10 @@ What it does: Makes archaeology impossible rather than forbidden — the builder
               capability-dropped, non-root container whose only route is a CONNECT-only
               allowlisting proxy; copies regular files back (never symlinks, never ``.git``)
               for the unchanged grader. Every failure to provide that isolation is
-              ``SandboxUnavailable`` — the run stops; there is no host fallback.
+              ``SandboxUnavailable`` — the run stops; there is no host fallback. On close
+              the session reads the sidecar's ``deny`` lines and reports them once as
+              ``builder.egress_denied`` (G-400: the worker meters them into
+              ``crb_egress_denied_total{repo}`` and the trace names the targets).
 How:          ``SealedCheckout.create``: ``git archive <parent>`` → ``git init`` + one commit
               → overlay tests (a dangling oracle commit for byte-identity checks) → replicate
               harness fix-ups. ``ContainerSession.__enter__``: verify images → per-attempt
@@ -70,7 +73,8 @@ Works with:   src/crb/builders/sidecar.py (the internal network and the proxy co
               src/crb/core/workspace.py (the source worktree and ``touched_files``),
               src/crb/builders/claude_code.py and src/crb/builders/openai_agent.py (receive
               ``overrides_for``), src/crb/core/deps.py (the builder binding it mounts)
-Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py
+Tested by:    tests/test_builders_container.py, tests/test_builders_container_docker.py,
+              tests/test_container_egress.py
 Touch when:   onboarding a repository whose tests need a toolchain cache — add it to
               ``CRB_BUILDER__*`` ``extra_ro_mounts`` / the builder image, never a mount of
               ``docker.sock``, ``/`` or ``$HOME`` (refused here); a new host the model
@@ -99,6 +103,7 @@ from pathlib import Path
 from typing import Any
 
 from crb.builders import egress_proxy
+from crb.builders.base import EventFn, emit
 from crb.builders.sidecar import (
     PROXY_ALIAS,
     PROXY_PORT,
@@ -801,12 +806,18 @@ class ContainerSession:
         executor: DockerExecutor | None = None,
         label: str = "",
         deps: TaskDeps | None = None,
+        on_event: EventFn | None = None,
     ) -> None:
         self.settings = settings
         self.checkout = checkout
         #: the task's dependencies (ADR-0019); the builder is only ever given ``deps.builder``
         self.deps = deps
         self.cancel = cancel
+        #: the run's raw event callback (the adapter's ``on_event``, never the prefixing
+        #: ``builder_on_event``): :meth:`close` reports the sidecar's denied hosts on it as
+        #: ``builder.egress_denied`` (G-400); ``None`` = nobody listening, nothing reported
+        self.on_event = on_event
+        self._egress_reported = False
         self.executor = executor or DockerExecutor(
             DockerSettings(
                 image=settings.image,
@@ -900,9 +911,34 @@ class ContainerSession:
         """The sidecar's log tail (its allow / deny decisions), kept after close."""
         return self.sidecar.log if self.sidecar is not None else ""
 
+    @property
+    def denied_hosts(self) -> list[str]:
+        """``host:port`` for every ``deny`` line the sidecar logged (``[]`` unnetworked)."""
+        return self.sidecar.denied_hosts() if self.sidecar is not None else []
+
+    def report_egress(self) -> list[str]:
+        """Blocked egress, once per session (G-400): the sidecar's ``deny`` lines, emitted as
+        ``builder.egress_denied {hosts, n}`` on :attr:`on_event` — the worker's
+        ``record_event`` meters them into ``crb_egress_denied_total{repo}`` and the run's
+        trace names the targets. Returns the hosts. The allowlist held (the proxy refused the
+        CONNECT), so this is a builder that tried to reach somewhere it may not, not an
+        escape; what the product cannot see is in docs/DEPLOYMENT.md#92-alert-rules."""
+        if self._egress_reported:
+            return []
+        self._egress_reported = True
+        hosts = self.denied_hosts
+        on_event = self.on_event
+        if hosts:
+            emit(on_event, "builder.egress_denied", hosts=list(hosts), n=len(hosts))
+        return hosts
+
     def close(self) -> None:
-        """Tear down; never raises (the proxy's log tail stays readable as ``proxy_log``)."""
+        """Tear down; never raises (the proxy's log tail stays readable as ``proxy_log``).
+        The sidecar's ``deny`` lines are read and reported first (:meth:`report_egress`):
+        after the proxy is removed only the kept tail is left."""
         if self.sidecar is not None:
+            with contextlib.suppress(Exception):  # reporting must never stop the teardown
+                self.report_egress()
             self.sidecar.close()
 
     def __exit__(self, *exc: object) -> None:

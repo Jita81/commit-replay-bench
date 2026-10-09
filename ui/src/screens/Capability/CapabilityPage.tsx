@@ -1,6 +1,6 @@
 /**
- * Capability map — per (class × size) cell: pass rate with n and interval, false-Q1, cost, latency,
- * oracle strength, and the route that evidence licenses (/capability).
+ * Capability map — per (class × size) cell: pass rate with n and interval, false-Q1, cost,
+ * latency, oracle strength, and the route that evidence licenses (/capability).
  *
  * Navigation
  * ----------
@@ -21,23 +21,32 @@
  *               the dash with its reason, never $0.00. The run action in the empty state is an
  *               operator's; other roles read who acts. The header's controls pill reads the
  *               map through `currentData`, so a refetch that fails never leaves the old
- *               verdict beside the error.
- * How:          `useRepoParam` → `useCapabilityMapWithControls(repo, projection)` → index the
- *               cells by `class|size` → the full taxonomy × size order as the grid so 0-count
- *               classes render honestly → `CellBox` per cell, `CellDetail` on click.
+ *               verdict beside the error. Reached without `?repo=`, the page shows the most
+ *               recently updated repository, as Baseline does (G-977). Export CSV is an
+ *               `ExportButton`: the page fetches the file and says "Downloaded <file> —
+ *               <n> rows", or shows the error envelope with Retry (G-101). `?cell=<class>|<size>`
+ *               (Routing's door, G-253) opens that cell's detail on arrival; the selection is
+ *               dropped when the repository, the projection, a filter or the arm changes.
+ * How:          `useRepoParam({ defaultToLatest })` → `useCapabilityMapWithControls(repo,
+ *               projection)` → index the cells by `class|size` → the full taxonomy × size
+ *               order as the grid so 0-count classes render honestly → `CellBox` per cell,
+ *               `CellDetail` on click.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md,
  *               docs/adr/0001-four-belts-and-false-q1-at-write.md
  * Works with:   ui/src/screens/Capability/contract.ts (the extended map type and hook),
- *               ui/src/screens/Capability/ReasonCode.tsx (a reason code's sentence, inline),
- *               ui/src/screens/Capability/FailureSplit.tsx (split, model point, controls pill),
+ *               ui/src/screens/Capability/ReasonCode.tsx and
+ *               ui/src/screens/Capability/FailureSplit.tsx (a reason code's sentence inline;
+ *               the split, model point and controls pill),
+ *               ui/src/components/ExportButton.tsx (Export CSV),
+ *               ui/src/components/RepoPicker.tsx (`useRepoParam`),
  *               ui/src/components/Help.tsx (`Term` in the legend), ui/src/api/types.ts
- *               (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`), ui/src/components/StatTile.tsx
- *               (the numbers with their method; cost and latency through
- *               ui/src/lib/economics.ts — known n, t interval, apparatus, F35),
- *               src/crb/server/routes/capability.py (the
- *               route and the cell statistics), src/crb/core/taxonomy.py (`ALL_CLASSES` —
- *               the list `ALL_CLASSES` here must match)
+ *               (`CapabilityMap`, `CellField`, `NOT_YET_MEASURED`),
+ *               ui/src/components/StatTile.tsx (the numbers with their method; cost and
+ *               latency through ui/src/lib/economics.ts — known n, t interval, apparatus,
+ *               F35), src/crb/server/routes/capability.py and src/crb/core/taxonomy.py (the
+ *               route and the cell statistics; `ALL_CLASSES` — the list `ALL_CLASSES` here
+ *               must match)
  * Tested by:    ui/src/screens/Capability/CapabilityPage.test.tsx,
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  *               (a real cell with route `calibrate`),
@@ -49,13 +58,14 @@
  * Claims:       The map shows measured cells only; coverage is `null` until the repo has a
  *               change profile (docs/EVIDENCE-AND-CLAIMS.md#6-permitted-claim-shapes-by-maturity).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { NOT_YET_MEASURED, type CapabilityMap, type CellField } from '../../api/types'
-import { AnchorButton, LinkButton } from '../../components/Button'
+import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
 import { EmptyState } from '../../components/EmptyState'
+import { ExportButton } from '../../components/ExportButton'
 import { InlineSelect } from '../../components/Field'
 import { Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
@@ -66,7 +76,6 @@ import { QueryBoundary } from '../../components/QueryBoundary'
 import { RepoPicker, useRepoParam } from '../../components/RepoPicker'
 import { StatTile } from '../../components/StatTile'
 import { VerdictPill } from '../../components/VerdictPill'
-import { apiUrl } from '../../api/client'
 import { currentData } from '../../api/hooks'
 import { useAuth } from '../../lib/auth'
 import { economicsSpoken, economicsTile } from '../../lib/economics'
@@ -438,9 +447,9 @@ function ControlsTile({ verdict, policy }: { verdict: ControlsVerdict | undefine
   )
 }
 
-/** The screen. `?repo=` from the URL; projection toggles (by language / by model) are local state. */
+/** The screen. `?repo=` from the URL (the latest repository when absent); projection toggles (by language / by model) are local state. */
 export function CapabilityPage() {
-  const [repo, setRepo] = useRepoParam()
+  const [repo, setRepo] = useRepoParam({ defaultToLatest: true })
   const [params, setParams] = useSearchParams()
   // ?arm= — one context arm per reading (ADR-0026); '' = each cell on its own standard arm
   const arm = params.get('arm') ?? ''
@@ -458,7 +467,8 @@ export function CapabilityPage() {
   // The selection is a KEY resolved against the current response, never a stored cell
   // object: a repo / projection / filter change would otherwise keep showing the old
   // detail with the new repo's ledger link (CodeRabbit on PR #6).
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // `?cell=class|size` seeds it (Routing's door, G-253); nothing writes the key back to the URL
+  const [selectedKey, setSelectedKey] = useState<string | null>(() => params.get('cell'))
 
   const projection = useMemo<CellField[]>(() => {
     const p: CellField[] = ['capability_class', 'size']
@@ -467,9 +477,15 @@ export function CapabilityPage() {
     return p
   }, [byLanguage, byModel])
 
+  // the selection is dropped when the repo, the projection, a filter or the arm CHANGES —
+  // never on arrival, so a seeded `?cell=` survives the first render
+  const scope = [repo, byLanguage, byModel, language, model, arm].join('\u0000')
+  const scopeRef = useRef(scope)
   useEffect(() => {
+    if (scopeRef.current === scope) return
+    scopeRef.current = scope
     setSelectedKey(null)
-  }, [repo, byLanguage, byModel, language, model, arm])
+  }, [scope])
 
   const map = useCapabilityMapWithControls(repo, projection, arm)
   // the header pill sits outside QueryBoundary: after a failed refetch it must not show the
@@ -487,9 +503,9 @@ export function CapabilityPage() {
             <RepoPicker value={repo} onChange={setRepo} />
             {repo && mapData && <ControlsPill verdict={mapData.controls} minShare={mapData.policy?.min_controls_share} />}
             {repo && (
-              <AnchorButton size="sm" href={apiUrl(`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`)} download hint="button.capability.export">
+              <ExportButton size="sm" path={`/ledger/export?format=csv&repo=${encodeURIComponent(repo)}`} hint="button.capability.export">
                 Export CSV
-              </AnchorButton>
+              </ExportButton>
             )}
           </>
         }

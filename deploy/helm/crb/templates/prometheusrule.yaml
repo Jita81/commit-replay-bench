@@ -1,14 +1,14 @@
 {{- /*
-DEPLOYMENT §9.2's four alert rules as a PrometheusRule (the Prometheus Operator's resource),
+DEPLOYMENT §9.2's alert rules as a PrometheusRule (the Prometheus Operator's resource),
 off by default. Each expression is the guide's, word for word: tests/test_deploy_alert_rules.py
-reads the table and fails when the two disagree. Three of the four read the worker's own
+reads the table and fails when the two disagree. Five of the seven read the worker's own
 series, so the rules are refused while the worker's metrics port is off. CrbNoWorker reads
 the absence of crb_queue_depth, which the api's exposition never serves (P-268), so it
 fires when no worker is scraped even while the api is.
 */}}
 {{- if .Values.prometheusRule.enabled }}
 {{- if and .Values.worker.enabled (eq (int .Values.worker.metrics.port) 0) }}
-{{- fail "prometheusRule.enabled needs the worker's metrics (worker.metrics.port > 0): the no-worker, sandbox and delivery rules read series only the worker serves, so with the port off they could never fire, or would fire for ever — docs/DEPLOYMENT.md §9.2" }}
+{{- fail "prometheusRule.enabled needs the worker's metrics (worker.metrics.port > 0): the no-worker, sandbox, delivery, disqualified and egress rules read series only the worker serves, so with the port off they could never fire, or would fire for ever — docs/DEPLOYMENT.md §9.2" }}
 {{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -60,4 +60,31 @@ spec:
             summary: "A factory delivery failed: the push or the pull-request call errored"
             description: "Check the GitHub App's installation, its permissions and the repository's default branch."
             runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/DEPLOYMENT.md#92-alert-rules
+        - alert: CrbControlsNotPassed
+          expr: max by (repo) (crb_controls_verdict{state!="passed"}) == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Repository {{ "{{" }} $labels.repo {{ "}}" }}: the negative-controls verdict has not read passed for an hour"
+            description: "Its capability map licenses no delivery until the controls pass. Run the controls, or read the Oracle screen for why they did not; silence per repo while a repository is deliberately unmeasured."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/OPERATOR.md#31-oracle-adequacy--mutation-scoring
+        - alert: CrbDisqualifiedRising
+          expr: sum by (repo) (increase(crb_tasks_total{outcome="disqualified"}[7d])) >= 2
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Repository {{ "{{" }} $labels.repo {{ "}}" }}: disqualified attempts reached the threshold in the window"
+            description: "A builder repeatedly disqualified for test tampering is a stop condition. GET /ledger/verify (disqualified) and the Ledger tile name the builder; stop delivering from it and read its rows' dq_reason. Follow OPERATOR §8."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/OPERATOR.md#8-stop-conditions
+        - alert: CrbEgressDenied
+          expr: increase(crb_egress_denied_total[1h]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The egress sidecar refused a builder's connection to a host outside the allowlist"
+            description: "The allowlist held. The run's builder.egress_denied events name the targets; decide whether the host belongs on CRB_BUILDER__ALLOW_HOSTS or the builder was reaching where it should not. A runtime escape needs the operator's own sensor (DEPLOYMENT §9.2)."
+            runbook_url: https://github.com/Jita81/commit-replay-bench/blob/main/docs/OPERATOR.md#8-stop-conditions
 {{- end }}

@@ -19,8 +19,11 @@
  *               so a printed page is the page and the footer's versions (G-213); a health that
  *               is not OK stays on the closed Menu button as the probe's glyph and in its name. The
  *               instrument row offers every role the pages its API lets that role read
- *               (G-914). `AboutThisScreen` is mounted once after the outlet so every screen
- *               carries its help with no wiring. A deep link lands on its target: the shell
+ *               (G-914), and its "Instrument" label is itself a hint trigger that names the
+ *               Operate path — health → Runs → Ledger → Settings — so the path exists in
+ *               the product, not only in the guide (G-396). `AboutThisScreen` is mounted
+ *               once after the outlet so every screen carries its help with no wiring. A
+ *               deep link lands on its target: the shell
  *               scrolls to `location.hash` once the page renders it (`useScrollToHash`,
  *               P-399). The footer carries crb / apparatus /
  *               policy versions — the one place internals appear, because an auditor needs
@@ -335,9 +338,11 @@ export function Layout() {
         </nav>
         <nav aria-label="Instrument" id={SHELL_MENU_IDS[2]} className={`${folded} border-b border-border bg-surface-high`}>
           <ul className="mx-auto m-0 flex max-w-[1400px] list-none flex-wrap items-center gap-1 px-5 py-1 p-0">
-            <li className="pr-2 text-[11px] font-bold uppercase tracking-[.08em] text-on-surface-muted" aria-hidden>
+            {/* the group's label opens the Operate path's purpose (G-396); it follows the Primary
+                row in the tab order, so the phone Menu's first Tab still lands on the chrome */}
+            <Hint as="li" id="nav.instrument_group" className="pr-2 text-[11px] font-bold uppercase tracking-[.08em] text-on-surface-muted" data-testid="instrument-group-label">
               {instrument.length > 1 ? 'Instrument' : 'Record'}
-            </li>
+            </Hint>
             {instrument.map((n) => (
               <li key={n.to}>
                 <Hint

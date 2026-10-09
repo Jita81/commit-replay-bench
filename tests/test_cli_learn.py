@@ -625,20 +625,21 @@ def test_strengthen_oracle_accepts_a_run_events_log_page(run: Run, tmp_path: Pat
 def test_remeasure_text_json_and_out(run: Run, tmp_path: Path) -> None:
     code, out, err = run(["learn", "remeasure", "--apparatus", APPARATUS_VERSION])
     assert code == 0, err
-    assert f"apparatus {APPARATUS_VERSION}" in out and "cells to renew: 1" in out
+    assert f"apparatus {APPARATUS_VERSION}" in out and "readings to top up: 0" in out
     assert "nothing was sent" in out
     plan = tmp_path / "plan.json"
     _, d = _json(run, ["learn", "remeasure", "--apparatus", APPARATUS_VERSION, "--out", str(plan)])
     assert d["schema"] == "crb.learn.remeasure.v1" and d["rows_stale"] == 3
-    (cell,) = d["cells"]
+    # the ledger alone holds no registered reading, so every cell is offered registration
+    # and none a replay: rows graded before a reading never count (ADR-0026 item 2, P-602)
+    (cell,) = [c for c in d["cells"] if c["reason"] == "stale"]
+    assert all(c["reason"] == "thin" for c in d["cells"] if c is not cell)
+    assert all(c["next_act"] == "register" and c["requests"] == [] for c in d["cells"])
     assert cell["label"] == "replay|bug.fix|M|python|claude_code|claude-sonnet-5|anthropic"
     assert cell["n_needed"] == 20 and cell["cost_known"]  # look.v1's first look
-    assert cell["est_cost_usd"] == pytest.approx(0.4 * 20)
-    req = cell["requests"][0]
-    assert req["repo"] == "click" and req["kind"] == "replay" and req["mode"] == "sighted"
-    assert req["builder"] == "claude_code" and len(req["task_ids"]) == 3 and req["limit"] == 3
-    assert cell["requests"][1]["limit"] == 17  # 20 needed − 3 named stale tasks
-    assert json.loads(plan.read_text(encoding="utf-8"))["cells"][0]["n_needed"] == 20
+    assert cell["est_cost_usd"] == 0.0 and "register a reading" in cell["note"]
+    saved = json.loads(plan.read_text(encoding="utf-8"))["cells"]
+    assert [c["n_needed"] for c in saved if c["reason"] == "stale"] == [20]
 
 
 def test_remeasure_default_apparatus_is_the_instrument(run: Run) -> None:
@@ -661,7 +662,7 @@ def test_remeasure_policy_override(run: Run) -> None:
             '{"rule": "look.v1-late"}',
         ],
     )
-    assert d["cells"][0]["n_needed"] == 30
+    assert [c["n_needed"] for c in d["cells"] if c["reason"] == "stale"] == [30]
 
 
 # ---------------------------------------------------------------------------

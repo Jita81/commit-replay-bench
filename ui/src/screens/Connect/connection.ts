@@ -30,13 +30,17 @@
  * ADRs:         none
  * Works with:   ui/src/screens/Connect/ConnectPage.tsx (renders it and passes the polled
  *               run), ui/src/screens/Home/HomePage.tsx (task 4 and 5 statuses),
+ *               ui/src/screens/Repos/RepoConfigTab.tsx (`summaryLine` — the probe stage's
+ *               evidence line is the runner's own summary there and here alike),
  *               ui/src/api/types.ts (`RepoSummary`, `OracleReport`, `ControlsReport`, `Run`),
  *               ui/src/lib/format.ts (`fmtAgo`, `count`),
  *               docs/ONBOARDING-A-REPO.md (the same six steps for a developer at the CLI)
- * Tested by:    ui/src/screens/Connect/connection.test.ts
+ * Tested by:    ui/src/screens/Connect/connection.test.ts,
+ *               ui/e2e/walkthrough/04b-connect-walk.spec.ts (the probe line on the live walk)
  * Touch when:   never for a new repository; a stage is added to onboarding (add it here and
  *               in ONBOARDING-A-REPO.md); the API exposes a stamp that answers a stage better
- *               than the proxy used.
+ *               than the proxy used; the probe's stored detail changes shape (keep
+ *               `summaryLine` and RepoConfigTab's reading the same line).
  */
 
 import type { ControlsReport, OracleReport, RepoSummary, Run, RunKind, RunStatus } from '../../api/types'
@@ -91,9 +95,15 @@ export interface StageInputs {
 
 const ACTIVE: readonly RunStatus[] = ['queued', 'running']
 
-/** The probe's detail can be a whole test-runner transcript; the stage line keeps its head. */
-function firstLine(text: string, max = 160): string {
-  const line = text.split('\n').find((l) => l.trim()) ?? ''
+/**
+ * The probe's detail is the runner's tail — pytest's progress dots first, its own summary
+ * ("1 passed in 0.08s") last. The stage line keeps the SUMMARY: the last non-empty line, the
+ * same line the repository page's Configuration tab shows (RepoConfigTab `summaryLine`), so
+ * the walk and the repository page never read one transcript two ways (P-662).
+ */
+function summaryLine(text: string, max = 160): string {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  const line = lines[lines.length - 1] ?? ''
   return line.length > max ? `${line.slice(0, max)}…` : line
 }
 
@@ -215,11 +225,11 @@ export function stagesFor(input: StageInputs): Stage[] {
     status: probeStatus,
     detail:
       probeStatus === 'done'
-        ? `${repo.probe.status}${repo.probe.detail ? ` — ${firstLine(repo.probe.detail)}` : ''}`
+        ? `${repo.probe.status}${repo.probe.detail ? ` — ${summaryLine(repo.probe.detail)}` : ''}`
         : probeStatus === 'running'
           ? live('probe', probeRun)
           : probeStatus === 'failed'
-            ? firstLine(repo.probe.detail) || 'the probe found the toolchain missing'
+            ? summaryLine(repo.probe.detail) || 'the probe found the toolchain missing'
             : 'run the probe (a few seconds; no model involved)',
     runKind: 'probe',
     runId: probeRun?.id ?? null,

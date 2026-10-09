@@ -9,6 +9,9 @@ What it does: Pins the pool caps, which commits are candidates (the feat commit,
               a target that is green at the parent or times out, that a gold which breaks the
               belt, fails its target, times out or errors is never ``gold_clean``, that a
               declared linter's verdict reaches the gold check only after the core belts hold,
+              that ``config_candidates`` turns a timed-out gold, a timed-out lint plan and an
+              unloadable parent into named config changes and a belt-5 failure into none
+              (DL-316),
               that support files under the test layout are overlaid but never targets
               (mesh-client, DL-023) and that three consecutive harness-errored candidates stop
               the run instead of failing it. Toolchain cases pin gofmt / ruff on the gold, and
@@ -1070,3 +1073,72 @@ def test_three_unloadable_candidates_stop_the_mine_with_what_to_do(
                 target_count=5,
             )
         )
+
+
+# --- the config changes the notes imply (DL-316) --------------------------------------------
+
+
+def test_a_timed_out_gold_is_offered_a_named_timeout_candidate_and_a_lint_debt_gold_is_offered_none(
+    pyrepo: pr.PyRepo,
+) -> None:
+    """A note that names a hit wall clock implies a concrete change — the configured limit,
+    doubled — with the tasks and skipped shas that imply it; ``gold fails belt 5`` is the
+    maintainers' own lint debt (ADR-0011) and implies nothing; a lint plan that timed out
+    is the plan's wall clock, not debt."""
+    cfg = pyrepo.config
+    headroom = pyrepo.feat_task(
+        task_id="a" * 40,
+        gold_clean=False,
+        gold_note="QUAL_HEADROOM: the gold needed more than half the wall clock",
+        labels={"qualification_code": "QUAL_HEADROOM"},
+    )
+    legacy = pyrepo.feat_task(task_id="b" * 40, gold_clean=False, gold_note="gold target timed out")
+    debt = pyrepo.feat_task(
+        task_id="c" * 40, gold_clean=False, gold_note="gold fails belt 5 (ruff): E501 line too long"
+    )
+    lint_slow = pyrepo.feat_task(
+        task_id="d" * 40, gold_clean=False, gold_note="gold fails belt 5 (ruff): ruff timed out"
+    )
+    unloadable = pyrepo.feat_task(
+        task_id="e" * 40,
+        gold_clean=False,
+        gold_note="QUAL_ENV_UNLOADABLE: the parent cannot load its dependencies offline",
+        labels={"qualification_code": "QUAL_ENV_UNLOADABLE"},
+    )
+    clean = pyrepo.feat_task()
+    skips = [
+        {"sha": "f" * 40, "reason": "target timeout at parent", "code": "QUAL_RED_TIMEOUT"},
+        {"sha": "0" * 40, "reason": "target green at parent (not RED)", "code": "QUAL_NOT_RED"},
+    ]
+    out = m.config_candidates(
+        [headroom, legacy, debt, lint_slow, unloadable, clean], cfg, skips=skips
+    )
+    by_kind = {c.kind: c for c in out}
+    assert set(by_kind) == {"raise_test_timeout", "raise_lint_timeout", "provisioning_on"}
+    t = by_kind["raise_test_timeout"]
+    # observed is the configured limit that was hit (the runner default when none is named)
+    assert (t.field, t.observed, t.proposed, t.scope) == ("runner_opts.timeout", 900, 1800, "repo")
+    assert t.sources == ("a" * 40, "b" * 40, "f" * 40)
+    assert t.update(cfg) == {"runner_opts": {**cfg.runner_opts, "timeout": 1800}}
+    # plain English: a real plural, and the limit named as the one IN FORCE — a note written
+    # under an earlier limit never reads as if it hit the current one
+    assert t.reason.startswith("3 commits hit the test wall clock")
+    assert "limit in force is 900 s" in t.reason and "(s)" not in t.reason
+    lint = by_kind["raise_lint_timeout"]
+    assert (lint.field, lint.observed, lint.proposed) == ("lint.timeout", 600, 1200)
+    assert lint.sources == ("d" * 40,)
+    assert (
+        lint.reason.startswith("1 gold timed out in belt 5") and "in force is 600 s" in lint.reason
+    )
+    env = by_kind["provisioning_on"]
+    assert (env.scope, env.field, env.proposed) == ("deployment", "CRB_PROVISION__ENABLED", True)
+    assert env.update(cfg) == {}  # not a repository setting: named, never applied by PUT
+    # the lint-debt gold and the clean one imply nothing
+    assert all("c" * 40 not in c.sources for c in out)
+    assert m.config_candidates([debt, clean], cfg) == []
+    # a configured limit is the one read, and the id is stable for the same reading
+    raised = RepoConfig.from_dict(cfg.name, {**cfg.to_dict(), "runner_opts": {"timeout": 1800}})
+    again = m.config_candidates([headroom], raised)
+    assert (again[0].observed, again[0].proposed) == (1800, 3600)
+    assert "1 commit hit" in again[0].reason and "limit in force is 1800 s" in again[0].reason
+    assert again[0].id != t.id and t.id == m.config_candidates([legacy], cfg)[0].id

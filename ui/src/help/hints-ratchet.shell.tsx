@@ -6,7 +6,9 @@
  * ----------
  * What it is:   `SHELL_SCREENS`: one `{ route, path, element, api, roles }` per route that is
  *               not part of the journey — `/login`, `/invite`, `/help`, `/help/docs/:name`
- *               and `*` — spread into the ratchet's `SCREENS` table.
+ *               and `*` — spread into the ratchet's `SCREENS` table; and `SHELL_CHROME_HINTS`,
+ *               the chrome the shell renders on every screen, each id asserted present by
+ *               ui/src/components/Layout.test.tsx.
  * What it does: Closes G-909. Until this file existed the ratchet read App.tsx's route table
  *               and then dropped those four by name, so a new unhinted element on any of them
  *               failed no test, against the operator's ask that every element explains itself.
@@ -21,17 +23,20 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/src/help/hints-ratchet.test.tsx (spreads these into `SCREENS`),
+ *               ui/src/components/Layout.tsx (renders `SHELL_CHROME_HINTS`),
  *               ui/src/help/hints.ts (`MIN_HINTS` — the floors these routes are held to),
  *               ui/src/screens/Login/LoginPage.tsx,
  *               ui/src/screens/Invite/AcceptInvitePage.tsx, ui/src/screens/Help/HelpPage.tsx,
  *               ui/src/screens/Help/DocPage.tsx, ui/src/screens/NotFoundPage.tsx (the
  *               screens rendered under these fixtures), ui/src/test/utils.tsx (`envelope`)
- * Tested by:    ui/src/help/hints-ratchet.test.tsx
+ * Tested by:    ui/src/help/hints-ratchet.test.tsx, ui/src/components/Layout.test.tsx
  * Touch when:   never for a new repository; one of these screens gains an element — add the fixture
- *               state that renders it and raise its `MIN_HINTS` floor.
+ *               state that renders it and raise its `MIN_HINTS` floor; the shell's chrome
+ *               gains a hinted element — add its id to `SHELL_CHROME_HINTS`.
  */
 import type { ReactElement } from 'react'
 import type { Role } from '../api/types'
+import type { HintId } from './hints'
 import { DocPage } from '../screens/Help/DocPage'
 import { HelpPage } from '../screens/Help/HelpPage'
 import { AcceptInvitePage } from '../screens/Invite/AcceptInvitePage'
@@ -56,6 +61,13 @@ const SIGNED_OUT = {
 }
 
 const SIGNED_IN = { 'GET /auth/me': PRINCIPAL }
+
+/**
+ * The shell's chrome, rendered on every screen for every role: the phone Menu, the role and
+ * health pills, Help, the theme, Sign out, the instrument group's label (the Operate path,
+ * G-396) and the footer. Layout.test asserts each id is rendered; losing one fails there.
+ */
+export const SHELL_CHROME_HINTS: readonly HintId[] = ['button.shell.menu', 'pill.shell.role', 'pill.shell.health', 'nav.help', 'button.shell.theme', 'button.shell.sign_out', 'nav.instrument_group', 'nav.version_line', 'nav.footer_help', 'nav.footer_glossary']
 
 export const SHELL_SCREENS: Record<string, ShellScreen> = {
   '/login': {
