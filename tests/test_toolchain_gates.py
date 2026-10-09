@@ -7,7 +7,9 @@ version while the daemon was stopped (P-744). The cure is one gate that asks whe
 WORKS — ``require_tool`` / ``require_docker`` in tests/conftest_langs.py, run for every
 ``@pytest.mark.toolchain`` and ``@pytest.mark.docker`` test by tests/conftest.py — and a job
 that names the tools it provides in ``CRB_TEST_REQUIRE_TOOLS``, where a tool that does not
-work fails instead of skipping (P-745). These ratchets keep both true.
+work fails instead of skipping (P-745). These ratchets keep both true, and the same for the
+history: the suite jobs hold all of it, so a test that cannot read a commit fails, naming the
+fetch, instead of skipping the proof it was written to make (P-753).
 
 Navigation
 ----------
@@ -23,17 +25,20 @@ What it does: Fails when a test skips on its own PATH or version lookup — ``sh
               does not provide; and when the fresh-clone shards declare anything but the
               ``test-shard`` jobs' tools less ``NOT_GIVEN_TO_ROOT``; and when a Python package
               a test skips on (``pytest.importorskip``) is not installed by the suite jobs'
-              ``uv sync`` extras nor named here as one CI does not install (P-707). Each check
-              also runs on planted shapes so it cannot pass vacuously.
+              ``uv sync`` extras nor named here as one CI does not install (P-707); and when a
+              test skips on what a ``git`` command said, or a suite job holds less than the
+              whole history (P-753). Each check also runs on planted shapes so it cannot pass
+              vacuously.
 How:          ``ast`` over every ``tests/**/*.py`` except the gate's own module and its unit
               tests; PyYAML over ci.yml's ``env:`` blocks.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   tests/conftest_langs.py (the gate), tests/conftest.py (the setup hook that runs it
               for each marker), .github/workflows/ci.yml (``test-shard`` and
-              ``fresh-clone-shard``, which declare the tools they provide and whose ``uv sync``
-              extras install the packages), pyproject.toml (the extras' packages),
-              docs/PREVENTION.md (P-707, P-744, P-745, P-747, P-748)
+              ``fresh-clone-shard``, which declare the tools they provide, whose ``uv sync``
+              extras install the packages and whose checkouts hold the whole history),
+              pyproject.toml (the extras' packages), docs/PREVENTION.md (P-707, P-744, P-745,
+              P-747, P-748, P-753)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository's own tests (they are not in this suite); a runner
               for a new language adds a tool — gate on it with ``@pytest.mark.toolchain``, give
@@ -42,7 +47,8 @@ Touch when:   never for a new repository's own tests (they are not in this suite
               to ``NOT_PROVIDED_BY_CI`` here with the reason; a tool the fresh-clone shards
               cannot give root joins ``NOT_GIVEN_TO_ROOT`` with the reason; a test that skips on
               a package (``pytest.importorskip``) needs that package in the extras the suite
-              jobs install, or an entry in ``NOT_INSTALLED_BY_CI`` with the reason.
+              jobs install, or an entry in ``NOT_INSTALLED_BY_CI`` with the reason; a test
+              that needs a commit fails, naming the fetch, when the clone lacks it.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ import ast
 import re
 import tomllib
 import warnings
+from collections.abc import Collection
 from pathlib import Path
 
 import pytest
@@ -105,7 +112,8 @@ def _name(node: ast.AST) -> str:
 
 #: A version command run by hand in a skip condition is a lookup of its own too: a
 #: ``subprocess`` call whose literal argv asks a tool for its version. Any other command
-#: (``git show`` of a commit a shallow clone lacks) asks about data, not a tool.
+#: (``git show`` of a commit a shallow clone lacks) asks about data, not a tool — and a skip
+#: on that is refused by ``history_skip_findings`` below (P-753).
 SUBPROCESS = {"run", "call", "check_call", "check_output", "Popen"}
 VERSION_ARGS = {"version", "--version", "-version", "-v", "-V"}
 
@@ -151,17 +159,42 @@ def _lookups(node: ast.AST, helpers: set[str], tainted: set[str]) -> list[str]:
     return out
 
 
+def _dotted(node: ast.AST) -> str:
+    """``self.head`` for an attribute chain on a name, or ``""``."""
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    return ".".join([node.id, *reversed(parts)]) if isinstance(node, ast.Name) and parts else ""
+
+
+def _targets(node: ast.AST | None) -> list[str]:
+    """The names a target binds: ``a``, each of ``a, (b, *c)``, and ``self.head``."""
+    if isinstance(node, ast.Name):
+        return [node.id]
+    if isinstance(node, ast.Tuple | ast.List):
+        return [name for e in node.elts for name in _targets(e)]
+    if isinstance(node, ast.Starred):
+        return _targets(node.value)
+    path = _dotted(node) if isinstance(node, ast.Attribute) else ""
+    return [path] if path else []
+
+
 def _assigned(body: list[ast.stmt]) -> list[tuple[list[str], ast.AST]]:
-    """(names, value) for each assignment in ``body``, nested blocks included."""
+    """(names, value) for each binding in ``body``, nested blocks included: an assignment to
+    any target (a tuple unpacked, an attribute), a ``with … as`` and a ``for`` target."""
     out: list[tuple[list[str], ast.AST]] = []
     for stmt in body:
         for n in ast.walk(stmt):
             if isinstance(n, ast.Assign):
-                names = [t.id for t in n.targets if isinstance(t, ast.Name)]
-                out.append((names, n.value))
-            elif isinstance(n, ast.AnnAssign | ast.NamedExpr) and n.value is not None:
-                if isinstance(n.target, ast.Name):
-                    out.append(([n.target.id], n.value))
+                out.append(([name for t in n.targets for name in _targets(t)], n.value))
+            elif isinstance(n, ast.AnnAssign | ast.AugAssign | ast.NamedExpr):
+                if n.value is not None:
+                    out.append((_targets(n.target), n.value))
+            elif isinstance(n, ast.withitem) and n.optional_vars is not None:
+                out.append((_targets(n.optional_vars), n.context_expr))
+            elif isinstance(n, ast.For | ast.AsyncFor | ast.comprehension):
+                out.append((_targets(n.target), n.iter))
     return out
 
 
@@ -196,15 +229,62 @@ def _local_taint(func: ast.AST, helpers: set[str], tainted: set[str]) -> set[str
             return local
 
 
-def _calls_skip(body: list[ast.stmt]) -> bool:
-    return any(
-        isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Attribute)
-        and n.func.attr == "skip"
-        and _name(n.func.value) == "pytest"
-        for stmt in body
-        for n in ast.walk(stmt)
-    )
+#: The skips, however spelled: ``pytest.skip`` and ``pytest.xfail`` (or imported bare, or
+#: under an alias), ``raise unittest.SkipTest`` or ``pytest.skip.Exception``, and a skip or
+#: xfail mark applied at run time (``request.applymarker(pytest.mark.skip(…))``).
+SKIPS = {"skip", "xfail"}
+PYTEST: tuple[frozenset[str], frozenset[str]] = (frozenset({"pytest"}), frozenset())
+
+
+def _pytest_names(tree: ast.Module) -> tuple[frozenset[str], frozenset[str]]:
+    """The names a module binds to pytest, and to its ``skip`` and ``xfail``."""
+    mods, funcs = {"pytest"}, set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            mods |= {a.asname or a.name for a in n.names if a.name == "pytest"}
+        elif isinstance(n, ast.ImportFrom) and n.module == "pytest":
+            funcs |= {a.asname or a.name for a in n.names if a.name in SKIPS}
+    return frozenset(mods), frozenset(funcs)
+
+
+def _skips(
+    node: ast.AST, names: tuple[frozenset[str], frozenset[str]] = PYTEST, via: Collection[str] = ()
+) -> bool:
+    """Whether ``node`` skips: in any spelling above, or by calling ``via``, a function of the
+    module whose body does."""
+    mods, funcs = names
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call) and (
+            (
+                isinstance(n.func, ast.Attribute)
+                and n.func.attr in SKIPS
+                and _name(n.func.value) in mods
+            )
+            or (isinstance(n.func, ast.Name) and (n.func.id in funcs or n.func.id in via))
+            or (
+                isinstance(n.func, ast.Attribute)
+                and n.func.attr in via
+                and _chain(n.func)[1:] in (["self"], ["cls"])
+            )
+        ):
+            return True
+        if isinstance(n, ast.Raise) and n.exc is not None:
+            exc = n.exc.func if isinstance(n.exc, ast.Call) else n.exc
+            if _name(exc) == "SkipTest" or (
+                _name(exc) == "Exception" and _name(getattr(exc, "value", exc)) in SKIPS
+            ):
+                return True
+        if isinstance(n, ast.Attribute) and n.attr in SKIPS and _name(n.value) == "mark":
+            return True
+    return False
+
+
+def _calls_skip(
+    body: list[ast.stmt],
+    names: tuple[frozenset[str], frozenset[str]] = PYTEST,
+    via: Collection[str] = (),
+) -> bool:
+    return any(_skips(stmt, names, via) for stmt in body)
 
 
 def _enclosing(tree: ast.Module) -> dict[ast.AST, ast.AST]:
@@ -321,7 +401,8 @@ def test_the_scan_leaves_the_gate_and_a_branch_alone() -> None:
         '@pytest.mark.toolchain("cargo", "cargo-fmt")\ndef test_a(): ...\n'
         'def f():\n    langs.require_tool("go")\n    langs.require_docker()\n'
         '    if langs.tool_usable("cargo-fmt"):\n        assert True\n'
-        # a lookup that feeds no skip, and a skip on something that is not a tool
+        # a lookup that feeds no skip, and a skip on something that is not a tool (the last,
+        # a skip on a commit, is the history scan's to refuse: P-753)
         'def _bin():\n    return shutil.which("ruff") or "ruff"\n'
         'def g():\n    r = subprocess.run([_bin(), "check"])\n    assert r.returncode == 0\n'
         '@pytest.mark.skipif(sys.platform == "win32", reason="posix only")\ndef test_b(): ...\n'
@@ -516,3 +597,646 @@ def test_the_fresh_clone_declaration_check_refuses_a_changed_declaration(
     planted = text.replace(fresh_env, fresh_env.replace(old, new), 1)
     assert planted != text, what
     assert fresh_declaration_findings(planted) != [], what
+
+
+# --- the history CI provides ------------------------------------------------------------------
+
+
+#: What runs ``git``: an argv whose first item is the git executable (``"git"``,
+#: ``"/usr/bin/git"``, or a name holding it: ``GIT``, ``git_exe``); a command string given to a
+#: runner (``subprocess.run("git show …", shell=True)``, ``os.system``); and a call through
+#: anything named for git (``Git(root).show_file(…)``, ``git_repo.commit()``). A ``GitHub`` or
+#: ``GitLab`` client is not git, nor is ``digit``, nor a type (``tuple[GitRepo, str]``).
+_GIT_EXE = re.compile(r"^(?:\S*/)?git(?:\s|$)")
+_GIT_NAME = re.compile(r"(?:^|_)(?:git|GIT)(?:_|$)")
+_GITISH = re.compile(rf"{_GIT_NAME.pattern}|(?:^|_|[a-z])Git(?!Hub|Lab)(?:[A-Z_]|$)")
+RUNNERS = SUBPROCESS | {"system", "popen", "getoutput", "getstatusoutput"}
+
+
+def _chain(node: ast.AST) -> list[str]:
+    """Every name along an attribute chain, outermost first: ``["show", "repo", "self"]``."""
+    out: list[str] = []
+    while isinstance(node, ast.Attribute):
+        out.append(node.attr)
+        node = node.value
+    return [*out, node.id] if isinstance(node, ast.Name) else out
+
+
+def _says_git(node: ast.AST) -> bool:
+    """A string that starts a ``git`` command, or a name that holds the executable."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return bool(_GIT_EXE.match(node.value))
+    if isinstance(node, ast.JoinedStr) and node.values:
+        return _says_git(node.values[0])
+    return any(_GIT_NAME.search(name) for name in _chain(node))
+
+
+def _git_argv(node: ast.AST) -> bool:
+    """A ``git`` command: an argv whose first item says git, or a runner given a command string
+    that starts with ``git``."""
+    if isinstance(node, ast.List | ast.Tuple):
+        return bool(node.elts) and _says_git(node.elts[0])
+    return (
+        isinstance(node, ast.Call)
+        and _name(node.func) in RUNNERS
+        and bool(node.args)
+        and isinstance(node.args[0], ast.Constant | ast.JoinedStr)
+        and _says_git(node.args[0])
+    )
+
+
+def _loaded(node: ast.AST) -> str:
+    """The name or attribute path ``node`` reads (``out``, ``self.out``), or ``""``."""
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+        return _dotted(node)
+    return ""
+
+
+def _reads_git(node: ast.AST, helpers: Collection[str], tainted: Collection[str]) -> bool:
+    """Whether ``node`` runs ``git``, calls something named for it or a function of the module
+    that does (``f()``, ``self.f()``), or reads a name assigned from any of them (``out``,
+    ``self.out``)."""
+    for n in ast.walk(node):
+        if _git_argv(n):
+            return True
+        if isinstance(n, ast.Call):
+            chain = _chain(n.func)
+            if any(_GITISH.search(name) for name in chain):
+                return True
+            if chain and chain[0] in helpers and chain[1:] in ([], ["self"], ["cls"]):
+                return True
+        elif _loaded(n) in tainted:
+            return True
+    return False
+
+
+def _git_taint(body: list[ast.stmt], helpers: Collection[str], tainted: set[str]) -> set[str]:
+    """``tainted`` and every name ``body`` assigns from what ``git`` said, to a fixpoint."""
+    names = set(tainted)
+    while True:
+        before = len(names)
+        for assigned, value in _assigned(body):
+            if _reads_git(value, helpers, names):
+                names |= set(assigned)
+        if len(names) == before:
+            return names
+
+
+#: Every dotted name a module or package under ``tests/`` can be imported by: pytest puts
+#: ``tests/`` on the path (``test_worker``, ``fixtures.langs``), and a test may put a folder
+#: under it there too (``builders_repo`` from ``tests/fixtures``), so each slice of the path.
+_TEST_MODULES = frozenset(
+    ".".join(parts[i:j])
+    for p in TESTS.rglob("*.py")
+    if ".cache" not in p.parts
+    for parts in [p.relative_to(TESTS).with_suffix("").parts]
+    for i in range(len(parts))
+    for j in range(i + 1, len(parts) + 1)
+    if parts[j - 1] != "__init__"
+)
+
+
+def _from_a_test_module(node: ast.ImportFrom) -> bool:
+    """Whether ``node`` imports from another test module — a relative import, ``tests.…``, or
+    a module or package under ``tests/`` (``test_worker``, ``fixtures.langs``,
+    ``builders_repo``) — so a name it brings in can be that module's git helper. A name from the package under test or a
+    library never is, whatever it is called: ``from crb.core import lint`` is not
+    ``test_formatting``'s ``lint``."""
+    return (
+        bool(node.level)
+        or (node.module or "").split(".")[0] == "tests"
+        or (node.module in _TEST_MODULES)
+    )
+
+
+def _git_scope(tree: ast.Module, extern: Collection[str] = ()) -> tuple[set[str], set[str]]:
+    """The module's git helpers — functions of any depth (a method, a fixture) that run git,
+    and names it imports from a test module that holds one (``extern``) — and the names that
+    hold what git said: assigned at module level, or to an attribute (``self.out``) in any
+    function, to a fixpoint."""
+    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
+    top = [s for s in tree.body if not isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef)]
+    imported = {
+        a.asname or a.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and _from_a_test_module(n)
+        for a in n.names
+        if a.name in extern
+    }
+    helpers, tainted = set(imported), set(imported)
+    while True:  # a function that calls one, or reads such a name, is one too
+        before = len(helpers) + len(tainted)
+        helpers |= {f.name for f in funcs if _reads_git(f, helpers, tainted)}
+        tainted = _git_taint(top, helpers, tainted)
+        for f in funcs:
+            tainted |= {n for n in _git_taint(f.body, helpers, tainted) if "." in n}
+        if len(helpers) + len(tainted) == before:
+            return helpers, tainted
+
+
+def git_helpers(tree: ast.Module, extern: Collection[str] = ()) -> set[str]:
+    """What another test module can import from this one, or a test receive from it as a
+    fixture, that holds what git said: its top-level git helpers and names."""
+    helpers, tainted = _git_scope(tree, extern)
+    top = {s.name for s in tree.body if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef)}
+    return (helpers & top) | {n for n in tainted if "." not in n}
+
+
+def _conditions(mark: ast.Call) -> list[ast.expr]:
+    """A ``skipif`` or ``xfail`` mark's conditions — its positional arguments and
+    ``condition=`` — and each string among them parsed as the expression pytest evaluates."""
+    out = [*mark.args, *(k.value for k in mark.keywords if k.arg == "condition")]
+    for n in list(out):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            try:
+                with warnings.catch_warnings():  # a regex in a string is not a condition
+                    warnings.simplefilter("ignore", SyntaxWarning)
+                    out.append(ast.parse(n.value.strip(), mode="eval").body)
+            except (SyntaxError, ValueError):
+                continue
+    return out
+
+
+def _branches(node: ast.AST) -> list[ast.AST]:
+    """What an ``if`` or a conditional expression runs, on either side of its test."""
+    if isinstance(node, ast.If):
+        return [*node.body, *node.orelse]
+    if isinstance(node, ast.IfExp):
+        return [node.body, node.orelse]
+    return []
+
+
+def history_skip_findings(source: str, where: str, extern: Collection[str] = ()) -> list[str]:
+    """Every place a test skips, or passes having proved nothing, on what a ``git`` command
+    said (P-753):
+
+    - a ``skipif`` or ``xfail`` mark whose condition (a string one too) reads git;
+    - an ``if`` or a conditional expression that reads git and skips in either branch;
+    - an ``and`` / ``or`` that skips on git (``r.returncode and pytest.skip(…)``);
+    - an ``except`` that skips around a git command;
+    - a ``return`` from a test in an ``if`` that reads git.
+
+    A skip is any spelling (``pytest.skip`` or ``xfail`` however imported, ``SkipTest``,
+    ``pytest.skip.Exception``, a skip mark applied at run time, or a call to a function of the
+    module that skips). Git is read directly, through a function of any depth that reads it
+    (a method, a fixture the test takes), through a name assigned from one (a tuple unpacked,
+    ``self.out``, a ``with … as``), or through ``extern``, the git helpers of the other test
+    modules. The suite jobs hold the whole history, so a commit a test cannot read is a clone
+    to deepen: the test fails, naming the fetch, and never skips the proof it was written to
+    make."""
+    tree = ast.parse(source)
+    helpers, tainted = _git_scope(tree, extern)
+    names = _pytest_names(tree)
+    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
+    skippers: set[str] = set()
+    while True:  # a function that calls one that skips skips too
+        grown = {f.name for f in funcs if _calls_skip(f.body, names, skippers)}
+        if grown == skippers:
+            break
+        skippers = grown
+    scope_of = _enclosing(tree)
+    local: dict[ast.AST, set[str]] = {tree: tainted}
+
+    def git(node: ast.AST) -> bool:
+        scope = scope_of.get(node, tree)
+        if scope not in local:  # and the fixtures the function takes that read git
+            args = getattr(scope, "args", None)
+            given = {a.arg for a in ast.walk(args) if isinstance(a, ast.arg)} if args else set()
+            seed = tainted | (given & (helpers | set(extern)))
+            local[scope] = _git_taint(getattr(scope, "body", []), helpers, seed)
+        return _reads_git(node, helpers, local[scope])
+
+    def skips(*nodes: ast.AST) -> bool:
+        return any(_skips(n, names, skippers) for n in nodes)
+
+    fix = "pytest.fail, naming the fetch that deepens the clone"
+    out: list[str] = []
+    for node in ast.walk(tree):
+        scope = scope_of.get(node, tree)
+        if isinstance(node, ast.Call) and (
+            _name(node.func) == "skipif"
+            or (_name(node.func) == "xfail" and _name(getattr(node.func, "value", node)) == "mark")
+        ):
+            if any(git(c) for c in _conditions(node)):
+                out.append(f"{where}:{node.lineno}: a {_name(node.func)} on what git said — {fix}")
+        elif (branches := _branches(node)) and skips(*branches) and git(node.test):
+            out.append(f"{where}:{node.lineno}: skips on what git said — {fix}")
+        elif isinstance(node, ast.BoolOp) and any(skips(v) for v in node.values):
+            if any(git(v) for v in node.values if not skips(v)):
+                out.append(f"{where}:{node.lineno}: skips on what git said — {fix}")
+        elif (
+            isinstance(node, ast.Try)
+            and any(skips(*h.body) for h in node.handlers)
+            and any(git(s) for s in node.body)
+        ):
+            out.append(f"{where}:{node.lineno}: skips when git fails — {fix}")
+        elif (
+            isinstance(node, ast.If)
+            and isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef)
+            and scope.name.startswith("test")
+            and any(isinstance(n, ast.Return) for s in _branches(node) for n in ast.walk(s))
+            and git(node.test)
+        ):
+            out.append(
+                f"{where}:{node.lineno}: returns early on what git said, so the test passes "
+                f"having proved nothing — {fix}"
+            )
+    return out
+
+
+def test_no_test_skips_on_what_git_said() -> None:
+    """The proof that ``workflow_jobs.json`` is the pull-request workflows at its commit
+    skipped on a clone that lacked the commit, so a shallow checkout passed it having proved
+    nothing (P-753). The suite jobs hold the whole history: a test that cannot read a commit
+    fails, naming the fetch. A helper or fixture of another test module counts: the scan
+    follows them across modules to a fixpoint."""
+    trees = {p: ast.parse(p.read_text(encoding="utf-8")) for p in _test_sources()}
+    extern: set[str] = set()
+    while True:
+        grown = {n for tree in trees.values() for n in git_helpers(tree, extern)}
+        if grown == extern:
+            break
+        extern = grown
+    found = [
+        f
+        for p in trees
+        for f in history_skip_findings(
+            p.read_text(encoding="utf-8"), str(p.relative_to(ROOT)), extern
+        )
+    ]
+    assert found == []
+
+
+#: Each shape of a skip on git the scan refuses — the one P-753 found, and each a review
+#: planted against the first scan and found it passed.
+HISTORY_SKIPS = {
+    "nested-helper-local-exit-code": (
+        'def test_a():\n    def git(*a):\n        return subprocess.run(["git", *a])\n'
+        '    listed = git("ls-tree", "abc")\n    if listed.returncode != 0:\n'
+        '        pytest.skip("a shallow clone")\n'
+    ),
+    "if-on-the-result": (
+        'def f():\n    shown = subprocess.run(["git", "show", "abc:ci.yml"])\n'
+        '    if shown.returncode != 0:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "skipif-on-a-helper": (
+        'def _has(c):\n    return subprocess.run(["git", "cat-file", "-e", c]).returncode == 0\n'
+        '@pytest.mark.skipif(not _has("abc"), reason="x")\ndef test_a(): ...\n'
+    ),
+    "module-constant": (
+        'HEAD = subprocess.run(("git", "rev-parse", "HEAD")).stdout\n'
+        'def f():\n    if not HEAD:\n        pytest.skip("no history")\n'
+    ),
+    "except-around-git": (
+        'def f():\n    try:\n        subprocess.run(["git", "show", "abc"], check=True)\n'
+        '    except subprocess.CalledProcessError:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "skip-in-the-else": (
+        'def test_a():\n    r = subprocess.run(["git", "cat-file", "-e", "abc"])\n'
+        '    if r.returncode == 0:\n        check(r)\n    else:\n        pytest.skip("shallow")\n'
+    ),
+    "skip-through-a-method": (
+        'class TestHistory:\n    def _shallow(self):\n        pytest.skip("a shallow clone")\n'
+        '    def test_a(self):\n        r = subprocess.run(["git", "show", "abc"])\n'
+        "        if r.returncode:\n            self._shallow()\n"
+    ),
+    "skip-through-a-helper": (
+        'def _shallow():\n    pytest.skip("a shallow clone")\n'
+        'def test_a():\n    r = subprocess.run(["git", "show", "abc:ci.yml"])\n'
+        "    if r.returncode != 0:\n        _shallow()\n"
+    ),
+    "helper-checks-and-skips": (
+        'def _need(c):\n    if subprocess.run(["git", "cat-file", "-e", c]).returncode:\n'
+        '        pytest.skip("a shallow clone")\ndef test_a():\n    _need("abc")\n'
+    ),
+    "skip-imported-bare": (
+        'from pytest import skip\ndef test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    if r.returncode:\n        skip("a shallow clone")\n'
+    ),
+    "pytest-under-an-alias": (
+        'import pytest as pt\ndef test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    if r.returncode:\n        pt.skip("a shallow clone")\n'
+    ),
+    "raise-SkipTest": (
+        'def test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    if r.returncode:\n        raise unittest.SkipTest("a shallow clone")\n'
+    ),
+    "raise-skip-Exception": (
+        'def test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    if r.returncode:\n        raise pytest.skip.Exception("a shallow clone")\n'
+    ),
+    "xfail": (
+        'def test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    if r.returncode:\n        pytest.xfail("a shallow clone")\n'
+    ),
+    "xfail-mark": (
+        'def _has(c):\n    return subprocess.run(["git", "cat-file", "-e", c]).returncode == 0\n'
+        '@pytest.mark.xfail(condition=not _has("abc"), reason="x")\ndef test_a(): ...\n'
+    ),
+    "tuple-unpacked": (
+        'def _git(*a):\n    p = subprocess.run(["git", *a], capture_output=True, text=True)\n'
+        '    return p.returncode, p.stdout\ndef test_a():\n    code, out = _git("ls-tree", "abc")\n'
+        '    if code:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "method-helper": (
+        "class TestHistory:\n    def _has(self, c):\n"
+        '        return subprocess.run(["git", "cat-file", "-e", c]).returncode == 0\n'
+        '    def test_a(self):\n        if not self._has("abc"):\n            pytest.skip("x")\n'
+    ),
+    "fixture-the-test-takes": (
+        '@pytest.fixture\ndef listed():\n    return subprocess.run(["git", "ls-tree", "abc"])\n'
+        'def test_a(listed):\n    if listed.returncode != 0:\n        pytest.skip("shallow")\n'
+    ),
+    "fixture-that-skips": (
+        '@pytest.fixture\ndef history():\n    r = subprocess.run(["git", "cat-file", "-e", "a"])\n'
+        '    if r.returncode:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "shell-string": (
+        'def test_a():\n    r = subprocess.run("git cat-file -e abc", shell=True)\n'
+        '    if r.returncode:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "f-string-command": (
+        'def test_a():\n    r = subprocess.run(f"git cat-file -e {C}", shell=True)\n'
+        '    if r.returncode:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "argv0-a-name": (
+        'GIT = shutil.which("git") or "git"\ndef test_a():\n'
+        '    r = subprocess.run([GIT, "cat-file", "-e", "abc"])\n'
+        '    if r.returncode:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "argv0-a-path": (
+        'def test_a():\n    r = subprocess.run(["/usr/bin/git", "cat-file", "-e", "abc"])\n'
+        '    if r.returncode:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "os-system": (
+        'def test_a():\n    if os.system("git cat-file -e abc"):\n        pytest.skip("shallow")\n'
+    ),
+    "the-product-Git": (
+        "from crb.core.git import Git\ndef test_a():\n"
+        '    if Git(ROOT).show_file("8fa2d73a", "ci.yml") is None:\n        pytest.skip("x")\n'
+    ),
+    "the-product-Git-through-a-local": (
+        'from crb.core.git import Git\ndef test_a():\n    names = Git(ROOT).tree_names("8fa2d73a")\n'
+        '    if not names:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "skipif-string": (
+        "@pytest.mark.skipif(\"subprocess.run(['git', 'cat-file', '-e', 'a']).returncode\", "
+        'reason="x")\ndef test_a(): ...\n'
+    ),
+    "conditional-expression": (
+        'def test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    pytest.skip("a shallow clone") if r.returncode else None\n'
+    ),
+    "and-or": (
+        'def test_a():\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    r.returncode and pytest.skip("a shallow clone")\n'
+    ),
+    "with-as": (
+        'def test_a():\n    with subprocess.Popen(["git", "show", "abc"]) as p:\n'
+        '        if p.wait():\n            pytest.skip("a shallow clone")\n'
+    ),
+    "self-attribute": (
+        "class TestH:\n    def setup_method(self):\n"
+        '        self.r = subprocess.run(["git", "show", "abc"])\n'
+        '    def test_a(self):\n        if self.r.returncode:\n            pytest.skip("x")\n'
+    ),
+    "skip-mark-applied-at-run-time": (
+        'def test_a(request):\n    r = subprocess.run(["git", "show", "abc"])\n'
+        '    if r.returncode:\n        request.applymarker(pytest.mark.skip(reason="shallow"))\n'
+    ),
+    "early-return": (
+        'def test_a():\n    r = subprocess.run(["git", "ls-tree", "abc"])\n'
+        "    if r.returncode != 0:\n        return\n    assert parse(r.stdout) == EXPECTED\n"
+    ),
+    "early-return-in-the-else": (
+        'def test_a():\n    r = subprocess.run(["git", "ls-tree", "abc"])\n'
+        "    if r.returncode == 0:\n        assert parse(r.stdout) == EXPECTED\n    else:\n"
+        "        return\n"
+    ),
+    "check-output-in-a-try": (
+        'def test_a():\n    try:\n        out = subprocess.check_output(["git", "show", "abc"])\n'
+        '    except subprocess.CalledProcessError:\n        pytest.skip("a shallow clone")\n'
+    ),
+    "on-its-output": (
+        'def test_a():\n    out = subprocess.check_output(["git", "rev-list", "--count", "HEAD"])\n'
+        '    if int(out) < 100:\n        pytest.skip("a shallow clone")\n'
+    ),
+}
+
+
+@pytest.mark.parametrize("planted", HISTORY_SKIPS.values(), ids=HISTORY_SKIPS.keys())
+def test_the_history_scan_finds_each_shape_of_a_skip_on_git(planted: str) -> None:
+    assert history_skip_findings(planted, "planted"), planted
+
+
+def test_the_history_scan_follows_a_helper_or_fixture_of_another_module() -> None:
+    """A conftest fixture or a helper another module exports is followed: ``git_helpers``
+    names it, and a test that takes or imports it and skips on it is refused. A name of the
+    same spelling imported from the package under test is not that helper."""
+    conftest = ast.parse(
+        '@pytest.fixture\ndef history():\n    return subprocess.run(["git", "ls-tree", "a"])\n'
+        'def has_commit(c):\n    return Git(ROOT).show_file(c, "x") is not None\n'
+    )
+    extern = git_helpers(conftest)
+    assert extern == {"history", "has_commit"}
+    taken = 'def test_a(history):\n    if history.returncode:\n        pytest.skip("shallow")\n'
+    imported = (
+        "from tests.helpers import has_commit\ndef test_a():\n"
+        '    if not has_commit("abc"):\n        pytest.skip("shallow")\n'
+    )
+    sibling = imported.replace("tests.helpers", "test_worker")
+    package = imported.replace("tests.helpers", "fixtures.langs")
+    on_path = imported.replace("tests.helpers", "builders_repo")
+    relative = imported.replace("tests.helpers", ".helpers")
+    for planted in (taken, imported, sibling, package, on_path, relative):
+        assert history_skip_findings(planted, "planted") == [], planted
+        assert history_skip_findings(planted, "planted", extern), planted
+    # A name from the package under test is never another module's helper, whatever it is
+    # called. The scan read ``from crb.core import lint as lint_mod`` as test_formatting's git
+    # helper ``lint``, and refused a test's return on ``lint_mod.LINT_NOT_REQUESTED``.
+    product = (
+        "from crb.core import has_commit as hc\ndef test_a(status):\n"
+        "    if status == hc.NOT_REQUESTED:\n        return\n"
+    )
+    assert history_skip_findings(product, "planted", extern) == []
+
+
+def test_the_history_scan_passes_a_fail_and_a_skip_on_something_else() -> None:
+    fine = (
+        'def f():\n    shown = subprocess.run(["git", "show", "abc"])\n'
+        '    if shown.returncode != 0:\n        pytest.fail("git fetch origin abc")\n'
+        'def g():\n    r = subprocess.run(["git", "log"])\n    assert r.returncode == 0\n'
+        '    if not os.environ.get("CRB_TEST_POSTGRES_URL"):\n        pytest.skip("no postgres")\n'
+        'def test_h():\n    if digit() or GitHub(token).ok or legit:\n        pytest.skip("x")\n'
+        '    r = subprocess.run(["git", "show", "abc"])\n    if r.returncode:\n'
+        '        pytest.fail("git fetch origin abc")\n'
+        'def test_i(tmp_path):\n    if not os.environ.get("CI"):\n        return\n'
+        "def built() -> tuple[GitRepo, str]:\n    return make()\n"
+        "def test_j(built):\n    if not built:\n        return\n"
+        '    if shutil.which("git") is None:\n        pytest.skip("the gate\'s job, not this scan\'s")\n'
+        '    subprocess.run(["git", "init", tmp_path])\n'
+    )
+    assert history_skip_findings(fine, "fine") == []
+
+
+#: A ``git clone`` / ``fetch`` / ``pull`` that cuts the history it takes, wherever its
+#: options sit (``git -c k=v clone``, ``git -C dir fetch --depth=1``).
+_CUT = re.compile(
+    r"\bgit\b[^\n]*?\b(?:clone|fetch|pull)\b[^\n]*?--(?:depth|shallow|single-branch|deepen)"
+)
+#: A pytest command, by its last path part, and the arguments after it on that command.
+_PYTEST = re.compile(r"(?:^|[\s;&|(\"'])(?:\S*/)?pytest(?=[\s\"']|$)([^\n;&|]*)")
+#: An option and its argument, which may name a file but selects none: a selected test file
+#: is a positional argument, never ``--name=value`` or the value of an option that takes one.
+_NOT_A_SELECTION = re.compile(
+    r"(?<!\S)(?:--[\w-]+=\S+|(?:--(?:ignore|ignore-glob|deselect|confcutdir|rootdir)|-c|-p)\s+\S+)"
+)
+
+
+def _runs(step: dict[str, object]) -> str:
+    """A step's ``run`` with its continued lines joined and its comment lines dropped."""
+    text = re.sub(r"\\\n\s*", " ", str(step.get("run") or ""))
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+def suite_jobs(ci_text: str) -> set[str]:
+    """Every job that runs the suite: one whose pytest selects no test file and is not
+    ``--version`` or ``--help``, so it collects every test under ``tests/``. A file an option
+    names (``--ignore=x.py``, ``--deselect x.py::t``, ``-c x.py``) selects nothing."""
+    return {
+        job
+        for job, spec in yaml.safe_load(ci_text)["jobs"].items()
+        for step in spec.get("steps") or []
+        for args in _PYTEST.findall(_runs(step))
+        if not re.search(r"\S+\.py\b|--(?:version|help)\b", _NOT_A_SELECTION.sub(" ", args))
+    }
+
+
+def shallow_suite_findings(ci_text: str) -> list[str]:
+    """Each suite job that holds less than the whole history: a checkout without
+    ``fetch-depth: 0``, or a ``git clone`` / ``fetch`` / ``pull`` cut by ``--depth``,
+    ``--deepen``, ``--shallow-*`` or ``--single-branch`` (P-753). It reads ``SUITE_JOBS`` and
+    every job ``suite_jobs`` finds, so a new suite job is read before anyone names it, and a
+    renamed one is reported gone."""
+    jobs = yaml.safe_load(ci_text)["jobs"]
+    out: list[str] = []
+    for job in sorted(set(SUITE_JOBS) | suite_jobs(ci_text)):
+        if job not in jobs:
+            out.append(f"{job} is gone — SUITE_JOBS names a job ci.yml no longer has")
+            continue
+        steps = jobs[job].get("steps") or []
+        checkouts = [s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@")]
+        if not checkouts or any((s.get("with") or {}).get("fetch-depth") != 0 for s in checkouts):
+            out.append(f"{job} does not check out the whole history (fetch-depth: 0)")
+        if any(_CUT.search(_runs(s)) for s in steps):
+            out.append(f"{job} cuts the history it clones or fetches")
+    return out
+
+
+def test_the_suite_jobs_hold_the_whole_history() -> None:
+    """Every job that runs the suite checks out the whole history, and the fresh-clone
+    shards' clone of it is whole too: the proofs that read a commit run there (P-753)."""
+    assert shallow_suite_findings(CI.read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize(
+    ("what", "old", "new", "job"),
+    [
+        (
+            "test-shard shallow",
+            "fetch-depth: 0 # fixture replays and mining tests walk git history",
+            "fetch-depth: 1",
+            "test-shard",
+        ),
+        (
+            "fresh-clone-shard depth dropped",
+            "          fetch-depth: 0 # mining tests walk the history\n",
+            "",
+            "fresh-clone-shard",
+        ),
+        (
+            "fresh clone cut",
+            'git clone -q --no-local "$SRC" /root/fresh',
+            'git clone -q --depth 1 --no-local "$SRC" /root/fresh',
+            "fresh-clone-shard",
+        ),
+        (
+            "clone cut after a git option",
+            'git clone -q --no-local "$SRC" /root/fresh',
+            'git -c protocol.file.allow=always clone -q --depth 1 --no-local "$SRC" /root/fresh',
+            "fresh-clone-shard",
+        ),
+        (
+            "clone cut on a continued line",
+            'git clone -q --no-local "$SRC" /root/fresh',
+            'git clone -q --no-local \\\n          --depth 1 "$SRC" /root/fresh',
+            "fresh-clone-shard",
+        ),
+        (
+            "fetch cut in another directory",
+            'git fetch -q "$SRC" HEAD',
+            'git -C /root/fresh fetch -q --depth=1 "$SRC" HEAD',
+            "fresh-clone-shard",
+        ),
+        (
+            "pull cut",
+            'git fetch -q "$SRC" HEAD',
+            'git pull -q --depth 1 "$SRC" HEAD',
+            "fresh-clone-shard",
+        ),
+        (
+            "a new suite job on a default checkout",
+            "\n  test:\n",
+            "\n  test-extra:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/checkout@v4\n      - run: .venv/bin/pytest -q\n"
+            "\n  test:\n",
+            "test-extra",
+        ),
+        (
+            "a new suite job that only ignores a file",
+            "\n  test:\n",
+            "\n  test-most:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "      - run: .venv/bin/pytest -q --ignore=tests/test_slow.py -p no:cacheprovider\n"
+            "\n  test:\n",
+            "test-most",
+        ),
+    ],
+)
+def test_the_history_check_refuses_a_shallow_suite_job(
+    what: str, old: str, new: str, job: str
+) -> None:
+    text = CI.read_text(encoding="utf-8")
+    assert old in text, f"{what}: the line moved"
+    findings = shallow_suite_findings(text.replace(old, new))
+    assert findings and all(f.startswith(job) for f in findings), (what, findings)
+
+
+def test_suite_jobs_is_what_ci_runs_the_suite_in() -> None:
+    """``SUITE_JOBS`` is checked against ci.yml, never only kept by hand: a job whose pytest
+    names no test file runs the suite, so it must install what the suite skips on and hold
+    the whole history (P-707, P-753)."""
+    assert suite_jobs(CI.read_text(encoding="utf-8")) == set(SUITE_JOBS)
+
+
+def test_a_file_an_option_names_is_not_a_selection() -> None:
+    """A file an option names leaves the suite running; a positional test file does not."""
+    jobs = {
+        "ignores": "pytest -q --ignore=tests/test_slow.py --deselect tests/test_x.py::t",
+        "configured": "pytest -c ci/pytest_conf.py -p no:cacheprovider",
+        "selects": "pytest tests/test_x.py --ignore=tests/test_slow.py",
+        "covers": "pytest --cov-config=tests/conf.py",
+    }
+    text = yaml.safe_dump({"jobs": {name: {"steps": [{"run": run}]} for name, run in jobs.items()}})
+    assert suite_jobs(text) == {"ignores", "configured", "covers"}
+
+
+def test_the_history_check_reports_a_renamed_suite_job() -> None:
+    text = CI.read_text(encoding="utf-8")
+    renamed = text.replace("\n  test-shard:\n", "\n  unit-shard:\n")
+    assert renamed != text, "the test-shard job moved"
+    findings = shallow_suite_findings(renamed)
+    assert "test-shard is gone — SUITE_JOBS names a job ci.yml no longer has" in findings
+    assert suite_jobs(renamed) == {"unit-shard", "fresh-clone-shard"}

@@ -1,52 +1,63 @@
 #!/usr/bin/env python3
-"""Branch protection requires exactly the jobs the workflow runs — compared, not assumed.
+"""Branch protection requires exactly the pull-request workflows' jobs — compared, not assumed.
 
-A job in ``.github/workflows/ci.yml`` blocks a merge only while its check name is on the
-branch's required-status-checks list, and that list is a repository setting, not a file. A
-job renamed in the workflow, or added to it, therefore stops gating without any file saying
-so; an administrator who drops a check from the setting does the same. This script reads the
-setting and compares it with the workflow's jobs, both ways.
+A job blocks a merge only while its check name is on the branch's required-status-checks
+list, and that list is a repository setting, not a file. A job renamed in a workflow, or
+added to one, therefore stops gating without any file saying so; an administrator who drops
+a check from the setting does the same. This script reads the setting and compares it, both
+ways, with the jobs of every workflow under ``.github/workflows`` whose top-level ``on:``
+names ``pull_request`` — found by reading each file, never from a list kept by hand, so a
+new workflow's job (``commit-subjects.yml``'s, say) is held to the setting the day it lands.
 
     python scripts/check_branch_protection.py --repo Jita81/commit-replay-bench
     python scripts/check_branch_protection.py --from-json reading.json   # offline
+    python scripts/check_branch_protection.py --workflow .github/workflows/ci.yml  # one file
 
-It fails on: a required check that no job reports (every pull request waits on it for
-ever); a job that no required check names (it can fail and the change still merges); a
-required check that is a part of an aggregator (its name changes whenever the work is split
-differently); a setting that is not strict (a branch may merge while behind ``main``); and a
-job name of 100 characters or more (GitHub cuts a check name at 100, so no run can satisfy
-it). An aggregator is a job that ``needs`` others and runs ``if: always()`` — the ``test``
-job over the suite's shards and ``walkthrough`` over the story and the screens shards: it is
-required, and the parts it stands for are not. A saved reading may list a job added before
-the administrator could require it, under ``awaiting_protection`` with the step that remains
-and the open gap in docs/dod that names the job; the live setting never does (DL-101, P-269).
+It fails on: a required check that no job of a pull-request workflow reports (every pull
+request waits on it for ever); such a job that no required check names (it can fail and the
+change still merges); a required check that is a part of an aggregator (its name changes
+whenever the work is split differently); a setting that is not strict (a branch may merge
+while behind ``main``); and a job name of 100 characters or more (GitHub cuts a check name
+at 100, so no run can satisfy it). An aggregator is a job that ``needs`` others and runs
+``if: always()`` — the ``test`` job over the suite's shards and ``walkthrough`` over the
+story and the screens shards: it is required, and the parts it stands for are not. A saved
+reading may list a job added before the administrator could require it, under
+``awaiting_protection`` with the step that remains and the open gap in docs/dod that names
+the job; the live setting never does (DL-101, P-269).
 
 Navigation
 ----------
-What it is:   The comparator between branch protection's required checks and ci.yml's jobs
-              (stdlib only; ``gh`` reads the setting).
-What it does: Expands ci.yml's jobs into the check names GitHub reports (a matrix job once per
-              combination), sets aside the parts an aggregator stands for, reads
-              ``required_status_checks`` through ``gh api`` (or from a saved JSON reading,
-              which may name jobs awaiting the administrator, each under an open gap in
-              docs/dod that names it), and prints every difference; exits non-zero on any.
-How:          Line-scan the workflow's ``jobs:`` block (job key, ``name:``, list matrices,
-              ``needs:``, the job-level ``if:``) → expand ``${{ matrix.<key> }}`` → the
-              aggregators' parts → set comparison with the reading; the open gaps come from
-              scripts/dod_check.py's own parser.
+What it is:   The comparator between branch protection's required checks and the jobs of
+              every pull-request workflow (stdlib only; ``gh`` reads the setting).
+What it does: Finds the workflows under .github/workflows that run on ``pull_request`` (or
+              takes them from ``--workflow``), expands their jobs into the check names GitHub
+              reports (a matrix job once per combination), sets aside the parts an
+              aggregator stands for, reads ``required_status_checks`` through ``gh api`` (or
+              from a saved JSON reading, which may name jobs awaiting the administrator, each
+              under an open gap in docs/dod that names it), and prints every difference,
+              naming the workflow file; exits non-zero on any.
+How:          Line-scan each workflow's top-level ``on:`` (a scalar, a ``[list]`` or a block
+              of events; any other shape fails closed) and its ``jobs:`` block (job key,
+              ``name:``, list matrices, ``needs:``, the job-level ``if:``) → expand
+              ``${{ matrix.<key> }}`` → the aggregators' parts → set comparison with the
+              reading; the open gaps come from scripts/dod_check.py's own parser.
 Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
-Works with:   .github/workflows/ci.yml (the jobs it expands), .github/workflows/
+Works with:   .github/workflows/ci.yml and .github/workflows/commit-subjects.yml (the
+              pull-request workflows whose jobs it expands), .github/workflows/
               branch-protection.yml (the scheduled run with a token that may read the
               setting), tests/fixtures/branch_protection_main.json (the last saved reading),
+              data/branch-protection-2026-10-07/ (the reading README cites),
               docs/DEPLOYMENT.md §3.4 (the administrator's guide to the setting),
               docs/dod/product.md (product.evidence.6 and gap G-930), scripts/dod_check.py
               (``open_gaps`` reads the record through its parser)
 Tested by:    tests/test_check_branch_protection.py
-Touch when:   never for a new repository (it compares this repository's own workflow with its
-              own branch setting); ci.yml gains a job shape this scan does not read (an
-              ``include:`` matrix, a job-level ``if:`` that keeps a job off pull requests) —
-              teach ``parse_jobs`` and add the fixture case in the same change.
+Touch when:   never for a new repository (it compares this repository's own workflows with its
+              own branch setting); a pull-request workflow gains a shape this scan does not
+              read (an ``include:`` matrix, an ``on:`` written as a ``{…}`` mapping, a
+              job-level ``if:`` or a ``paths:`` filter that keeps a job off some pull
+              requests) — teach ``triggers`` or ``parse_jobs`` and add the fixture case in the
+              same change.
 """
 
 from __future__ import annotations
@@ -58,13 +69,16 @@ import json
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 ROOT = Path(__file__).resolve().parent.parent
-CI = ROOT / ".github" / "workflows" / "ci.yml"
+#: Every workflow here whose top-level ``on:`` names :data:`PR_EVENT` has its jobs required.
+WORKFLOWS = ROOT / ".github" / "workflows"
+#: The event whose runs a merge waits on: a workflow that does not run on it gates nothing.
+PR_EVENT = "pull_request"
 #: GitHub cuts a check-run name at this length (docs/DEPLOYMENT.md §3.4).
 NAME_LIMIT = 100
 
@@ -77,6 +91,23 @@ _NEEDS = re.compile(r"^    needs:\s*(.+?)\s*$")
 _IF = re.compile(r"^    if:\s*(.+?)\s*$")
 _MATRIX_LIST = re.compile(r"^        ([A-Za-z0-9_-]+):\s*\[(.*)\]\s*$")
 _MATRIX_REF = re.compile(r"\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}")
+#: The top-level trigger key, bare or quoted (``"on"`` keeps YAML 1.1 from reading ``true``).
+_ON = re.compile(r"""^(?:on|"on"|'on')\s*:(.*)$""")
+#: One event under a block ``on:``: a key (``pull_request:``, ``"pull_request":``) in a block
+#: of keys, or a list item (``- push``, ``- "push"``) in a block of items, each bare or quoted.
+_EVENT_KEY = re.compile(r"""^(["']?)([A-Za-z_]+)\1\s*:(?:\s|$)""")
+_EVENT_ITEM = re.compile(r"""^-\s+(["']?)([A-Za-z_]+)\1$""")
+_COMMENT = re.compile(r"\s+#.*$|^#.*$")
+#: An event name as GitHub spells one (``pull_request_target``). An anchor, an alias, a tag
+#: or a block-scalar indicator (``&t``, ``*t``, ``!!str``, ``>-``) is no event: read as one, it
+#: would name a trigger the workflow does not have and drop the one it does.
+_EVENT = re.compile(r"^[a-z_]+$")
+#: A column-0 line that may end the ``on:`` value: another top-level key, bare or quoted, or a
+#: document marker. Any other column-0 line could still be part of ``on:`` (a flow list or a
+#: scalar that runs on), so the scan fails closed on it.
+_TOP_KEY = re.compile(
+    r"""^(?:[A-Za-z_][\w-]*|"[^"\\]*"|'[^']*')\s*:(?:\s|$)|^(?:---|\.\.\.)(?:\s|$)"""
+)
 #: The one job-level condition that makes a job an aggregator: it runs, and so fails, when a
 #: part failed, was cancelled or was skipped. Without it a failed part SKIPS the job, and a
 #: skipped required check does not block a merge — so a job without it is no aggregator and
@@ -96,9 +127,95 @@ def _fill(label: str, values: dict[str, str]) -> str:
     return _MATRIX_REF.sub(lambda m: values[m.group(1)], label)
 
 
+def _block_events(lines: list[str]) -> list[str] | None:
+    """The events of a block ``on:`` whose lines follow it, or None when any line at the
+    events' indent is one the scan cannot read: a block read in part would drop the events it
+    missed, and with them, maybe, every job of a pull-request workflow. The first line sets
+    the block's kind: keys (``push:``, each with its filters below it) or list items
+    (``- push``). In a block of keys, a ``- …`` line at the keys' indent is the value of the
+    key above it (``schedule:`` then ``- cron: …``), never an event. The block ends at the
+    next top-level key; any other column-0 line is unreadable."""
+    events: list[str] = []
+    indent: int | None = None
+    items = False
+    for child in lines:
+        if not child.strip() or child.lstrip().startswith("#"):
+            continue
+        if not child.startswith(" "):
+            if _TOP_KEY.match(child):
+                break
+            return None
+        width = len(child) - len(child.lstrip(" "))
+        line = _COMMENT.sub("", child).strip()
+        if indent is None:
+            indent, items = width, line.startswith("-")
+        if width != indent:
+            continue
+        if items:
+            e = _EVENT_ITEM.match(line)
+        elif line.startswith("-") and events:
+            continue
+        else:
+            e = _EVENT_KEY.match(line)
+        if not e:
+            return None
+        events.append(e.group(2))
+    return events or None
+
+
+def _unreadable(why: str) -> NoReturn:
+    raise SystemExit(
+        f"check_branch_protection: could not read the workflow's top-level on: ({why}) — "
+        "teach triggers this shape"
+    )
+
+
+def triggers(text: str) -> list[str]:
+    """The events a workflow's top-level ``on:`` names, in file order: ``on: push``,
+    ``on: [push, pull_request]``, or a block of events (keys, with their filters, or list
+    items), each bare or quoted. Anything else fails closed, because a workflow read as
+    running on nothing, or on only some of its events, could drop its jobs out of the
+    comparison, and a setting that did not require them would pass. That covers no top-level
+    ``on:`` or two of them, a ``{…}`` mapping, a value that runs on past its line (a flow list
+    over two lines, a scalar continued below), a list that nests, a block with no event or
+    with an event line it cannot read, and any event that is not an event name (an anchor, an
+    alias, a tag, a block scalar, a broken quote)."""
+    lines = text.split("\n")
+    at = [i for i, line in enumerate(lines) if _ON.match(line)]
+    if len(at) != 1:
+        _unreadable("missing" if not at else f"{len(at)} top-level on: keys")
+    i = at[0]
+    value = _COMMENT.sub("", lines[i].split(":", 1)[1]).strip()
+    if value.startswith("{"):
+        _unreadable("a {…} mapping")
+    if value:
+        rest = [ln for ln in lines[i + 1 :] if ln.strip() and not ln.lstrip().startswith("#")]
+        if rest and not _TOP_KEY.match(rest[0]):
+            _unreadable("a value that runs on past its line")
+        if value.startswith("["):
+            inner = value[1:-1]
+            if not value.endswith("]") or any(c in inner for c in "[]{}"):
+                _unreadable("a flow list that does not close on its line, or that nests")
+            events = [_unquote(v) for v in inner.split(",") if v.strip()]
+        else:
+            events = [_unquote(value)]
+    else:
+        events = _block_events(lines[i + 1 :]) or []
+    if not events:
+        _unreadable("no event, or an event line it cannot read")
+    if bad := [e for e in events if not _EVENT.match(e)]:
+        _unreadable(f"{bad[0]!r} is not an event name")
+    return events
+
+
+def runs_on_pull_request(text: str) -> bool:
+    """True when the workflow's top-level ``on:`` names :data:`PR_EVENT`."""
+    return PR_EVENT in triggers(text)
+
+
 @dataclass
 class Job:
-    """One job of ci.yml as the scan reads it."""
+    """One job of a workflow as the scan reads it."""
 
     key: str
     name: str | None = None
@@ -143,7 +260,7 @@ class Job:
 
 
 def parse_jobs(ci_text: str) -> list[Job]:
-    """ci.yml's jobs in file order: key, ``name:``, list matrix (any number of keys),
+    """A workflow's jobs in file order: key, ``name:``, list matrix (any number of keys),
     ``needs:`` and the job-level ``if:``."""
     jobs: list[Job] = []
     in_jobs = False
@@ -191,7 +308,8 @@ def parse_jobs(ci_text: str) -> list[Job]:
 
 
 def job_contexts(ci_text: str) -> list[str]:
-    """Every check name ci.yml's jobs report, in file order, parts of an aggregator included."""
+    """Every check name a workflow's jobs report, in file order, parts of an aggregator
+    included."""
     return [ctx for job in parse_jobs(ci_text) for ctx in job.contexts()]
 
 
@@ -219,13 +337,55 @@ def gating_contexts(ci_text: str) -> list[str]:
     return [ctx for ctx in job_contexts(ci_text) if ctx not in parts]
 
 
+def pull_request_contexts(texts: Mapping[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    """``(gating, parts)`` over the workflows in ``texts`` (``{file name: text}``) that run on
+    :data:`PR_EVENT`: each check name that must be required, mapped to the file that reports
+    it, and each part of an aggregator, mapped to the aggregator's job key. A workflow that
+    does not run on pull requests contributes neither: no merge waits on its jobs. One check
+    name reported by two files fails closed, whether each reports it as a check to require
+    or as an aggregator's part: a required name cannot say which of the two jobs it waits
+    on, and a part would hide the other file's check or lose its own aggregator."""
+    gating: dict[str, str] = {}
+    parts: dict[str, str] = {}
+    seen: dict[str, str] = {}
+    for name, text in texts.items():
+        if not runs_on_pull_request(text):
+            continue
+        file_gating = gating_contexts(text)
+        file_parts = aggregated_parts(text)
+        for ctx in [*file_gating, *file_parts]:
+            if ctx in seen:
+                raise SystemExit(
+                    f"check_branch_protection: {ctx!r} is reported by both {seen[ctx]} and "
+                    f"{name}: give each job its own name"
+                )
+            seen[ctx] = name
+        gating.update(dict.fromkeys(file_gating, name))
+        parts.update(file_parts)
+    return gating, parts
+
+
+def _files(files: Iterable[str], conjunction: str = "or") -> str:
+    """``ci.yml or commit-subjects.yml`` — the workflow files a sentence names, or "a
+    pull-request workflow" when the caller gave check names without their files."""
+    named = sorted(set(files))
+    if not named:
+        return "a pull-request workflow"
+    return f" {conjunction} ".join([", ".join(named[:-1]), named[-1]] if named[:-1] else named)
+
+
 def compare(
-    jobs: list[str], required: list[str], strict: bool, parts: dict[str, str] | None = None
+    jobs: Sequence[str] | Mapping[str, str],
+    required: list[str],
+    strict: bool,
+    parts: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """Every way the setting and the workflow disagree, as sentences; empty when they agree.
-    ``jobs`` are the check names that must be required; ``parts`` the check names an
-    aggregator stands for, which must not be."""
+    """Every way the setting and the workflows disagree, as sentences; empty when they agree.
+    ``jobs`` are the check names that must be required — a mapping names the workflow file
+    that reports each, and the sentences name it too; ``parts`` the check names an aggregator
+    stands for, which must not be."""
     parts = parts or {}
+    files = dict(jobs) if isinstance(jobs, Mapping) else {}
     errors: list[str] = []
     for ctx in required:
         if ctx in parts:
@@ -236,8 +396,8 @@ def compare(
             )
         elif ctx not in jobs:
             errors.append(
-                f"branch protection requires {ctx!r}, which no job in ci.yml reports: "
-                "every pull request waits on it for ever"
+                f"branch protection requires {ctx!r}, which no job in "
+                f"{_files(files.values())} reports: every pull request waits on it for ever"
             )
     for ctx in [*jobs, *parts]:
         if len(ctx) >= NAME_LIMIT:
@@ -246,9 +406,10 @@ def compare(
                 f"name at {NAME_LIMIT}, so no run can ever satisfy it"
             )
         elif ctx in jobs and ctx not in required:
+            where = f" in {files[ctx]}" if ctx in files else ""
             errors.append(
-                f"job {ctx!r} runs on every pull request but branch protection does not "
-                "require it: it can fail and the change still merges"
+                f"job {ctx!r}{where} runs on every pull request but branch protection does "
+                "not require it: it can fail and the change still merges"
             )
     if not strict:
         errors.append(
@@ -278,13 +439,14 @@ def open_gaps() -> dict[str, str]:
 
 
 def compare_reading(
-    jobs: list[str],
+    jobs: Sequence[str] | Mapping[str, str],
     reading: dict[str, Any],
     gaps: Mapping[str, str] | None = None,
-    parts: dict[str, str] | None = None,
+    parts: Mapping[str, str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    """``(errors, notes)`` for one reading. A SAVED reading may name, under
-    :data:`AWAITING_KEY`, a job added to ci.yml before an administrator could require it, with
+    """``(errors, notes)`` for one reading; ``jobs`` as :func:`compare` takes them. A SAVED
+    reading may name, under :data:`AWAITING_KEY`, a job added to a pull-request workflow
+    before an administrator could require it, with
     the step that remains: it is not an error while the setting lacks it, and it is listed as a
     note. The entry is an error once the setting requires the job (read it again and drop the
     entry), when no job reports it, when it names no step, and unless its step names a gap
@@ -306,7 +468,8 @@ def compare_reading(
                 f"under {AWAITING_KEY}"
             )
         elif ctx not in jobs:
-            errors.append(f"{ctx!r} awaits branch protection, but no job in ci.yml reports it")
+            where = _files(jobs.values() if isinstance(jobs, Mapping) else ())
+            errors.append(f"{ctx!r} awaits branch protection, but no job in {where} reports it")
         elif not step.strip():
             errors.append(f"{ctx!r} awaits branch protection with no step named")
         else:
@@ -347,11 +510,44 @@ def read_live(repo: str, branch: str) -> dict[str, Any]:
     return data
 
 
+def default_workflows(directory: Path = WORKFLOWS) -> list[Path]:
+    """Every workflow file in ``directory``, by name; :func:`pull_request_contexts` keeps the
+    ones that run on pull requests."""
+    return sorted(p for p in directory.iterdir() if p.suffix in (".yml", ".yaml") and p.is_file())
+
+
+def read_workflows(paths: Iterable[Path]) -> dict[str, str]:
+    """``{file name: text}`` for each path. Two paths with one file name fail closed: they
+    would share one key, the second would replace the first unread, and a job only the first
+    runs would never be compared."""
+    texts: dict[str, str] = {}
+    seen: dict[str, Path] = {}
+    for p in paths:
+        if p.name in seen:
+            raise SystemExit(
+                f"check_branch_protection: two workflows are named {p.name} ({seen[p.name]} and "
+                f"{p}): name each file once"
+            )
+        seen[p.name] = p
+        texts[p.name] = p.read_text(encoding="utf-8")
+    return texts
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     ap.add_argument("--repo", default="Jita81/commit-replay-bench")
     ap.add_argument("--branch", default="main")
-    ap.add_argument("--ci", type=Path, default=CI, help="the workflow whose jobs must be required")
+    ap.add_argument(
+        "--workflow",
+        "--ci",
+        dest="workflows",
+        action="append",
+        type=Path,
+        metavar="PATH",
+        help="a workflow whose jobs must be required (repeatable; it must run on pull_request); "
+        "default: every workflow under .github/workflows that runs on pull_request. --ci is "
+        "the old name",
+    )
     ap.add_argument(
         "--from-json",
         type=Path,
@@ -364,10 +560,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         reading = read_live(args.repo, args.branch)
     required = [str(c) for c in reading.get("contexts", [])]
-    ci_text = args.ci.read_text(encoding="utf-8")
-    errors, notes = compare_reading(
-        gating_contexts(ci_text), reading, parts=aggregated_parts(ci_text)
-    )
+    texts = read_workflows(args.workflows or default_workflows())
+    if args.workflows:
+        off = [name for name, text in texts.items() if not runs_on_pull_request(text)]
+        if off:
+            raise SystemExit(
+                f"check_branch_protection: {', '.join(off)} does not run on {PR_EVENT}: no "
+                "merge waits on its jobs, so none of them can be required"
+            )
+    gating, parts = pull_request_contexts(texts)
+    errors, notes = compare_reading(gating, reading, parts=parts)
     for e in errors:
         print(e)
     if errors:
@@ -375,7 +577,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     for n in notes:
         print(n)
-    print(f"branch protection: {len(required)} required checks match the jobs in {args.ci.name}")
+    print(
+        f"branch protection: {len(required)} required checks match the jobs of "
+        f"{_files(gating.values(), 'and')}"
+    )
     return 0
 
 

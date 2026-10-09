@@ -11,14 +11,14 @@
 #   (commit-subjects lives in commit-subjects.yml: it must re-run when a pull request's
 #             title is edited, and an edit should not re-run this whole workflow)
 #   layers    import-linter: crb.core is stdlib-only; layers depend downward only
-#   test-shard     the hermetic suite (pytest -m "not sandbox_images") split nine ways per Python
+#   test-shard     the hermetic suite (pytest -m "not sandbox_images") split eleven ways per Python
 #                  version (3.12, 3.13) by scripts/ci_test_shards.py — whole test files,
 #                  longest-first over the measured seconds in scripts/ci_test_weights.json, so
-#                  every shard computes the same partition and the nine are balanced. Each shard
+#                  every shard computes the same partition and the eleven are balanced. Each shard
 #                  uploads its report (every id it collected, the ids it ran) and its coverage
 #                  data. The shards are not required contexts
 #   test           the required contexts "test (py3.12)" and "test (py3.13)": an aggregator per
-#                  version that passes only when every shard passed, the nine reports prove every
+#                  version that passes only when every shard passed, the eleven reports prove every
 #                  collected test ran in exactly one non-empty shard (`ci_test_shards.py verify`),
 #                  and the shards' combined coverage is >= 70 — the single job's gate, on the
 #                  same data. It ran as one job per version until py3.13 took 58 of its 60
@@ -27,8 +27,8 @@
 #             uv.lock, with the runner's docker daemon stopped (product.evidence.205, G-664):
 #             an aggregator over `fresh-clone-gates` (every gate but the suite) and the N
 #             `fresh-clone-shard` jobs (the suite, split as `test-shard` is), which proves the
-#             partition like `test`. Not on main's required-checks list until an administrator
-#             adds it (DL-101)
+#             partition like `test`. On main's required-checks list since 2026-10-07
+#             (DL-101)
 #   ui-unit   the UI's own gates: `npm ci`, `npm run typecheck` (tsc -b) and `npx vitest run`.
 #             The hint ratchet, the native-`title=` allowlist and every screen suite run
 #             there, so a hint-registry, a copy or a type regression fails a build instead of
@@ -75,12 +75,14 @@
 #
 # Required contexts: every job in this file except `test-shard`, `walkthrough-story`,
 # `walkthrough-screens`, `fresh-clone-gates` and `fresh-clone-shard` (the parts behind the
-# `test`, `walkthrough` and `fresh-clone` aggregators) and `fresh-clone` itself, which awaits
-# an administrator (DL-101), is on main's required-checks list — lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13),
-# ui-unit, ui-smoke, security, sbom, test-postgres, container, sandbox-images and walkthrough:
-# 16 contexts, read from the repository setting on 2026-09-27. The list is a repository setting
-# only an administrator can change (docs/DEPLOYMENT.md §3.4 names the call); a part of a split
-# job is never added to it — its name changes with the split, the aggregator's does not.
+# `test`, `walkthrough` and `fresh-clone` aggregators) is on main's required-checks list —
+# lint, types, code-map, dod, claims, layers, test (py3.12), test (py3.13), ui-unit, ui-smoke,
+# security, sbom, test-postgres, container, sandbox-images, walkthrough and fresh-clone — with
+# commit-subjects.yml's one job: 18 contexts, read from the repository setting on 2026-10-07
+# (data/branch-protection-2026-10-07/). The list is a repository setting only an administrator
+# can change (docs/DEPLOYMENT.md §3.4 names the call); scripts/check_branch_protection.py holds
+# it to every pull-request workflow's jobs. A part of a split job is never added to it — its
+# name changes with the split, the aggregator's does not.
 #
 # Actions are pinned by major tag; Dependabot keeps them current (.github/dependabot.yml).
 # The installer itself is pinned too: every setup-uv step names the same exact uv version.
@@ -254,26 +256,27 @@ jobs:
         run: .venv/bin/lint-imports
 
   test-shard:
-    # The hermetic suite, split nine ways per Python version. It ran as one job per version
+    # The hermetic suite, split eleven ways per Python version. It ran as one job per version
     # until py3.13 took 58 of its 60 minutes on PR #57 (P-053). Each shard runs the SAME
     # command the single job ran — `-m "not sandbox_images"` and nothing else deselected —
     # plus the shard plugin, which keeps only this shard's test files: longest-first over the
-    # measured per-file seconds in scripts/ci_test_weights.json, so the nine are balanced and
-    # every shard computes the same partition. At most ~11.5 min of tests + ~2.5 min setup
-    # per shard, planned from three runs' measured per-file seconds (2026-09-28): under half
-    # of this budget, where eight shards of Wave 2's merged suite came to 15.4 min, over it;
-    # `test (py…)` fails when the weights go stale (P-740). No shard enforces coverage (a
-    # ninth of the suite covers less than the whole): `test (py…)` combines the nine shards'
+    # measured per-file seconds in scripts/ci_test_weights.json, so the eleven are balanced and
+    # every shard computes the same partition. At most ~11.6 min of tests + ~2.5 min setup
+    # per shard (the heaviest is tests/test_worker.py alone), planned from two runs' measured
+    # per-file seconds on both versions (2026-10-09): under half of this budget, where nine
+    # shards came to 16.2 min, over it (eight shards of Wave 2's suite: 15.4 min);
+    # `test (py…)` fails when the weights go stale (P-740). No shard enforces coverage (an
+    # eleventh of the suite covers less than the whole): `test (py…)` combines the shards'
     # coverage data and fails under 70 % on the union, exactly as the single job did. The
     # shards are not required contexts — the `test` aggregators are.
-    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 9)
+    name: test shard (py${{ matrix.python }}, ${{ matrix.shard }} of 11)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13"]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     env:
       # A toolchain warm-up (npm install, Maven resolution, docker build) that fails here
       # is a repository defect, not missing infrastructure: fail, never skip.
@@ -291,6 +294,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0 # fixture replays and mining tests walk git history
+      - uses: ./.github/actions/docker-hub-mirror # Docker Hub through mirror.gcr.io (P-783)
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.11.3"
@@ -322,7 +326,7 @@ jobs:
           PYTHONPATH: scripts
         run: >-
           .venv/bin/pytest -q -m "not sandbox_images"
-          -p ci_test_shards --shard=${{ matrix.shard }}/9
+          -p ci_test_shards --shard=${{ matrix.shard }}/11
           --shard-report=shard-report/shard-${{ matrix.shard }}.json
           --cov=crb --cov-branch --cov-report= --cov-fail-under=0
       - name: Keep this shard's report and coverage data for `test (py${{ matrix.python }})`
@@ -351,9 +355,9 @@ jobs:
     # this job carries the required one. It passes only when (1) every shard succeeded — a
     # failed, cancelled or skipped shard fails it; `needs` on a matrix job waits for every
     # leg of BOTH versions, so a red py3.13 shard also fails `test (py3.12)`: stricter, never
-    # looser; (2) this version's nine reports prove the shards are one exact partition of the
-    # collected suite — every test in exactly one shard, none empty, all nine collecting the
-    # same suite (scripts/ci_test_shards.py verify); (3) the nine shards' coverage data,
+    # looser; (2) this version's eleven reports prove the shards are one exact partition of
+    # the collected suite — every test in exactly one shard, none empty, all eleven collecting
+    # the same suite (scripts/ci_test_shards.py verify); (3) the eleven shards' coverage data,
     # combined, is at least 70 % — the single job's gate, on the same data. `if: always()`
     # so it runs, and fails, when a shard failed or was cancelled: a skipped required check
     # does not block a merge. tests/test_ci_test_shards.py holds all of this in place.
@@ -395,10 +399,11 @@ jobs:
           merge-multiple: true
       - name: Every test ran in exactly one shard (the partition proof), and the weights are current
         run: >-
-          python3 scripts/ci_test_shards.py verify --shards 9 --python ${{ matrix.python }}
+          python3 scripts/ci_test_shards.py verify --shards 11 --python ${{ matrix.python }}
           shards/shard-1.json shards/shard-2.json shards/shard-3.json
           shards/shard-4.json shards/shard-5.json shards/shard-6.json
           shards/shard-7.json shards/shard-8.json shards/shard-9.json
+          shards/shard-10.json shards/shard-11.json
       - name: coverage >= 70 on the union of the shards
         run: |
           .venv/bin/coverage combine --keep shards/shard-*.coverage
@@ -491,16 +496,16 @@ jobs:
     # is stopped) and cargo (the runner's rustup has no toolchain for root). The list is
     # test-shard's less exactly those (tests/test_toolchain_gates.py, P-748). The timeout is
     # test-shard's 30 minutes scaled by the measured root slowdown and rounded up: at the same
-    # N, the refreshed weights (P-740) put the heaviest of nine shards of Wave 2's merged
-    # suite at 16.2 min as root, so a 30-minute timeout would leave it over half
+    # N, the weights refreshed on 2026-10-09 (P-740) put the heaviest of eleven shards at
+    # 16.4 min as root, so a 30-minute timeout would leave it over half
     # (tests/test_ci_test_shards.py, P-743).
-    name: fresh-clone shard (${{ matrix.shard }} of 9, as root, no docker daemon)
+    name: fresh-clone shard (${{ matrix.shard }} of 11, as root, no docker daemon)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     env:
       CRB_TEST_REQUIRE_TOOLS: "go gofmt node npm mvn jdk helm uv jq bash"
     steps:
@@ -543,7 +548,7 @@ jobs:
           git fetch -q "$SRC" HEAD
           git checkout -q --detach "$(git -C "$SRC" rev-parse HEAD)"
           uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra openai --extra dev
-          PYTHONPATH=scripts .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images" -p ci_test_shards --shard="$SHARD/9" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"
+          PYTHONPATH=scripts .venv/bin/pytest -q -p no:cacheprovider -m "not sandbox_images" -p ci_test_shards --shard="$SHARD/11" --shard-report="$SRC/fresh-clone-report/shard-$SHARD.json"
           GATES
           sudo --preserve-env=SRC,SHARD,CRB_TEST_REQUIRE_TOOLS,JAVA_HOME,PYTHONDONTWRITEBYTECODE \
             env "PATH=$PATH" HOME=/root bash -euo pipefail "$RUNNER_TEMP/gates.sh" < /dev/null
@@ -561,7 +566,7 @@ jobs:
         run: python3 scripts/ci_job_budget.py --timeout-minutes 40 --mode fail
 
   fresh-clone:
-    # The one context an administrator adds to main's required checks (DL-101, G-930): it
+    # The fresh-clone check's required context (on main's list since 2026-10-07, DL-101): it
     # passes only when the gates job and every shard passed — a failed, cancelled or skipped
     # part fails it — and the N reports prove every collected test ran in exactly one shard.
     # `if: always()` so it runs, and fails, when a part failed: a skipped required check does
@@ -591,10 +596,11 @@ jobs:
           merge-multiple: true
       - name: Every test ran in exactly one shard (the partition proof)
         run: >-
-          python3 scripts/ci_test_shards.py verify --shards 9 --python 3.12
+          python3 scripts/ci_test_shards.py verify --shards 11 --python 3.12
           shards/shard-1.json shards/shard-2.json shards/shard-3.json
           shards/shard-4.json shards/shard-5.json shards/shard-6.json
           shards/shard-7.json shards/shard-8.json shards/shard-9.json
+          shards/shard-10.json shards/shard-11.json
       - name: Job budget (fails past 80 % of timeout-minutes)
         if: always()
         run: python3 scripts/ci_job_budget.py --timeout-minutes 10 --mode fail
@@ -823,11 +829,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: ./.github/actions/docker-hub-mirror # Docker Hub through mirror.gcr.io (P-783)
       - name: hadolint deploy/Dockerfile
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: deploy/Dockerfile
       - uses: docker/setup-buildx-action@v4
+        with:
+          # BuildKit in this builder does not read the daemon's registry-mirrors (P-783)
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build deploy/Dockerfile (no push; GHA layer cache)
         uses: docker/build-push-action@v7
         with:
@@ -896,6 +908,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: ./.github/actions/docker-hub-mirror # Docker Hub through mirror.gcr.io (P-783)
       - name: hadolint deploy/sandbox/Dockerfile.python
         uses: hadolint/hadolint-action@v3.5.0
         with:
@@ -909,6 +922,11 @@ jobs:
         with:
           dockerfile: deploy/sandbox/Dockerfile.go
       - uses: docker/setup-buildx-action@v4
+        with:
+          # BuildKit in this builder does not read the daemon's registry-mirrors (P-783)
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
       - name: Build deploy/sandbox/Dockerfile.python (no push; GHA layer cache)
         uses: docker/build-push-action@v7
         with:
