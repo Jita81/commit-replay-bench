@@ -311,6 +311,43 @@ def test_one_check_name_in_two_workflows_fails_closed() -> None:
         mod.pull_request_contexts({"ci.yml": CI_TEXT, "twin.yml": twin})
 
 
+@pytest.mark.parametrize("part_first", [True, False])
+def test_an_aggregators_part_named_like_another_workflows_check_fails_closed(
+    part_first: bool,
+) -> None:
+    """A part in one file and a check to require in another, under one name, in either order:
+    the part would hide the check, or the check be refused as a part (P-752)."""
+    mod = _load()
+    split = "on: pull_request\n" + SPLIT_CI_TEXT.removeprefix("name: ci\n")
+    twin = SUBJECTS_TEXT.replace(SUBJECTS, "walkthrough story")
+    texts = (
+        {"split.yml": split, "twin.yml": twin}
+        if part_first
+        else {"twin.yml": twin, "split.yml": split}
+    )
+    first, second = ("split.yml", "twin.yml") if part_first else ("twin.yml", "split.yml")
+    with pytest.raises(
+        SystemExit, match=rf"'walkthrough story' is reported by both {first} and {second}"
+    ):
+        mod.pull_request_contexts(texts)
+
+
+def test_one_part_in_two_workflows_fails_closed() -> None:
+    """Two files whose aggregators each stand for a part of one name: the later would replace
+    the earlier's aggregator without a word."""
+    mod = _load()
+    split = "on: pull_request\n" + SPLIT_CI_TEXT.removeprefix("name: ci\n")
+    other = (
+        "on: pull_request\njobs:\n  story:\n    name: walkthrough story\n"
+        "  e2e:\n    name: e2e\n    needs: [story]\n    if: always()\n"
+    )
+    assert mod.aggregated_parts(other) == {"walkthrough story": "e2e"}
+    with pytest.raises(
+        SystemExit, match=r"'walkthrough story' is reported by both a\.yml and b\.yml"
+    ):
+        mod.pull_request_contexts({"a.yml": split, "b.yml": other})
+
+
 def test_the_real_pull_request_workflows_are_found_by_reading_their_on() -> None:
     """No list kept by hand: each file under .github/workflows is read, and today ci.yml and
     commit-subjects.yml run on pull requests while the scheduled and release ones do not."""

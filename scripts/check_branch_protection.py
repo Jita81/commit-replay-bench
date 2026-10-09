@@ -342,21 +342,26 @@ def pull_request_contexts(texts: Mapping[str, str]) -> tuple[dict[str, str], dic
     :data:`PR_EVENT`: each check name that must be required, mapped to the file that reports
     it, and each part of an aggregator, mapped to the aggregator's job key. A workflow that
     does not run on pull requests contributes neither: no merge waits on its jobs. One check
-    name reported by two files fails closed: a required name cannot say which of the two
-    jobs it waits on."""
+    name reported by two files fails closed, whether each reports it as a check to require
+    or as an aggregator's part: a required name cannot say which of the two jobs it waits
+    on, and a part would hide the other file's check or lose its own aggregator."""
     gating: dict[str, str] = {}
     parts: dict[str, str] = {}
+    seen: dict[str, str] = {}
     for name, text in texts.items():
         if not runs_on_pull_request(text):
             continue
-        for ctx in gating_contexts(text):
-            if ctx in gating:
+        file_gating = gating_contexts(text)
+        file_parts = aggregated_parts(text)
+        for ctx in [*file_gating, *file_parts]:
+            if ctx in seen:
                 raise SystemExit(
-                    f"check_branch_protection: {ctx!r} is reported by both {gating[ctx]} and "
+                    f"check_branch_protection: {ctx!r} is reported by both {seen[ctx]} and "
                     f"{name}: give each job its own name"
                 )
-            gating[ctx] = name
-        parts.update(aggregated_parts(text))
+            seen[ctx] = name
+        gating.update(dict.fromkeys(file_gating, name))
+        parts.update(file_parts)
     return gating, parts
 
 
