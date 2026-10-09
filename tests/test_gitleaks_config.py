@@ -12,14 +12,20 @@ of the same class — ADR-0025's public HMAC label ``crb.ledger.anchor.v1``, rea
 #69's push 435d2a49 — and its entry is held to the label the ADR derives the key from the
 same way. A sample of near-misses cannot prove two regexes agree (an alternation slips past
 any sample), so agreement is exact, and the whole allowlist is pinned entry by entry: a new
-entry is a new decision, made in this file with its reason.
+entry is a new decision, made in this file with its reason. The config is read the way gitleaks
+reads it, every key case-insensitively, and the rest of it is pinned too — gitleaks' own rules
+whole, and no rule of our own: an inventory that read keys exactly let a rule-level allowlist
+spelled ``[[rules.AllowLists]]`` hide a planted token that gitleaks then honoured.
 
 Navigation
 ----------
 What it is:   The gate that holds .gitleaks.toml's allowlist regexes to the product's own
               definitions (``KEY_RE``'s pattern, ADR-0025's anchor label), pins the whole
-              allowlist inventory, and keeps the config's path doctrine.
-What it does: Reads .gitleaks.toml with tomllib; finds the allowlist whose secret-target
+              config — every allowlist, ``[extend]``, no rule of our own — and keeps the
+              config's path doctrine.
+What it does: Reads .gitleaks.toml with tomllib and folds every key to lower case, as
+              gitleaks (viper) does, refusing two spellings of one key; finds the allowlist
+              whose secret-target
               regexes pass a key made the way the dependency store makes one
               (``crb.core.provision.bundle_key``) and requires exactly one, scoped to
               ``generic-api-key``, matched against the captured secret, with nothing but
@@ -34,7 +40,12 @@ What it does: Reads .gitleaks.toml with tomllib; finds the allowlist whose secre
               ADR (no code constant defines it yet), while the ADR still derives the anchor key
               from it; and requires the config's allowlists, each by its shape (scope and every
               key but ``description``), to equal ``EXPECTED_ALLOWLISTS`` — planted extra,
-              widened, unscoped and removed entries are refused, a reworded description is not.
+              widened, unscoped and removed entries are refused, a reworded description is not
+              — and the rest of the config to be ``EXPECTED_TOP_LEVEL`` with ``[extend]``
+              exactly ``EXPECTED_EXTEND``: a rule-level allowlist however it is spelled, a
+              second spelling of ``allowlists``, a disabled default rule, a rule of our own and
+              an ``[extend]`` path are refused, planted in the config's text, while respelling
+              a key's case is not.
 How:          Each allowlist regex is evaluated the way gitleaks evaluates it — an unanchored
               search over the captured secret (Go's ``MatchString``); the patterns used here
               mean the same in RE2 and Python's ``re`` (no sample ends in a newline, where
@@ -52,7 +63,9 @@ Touch when:   never for a new repository; the dependency store's key shape chang
               KEY_RE, the allowlist and ``EXPECTED_ALLOWLISTS`` together); the product defines
               the anchor label in code (read it from that constant here instead of the ADR);
               an allowlist entry is added, changed or removed in .gitleaks.toml (change
-              ``EXPECTED_ALLOWLISTS`` with its one-line reason).
+              ``EXPECTED_ALLOWLISTS`` with its one-line reason); the config gains a top-level
+              key, an ``[extend]`` key or a rule of its own (change ``EXPECTED_TOP_LEVEL`` or
+              ``EXPECTED_EXTEND`` with the reason, and say what the new key may do).
 """
 
 from __future__ import annotations
@@ -79,9 +92,38 @@ EVIDENCE = ROOT / "docs" / "reviews" / "2026-09-25-sealed-posture"
 GUARDED_TREES = ("docs", "src", "deploy")
 
 
+class KeyCollision(ValueError):
+    """Two spellings of one key in one table: gitleaks reads them as one key and honours
+    whichever it meets, in an order nothing here pins."""
+
+
+def _fold(node: object, where: str = "the top level") -> Any:
+    """``node`` with every table key lower-cased — what gitleaks reads. Its config loader
+    (viper) matches keys case-insensitively, so ``[[rules.AllowLists]]``, ``[[Rules]]`` and
+    ``UseDefault`` are ``[[rules.allowlists]]``, ``[[rules]]`` and ``useDefault`` to it. Two
+    spellings of one key are refused: a planted ``[[AllowLists]]`` beside ``[[allowlists]]``
+    hid a token from gitleaks 8.30.1."""
+    if isinstance(node, dict):
+        folded: dict[str, Any] = {}
+        for key, value in node.items():
+            low = key.lower()
+            if low in folded:
+                raise KeyCollision(f"{where}: two spellings of the key {low!r}")
+            folded[low] = _fold(value, low)
+        return folded
+    if isinstance(node, list):
+        return [_fold(item, where) for item in node]
+    return node
+
+
+def _parse(text: str) -> dict[str, Any]:
+    """A config's text as gitleaks reads it: TOML, every key folded to lower case."""
+    config: dict[str, Any] = _fold(tomllib.loads(text))
+    return config
+
+
 def _config() -> dict[str, Any]:
-    with CONFIG.open("rb") as fh:
-        return tomllib.load(fh)
+    return _parse(CONFIG.read_text("utf-8"))
 
 
 def _scoped_allowlists(config: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -108,7 +150,7 @@ def _allowlists(config: dict[str, Any]) -> list[dict[str, Any]]:
 def _targets_secret(entry: dict[str, Any]) -> bool:
     """gitleaks matches an allowlist's regexes against the captured secret unless the entry
     names another ``regexTarget`` (``match`` or ``line``)."""
-    return entry.get("regexTarget", "secret") == "secret"
+    return entry.get("regextarget", "secret") == "secret"
 
 
 def _passes(pattern: str, secret: str) -> bool:
@@ -170,11 +212,11 @@ def test_a_real_key_matches_the_products_own_shape() -> None:
 
 def test_the_dep_key_allowlist_is_scoped_to_one_rule_and_the_secret_alone() -> None:
     entry = _dep_key_allowlist()
-    assert entry.get("targetRules") == ["generic-api-key"], (
+    assert entry.get("targetrules") == ["generic-api-key"], (
         "the dep_ key allowlist must apply only to the rule that misreads the key"
     )
     assert _targets_secret(entry), "the anchored regex must be matched against the secret"
-    extra = set(entry) - {"description", "targetRules", "regexes", "regexTarget"}
+    extra = set(entry) - {"description", "targetrules", "regexes", "regextarget"}
     assert not extra, f"the dep_ key allowlist may carry only its regexes, not {sorted(extra)}"
     assert len(entry["regexes"]) == 1, entry["regexes"]
 
@@ -330,7 +372,7 @@ def test_the_adr_0025_anchor_label_is_passed_alone() -> None:
     ]
     assert len(entries) == 1, f"expected one allowlist passing {label!r}, got {entries}"
     (entry,) = entries
-    assert entry.get("targetRules") == ["generic-api-key"], entry
+    assert entry.get("targetrules") == ["generic-api-key"], entry
     (pattern,) = entry["regexes"]
     literal = "^" + re.escape(label) + "$"
     assert pattern == literal, (
@@ -353,7 +395,8 @@ DEP_KEY_REGEX = "^dep_[0-9a-f]{64}$"
 LABEL_REGEX = r"^crb\.ledger\.anchor\.v1$"
 
 #: The whole allowlist .gitleaks.toml may carry, entry by entry, each with why it may exist —
-#: written as the entry's shape (every key but ``description``; all apply globally). Adding,
+#: written as the entry's shape (every key but ``description``, spelled as the TOML spells it
+#: and folded to lower case as gitleaks reads it; all apply globally). Adding,
 #: widening, narrowing or removing an entry fails test_the_allowlist_inventory_is_pinned until
 #: this table changes with its reason (P-675).
 EXPECTED_ALLOWLISTS: tuple[tuple[str, dict[str, Any]], ...] = (
@@ -399,7 +442,7 @@ def _inventory_drift(config: dict[str, Any]) -> list[str]:
     """Every allowlist shape the config carries that EXPECTED_ALLOWLISTS does not, and every
     expected shape the config lacks — counted, so a duplicate is drift too."""
     found = Counter(_shape(entry, scope) for scope, entry in _scoped_allowlists(config))
-    expected = Counter(_shape(entry, "global") for _, entry in EXPECTED_ALLOWLISTS)
+    expected = Counter(_shape(_fold(entry), "global") for _, entry in EXPECTED_ALLOWLISTS)
     return [f"not in EXPECTED_ALLOWLISTS: {dict(s)}" for s in (found - expected).elements()] + [
         f"missing from .gitleaks.toml: {dict(s)}" for s in (expected - found).elements()
     ]
@@ -414,6 +457,47 @@ def test_the_allowlist_inventory_is_pinned() -> None:
     assert _inventory_drift(_config()) == []
 
 
+#: Every top-level key .gitleaks.toml may carry, folded: its title, the oldest gitleaks it runs
+#: on, ``[extend]`` and the allowlists above. No ``rules``: a rule of our own replaces or adds
+#: to gitleaks' (a rule-level allowlist rides on one), so it is a scanner decision this table
+#: makes first, with its reason (P-675).
+EXPECTED_TOP_LEVEL = frozenset({"title", "minversion", "extend", "allowlists"})
+#: ``[extend]``, folded: gitleaks' own rules, whole. ``disabledRules`` switches one off, and a
+#: ``path`` or ``url`` reads another config this file does not pin.
+EXPECTED_EXTEND: dict[str, Any] = {"usedefault": True}
+
+
+def _settings_drift(config: dict[str, Any]) -> list[str]:
+    """Every top-level key the config adds or drops, and an ``[extend]`` that is not gitleaks'
+    own rules whole."""
+    keys = set(config)
+    drift = [f"top-level key not pinned: {k!r}" for k in sorted(keys - EXPECTED_TOP_LEVEL)]
+    drift += [f"pinned top-level key missing: {k!r}" for k in sorted(EXPECTED_TOP_LEVEL - keys)]
+    if config.get("extend") != EXPECTED_EXTEND:
+        drift.append(f"[extend] is {config.get('extend')!r}, not {EXPECTED_EXTEND!r}")
+    return drift
+
+
+def _drift(config: dict[str, Any]) -> list[str]:
+    """Everything the config says that the pins above do not."""
+    return _settings_drift(config) + _inventory_drift(config)
+
+
+def _text_drift(text: str) -> list[str]:
+    """The drift of a config's text as gitleaks reads it; two spellings of one key are drift."""
+    try:
+        config = _parse(text)
+    except KeyCollision as exc:
+        return [str(exc)]
+    return _drift(config)
+
+
+def test_the_rest_of_the_config_is_pinned() -> None:
+    """Read as gitleaks reads it, the config is the pins and nothing else: gitleaks' own rules
+    whole, no rule of our own, and the allowlists above (P-675)."""
+    assert _text_drift(CONFIG.read_text("utf-8")) == []
+
+
 def _entry_with(config: dict[str, Any], field: str, value: str) -> dict[str, Any]:
     (entry,) = [e for e in config["allowlists"] if value in e.get(field, [])]
     return entry
@@ -423,7 +507,7 @@ def _plant_broad_entry(config: dict[str, Any]) -> None:
     config["allowlists"].append(
         {
             "description": "planted",
-            "targetRules": ["generic-api-key"],
+            "targetrules": ["generic-api-key"],
             "regexes": ["^[A-Za-z0-9]{32}$"],
         }
     )
@@ -442,7 +526,7 @@ def _plant_label_alternation(config: dict[str, Any]) -> None:
 
 
 def _plant_unscoped_dep_key(config: dict[str, Any]) -> None:
-    del _entry_with(config, "regexes", DEP_KEY_REGEX)["targetRules"]
+    del _entry_with(config, "regexes", DEP_KEY_REGEX)["targetrules"]
 
 
 def _plant_docs_path(config: dict[str, Any]) -> None:
@@ -483,9 +567,9 @@ def test_the_inventory_refuses_a_planted_change(plant: str) -> None:
     """The negative control: each change, planted in a parsed copy of the config, is drift —
     from a baseline with none, so the refusal is the plant's and not the config's."""
     config = copy.deepcopy(_config())
-    assert _inventory_drift(config) == [], "the control needs the config to match the inventory"
+    assert _drift(config) == [], "the control needs the config to match the pins"
     PLANTS[plant](config)
-    assert _inventory_drift(config), f"the inventory let {plant!r} through"
+    assert _drift(config), f"the pins let {plant!r} through"
 
 
 def test_the_inventory_ignores_descriptions() -> None:
@@ -493,4 +577,61 @@ def test_the_inventory_ignores_descriptions() -> None:
     config = copy.deepcopy(_config())
     for entry in config["allowlists"]:
         entry["description"] = "reworded"
-    assert _inventory_drift(config) == []
+    assert _drift(config) == []
+
+
+def _replace_once(text: str, old: str, new: str) -> str:
+    assert text.count(old) == 1, f"the plant needs exactly one {old!r} in .gitleaks.toml"
+    return text.replace(old, new)
+
+
+#: A token-shaped allowlist regex: what each planted allowlist below would wave through.
+TOKEN = "'''^[A-Za-z0-9]{32}$'''"
+RULE_ALLOWLIST = f'\n[[rules]]\nid = "generic-api-key"\n[[rules.AllowLists]]\nregexes = [{TOKEN}]\n'
+RULES_TABLE = f'\n[[Rules]]\nid = "generic-api-key"\n[[Rules.allowlists]]\nregexes = [{TOKEN}]\n'
+SECOND_SPELLING = f"\n[[AllowLists]]\nregexes = [{TOKEN}]\n"
+OWN_RULE = "\n[[rules]]\nid = \"crb-planted\"\nregex = '''planted'''\n"
+EXTEND = "useDefault = true"
+
+#: Changes planted in the config's text, where gitleaks reads it: each is valid TOML. Measured
+#: with gitleaks 8.30.1 on 2026-10-09, the three planted allowlists each hid a 32-character
+#: token the committed config reports, and the disabled rule loaded without a word.
+TEXT_PLANTS: dict[str, Callable[[str], str]] = {
+    "a rule-level allowlist spelled [[rules.AllowLists]]": lambda t: t + RULE_ALLOWLIST,
+    "a rule spelled [[Rules]] with its own allowlist": lambda t: t + RULES_TABLE,
+    "an [[AllowLists]] entry beside [[allowlists]]": lambda t: t + SECOND_SPELLING,
+    "a rule of our own": lambda t: t + OWN_RULE,
+    "a default rule switched off": lambda t: _replace_once(
+        t, EXTEND, f'{EXTEND}\ndisabledRules = ["aws-access-token"]'
+    ),
+    "a default rule switched off, spelled DisabledRules": lambda t: _replace_once(
+        t, EXTEND, f'{EXTEND}\nDisabledRules = ["aws-access-token"]'
+    ),
+    "an [extend] path to another config": lambda t: _replace_once(
+        t, EXTEND, f'{EXTEND}\npath = "other.toml"'
+    ),
+    "gitleaks' own rules dropped": lambda t: _replace_once(t, EXTEND, "useDefault = false"),
+}
+
+
+@pytest.mark.parametrize("plant", sorted(TEXT_PLANTS))
+def test_the_config_refuses_a_planted_text_change(plant: str) -> None:
+    """The negative control where gitleaks reads the config — its text — from a baseline with
+    no drift, so the refusal is the plant's: the parser accepts each plant, and the pins refuse
+    it."""
+    text = CONFIG.read_text("utf-8")
+    assert _text_drift(text) == [], "the control needs the config to match the pins"
+    planted = TEXT_PLANTS[plant](text)
+    tomllib.loads(planted)
+    assert _text_drift(planted), f"the pins let {plant!r} through"
+
+
+def test_the_config_reads_keys_as_gitleaks_does() -> None:
+    """The positive control: respelling a key's case changes nothing gitleaks reads — the
+    config with ``UseDefault``, ``TargetRules`` and ``RegexTarget`` still loads gitleaks' own
+    rules under 8.30.1 — so it changes nothing pinned."""
+    text = CONFIG.read_text("utf-8")
+    for key in ("useDefault", "targetRules", "regexTarget"):
+        assert key in text, f".gitleaks.toml no longer spells {key!r}: pick another key"
+        text = text.replace(key, key[0].upper() + key[1:])
+    assert _text_drift(text) == []
