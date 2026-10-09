@@ -12,6 +12,12 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The value baseline says who made its thirteen verdicts**
+  ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen
+  clean patches a person read" would not have merged; all thirteen verdicts are Claude's, ten the
+  independent decider's (Fable 5.1) and three the critical-friend review's (Opus 5), each on a
+  review task the operator gave. The 4-of-13 figure is unchanged.
+
 - **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
   fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
   the guard's false-positive rate and tops up only the rows a registered reading counts. `GET
