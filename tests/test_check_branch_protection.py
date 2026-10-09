@@ -583,8 +583,9 @@ def test_a_job_awaits_protection_only_under_an_open_gap_that_names_it() -> None:
         "'bare' awaits branch protection under G-111, which is not an open gap in docs/dod "
         "that names the job"
     ]
-    # the real record, read through dod_check's parser: G-930 is open (its token is not yet
-    # provisioned) but its text names no job, so a job parked under it is refused
+    # the real record, read through dod_check's parser: G-930 is open (its token is in place
+    # but no run on main is green yet) and its text names no job, so a job parked under it is
+    # refused
     live = mod.open_gaps()
     assert "BRANCH_PROTECTION_TOKEN" in live["G-930"]
     parked = {**base, "awaiting_protection": {"bare": "an administrator requires it (G-930)"}}

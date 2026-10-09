@@ -14,7 +14,8 @@ What it does: Fails when a job in any workflow talks to a docker daemon — a ``
               ``docker/build-push-action`` step, or ``docker`` among the tools its
               ``CRB_TEST_REQUIRE_TOOLS`` declares — without the
               ``./.github/actions/docker-hub-mirror`` step before the first of them
-              (jobs that stop the daemon are exempt); when a ``docker/setup-buildx-action``
+              (what runs after a ``systemctl stop`` of docker is exempt until a
+              ``start`` or ``restart`` brings it back); when a ``docker/setup-buildx-action``
               step does not give BuildKit the docker.io mirror; and when the composite
               action stops merging into the runner's ``daemon.json``, stops restarting the
               daemon or stops proving that ``docker info`` lists the mirror. Each check is
@@ -42,14 +43,16 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+WORKFLOWS = sorted(
+    p for ext in ("*.yml", "*.yaml") for p in (ROOT / ".github" / "workflows").glob(ext)
+)
 ACTION = ROOT / ".github" / "actions" / "docker-hub-mirror" / "action.yml"
 MIRROR_STEP = "./.github/actions/docker-hub-mirror"
 MIRROR = "mirror.gcr.io"
 
 # a docker command, not a word in a name (`docker.io`, `docker-compose.yml`, `crb-docker`)
 _DOCKER_COMMAND = re.compile(r"(?<![\w./-])docker\s+(?![.-])[a-z]")
-_STOPS_DAEMON = re.compile(r"systemctl\s+stop\s+[^\n]*\bdocker\b")
+_DAEMON_SWITCH = re.compile(r"systemctl\s+(stop|start|restart)\s+[^\n]*\bdocker\b")
 _PULLING_ACTIONS = ("docker/setup-buildx-action@", "docker/build-push-action@")
 
 
@@ -74,15 +77,30 @@ def _uses_docker(step: dict[str, Any], *, declared: bool) -> bool:
     return declared and "pytest" in run
 
 
+def _first_docker_use(steps: list[dict[str, Any]], *, declared: bool) -> int | None:
+    """The first step that reaches the daemon while it runs: what follows a ``systemctl
+    stop`` of docker, in its step or a later one, is exempt until a ``start`` or ``restart``."""
+    running = True
+    for i, step in enumerate(steps):
+        run = str(step.get("run", ""))
+        at = 0
+        for switch in _DAEMON_SWITCH.finditer(run):
+            if running and _uses_docker(
+                {**step, "run": run[at : switch.start()]}, declared=declared
+            ):
+                return i
+            running, at = switch.group(1) != "stop", switch.end()
+        if running and _uses_docker({**step, "run": run[at:]}, declared=declared):
+            return i
+    return None
+
+
 def job_findings(where: str, text: str) -> list[str]:
     """The jobs of one workflow that reach a docker daemon before the mirror step."""
     findings = []
     for name, job in (yaml.safe_load(text).get("jobs") or {}).items():
         steps = _steps(job)
-        if any(_STOPS_DAEMON.search(str(s.get("run", ""))) for s in steps):
-            continue
-        declared = _requires_docker(job)
-        first = next((i for i, s in enumerate(steps) if _uses_docker(s, declared=declared)), None)
+        first = _first_docker_use(steps, declared=_requires_docker(job))
         if first is None:
             continue
         mirror = next((i for i, s in enumerate(steps) if s.get("uses") == MIRROR_STEP), None)
@@ -228,6 +246,21 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
         "    steps:\n"
         "      - run: sudo systemctl stop docker.socket docker.service\n"
         "      - run: if docker info; then exit 1; fi\n"
+        "  pulls-then-stops:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: docker pull python:3.12-slim\n"
+        "      - run: sudo systemctl stop docker.socket docker.service\n"
+        "  stops-in-one-step:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: docker pull python:3.12-slim && sudo systemctl stop docker\n"
+        "  restarts:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker.socket docker.service\n"
+        "      - run: sudo systemctl start docker\n"
+        "      - run: docker pull python:3.12-slim\n"
         "  named:\n"
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
@@ -245,6 +278,9 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
     assert job_findings("probe.yml", planted) == [
         f"probe.yml: job 'probe' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'declared' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'pulls-then-stops' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'stops-in-one-step' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'restarts' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'builds' uses docker without {MIRROR_STEP} before it",
     ]
 

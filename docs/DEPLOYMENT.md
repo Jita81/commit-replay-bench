@@ -505,8 +505,10 @@ either today; P-752's gap column]. The daily
 `branch-protection` workflow (`.github/workflows/branch-protection.yml`) runs it against the
 live setting. Reading the setting needs a token with Administration: read, which a workflow's
 own `GITHUB_TOKEN` can never be given, so an administrator adds a fine-grained token with that
-one permission on this repository as the secret `BRANCH_PROTECTION_TOKEN`. Until then the
-workflow fails, by design (G-930).
+one permission on this repository as the secret `BRANCH_PROTECTION_TOKEN`; without it the
+workflow fails, by design. The secret was added on 2026-10-09 and the workflow passed on a
+pull request's branch that day (run 37966599892); G-930 stays open until a run on `main` is
+green.
 
 When a pull request adds or renames a job, the administrator changes the list before it
 merges (a renamed job leaves its old name required, so the pull request waits until then).
