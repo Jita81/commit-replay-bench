@@ -40,7 +40,9 @@ What it does: Runs one command with a wall clock and a cancel token and reports 
               exactly as hardened (no binary, no daemon, root user, forbidden mount, launch
               failure). It never falls back to the host. Before a container starts it makes
               the worktree readable to the container's user whatever its host modes
-              (``grant_sandbox_read``: read, never write, never through a link).
+              (``grant_sandbox_read``: read, never write, never through a link). After any
+              kill it waits for the killed command's output for ``POST_KILL_DRAIN_S`` at most,
+              whatever a process the kill did not reach does with the pipes (P-774).
 How:          ``Command`` (argv, root, writable paths, sealed ``ro_mounts``) → ``build_argv``
               (the full ``docker run`` hardening set, the worktree read-only at ``/src`` and a
               throwaway tmpfs copy at ``/work`` — or the ``readonly`` tree — each bundle mount
@@ -65,9 +67,15 @@ How:          ``Command`` (argv, root, writable paths, sealed ``ro_mounts``) →
               daemon reported the container not running; ``False`` = the bound was hit and
               the container may still be running (a warning names it; the executor records
               it in ``unconfirmed_kills`` and calls ``on_kill_unconfirmed`` so the worker
-              records and reaps it — src/crb/server/reaper.py). The worst-case wait after a
-              cancel is therefore the command's timeout + ``_CANCEL_POLL_S`` +
-              ``DOCKER_KILL_TIMEOUT_S`` + ``KILL_CONFIRM_S``.
+              records and reaps it — src/crb/server/reaper.py). Every kill path (both
+              executors, ``DockerStream``) then waits for the output for at most
+              ``POST_KILL_DRAIN_S`` (5 s): a pipe still open past it is held by a process the
+              group kill missed — one forked as the signal was sent, or one that left the
+              session — so it is abandoned with the output read so far, the killed process
+              is reaped and a warning names the container or command (``OutputDrain``,
+              ``read_lines``). The worst-case wait after a cancel is therefore the command's
+              timeout + ``_CANCEL_POLL_S`` + ``DOCKER_KILL_TIMEOUT_S`` + ``KILL_CONFIRM_S`` +
+              ``POST_KILL_DRAIN_S`` + one second to stop the drain and reap.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0012-builder-in-a-sealed-container.md
@@ -84,7 +92,8 @@ Works with:   src/crb/core/runners/base.py (builds the Command, binds the depend
               from settings and ends the run ``failed: sandbox unavailable``),
               src/crb/observability/probes.py (the health probe that reports the daemon)
 Tested by:    tests/test_execution.py, tests/test_execution_edges.py, tests/test_sandbox_docker.py,
-              tests/test_builders_container.py, tests/test_builders_container_docker.py
+              tests/test_builders_container.py, tests/test_builders_container_docker.py,
+              tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py
 Touch when:   never for a new repository (its image, memory and cpu limits are
               ``DockerSettings`` from the repo / deployment config; a toolchain that must
               write somewhere declares ``writable_paths`` in its runner, one that must run
@@ -95,10 +104,13 @@ Touch when:   never for a new repository (its image, memory and cpu limits are
 
 from __future__ import annotations
 
+import codecs
 import contextlib
+import io
 import logging
 import os
 import re
+import selectors
 import shutil
 import signal
 import stat
@@ -110,7 +122,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import IO, Any, Protocol
 
 from crb.core.deps import BundleMount, validate_mount
 
@@ -166,6 +178,19 @@ DOCKER_KILL_TIMEOUT_S: float = 30.0
 #: attributes so a test can shorten the bound.
 KILL_CONFIRM_S: float = 10.0
 KILL_CONFIRM_STEP_S: float = 0.1
+#: After a kill, the most a reader still waits for the killed process's output pipes to
+#: close (and for the process itself to be reaped). A process-group SIGKILL closes every
+#: pipe end its members hold at once, so a pipe still open past this is held by a process
+#: the kill did not reach — one forked as the signal was sent (measured on macOS, P-774) or
+#: one that left the session (``setsid``) — and is abandoned with the output read so far.
+#: ``LocalExecutor`` / ``DockerExecutor`` / ``DockerStream`` carry it as a class attribute
+#: so a test can shorten the bound.
+POST_KILL_DRAIN_S: float = 5.0
+#: How often a drain or a line reader wakes to ask whether it should stop waiting.
+_DRAIN_WAKE_S = 0.1
+#: Past :data:`POST_KILL_DRAIN_S`, the most an abandoned drain takes to close its pipes and
+#: the killed process to be reaped.
+_DRAIN_STOP_S = 1.0
 
 
 class SandboxUnavailable(RuntimeError):
@@ -328,6 +353,201 @@ def docker_server_version(docker: str, *, timeout: float = 30, runner: Runner | 
 
 
 # ---------------------------------------------------------------------------
+# Reading a process's output — bounded once it has been killed
+# ---------------------------------------------------------------------------
+
+
+def _codec_of(stream: IO[str]) -> tuple[str, str]:
+    """The encoding and error handler a text pipe decodes with (``Popen`` sets both)."""
+    return (
+        str(getattr(stream, "encoding", None) or "utf-8"),
+        str(getattr(stream, "errors", None) or "strict"),
+    )
+
+
+def reap_after_kill(proc: subprocess.Popen[Any], bound_s: float, what: str) -> bool:
+    """Wait at most ``bound_s`` for a killed process to exit and be reaped. ``False`` (a
+    warning names ``what``) means it had not: a SIGKILLed process that does not exit is
+    stuck in the kernel, and an unbounded wait would hang its caller with it."""
+    try:
+        proc.wait(timeout=bound_s)
+    except subprocess.TimeoutExpired:
+        _LOG.warning(
+            "%s: pid %d not reaped within %.1fs of the kill; stopped waiting",
+            what,
+            proc.pid,
+            bound_s,
+        )
+        return False
+    return True
+
+
+class OutputDrain:
+    """``Popen.communicate()`` on a daemon thread, with an end that is bounded after a kill.
+
+    The drain reads the process's stdout and stderr pipes to EOF (``os.read`` through a
+    selector, as ``communicate`` does), then reaps the process; :attr:`done` says it has.
+    The caller polls it against its own deadline and cancel token and, after killing the
+    process, calls :meth:`finish_after_kill`, which waits at most ``bound_s`` more. A group
+    kill closes every pipe end it reaches; one still open past the bound is held by a
+    process that escaped the kill (P-774), and waiting for it means waiting for that
+    process — so the drain is stopped instead: it closes its own pipes on its own thread
+    (never under a read another thread is blocked in), the killed process is reaped (no
+    zombie), a warning names what was killed, and :meth:`text` returns what was read.
+
+    :meth:`text` decodes as ``communicate`` does — the pipes' own encoding and error
+    handler, universal newlines — so a run that ends on its own reads the same characters
+    it always did, and a decode error there is still an empty output (now logged). Output
+    the drain abandoned may end inside a character, so it is decoded with ``replace``.
+    """
+
+    def __init__(self, proc: subprocess.Popen[str]) -> None:
+        self._proc = proc
+        self._pipes: dict[str, IO[str]] = {}
+        if proc.stdout is not None:
+            self._pipes["out"] = proc.stdout
+        if proc.stderr is not None:
+            self._pipes["err"] = proc.stderr
+        self._chunks: dict[str, list[bytes]] = {key: [] for key in self._pipes}
+        self._stop = threading.Event()
+        self._eof = threading.Event()
+        #: True once :meth:`finish_after_kill` stopped waiting for the pipes.
+        self.abandoned = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            with selectors.PollSelector() as sel:
+                for key, pipe in self._pipes.items():
+                    sel.register(pipe, selectors.EVENT_READ, key)
+                while sel.get_map() and not self._stop.is_set():
+                    for ready, _ in sel.select(_DRAIN_WAKE_S):
+                        data = os.read(ready.fd, 32768)
+                        if data:
+                            self._chunks[ready.data].append(data)
+                        else:  # EOF: every writer has closed it
+                            sel.unregister(ready.fileobj)
+                if not sel.get_map():
+                    self._eof.set()
+        except OSError:
+            _LOG.exception("reading the output of pid %d failed", self._proc.pid)
+        finally:
+            for pipe in self._pipes.values():
+                with contextlib.suppress(OSError):
+                    pipe.close()
+        while not self._stop.is_set():
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                self._proc.wait(timeout=_DRAIN_WAKE_S)
+                return
+
+    @property
+    def done(self) -> bool:
+        """Both pipes reached EOF and the process was reaped (or the drain was stopped)."""
+        return not self._thread.is_alive()
+
+    def join(self, timeout: float) -> bool:
+        """Wait at most ``timeout`` for :attr:`done`; return it."""
+        self._thread.join(timeout)
+        return self.done
+
+    def finish_after_kill(self, bound_s: float, what: str) -> bool:
+        """After the process (and its group) was killed: wait at most ``bound_s`` for its
+        pipes to reach EOF and for it to be reaped. ``True`` — they did, and :meth:`text` is
+        everything it wrote. ``False`` — the bound was hit: the drain is stopped and closes
+        its pipes, the process is reaped, a warning names ``what``, and :meth:`text` is the
+        output read so far. Returns within ``bound_s`` + :data:`_DRAIN_STOP_S`."""
+        self._thread.join(bound_s)
+        if not self._thread.is_alive():
+            return True
+        self.abandoned = True
+        held = not self._eof.is_set()
+        self._stop.set()
+        stop_by = time.monotonic() + _DRAIN_STOP_S
+        self._thread.join(_DRAIN_STOP_S)
+        reaped = reap_after_kill(self._proc, max(0.0, stop_by - time.monotonic()), what)
+        if held:
+            _LOG.warning(
+                "%s: its output pipes were still open %.1fs after the kill (a process the "
+                "kill did not reach holds them); stopped waiting with the output read so far "
+                "(pid %d %s)",
+                what,
+                bound_s,
+                self._proc.pid,
+                "reaped" if reaped else "NOT reaped",
+            )
+        return False
+
+    def text(self) -> tuple[str, str]:
+        """``(stdout, stderr)`` — everything once :attr:`done` after a natural end, the
+        output read so far after :meth:`finish_after_kill` gave up."""
+        try:
+            return self._decode("out"), self._decode("err")
+        except UnicodeDecodeError:
+            _LOG.exception("the output of pid %d does not decode; reporting none", self._proc.pid)
+            return "", ""
+
+    def _decode(self, key: str) -> str:
+        pipe = self._pipes.get(key)
+        if pipe is None:
+            return ""
+        encoding, errors = _codec_of(pipe)
+        data = b"".join(list(self._chunks[key]))
+        decoded = data.decode(encoding, "replace" if self.abandoned else errors)
+        return decoded.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def read_lines(
+    stream: IO[str], *, killed_at: Callable[[], float | None], bound_s: float, what: str
+) -> Iterator[str]:
+    """Yield a text pipe's lines without their newline, exactly as iterating it would (its
+    own encoding and error handler, universal newlines, a last line without a newline
+    included) — but never wait on it more than ``bound_s`` past ``killed_at()``, the moment
+    its owner killed the writer (``None`` while nothing was killed). Whatever the pipe
+    still delivers is read on, however slowly the caller takes the lines; once it has
+    been silent for a wake past that bound it is held by a process the kill did not reach
+    (P-774), so a warning names ``what``, the pipe is closed (on this, the only thread
+    reading it) and the lines end with what was read so far."""
+    fd = stream.fileno()
+    encoding, errors = _codec_of(stream)
+    decoder = io.IncrementalNewlineDecoder(
+        codecs.getincrementaldecoder(encoding)(errors), translate=True
+    )
+    partial: list[str] = []
+    with selectors.PollSelector() as sel:
+        sel.register(fd, selectors.EVENT_READ)
+        while True:
+            if not sel.select(_DRAIN_WAKE_S):
+                killed = killed_at()
+                if killed is not None and time.monotonic() >= killed + bound_s:
+                    _LOG.warning(
+                        "%s: its output pipe was still open %.1fs after the kill (a process "
+                        "the kill did not reach holds it); stopped reading with the output "
+                        "read so far",
+                        what,
+                        bound_s,
+                    )
+                    with contextlib.suppress(OSError):
+                        stream.close()
+                    break
+                continue
+            data = os.read(fd, 32768)
+            text = decoder.decode(data, final=not data)
+            if "\n" in text:
+                lines = text.split("\n")
+                lines[0] = "".join(partial) + lines[0]
+                partial = [lines.pop()]
+                yield from lines
+            else:
+                partial.append(text)
+            if not data:
+                break
+    rest = "".join(partial)
+    if rest:
+        yield rest
+
+
+# ---------------------------------------------------------------------------
 # Local
 # ---------------------------------------------------------------------------
 
@@ -336,6 +556,10 @@ class LocalExecutor:
     """Run on the host. Minimal explicit environment; process-group kill on timeout."""
 
     name = "local"
+
+    #: After a kill, the most :meth:`run` waits for the command's output pipes (module
+    #: default :data:`POST_KILL_DRAIN_S`; a class attribute so a test can shorten it).
+    POST_KILL_DRAIN_S: float = POST_KILL_DRAIN_S
 
     def __init__(
         self, *, base_env: Mapping[str, str] | None = None, cancel: CancelFn | None = None
@@ -379,7 +603,11 @@ class LocalExecutor:
     def run(self, cmd: Command) -> ExecResult:
         """Run ``cmd`` on the host under its wall clock and the cancel token. Never
         raises for what the command did; a timeout or cancellation kills the whole
-        process group (``start_new_session``) so no test child outlives the run."""
+        process group (``start_new_session``) so no test child outlives the run, and then
+        waits at most :attr:`POST_KILL_DRAIN_S` for the output: a pipe a process outside
+        the group still holds is abandoned with what was read (a warning names the
+        command), so the run returns within the wall clock + ``_CANCEL_POLL_S`` +
+        :attr:`POST_KILL_DRAIN_S` + one second."""
         if cmd.ro_mounts:
             # a mount is a container concept; on the host a binding's local_env points the
             # toolchain at its set instead, so a mount here is a caller's mistake
@@ -404,37 +632,20 @@ class LocalExecutor:
         deadline = started + cmd.timeout
         # Read pipes on a helper thread so a chatty child never blocks on a full pipe
         # while we poll for the deadline and the cancel token.
-        box: dict[str, str] = {}
-
-        def _drain() -> None:
-            o, e = proc.communicate()
-            box["out"], box["err"] = o or "", e or ""
-
-        t = threading.Thread(target=_drain, daemon=True)
-        t.start()
-        while t.is_alive():
-            t.join(_CANCEL_POLL_S)
-            if not t.is_alive():
-                break
+        drain = OutputDrain(proc)
+        while not drain.join(_CANCEL_POLL_S):
             if self._cancel is not None and self._cancel():
                 cancelled = True
-                self._kill_group(proc)
-                t.join()
-                break
-            if time.monotonic() >= deadline:
+            elif time.monotonic() >= deadline:
                 timed_out = True
-                self._kill_group(proc)
-                t.join()
-                break
+            else:
+                continue
+            self._kill_group(proc)
+            drain.finish_after_kill(self.POST_KILL_DRAIN_S, f"command {cmd.argv[0]}")
+            break
+        out, err = drain.text()
         rc = 130 if cancelled else 124 if timed_out else int(proc.returncode or 0)
-        return ExecResult(
-            rc,
-            box.get("out", ""),
-            box.get("err", ""),
-            timed_out,
-            time.monotonic() - started,
-            cancelled,
-        )
+        return ExecResult(rc, out, err, timed_out, time.monotonic() - started, cancelled)
 
     @staticmethod
     def _kill_group(proc: subprocess.Popen[str]) -> None:
@@ -531,15 +742,17 @@ class DockerExecutor:
     :attr:`KILL_CONFIRM_S`, the answer on the result's ``kill_confirmed``. A kill that
     goes unconfirmed is appended to :attr:`unconfirmed_kills` and handed to
     ``on_kill_unconfirmed`` — the same report a sealed session makes for its streams —
-    so no path ends as a silent terminal ``cancelled`` with a running container.
+    so no path ends as a silent terminal ``cancelled`` with a running container. After
+    the kill the client's output is waited for at most :attr:`POST_KILL_DRAIN_S` (P-774).
     """
 
     name = "docker"
 
-    #: The confirmation bound and step (module defaults; class attributes so a test can
-    #: shorten them).
+    #: The confirmation bound and step, and the most the output is waited for after a kill
+    #: (module defaults; class attributes so a test can shorten them).
     KILL_CONFIRM_S: float = KILL_CONFIRM_S
     KILL_CONFIRM_STEP_S: float = KILL_CONFIRM_STEP_S
+    POST_KILL_DRAIN_S: float = POST_KILL_DRAIN_S
 
     def __init__(
         self,
@@ -746,7 +959,10 @@ class DockerExecutor:
         After the kill: the client's process group (a hung daemon must not orphan the
         ``docker run`` client), then the bounded confirmation attempt
         (:func:`wait_container_stopped`, :attr:`KILL_CONFIRM_S`); an unconfirmed kill is
-        reported through :meth:`_report_unconfirmed` before the result is returned."""
+        reported through :meth:`_report_unconfirmed` before the result is returned. Then
+        the client's output is waited for at most :attr:`POST_KILL_DRAIN_S`: a pipe a
+        process outside the client's group still holds is abandoned with what was read and
+        a warning naming the container (:class:`OutputDrain`, P-774)."""
         name = f"crb-{uuid.uuid4().hex[:12]}"
         argv = [*argv[:3], "--name", name, *argv[3:]]  # docker run --rm --name …
         proc = subprocess.Popen(
@@ -757,21 +973,11 @@ class DockerExecutor:
             text=True,
             start_new_session=True,
         )
-        box: dict[str, str] = {}
-
-        def _drain() -> None:
-            o, e = proc.communicate()
-            box["out"], box["err"] = o or "", e or ""
-
-        t = threading.Thread(target=_drain, daemon=True)
-        t.start()
+        drain = OutputDrain(proc)
         timed_out = cancelled = False
         kill_confirmed: bool | None = None
         deadline = started + cmd.timeout
-        while t.is_alive():
-            t.join(_CANCEL_POLL_S)
-            if not t.is_alive():
-                break
+        while not drain.join(_CANCEL_POLL_S):
             if self._cancel is not None and self._cancel():
                 cancelled = True
             elif time.monotonic() >= deadline:
@@ -779,27 +985,28 @@ class DockerExecutor:
             else:
                 continue
             kill_confirmed = self._kill(name, proc)
-            t.join()
+            drain.finish_after_kill(self.POST_KILL_DRAIN_S, f"docker container {name}")
             break
+        out, err = drain.text()
         if (
             proc.returncode == 125
             and not (cancelled or timed_out)
-            and docker_launch_failed(box.get("out", ""), box.get("err", ""))
+            and docker_launch_failed(out, err)
         ):
             raise SandboxUnavailable(
-                f"docker failed to launch the container (exit 125): {box.get('err', '')[:400]}"
+                f"docker failed to launch the container (exit 125): {err[:400]}"
             )
         rc = 130 if cancelled else 124 if timed_out else int(proc.returncode or 0)
         return ExecResult(
             rc,
-            box.get("out", ""),
-            box.get("err", ""),
+            out,
+            err,
             timed_out,
             time.monotonic() - started,
             cancelled,
             kill_confirmed=kill_confirmed,
             container=name,
-            env_error=_env_error(rc, box.get("err", "")),
+            env_error=_env_error(rc, err),
         )
 
     def _kill(self, name: str, proc: subprocess.Popen[str]) -> bool:
@@ -1121,6 +1328,11 @@ class DockerStream:
       :attr:`kill_confirmed` — ``True`` means the daemon reported the container not
       running; ``False`` means the bound was hit, a warning named the container, and it
       may still be running (the worker records and reaps it).
+    * **The reader never waits on a killed client for more than** :attr:`POST_KILL_DRAIN_S`:
+      once :meth:`kill` has run, a stdout pipe that stays silent and open past that bound
+      is held by a process the group kill did not reach, so :meth:`lines` stops reading
+      it, a warning names the container, and the lines read so far stand (P-774). The
+      client's reap is bounded the same way.
     * **stderr never deadlocks stdout**: it goes to a temporary file, of which the last
       4000 characters are kept as :attr:`stderr_tail` (the caller redacts).
     * **Exit 125 is a launch failure when docker says so** (:func:`docker_launch_failed`:
@@ -1132,10 +1344,13 @@ class DockerStream:
     """
 
     #: The TOTAL bound on :meth:`kill`'s confirmation attempt (every inspect call gets
-    #: only the time left), and how often it asks. Class attributes so a test can
-    #: shorten the bound (module defaults :data:`KILL_CONFIRM_S` / :data:`KILL_CONFIRM_STEP_S`).
+    #: only the time left), and how often it asks; and the most :meth:`lines` waits on the
+    #: client's stdout after the kill. Class attributes so a test can shorten the bounds
+    #: (module defaults :data:`KILL_CONFIRM_S` / :data:`KILL_CONFIRM_STEP_S` /
+    #: :data:`POST_KILL_DRAIN_S`).
     KILL_CONFIRM_S: float = KILL_CONFIRM_S
     KILL_CONFIRM_STEP_S: float = KILL_CONFIRM_STEP_S
+    POST_KILL_DRAIN_S: float = POST_KILL_DRAIN_S
 
     def __init__(
         self,
@@ -1156,6 +1371,8 @@ class DockerStream:
         self._cancelled = False
         self._kill_confirmed: bool | None = None
         self._kill_lock = threading.Lock()
+        #: When :meth:`kill` first signalled the client's group (monotonic), else None.
+        self._killed_at: float | None = None
         self._stderr = ""
         self._stderr_file = tempfile.TemporaryFile(  # noqa: SIM115 — closed in lines()
             mode="w+", encoding="utf-8", errors="replace"
@@ -1182,15 +1399,22 @@ class DockerStream:
 
     # --- lifecycle ---------------------------------------------------------------
     def lines(self) -> Iterator[str]:
-        """Yield stdout line by line until the container exits or is killed; then reap
-        the client, keep the stderr tail, and raise for a launch failure. Consume it
-        fully (or stop early — the ``finally`` still cleans up)."""
+        """Yield stdout line by line until the container exits or is killed (then at most
+        :attr:`POST_KILL_DRAIN_S` more, :func:`read_lines`); then reap the client, keep the
+        stderr tail, and raise for a launch failure. Consume it fully (or stop early — the
+        ``finally`` still cleans up)."""
         assert self._proc.stdout is not None
         saw_output = False
+        what = f"docker container {self.name}"
         try:
-            for line in self._proc.stdout:
+            for line in read_lines(
+                self._proc.stdout,
+                killed_at=lambda: self._killed_at,
+                bound_s=self.POST_KILL_DRAIN_S,
+                what=what,
+            ):
                 saw_output = True
-                yield line.rstrip("\n")
+                yield line
         finally:
             self._watchdog.cancel()
             self._stop_poll.set()
@@ -1198,7 +1422,7 @@ class DockerStream:
                 self._proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.kill()
-                self._proc.wait()
+                reap_after_kill(self._proc, self.POST_KILL_DRAIN_S, what)
             if self._enforced:  # the promise: after an enforced kill, the container is down
                 self._confirm_stopped()
             try:
@@ -1254,6 +1478,8 @@ class DockerStream:
             except (ProcessLookupError, PermissionError):
                 with contextlib.suppress(OSError):
                     self._proc.kill()
+            if self._killed_at is None:
+                self._killed_at = time.monotonic()
             self._kill_confirmed = self._wait_stopped()
 
     def _confirm_stopped(self) -> None:
@@ -1366,6 +1592,7 @@ __all__: Sequence[str] = (
     "KILL_CONFIRM_S",
     "KILL_CONFIRM_STEP_S",
     "LOCAL_FIXED_ENV",
+    "POST_KILL_DRAIN_S",
     "SANDBOX_TREES",
     "TREE_COPY",
     "TREE_COPY_MARKER",
@@ -1379,12 +1606,15 @@ __all__: Sequence[str] = (
     "Executor",
     "KillUnconfirmedFn",
     "LocalExecutor",
+    "OutputDrain",
     "SandboxUnavailable",
     "UnconfirmedKill",
     "bundle_mount_args",
     "container_stopped",
     "executor_kind",
     "make_executor",
+    "read_lines",
+    "reap_after_kill",
     "sequence_env",
     "wait_container_stopped",
 )

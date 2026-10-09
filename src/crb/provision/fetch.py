@@ -21,7 +21,8 @@ rebuild step, a test container and a builder never receive it.
 
 The wall clock is ``fetch_timeout_s``; a watchdog measures the stage while the fetch runs
 and kills it past ``max_bundle_mb`` (``PROVISION_TOO_LARGE``); a non-zero exit is
-``PROVISION_FETCH_FAILED`` naming every host the proxy denied.
+``PROVISION_FETCH_FAILED`` naming every host the proxy denied. After a kill the output is
+waited for at most ``POST_KILL_DRAIN_S`` more (P-774).
 
 Navigation
 ----------
@@ -31,7 +32,8 @@ What it does: Builds the exact argv (internal network or none, read-only, no cap
               the worker's non-root uid, ``/in`` read-only and ``/out``, the proxy URL, the
               recipe's fixed environment and — for a private mirror — the credential by name
               behind the prelude, and nothing else); runs it with the sidecar for the
-              registry hosts; kills an oversized or overdue fetch; names denied hosts; emits
+              registry hosts; kills an oversized or overdue fetch and waits a bounded
+              ``POST_KILL_DRAIN_S`` for its output; names denied hosts; emits
               ``provision.fetch`` and ``provision.refused``.
 How:          ``FetchPlan`` (recipe, image, argv, env, hosts, inputs, mirror) → ``fetch_argv``
               → ``run_fetch``: stage the inputs → start the sidecar (unless offline) →
@@ -45,7 +47,7 @@ Works with:   src/crb/builders/sidecar.py (the internal network and the proxy),
               that builds plans; src/crb/provision/python.py and src/crb/provision/node.py are
               the others), src/crb/core/deps.py (the refusals)
 Tested by:    tests/test_provision_fetch.py, tests/test_provision_go.py,
-              tests/test_provision_mirror_credential.py
+              tests/test_provision_mirror_credential.py, tests/test_post_kill_wait_ratchet.py
 Touch when:   never for a new repository; a flag on the fetch's ``docker run`` is a security
               decision (docs/SECURITY.md §3.1.1 and ADR-0005's amendment change with it).
 """
@@ -57,7 +59,6 @@ import os
 import shutil
 import signal
 import subprocess
-import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -68,7 +69,7 @@ from urllib.parse import urlsplit
 
 from crb.builders.sidecar import EgressSidecar
 from crb.core.deps import ProvisionRefused, is_secret_like, worker_user
-from crb.core.execution import SandboxUnavailable
+from crb.core.execution import POST_KILL_DRAIN_S, OutputDrain, SandboxUnavailable
 from crb.core.redact import redact_and_cap
 from crb.provision.config import ProvisionConfig
 
@@ -420,20 +421,10 @@ def _execute(
         start_new_session=True,
         env=client,
     )
-    box: dict[str, str] = {}
-
-    def drain() -> None:
-        o, e = proc.communicate()
-        box["out"], box["err"] = o or "", e or ""
-
-    t = threading.Thread(target=drain, daemon=True)
-    t.start()
+    drain = OutputDrain(proc)
     breach = ""
     deadline = started + config.fetch_timeout_s
-    while t.is_alive():
-        t.join(_POLL_S)
-        if not t.is_alive():
-            break
+    while not drain.join(_POLL_S):
         if _dir_bytes(stage / plan.out_sub) > cap:
             breach = "too_large"
         elif time.monotonic() >= deadline:
@@ -447,9 +438,10 @@ def _execute(
         except (ProcessLookupError, PermissionError):
             with contextlib.suppress(OSError):
                 proc.kill()
-        t.join()
+        # bounded: a process the kill missed may hold the pipes for ever (P-774)
+        drain.finish_after_kill(POST_KILL_DRAIN_S, f"fetch container {name}")
         break
-    out, err = box.get("out", ""), box.get("err", "")
+    out, err = drain.text()
     if secret:  # a tool that echoes its URL or config never puts the credential in a log
         out, err = (
             out.replace(secret, "[mirror credential]"),

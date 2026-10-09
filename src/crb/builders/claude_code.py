@@ -99,7 +99,8 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guard
               src/crb/builders/__init__.py (registered as ``"claude_code"``),
               src/crb/server/routes/admin.py (the verify-login route),
               src/crb/server/builder_login.py (the run preflight and the verification cache)
-Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py
+Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py,
+              tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py
 Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
               per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
               event shape is a change to ``argv``/``StreamStats.feed`` with a canned-stream
@@ -142,7 +143,12 @@ from crb.builders.base import (
     emit,
 )
 from crb.builders.budget import CostMeter, price_for
-from crb.core.execution import SandboxUnavailable
+from crb.core.execution import (
+    POST_KILL_DRAIN_S,
+    SandboxUnavailable,
+    read_lines,
+    reap_after_kill,
+)
 from crb.core.ledger import AUTH_REFUSED
 from crb.core.redact import redact_and_cap
 from crb.core.secrets_file import SecretsError, SecretsInsecure, SecretsStore, fingerprint
@@ -401,9 +407,15 @@ class SubprocessHandle:
     """Real transport: ``claude`` as a child process, killed as a group on timeout.
 
     A watchdog timer kills the process group at the deadline even if it is
-    silent (a blocked ``readline`` would otherwise wait forever). stderr goes to
+    silent (a blocked ``readline`` would otherwise wait forever). After a kill the
+    stdout pipe is read for at most :attr:`POST_KILL_DRAIN_S` more: one a process outside
+    the group still holds is abandoned with the lines read so far (P-774). stderr goes to
     a temporary file so it can never fill a pipe and deadlock the stdout reader.
     """
+
+    #: After a kill, the most :meth:`lines` waits on the stdout pipe and the reap (module
+    #: default :data:`crb.core.execution.POST_KILL_DRAIN_S`; a test can shorten it).
+    POST_KILL_DRAIN_S: float = POST_KILL_DRAIN_S
 
     def __init__(self, argv: list[str], env: Mapping[str, str], cwd: Path, timeout_s: int) -> None:
         self._stderr_file = tempfile.TemporaryFile(  # noqa: SIM115 — closed in lines()
@@ -422,6 +434,7 @@ class SubprocessHandle:
             start_new_session=True,
         )
         self._timed_out = False
+        self._killed_at: float | None = None
         self._stderr = ""
         self._watchdog = threading.Timer(timeout_s, self._on_deadline)
         self._watchdog.daemon = True
@@ -432,16 +445,21 @@ class SubprocessHandle:
         the stderr tail. Always runs the ``finally`` — a consumer that breaks out of the
         loop still leaves no zombie."""
         assert self._proc.stdout is not None
+        what = f"claude CLI (pid {self._proc.pid})"
         try:
-            for line in self._proc.stdout:
-                yield line.rstrip("\n")
+            yield from read_lines(
+                self._proc.stdout,
+                killed_at=lambda: self._killed_at,
+                bound_s=self.POST_KILL_DRAIN_S,
+                what=what,
+            )
         finally:
             self._watchdog.cancel()
             try:  # reap the child whether it exited, was killed, or the reader stopped early
                 self._proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.kill()
-                self._proc.wait()
+                reap_after_kill(self._proc, self.POST_KILL_DRAIN_S, what)
             try:
                 self._stderr_file.seek(0)
                 self._stderr = self._stderr_file.read()[-4000:]
@@ -461,6 +479,8 @@ class SubprocessHandle:
             os.killpg(self._proc.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             self._proc.kill()
+        if self._killed_at is None:
+            self._killed_at = time.monotonic()
 
     @property
     def returncode(self) -> int | None:
