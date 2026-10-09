@@ -1088,6 +1088,11 @@ _CUT = re.compile(
 )
 #: A pytest command, by its last path part, and the arguments after it on that command.
 _PYTEST = re.compile(r"(?:^|[\s;&|(\"'])(?:\S*/)?pytest(?=[\s\"']|$)([^\n;&|]*)")
+#: An option and its argument, which may name a file but selects none: a selected test file
+#: is a positional argument, never ``--name=value`` or the value of an option that takes one.
+_NOT_A_SELECTION = re.compile(
+    r"(?<!\S)(?:--[\w-]+=\S+|(?:--(?:ignore|ignore-glob|deselect|confcutdir|rootdir)|-c|-p)\s+\S+)"
+)
 
 
 def _runs(step: dict[str, object]) -> str:
@@ -1097,14 +1102,15 @@ def _runs(step: dict[str, object]) -> str:
 
 
 def suite_jobs(ci_text: str) -> set[str]:
-    """Every job that runs the suite: one whose pytest names no test file and is not
-    ``--version`` or ``--help``, so it collects every test under ``tests/``."""
+    """Every job that runs the suite: one whose pytest selects no test file and is not
+    ``--version`` or ``--help``, so it collects every test under ``tests/``. A file an option
+    names (``--ignore=x.py``, ``--deselect x.py::t``, ``-c x.py``) selects nothing."""
     return {
         job
         for job, spec in yaml.safe_load(ci_text)["jobs"].items()
         for step in spec.get("steps") or []
         for args in _PYTEST.findall(_runs(step))
-        if not re.search(r"\S+\.py\b|--(?:version|help)\b", args)
+        if not re.search(r"\S+\.py\b|--(?:version|help)\b", _NOT_A_SELECTION.sub(" ", args))
     }
 
 
@@ -1188,6 +1194,15 @@ def test_the_suite_jobs_hold_the_whole_history() -> None:
             "\n  test:\n",
             "test-extra",
         ),
+        (
+            "a new suite job that only ignores a file",
+            "\n  test:\n",
+            "\n  test-most:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/checkout@v4\n"
+            "      - run: .venv/bin/pytest -q --ignore=tests/test_slow.py -p no:cacheprovider\n"
+            "\n  test:\n",
+            "test-most",
+        ),
     ],
 )
 def test_the_history_check_refuses_a_shallow_suite_job(
@@ -1204,6 +1219,18 @@ def test_suite_jobs_is_what_ci_runs_the_suite_in() -> None:
     names no test file runs the suite, so it must install what the suite skips on and hold
     the whole history (P-707, P-753)."""
     assert suite_jobs(CI.read_text(encoding="utf-8")) == set(SUITE_JOBS)
+
+
+def test_a_file_an_option_names_is_not_a_selection() -> None:
+    """A file an option names leaves the suite running; a positional test file does not."""
+    jobs = {
+        "ignores": "pytest -q --ignore=tests/test_slow.py --deselect tests/test_x.py::t",
+        "configured": "pytest -c ci/pytest_conf.py -p no:cacheprovider",
+        "selects": "pytest tests/test_x.py --ignore=tests/test_slow.py",
+        "covers": "pytest --cov-config=tests/conf.py",
+    }
+    text = yaml.safe_dump({"jobs": {name: {"steps": [{"run": run}]} for name, run in jobs.items()}})
+    assert suite_jobs(text) == {"ignores", "configured", "covers"}
 
 
 def test_the_history_check_reports_a_renamed_suite_job() -> None:

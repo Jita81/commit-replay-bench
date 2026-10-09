@@ -44,9 +44,9 @@ abstract cells, never code.
 > reading of 7 October, which found the checks of the reading of 27 September plus
 > `fresh-clone` and `commit-subjects`; rows: data/branch-protection-2026-10-07/;
 > apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
-> workflow outside `ci.yml` is red by design: the daily `branch-protection` check fails until an
-> administrator adds the `BRANCH_PROTECTION_TOKEN` secret it reads the setting with (G-930;
-> [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
+> workflow outside `ci.yml` has yet to pass on `main`: the daily `branch-protection` check reads
+> the setting with the `BRANCH_PROTECTION_TOKEN` secret an administrator added on 2026-10-09,
+> and so far it is green only on a pull request's branch (G-930; [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
 > 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
 > builders, store, server, UI, factory, deployment) plus the MCP server (P8) so Claude Code
 > can drive a deployment. `v2.0.0a1` is tagged and its image is on GHCR; `v2.0.0b1` will be

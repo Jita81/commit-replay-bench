@@ -268,7 +268,7 @@ These are not wave items; each unblocks the work named beside it.
 | sign in through a live identity provider | F43 (go-live.16) | Wave 4 or later |
 | cut 2.0.0b1: the tag, the chart as an OCI artifact, a `v*` tag-protection ruleset | G-604 (release.22) | after Wave 4 |
 | a penetration test | F46, named in G-317's line | before go-live |
-| add a fine-grained token with Administration: read as the secret `BRANCH_PROTECTION_TOKEN` | G-930 (`product.evidence.6`): the daily `branch-protection` workflow goes green | any time |
+| add a fine-grained token with Administration: read as the secret `BRANCH_PROTECTION_TOKEN` | G-930 (`product.evidence.6`): the daily `branch-protection` workflow goes green | done 2026-10-09: green on a branch (run 37966599892); G-930 closes on the first green run on `main` |
 | accept ADR-0026 and fix its [operator] values: the per-cell budget, the first look, the size rule, the class-set split and thresholds | Wave 2's R and F, built on the proposals | now: Wave 2 is built on them |
 | once ADR-0026 is accepted, drop the `[operator]` markers on the values it fixed | the record reads as decided | after the acceptance |
 | merge `feat/ns1`, then open the pull request for `feat/ns2` and replace the `pull/new/feat/ns2` links in CHANGELOG with `pull/<n>` | Wave 2 on `main`; G-997's twin for Wave 2 | after `feat/ns1` merges |
