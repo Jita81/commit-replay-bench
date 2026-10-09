@@ -80,7 +80,7 @@ def test_the_split_is_the_seeded_hash_per_commit_and_about_one_third_derivation(
     digest = hashlib.sha256(f"crb.split.v1|{REPO}|{commit}".encode()).hexdigest()
     expect = "derivation" if int(digest[:16], 16) / 16**16 < 1 / 3 else "confirmation"
     assert cs.split_of(REPO, commit) == expect
-    assert pytest.approx(1 / 3) == cs.DERIVATION_SHARE  # ADR-0026 [operator]: one third
+    assert pytest.approx(1 / 3) == cs.DERIVATION_SHARE  # ADR-0026 item 9: one third, fixed (DL-371)
     splits = [cs.split_of(REPO, sha(i)) for i in range(3000)]
     share = splits.count("derivation") / len(splits)
     assert 0.30 < share < 0.37  # a binomial of 3000 at 1/3 lies here with overwhelming odds
