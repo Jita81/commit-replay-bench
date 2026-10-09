@@ -221,8 +221,14 @@ const signedInAs = new WeakMap<Page, string>()
  * the whole test times out, minutes later. This ends the existing session first when it
  * belongs to somebody else, and returns immediately when it is already the person asked
  * for, so no spec can lose four minutes to that mistake again.
+ *
+ * `by: 'keyboard'` submits with Enter in the Password field instead of clicking Sign in, so
+ * the pointer never enters the page. A click leaves the pointer resting where Sign in was,
+ * and a resting pointer is not inert: as Tab scrolls the page under it, the browser sends it
+ * mouseover events, the hint it comes to rest on opens on hover, and that bubble spends an
+ * Escape meant for the control a keyboard spec is closing (P-781). 11b-keyboard signs in so.
  */
-export async function signIn(page: Page, user = env.user, pass = env.pass): Promise<void> {
+export async function signIn(page: Page, user = env.user, pass = env.pass, opts: { by?: 'click' | 'keyboard' } = {}): Promise<void> {
   await page.goto('/login')
   const shell = signedInShell(page)
   const username = field(page, 'Username')
@@ -236,7 +242,8 @@ export async function signIn(page: Page, user = env.user, pass = env.pass): Prom
   }
   await username.fill(user)
   await field(page, 'Password').fill(pass)
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+  if (opts.by === 'keyboard') await field(page, 'Password').press('Enter')
+  else await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(shell).toBeVisible()
   signedInAs.set(page, user)
 }

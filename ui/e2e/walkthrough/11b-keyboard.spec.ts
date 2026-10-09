@@ -4,8 +4,13 @@
  * Oracle (each opening and closing with `aria-expanded`), the sign-off form filled to a Sign
  * off that stays closed on a cell with no proven standard (routing.v2; the walk of an enabled
  * Sign off and of the revoke confirmation waits on G-956), and the freeze dialog with focus in, kept in and back (/factory) — plus
- * a negative control that takes the map cells out of the tab order and requires the same step
- * to fail.
+ * two negative controls: one takes the map cells out of the tab order and requires the same
+ * step to fail, one puts the pointer on the page and requires the pointer guard to see it.
+ *
+ * No step lets the pointer reach the page. Every one signs in by keyboard, and `afterEach`
+ * fails a step whose page saw a pointer event: a pointer left resting on the page by a click
+ * is sent mouseover events as Tab scrolls under it, the hint it rests on opens, and that
+ * bubble spends an Escape the step meant for its control (P-781, PR #58's CI, 8 October).
  *
  * It runs in the stateful story, after the specs that make what it operates: 08 seeds
  * `walk-signable` (every clause but the sealed posture and the reading holds), 05 and 04 give the
@@ -22,14 +27,17 @@
  *               passwords 08 and 11-screens sign in with), then for each of the five controls
  *               signs in as the persona who uses it, loads the page, reaches the control from
  *               the skip link by Tab alone and drives it with Enter, Space, typing and Escape,
- *               asserting `aria-expanded`, where focus goes and that it comes back; the
- *               negative control proves `tabTo` fails on a control that cannot take focus.
- * How:          Playwright; `signIn`, `ensurePersona` and `primary` from support.ts; the
- *               keyboard helpers from keyboard.ts; never `focus()` and never a click.
+ *               asserting `aria-expanded`, where focus goes and that it comes back; fails
+ *               any step whose page a pointer event reached; the negative controls prove
+ *               `tabTo` fails on a control that cannot take focus and the guard sees a pointer.
+ * How:          Playwright; `signIn` (by keyboard), `ensurePersona` and `primary` from
+ *               support.ts; the keyboard helpers from keyboard.ts; never `focus()`, never a
+ *               click, never the pointer.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   ui/e2e/walkthrough/keyboard.ts (`tabTo`, `escapeUntil`, `focusedIs`,
- *               `chooseByKeyboard`, `settle`, `bubbleOf`), ui/e2e/walkthrough/support.ts,
+ *               `chooseByKeyboard`, `settle`, `bubbleOf`, `countPointer`, `pointerEvents`),
+ *               ui/e2e/walkthrough/support.ts,
  *               ui/e2e/walkthrough/08-signoff.spec.ts (seeds and signs `walk-signable`),
  *               ui/e2e/walkthrough/10-factory.spec.ts (the backlog the freeze dialog opens on),
  *               .github/workflows/ci.yml (the `walkthrough-story` job runs it),
@@ -40,10 +48,26 @@
  *               by Tab from the skip link).
  */
 import { expect, test } from '@playwright/test'
-import { bubbleOf, chooseByKeyboard, escapeUntil, focusedIs, settle, tabTo } from './keyboard'
+import { bubbleOf, chooseByKeyboard, countPointer, escapeUntil, focusedIs, pointerEvents, settle, tabTo } from './keyboard'
 import { ensurePersona, env, personaPassword, primary, signIn } from './support'
 
 test.describe.configure({ mode: 'serial' })
+
+/** The tag of the one test that puts the pointer on the page on purpose (the guard's negative control). */
+const POINTER = '@pointer'
+
+// Arm every test's page before its first navigation, and fail a test whose page a pointer
+// event reached (P-781): only the guard's own negative control, tagged POINTER, may.
+test.beforeEach(async ({ page }) => {
+  await countPointer(page)
+})
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.tags.includes(POINTER)) return
+  expect(
+    await pointerEvents(page),
+    'the pointer reached the page: a hint under a resting pointer opens on hover as Tab scrolls, and its bubble spends an Escape meant for the control (P-781)',
+  ).toEqual([])
+})
 
 /** The primary repository the story onboarded, measured and froze a backlog on. */
 const REPO = primary().name
@@ -57,7 +81,7 @@ const PASSWORDS = { operator: personaPassword(USERNAMES.operator), approver: per
 
 test.describe('11b-keyboard: the controls a keyboard person has to operate', () => {
   test('the operator and approver accounts exist (admin, via the API)', async ({ page }) => {
-    await signIn(page, env.user, env.pass)
+    await signIn(page, env.user, env.pass, { by: 'keyboard' })
     await ensurePersona(page, USERNAMES.operator, 'operator')
     await ensurePersona(page, USERNAMES.approver, 'approver')
   })
@@ -73,7 +97,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
 
   test('keyboard: a map cell opens from the keyboard, and the reason code in it opens and closes (/capability)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
     await page.goto(`/capability?repo=${encodeURIComponent(REPO)}`)
     await settle(page)
     const where = 'operator @ 1280 /capability'
@@ -98,7 +122,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
 
   test('keyboard: a reason-code button on Routes is reached by Tab and opens and closes with aria-expanded (/routing)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
     await page.goto(`/routing?repo=${encodeURIComponent(REPO)}`)
     await settle(page)
     const where = 'operator @ 1280 /routing'
@@ -117,7 +141,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
 
   test('keyboard: a term on Oracle opens and closes with aria-expanded (/oracle)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
     await page.goto(`/oracle?repo=${encodeURIComponent(REPO)}`)
     await settle(page)
     const where = 'operator @ 1280 /oracle'
@@ -139,7 +163,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
 
   test('keyboard: the sign-off form is filled from the keyboard, and Sign off stays closed on a cell with no proven standard (/signoff)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.approver, PASSWORDS.approver)
+    await signIn(page, USERNAMES.approver, PASSWORDS.approver, { by: 'keyboard' })
     await page.goto(`/signoff?repo=${SIGNED_REPO}`)
     await settle(page)
     const where = 'approver @ 1280 /signoff'
@@ -166,7 +190,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
 
   test('keyboard: the freeze dialog takes focus when it opens and gives it back when it closes (/factory)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
     await page.goto(`/factory?repo=${encodeURIComponent(REPO)}`)
     await settle(page)
     const where = 'operator @ 1280 /factory'
@@ -192,7 +216,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     // defect a keyboard person meets when a control is a div with an onClick, or carries
     // tabindex="-1" — and `tabTo` must fail on the same page it passes above.
     await page.setViewportSize({ width: 1280, height: 900 })
-    await signIn(page, USERNAMES.operator, PASSWORDS.operator)
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
     await page.goto(`/capability?repo=${encodeURIComponent(REPO)}`)
     await settle(page)
     const cells = await page.evaluate(() => {
@@ -208,5 +232,20 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
       failed = String(e)
     }
     expect(failed, 'tabTo reached a map cell that cannot take focus — the keyboard pass cannot fail').toContain('never reached')
+  })
+
+  test('keyboard: the pointer guard sees a pointer that reaches the page (negative control)', { tag: POINTER }, async ({ page }) => {
+    // A guard that cannot fail proves nothing. Sign in the way every step above does, then do
+    // what the click-based sign-in did on PR #58's CI (P-781): put the pointer on the page
+    // where Sign in was. The guard must see it, though no hint has to open for it to count.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
+    await page.goto(`/capability?repo=${encodeURIComponent(REPO)}`)
+    await settle(page)
+    expect(await pointerEvents(page), 'the keyboard sign-in let the pointer reach the page').toEqual([])
+    await page.mouse.move(640, 466)
+    await expect
+      .poll(async () => (await pointerEvents(page)).length, { message: 'the guard did not see a pointer on the page — it cannot fail' })
+      .toBeGreaterThan(0)
   })
 })

@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The keyboard walkthrough keeps the pointer off the page** (P-781;
+  [#78](https://github.com/Jita81/commit-replay-bench/pull/78)). 11b-keyboard signed in by
+  clicking Sign in, which left the pointer resting on the page. On PR #58's CI, Tab scrolled the
+  map under it, the hint it came to rest on opened between two Escapes 13 ms apart and spent the
+  second, so a reason code stayed open and the step failed, once in the last 60 runs. Every 11b
+  step now signs in with Enter and fails when any pointer event reached its page, and a
+  negative control proves the guard sees one.
+
 - **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
   ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table
   the application updates, `invitations` and `decisions_due`. A split-role PostgreSQL store
