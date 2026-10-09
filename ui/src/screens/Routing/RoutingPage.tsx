@@ -11,20 +11,30 @@
  *               the model rate and split, and the policy version that produced it. The policy
  *               card states the rule in words with the thresholds in force, including the
  *               controls gate; the controls verdict every decision was taken under is shown
- *               beside it.
- * How:          `useRepoParam` → `useRoutesWithControls` → count decisions per route for the
- *               tiles → `DataTable` sorted by route. The interval bar's upper bound is
- *               synthesised symmetrically because a decision carries `ci_low` only (see the
- *               comment at the column).
+ *               beside it. Each decision row carries two doors (G-253): Rows, to the ledger
+ *               rows behind it (repo, class, size, and language, builder and model where the
+ *               decision carries them — the ledger page filters by neither provider nor
+ *               process step), and Map cell, to its class × size cell on the map with the
+ *               detail open (`?cell=`); the doors stay visible at every width, as the row's
+ *               only navigation, while the data columns fold below md. Reached without
+ *               `?repo=`, the page shows the most recently updated repository, as Baseline
+ *               does (G-977).
+ * How:          `useRepoParam({ defaultToLatest })` → `useRoutesWithControls` → count
+ *               decisions per route for the tiles → `DataTable` sorted by route. The
+ *               interval bar's upper bound is synthesised symmetrically because a decision
+ *               carries `ci_low` only (see the comment at the column).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Capability/contract.ts (the extended decision type and the hook),
- *               ui/src/screens/Capability/ReasonCode.tsx (a reason code's sentence, inline),
- *               ui/src/screens/Capability/FailureSplit.tsx (controls pill, split, model point),
+ *               ui/src/screens/Capability/ReasonCode.tsx and
+ *               ui/src/screens/Capability/FailureSplit.tsx (a reason code's sentence inline;
+ *               the controls pill, split and model point),
  *               ui/src/lib/auth.tsx (`can` — the run action is an operator's),
- *               ui/src/api/types.ts (`RouteDecision`, `ROUTES`),
- *               src/crb/core/routing.py (`route()` — the rule this page describes),
- *               src/crb/server/routes/capability.py (the `/routes` route),
+ *               ui/src/components/RepoPicker.tsx (`useRepoParam`), ui/src/api/types.ts
+ *               (`RouteDecision`, `ROUTES`), ui/src/screens/Ledger/LedgerPage.tsx and
+ *               ui/src/screens/Capability/CapabilityPage.tsx (where the doors land),
+ *               src/crb/core/routing.py and src/crb/server/routes/capability.py (`route()` —
+ *               the rule this page describes — and the `/routes` route that serves it),
  *               ui/src/components/VerdictPill.tsx (the route pill with its sentence)
  * Tested by:    ui/src/screens/Routing/RoutingPage.test.tsx,
  *               ui/e2e/walkthrough/07-settings-and-a11y.spec.ts
@@ -139,9 +149,32 @@ function PolicyCard({ policy, controls }: { policy: RoutingPolicyWithControls; c
 const cellLabel = (c: Record<string, string>) =>
   [c.capability_class, c.size, c.language, c.builder, c.model, c.provider].filter(Boolean).join(' · ')
 
-/** The screen; `?repo=` from the URL. */
+/** A key field the decision carries: present and not the `*` of an unprojected dimension. */
+const carried = (v: string | undefined): v is string => Boolean(v) && v !== '*'
+
+/**
+ * The ledger rows behind a decision: the ledger's own filters — repo, class and size, plus
+ * language, builder and model when the decision carries them. Provider and process step are
+ * not filters the ledger page reads, so a decision projected by either opens every row of
+ * its class and size (the hint says so).
+ */
+export function ledgerRowsUrl(repo: string, cell: Record<string, string>): string {
+  const q = new URLSearchParams({ repo, capability_class: cell.capability_class ?? '', size: cell.size ?? '' })
+  for (const k of ['language', 'builder', 'model'] as const) {
+    const v = cell[k]
+    if (carried(v)) q.set(k, v)
+  }
+  return `/ledger?${q.toString()}`
+}
+
+/** The decision's class × size cell on the map, with its detail open on arrival (`?cell=`). */
+export function mapCellUrl(repo: string, cell: Record<string, string>): string {
+  return `/capability?repo=${encodeURIComponent(repo)}&cell=${encodeURIComponent(`${cell.capability_class}|${cell.size}`)}`
+}
+
+/** The screen; `?repo=` from the URL (the latest repository when absent). */
 export function RoutingPage() {
-  const [repo, setRepo] = useRepoParam()
+  const [repo, setRepo] = useRepoParam({ defaultToLatest: true })
   const { can } = useAuth()
   const routes = useRoutesWithControls(repo)
 
@@ -184,8 +217,25 @@ export function RoutingPage() {
       { key: 'oracle', header: 'Oracle', hint: 'col.routing.oracle', numeric: true, sortValue: (d) => d.oracle_strength ?? -1, cell: (d) => fmtRatio(d.oracle_strength), hideBelowMd: true },
       { key: 'reason', header: 'Reason', hint: 'col.routing.reason', sortValue: (d) => d.reason, cell: (d) => <span className="text-xs text-on-surface-muted">{d.reason}</span> },
       { key: 'policy', header: 'Policy', hint: 'col.routing.policy', mono: true, cell: (d) => d.policy_version, hideBelowMd: true },
+      // the doors (G-253): the same two the Capability detail offers, from the decision itself
+      {
+        key: 'doors',
+        header: 'Doors',
+        hint: 'col.routing.doors',
+        cell: (d) => (
+          <span className="inline-flex flex-wrap gap-1">
+            <LinkButton size="sm" to={ledgerRowsUrl(repo, d.cell)} hint="button.routing.rows">
+              Rows
+            </LinkButton>
+            <LinkButton size="sm" to={mapCellUrl(repo, d.cell)} hint="button.routing.map_cell">
+              Map cell
+            </LinkButton>
+          </span>
+        ),
+        // never folded away below md: the doors are the row's only navigation (a phone has no other)
+      },
     ],
-    [],
+    [repo],
   )
 
   return (

@@ -467,3 +467,38 @@ def test_the_published_bar_moves_with_every_threshold_it_names(field: str, value
         assert "let at most 1 measurement control escape" in moved.describe()
     else:
         assert f"{value:.0%}" in moved.describe() or f"{value:.2f}" in moved.describe()
+
+
+# --- inputs the rule does not read (ADR-0003, G-535) -----------------------------------
+
+
+def test_the_rule_reads_no_merge_outcome_or_review_verdict() -> None:
+    """ADR-0003 §"Inputs the rule does not read": a merge outcome and a review verdict feed no
+    clause of the rule. They may only ever route through a new, pre-registered policy version
+    graded on anchored reviews. So no parameter of ``route`` and no field of any input it reads
+    — the cell's statistics, the oracle, the controls, the reading, the policy, or the graded
+    row the statistics are reduced from — is named for an outcome, a merge, a review or a
+    verdict. A later rule may add inputs; it may not add these without that new version."""
+    import dataclasses
+    import inspect
+
+    from crb.core.ledger import GradeRow
+
+    forbidden = {"outcome", "outcomes", "merge", "merged", "review", "reviews", "verdict"}
+
+    def tokens(name: str) -> set[str]:
+        return set(name.lower().split("_"))
+
+    params = list(inspect.signature(rt.route).parameters)
+    assert params[0] == "stats"
+    assert not [p for p in params if tokens(p) & forbidden], params
+    for kind in (
+        CellStats,
+        rt.OracleEvidence,
+        rt.ControlsVerdict,
+        ArmVerdict,
+        rt.RoutingPolicy,
+        GradeRow,
+    ):
+        named = [f.name for f in dataclasses.fields(kind) if tokens(f.name) & forbidden]
+        assert named == [], f"{kind.__name__} carries {named}: the rule would read them"

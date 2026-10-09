@@ -13,7 +13,11 @@
  *               it controls the chrome cluster and both nav rows, folds them below 640 px
  *               while closed, opens and closes with `aria-expanded`, closes on Escape with
  *               focus back on the button (after a first Escape closed a hint bubble, never on
- *               the same press) and on following a link inside it. jsdom applies no CSS, so
+ *               the same press) and on following a link inside it; that the instrument row's
+ *               label names the Operate path as a hint trigger and every chrome id in
+ *               `SHELL_CHROME_HINTS` renders (G-396); and that the ledger health probe's
+ *               `false_q1` drives the "Delivery halted" banner — plural, singular, and none
+ *               at zero or with no probe (G-564). jsdom applies no CSS, so
  *               the fold is asserted as the `max-sm:hidden` class; the 375-px walkthrough
  *               (11-screens) asserts what a phone actually shows.
  * How:          Pure calls for the helper; the shell rendered as a layout route with one
@@ -22,6 +26,9 @@
  * ADRs:         none
  * Works with:   ui/src/components/Layout.tsx, ui/src/components/Help.tsx,
  *               ui/src/components/Hint.tsx (the menu button's hint spends the first Escape),
+ *               ui/src/help/hints-ratchet.shell.tsx (`SHELL_CHROME_HINTS`), ui/src/api/types.ts
+ *               (`Probe` — the ledger probe's shape; its `false_q1` field is
+ *               src/crb/server/routes/system.py's `probe_ledger`),
  *               ui/e2e/walkthrough/11-screens.spec.ts (the same menu at 375 px in Chromium)
  * Tested by:    ui/src/components/Layout.test.tsx
  * Touch when:   never for a new repository; a journey step is added or the shell's chrome changes.
@@ -32,6 +39,9 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Probe } from '../api/types'
+import { hintText } from '../help/hints'
+import { SHELL_CHROME_HINTS } from '../help/hints-ratchet.shell'
 import { AuthProvider } from '../lib/auth'
 import { PRINCIPAL, mockApi } from '../test/utils'
 import { JOURNEY_STEPS, Layout, SHELL_MENU_IDS, journeyEyebrow } from './Layout'
@@ -142,6 +152,102 @@ describe('Layout: the instrument row by role (G-914)', () => {
   it('Runs stays an operator entry and Settings an admin one', async () => {
     expect(await instrumentAs('operator')).toEqual(['Runs', 'Map grid', 'Routes', 'Oracle', 'Learn', 'Ledger'])
     expect(await instrumentAs('admin')).toEqual(['Runs', 'Map grid', 'Routes', 'Oracle', 'Learn', 'Ledger', 'Settings'])
+  })
+})
+
+describe('Layout: the Operate path (G-396)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("the instrument row names the Operate path: its label opens the group's purpose (G-396)", async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { items: [] },
+    })
+    const { container } = renderShell('/ledger', '/ledger', <h1>Ledger</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
+    const nav = screen.getByRole('navigation', { name: 'Instrument' })
+    const label = within(nav).getByTestId('instrument-group-label')
+    expect(label).toHaveTextContent('Instrument')
+    expect(label).toHaveAttribute('data-hint', 'nav.instrument_group')
+    // no longer hidden from assistive technology: it is a trigger like every nav entry
+    expect(label).not.toHaveAttribute('aria-hidden')
+    expect(label).not.toHaveAttribute('title')
+    // focus opens the group's purpose, which names the path
+    label.focus()
+    const tipId = label.getAttribute('aria-describedby')!.split(' ').pop()!
+    await waitFor(() => expect(document.getElementById(tipId)).toHaveAttribute('data-open', 'true'))
+    expect(document.getElementById(tipId)).toHaveTextContent(hintText('nav.instrument_group'))
+    expect(hintText('nav.instrument_group')).toContain('health → Runs → Ledger → Settings')
+    // every chrome id the shell registry names is rendered
+    for (const id of SHELL_CHROME_HINTS) expect(container.querySelector(`[data-hint="${id}"]`), id).not.toBeNull()
+  })
+
+  it('the label does not steal the phone Menu’s first Tab: it follows the chrome and the Primary row (F26)', async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'operator' },
+      'GET /health': { status: 'ok', probes: [] },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { items: [] },
+    })
+    renderShell('/ledger', '/ledger', <h1>Ledger</h1>)
+    await waitFor(() => expect(screen.getByTestId('user-chip')).toBeInTheDocument())
+    const button = screen.getByRole('button', { name: 'Menu' })
+    await userEvent.click(button)
+    expect(button).toHaveFocus()
+    await userEvent.tab()
+    // the first Tab lands in the chrome cluster the menu discloses first, not on the label
+    expect(document.getElementById(SHELL_MENU_IDS[0])).toContainElement(document.activeElement as HTMLElement)
+    expect(screen.getByTestId('instrument-group-label')).not.toHaveFocus()
+  })
+})
+
+describe('Layout: the stop-condition banner (G-564)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  /** The ledger probe as `GET /health` serves it (`probe_ledger`): `false_q1` is the server's field name. */
+  const ledgerProbe = (falseQ1: number): Probe => ({ name: 'ledger', status: falseQ1 ? 'down' : 'ok', detail: falseQ1 ? `false_q1=${falseQ1} — honesty floor breached` : '10 rows, false_q1=0', data: { rows: 10, false_q1: falseQ1 } })
+
+  function renderWith(probes: Probe[]) {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /health': { status: probes.some((p) => p.status !== 'ok') ? 'down' : 'ok', probes },
+      'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false },
+      'GET /decisions': { items: [] },
+    })
+    return renderShell('/results', '/results', <h1>Baseline</h1>)
+  }
+
+  it('a false-Q1 row on the ledger probe halts delivery in a red alert above every screen, linking to the ledger (G-564)', async () => {
+    renderWith([ledgerProbe(2)])
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Delivery halted — 2 false-Q1 rows on the ledger.')
+    expect(alert).toHaveTextContent('Nothing measured is evidence until it is investigated. No policy setting can override this.')
+    expect(within(alert).getByRole('link', { name: 'Investigate in the ledger' })).toHaveAttribute('href', '/ledger')
+    expect(alert.className).toContain('bg-status-red')
+    expect(alert.querySelector('[data-hint="banner.shell.stop_condition"]')).not.toBeNull()
+    // above every screen: inside the header, before the page content
+    expect(screen.getByRole('banner')).toContainElement(alert)
+  })
+
+  it('one false-Q1 row reads in the singular', async () => {
+    renderWith([ledgerProbe(1)])
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Delivery halted — 1 false-Q1 row on the ledger.')
+    expect(alert).not.toHaveTextContent('rows on the ledger')
+  })
+
+  it('a ledger probe reading zero false-Q1 shows no stop banner', async () => {
+    const view = renderWith([ledgerProbe(0)])
+    await screen.findByLabelText('Instrument health: OK')
+    expect(screen.queryByRole('alert')).toBeNull()
+    view.unmount()
+    vi.unstubAllGlobals()
+    // and so does a health with no ledger probe at all (an older server): absence is not a stop
+    renderWith([{ name: 'worker', status: 'ok', detail: 'checked in', data: {} }])
+    await screen.findByLabelText('Instrument health: OK')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 

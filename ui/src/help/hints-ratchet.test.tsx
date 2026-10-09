@@ -164,6 +164,8 @@ function renderShell(role: Role, falseQ1 = 0, devAutologin = false) {
     'GET /health': { status: 'ok', probes: [{ name: 'ledger', status: 'ok', data: { false_q1: falseQ1 } }] },
     'GET /version': { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_enabled: false, dev_autologin: devAutologin },
     'GET /repos': { items: [] },
+    // the nav badge's one reading (F6): nothing waiting renders the badge with 0
+    'GET /decisions': { total: 0, by_role: {}, errors: [] },
   })
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   return render(

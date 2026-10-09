@@ -1,185 +1,147 @@
 /**
- * useDecisions / useDecisionCount — the inbox's rows across every repository, once.
+ * useDecisions / useDecisionCount — the inbox as the server serves it, once (F6).
  *
  * Navigation
  * ----------
- * What it is:   One hook that fetches the map, the sign-offs, the factory tasks, the
- *               prevention register and the context library for every connected repository
- *               and folds them through `decisionsFor`; a count for the nav badge; and, for the
- *               screen that asks for it, the server's clock over the same rows.
- * What it does: Keeps the Decisions page and the header badge on the same numbers (one
- *               query set, cached by TanStack), and adds the "signed but stale" rows the
- *               inbox lists separately — a sign-off the API marks `stale` because the
- *               apparatus has moved since it was made. Passes the viewer's account id, so
- *               an entry they sponsored is never offered to them to sign. `GET /decisions`
- *               adds the one thing a browser cannot derive: when each row FIRST became due
- *               (G-516), joined on the row identity (`repo|kind|key`) both derivations compute.
- * How:          `useQueries` over the connected repositories; `ready` when every query has
- *               either data or the 404 that means "no backlog"; null count until then.
+ * What it is:   `useDecisions` reads `GET /decisions` — every due decision across the connected
+ *               repositories, each with its act, its link, whether this person can take it and
+ *               how long it has waited — and `useDecisionCount` reads `GET /decisions?count=1`
+ *               for the nav badge.
+ * What it does: Gives the Decisions page and the header badge the SAME derivation, made once on
+ *               the server (src/crb/server/decisions.py), instead of five queries per repository
+ *               in every browser on every screen (decisions.operations.10). The page's rows keep
+ *               the server's order; a stale sign-off (`signoff_stale`) is listed in its own
+ *               section. A read that failed keeps its `ApiError` — status, code and message —
+ *               and so does each repository the server could not read (G-134): the page says
+ *               the count is incomplete and offers a retry, and the badge shows no number
+ *               rather than a smaller one.
+ * How:          One `useQuery` each, both under `DECISIONS_PREFIX`, which every settled act
+ *               invalidates (ui/src/api/queryClient.ts, P-613): a person who has just acted
+ *               must not see the act still waiting. The badge's reading is held 30 s between
+ *               acts and the server makes the browser revalidate it every time
+ *               (`private, no-cache` with an `ETag`, so an unchanged count is a 304); the
+ *               list is re-read whenever a page that shows it mounts, and served fresh
+ *               (`no-store` — it carries its clock). `useDecisions(repo)` reads one
+ *               repository's rows (`?repo=`), the Results page's panel.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
- * Works with:   ui/src/screens/Decisions/decisions.ts, ui/src/screens/Decisions/DecisionsPage.tsx,
- *               ui/src/components/Layout.tsx (the badge), ui/src/api/hooks.ts,
- *               src/crb/server/routes/decisions.py (the clock this joins on)
- * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx
- * Touch when:   never for a new repository; a row source is added.
+ * Works with:   ui/src/screens/Decisions/decisions.ts (the row type and labels),
+ *               ui/src/screens/Decisions/DecisionsPage.tsx, ui/src/components/Layout.tsx (the
+ *               badge), ui/src/screens/Results/ResultsPage.tsx (one repository's rows),
+ *               ui/src/api/queryClient.ts (every act re-reads both),
+ *               src/crb/server/routes/decisions.py (both readings)
+ * Tested by:    ui/src/screens/Decisions/DecisionsPage.test.tsx,
+ *               ui/src/screens/Decisions/useDecisionCount.test.tsx,
+ *               ui/src/screens/Results/ResultsPage.test.tsx
+ * Touch when:   never for a new repository; the served row gains a field the page shows.
  */
 
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import { api, isApiError, qs } from '../../api/client'
-import { keys, useAllRepos } from '../../api/hooks'
-import type { CapabilityMap, FactoryTask, LibraryIndex, Page, PreventionRegister, Signoff } from '../../api/types'
-import { useAuth } from '../../lib/auth'
-import { libraryKey } from '../Library/useLibrary'
-import { type Decision, decisionsFor, libraryDecisions } from './decisions'
+import { ApiError, api, qs } from '../../api/client'
+import { DECISIONS_PREFIX } from '../../api/queryClient'
+import type { DecisionCount, DecisionList, DecisionRowOut } from '../../api/types'
+import type { Decision, DecisionKind } from './decisions'
 
-/** One row of `GET /decisions` — the server's clock over the same derivation. */
-interface DueRow {
+/** The page's reading (one repository's, or every one's) and the badge's: one prefix, which every settled act invalidates (P-613). */
+export const decisionsKey = (repo = '') => [...DECISIONS_PREFIX, 'list', repo] as const
+export const decisionCountKey = [...DECISIONS_PREFIX, 'count'] as const
+
+/** A repository the server could not read, as the error it answered — never a bare string. */
+export interface RepoReadError {
   repo: string
-  kind: string
-  key: string
-  due_since: string
-  age_s: number
-}
-
-interface DueList {
-  items: DueRow[]
-  total: number
-  as_of: string
-  repos: string[]
-}
-
-export interface StaleSignoff {
-  repo: string
-  signoff: Signoff
+  error: ApiError
 }
 
 export interface DecisionsState {
+  /** True once the reading answered and every repository in it was read. */
   ready: boolean
+  /** Every row but the stale sign-offs, in the server's order. */
   decisions: Decision[]
-  stale: StaleSignoff[]
+  /** The `signoff_stale` rows: their own section. */
+  stale: Decision[]
   byRepo: Record<string, Decision[]>
-  /** Every repository on record (measured or not) — the empty state's truth, not `byRepo`'s keys. */
+  /** Every repository on record (measured or not) — the empty state's truth. */
   connected: string[]
-  errors: string[]
+  /** The repositories with at least one measured cell. */
+  measured: string[]
+  /** The reading itself failed: the whole inbox is unknown. */
+  error: ApiError | null
+  /** Repositories whose inputs the server could not read: the count is incomplete. */
+  repoErrors: RepoReadError[]
+  /** Read the inbox again (the Retry). */
+  refetch: () => void
 }
 
-function notFound(err: unknown): boolean {
-  return isApiError(err) && err.status === 404
+function toDecision(r: DecisionRowOut): Decision {
+  return {
+    kind: r.kind as DecisionKind,
+    repo: r.repo,
+    key: r.key,
+    title: r.title,
+    evidence: r.evidence,
+    ...(r.reason_code ? { reasonCode: r.reason_code } : {}),
+    act: r.act,
+    href: r.href,
+    role: r.role,
+    canAct: r.can_act,
+    ...(r.signoff ? { signoff: r.signoff } : {}),
+    ...(r.due_since ? { dueSince: r.due_since, ageS: r.age_s } : {}),
+  }
+}
+
+function asApiError(e: unknown): ApiError {
+  return e instanceof ApiError ? e : new ApiError(0, 'network', e instanceof Error ? e.message : String(e))
 }
 
 /**
- * `GET /decisions` — when each decision first became due, and how long it has waited (G-516).
- *
- * The rows themselves stay the screen's own derivation (it has the data already); this adds
- * the one thing a browser cannot know, because the clock started before it was opened. A
- * failure is silent by design: an age is worth having and never worth blocking the inbox for.
+ * `GET /decisions[?repo=]` — the inbox, its clock and each row's act for this person; with
+ * `repo`, that repository's rows only. Re-read whenever a page that shows it mounts.
  */
-export function useDecisionAges(enabled: boolean): Record<string, DueRow> {
-  const due = useQuery({ queryKey: keys.decisionAges, queryFn: () => api<DueList>('/decisions'), enabled, retry: false, staleTime: 60_000 })
-  // a failed read gives no ages — never a zero, which would read as "due just now"
-  const failed = due.isError
-  return useMemo(() => Object.fromEntries((failed ? [] : (due.data?.items ?? [])).map((r) => [`${r.repo}|${r.kind}|${r.key}`, r])), [due.data, failed])
-}
-
-/**
- * `withAges` is the SCREEN's call, not the badge's: the ages endpoint reduces every
- * repository's ledger, and the nav badge — which mounts on every screen — needs a count, not
- * a clock. The page asks for the clock; nothing else pays for it.
- */
-export function useDecisions(withAges = false): DecisionsState {
-  const me = useAuth().me?.id ?? ''
-  const repos = useAllRepos()
-  const ages = useDecisionAges(withAges)
-  const names = useMemo(() => (repos.data?.items ?? []).map((r) => r.name), [repos.data])
-  const maps = useQueries({
-    queries: names.map((repo) => ({
-      queryKey: keys.capability(repo, 'capability_class,size'),
-      queryFn: () => api<CapabilityMap>(`/capability-map${qs({ repo, by: 'capability_class,size' })}`),
-      retry: false,
-    })),
+export function useDecisions(repo = ''): DecisionsState {
+  const q = useQuery({
+    queryKey: decisionsKey(repo),
+    queryFn: () => api<DecisionList>(`/decisions${qs({ repo: repo || undefined })}`),
+    retry: false,
+    refetchOnMount: 'always',
   })
-  const signoffs = useQueries({
-    queries: names.map((repo) => ({
-      queryKey: keys.signoffs(repo),
-      queryFn: () => api<Page<Signoff>>(`/signoffs${qs({ repo, limit: 500 })}`),
-      retry: false,
-    })),
-  })
-  const tasks = useQueries({
-    queries: names.map((repo) => ({
-      queryKey: keys.factoryTasks(repo),
-      queryFn: () => api<FactoryTask[]>(`/factory/${encodeURIComponent(repo)}/tasks`),
-      retry: false,
-    })),
-  })
-  const registers = useQueries({
-    queries: names.map((repo) => ({
-      queryKey: keys.learnRegister(repo),
-      queryFn: () => api<PreventionRegister>(`/learn/register${qs({ repo })}`),
-      retry: false,
-    })),
-  })
-  const libraries = useQueries({
-    queries: names.map((repo) => ({
-      queryKey: libraryKey(repo),
-      queryFn: () => api<LibraryIndex>(`/library/${encodeURIComponent(repo)}`),
-      retry: false,
-    })),
-  })
+  const { refetch } = q
   return useMemo(() => {
-    if (!repos.data) return { ready: false, decisions: [], stale: [], byRepo: {}, connected: [], errors: repos.isError ? [String(repos.error?.message ?? 'repos')] : [] }
+    const again = () => void refetch()
+    if (q.isError) return { ready: false, decisions: [], stale: [], byRepo: {}, connected: [], measured: [], error: asApiError(q.error), repoErrors: [], refetch: again }
+    const body = q.data
+    if (!body) return { ready: false, decisions: [], stale: [], byRepo: {}, connected: [], measured: [], error: null, repoErrors: [], refetch: again }
+    const rows = body.items.map(toDecision)
+    const decisions = rows.filter((d) => d.kind !== 'signoff_stale')
     const byRepo: Record<string, Decision[]> = {}
-    const stale: StaleSignoff[] = []
-    const errors: string[] = []
-    let ready = true
-    names.forEach((repo, i) => {
-      const m = maps[i]
-      const s = signoffs[i]
-      const t = tasks[i]
-      const g = registers[i]
-      const l = libraries[i]
-      // a 404 is an expected absence (never measured, no backlog): the repo simply has no
-      // decisions; any OTHER error means the count is incomplete — never served as ready
-      const failures = [m, s, t, g, l].flatMap((q) => (q?.isError && !notFound(q.error) ? [q.error] : []))
-      if (failures.length > 0) {
-        for (const e of failures) errors.push(`${repo}: ${e.message}`)
-        ready = false
-        return
-      }
-      // each source is settled when it has data or its permitted 404; the repo counts only
-      // when ALL THREE are settled — a settled 404 on one must not hide a pending other
-      const settled = (q: { data?: unknown; isError: boolean; error: unknown } | undefined) => q?.data !== undefined || (q?.isError === true && notFound(q.error))
-      if (!settled(m) || !settled(s) || !settled(t) || !settled(g) || !settled(l)) {
-        ready = false
-        return
-      }
-      if (!m?.data || !s?.data) {
-        // a permitted 404: never measured / no sign-offs — only the library can be waiting on a person
-        const lib = libraryDecisions(repo, l?.data ?? null, me)
-        if (lib.length > 0) byRepo[repo] = lib
-        return
-      }
-      byRepo[repo] = decisionsFor({ repo, cells: m.data.cells, signoffs: s.data.items, tasks: t?.data ?? [], register: g?.data ?? null, library: l?.data ?? null, me }).map((d) => {
-        // the server's clock, joined on the row identity both derivations compute. A row the
-        // server has not seen yet simply has no age — never a zero, which would read as "due
-        // just now" for something that may have been waiting for days.
-        const seen = ages[`${d.repo}|${d.kind}|${d.key}`]
-        return seen ? { ...d, dueSince: seen.due_since, ageS: seen.age_s } : d
-      })
-      for (const so of s.data.items) if (so.stale && !so.revoked) stale.push({ repo, signoff: so })
-    })
-    // `connected` is every repository on record; `byRepo` only those with a measured map — an
-    // unmeasured repository is connected and has no decisions, not "no repository"
-    return { ready, decisions: Object.values(byRepo).flat(), stale, byRepo, connected: names, errors }
-  }, [repos.data, repos.isError, repos.error, names, maps, signoffs, tasks, registers, libraries, me, ages])
+    for (const d of decisions) (byRepo[d.repo] ??= []).push(d)
+    const repoErrors = body.errors.map((e) => ({ repo: e.repo, error: new ApiError(e.status, e.code, e.message) }))
+    return {
+      ready: repoErrors.length === 0,
+      decisions,
+      stale: rows.filter((d) => d.kind === 'signoff_stale'),
+      byRepo,
+      connected: body.repos,
+      measured: body.measured,
+      error: null,
+      repoErrors,
+      refetch: again,
+    }
+  }, [q.data, q.isError, q.error, refetch])
 }
 
-/** The nav badge's number: decisions + stale sign-offs; null until every repo answered. */
+/**
+ * The nav badge's number: every decision waiting, stale sign-offs included, from the count
+ * reading — one request, whatever the number of repositories. `null` until it answers, when it
+ * failed, and while any repository could not be read: a smaller number would read as fewer
+ * decisions, not as an unknown one.
+ */
 export function useDecisionCount(): number | null {
-  const d = useDecisions()
-  return d.ready ? d.decisions.length + d.stale.length : null
+  const q = useQuery({ queryKey: decisionCountKey, queryFn: () => api<DecisionCount>('/decisions?count=1'), retry: false, staleTime: 30_000 })
+  const body: Partial<DecisionCount> | undefined = q.data
+  // a body that is not the count's shape is no number either: the nav never breaks on it
+  if (q.isError || typeof body?.total !== 'number' || !Array.isArray(body.errors) || body.errors.length > 0) return null
+  return body.total
 }
 
 /** `GET /version` is cheap; the badge re-renders with the count only. */

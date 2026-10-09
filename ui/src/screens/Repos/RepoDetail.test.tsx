@@ -6,8 +6,10 @@
  * What it is:   Screen test for the repository detail page against a mocked `GET /repos/{name}`.
  * What it does: Pins that Next steps link the Connection walk and the Factory for this
  *               repository as well as the instrument screens (J-FAC-18), that Start a run is
- *               offered only to an operator, and that `?tab=config` opens the Configuration
- *               tab so a link can land on it (the walk's Configuration button).
+ *               offered only to an operator, that `?tab=config` opens the Configuration
+ *               tab so a link can land on it (the walk's Configuration button), and that an
+ *               unknown name says so and offers Connection with no tablist while a 500 offers
+ *               Retry (G-979).
  * How:          `mockApi` with the config-tab fixture; `renderApp` at `/repos/:name` with and
  *               without `?tab=`; assertions on the links and the selected tab.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -17,11 +19,12 @@
  * Tested by:    ui/src/screens/Repos/RepoDetail.test.tsx
  * Touch when:   never for a new repository; a Next step is added or the tab set changes.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Principal } from '../../api/types'
-import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
+import { unhinted } from '../../help/hints-collector'
+import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
 import { RepoDetail } from './RepoDetail'
 import { REPO } from './repoFixtures'
 
@@ -90,6 +93,45 @@ describe('RepoDetail', () => {
     // mine hand-off never borrows its name, so one label never starts two acts (P-163)
     expect(screen.queryByRole('link', { name: /re-qualify/i })).toBeNull()
     expect(screen.getByRole('columnheader', { name: /Re-check gold/ })).toBeInTheDocument()
+  })
+
+  it('an unknown repository says so and offers Connection (G-979)', async () => {
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos/ghost': () => envelope(404, 'not_found', "no repo 'ghost'"),
+      'GET /repos/ghost/profile': () => envelope(404, 'not_found', "no repo 'ghost'"),
+      'GET /health': { status: 'ok', probes: [] },
+    })
+    const { container } = renderApp(<RepoDetail />, { route: '/repos/ghost?tab=config', path: '/repos/:name' })
+    const state = await screen.findByTestId('unknown-repo')
+    expect(state).toHaveTextContent('No repository called ghost')
+    expect(within(state).getByRole('link', { name: 'Open Connection' })).toHaveAttribute('href', '/connect')
+    expect(container).toHaveTextContent('Not found')
+    // no sections of a repository that does not exist, and no bare retry
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(unhinted(container)).toEqual([])
+  })
+
+  it('a repository read that fails for another reason offers Retry, not a missing repository (G-979)', async () => {
+    const reads: string[] = []
+    mockApi({
+      'GET /auth/me': VIEWER,
+      [`GET /repos/${REPO.name}`]: () => {
+        reads.push('repo')
+        return envelope(500, 'internal_error', 'the store is not answering')
+      },
+      [`GET /repos/${REPO.name}/profile`]: { repo: REPO.name, n_commits: 0, cells: [], classes: [], sizes: [] },
+      'GET /health': { status: 'ok', probes: [] },
+    })
+    renderApp(<RepoDetail />, { route: `/repos/${REPO.name}`, path: '/repos/:name' })
+    const err = await screen.findByRole('alert')
+    expect(err).toHaveTextContent('the store is not answering')
+    expect(screen.queryByTestId('unknown-repo')).toBeNull()
+    const before = reads.length
+    await userEvent.click(within(err).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(reads.length).toBeGreaterThan(before))
   })
 
   it('a viewer is offered no re-check link', async () => {

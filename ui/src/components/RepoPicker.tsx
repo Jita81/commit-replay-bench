@@ -21,15 +21,18 @@
  * Works with:   ui/src/api/hooks.ts (`useAllRepos`), ui/src/components/Field.tsx (`InlineSelect`),
  *               ui/src/screens/Results/ResultsPage.tsx and
  *               ui/src/screens/Signoff/SignoffPage.tsx (`defaultToLatest` — the two screens
- *               the afternoon ends on), ui/src/screens/Home/HomePage.tsx (the same
- *               most-recently-updated rule), ui/src/screens/Capability/CapabilityPage.tsx
- *               (a typical consumer — the page header's actions slot),
+ *               the afternoon ends on), ui/src/screens/Capability/CapabilityPage.tsx and
+ *               ui/src/screens/Routing/RoutingPage.tsx (`defaultToLatest` — reached from the
+ *               journey or the instrument nav, they land on the latest repository, G-977),
+ *               ui/src/screens/Home/HomePage.tsx (the same most-recently-updated rule),
+ *               ui/src/screens/Ledger/LedgerPage.tsx (a consumer that keeps the empty
+ *               value — the whole ledger — the page header's actions slot),
  *               ui/src/components/QueryBoundary.tsx (its `idle` branch is what an empty
  *               `?repo=` shows)
- * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx (`defaultToLatest`),
- *               ui/src/screens/Capability/CapabilityPage.test.tsx,
- *               ui/src/screens/Routing/RoutingPage.test.tsx
- *               and ui/src/screens/Signoff/SignoffPage.test.tsx (each renders with `?repo=`),
+ * Tested by:    ui/src/screens/Results/ResultsPage.test.tsx,
+ *               ui/src/screens/Capability/CapabilityPage.test.tsx and
+ *               ui/src/screens/Routing/RoutingPage.test.tsx (`defaultToLatest`),
+ *               ui/src/screens/Signoff/SignoffPage.test.tsx (renders with `?repo=`),
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
  * Touch when:   never for a new repository (a newly added repo appears in the list).
  */

@@ -12,7 +12,8 @@ What it does: Pins #60's semantics — a failed query fails the check, every que
               shell string, held in a variable or not — and any ``docker inspect`` of a
               container after a ``kill``, ``rm`` or ``stop`` in the same function, either
               one reached directly or through a same-module helper, proving on planted
-              source that it catches each shape (docs/PREVENTION.md P-119, P-263, P-272).
+              source that it catches each shape (docs/PREVENTION.md P-119, P-263, P-272);
+              and refuses a test's ``docker build`` under a fixed tag (P-671).
 How:          ``monkeypatch.setattr(subprocess, "run", …)`` for the helper; an ``ast`` walk
               for the ratchet: a call whose argv is ``[<docker>, "ps", …]``,
               ``[<docker>, "network", "ls", …]`` or ``_docker("ps", …)``, a name read as the
@@ -417,3 +418,73 @@ def test_image_after_rm(docker):
     subprocess.run([docker, "image", "inspect", "img"])
 """
     assert docker_listing_reads(allowed) == []
+
+
+# --- a test's own docker build never takes a fixed tag (P-671) --------------------------
+
+# the session's shipped reference images: one tag per language, built from the Dockerfile the
+# worktree carries; a per-test derived image is what must not share a name across runs
+_SHARED_TAG_HOME = "tests/conftest_langs.py"
+
+
+def fixed_build_tags(source: str, name: str = "<planted>") -> list[str]:
+    """``<name>:<line>`` of every ``docker build … -t <tag>`` argv list whose tag is a string
+    literal, or a name every binding of which in the same function is one (an empty guard
+    re-bound to a per-run tag is not): suites in sibling worktrees share the daemon, so one
+    run's rebuild moves a fixed tag off the image another run pinned."""
+    found: list[str] = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        bound: dict[str, list[bool]] = {}
+        for a in ast.walk(fn):
+            if isinstance(a, ast.Assign):
+                is_lit = isinstance(a.value, ast.Constant) and isinstance(a.value.value, str)
+                for t in a.targets:
+                    if isinstance(t, ast.Name):
+                        bound.setdefault(t.id, []).append(is_lit)
+        literal = {k for k, v in bound.items() if all(v)}
+        for node in ast.walk(fn):
+            if not isinstance(node, ast.List):
+                continue
+            words = [e.value if isinstance(e, ast.Constant) else None for e in node.elts]
+            if "build" not in words or "-t" not in words:
+                continue
+            i = words.index("-t")
+            tag = node.elts[i + 1] if i + 1 < len(node.elts) else None
+            fixed = (isinstance(tag, ast.Constant) and isinstance(tag.value, str)) or (
+                isinstance(tag, ast.Name) and tag.id in literal
+            )
+            if fixed:
+                found.append(f"{name}:{node.lineno}")
+    return sorted(set(found))
+
+
+def test_no_test_builds_an_image_under_a_fixed_tag() -> None:
+    found: list[str] = []
+    for path in sorted(TESTS.rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in (_SHARED_TAG_HOME, "tests/test_docker_wait.py"):
+            continue
+        found += fixed_build_tags(path.read_text(encoding="utf-8"), rel)
+    assert found == [], (
+        "a derived image under a fixed tag is shared by every suite on the daemon (docs/"
+        f"PREVENTION.md P-671); tag it with the run's own scratch name: {found}"
+    )
+
+
+def test_the_tag_ratchet_catches_a_literal_and_a_name_bound_to_one() -> None:
+    planted = """
+import subprocess
+def a(root):
+    subprocess.run(["docker", "build", "-q", "-t", "x-baked:test", str(root)])
+def b(root):
+    baked = "x-baked:test"
+    subprocess.run(["docker", "build", "-t", baked, str(root)])
+def ok(root):
+    baked = f"x-baked:{root.name}"
+    subprocess.run(["docker", "build", "-t", baked, str(root)])
+def ok_run(image):
+    subprocess.run(["docker", "run", "--rm", "-t", "x:test"])
+"""
+    assert fixed_build_tags(planted) == ["<planted>:4", "<planted>:7"]

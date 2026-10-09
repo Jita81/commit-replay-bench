@@ -7,8 +7,11 @@ What it is:   ``/repos``'s test suite — list / detail shapes, config validatio
 What it does: Pins the list shape (probe, counts, last run), pagination, viewer reads, anonymous
               401, detail with config and 404, create RBAC / validation / the recorded event /
               duplicate 409 / invalid config 422, update RBAC with a redacted diff event, the
-              per-repo audit trail newest first, probe RBAC and enqueue (queue unavailable
-              handled), profile computed / cached / refreshed and 409 without a clone, the
+              per-repo audit trail newest first, the config candidates the mine notes imply
+              (a viewer reads them; an operator's accept goes through the audited update under
+              the session and a reject changes nothing, DL-316), probe RBAC and enqueue
+              (queue unavailable handled), profile computed / cached / refreshed and 409
+              without a clone, the
               task list with filters, and the pool window: the mined tasks' date range from
               the store and the share of the clone's non-merge history since the oldest task —
               unknown, with the reason, when the clone is not on this host; the walk cached
@@ -34,6 +37,7 @@ import subprocess
 import sys
 import types
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +57,7 @@ from fixtures.server_seed import (
     envelope,
     login,
     make_env,
+    task_id,
     user_id,
 )
 
@@ -287,6 +292,31 @@ class TestUpdate:
         r = env.put(f"/repos/{ALPHA}", json={"spend": {"max_turns": "50"}})
         assert r.status_code == 422
 
+    def test_update_switches_the_free_stage_chain_on_and_records_who(self, env: Env) -> None:
+        """``auto_stages`` (DL-315) is a config field like any other: set through PUT, stored
+        only once on, and its ``repo.updated`` event names the person the worker chains
+        the next stage under."""
+        assert "auto_stages" not in env.get(f"/repos/{ALPHA}").json()["config"]
+        r = env.put(f"/repos/{ALPHA}", json={"auto_stages": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["config"]["auto_stages"] is True
+        trace = system_trace_id("repo", ALPHA)
+        with env.factory() as s:
+            ev = (
+                s.execute(select(Event).where(Event.trace_id == trace).order_by(Event.seq.desc()))
+                .scalars()
+                .first()
+            )
+        # the switch is stored only once on, so the diff reads from nothing
+        assert ev is not None and ev.payload_json["diff"]["auto_stages"] == {
+            "from": None,
+            "to": True,
+        }
+        assert ev.actor == user_id(USERS["admin"])
+        r = env.put(f"/repos/{ALPHA}", json={"auto_stages": False})
+        assert r.status_code == 200 and "auto_stages" not in r.json()["config"]
+        assert env.put(f"/repos/{ALPHA}", json={"auto_stages": "yes"}).status_code == 422
+
     def test_update_invalid_422(self, env: Env) -> None:
         r = env.put(f"/repos/{ALPHA}", json={"runner": "cargo", "language": "python"})
         assert r.status_code == 200  # cargo is a known runner; config accepts it
@@ -294,6 +324,152 @@ class TestUpdate:
         assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
         r = env.put("/repos/nope", json={"probe": "x"})
         assert r.status_code == 404
+
+
+class TestConfigCandidates:
+    """``GET /repos/{name}/config-candidates`` and the accept / reject acts (DL-316)."""
+
+    @staticmethod
+    def _note(env: Env, i: int, note: str, code: str = "") -> None:
+        """Rewrite seed task ``i``'s gold note as the miner would have left it."""
+        from crb.core.spec import TaskSpec
+        from crb.store.models import Task
+
+        with env.factory() as s:
+            row = s.get(Task, (ALPHA, task_id(i)))
+            assert row is not None
+            spec = TaskSpec.from_dict(row.spec_json)
+            labels = {**dict(spec.labels), **({"qualification_code": code} if code else {})}
+            spec = spec.with_(gold_clean=False, gold_note=note, labels=labels)
+            row.gold_clean = False
+            row.spec_json = spec.to_dict()
+            s.commit()
+
+    def test_accepting_a_candidate_applies_it_under_the_session_and_rejecting_changes_nothing(
+        self, env: Env
+    ) -> None:
+        # nothing implied yet: the seed's gold notes name no change
+        assert env.get(f"/repos/{ALPHA}/config-candidates").json() == {"repo": ALPHA, "items": []}
+        self._note(
+            env, 1, "QUAL_HEADROOM: the gold needed more than half the wall clock", "QUAL_HEADROOM"
+        )
+        self._note(env, 2, "gold fails belt 5 (ruff): ruff timed out")
+        self._note(env, 3, "gold fails belt 5 (ruff): E501 line too long")  # lint debt: none
+        login(env.client, "viewer")
+        r = env.get(f"/repos/{ALPHA}/config-candidates")
+        assert r.status_code == 200, r.text
+        items = r.json()["items"]
+        assert [c["kind"] for c in items] == ["raise_test_timeout", "raise_lint_timeout"]
+        timeout, lint = items
+        assert (
+            timeout["field"] == "runner_opts.timeout"
+            and timeout["proposed"] == 2 * timeout["observed"]
+        )
+        assert timeout["sources"] == [task_id(1)] and lint["sources"] == [task_id(2)]
+        # the acts are an operator's
+        r = env.post(f"/repos/{ALPHA}/config-candidates/{timeout['id']}/accept")
+        assert r.status_code == 403
+        # (assert_rbac performs the act at the minimum role: an unknown id keeps the
+        # candidates undecided and answers 404 there, which is neither 401 nor 403)
+        assert_rbac(
+            env, "POST", f"/repos/{ALPHA}/config-candidates/nope/reject", min_role="operator"
+        )
+        login(env.client, "operator")
+        before = env.get(f"/repos/{ALPHA}").json()["config"]
+        # accept: the change goes through the audited update, under the session
+        r = env.post(f"/repos/{ALPHA}/config-candidates/{timeout['id']}/accept")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["decision"] == "accepted" and body["id"] == timeout["id"]
+        assert body["config"]["runner_opts"]["timeout"] == timeout["proposed"]
+        assert (
+            env.get(f"/repos/{ALPHA}").json()["config"]["runner_opts"]["timeout"]
+            == timeout["proposed"]
+        )
+        trace = system_trace_id("repo", ALPHA)
+        with env.factory() as s:
+            events = list(
+                s.execute(
+                    select(Event).where(Event.trace_id == trace).order_by(Event.seq)
+                ).scalars()
+            )
+        assert [e.action for e in events] == ["repo.updated", "repo.candidate.accepted"]
+        assert events[0].actor == user_id(USERS["operator"]) == events[1].actor
+        assert events[0].payload_json["fields"] == ["runner_opts"]
+        assert events[0].payload_json["candidate"]["id"] == timeout["id"]
+        assert events[1].payload_json["candidate"]["kind"] == "raise_test_timeout"
+        assert events[1].payload_json["held_until"] == "re-qualify"
+        # decided: it is gone from the list, and the commits it named are HELD — the same
+        # unre-qualified note must not offer the next doubling with a limit nobody ran at
+        # (DL-316 (4)); the lint candidate, undecided, still stands
+        items = env.get(f"/repos/{ALPHA}/config-candidates").json()["items"]
+        assert [c["kind"] for c in items] == ["raise_lint_timeout"]
+        # a qualify run that finished after the accept lifts the hold: the note that still
+        # stands offers the next doubling from the limit now in force, and says so
+        with env.factory() as s:
+            accepted_at = datetime.fromisoformat(events[1].timestamp)
+            s.add(
+                Run(
+                    id="q" * 32,
+                    repo=ALPHA,
+                    kind="qualify",
+                    mode="sighted",
+                    status="succeeded",
+                    actor=events[1].actor,
+                    finished=(accepted_at + timedelta(minutes=1)).isoformat(),
+                )
+            )
+            s.commit()
+        items = env.get(f"/repos/{ALPHA}/config-candidates").json()["items"]
+        assert [c["kind"] for c in items] == ["raise_test_timeout", "raise_lint_timeout"]
+        assert (items[0]["observed"], items[0]["proposed"]) == (
+            timeout["proposed"],
+            2 * timeout["proposed"],
+        )
+        assert items[0]["id"] != timeout["id"] and items[0]["sources"] == [task_id(1)]
+        assert f"limit in force is {timeout['proposed']} s" in items[0]["reason"]
+        assert "1 commit hit" in items[0]["reason"]
+        # a decided or unknown id is 404
+        assert (
+            env.post(f"/repos/{ALPHA}/config-candidates/{timeout['id']}/accept").status_code == 404
+        )
+        assert env.post(f"/repos/{ALPHA}/config-candidates/nope/reject").status_code == 404
+        # reject: nothing changes but the record
+        config_before = env.get(f"/repos/{ALPHA}").json()["config"]
+        r = env.post(f"/repos/{ALPHA}/config-candidates/{lint['id']}/reject")
+        assert r.status_code == 200, r.text
+        assert r.json()["decision"] == "rejected" and r.json()["config"] == config_before
+        assert env.get(f"/repos/{ALPHA}").json()["config"] == config_before
+        assert "lint" not in before or before["lint"] == config_before["lint"]
+        items = env.get(f"/repos/{ALPHA}/config-candidates").json()["items"]
+        assert [c["kind"] for c in items] == ["raise_test_timeout"]
+        with env.factory() as s:
+            last = (
+                s.execute(select(Event).where(Event.trace_id == trace).order_by(Event.seq.desc()))
+                .scalars()
+                .first()
+            )
+        assert last is not None and last.action == "repo.candidate.rejected"
+        assert last.actor == user_id(USERS["operator"])
+        assert last.payload_json["candidate"]["id"] == lint["id"]
+
+    def test_a_deployment_setting_is_named_not_applied(self, env: Env) -> None:
+        self._note(
+            env, 1, "QUAL_ENV_UNLOADABLE: the parent cannot load its deps", "QUAL_ENV_UNLOADABLE"
+        )
+        login(env.client, "operator")
+        items = env.get(f"/repos/{ALPHA}/config-candidates").json()["items"]
+        assert [c["scope"] for c in items] == ["deployment"]
+        r = env.post(f"/repos/{ALPHA}/config-candidates/{items[0]['id']}/accept")
+        assert r.status_code == 409 and envelope(r)["code"] == "not_a_repo_setting"
+        assert env.get(f"/repos/{ALPHA}/config-candidates").json()["items"] == items
+        assert (
+            env.post(f"/repos/{ALPHA}/config-candidates/{items[0]['id']}/reject").status_code == 200
+        )
+        assert env.get(f"/repos/{ALPHA}/config-candidates").json()["items"] == []
+
+    def test_404_unknown_repo(self, env: Env) -> None:
+        assert env.get("/repos/nope/config-candidates").status_code == 404
 
 
 class TestEvents:

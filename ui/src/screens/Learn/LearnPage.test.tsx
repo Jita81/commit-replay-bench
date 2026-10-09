@@ -21,8 +21,11 @@
  *               of offering the form again; that registering an item reports the backlog it
  *               landed on and what it superseded; and that queueing runs confirms the plan's
  *               own estimate first, so nothing is sent by one click, and then names what was
- *               queued — an unknown estimate as unknown, never $0.00; and that the note is a
- *               one-line field (P-161).
+ *               queued — an unknown estimate as unknown, never $0.00; that the note is a
+ *               one-line field (P-161); that the guard's false-positive rate reads per
+ *               apparatus and month with the undecided rows apart (G-536); and that a cell
+ *               short of the bar says how many more attempts it needs, how many can be queued
+ *               and what they cost, or that nothing can be queued and why (G-565).
  * How:          `mockApi` with three reports (empty, or one row each where a row is needed),
  *               the populated register fixture (ui/src/screens/Learn/register.fixture.ts) and
  *               the POSTs; `renderApp` at `/learn?repo=…` as the role under test.
@@ -41,13 +44,15 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, json, mockApi, renderApp } from '../../test/utils'
-import { LearnPage, type RefusalGroup, type RefusalReport, type RemeasureCell, type RemeasurePlan, type StrengthenItem, type StrengthenReport } from './LearnPage'
+import { LearnPage, type FalsePositives, type RefusalGroup, type RefusalReport, type RemeasureCell, type RemeasurePlan, type StrengthenItem, type StrengthenReport } from './LearnPage'
 import { REGISTER } from './register.fixture'
 
-const REFUSALS: RefusalReport = { repo: 'alpha', rows_total: 0, rows_protocol: 0, protocol_share: 0, share: { rows_total: 0, rows_protocol: 0, share: 0, ci_low: 0, ci_high: 0 }, by_apparatus: [], cost_usd: 0, minutes: 0, unparsed: 0, apparatus_versions: [], groups: [], decisions: [], note: 'no rows' }
+const NO_FALSE_POSITIVES: FalsePositives = { periods: [], rows_protocol: 0, honest: 0, refuse: 0, undecided: 0, decided_groups: 0, undecided_groups: 0, unclassed: 0, note: 'a row is a false positive when every class it fell into was decided honest' }
+const REFUSALS: RefusalReport = { repo: 'alpha', rows_total: 0, rows_protocol: 0, protocol_share: 0, share: { rows_total: 0, rows_protocol: 0, share: 0, ci_low: 0, ci_high: 0 }, by_apparatus: [], cost_usd: 0, minutes: 0, unparsed: 0, apparatus_versions: [], groups: [], decisions: [], false_positives: NO_FALSE_POSITIVES, note: 'no rows' }
 const STRENGTHEN: StrengthenReport = { repo: 'alpha', threshold: 0.8, cells_flagged: [], cells_without_scores: [], items: [], note: 'nothing held' }
-const REMEASURE: RemeasurePlan = { repo: 'alpha', current_apparatus: '2.2', min_n: 10, rows_total: 0, rows_stale: 0, cells: [], up_to_date: [], summary: { cells_stale: 0, n_needed_total: 0, est_cost_usd_total: 0, est_minutes_total: 0, cost_known_cells: 0 }, note: 'nothing stale' }
+const REMEASURE: RemeasurePlan = { repo: 'alpha', current_apparatus: '2.2', min_n: 10, rows_total: 0, rows_stale: 0, cells: [], up_to_date: [], cannot_clear: [], summary: { cells_pending: 0, cells_stale: 0, cells_thin: 0, n_needed_total: 0, n_requested_total: 0, short_by_total: 0, est_cost_usd_total: 0, est_minutes_total: 0, cost_known_cells: 0 }, note: 'nothing stale' }
 
 describe('the register fixture', () => {
   it('gives every entry its own counts, never those of another entry (CodeRabbit, PR #57)', () => {
@@ -70,7 +75,7 @@ describe('the register fixture', () => {
 /** One refusal class, one strengthening item and one stale cell — the rows the three decisions act on. */
 const GROUP: RefusalGroup = { group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl <url>', n: 3, cost_usd: 1.2, minutes: 4, repos: ['alpha'], tasks: ['t1'], examples: ['curl https://x'], truncated: false, candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:', verdict: 'unsure' }
 const ITEM: StrengthenItem = { id: 'strengthen-1', title: 'Strengthen the divide tests', description: 'kill the surviving mutants', capability_class: 'test.add', labels: { cell: 'bug.fix|S', reason_code: 'oracle_weak', oracle_strength: '0.40', threshold: '0.80', escaped: '1' } }
-const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 4, n_needed: 6, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], in_flight_run_ids: [] }
+const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', key: 'replay|bug.fix|S|python|editblock|m|cerebras|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_1', next_look: 20, mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 14, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], note: '', in_flight_run_ids: [] }
 
 /** The signed-in operator's view of one repository with one row in each report. */
 function operatorApi(extra: Record<string, unknown> = {}) {
@@ -96,10 +101,10 @@ describe('LearnPage', () => {
       'GET /learn/remeasure': REMEASURE,
     })
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
-    await waitFor(() => expect(screen.getByText('Nothing stale')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Nothing to top up or register')).toBeInTheDocument())
     // the header says the product decides nothing, and whose each decision is
     expect(screen.getByText(/The product decides nothing: the register acts only under an operator’s switch, and each report’s decision is an operator’s, recorded with their name\./)).toBeInTheDocument()
-    for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale evidence']) expect(screen.getByText(eyebrow)).toBeInTheDocument()
+    for (const eyebrow of ['Prevention', 'Refusals', 'Weak oracles', 'Stale or thin evidence']) expect(screen.getByText(eyebrow)).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/play 0\d/)
     expect(document.body.textContent).not.toContain('evidence expires')
     // each report says what a person does with it, and its words are terms
@@ -113,7 +118,7 @@ describe('LearnPage', () => {
     expect(screen.getAllByRole('button', { name: /^apparatus/ }).length).toBeGreaterThanOrEqual(1)
     // with nothing to decide, the three reports offer an operator no form and no control:
     // each decision is a control on the row it acts on, never a free-standing write
-    for (const eyebrow of ['Refusals', 'Weak oracles', 'Stale evidence']) {
+    for (const eyebrow of ['Refusals', 'Weak oracles', 'Stale or thin evidence']) {
       const card = screen.getByText(eyebrow).closest('section')!
       expect(card.querySelector('form')).toBeNull()
       expect(within(card).queryByRole('button', { name: /register|revert|switch|run the loop/i })).toBeNull()
@@ -352,8 +357,8 @@ describe('LearnPage', () => {
     // the confirmation repeats the plan's numbers, and nothing has been sent yet
     const plan = within(await screen.findByTestId('learn-queue-summary'))
     expect(plan.getByText(CELL.label)).toBeInTheDocument()
-    expect(plan.getByText('sighted')).toBeInTheDocument()
-    expect(plan.getByText('6')).toBeInTheDocument()
+    expect(plan.getByText('sighted · S3')).toBeInTheDocument()
+    expect(plan.getByText('6, before the look at 20')).toBeInTheDocument()
     expect(plan.getByText('$2.40')).toBeInTheDocument()
     expect(calls.filter((c) => c.method === 'POST')).toEqual([])
     await userEvent.click(screen.getByRole('button', { name: 'Queue the runs' }))
@@ -399,6 +404,144 @@ describe('LearnPage', () => {
     const inFlight = await remeasure.findByRole('link', { name: '2 runs queued' })
     expect(inFlight).toHaveAttribute('href', '/runs?repo=alpha')
     expect(remeasure.queryByRole('button', { name: 'Queue runs' })).toBeNull()
+  })
+
+  it('a cell short of the bar says how many more commits its reading needs and what they cost, or that the cost is not known', async () => {
+    // G-565 under ADR-0026 item 2: a registered reading waiting on its look is offered exactly
+    // the commits it still needs, priced; a commit the worker would skip is short, and says why
+    const pending: RemeasureCell = { ...CELL, label: 'replay|bug.fix|M|go|editblock|m|cerebras', key: 'replay|bug.fix|M|go|editblock|m|cerebras|sighted|S3', stale_versions: [], n_stale: 0, n_current: 5, n_needed: 15, n_requested: 9, short_by: 6, est_cost_usd: 4.5, requests: [{ kind: 'replay' }], note: '6 pending commit(s) are no longer gold-clean, and the worker builds only a gold-clean commit: re-qualify them, or the look waits' }
+    const unpriced: RemeasureCell = { ...pending, label: 'replay|docs.update|S|go|editblock|m|cerebras', key: 'replay|docs.update|S|go|editblock|m|cerebras|sighted|S3', n_needed: 12, n_requested: 12, short_by: 0, cost_known: false, est_cost_usd: 0, note: '' }
+    // a cell with rows and no reading: registration first, never a replay
+    const unregistered: RemeasureCell = { ...pending, label: 'replay|test.add|XS|go|editblock|m|cerebras', key: 'replay|test.add|XS|go|editblock|m|cerebras|sighted|S3', reason: 'thin', next_act: 'register', reading_id: '', next_look: null, n_needed: 20, n_requested: 0, short_by: 0, requests: [], note: 'register a reading of this cell at apparatus 2.2 first (crb reading register, or POST /readings)' }
+    // a reading on an arm this plan cannot compose a replay for: queued by hand from Runs
+    const byHand: RemeasureCell = { ...pending, label: 'replay|bug.fix|L|go|editblock|m|cerebras', key: 'replay|bug.fix|L|go|editblock|m|cerebras|blind|S1@x', mode: 'blind', arm: 'S1@x', next_act: 'runs', n_needed: 20, n_requested: 0, short_by: 20, requests: [], note: 'S1@x counts only rows whose failing test x wrote; this deployment’s test author is not configured' }
+    mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [pending, unpriced, unregistered, byHand], summary: { ...REMEASURE.summary, cells_pending: 3, cells_thin: 1, n_needed_total: 47, cost_known_cells: 2 } } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const table = await screen.findByRole('table', { name: /Cells to top up, or to register a reading on/ })
+    const row = (label: string) => within(table).getByText(label).closest('tr')!
+    // the reason, the need and what can be queued of it, and the price of what is queued
+    expect(within(row(pending.label)).getByText('look pending')).toBeInTheDocument()
+    expect(screen.getByTestId(`learn-needed-${pending.key}`)).toHaveTextContent('15')
+    expect(screen.getByTestId(`learn-needed-${pending.key}`)).toHaveTextContent('9 can be queued; 6 short')
+    expect(screen.getByTestId(`learn-needed-${pending.key}`)).toHaveTextContent('no longer gold-clean')
+    expect(row(pending.label).textContent).toContain('$4.50')
+    // an unknown cost says so, never $0.00
+    expect(row(unpriced.label).textContent).toContain('not known')
+    expect(row(unpriced.label).textContent).not.toContain('$0.00')
+    // no reading: no button, the act that comes first, and why
+    expect(within(row(unregistered.label)).queryByRole('button', { name: 'Queue runs' })).toBeNull()
+    expect(row(unregistered.label).textContent).toContain('Register a reading first')
+    expect(screen.getByTestId(`learn-needed-${unregistered.key}`)).toHaveTextContent('register a reading of this cell')
+    // an arm this plan cannot compose: no button, a way to Runs, and why
+    expect(within(row(byHand.label)).queryByRole('button', { name: 'Queue runs' })).toBeNull()
+    expect(within(row(byHand.label)).getByRole('link', { name: 'Queue from Runs' })).toHaveAttribute('href', '/runs?repo=alpha')
+    // the dialog for the pending cell repeats what the runs ask for and how many are short
+    await userEvent.click(within(row(pending.label)).getByRole('button', { name: 'Queue runs' }))
+    const summary = within(await screen.findByTestId('learn-queue-summary'))
+    expect(summary.getByText(/^9 — 6 short: 6 pending commit/)).toBeInTheDocument()
+    expect(summary.getByText('Commits these runs ask for')).toBeInTheDocument()
+    expect(summary.getByText('$4.50')).toBeInTheDocument()
+  })
+
+  it('a viewer reads why a cell needs what it needs and what comes next, not a bare state', async () => {
+    const unregistered: RemeasureCell = { ...CELL, reason: 'stale', next_act: 'register', reading_id: '', next_look: null, n_needed: 20, n_requested: 0, requests: [], note: 'register a reading of this cell at apparatus 2.2 first' }
+    mockApi({ ...operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [unregistered] } }), 'GET /auth/me': { ...PRINCIPAL, role: 'viewer' } })
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const needed = await screen.findByTestId(`learn-needed-${unregistered.key}`)
+    expect(needed).toHaveTextContent('register a reading of this cell at apparatus 2.2 first')
+    expect(needed.querySelector('[data-hint="text.learn.remeasure_short"]')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Queue runs' })).toBeNull()
+  })
+
+  it('an empty plan never says every cell reached the look while a reading has decided against one', async () => {
+    const decided = { label: 'replay|docs.update|S|go|editblock|m|cerebras', mode: 'sighted', arm: 'S3', state: 'undecided' as const, reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_9' }
+    mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [], cannot_clear: [decided] } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const card = within(await waitFor(() => {
+      const c = document.getElementById('remeasure')
+      if (!c || !within(c).queryByText('Nothing to top up or register')) throw new Error('not yet')
+      return c
+    }))
+    expect(card.getByText(/No cell can be helped by more attempts/)).toBeInTheDocument()
+    expect(card.queryByText(/reached the rule’s first look/)).toBeNull()
+    const list = card.getByTestId('learn-cannot-clear')
+    expect(list).toHaveTextContent('docs.update')
+    expect(list).toHaveTextContent('mine more history')
+    expect(within(list).getByRole('link', { name: 'Mine runs' })).toHaveAttribute('href', '/runs?repo=alpha&kind=mine')
+    expect(unhinted(list)).toEqual([])
+  })
+
+  it('shows the learn stream’s own numbers: a finding to its re-measurement and each count explained on hover', async () => {
+    // G-536: the page mounts the learn stream's FlowPanel, and its figures carry their hints
+    const learnStream = {
+      stream: 'learn',
+      name: 'Learn',
+      lead_times: [
+        { key: 'refusal_to_strengthening', label: 'Refusal raised → strengthening item registered', n: 0, median_s: null, min_s: null, max_s: null, dropped: 0, reason: 'no refusal answered yet' },
+        { key: 'finding_to_remeasurement', label: 'Class found → first re-measured under a change', n: 1, median_s: 14_400, min_s: 14_400, max_s: 14_400, dropped: 0, reason: '' },
+      ],
+      spend: { usd: null, rows_priced: 0, rows_unpriced: 0, apparatus_versions: [] },
+      spend_label: 'no model spend: learning reads what other streams already paid for',
+      per_unit: null,
+      per_unit_label: '',
+      per_unit_spend: { usd: null, rows_priced: 0, rows_unpriced: 0, apparatus_versions: [] },
+      per_unit_units: 0,
+      per_unit_reason: '',
+      counts: { refusals: 0, guard_rows_refused: 3, guard_false_positives: 1, guard_right_refusals: 1, guard_rows_undecided: 1, classes_found: 2, classes_with_a_change: 1, classes_remeasured: 1 },
+      not_captured: [],
+    }
+    const flow = { repo: 'alpha', apparatus: '2.4', generated: '2026-09-28T10:00:00+00:00', method: 'derived from the stored records', spend: { usd: null, rows_priced: 0, rows_unpriced: 0, apparatus_versions: [] }, streams: [learnStream] }
+    mockApi(operatorApi({ 'GET /flow': flow }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const tile = await screen.findByTestId('flow-finding_to_remeasurement')
+    expect(tile).toHaveAttribute('data-hint', 'flow.finding_to_remeasurement')
+    expect(tile).toHaveTextContent('4 h 0 min')
+    expect(tile).toHaveTextContent('n =1')
+    for (const key of ['guard_rows_refused', 'guard_false_positives', 'guard_right_refusals', 'guard_rows_undecided', 'classes_found', 'classes_with_a_change', 'classes_remeasured']) {
+      expect(screen.getByTestId(`flow-count-${key}`)).toHaveAttribute('data-hint', `flow.learn.${key}`)
+    }
+    expect(screen.getByTestId('flow-count-classes_remeasured')).toHaveTextContent('Classes measured again under a change')
+    expect(unhinted(document.getElementById('flow-learn')!)).toEqual([])
+  })
+
+  it("shows the guard's false-positive rate by apparatus with the undecided rows apart", async () => {
+    // G-536: one row per apparatus version and month, never blended; the undecided rows are
+    // their own column and widen the rate into a range until someone decides their class
+    const fp: FalsePositives = {
+      periods: [
+        // 2.10 first on purpose: the table orders versions as numbers, so it reads last
+        { apparatus_version: '2.10', month: '2026-11', rows_protocol: 1, honest: 0, refuse: 1, undecided: 0, rate_low: 0, rate_high: 0 },
+        { apparatus_version: '2.1', month: '2026-09', rows_protocol: 4, honest: 2, refuse: 1, undecided: 1, rate_low: 0.5, rate_high: 0.75 },
+        { apparatus_version: '2.2', month: '2026-10', rows_protocol: 2, honest: 1, refuse: 1, undecided: 0, rate_low: 0.5, rate_high: 0.5 },
+      ],
+      rows_protocol: 7,
+      honest: 3,
+      refuse: 3,
+      undecided: 1,
+      decided_groups: 3,
+      undecided_groups: 1,
+      unclassed: 1,
+      note: 'a row is a false positive when every class it fell into was decided honest',
+    }
+    mockApi(operatorApi({ 'GET /learn/refusals': { ...REFUSALS, groups: [GROUP], false_positives: fp } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const table = await screen.findByRole('table', { name: /The guard's false positives, by apparatus/ })
+    const rows = within(table).getAllByRole('row').slice(1)
+    expect(rows).toHaveLength(3)
+    expect(rows[2]!.textContent).toContain('2.10')
+    expect(rows[0]!.textContent).toContain('2.1')
+    expect(rows[0]!.textContent).toContain('2026-09')
+    expect(rows[0]!.textContent).toContain('50.0% to 75.0%')
+    // a version with nothing undecided reads one exact rate
+    expect(rows[1]!.textContent).toContain('2.2')
+    expect(rows[1]!.textContent).not.toContain(' to ')
+    const undecided = within(table).getByRole('columnheader', { name: /Undecided/ })
+    expect(undecided).toBeInTheDocument()
+    expect(screen.getByTestId('learn-false-positives')).toHaveTextContent('1 of 7 refused rows are undecided (1 class(es) nobody has judged)')
+    // the way forward names who can act, and says what no decision can reach
+    expect(screen.getByTestId('learn-false-positives')).toHaveTextContent('When an operator decides a class above, this range narrows.')
+    expect(screen.getByTestId('learn-false-positives')).toHaveTextContent('1 of the undecided rows fell into no class')
+    expect(unhinted(screen.getByTestId('learn-false-positives'))).toEqual([])
   })
 
   it('a cell whose cost nothing recorded says so instead of showing zero', async () => {

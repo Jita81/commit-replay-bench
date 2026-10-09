@@ -70,6 +70,8 @@ import {
 import { api, ApiError, qs } from './client'
 import { RunEventStream, type EventSourceFactory, type SseSnapshot } from './sse'
 import type {
+  CandidateDecision,
+  ConfigCandidates,
   AcceptanceAssignments,
   HeldOutRecord,
   Intake,
@@ -84,6 +86,8 @@ import type {
   EvidenceResponse,
   FactoryBacklog,
   FactoryCatalogue,
+  FactoryEvolutionBody,
+  FactoryOutcomeSync,
   FactoryTask,
   Flow,
   GoLive,
@@ -158,6 +162,7 @@ export const keys = {
   me: ['auth', 'me'] as const,
   repos: ['repos'] as const,
   repo: (name: string) => ['repos', name] as const,
+  configCandidates: (name: string) => ['repos', name, 'config-candidates'] as const,
   repoProfile: (name: string) => ['repos', name, 'profile'] as const,
   repoPool: (name: string) => ['repos', name, 'pool'] as const,
   /** Every executor's posture reading for `name` — the prefix a finished run invalidates. */
@@ -191,7 +196,6 @@ export const keys = {
   users: ['users'] as const,
   userEvents: (id: string, p?: PageParams) => ['users', id, 'events', p ?? {}] as const,
   invitations: ['invitations'] as const,
-  decisionAges: ['decisions', 'ages'] as const,
   twoPerson: ['two-person-readiness'] as const,
   settings: ['settings'] as const,
   githubApp: ['github', 'app'] as const,
@@ -458,6 +462,34 @@ export function useRecordBaselineRead(repo: string, ready: boolean): void {
   }, [repo, ready, qc])
 }
 
+/**
+ * `GET /repos/{name}/config-candidates` — the config changes the mine's gold notes and skips
+ * imply, not yet decided (DL-316). Read on the walk's mine stage; a viewer reads, an operator
+ * decides.
+ */
+export function useConfigCandidates(name: string): UseQueryResult<ConfigCandidates, ApiError> {
+  return useQuery({
+    queryKey: keys.configCandidates(name),
+    queryFn: () => api<ConfigCandidates>(`/repos/${enc(name)}/config-candidates`),
+    enabled: name.length > 0,
+    retry: false,
+  })
+}
+
+/**
+ * `POST /repos/{name}/config-candidates/{id}/accept|reject` — the session decides one
+ * candidate. Accept goes through the same merge, re-validation and `repo.updated` event as a
+ * hand edit; reject records the decision and changes nothing. The repository, its candidates
+ * and its audit trail (one key prefix) are re-read either way.
+ */
+export function useDecideCandidate(): UseMutationResult<CandidateDecision, ApiError, { name: string; id: string; decision: 'accept' | 'reject' }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ name, id, decision }) => api<CandidateDecision>(`/repos/${enc(name)}/config-candidates/${enc(id)}/${decision}`, { method: 'POST' }),
+    onSuccess: (_d, { name }) => qc.invalidateQueries({ queryKey: keys.repo(name) }),
+  })
+}
+
 /** `POST /repos`; invalidates the list. */
 export function useCreateRepo(): UseMutationResult<RepoDetail, ApiError, RepoCreateRequest> {
   const qc = useQueryClient()
@@ -614,6 +646,12 @@ export function useCreateRun(): UseMutationResult<Run, ApiError, RunCreateReques
     onSuccess: (run) => {
       qc.invalidateQueries({ queryKey: ['runs'] })
       qc.setQueryData(keys.run(run.id), run)
+      // the repository's `last_run` is this run now: the walk on /connect/:name and the
+      // Connect list read the stage they watch from it, so a stale card (G-428: a stage's
+      // Run left the card on the previous run) is refetched the moment the run is queued —
+      // the same reads `useProbeRepo` invalidates
+      qc.invalidateQueries({ queryKey: keys.repo(run.repo) })
+      qc.invalidateQueries({ queryKey: keys.repos })
     },
   })
 }
@@ -624,6 +662,8 @@ export function useCancelRun(): UseMutationResult<Run, ApiError, string> {
   return useMutation({
     mutationFn: (id) => api<Run>(`/runs/${enc(id)}/cancel`, { method: 'POST' }),
     onSuccess: (_r, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
+    // a refused cancel (409: the run already ended) means the page's copy is stale: read it again (G-976)
+    onError: (_e, id) => qc.invalidateQueries({ queryKey: keys.run(id) }),
   })
 }
 
@@ -1021,6 +1061,21 @@ export function useWaiveProbe(): UseMutationResult<unknown, ApiError, { repo: st
   })
 }
 
+/** `POST /factory/{repo}/outcomes/sync` (operator) — read each delivered pull request's fate from GitHub
+ * and record `delivery.merged` / `delivery.closed` (G-368, B-9 / F30). 409 `outcome_sync_unavailable`
+ * when the repository is not linked through the App; 502 `github_error` when the token cannot be
+ * minted. Invalidates the backlog (its outcomes summary) and the tasks (each item's outcome). */
+export function useSyncOutcomes(repo: string): UseMutationResult<FactoryOutcomeSync, ApiError, void> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api<FactoryOutcomeSync>(`/factory/${enc(repo)}/outcomes/sync`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
+  })
+}
+
 /** `POST /factory/{repo}/backlog` (operator) — freeze a backlog; 409 while a factory run is active. */
 export function useRegisterBacklog(): UseMutationResult<FactoryBacklog, ApiError, { repo: string; body: unknown }> {
   const qc = useQueryClient()
@@ -1039,6 +1094,22 @@ export function useFactoryEvidence(repo: string): UseQueryResult<Page<EvidencePa
     queryFn: () => api<Page<EvidencePack>>(`/factory/${enc(repo)}/evidence`),
     enabled: repo.length > 0,
     retry: false,
+  })
+}
+
+/** `POST <way_forward.route>` (operator) — register an evolution that supersedes a stopped item (F32,
+ * DL-049): the body is `{item, authored?}` and the route is the one the task view SERVED for the
+ * item (`/factory/{repo}/backlog/evolutions` today), never composed here. 409 `factory_run_active`
+ * / `item_exists` / `already_superseded`, 422 for a malformed item. Invalidates the backlog and the
+ * tasks, because the record gained an item. Nothing is posted without a person's press. */
+export function useRegisterEvolution(repo: string): UseMutationResult<FactoryBacklog, ApiError, { route: string; body: FactoryEvolutionBody }> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ route, body }) => api<FactoryBacklog>(route, { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.factoryBacklog(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
   })
 }
 
@@ -1214,7 +1285,14 @@ export function useSyncGitHubInstallations(): UseMutationResult<GitHubInstallati
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => api<GitHubInstallation[]>('/github/installations/sync', { method: 'POST' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.githubApp }),
+    // G-128: the response IS the installation list, so the app query is seeded from it
+    // before the refetch — a caller's onSuccess (the dialog's select-the-landed-installation)
+    // then reads the recorded installation at once — and the invalidation is RETURNED, so
+    // the mutation is pending until the app has been re-read, never racing the refetch
+    onSuccess: (rows) => {
+      qc.setQueryData<GitHubAppInfo>(keys.githubApp, (old) => (old ? { ...old, installations: rows } : old))
+      return qc.invalidateQueries({ queryKey: keys.githubApp })
+    },
   })
 }
 

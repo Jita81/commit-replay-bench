@@ -25,6 +25,20 @@ store-level checks:
   semantics as :func:`crb.core.ledger.false_q1_total`; any false-Q1 row = ``down``; and
   the sign-off and review chains walked from their stored columns — a break = ``down``.
   The same numbers refresh the ``crb_false_q1_total`` / ``crb_ledger_rows`` gauges.
+* ``redaction``   — the newest :data:`REDACTION_PROBE_PACKS` stored evidence packs carry no
+  credential shape the redactor knows (G-400): every string of each pack is re-run through
+  :func:`crb.core.redact.redact`, and a pack leaks when the redactor would ADD a marker the
+  string does not already carry — its own ``[REDACTED…]`` markers, whole or cut at the end
+  by the head cap, are counted first, so neither a marker nor the word after one is ever
+  read as a secret (P-640). A leaking pack is ``down`` and the detail names the pack hash,
+  never the value; a pack body that cannot be read is ``degraded``, never down. The way
+  back (DL-313): a pack is never deleted (the table is append-only), so an approver
+  acknowledges it — after rotating the credential — at ``POST
+  /system/redaction/{pack_hash}/acknowledge``; the act is a ``redaction.acknowledged`` event
+  on the audit chain and the probe reads the pack as acknowledged, ``ok``, naming it. Known
+  shapes only, in stored packs only — a secret of a shape the redactor does not know is not
+  seen here. An ``ok`` reading is reused for :data:`REDACTION_PROBE_TTL_S` (one worker
+  heartbeat).
 * ``worker``      — liveness from the ``workers`` table each worker upserts every
   ``heartbeat_s`` even when idle (J-TEL-2): a worker seen within 3 × its own
   ``heartbeat_s`` is alive. ``degraded`` (never ``down``) when runs are queued and no
@@ -86,19 +100,28 @@ Navigation
 ----------
 What it is:   The ``/health``, ``/health/live``, ``/metrics`` and ``/version`` routes — the
               unauthenticated operational surface.
-What it does: Readiness aggregates the store probes (db, migrations at head, append-only triggers
-              proven live, ledger false-Q1 = 0, worker check-ins from the ``workers`` table) and the
-              served-commit ``build`` probe (``served`` + ``stale``) with the observability probes
-              (sandbox — skipped for the ``api`` role — toolchains, builders with each present
-              login's verification state) and answers 503 when any is ``down``, and serves the
-              deployment's ``posture`` beside them (where tests and the builder run, and whether
-              production runs unsealed under ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that
-              raises is ``down`` with the fixed ``failure_detail`` naming the request id, the
-              exception logged, never served; liveness checks the database only; ``/metrics``
-              refreshes the ledger gauges then renders the shared registry; ``/health`` and
-              ``/version`` say whether automatic sign-in is on (never which account, and ``on`` only
-              to a caller that could use it), and ``probe_dev_autologin`` is the doctor line that
-              warns while it is.
+What it does: Readiness aggregates the store probes (db, migrations at head, append-only
+              triggers proven live, ledger false-Q1 = 0, worker check-ins from the ``workers``
+              table) and the served-commit ``build`` probe (``served`` + ``stale``) with the
+              observability probes
+              (sandbox — skipped for the ``api`` role — toolchains, builders with each
+              present login's verification state) and answers
+              503 when any is ``down``, and serves the deployment's ``posture`` beside them
+              (where tests and the builder run, and whether production runs unsealed under
+              ``CRB_ALLOW_UNSEALED_PROD``, ADR-0023); a read that raises is ``down`` with
+              the fixed ``failure_detail`` naming the request id, the exception logged, never
+              served;
+              liveness checks the database only; ``/metrics``
+              refreshes the ledger gauges and each repository's one-hot
+              ``crb_controls_verdict`` (from the latest controls report, at scrape time, so a
+              restart cannot blank it — G-920) then renders the shared registry;
+              ``disqualified_counts`` is the ``disqualified`` block ``/ledger/verify`` serves
+              (per builder over the last seven days against DL-312's threshold, G-400);
+              ``POST /system/redaction/{pack_hash}/acknowledge`` (approver) records the way
+              back from a ``redaction`` stop on the audit chain (DL-313).
+              ``/health`` and ``/version`` say whether automatic sign-in is on (never which
+              account, and ``on`` only to a caller that could use it), and
+              ``probe_dev_autologin`` is the doctor line that warns while it is.
 How:          ``collect_health`` = the probe list, each under ``probes.run_probe`` with the
               request id → ``probes.aggregate`` → stamp;
               ``migrations_result`` turns a ``HeadStatus`` into the probe (``crb doctor``
@@ -130,7 +153,8 @@ Works with:   src/crb/observability/probes.py (the probe vocabulary, ``run_probe
               docs/API.md#health--metrics-no-auth-bind-to-an-internal-interface (the
               ``migrations`` contract the other documents copy)
 Tested by:    tests/test_server_system.py, tests/test_deploy_health_probes.py,
-              tests/test_settings_posture.py, tests/test_server_dev_autologin.py
+              tests/test_settings_posture.py, tests/test_server_dev_autologin.py,
+              tests/test_health_probe_docs.py, tests/test_ledger_disqualified.py
 Touch when:   never for a new repository; adding a probe means deciding which role owns it
               (``skipped`` elsewhere), whether it may fail readiness, and putting its read
               under ``probes.run_probe`` (never an exception in a ``detail``); a new belt means
@@ -142,9 +166,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +179,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.ledger import BELT_SET_V3_LEGACY, BELT_SET_V5, LedgerIntegrityError
+from crb.core.redact import redact
 from crb.core.routing import POLICY_VERSION
 from crb.core.secrets_file import SecretsError
 from crb.core.signoff import SIGNOFF_POLICY_VERSION
@@ -163,7 +189,7 @@ from crb.observability import build_stamp, metrics, probes
 from crb.observability.metrics import EXPOSITION_DEGRADED
 from crb.observability.probes import DEGRADED, DOWN, OK, ProbeResult
 from crb.provision.probe import probe_provision
-from crb.server.auth import dev_autologin_refusal
+from crb.server.auth import ApproverDep, dev_autologin_refusal
 from crb.server.builder_login import (
     FIX_WHERE,
     STATE_INVALID,
@@ -171,11 +197,21 @@ from crb.server.builder_login import (
     STATE_VERIFIED,
     login_readings,
 )
-from crb.server.deps import ApiError, ErrorEnvelope, SessionFactoryDep, SettingsDep, request_id
+from crb.server.deps import (
+    ApiError,
+    DbDep,
+    ErrorEnvelope,
+    SessionFactoryDep,
+    SettingsDep,
+    request_id,
+)
 from crb.server.flow_record import stamp_first_healthy
 from crb.server.intake import IntakeStore, ListenerState, needs_credential
+from crb.server.routes.oracle import latest_controls_verdict, verdict_dict
 from crb.server.routes.reviews import verify_reviews
+from crb.server.routes.runs import append_system_event, system_trace_id
 from crb.server.routes.signoffs import verify_signoffs
+from crb.server.schemas import RedactionAckIn, RedactionAckOut
 from crb.server.secrets import SecretsFile, secrets_dir_for
 from crb.server.settings import Settings
 from crb.server.worker_metrics import exposition_by_worker
@@ -184,6 +220,8 @@ from crb.store.ledger import assert_append_only
 from crb.store.migrate import HeadStatus, head_status_on
 from crb.store.models import (
     LEASE_ROW_PREFIX,
+    Event,
+    EvidencePackRow,
     Grade,
     Repo,
     Run,
@@ -384,6 +422,54 @@ def refresh_ledger_gauges(factory: sessionmaker[Session]) -> tuple[int, int]:
     rows, fq1 = ledger_counts(factory)
     metrics.set_ledger_health(rows=rows, false_q1=fq1)
     return rows, fq1
+
+
+def refresh_controls_gauges(factory: sessionmaker[Session]) -> dict[str, str]:
+    """Set ``crb_controls_verdict{repo,state}`` one-hot for every repository from its latest
+    ``controls.report`` at the running apparatus (``latest_controls_verdict`` — the same read
+    the router and the Oracle screen make) and return ``{repo: state}``. Called at SCRAPE
+    time by ``/metrics``, not by the worker on ``controls.report``: a gauge the worker set
+    would read absent after every API restart until the next controls run, and an alert on
+    ``state!="passed"`` would fall silent exactly when the deployment came back (G-920)."""
+    states: dict[str, str] = {}
+    with factory() as s:
+        names = [str(n) for n in s.execute(select(Repo.name).order_by(Repo.name)).scalars()]
+        for name in names:
+            states[name] = str(verdict_dict(latest_controls_verdict(s, name))["state"])
+    for name, state in states.items():
+        metrics.set_controls_verdict(name, state)
+    return states
+
+
+#: The ``disqualified`` block of ``GET /ledger/verify`` (DL-312, G-400): rows graded
+#: ``disqualified`` in the last :data:`DISQUALIFIED_WINDOW_DAYS`, counted per builder, and a
+#: builder at or over :data:`DISQUALIFIED_THRESHOLD` of them is a stop condition
+#: (docs/OPERATOR.md#8-stop-conditions). The threshold is a hypothesis until a deployment
+#: has measured its own base rate — DL-312 says how to change it.
+DISQUALIFIED_WINDOW_DAYS = 7
+DISQUALIFIED_THRESHOLD = 2
+
+
+def disqualified_counts(session: Session, *, now: _dt.datetime | None = None) -> dict[str, Any]:
+    """``{window_days, threshold, by_builder: [{builder, n}], over: [builder]}`` over the
+    grade rows created in the last :data:`DISQUALIFIED_WINDOW_DAYS` (``created`` is an
+    ISO-8601 UTC string, so the cut is a string compare against one), disqualified rows
+    only, per builder, descending by count then by name; ``over`` names the builders at or
+    past :data:`DISQUALIFIED_THRESHOLD`."""
+    at = now or _dt.datetime.now(_dt.UTC)
+    since = (at - _dt.timedelta(days=DISQUALIFIED_WINDOW_DAYS)).isoformat(timespec="seconds")
+    rows = session.execute(
+        select(Grade.builder, func.count(Grade.seq))
+        .where(Grade.disqualified.is_(True), Grade.created >= since)
+        .group_by(Grade.builder)
+    ).all()
+    counts = sorted(((str(b or ""), int(n)) for b, n in rows), key=lambda t: (-t[1], t[0]))
+    return {
+        "window_days": DISQUALIFIED_WINDOW_DAYS,
+        "threshold": DISQUALIFIED_THRESHOLD,
+        "by_builder": [{"builder": b, "n": n} for b, n in counts],
+        "over": [b for b, n in counts if n >= DISQUALIFIED_THRESHOLD],
+    }
 
 
 def probe_ledger(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
@@ -855,6 +941,181 @@ def probe_dev_autologin(settings: Settings | None) -> ProbeResult:
     )
 
 
+#: How many of the newest stored evidence packs the ``redaction`` probe re-reads.
+REDACTION_PROBE_PACKS = 50
+#: How long a reading is reused: one worker heartbeat (``heartbeat_s`` defaults to 10 s), so
+#: a readiness poll every few seconds does not re-walk fifty packs each time, and a pack
+#: stored since is seen within a heartbeat. A reading that is not ``ok`` is not cached at
+#: all, so a fixed store is seen at once.
+REDACTION_PROBE_TTL_S = 10.0
+#: The redactor's own whole markers — ``[REDACTED]``, ``[REDACTED-KEY]``,
+#: ``[REDACTED-PRIVATE-KEY]`` — and a marker the head cap cut at the end of a string
+#: (``[REDAC …``: ``redact_and_cap_head`` cuts anywhere and appends `` …``). Both are COUNTED,
+#: never cut out, before and after the redactor is re-run (:func:`carries_secret_shape`):
+#: cutting a marker out re-created the shape it stood in — ``token=[REDACTED] mismatch``
+#: became ``token= mismatch``, which the ``key=value`` rule re-matches on the next word — and
+#: the six-character cut ``[REDAC`` is itself a value that rule accepts (P-640, the Wave 6
+#: plan critique and its verifiers, 2026-09-29).
+_MARKER_WHOLE = re.compile(r"\[REDACTED(?:-[A-Z-]+)?\]")
+_MARKER_CUT = re.compile(
+    r"\[(?:R(?:E(?:D(?:A(?:C(?:T(?:E(?:D(?:-[A-Z-]*)?)?)?)?)?)?)?)?)?(?=\s*…\s*$)"
+)
+#: The audit-chain action an approver's acknowledgement writes (DL-313): the way back from a
+#: ``redaction`` stop for a pack that is never deleted. ``payload = {pack_hash, reason}``.
+REDACTION_ACK_ACTION = "redaction.acknowledged"
+#: Per store (the factory's bind URL), like the provision cache is per configuration, so two
+#: stores in one process — the test suite's — never read each other's packs.
+_redaction_cache: dict[str, tuple[float, ProbeResult]] = {}
+_redaction_lock = threading.Lock()
+
+
+def _store_key(factory: sessionmaker[Session]) -> str:
+    bind = dict(getattr(factory, "kw", {}) or {}).get("bind")
+    url = getattr(bind, "url", None)
+    return str(url) if url is not None else f"factory:{id(factory)}"
+
+
+def _marker_count(text: str) -> int:
+    """How many of the redactor's own markers ``text`` carries — whole ones anywhere, plus a
+    cut one at the end (the head cap's ``[REDAC …``)."""
+    return len(_MARKER_WHOLE.findall(text)) + (1 if _MARKER_CUT.search(text) else 0)
+
+
+def carries_secret_shape(text: str) -> bool:
+    """``True`` when re-running the redactor would ADD a marker ``text`` does not already
+    carry — a credential shape whose captured value is not one of the redactor's own
+    markers, whole or cut. A marker the redactor merely rewrites in place (``token:
+    [REDACTED]`` → ``token=[REDACTED]``) adds none and is not a secret."""
+    return _marker_count(redact(text)) > _marker_count(text)
+
+
+def acknowledged_packs(session: Session) -> dict[str, dict[str, str]]:
+    """``{pack_hash: {actor, reason, at}}`` for every :data:`REDACTION_ACK_ACTION` event on
+    the chain (the first record of each pack wins — the act is idempotent)."""
+    rows = session.execute(
+        select(Event.payload_json, Event.actor, Event.timestamp)
+        .where(Event.action == REDACTION_ACK_ACTION, Event.stage == "system")
+        .order_by(Event.id)
+    ).all()
+    out: dict[str, dict[str, str]] = {}
+    for payload, actor, at in rows:
+        pack_hash = str(dict(payload or {}).get("pack_hash") or "")
+        if pack_hash and pack_hash not in out:
+            out[pack_hash] = {
+                "actor": str(actor or ""),
+                "reason": str(dict(payload or {}).get("reason") or ""),
+                "at": str(at or ""),
+            }
+    return out
+
+
+def _strings_of(value: Any) -> Iterator[str]:
+    """Every string in a JSON-shaped value, keys included (a key can carry a value)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, Mapping):
+        for k, v in value.items():
+            yield from _strings_of(k)
+            yield from _strings_of(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _strings_of(v)
+
+
+def redaction_result(factory: sessionmaker[Session]) -> ProbeResult:
+    """One uncached reading of the ``redaction`` probe (see the module docstring)."""
+    with factory() as s:
+        packs = list(
+            s.execute(
+                select(EvidencePackRow.pack_hash, EvidencePackRow.body_json)
+                .order_by(EvidencePackRow.created.desc(), EvidencePackRow.pack_hash)
+                .limit(REDACTION_PROBE_PACKS)
+            ).all()
+        )
+        acked = acknowledged_packs(s)
+    leaking: list[str] = []
+    acknowledged: list[str] = []
+    unreadable: list[str] = []
+    for pack_hash, body in packs:
+        try:
+            found = any(carries_secret_shape(text) for text in _strings_of(body))
+        except Exception:  # one pack's read must not decide the others'
+            unreadable.append(str(pack_hash))
+            continue
+        if found and str(pack_hash) in acked:
+            acknowledged.append(str(pack_hash))
+        elif found:
+            leaking.append(str(pack_hash))
+    data = {
+        "packs": len(packs),
+        "window": REDACTION_PROBE_PACKS,
+        "leaking": leaking,
+        "acknowledged": acknowledged,
+        "unreadable": unreadable,
+    }
+    if leaking:
+        n = len(leaking)
+        return ProbeResult(
+            "redaction",
+            DOWN,
+            f"a credential shape the redactor knows is in {_plural(n, 'stored evidence pack')}"
+            f" — pack {leaking[0]}"
+            + (f" and {n - 1} more" if n > 1 else "")
+            + " — stop delivery, rotate the credential, then an approver acknowledges the "
+            "pack (docs/OPERATOR.md#8-stop-conditions); the value is not served",
+            data,
+        )
+    if unreadable:
+        return ProbeResult(
+            "redaction",
+            DEGRADED,
+            f"{_plural(len(unreadable), 'stored evidence pack')} could not be read — "
+            f"pack {unreadable[0]} — the others carry no known credential shape",
+            data,
+        )
+    if not packs:
+        return ProbeResult(
+            "redaction", OK, "no stored evidence pack yet; nothing to re-check", data
+        )
+    noted = (
+        f"; {_plural(len(acknowledged), 'pack')} acknowledged by an approver after rotation"
+        f" — {acknowledged[0]}"
+        + (f" and {len(acknowledged) - 1} more" if len(acknowledged) > 1 else "")
+        if acknowledged
+        else ""
+    )
+    return ProbeResult(
+        "redaction",
+        OK,
+        f"the newest {_plural(len(packs), 'stored evidence pack')} carry no credential shape "
+        f"the redactor knows (known shapes only){noted}",
+        data,
+    )
+
+
+def probe_redaction(factory: sessionmaker[Session], *, request_id: str = "") -> ProbeResult:
+    """``redaction`` (G-400): :func:`redaction_result`, an ``ok`` reading reused for
+    :data:`REDACTION_PROBE_TTL_S`; a store that cannot be read is ``down`` with the fixed
+    ``failure_detail`` (``run_probe``)."""
+    key = _store_key(factory)
+    now = _monotonic()
+    with _redaction_lock:
+        hit = _redaction_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+
+    def _read() -> ProbeResult:
+        result = redaction_result(factory)
+        with _redaction_lock:
+            if result.status == OK:
+                _redaction_cache[key] = (now + REDACTION_PROBE_TTL_S, result)
+            else:
+                _redaction_cache.pop(key, None)
+        return result
+
+    return probes.run_probe("redaction", _read, request_id=request_id)
+
+
 def probe_builder_logins(
     factory: sessionmaker[Session], settings: Settings, *, request_id: str = ""
 ) -> ProbeResult:
@@ -958,6 +1219,7 @@ def collect_health(
         probe_migrations(factory, request_id=rid),
         probe_append_only(factory, request_id=rid),
         probe_ledger(factory, request_id=rid),
+        probe_redaction(factory, request_id=rid),
         probes.run_probe(
             "sandbox", lambda: probe_sandbox(settings, role, request_id=rid), request_id=rid
         ),
@@ -1032,19 +1294,78 @@ def health_live(request: Request, response: Response, factory: SessionFactoryDep
     summary="Prometheus exposition (crb_false_q1_total must read 0)",
 )
 def prometheus_metrics(factory: SessionFactoryDep, settings: SettingsDep) -> Response:
-    """The exposition; the ledger gauges are refreshed on every scrape so
-    ``crb_false_q1_total`` is never stale."""
+    """The exposition; the ledger gauges and each repository's ``crb_controls_verdict`` are
+    refreshed on every scrape so neither is ever stale, and a restart blanks nothing."""
     if not settings.metrics_enabled:
         raise ApiError(404, "metrics_disabled", "CRB_METRICS_ENABLED is false")
     if not metrics.available():
         raise ApiError(503, "metrics_unavailable", "prometheus_client is not installed")
     refresh_ledger_gauges(factory)
+    refresh_controls_gauges(factory)
     return Response(content=metrics.render_api(), media_type=CONTENT_TYPE_LATEST)
 
 
 #: The package's licence — pyproject.toml's ``license`` (tests/test_server_app.py pins the
 #: two together, so the Deployment page never states a licence the package does not carry).
 LICENCE = "Apache-2.0"
+
+
+def _ack_out(pack_hash: str, rec: Mapping[str, str]) -> RedactionAckOut:
+    return RedactionAckOut(
+        pack_hash=pack_hash,
+        actor=str(rec.get("actor", "")),
+        reason=str(rec.get("reason", "")),
+        acknowledged_at=str(rec.get("at", "")),
+    )
+
+
+@router.post(
+    "/system/redaction/{pack_hash}/acknowledge",
+    response_model=RedactionAckOut,
+    summary="Acknowledge a stored evidence pack the redaction probe named (approver; DL-313)",
+    responses={
+        404: {"model": ErrorEnvelope, "description": "no stored pack with that hash"},
+        409: {"model": ErrorEnvelope, "description": "the pack carries no known credential shape"},
+    },
+)
+def acknowledge_redaction(
+    pack_hash: str, body: RedactionAckIn, approver: ApproverDep, db: DbDep
+) -> RedactionAckOut:
+    """The way back from a ``redaction`` stop (DL-313). The evidence table is append-only and
+    a pack is never deleted, so after the credential is rotated an approver records that the
+    named pack has been dealt with: one ``redaction.acknowledged`` system event on the audit
+    chain (``payload = {pack_hash, reason}``, the actor stamped, the value never copied), and
+    the probe reads the pack as acknowledged. Idempotent — a second call returns the first
+    record. A pack the store does not hold is 404; a pack that carries no known shape is 409
+    (nothing to acknowledge — the probe never named it)."""
+    row = db.get(EvidencePackRow, pack_hash)
+    if row is None:
+        raise ApiError(404, "not_found", f"no stored evidence pack {pack_hash}")
+    already = acknowledged_packs(db).get(pack_hash)
+    if already is not None:
+        return _ack_out(pack_hash, already)
+    try:
+        found = any(carries_secret_shape(text) for text in _strings_of(row.body_json))
+    except Exception:
+        found = False
+    if not found:
+        raise ApiError(
+            409,
+            "nothing_to_acknowledge",
+            f"stored evidence pack {pack_hash} carries no credential shape the redactor knows",
+        )
+    ev = append_system_event(
+        db,
+        trace_id=system_trace_id("redaction", pack_hash),
+        action=REDACTION_ACK_ACTION,
+        repo=str(row.repo or ""),
+        actor=approver.id,
+        payload={"pack_hash": pack_hash, "reason": body.reason},
+    )
+    db.commit()
+    with _redaction_lock:  # the next readiness read sees the acknowledgement at once
+        _redaction_cache.clear()
+    return _ack_out(pack_hash, {"actor": ev.actor, "reason": body.reason, "at": str(ev.timestamp)})
 
 
 @router.get("/version", summary="Package, apparatus and routing-policy versions")
@@ -1073,24 +1394,33 @@ def version(request: Request) -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_ROLE",
+    "DISQUALIFIED_THRESHOLD",
+    "DISQUALIFIED_WINDOW_DAYS",
     "LICENCE",
     "MIGRATE_FIX",
+    "REDACTION_ACK_ACTION",
+    "REDACTION_PROBE_PACKS",
     "ROLES",
     "ROLE_ALL",
     "ROLE_API",
     "ROLE_ENV",
     "ROLE_WORKER",
     "SKIPPED",
+    "acknowledged_packs",
+    "carries_secret_shape",
     "collect_health",
     "collect_liveness",
     "dev_autologin_state",
+    "disqualified_counts",
     "ledger_counts",
     "migrations_result",
     "probe_dev_autologin",
     "probe_migrations",
     "probe_provision_role",
+    "probe_redaction",
     "probe_worker",
     "process_role",
+    "refresh_controls_gauges",
     "refresh_ledger_gauges",
     "router",
 ]

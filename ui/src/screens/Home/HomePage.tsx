@@ -7,7 +7,12 @@
  *               repository, Confirm its shape, Prove the instrument (£0), Measure (spends
  *               money), Read the baseline, Invite an approver, Deliver your first change —
  *               with a status per task derived from the API, "You have completed n of 8",
- *               the instrument's health as a notification banner when it is degraded, the
+ *               the instrument's health as a notification banner when it is degraded — the
+ *               sandbox's own banner, and one banner naming every other probe that is
+ *               degraded or down with its detail and the guide section (G-397; a skipped
+ *               probe is silent and a ledger down on false-Q1 is the shell's halt banner) —
+ *               task 8's note saying that work enters from the enterprise's board and whether
+ *               intake is listening (G-548, the same words as the Factory head), the
  *               cost statement, "Why two people" (the operator who queues the runs is not
  *               the approver who signs), one Continue button that names the next task, and
  *               the north star above the list (ValueTile: working changes per pound, blind).
@@ -49,7 +54,10 @@
  *               role — not the presence of an admin, a viewer, or the admin who queued every
  *               run (G-477); a waiting invitation reads "In progress");
  *               `useFactoryBacklog` +
- *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`; every
+ *               `useFactoryTasks` + `useActiveRun(repo, 'factory')` → `factoryStatusFor`;
+ *               `useIntake` → `intakeState` (screens/Factory/intake.ts) for task 8's note;
+ *               `probesNeedingAttention(health.probes)` → `PROBE_LABEL` (the probe in words)
+ *               and `PROBE_GUIDE` for the banner; every
  *               query's error state (the App's and the runs' included) feeds the one
  *               `ErrorState`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -60,7 +68,8 @@
  *               ui/src/api/hooks.ts (`useActiveRun`, `useSignoffs`),
  *               ui/src/screens/Connect/connection.ts (the connection state each task reads),
  *               ui/src/screens/Factory/FactoryPage.tsx (where the tasks lead: with Connect
- *               and Results, the routes in ui/src/App.tsx),
+ *               and Results, the routes in ui/src/App.tsx; screens/Factory/intake.ts is the
+ *               intake line task 8 shares with it),
  *               ui/src/screens/Home/ValueTile.tsx (the scorecard tile),
  *               src/crb/server/routes/repos.py (`baseline_read` on the repository — task 6)
  * Tested by:    ui/src/screens/Home/HomePage.test.tsx, ui/src/help/hints-ratchet.test.tsx
@@ -72,14 +81,18 @@
 
 import { useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useOracle, useOracleControls, useRepo, useSignoffs, useTwoPersonReadiness } from '../../api/hooks'
+import { useActiveRun, useAllRepos, useCapabilityMap, useFactoryBacklog, useFactoryTasks, useGitHubApp, useHealth, useIntake, useOracle, useOracleControls, useRepo, useSignoffs, useTwoPersonReadiness } from '../../api/hooks'
 import { isApiError } from '../../api/client'
+import type { Probe } from '../../api/types'
 import { ErrorState } from '../../components/ErrorState'
+import { DocLink } from '../../components/Help'
 import { Hint } from '../../components/Hint'
+import type { DocAnchor } from '../../help/docs'
 import { InsetText, Kicker, Lede, NotificationBanner, PageTitle, StartButton, type TagTone, TaskList, type TaskItem } from '../../components/govuk'
 import { useAuth } from '../../lib/auth'
 import { kOfN, sentence } from '../../lib/format'
 import { type StageStatus, stageComplete, stagesFor } from '../Connect/connection'
+import { INTAKE_LEAD, intakeState, intakeWords } from '../Factory/intake'
 import { ValueTile } from './ValueTile'
 
 const TONE: Record<StageStatus, TagTone> = { done: 'pale', warn: 'pale', running: 'blue', todo: 'blue', failed: 'red', blocked: 'grey' }
@@ -194,6 +207,52 @@ export function task7NextStep(reasonCode: string, admin: boolean): string {
   }
 }
 
+/**
+ * G-397 — the probes Home raises its banner for: every one that is `degraded` or `down`, except
+ * the sandbox (its own banner above, whose rule is unchanged) and a ledger probe down on a
+ * false-Q1 row (the shell's red halt banner, which links to the ledger). A `skipped` probe is
+ * a probe that did not run, not a fault, so it stays silent.
+ */
+export function probesNeedingAttention(probes: Probe[]): Probe[] {
+  return probes.filter((p) => {
+    if (p.status !== 'degraded' && p.status !== 'down') return false
+    if (p.name === 'sandbox') return false
+    if (p.name === 'ledger' && Number(p.data.false_q1 ?? 0) > 0) return false
+    return true
+  })
+}
+
+/** The guide section that says what to do about each probe; the health section for any other. */
+export const PROBE_GUIDE_DEFAULT: DocAnchor = 'DEPLOYMENT#93-health'
+export const PROBE_GUIDE: Record<string, DocAnchor> = {
+  db: 'DEPLOYMENT#93-health',
+  migrations: 'DEPLOYMENT#6-upgrade',
+  append_only: 'DEPLOYMENT#33-postgresql',
+  ledger: 'OPERATOR#6-export-and-verify-the-ledger',
+  sandbox: 'OPERATOR#7-when-the-sandbox-is-unavailable',
+  provision: 'OPERATOR#21-environment-setup--the-only-network-phase',
+  toolchains: 'OPERATOR#21-environment-setup--the-only-network-phase',
+  builders: 'OPERATOR#3-run-a-sweep',
+  worker: 'DEPLOYMENT#93-health',
+  intake: 'OPERATOR#11-intake--work-arriving-from-a-board',
+  build: 'DEPLOYMENT#6-upgrade',
+}
+
+/** The probe's name in words for the banner's sentence (a probe id is not plain English); the id itself for one not listed. */
+export const PROBE_LABEL: Record<string, string> = {
+  db: 'database',
+  migrations: 'migrations',
+  append_only: 'append-only store',
+  ledger: 'ledger',
+  sandbox: 'sandbox',
+  provision: 'provisioning',
+  toolchains: 'toolchains',
+  builders: 'builders',
+  worker: 'worker',
+  intake: 'intake',
+  build: 'build',
+}
+
 export function HomePage() {
   const { me, can } = useAuth()
   const [params] = useSearchParams()
@@ -213,6 +272,8 @@ export function HomePage() {
   const backlog = useFactoryBacklog(chosen)
   const factoryTasks = useFactoryTasks(chosen)
   const factoryRun = useActiveRun(chosen, 'factory')
+  // G-548 — where task 8's work comes from: the board, and whether intake is listening
+  const intake = useIntake(chosen)
   const signoffs = useSignoffs(chosen)
   // G-518/G-477 — task 7 reads the real two-person readiness for the repository shown, not the
   // presence of an admin: an account that can sign but has never signed in, a deployment whose
@@ -294,6 +355,7 @@ export function HomePage() {
     { label: 'the deployment’s health', q: health, failed: health.isError },
     { label: 'the GitHub App', q: gh, failed: gh.isError },
     { label: 'the factory runs', q: factoryRun, failed: factoryRun.isError },
+    { label: 'the board intake', q: intake, failed: failedRead(intake) },
   ]
   const unread = reads.filter((r) => r.failed)
   const reposUnread = repos.isError
@@ -324,6 +386,9 @@ export function HomePage() {
   const nextTask = tasks.find((t) => CONTINUE_STOPS[t.status] && (t.num !== 7 || can('admin')))
   const listed: TaskItem[] = tasks.map(({ label, ...t }) => ({ ...t, status: label ?? t.status }))
   const sandbox = health.data?.probes.find((p) => p.name === 'sandbox')
+  // G-397 — every other probe that is degraded or down raises ONE banner naming each; a
+  // `skipped` probe is silent, and a ledger probe down on false-Q1 is the shell's halt banner
+  const attention = health.isError ? [] : probesNeedingAttention(health.data?.probes ?? [])
 
   return (
     <>
@@ -355,6 +420,21 @@ export function HomePage() {
           </p>
         </NotificationBanner>
       )}
+      {attention.length > 0 && (
+        <NotificationBanner title="Important">
+          <p className="m-0 mb-2 font-bold">{attention.length === 1 ? 'A health probe needs attention.' : `${attention.length} health probes need attention.`}</p>
+          <ul className="m-0 list-disc pl-5" data-testid="home-probe-banner">
+            {attention.map((p) => (
+              <Hint as="li" key={p.name} id="banner.home.probe" className="mb-1">
+                The {PROBE_LABEL[p.name] ?? p.name} probe is {p.status}{p.detail ? `: ${p.detail}` : ''}. <DocLink to={PROBE_GUIDE[p.name] ?? PROBE_GUIDE_DEFAULT}>What to do</DocLink>
+              </Hint>
+            ))}
+          </ul>
+          <p className="m-0 mt-2">
+            Every screen's header pill shows the same status. <Link to="/posture">See the deployment's health</Link>.
+          </p>
+        </NotificationBanner>
+      )}
       <div className="mb-6 flex max-w-[44em] flex-wrap gap-4">
         <ValueTile />
       </div>
@@ -364,6 +444,13 @@ export function HomePage() {
           <p className="m-0 mt-2 text-[16px] text-on-surface-muted" data-testid="home-task-7-note">
             <strong>Task 7.</strong> {sentence(ready.reason)}. {task7NextStep(ready.reason_code, admin)}
           </p>
+        )}
+        {chosen && (
+          // G-548 — the stream starts at the board: the same words the Factory head shows
+          <Hint as="p" id="stat.home.intake_state" className="m-0 mt-2 text-[16px] text-on-surface-muted" data-testid="home-task-8-note">
+            <strong>Task 8.</strong> {INTAKE_LEAD}{' '}
+            <Link to={`/factory/intake${q}`}>{intakeWords(intakeState(intake.data, intake.isError, intake.isPending))}</Link>
+          </Hint>
         )}
       </div>
       <InsetText className="mt-8">

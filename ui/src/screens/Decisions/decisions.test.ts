@@ -14,8 +14,11 @@
  *               withheld", that an unmeasured cell (n = 0) never appears, the order, and
  *               the prevention loop's rows: a filed item nobody registered is "a prevention
  *               needs an owner" for an operator, a reopened class and a change retired for
- *               harm are rows anyone may read — each linking to the class on the Learn page.
- * How:          Plain unit tests over hand-built map cells, sign-offs and factory tasks.
+ *               harm are rows anyone may read — each linking to the class on the Learn page; a
+ *               cell held by its oracle or its controls is one `strengthen` row (G-535); and the
+ *               fold produces the shared fixture's rows, the rows the server serves (F6).
+ * How:          Plain unit tests over hand-built map cells, sign-offs and factory tasks, and
+ *               `decisions.parity.json` (read by tests/test_server_decisions.py too).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0003-one-routing-rule.md
  * Works with:   ui/src/screens/Decisions/decisions.ts (under test)
@@ -24,10 +27,11 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { CapabilityCell, FactoryTask, Signoff } from '../../api/types'
+import type { CapabilityCell, FactoryTask, LibraryIndex, PreventionRegister, Signoff } from '../../api/types'
 import { REGISTER } from '../Learn/register.fixture'
 import { LIBRARY, PROPOSED, SIGNED } from '../Library/library.fixture'
-import { decisionsFor, evidenceStats, waitedFor } from './decisions'
+import { STRENGTHEN_REASONS, decisionsFor, evidenceStats, holdReason, waitedFor } from './decisions'
+import PARITY from './decisions.parity.json?raw'
 
 function cell(over: Partial<CapabilityCell>): CapabilityCell {
   return { capability_class: 'bug.fix', size: 'XS', n: 22, n_tasks: 9, clean: 22, point: 1, ci_low: 0.851, ci_high: 1, false_q1: 0, route: 'deliver', reason: 'n=22 …', reason_code: 'deliver', ...over } as CapabilityCell
@@ -60,7 +64,7 @@ describe('decisionsFor', () => {
     const rows = decisionsFor({
       repo: 'alpha',
       cells: [
-        cell({ size: 'S', route: 'human', reason: 'oracle strength 0.76 < 0.80', reason_code: 'oracle_weak' }),
+        cell({ size: 'S', route: 'human', reason: 'the reading decided against the arm', reason_code: 'insufficient' }),
         cell({ size: 'M', route: 'do_not_ship', reason: '1 false-Q1 row', reason_code: 'false_q1', false_q1: 1 }),
         cell({ size: 'L', n: 0, route: 'NOT_YET_MEASURED' as never }),
         cell({ size: 'XL', route: 'calibrate', reason_code: 'n_below_min' }),
@@ -69,8 +73,32 @@ describe('decisionsFor', () => {
       tasks: [],
     })
     expect(rows.map((r) => r.kind)).toEqual(['do_not_ship', 'routed_human'])
-    expect(rows[1]?.title).toContain('oracle strength 0.76 < 0.80')
+    expect(rows[1]?.title).toContain('the reading decided against the arm')
     expect(rows[1]).toMatchObject({ role: 'viewer', href: '/routing?repo=alpha' })
+  })
+
+  it('a cell held by its oracle or its controls is a strengthening decision that links to Learn', () => {
+    // G-535: one row per held cell — never zero (it waits on a person), never two (not also "routed to a human")
+    const weak = decisionsFor({ repo: 'alpha', cells: [cell({ size: 'S', route: 'human', reason: 'oracle strength 0.76 < 0.80', reason_code: 'oracle_weak' })], signoffs: [], tasks: [] })
+    expect(weak).toHaveLength(1)
+    expect(weak[0]).toMatchObject({ kind: 'strengthen', key: 'bug.fix|S', role: 'operator', act: 'Strengthen the tests', href: '/learn?repo=alpha#strengthen', reasonCode: 'oracle_weak' })
+    expect(weak[0]?.title).toBe('bug.fix × S is held until its tests are stronger')
+    // routing.v2 lists every failing clause: thin controls behind a pending reading still hold the cell, and the row names that clause
+    const shortfall = { code: 'controls_thin', route: 'calibrate', observed: 0.2, threshold: 0.5, next: 'controls', count: 0, model_money: false }
+    const thin = decisionsFor({ repo: 'alpha', cells: [cell({ size: 'M', route: 'calibrate', reason_code: 'reading_unregistered', shortfalls: [shortfall] })], signoffs: [], tasks: [] })
+    expect(thin.map((r) => [r.kind, r.reasonCode])).toEqual([['strengthen', 'controls_thin']])
+    expect(thin[0]?.evidence.endsWith(' · controls_thin')).toBe(true)
+    // the reasons are the server's own (tests/test_decisions_kinds.py reads this tuple)
+    expect([...STRENGTHEN_REASONS]).toEqual(['oracle_weak', 'controls_escapes', 'controls_thin'])
+    expect(holdReason({ reason_code: 'controls_escapes' })).toBe('controls_escapes')
+    expect(holdReason({ reason_code: 'insufficient', shortfalls: [] })).toBeNull()
+  })
+
+  it('the browser’s fold produces the shared fixture’s rows, the same rows the server serves (F6)', () => {
+    const fx = JSON.parse(PARITY) as { repo: string; cells: CapabilityCell[]; signoffs: Signoff[]; tasks: FactoryTask[]; register: PreventionRegister; library: LibraryIndex; expected: Array<Record<string, string>> }
+    const rows = decisionsFor({ repo: fx.repo, cells: fx.cells, signoffs: fx.signoffs, tasks: fx.tasks, register: fx.register, library: fx.library })
+    const got = rows.map((r) => ({ kind: r.kind, key: r.key, title: r.title, role: r.role, evidence: r.evidence, reason_code: r.reasonCode ?? '', act: r.act, href: r.href }))
+    expect(got).toEqual(fx.expected)
   })
 
   it('an item the entry gate did not build waits here: an approver may fund a calibration build; missing context is the operator’s (ADR-0026 item 8)', () => {

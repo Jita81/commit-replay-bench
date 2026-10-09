@@ -126,24 +126,50 @@ Item ids are `sha(cell, repo, task)` — a re-run produces the same backlog; `--
 keeps only cells and scores stamped at or after that version. `--out backlog.json` writes an
 **unfrozen** `Backlog`; freezing it is the human's act (§3).
 
-### 2.3 Apparatus change → re-measurement plan — `remeasure_plan(rows, current)` → `crb learn remeasure`
+### 2.3 Readings waiting on their look → the top-up plan — `remeasure_plan(rows, readings=…)` → `crb learn remeasure`
 
-Per full cell (the unit a run targets): the rows stamped with an apparatus older than the
-current one, how many eligible current-apparatus rows exist, `n_needed = min_n − n_current`
-(from `routing.DEFAULT_POLICY`), the estimated cost (that cell's own mean row cost × n
-needed, with `cost_known` false when no row recorded one) and minutes, and the exact
-`POST /runs` bodies (`crb.server.schemas.RunCreateRequest`) an operator can queue:
+A cell is licensed only by a **reading** registered before its first attempt, and only rows
+graded after registration count, read in the reading's seeded order (ADR-0026 items 2 and 3).
+So the plan reads the registered readings, not the raw rows. Per cell, the reading that speaks
+for it at the current apparatus decides:
+
+* **waiting on its look** (`look_pending`) — the plan offers exactly the commits it still
+  needs: the pool's first `next_look` commits, in the seeded order, with no observed first
+  attempt graded after registration. `n_current` is the commits its look has read and
+  `n_needed` the commits still needed before the next look — the reading verdict's own
+  `counted` and `needed`, the numbers the Capability page shows for that reading. One request names those
+  commits for the arm the hierarchy stopped at (`S3` a sighted replay, `A0` or `S1@<author>` a
+  blind one, `S1` with `arm: S1`), with `learning: off` so its rows carry that arm and not the
+  arm `+L`. The estimate is the cell's own mean row cost × the commits requested × up to the
+  ladder's rungs (3) for a blind cell, with `cost_known` false when no row recorded one:
 
 ```json
 {"repo": "cobra", "kind": "replay", "mode": "sighted", "builder": "claude_code",
  "model": "claude-sonnet-5", "provider": "anthropic",
- "task_ids": ["1995054b00…", "…"], "limit": 7}
+ "task_ids": ["1995054b00…", "…"], "limit": 8, "learning": "off"}
 ```
 
-`task_ids` re-measures the *same* tasks the stale rows were graded on; when they are fewer
-than the rule needs, a second request asks for the remainder by `limit` and says so. The
-derivation queues nothing — `crb learn remeasure` prints JSON for the operator to post, and
-`POST /learn/remeasure/queue` sends one cell's bodies on an operator's own instruction (§4).
+  A pending commit that is no longer gold-clean (the worker builds only those) or whose label
+  moved out of the cell is left out and `short_by` says so. No request is offered — `next_act`
+  `runs`, with the reason — when a replay this plan composes could not write rows the reading
+  counts: `S2` (factory rows only), `+facts` / `+library` briefs, `+L` (the repository's loop
+  switch, which a run can only opt out of), an `S1` author other than the deployment's, or a
+  deployment that grades outside the reading's posture class.
+* **delivered** — named in `up_to_date`.
+* **insufficient** (its third miss) or **undecided** (its pool is too small for the next look)
+  — named in `cannot_clear` with the routing rule's own words and next act: a new reading, or
+  **mine more history** and register a new reading once the new commits are labelled into the
+  cell and qualified. No further attempt on that reading can help.
+* **no reading at this apparatus** — one entry per (mode, context arm) of the cell's rows,
+  `stale` when they all predate the apparatus, else `thin`, with `next_act` `register` and
+  **no request**: a replay graded before a reading is registered never counts, and it makes
+  those commits unusable in the reading that could count them (`pool_seen`). `n_current`
+  counts distinct changes with a first attempt, never attempts.
+
+The derivation queues nothing — `crb learn remeasure` prints JSON (the ledger alone holds no
+reading, so offline every cell is offered registration), and `POST /learn/remeasure/queue`
+sends one waiting reading's body on an operator's own instruction (§4); a cell with no
+registered reading is refused `reading_unregistered`.
 
 ### 2.4 What strengthening costs a person
 
@@ -281,6 +307,13 @@ summary.
   `BacklogItem.from_dict` and `readiness.assess` as `ready` / `build` with no value gaps, and
   the `--out` file loads and freezes as a `Backlog` whose hash verifies.
 * **The run requests are valid**: every body validates as `RunCreateRequest`.
+* **A top-up buys only rows a reading counts**: a request names only the pending commits of a
+  registered reading at the current apparatus, in its seeded order, never a commit already
+  graded and never a limit-only body; a cell with no reading is offered registration and
+  nothing to replay; counts are distinct first attempts, the reading's own (P-602, P-603).
+* **The guard's false-positive rate is a bound, not a guess**: a row counts as a false
+  positive only when a person decided every class it fell into honest; an undecided row is
+  counted apart, never as either verdict.
 
 ## 6. What this is not (yet)
 
@@ -290,8 +323,9 @@ summary.
   the accepted line into the repository is still a person's job — the decision and its
   provenance are recorded and served, but nothing opens a pull request for it. [gap]
 * It does not label refusals *instrument* vs *builder* on its own — that is what the human
-  verdict is. Once decisions accumulate, the share of `honest` decisions per reason is the
-  guard's measured false-positive rate; reporting it over time is a follow-up.
+  verdict is. The decisions people record are what the guard's false-positive rate is
+  derived from (§7.5), per apparatus version and month; until every class is decided, that
+  rate is a range, not a number.
 * Strengthening items are proposals for the **target tests of an existing task**; they do
   not propose new oracle coverage for classes that have no tasks.
 * The re-measurement plan estimates cost from the cell's own history; a cell whose rows
@@ -390,6 +424,23 @@ register:
   non-clean rate is no more than 5 points above the before window; otherwise the class reads
   `displaced` and names what it now fails as **[measured — n = 1 margin of 0.05; method:
   the constants of the prevention rule (`crb.prevention.rule.v1`) in the prevention module, read at this commit; apparatus n/a]**. Any later recurrence reopens it.
+
+**The loop's own numbers.** Three figures say how the learning stream itself is doing, and
+the Learn page shows them (its *How this flows* panel and the refusal card):
+
+* **The guard's false-positive rate** (`crb.core.learn.guard_false_positives`, served as
+  `false_positives` by `GET /learn/refusals`) — per apparatus version and calendar month, the
+  refused rows in classes a person decided honest (the guard was wrong) over all refused rows.
+  A row with any class decided refused was a right refusal; a row nobody has judged is
+  undecided and widens the rate into a range — honest ÷ n at least, (honest + undecided) ÷ n
+  at most — because the product never supplies a verdict nobody gave.
+* **How often a class recurs after a prevention** — the register's measurement above, and
+  `GET /value`'s learning curve.
+* **The time from a finding to its re-measurement** (`crb.core.prevention.finding_to_remeasure`,
+  the learn stream's `finding_to_remeasurement` lead time in `GET /flow`) — from a class's first
+  sighting to the first `decided` record of a change that targets it: how long the loop took
+  to act on a finding and read what its change did. A class no change targets is counted and
+  never timed.
 
 Only first attempts count: a retry exists only after a failure, and stream K's escalation rule
 decides how many there are. Harness and disqualified rows stay in n, so moving a failure into

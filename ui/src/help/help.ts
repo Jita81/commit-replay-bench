@@ -47,13 +47,19 @@ export interface ScreenHelp {
   readMore: Array<{ to: DocAnchor; label: string }>
 }
 
+/** The Operate path, named on each of its stops (G-396). */
+export const OPERATE_PATH = 'One stop on the Operate path: health → Runs → Ledger → Settings.'
+
+/** What operating this product does not include, said where the person is (G-402). */
+export const OPERATE_NON_GOALS = 'No budget spans a deployment or a repository: every limit belongs to one run. There is no metrics dashboard and no view of the platform’s own logs (a run page streams that run’s log), and no crb doctor screen.'
+
 export const HELP: ScreenHelp[] = [
   {
     route: '/home',
     purpose: 'This is where the deployment is on the way from an empty install to a change delivered under evidence. The task list is the operators’ progress; every role can read it.',
     next: {
       viewer: 'Follow Continue to the baseline for the most recent repository, or open Decisions to see what is waiting on a person. You cannot start a task from here.',
-      operator: 'Work the tasks in order. Tasks 1 to 4 cost nothing; tasks 5 and 8 spend model budget and say so before they start.',
+      operator: 'Work the tasks in order. Tasks 1 to 4 cost nothing; tasks 5 and 8 spend model budget and say so before they start. Task 8 starts at your board: switch the intake listener on and a ticket in the watched column becomes the backlog item.',
       approver: 'Nothing here needs you until task 7 is done and a cell reaches your Decisions. Read the baseline meanwhile.',
       admin: 'Task 1 (the GitHub App) and task 7 (an approver account) are yours; both are in Settings.',
     },
@@ -82,12 +88,12 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/connect/:name/measure',
-    purpose: 'Choose how many attempts to buy and what to keep, then start the first sighted measurement. This is the step that spends money, and it says how much before you confirm.',
+    purpose: 'Choose how many attempts to buy and what to keep, then start the first sighted measurement. This is the step that spends money, and it says how much before you confirm. This page does not run blind, choose the builder or model, sign off, route or deliver, or set a budget beyond this run’s cap; blind runs start from Runs.',
     next: {
       viewer: 'Only an operator can start a measurement.',
       operator: 'Pick a number of attempts, check the spend cap the run will keep, decide whether to keep worktrees for failed attempts, then confirm. You can cancel the run from Runs while it is in flight and you pay only for attempts made.',
     },
-    numbers: 'The estimate is a planning band, not a measurement: with no measured mean for this repository it uses the per-attempt range from earlier repositories and carries no apparatus. Once this repository has measured attempts the estimate uses their mean (n shown) with ±20 % around it.',
+    numbers: 'The estimate is a planning band, not a measurement: with no measured mean for this repository it uses the per-attempt range from earlier repositories and carries no apparatus. Once this repository has measured attempts the estimate uses their mean (n shown) with ±20 % around it. A builder with a known price per attempt — only the test-only fixture, at $0 — is priced at that price and reads neither the band nor the mean.',
     terms: ['sighted', 'apparatus', 'evidence_pack', 'cell'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-4--measure-operator-the-money-step', label: 'Measure: the money step' },
@@ -99,7 +105,7 @@ export const HELP: ScreenHelp[] = [
     purpose: 'The six stages that take one repository from registered to measured. Each stage says what it proves and whether it spends money; the first five involve no model.',
     next: {
       viewer: 'Read each stage’s status and detail line. The Baseline button opens the baseline once any stage has produced rows; a stage that reads Done, with a finding names what deliver is waiting on.',
-      operator: 'Press Run on the next stage that reads Not started. A Failed stage says so; open run gives the log and the error, fix the cause, then Retry. Measure… is the only stage that spends.',
+      operator: 'Press Run on the next stage that reads Not started, or switch on Chain the free stages so each stage that passes queues the next up to the controls. A Failed stage says so; open run gives the log and the error, fix the cause, then Retry. Under the mine stage, Accept or Reject each configuration change the notes imply. Measure… is the only stage that spends, and it always waits for you.',
     },
     numbers: 'Stage detail lines carry counts (tasks mined, controls constructed, mutants killed). They are counts, not rates: the rates, with n and a Wilson interval, appear on the Baseline. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
     terms: ['negative_controls', 'oracle_strength', 'sighted', 'wilson', 'apparatus', 'belt', 'cell'],
@@ -111,7 +117,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/results',
-    purpose: 'What the evidence says about one repository, in the order it matters: is the instrument trustworthy here, what may the builder be trusted to do, and what is waiting on a person. This is the baseline the factory runs on.',
+    purpose: 'What the evidence says about one repository, in the order it matters: is the instrument trustworthy here, what may the builder be trusted to do, and what is waiting on a person. This is the baseline the factory runs on. Reading it costs £0, because it calls no model and starts no run, and a first reading takes about ten minutes, an estimate nobody has timed yet.',
     next: {
       viewer: 'Read the three gates first. If any is amber the numbers below are provisional. Then read the route tiles and the map; open a cell for its full evidence.',
       operator: 'If a gate is amber, go back to the walk and run what is missing. If a cell reads calibrate, more attempts move it; if it reads human, more attempts will not.',
@@ -130,10 +136,10 @@ export const HELP: ScreenHelp[] = [
     purpose: 'Everything that is waiting on a person, across every repository. A cell the policy would refuse anyway is never listed; it stays on the map with its reason.',
     next: {
       viewer: 'Read why each row is here; the evidence line names the cell, n, interval and reason code.',
-      operator: 'Rows marked “approver acts” are not yours — a Sign a gap row needs an approver. Decide and Review rows on factory items are yours; Read opens the rest.',
+      operator: 'Rows marked “approver acts” are not yours — a Sign a gap row needs an approver. Decide and Review rows on factory items are yours, and so are Strengthen the tests (a cell held until its tests are stronger) and Queue re-measurement (a cell measured on an earlier apparatus), which open Learn; Read opens the rest.',
       approver: 'Attest opens the sign-off form with the cell chosen; Sign a gap opens the item on the Factory. Decline by doing nothing: an unsigned cell keeps its route.',
     },
-    numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
+    numbers: 'n on a row is the attempts in that cell; the bracket is its 95 % Wilson interval; the code after it is the routing reason. On a re-measurement row, the rows needed are those that reach the rule’s first look, the dollar figure is an estimate at the cell’s own cost per row (or “cost not known”), and builder/model@provider is what it is re-measured on. A stale row was signed under an earlier apparatus and licenses nothing until re-signed.',
     terms: ['cell', 'wilson', 'reason_code', 'signoff', 'stale', 'apparatus', 'false_q1'],
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-6--before-anyone-signs-anything', label: 'Before anyone signs anything' },
@@ -158,10 +164,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/factory',
-    purpose: 'Deliver new work under the same rules as replay: a frozen backlog, an item built only when its cell has a proven context standard and the item carries what it needs, a failing test proved before any build, a build inside the sandbox, and a branch and pull request only where the change’s own cell licenses it. Every step is on the evidence chain.',
+    purpose: 'Deliver new work under the same rules as replay. Work enters from your board through intake: a ticket in the watched column becomes a frozen backlog item, and a backlog can also be frozen here. An item is built only when its cell has a proven context standard and the item carries what it needs, a failing test is proved before any build, the build runs inside the sandbox, and a branch and pull request open only where the change’s own cell licenses it. Every step is on the evidence chain.',
     next: {
       viewer: 'Read each item’s chain: readiness, RED proof, build, delivery, review, outcome. A PR link opens the pull request in the repository.',
-      operator: 'Freeze a backlog, then Run the factory. The count beside the checkbox says how many items sit in a cell this deployment would deliver from today. An item whose cell’s standard nobody has signed off is not built at all; the rest open no pull request.',
+      operator: 'Switch the listener on, or freeze a backlog here, then Run the factory. The count beside the checkbox says how many items sit in a cell this deployment would deliver from today. An item whose cell’s standard nobody has signed off is not built at all; the rest open no pull request.',
       approver: 'Items blocked on a structural gap wait for your signature, and an item whose cell has no proven standard waits for a calibration build only you can fund. Lifting a missing sign-off for one run is recorded on the chain under your name; it never lifts the route gate.',
     },
     numbers: '“k of m items sit in a cell this deployment would deliver from” is read from the map and the sign-offs at this moment; it changes as measurement changes. Build and review statuses are the server’s words, shown verbatim. How this flows is derived from records already kept, not measured afresh: each duration is the median of the pairs on record with its n, a spend counts only the rows whose cost is a measurement and says how many are unpriced, and a figure nothing records is named with the gap that would close it rather than shown as a zero.',
@@ -169,6 +175,7 @@ export const HELP: ScreenHelp[] = [
     readMore: [
       { to: 'ONBOARDING-A-REPO#step-8--forward-mode-when-a-cell-is-trusted', label: 'Forward mode' },
       { to: 'GITHUB-APP#5-what-happens-at-clone-and-at-delivery', label: 'What happens at delivery' },
+      { to: 'OPERATOR#81-factory-stop-conditions', label: 'Factory stop conditions' },
     ],
   },
   {
@@ -200,7 +207,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/posture',
-    purpose: 'A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source.',
+    purpose: `A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source. ${OPERATE_NON_GOALS}`,
     next: {
       viewer: 'Print it, or send the URL. “Shown to admins” marks a value the API only returns to an admin. The page changes nothing: its one button prints it. It shows the go-live checklist’s state, line by line, but it is not the checklist and ticks nothing — an admin records the operator’s own acts on Settings.',
       admin: 'If Sign-in reads Local accounts only, configure OpenID Connect; if Test executor is not docker, nothing measured is evidence. Record each go-live act only you can do on Settings, under Go-live attestations.',
@@ -217,10 +224,10 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/runs/:id',
-    purpose: 'One run: its progress, live log, per-task rows and their evidence packs. Cancel stops after the attempt in flight; nothing already graded is lost.',
+    purpose: 'One run: its progress, live log, per-task rows and their evidence packs. Cancel ends a queued run at once; a running one stops between tasks and the command in flight is killed; nothing already graded is lost. This page does not start a run, does not change a graded row and never talks to the worker: it reads what the API serves, and Cancel is a request to the API.',
     next: {
-      viewer: 'Read the rows and open a pack; the pack hash is the row’s permanent reference.',
-      operator: 'Watch the log; open a row’s pack to see every belt and the diff; cancel if the spend is wrong.',
+      viewer: 'Read the rows and open a pack; the pack hash is the row’s permanent reference. A pack’s Review tab shows the verdicts recorded on the patch; recording one is an operator’s act.',
+      operator: 'Watch the log; open a row’s pack to see every belt and the diff; cancel if the spend is wrong. Record your review of the patch on the pack’s Review tab — the operator role records reviews, once the patch has loaded.',
     },
     numbers: 'A row is clean only when every evaluated belt holds; the “why not clean” split is red, budget, protocol and harness. Instrument rows (protocol, harness) count against the builder until the instrument is fixed.',
     terms: ['belt', 'clean', 'evidence_pack', 'false_q1', 'wilson', 'apparatus', 'oracle_strength', 'cell'],
@@ -231,7 +238,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/runs',
-    purpose: 'Every run the worker has executed or queued: mine, replay, blind, oracle, controls and factory. A run’s rows are what the ledger and the map are made of.',
+    purpose: `Every run the worker has executed or queued: mine, replay, blind, oracle, controls and factory. A run’s rows are what the ledger and the map are made of. ${OPERATE_PATH} ${OPERATE_NON_GOALS}`,
     next: {
       viewer: 'Open a run to read its progress and the evidence pack of any row.',
       operator: 'Press Start a run, or open one to watch its live log and cancel it. The kind’s hint says what it produces and whether it spends.',
@@ -278,7 +285,7 @@ export const HELP: ScreenHelp[] = [
       viewer: 'The gate rows name what held and what did not; escapes are findings about the tests, not failures of the grader.',
       operator: 'If the controls gate is not open, run the controls. If a task is weak, the strengthen report on Learn turns it into test work.',
     },
-    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong at or above the policy’s deliver floor, adequate at or above its adequate floor, weak below it; the Strong and Adequate tiles name the floors this deployment serves.',
+    numbers: 'Strength = mutants killed / mutants planted on the changed lines, per task, with a 95 % Wilson interval; unscoreable tasks are counted and never averaged. Bands: strong at or above the policy’s deliver floor, adequate at or above its adequate floor, weak below it; the Strong and Adequate tiles name the floors this deployment serves. This page queues nothing — Run oracle and Run controls open the Runs form — and the gate on each row is the server’s verdict, not arithmetic done here. A strength compares only within one language and one mutator family: a strength measured on Go tests is not comparable with one measured on Python tests, or with one from another family of mutators.',
     terms: ['oracle_strength', 'negative_controls', 'controls_escape', 'wilson', 'human', 'cell', 'apparatus'],
     readMore: [
       { to: 'OPERATOR#31-oracle-adequacy--mutation-scoring', label: 'Oracle adequacy: mutation scoring' },
@@ -290,9 +297,9 @@ export const HELP: ScreenHelp[] = [
     purpose: 'What the ledger teaches, and what the loop does about it: the prevention register lists every bug class with the change that should remove it and whether it worked; three reports list refusals that should become guard tests, weak oracles that should become test work, and evidence that has gone stale since the apparatus changed. The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.',
     next: {
       viewer: 'Read the register: each class names its lever, its before and after with n, and what happens next. The three reports carry the rows and spend behind them. The decisions are an operator’s.',
-      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue a cell’s re-measurement runs. Each says what it wrote; queueing spends the budget, so it shows the estimate first. Once the tests are stronger, an item’s row opens Runs with its task filled in to re-qualify, re-score or re-run the controls.',
+      operator: 'Throw the learning switch with a reason, revert a change that should not stay, or register a filed item on the Factory. From the reports: decide a refusal class, register a strengthening item on this repository’s backlog, or queue the commits a registered reading still needs (a cell with no reading is registered first). Each says what it wrote; queueing spends the budget, so it shows the estimate first. Once the tests are stronger, an item’s row opens Runs with its task filled in to re-qualify, re-score or re-run the controls.',
     },
-    numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Re-measurement spend multiplies each cell’s own mean row cost by the rows still needed; a dash means no cost is known.',
+    numbers: 'A class closes when a kept change is followed by max(20, n) exposed first attempts with no recurrence; n is ceil(ln 0.025 ÷ ln(1 − p0)) from the frozen before window. Refusal share is protocol rows / all rows with a 95 % Wilson interval, per apparatus version. Top-up spend multiplies each cell’s own mean row cost by the commits its runs ask for, times up to 3 attempts each for a blind cell; a dash means no cost is known.',
     terms: ['apparatus', 'stale', 'oracle_strength', 'wilson', 'cell'],
     readMore: [
       { to: 'LEARNING-LOOP#7-prevention--a-bug-is-closed-by-a-change-that-stops-it-recurring', label: 'Prevention: a bug is closed by a change that stops it recurring' },
@@ -303,7 +310,7 @@ export const HELP: ScreenHelp[] = [
   },
   {
     route: '/ledger',
-    purpose: 'Every graded trial, append-only and hash-chained. Verify proves nothing was edited, reordered or removed; the false-Q1 total is the number everything else defends.',
+    purpose: `Every graded trial, append-only and hash-chained. The server re-checks the chain on every load. If rows are removed from the end, only comparing with a head hash you recorded earlier shows it. The false-Q1 total is the number everything else defends. ${OPERATE_PATH} The page does not verify on demand, repair a chain or filter beyond what the URL carries — each as a control on the page or, where it has none, a chip; verify an export with crb ledger verify (and the store itself with --store).`,
     next: {
       viewer: 'Filter by repository, mode or clean; open a task or a pack. Export gives the rows as JSONL or CSV; the abstract export contains cells only, no code and no identifiers.',
       operator: 'A broken chain or a false-Q1 above 0 halts delivery; investigate the named row before anything else.',
