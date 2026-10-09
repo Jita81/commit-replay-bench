@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
+  [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
+  proposed values, so its status is Accepted and PLAN's operator acts are done.
+  [docs/reviews/2026-10-09-wave-3-registration.md](docs/reviews/2026-10-09-wave-3-registration.md)
+  sets out item 13's protocol; the £80 ceiling with its stage-1 line, stop rule and report; Claude
+  as the reviewer Paul tasked, with Paul's random draw to measure agreement; the stage-2 statement's
+  formula; and the steps after the restart, each not yet run. The product does not hold a campaign's
+  ceiling: Claude Code holds it by stopping the campaign (P-775, G-957).
+
 - **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
   fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
   the guard's false-positive rate and tops up only the rows a registered reading counts. `GET
