@@ -352,6 +352,21 @@ SETTLED: tuple[tuple[str, str, str], ...] = (
         "const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)",
         WAITED,
     ),
+    # the first pass: label-definitions, waited for above, is drawn in the same form; each later
+    # pass follows the expect.poll that proved the next commit (or none) in place
+    ("15-classes.spec.ts", "if (!(await message.isVisible())) break", RETRIED),
+    ("15-classes.spec.ts", "const said = (await message.textContent()) ?? ''", RETRIED),
+    (
+        "15-classes.spec.ts",
+        "if (await message.isVisible()) await expect(page.getByTestId('label-next')).toBeFocused()",
+        RETRIED,
+    ),
+    (
+        "15-classes.spec.ts",
+        "const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)",
+        WAITED,
+    ),
+    ("15-classes.spec.ts", "const box = await open.boundingBox()", WAITED),
     (
         "keyboard.ts",
         "const ids = ((await el.getAttribute('aria-describedby')) ?? '').split(' ').filter(Boolean)",
