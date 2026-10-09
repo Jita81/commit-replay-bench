@@ -669,6 +669,18 @@ def _need_person(actor: str, what: str) -> None:
         )
 
 
+def refuse_same_person(thing: str, *, sponsor: str, approver: str) -> None:
+    """THE two-person rule (ADR-0026 item 10, DESIGN §9.3), for every library entry and every
+    class-set version (``crb.core.class_sets``): the approver can never be the sponsor.
+    Raises :class:`LibraryRefused` ``same_person``."""
+    if approver == sponsor:
+        raise LibraryRefused(
+            f"the sponsor cannot sign their own {thing} — a second person must sign it "
+            "(the two-person rule, ADR-0026 item 10; cannot be relaxed)",
+            code=REFUSAL_SAME_PERSON,
+        )
+
+
 def _need_version(state: EntryState, act: LibraryAct) -> None:
     if act.version != state.entry.version:
         raise LibraryRefused(
@@ -790,12 +802,7 @@ def apply(state: EntryState | None, act: LibraryAct) -> EntryState:
                 "person: a person must sponsor it before another person signs it",
                 code=REFUSAL_NO_SPONSOR,
             )
-        if act.actor == state.sponsor:
-            raise LibraryRefused(
-                "the sponsor cannot sign their own entry — a second person must sign it "
-                "(the two-person rule, ADR-0026 item 10; cannot be relaxed)",
-                code=REFUSAL_SAME_PERSON,
-            )
+        refuse_same_person("entry", sponsor=state.sponsor, approver=act.actor)
         if state.entry.provenance.kind == PROVENANCE_ROWS:
             _need_independent_of_rows(state, act)
         # a re-signature of a stale entry acknowledges the file as it now reads at head
@@ -959,6 +966,10 @@ class ProvenStandard:
     state: str = "deliver"
     ceiling: bool = False
     reading_id: str = ""
+    #: For a ceiling: the forward (``S2``) reading registered to promote it — its id, rule,
+    #: look state, the tickets counted and clean, the next look and the tickets still
+    #: needed — or ``None`` when none is registered (ADR-0026 items 4 and 8).
+    forward: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -971,6 +982,7 @@ class ProvenStandard:
             "state": self.state,
             "ceiling": self.ceiling,
             "reading_id": self.reading_id,
+            "forward": dict(self.forward) if self.forward is not None else None,
         }
 
 
@@ -986,6 +998,19 @@ def standard_for(repo: str, capability_class: str, size: str) -> ProvenStandard 
     through the same store-bound readers as the factory's entry gate)."""
     del repo, capability_class, size
     return None
+
+
+#: What a cell whose standard is only a ceiling needs before anything in it delivers
+#: (ADR-0026 items 4 and 8): calibration builds graded on a second person's held-out tests,
+#: counted by a registered forward reading.
+CALIBRATION_NEEDS = (
+    "Measured only against each commit's own tests, so a ticket here is built only as a "
+    "calibration build, which never opens a pull request. Each calibration build needs a "
+    "failing test a person attached to the ticket, an approver who funds it, and held-out "
+    "acceptance tests a second person writes from the ticket alone before it is built. A "
+    "forward reading registered on this cell before those tests are written counts the first "
+    "attempts graded on them; when it passes its look, the ceiling becomes a standard."
+)
 
 
 def next_measurement(tasks_in_cell: int) -> str:
@@ -1116,7 +1141,11 @@ def work_type_page(
                 "size": size,
                 "tasks": n_tasks,
                 "standard": std.to_dict() if std is not None else None,
-                "next": "" if std is not None else next_measurement(n_tasks),
+                "next": (
+                    next_measurement(n_tasks)
+                    if std is None
+                    else (CALIBRATION_NEEDS if std.ceiling else "")
+                ),
             }
         )
     counted = evidence_pairs(quality)
@@ -1179,6 +1208,7 @@ __all__ = [
     "ACTOR_FRESHNESS",
     "ACTOR_MEASUREMENT",
     "ACTS",
+    "CALIBRATION_NEEDS",
     "EVIDENCE_ADVISORY",
     "EVIDENCE_CHECK",
     "FINAL_STATUSES",
@@ -1209,6 +1239,7 @@ __all__ = [
     "is_person",
     "next_measurement",
     "quality_rows",
+    "refuse_same_person",
     "signed_context",
     "split_entry_id",
     "stale_candidates",

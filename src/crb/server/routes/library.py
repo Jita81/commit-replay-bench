@@ -176,6 +176,7 @@ def store_standard_reader(db: Session, settings: Any, repo: str) -> StandardRead
         checks_arm=checks_arm_in(db, repo),
         posture_class=deployment_posture_class(settings, db.get(Repo, repo)),
     )
+    forwards = factory_standard.forward_states(db, repo)
 
     def read(_repo: str, capability_class: str, size: str) -> ProvenStandard | None:
         cell = CellRef(capability_class, size)
@@ -193,6 +194,7 @@ def store_standard_reader(db: Session, settings: Any, repo: str) -> StandardRead
             state=arm.state if arm is not None else "deliver",
             ceiling=std.ceiling,
             reading_id=std.reading_id,
+            forward=forwards.get(std.reading_id) if std.ceiling else None,
         )
 
     return read
@@ -221,7 +223,9 @@ def _trace(repo: str) -> str:
     return system_trace_id("library", repo)
 
 
-def _names(db: Session, ids: Iterable[str]) -> dict[str, str]:
+def display_names(db: Session, ids: Iterable[str]) -> dict[str, str]:
+    """Each user id's display name (or its sign-in subject) — the words a page shows for a
+    person; ids the store does not know are left out."""
     wanted = {i for i in ids if i}
     if not wanted:
         return {}
@@ -371,7 +375,7 @@ def library_index(
     row = get_repo_or_404(db, repo)
     states = _states(factory, repo)
     counted = counted_evidence(_config(row))
-    names = _names(db, [x for s in states.values() for x in (s.sponsor, s.approver)])
+    names = display_names(db, [x for s in states.values() for x in (s.sponsor, s.approver)])
     order = {k: i for i, k in enumerate(KINDS)}
     entries = sorted(states.values(), key=lambda s: (order[s.entry.kind], s.entry.slug))
     return LibraryIndexOut(
@@ -423,7 +427,7 @@ def work_type(
             "not_found",
             f"no work type {slug!r} in {repo}: not a global class or a signed entry",
         ) from exc
-    names = _names(db, [x for c in page["context"] for x in (c["sponsor"], c["approver"])])
+    names = display_names(db, [x for c in page["context"] for x in (c["sponsor"], c["approver"])])
     for c in page["context"]:
         c["sponsor_name"] = names.get(c["sponsor"], "")
         c["approver_name"] = names.get(c["approver"], "")
@@ -525,7 +529,7 @@ def propose_entry(
         payload={"entry_id": entry.entry_id, "version": entry.version, "act_id": chained.act_id},
     )
     db.commit()
-    return _entry_out(state, _names(db, [state.sponsor]), counted_evidence(_config(row)))
+    return _entry_out(state, display_names(db, [state.sponsor]), counted_evidence(_config(row)))
 
 
 def _act(
@@ -559,7 +563,7 @@ def _act(
 def _out(db: Session, repo: str, state: EntryState) -> EntryOut:
     row = get_repo_or_404(db, repo)
     return _entry_out(
-        state, _names(db, [state.sponsor, state.approver]), counted_evidence(_config(row))
+        state, display_names(db, [state.sponsor, state.approver]), counted_evidence(_config(row))
     )
 
 

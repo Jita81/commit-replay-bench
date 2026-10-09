@@ -532,8 +532,9 @@ rule makes them prospective (item 10).
   sponsor and sign; or call code ISO-conformant.
 
 **What is still open [gap].**
-- No forward reading exists yet: the held-out acceptance tests of item 8 need a second person
-  (Wave 4), and on slow repositories an `S2` reading takes years.
+- No forward reading has been run yet: the held-out acceptance tests of item 8 and the
+  forward reading are built (Wave 4, DL-334), but a reading needs a real second person and real
+  tickets, and on slow repositories an `S2` reading takes years.
 - `S1@<author>` measures one test author; another author model is another arm (item 1),
   never pooled, and needs its own commits. Authored tests are weakest where the oracle pins
   unstated values, so `S1` may lose most exactly there **[hypothesis — from the upstream
