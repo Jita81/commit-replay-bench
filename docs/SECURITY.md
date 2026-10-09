@@ -622,7 +622,8 @@ subject to a retention window.
 ### 3.7 Supply chain
 
 - Python dependencies are pinned in `uv.lock`; CI runs `pip-audit --strict` and emits a
-  CycloneDX SBOM; `gitleaks` scans every push; Dependabot is enabled for pip and Actions.
+  CycloneDX SBOM; `gitleaks` scans every commit a pull request adds and, on every push to main
+  and daily, the whole history (P-773); Dependabot is enabled for pip and Actions.
 - The core engine has **zero** third-party dependencies (enforced by `import-linter`), so the
   grading path's supply-chain surface is the Python standard library and `git`.
 - Container images are pinned by tag; the runtime image runs as a non-root user.

@@ -49,8 +49,9 @@ proves the shards ran every test exactly once and enforces the floor on their co
 `sandbox_images` is left out because it builds the reference sandbox images, and CI's
 `sandbox-images` job runs it on its own.
 
-CI additionally runs `gitleaks` (secrets), `pip-audit` (known vulnerabilities in the
-resolved environment) and produces a CycloneDX SBOM.
+CI additionally runs `gitleaks` (secrets: every commit a pull request adds, and the whole
+history on every push to main, `scripts/ci_gitleaks.py`), `pip-audit` (known vulnerabilities in
+the resolved environment) and produces a CycloneDX SBOM.
 
 No test may fail because of the machine it runs on **[aspiration — the rule DL-053 sets; the
 run below shows it is not yet demonstrated]**. Running as root, with no docker daemon or with
