@@ -192,3 +192,14 @@ Roles, labels and visible text first; `data-testid` where a role is not enough:
 `error-state`, `settings-*`, `about-this-screen`. Required fields render their label as `Label *`;
 `field(scope, 'Label')` in `support.ts` matches that exactly (and never `Source` for
 `Source prefix`).
+
+## Reading the page
+
+Assert with web-first assertions (`toContainText`, `toHaveText`, `toHaveCount`, `toBeVisible`,
+`expect.poll`): they retry until the page is right. A one-shot read (`textContent()`, `count()`,
+`getAttribute()`, `evaluate()`, `boundingBox()`, `all()`) reads once, and on a page drawn from
+several reads it can see an earlier render: `main` went red when 14-go-live read the footer before
+`GET /version` answered (P-782). When a step must read once, first wait for the very thing it
+reads; `settle()` is bounded and swallows its timeout, so it is not that wait.
+`tests/test_walkthrough_oneshot_reads.py` holds every one-shot read here with the reason it reads
+a settled page, and fails on one it does not hold.
