@@ -352,7 +352,7 @@ CREATE ROLE crb_app LOGIN PASSWORD '<secret>';
 GRANT CONNECT ON DATABASE crb TO crb_app;
 GRANT USAGE ON SCHEMA public TO crb_app;
 GRANT SELECT, INSERT ON grades, events, signoffs, evidence, reviews, task_qualifications,
-  library_acts TO crb_app;
+  library_acts, class_set_acts, class_labels TO crb_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON repos, runs, tasks, users, invitations,
   decisions_due, workers, github_installations TO crb_app;
 GRANT SELECT ON alembic_version TO crb_app;

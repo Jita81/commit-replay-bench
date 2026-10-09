@@ -64,6 +64,8 @@ import {
 import { api, ApiError, qs } from './client'
 import { RunEventStream, type EventSourceFactory, type SseSnapshot } from './sse'
 import type {
+  AcceptanceAssignments,
+  HeldOutRecord,
   Intake,
   GitHubAppInfo,
   GitHubConnectRequest,
@@ -178,6 +180,7 @@ export const keys = {
   factoryTasks: (repo: string) => ['factory', repo, 'tasks'] as const,
   factoryEvidence: (repo: string) => ['factory', repo, 'evidence'] as const,
   intake: (repo: string) => ['factory', repo, 'intake'] as const,
+  acceptance: (repo: string) => ['factory', repo, 'acceptance'] as const,
   flow: (repo: string) => ['flow', repo] as const,
   users: ['users'] as const,
   userEvents: (id: string, p?: PageParams) => ['users', id, 'events', p ?? {}] as const,
@@ -1189,6 +1192,36 @@ export function useIntake(repo: string): UseQueryResult<Intake, ApiError> {
     queryFn: () => api<Intake>(`/factory/${enc(repo)}/intake`),
     enabled: repo.length > 0,
     retry: false,
+  })
+}
+
+/** `GET /factory/{repo}/acceptance` (viewer) — the tickets whose calibration build needs a
+ *  second person's held-out acceptance tests, and whether the signed-in person may write them
+ *  (ADR-0026 item 8). Never a ticket's own failing test, never a build. */
+export function useAcceptance(repo: string, enabled = true): UseQueryResult<AcceptanceAssignments, ApiError> {
+  return useQuery({
+    queryKey: keys.acceptance(repo),
+    queryFn: () => api<AcceptanceAssignments>(`/factory/${enc(repo)}/acceptance`),
+    enabled: enabled && repo.length > 0,
+    retry: false,
+  })
+}
+
+/** `POST /factory/{repo}/items/{item}/acceptance` (operator, a second person) — write the
+ *  held-out acceptance tests of one calibration build. Refetches the assignments. */
+export function useWriteAcceptance(): UseMutationResult<
+  HeldOutRecord,
+  ApiError,
+  { repo: string; item: string; files: Array<{ path: string; content: string }> }
+> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ repo, item, files }) =>
+      api<HeldOutRecord>(`/factory/${enc(repo)}/items/${enc(item)}/acceptance`, { method: 'POST', body: { files } }),
+    onSuccess: (_data, { repo }) => {
+      void qc.invalidateQueries({ queryKey: keys.acceptance(repo) })
+      void qc.invalidateQueries({ queryKey: keys.factoryTasks(repo) })
+    },
   })
 }
 

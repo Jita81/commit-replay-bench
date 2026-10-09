@@ -703,9 +703,9 @@ def test_a_factory_s2_row_is_not_a_routing_first_attempt_without_held_out_accept
 ) -> None:
     """ADR-0026 item 8: a calibration build yields an ``S2`` row that can promote a ceiling
     only when it is also graded on held-out acceptance tests a second person wrote
-    (``product.truth.215``, not built yet). Until then every factory ``S2`` row — the
-    calibration build's and an ordinary one's — is stamped ``acceptance: none`` and the
-    reading's predicate refuses it."""
+    (``product.truth.215``; tests/test_factory_held_out.py). Without them every factory
+    ``S2`` row — the calibration build's and an ordinary one's — is stamped
+    ``acceptance: none`` and the reading's predicate refuses it."""
     rig = _rig(pyrepo, tmp_path, readers=_readers(lambda c: Standard("S3")))
     rig.evidence.record_calibration("I-1", approver="approver:ada", reason="measure the arm")
     cal = rig.loop().run_item(multiply_item(), authored=authored_multiply())
@@ -723,11 +723,18 @@ def test_a_factory_s2_row_is_not_a_routing_first_attempt_without_held_out_accept
     (row2,) = list(rig2.ledger.rows())
     assert row2.labels[LABEL_ACCEPTANCE] == ACCEPTANCE_NONE
     assert not counts_as_s2_first_attempt(row2.labels)
-    # only positive evidence of held-out acceptance grading counts, and only on S2
-    held = {"context_arm": ARM_S2, LABEL_ACCEPTANCE: ACCEPTANCE_HELD_OUT}
+    # only positive evidence of held-out acceptance grading counts — the stamp, the record's
+    # digest and a result (P-690) — and only on S2
+    held = {
+        "context_arm": ARM_S2,
+        LABEL_ACCEPTANCE: ACCEPTANCE_HELD_OUT,
+        "acceptance_sha256": "a" * 64,
+        "acceptance_result": "pass",
+    }
     assert counts_as_s2_first_attempt(held)
     assert not counts_as_s2_first_attempt({**held, "context_arm": "S1@t1"})
     assert not counts_as_s2_first_attempt({"context_arm": ARM_S2})
+    assert not counts_as_s2_first_attempt({"context_arm": ARM_S2, LABEL_ACCEPTANCE: "held_out"})
 
 
 def test_an_unsigned_estimate_cell_is_not_hidden_by_a_signed_larger_cell() -> None:

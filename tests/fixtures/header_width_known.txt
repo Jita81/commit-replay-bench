@@ -56,7 +56,6 @@ ui/src/screens/Connect/GitHubConnectDialog.test.tsx#cef0581cd854
 ui/src/screens/Factory/FactoryPage.test.tsx#b659d879333a
 ui/src/screens/Factory/FactoryPage.test.tsx#ba00bd3059ff
 ui/src/screens/Factory/FactoryPage.tsx#13c71871cb7c
-ui/src/screens/Factory/FactoryPage.tsx#a9f57cf478b2
 ui/src/screens/Oracle/OraclePage.tsx#a6feb8110606
 ui/src/screens/Posture/PosturePage.tsx#b2944462cbeb
 ui/src/screens/Repos/ListEditors.tsx#7249ed9e8cad

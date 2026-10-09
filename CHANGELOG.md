@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   fails, and every suite job must fetch the whole history (P-753). No token that may read the
   setting is provisioned yet, so the daily workflow stays red (G-930).
 
+- **Wave 4b: an organisation's own classes of work, and calibration builds graded on a second
+  person's held-out tests** (north-star Wave 4b, streams CLS and FWD;
+  [#74](https://github.com/Jita81/commit-replay-bench/pull/74)). `/classes` lets an organisation
+  propose its own class set: each class a child of a global class, with one rule reading only what
+  a ticket carries; commits held out by derivation and confirmation sets; other people label a
+  sample blind; a second person signs; unsigned, it routes nothing. On `/factory/acceptance`
+  a second person writes held-out tests from the ticket alone; a calibration build's first attempt
+  is graded on them, stamped `S2`, and opens no pull request; only a forward reading's delivery
+  promotes a ceiling. DL-330 to DL-335, P-680 to P-696, P-770 to P-772.
+
 - **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
   ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table
   the application updates, `invitations` and `decisions_due`. A split-role PostgreSQL store
@@ -40,6 +50,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   /golive` proves five of DEPLOYMENT §8's lines and records ten as attested acts. Failed reads show
   Retry, ledger exports are recorded, and caught controls carry a witness (`controls.v3`: rerun
   every repository's controls). DL-109 to DL-120, P-408 to P-411.
+
+- **CI bounds and retries the Playwright browser install** (P-751;
+  [#71](https://github.com/Jita81/commit-replay-bench/pull/71)). On 7 October the browser install
+  sat silent in apt on six required browser jobs until each job's own timeout cancelled it.
+  `scripts/ci_install_browser.py` now runs the install in its own process group, stops an
+  attempt that prints nothing for 300 s, kills the group and any `apt-get` left behind, and
+  retries up to five times within a budget each job sets at no more than half its timeout. A
+  workflow that runs `playwright install` itself fails a test.
 
 - **Routing reads a registered reading; a ticket builds only on its cell's proven standard**
   (Wave 2 part B: streams G, R, F, the pilot's Q1 and Q2, the integration;
