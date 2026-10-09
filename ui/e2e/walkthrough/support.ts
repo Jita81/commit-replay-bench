@@ -316,7 +316,9 @@ export async function waitForRun(page: Page, expected: RunStatus | RunStatus[], 
     .toMatch(/^(succeeded|failed|cancelled)$/)
   const got = (await runStatus(page)) as RunStatus
   if (!want.includes(got)) {
-    const err = (await page.getByRole('alert').first().textContent().catch(() => '')) ?? ''
+    // the page's own error, given a moment to draw: a failed run's alert can arrive after the
+    // status pill, and a read with no bound waits the whole test out when there is none (P-782)
+    const err = (await page.locator('#main').getByRole('alert').first().textContent({ timeout: 2_000 }).catch(() => '')) ?? ''
     throw new Error(`run ${runIdFromUrl(page)} ended ${got} (wanted ${want.join('|')})${err ? `: ${err.trim()}` : ''}`)
   }
   return got

@@ -117,7 +117,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     await expect(page.locator(`[id="${await disclosure.getAttribute('aria-controls')}"]`)).toHaveAttribute('role', 'note')
     await escapeUntil(page, async () => (await disclosure.getAttribute('aria-expanded')) === 'false')
     await expect(disclosure, `${where}: Escape did not close the reason code`).toHaveAttribute('aria-expanded', 'false')
-    expect(await focusedIs(disclosure), `${where}: closing the reason code lost focus`).toBe(true)
+    await expect.poll(() => focusedIs(disclosure), { message: `${where}: closing the reason code lost focus` }).toBe(true)
   })
 
   test('keyboard: a reason-code button on Routes is reached by Tab and opens and closes with aria-expanded (/routing)', async ({ page }) => {
@@ -136,7 +136,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     await expect(page.getByRole('note').filter({ hasText: 'glossary' }).first()).toBeVisible()
     await escapeUntil(page, async () => (await disclosure.getAttribute('aria-expanded')) === 'false')
     await expect(disclosure, `${where}: Escape did not close the reason code`).toHaveAttribute('aria-expanded', 'false')
-    expect(await focusedIs(disclosure), `${where}: closing the reason code lost focus`).toBe(true)
+    await expect.poll(() => focusedIs(disclosure), { message: `${where}: closing the reason code lost focus` }).toBe(true)
   })
 
   test('keyboard: a term on Oracle opens and closes with aria-expanded (/oracle)', async ({ page }) => {
@@ -158,7 +158,7 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     await escapeUntil(page, async () => (await term.getAttribute('aria-expanded')) === 'false')
     await expect(term, `${where}: Escape did not close the term "${name}"`).toHaveAttribute('aria-expanded', 'false')
     await expect(note).toHaveCount(0)
-    expect(await focusedIs(term), `${where}: closing the term lost focus`).toBe(true)
+    await expect.poll(() => focusedIs(term), { message: `${where}: closing the term lost focus` }).toBe(true)
   })
 
   test('keyboard: the sign-off form is filled from the keyboard, and Sign off stays closed on a cell with no proven standard (/signoff)', async ({ page }) => {
@@ -200,11 +200,11 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     await page.keyboard.press('Enter')
     const dialog = page.getByRole('dialog', { name: /^Freeze a (revised )?backlog$/ })
     await expect(dialog, `${where}: Enter on "${label}" did not open the freeze dialog`).toBeVisible()
-    expect(await focusedIs(dialog), `${where}: focus did not move into the freeze dialog when it opened`).toBe(true)
+    await expect.poll(() => focusedIs(dialog), { message: `${where}: focus did not move into the freeze dialog when it opened` }).toBe(true)
     // Tab stays inside a modal dialog
     for (let i = 0; i < 6; i += 1) {
       await page.keyboard.press('Tab')
-      expect(await focusedIs(dialog), `${where}: Tab ${i + 1} left the modal dialog`).toBe(true)
+      await expect.poll(() => focusedIs(dialog), { message: `${where}: Tab ${i + 1} left the modal dialog` }).toBe(true)
     }
     await escapeUntil(page, async () => !(await dialog.isVisible()))
     await expect(dialog, `${where}: Escape did not close the freeze dialog`).toBeHidden()
@@ -219,6 +219,9 @@ test.describe('11b-keyboard: the controls a keyboard person has to operate', () 
     await signIn(page, USERNAMES.operator, PASSWORDS.operator, { by: 'keyboard' })
     await page.goto(`/capability?repo=${encodeURIComponent(REPO)}`)
     await settle(page)
+    // the cells come from a query: take them out of the tab order only once they are drawn,
+    // or the control measures a page with none and proves nothing (P-782)
+    await expect(page.locator('button[data-hint="map.cell.tile"]').first(), 'the negative control needs a measured cell on the page').toBeAttached()
     const cells = await page.evaluate(() => {
       const all = Array.from(document.querySelectorAll<HTMLElement>('button[data-hint="map.cell.tile"]'))
       for (const el of all) el.tabIndex = -1

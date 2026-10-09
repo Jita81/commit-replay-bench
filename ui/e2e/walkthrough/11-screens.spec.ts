@@ -239,11 +239,22 @@ const SIDEWAYS_SCROLL_RATCHET: Record<string, string> = {
 }
 
 /**
+ * Wait until every query on the page has answered — no QueryBoundary still loading, and /login
+ * no longer asking whether there is an organisation sign-in — so a measurement or a sample reads
+ * the page a person reads, not a render the page is about to replace (P-782).
+ */
+async function drawn(page: Page): Promise<void> {
+  await expect(page.getByTestId('loading'), 'a query on the page never answered').toHaveCount(0)
+  await expect(page.getByText('Checking for an organisation sign-in…'), 'the sign-in page never learned whether there is an organisation sign-in').toHaveCount(0)
+}
+
+/**
  * The document's scroll width, and the element that sets it — the deepest element whose right
  * edge reaches furthest past the viewport, described the way a person would look for it. A bare
  * "scrollWidth 981 > 375" says a page is broken; this says which element to fix.
  */
 async function widestOverflow(page: Page): Promise<{ scroll: number; inner: number; culprit: string }> {
+  await drawn(page)
   return page.evaluate(() => {
     const inner = window.innerWidth
     let worst: Element | null = null
@@ -473,7 +484,7 @@ async function phoneMenu(page: Page, where: string): Promise<boolean> {
   expect(await page.evaluate(() => document.activeElement?.closest('#shell-menu-actions, #shell-nav-primary, #shell-nav-instrument') !== null), `${where}: Tab from the open Menu button did not move into the menu`).toBe(true)
   await escapeUntil(page, async () => (await button.getAttribute('aria-expanded')) === 'false')
   await expect(button, `${where}: Escape did not close the menu`).toHaveAttribute('aria-expanded', 'false')
-  expect(await focusedIs(button), `${where}: focus did not return to the Menu button when Escape closed it`).toBe(true)
+  await expect.poll(() => focusedIs(button), { message: `${where}: focus did not return to the Menu button when Escape closed it` }).toBe(true)
   await expect(primaryNav).toBeHidden()
   // leave the button: its focus hint must not sit open over the next check's sample
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
@@ -487,6 +498,7 @@ async function phoneMenu(page: Page, where: string): Promise<boolean> {
  * clean with it open, and Escape closes it.
  */
 async function hintSample(page: Page, where: string, width: number): Promise<void> {
+  await drawn(page)
   const hinted = page.locator('[data-hint]')
   const n = await hinted.count()
   expect(n, `${where}: no hinted element`).toBeGreaterThan(0)

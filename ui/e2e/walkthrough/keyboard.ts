@@ -66,7 +66,12 @@ export async function bubbleOf(page: Page, el: Locator): Promise<Locator> {
  */
 export async function tabTo(page: Page, selector: string, where: string, opts: { fromTop?: boolean; backwards?: boolean; maxTabs?: number } = {}): Promise<number> {
   const { fromTop = true, backwards = false, maxTabs = 120 } = opts
+  // Tab only once the page has drawn what it is aiming for: a Tab pressed while the page is
+  // still rendering lands on whatever has painted so far, and the read after it then reads an
+  // earlier render (P-782). A control that is in the page but cannot take focus still fails.
+  await expect(page.locator(selector).first(), `${where}: ${selector} is not on the page to Tab to`).toBeAttached()
   if (fromTop) {
+    await expect(page.getByRole('link', { name: 'Skip to content' }), `${where}: the page has no skip link to start from`).toBeAttached()
     await page.keyboard.press('Tab')
     expect(await page.evaluate(() => document.activeElement?.textContent?.trim()), `${where}: the first Tab after the page loaded did not land on the skip link`).toBe('Skip to content')
     await page.keyboard.press('Enter')
@@ -144,12 +149,16 @@ export async function focusedIs(locator: Locator): Promise<boolean> {
  * and assert the value changed, so a select a keyboard person cannot operate fails.
  */
 export async function chooseByKeyboard(page: Page, where: string): Promise<void> {
-  const { before, prefix } = await page.evaluate(() => {
-    const sel = document.activeElement as HTMLSelectElement | null
-    const first = sel ? Array.from(sel.options).find((o) => o.value !== '') : undefined
-    return { before: sel?.value ?? '', prefix: (first?.textContent ?? '').trim().split(/\s/)[0] ?? '' }
-  })
-  expect(prefix, `${where}: the focused control is not a select with an option to choose`).not.toBe('')
+  const read = () =>
+    page.evaluate(() => {
+      const sel = document.activeElement as HTMLSelectElement | null
+      const first = sel instanceof HTMLSelectElement ? Array.from(sel.options).find((o) => o.value !== '') : undefined
+      return { before: sel instanceof HTMLSelectElement ? sel.value : '', prefix: (first?.textContent ?? '').trim().split(/\s/)[0] ?? '' }
+    })
+  // a select's options can arrive after the select does (they come from a query): wait for a
+  // real one rather than reading the first render's empty list (P-782)
+  await expect.poll(async () => (await read()).prefix, { message: `${where}: the focused control is not a select with an option to choose` }).not.toBe('')
+  const { before, prefix } = await read()
   await page.keyboard.type(prefix)
   await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLSelectElement | null)?.value ?? ''), { message: `${where}: typing "${prefix}" did not choose an option` }).not.toBe(before)
 }

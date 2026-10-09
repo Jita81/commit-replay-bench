@@ -154,11 +154,14 @@ test('an operator proposes from the repository’s files; each proposal waits fo
   await expect(summary).toContainText('Each proposal waits for a person to sponsor it and a different approver to sign it.')
   const mined = page.getByRole('table', { name: /^Library entries for/ }).getByRole('row').filter({ hasText: 'none yet — proposed by mined:' })
   await expect(mined.first()).toBeVisible()
-  const after = ((await (await page.request.get(`${env.baseUrl}/api/v1/library/${repo}`)).json()) as { entries: Array<{ entry_id: string; status: string; sponsor: string }> }).entries
+  const after = ((await (await page.request.get(`${env.baseUrl}/api/v1/library/${repo}`)).json()) as { entries: Array<{ entry_id: string; status: string; sponsor: string; entry: { proposed_by: string } }> }).entries
   expect(after.length).toBeGreaterThan(known)
   expect(after.filter((e) => e.status === 'signed' && !e.sponsor)).toEqual([]) // no miner signs
   // a person adopts one; nothing is signed until a different approver signs it
-  const unadopted = await mined.count()
+  // as many unsponsored mined rows as the API holds — the table redraws after Propose, and a
+  // one-shot count can read it before the new rows land (P-782)
+  const unadopted = after.filter((e) => !e.sponsor && e.entry.proposed_by.startsWith('mined:')).length
+  await expect(mined).toHaveCount(unadopted)
   await mined.first().getByRole('button', { name: 'Sponsor' }).click()
   await expect(mined).toHaveCount(unadopted - 1)
   // the same commit again: nothing new
