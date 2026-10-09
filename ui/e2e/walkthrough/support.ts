@@ -401,8 +401,14 @@ export async function apiGet(req: APIRequestContext, path: string): Promise<Reco
   return (await res.json()) as Record<string, unknown>
 }
 
-/** Poll a run through the API until it is terminal; assert it succeeded. */
+/**
+ * Poll a run through the API until it is terminal; assert it succeeded. The wait is added to the
+ * running test's own time limit first, so a caller's wait can never outlast its test: spec 15
+ * waited up to ten minutes for a mine under the default four (P-772).
+ */
 export async function waitRunApi(page: Page, runId: string, timeoutMs: number): Promise<void> {
+  const info = test.info()
+  if (info.timeout > 0) info.setTimeout(info.timeout + timeoutMs)
   await expect
     .poll(async () => String((await apiGet(page.request, `/runs/${runId}`)).status), { timeout: timeoutMs, intervals: [500, 1000, 2000], message: `run ${runId} did not finish` })
     .toMatch(/^(succeeded|failed|cancelled)$/)

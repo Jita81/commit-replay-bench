@@ -202,10 +202,12 @@ class TestFactory:
             assert c.get(f"{API_PREFIX}/version").status_code == 404
         mounted = register_routers(app)
         assert mounted == [  # core (W2-A) + domain (W2-B), sorted — the seam mounts every module
+            "acceptance",
             "admin",
             "auth",
             "builders",
             "capability",
+            "classes",
             "decisions",
             "factory",
             "flow",
@@ -277,8 +279,8 @@ class TestFactory:
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "down"
             assert probe["data"] == {
-                "triggers": 12,
-                "expected": 14,
+                "triggers": 16,
+                "expected": 18,
                 "missing": ["grades_no_delete", "grades_no_update"],
             }
         # init_db is idempotent: a restart reinstalls the missing triggers.
@@ -286,7 +288,7 @@ class TestFactory:
             r = c.get(f"{API_PREFIX}/health")
             probe = next(p for p in r.json()["probes"] if p["name"] == "append_only")
             assert probe["status"] == "ok"
-            assert probe["data"] == {"triggers": 14, "expected": 14}
+            assert probe["data"] == {"triggers": 18, "expected": 18}
 
 
 # --- middleware --------------------------------------------------------------------------

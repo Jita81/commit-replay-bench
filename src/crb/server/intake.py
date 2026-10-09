@@ -76,7 +76,9 @@ Works with:   src/crb/intake/client.py (the six verbs and the stop reasons),
               src/crb/server/factory_state.py (``FactoryHome`` — the backlog and the
               chain), src/crb/server/worker.py (calls ``poll_repository`` from the idle
               loop, under the lease), src/crb/server/routes/factory.py (serves and configures
-              it; the Register act), src/crb/store/models.py (``WorkerRow`` — the lease row)
+              it; the Register act), src/crb/store/models.py (``WorkerRow`` — the lease row),
+              src/crb/server/class_set_state.py (``draft_stamper`` — the ``classes`` hook that
+              classifies a draft by the organisation's routing class set)
 Tested by:    tests/test_intake_service.py, tests/test_server_routes_intake.py,
               tests/test_intake_worker.py
 Touch when:   never for a new repository (a board is linked in the repository's config); a
@@ -948,6 +950,7 @@ def poll_repository(
     actor: str = "intake",
     gate: Readers | None = None,
     require_signed_cell: bool = False,
+    classes: Callable[[Draft], Draft] | None = None,
     now: Callable[[], str] = utc_now_iso,
     force: bool = False,
     max_tickets: int = DEFAULT_MAX_PER_POLL,
@@ -1018,6 +1021,7 @@ def poll_repository(
             route_for=route_for,
             gate=gate,
             require_signed_cell=require_signed_cell,
+            classes=classes,
             item_url=item_url,
             run_active=run_active,
             actor=actor,
@@ -1066,6 +1070,7 @@ def _poll_column(
     approval: ApprovalPolicy,
     gate: Readers | None = None,
     require_signed_cell: bool = False,
+    classes: Callable[[Draft], Draft] | None = None,
 ) -> PollReport:
     """One pass, with no side effect outside the tracker and the chain. See
     :func:`poll_repository`, which is this plus the served view."""
@@ -1139,6 +1144,7 @@ def _poll_column(
             route_for=route_for,
             gate=gate,
             require_signed_cell=require_signed_cell,
+            classes=classes,
             item_url=item_url,
             run_active=run_active,
             actor=actor,
@@ -1256,6 +1262,7 @@ def _handle_ticket(
     approval: ApprovalPolicy | None = None,
     gate: Readers | None = None,
     require_signed_cell: bool = False,
+    classes: Callable[[Draft], Draft] | None = None,
 ) -> IntakeRow | None:
     """One ticket, end to end. Returns the row to serve, or ``None`` when it was skipped.
 
@@ -1310,6 +1317,10 @@ def _handle_ticket(
     previous = backlog.get(previous_id) if (backlog is not None and previous_id) else None
     try:
         draft = draft_from(ticket, tracker=tracker.name, previous=previous)
+        if classes is not None:
+            # ADR-0026 item 9: the organisation's routing class set classifies the ticket by
+            # the same rule its commits were classified by at replay
+            draft = classes(draft)
     except ValueError as exc:
         # A ticket this product cannot map to an item at all (a key with no character an
         # item id may use). It costs that ticket and nothing else: the promise this
