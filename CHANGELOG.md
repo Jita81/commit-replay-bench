@@ -19,8 +19,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   a check no job reports. It never saw that the check was missing before. It now finds every
   workflow whose `on:` names `pull_request` and requires each of their jobs. The new reading is
   saved in `data/branch-protection-2026-10-07/` (P-752). A test that skips on a git result now
-  fails, and every suite job must fetch the whole history (P-753). No token that may read the
-  setting is provisioned yet, so the daily workflow stays red (G-930).
+  fails, and every suite job must fetch the whole history (P-753); after CodeRabbit's review the
+  scan also follows a skip helper called as a method and an early return in an `else`. The gap
+  analysis's headline totals now carry their measured tag. No token that may read the setting is
+  provisioned yet, so the daily workflow stays red (G-930).
 
 - **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
   fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
