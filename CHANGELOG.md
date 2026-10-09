@@ -19,7 +19,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `scripts/ci_gitleaks.py` scans `base..head` on a pull request and the whole history on a push,
   the schedule or a manual run; an event with no range is refused. Main's security job, red
   since 26 September on `dep_` store keys and ADR-0025's HMAC label that gitleaks read as API
-  keys, is green again: those patterns are allowlisted, each held to its source by a test.
+  keys, is green again: those patterns are allowlisted, each held to its source, and a test
+  pins the whole config as gitleaks reads it.
 
 - **Wave 4b: an organisation's own classes of work, and calibration builds graded on a second
   person's held-out tests** (north-star Wave 4b, streams CLS and FWD;
