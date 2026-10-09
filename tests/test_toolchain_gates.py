@@ -261,6 +261,11 @@ def _skips(
                 and _name(n.func.value) in mods
             )
             or (isinstance(n.func, ast.Name) and (n.func.id in funcs or n.func.id in via))
+            or (
+                isinstance(n.func, ast.Attribute)
+                and n.func.attr in via
+                and _chain(n.func)[1:] in (["self"], ["cls"])
+            )
         ):
             return True
         if isinstance(n, ast.Raise) and n.exc is not None:
@@ -831,7 +836,7 @@ def history_skip_findings(source: str, where: str, extern: Collection[str] = ())
             isinstance(node, ast.If)
             and isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef)
             and scope.name.startswith("test")
-            and any(isinstance(n, ast.Return) for s in node.body for n in ast.walk(s))
+            and any(isinstance(n, ast.Return) for s in _branches(node) for n in ast.walk(s))
             and git(node.test)
         ):
             out.append(
@@ -891,6 +896,11 @@ HISTORY_SKIPS = {
     "skip-in-the-else": (
         'def test_a():\n    r = subprocess.run(["git", "cat-file", "-e", "abc"])\n'
         '    if r.returncode == 0:\n        check(r)\n    else:\n        pytest.skip("shallow")\n'
+    ),
+    "skip-through-a-method": (
+        'class TestHistory:\n    def _shallow(self):\n        pytest.skip("a shallow clone")\n'
+        '    def test_a(self):\n        r = subprocess.run(["git", "show", "abc"])\n'
+        "        if r.returncode:\n            self._shallow()\n"
     ),
     "skip-through-a-helper": (
         'def _shallow():\n    pytest.skip("a shallow clone")\n'
@@ -999,6 +1009,11 @@ HISTORY_SKIPS = {
     "early-return": (
         'def test_a():\n    r = subprocess.run(["git", "ls-tree", "abc"])\n'
         "    if r.returncode != 0:\n        return\n    assert parse(r.stdout) == EXPECTED\n"
+    ),
+    "early-return-in-the-else": (
+        'def test_a():\n    r = subprocess.run(["git", "ls-tree", "abc"])\n'
+        "    if r.returncode == 0:\n        assert parse(r.stdout) == EXPECTED\n    else:\n"
+        "        return\n"
     ),
     "check-output-in-a-try": (
         'def test_a():\n    try:\n        out = subprocess.check_output(["git", "show", "abc"])\n'
