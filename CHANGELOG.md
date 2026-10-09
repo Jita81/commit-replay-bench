@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The secrets scan reads every commit a pull request adds** (P-773, P-675;
+  [#79](https://github.com/Jita81/commit-replay-bench/pull/79)). gitleaks-action chose a pull
+  request's commits from one 30-commit page of the API: on #74 it scanned 15 of 558 and not the
+  head. The security job now installs gitleaks 8.30.1, pinned and checksum-verified, and
+  `scripts/ci_gitleaks.py` scans `base..head` on a pull request and the whole history on a push,
+  the schedule or a manual run; an event with no range is refused. Main's security job, red
+  since 26 September on `dep_` store keys and ADR-0025's HMAC label that gitleaks read as API
+  keys, is green again: those patterns are allowlisted, each held to its source by a test.
+
 - **Upgrading across revisions 0014 and 0015 grants what the application rewrites**
   ([#76](https://github.com/Jita81/commit-replay-bench/pull/76)). Both revisions added a table
   the application updates, `invitations` and `decisions_due`. A split-role PostgreSQL store
