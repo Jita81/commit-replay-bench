@@ -73,6 +73,11 @@ You are describing the repository's **shape**, not its code:
 Presets exist for the common shapes. **Tests the developer runs now:** `crb repo setup` then
 `crb repo probe` — green means the toolchain, the dependencies and your layout are right.
 
+The 30 minutes in this step's heading is the guide's estimate [hypothesis — no developer's
+time has been measured against it]. The product measures the real figure for each repository:
+the walk's *How this flows* panel shows the time from registration to the first green probe,
+read from the repository's own records, with its n.
+
 ## Step 2 — Make the oracle reproducible (developer, the real work)
 
 The bench grades against the repository's **own tests at each historical commit**. Real
@@ -99,6 +104,22 @@ task and a note for each failure. Aim for most of the mined tasks gold-clean; ev
 as "this slice of history is not measurable". Re-qualify tasks after a config change with
 `kind: mine` + `task_ids` — you never re-mine from scratch.
 
+**The notes become proposals, not edits.** Where a note names a concrete change — a
+target, baseline or gold that hit the test wall clock, a linter that timed out, a parent
+that could not load its dependencies offline — the mine stage on the Connection walk lists
+it as a candidate: the setting, the limit that was hit, the value proposed and the commits
+that imply it (`GET /repos/{name}/config-candidates`). An operator presses Accept, which
+applies it through the same validated, recorded config update as a hand edit, or Reject,
+which records the decision and changes nothing. After an Accept the named commits are held
+— not offered again — until a later mine or qualify run of the repository finishes: re-qualify
+them, and only a commit that still hits the new limit is offered the next one. Lint debt
+(`gold fails belt 5`) is never proposed: it is the maintainers' own. With the repository's
+`auto_stages` switch on (the "Chain the free stages" switch on the Connection walk, or
+`PUT /repos/{name}`), a passing probe queues the mine, a mine with a gold-clean task queues
+the qualify, and so on to the controls — the free stages only, each only while no run of it
+has succeeded or is in flight (a re-run never re-walks the repository); the money step is
+always a person's confirm.
+
 ## Step 3 — Prove the instrument on this repository (operator, £0)
 
 Two runs before any model attempt:
@@ -117,23 +138,40 @@ experiment; without them a pass rate is a rumour.
 ## Step 4 — Measure (operator, the money step)
 
 A sighted replay run: the builder sees the failing test and must make it pass; the grader
-never trusts the builder's word. Start with `limit: 10`, `retain: {worktrees, transcripts}`
-so a human can read every accepted patch, `preflight: true` so the repository's own
-formatter is applied before grading (4 of the 6 NHS misses were formatting **[hypothesis —
-as the NHS measurement of 2026-09-14 reported them; its rows are the operator's and not in
-this repository]**), and
-`outage_stop` at its default so a usage-limit outage stops the run rather than burning it.
-Name a spend cap for the whole run (`max_cost_usd`; the Measure page starts it at the top of
-the estimate): before each attempt the run adds what it has spent to what that attempt could
-cost — the attempt's own cost cap, or the dearest attempt so far when it has none — and stops
-itself, `stopped_code: spend_cap`, when the sum would pass the cap. A cap over a model with no
-known price is refused before anything is queued.
+never trusts the builder's word. Start from the walk's Measure page (`/connect/<name>/measure`):
+pick 10 attempts (enough to see the shape, not to route) and keep worktrees and transcripts so a
+human can read every accepted patch. Leave **Pre-flight off** for the first measurement. It is
+a switch on the page, off by default: when on, the repository's own formatter and linter run on
+each attempt's changed files after the build, fix what they can, and the builder gets one
+bounded repair call — that call is part of the attempt's spend, and the rows record a separate
+arm, `<builder>+preflight`, which is never pooled with plain rows. Switch it on for a second
+measurement you mean to compare with the plain one (4 of the 6 NHS misses were formatting
+**[hypothesis — as the NHS measurement of 2026-09-14 reported them; its rows are the
+operator's and not in this repository]**), never as the default arm. The page states the
+`outage_stop` the run keeps at the worker's default — three attempts in a row the provider
+refused stop the run rather than burning it — and does not change it; the full run form on
+Runs can. Name a spend cap for the whole run (`max_cost_usd`; the Measure page starts it at
+the top of the estimate): before each attempt the run adds what it has spent to what that
+attempt could cost — the attempt's own cost cap, or the dearest attempt so far when it has
+none — and stops itself, `stopped_code: spend_cap`, when the sum would pass the cap. A cap
+over a model with no known price is refused before anything is queued.
+
+**What this step does not do, in order:** it does not run blind (blind runs and the budget
+sweep start from Runs, the full run form); it does not choose the builder or the
+model (the deployment's credentialed builder is used — on a hermetic stack with none, the
+test-only `fixture_gold` at a known $0, named as an instrument check); it does not sign off
+(step 7), route (the rule does, step 5) or deliver (the factory, later); and it sets no budget
+beyond this run's own cap.
 
 **What to look at on the Run page:** the failure split. `builder_red` is the model's;
 `lint` is the maintainers' gate; `budget`, `protocol`, `harness`, `outage` are the
 instrument's or the operator's — each is named per row, none is hidden in a rate.
 
 ## Step 5 — Read the map (everyone)
+
+**Time and cost.** £0: reading the map calls no model and starts no run, so nothing is spent.
+A first reading of one repository's Baseline takes about ten minutes [hypothesis — no reader's
+time measured]: the three gates, the route tiles, and one cell opened for its evidence.
 
 Capability → the grid of *change class × size*. A cell shows `n` attempts **and**
 `n_tasks` distinct commits (many attempts on a few commits is a statement about those few
@@ -298,6 +336,17 @@ is an apparatus bump with an ADR, and every row measured before it expires
 | step 4 | a small sighted replay | rows have failure kinds you can explain; `false_q1` stays 0 |
 | before sign-off | the same on the sealed posture; a human review | the review is recorded as a review row |
 | always | `GET /health`, `crb ledger verify` | every probe `ok`; the chain verifies |
+
+How long the step 3 runs take: a mine run 5 to 13 s, an oracle run 1 to 3 s and a controls
+run 7 to 21 s [measured — n = 3 local runs of each, the later two on a heavily loaded machine,
+so read the range, not a point; the tier-1 walkthrough's fixture repository, the oracle and
+controls runs limited to one task; method: each run's `finished − started` from
+`GET /runs/{id}`, the stamps `GET /flow` also folds; apparatus 2.4; three local runs of
+`scripts/walkthrough.sh` on 2026-09-28 and 2026-09-29, branch `feat/ns6-lrn` on base
+`847f25dd` — not yet a CI run, which G-430 names]. A real repository takes longer: the oracle mutates every
+task it scores and the controls grade seven cheats per task, so the time grows with the tasks
+and the length of the test suite. The walk's *How this flows* panel shows
+this repository's own median for each run, with its n.
 
 ## What you may claim afterwards (and what you may not)
 

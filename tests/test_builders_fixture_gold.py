@@ -47,11 +47,26 @@ from fixtures.posture import grade_adhoc as grade
 
 
 def test_switch_is_exactly_one() -> None:
-    assert fg.fixture_builder_enabled({}) is False
-    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1"}) is True
-    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: " 1 "}) is True
+    """``1`` exactly — under a non-production ``CRB_ENV``, the only posture that admits it."""
+    dev = {fg.ENV_ENV: "dev"}
+    assert fg.fixture_builder_enabled(dev) is False
+    assert fg.fixture_builder_enabled({**dev, fg.ENABLE_ENV: "1"}) is True
+    assert fg.fixture_builder_enabled({**dev, fg.ENABLE_ENV: " 1 "}) is True
     for off in ("0", "true", "yes", "", "2"):
-        assert fg.fixture_builder_enabled({fg.ENABLE_ENV: off}) is False, off
+        assert fg.fixture_builder_enabled({**dev, fg.ENABLE_ENV: off}) is False, off
+
+
+def test_a_production_env_denies_the_switch() -> None:
+    """The belt: ``CRB_ENV`` naming production keeps the builder off with the switch set — the
+    same function the ``builders`` health probe reads (tests/test_probe_fixture_builder.py) —
+    and so does ``CRB_ENV`` unset or empty, the server's own default posture (P-664): only an
+    explicit non-production name lets the switch register the fixture."""
+    for prod in ("prod", "production", "Prod"):
+        assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: prod}) is False, prod
+    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: "dev"}) is True
+    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: ""}) is False
+    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1", fg.ENV_ENV: "  "}) is False
+    assert fg.fixture_builder_enabled({fg.ENABLE_ENV: "1"}) is False
 
 
 def test_unregistered_without_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,6 +79,7 @@ def test_unregistered_without_the_switch(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_registered_with_the_switch_and_identity_is_forced(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(fg.ENABLE_ENV, "1")
+    monkeypatch.setenv(fg.ENV_ENV, "dev")  # production is the default posture: switch out of it
     try:
         importlib.reload(builders_pkg)
         assert fg.NAME in builders_pkg.builder_names()
@@ -75,6 +91,7 @@ def test_registered_with_the_switch_and_identity_is_forced(monkeypatch: pytest.M
         assert d["fixture"] is True and "archaeology" in d["warning"]
     finally:
         monkeypatch.delenv(fg.ENABLE_ENV, raising=False)
+        monkeypatch.delenv(fg.ENV_ENV, raising=False)
         importlib.reload(builders_pkg)
         assert fg.NAME not in builders_pkg.builder_names()
 

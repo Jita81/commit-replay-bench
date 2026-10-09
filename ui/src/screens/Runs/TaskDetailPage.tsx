@@ -16,7 +16,10 @@
  *               as a commit (J-FAC-18). Below md (768 px) the grade table keeps Created, Clean,
  *               Review and Evidence and folds the rest into the evidence drawer, which shows
  *               each of them, so the table fits a phone and a line says where the rest went
- *               (G-292).
+ *               (G-292). The header links back to the repository and to its Tasks tab (G-293);
+ *               an id the repository does not have (404) reads "No such task in this
+ *               repository" with the way back to its tasks and no Retry, while any other
+ *               failure keeps the error envelope and its Retry (G-294).
  * How:          `useTask` + `useReviews({repo, task_id})` → a `Map` of row hash → latest review
  *               → `DataTable`; the drawer is opened with both the pack hash and the row hash
  *               so the Patch / Review tabs need no resolution.
@@ -38,9 +41,11 @@
  */
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router'
+import { isApiError } from '../../api/client'
 import { useTask } from '../../api/hooks'
 import { beltsOf, type GradeRow, type TaskSpec } from '../../api/types'
 import { BeltPills } from '../../components/BeltPills'
+import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { DataTable, type Column } from '../../components/DataTable'
 import { EmptyState } from '../../components/EmptyState'
@@ -139,6 +144,8 @@ export function TaskDetailPage() {
     [standing],
   )
 
+  const reposHref = `/repos/${encodeURIComponent(repo)}`
+  const missing = q.isError && isApiError(q.error) && q.error.status === 404
   // the header is the first sentence read: it must agree with the card below on what this is
   const factory = q.data ? isFactory(q.data.spec) : false
   const purpose = factory
@@ -146,81 +153,110 @@ export function TaskDetailPage() {
     : 'One replayable commit: its spec (the oracle, the source files, the belt scope) and every graded trial against it.'
   return (
     <>
-      <PageHeader eyebrow={`Tasks · ${repo}`} title={`Task ${shortId(taskId)}`} purpose={purpose} />
-      <QueryBoundary query={q} loading="Loading the task…">
-        {(t) => (
-          <div className="space-y-6">
-            <Card title={t.spec.subject} eyebrow={`${t.spec.capability_class} · ${t.spec.size} · ${t.spec.pool} · ${t.spec.language || '—'}`}>
-              {isFactory(t.spec) && (
-                <p className="mb-3 text-sm text-on-surface-muted">
-                  One factory item{t.spec.labels.item_id ? ` (${t.spec.labels.item_id})` : ''} — not a replayed commit: the id is the authored test's sha, the RED proof the factory wrote before building. Its graded trials sit in the same table as a commit's.
+      <PageHeader
+        eyebrow={`Tasks · ${repo}`}
+        title={`Task ${shortId(taskId)}`}
+        purpose={purpose}
+        actions={
+          <>
+            {/* G-293: back to the repository, or straight to its Tasks tab, in one click */}
+            <LinkButton size="sm" to={reposHref} hint="link.task.repo">
+              {repo}
+            </LinkButton>
+            <LinkButton size="sm" to={`${reposHref}?tab=tasks`} hint="button.task.back_to_tasks">
+              Back to tasks
+            </LinkButton>
+          </>
+        }
+      />
+      {missing ? (
+        // G-294: an id this repository does not have is a way forward, not a Retry that fails again
+        <EmptyState
+          glyph="?"
+          title="No such task in this repository"
+          reason={`${repo} has no task ${taskId}. It may have been mined from another repository, or the link was mistyped.`}
+          action={
+            <LinkButton to={`${reposHref}?tab=tasks`} hint="button.task.back_to_tasks">
+              Back to {repo}’s tasks
+            </LinkButton>
+          }
+        />
+      ) : (
+        <QueryBoundary query={q} loading="Loading the task…">
+          {(t) => (
+            <div className="space-y-6">
+              <Card title={t.spec.subject} eyebrow={`${t.spec.capability_class} · ${t.spec.size} · ${t.spec.pool} · ${t.spec.language || '—'}`}>
+                {isFactory(t.spec) && (
+                  <p className="mb-3 text-sm text-on-surface-muted">
+                    One factory item{t.spec.labels.item_id ? ` (${t.spec.labels.item_id})` : ''} — not a replayed commit: the id is the authored test's sha, the RED proof the factory wrote before building. Its graded trials sit in the same table as a commit's.
+                  </p>
+                )}
+                <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+                  <div>
+                    <Hint as="dt" id="tile.task.id" className="label">
+                      {isFactory(t.spec) ? 'Factory item' : 'Commit'}
+                    </Hint>
+                    <dd className="font-mono text-xs">{t.spec.task_id}</dd>
+                  </div>
+                  <div>
+                    <Hint as="dt" id="tile.task.authored" className="label">
+                      Authored
+                    </Hint>
+                    <dd>{fmtDate(t.spec.authored)}</dd>
+                  </div>
+                  <div>
+                    <Hint as="dt" id="tile.task.target_tests" className="label">
+                      Target tests
+                    </Hint>
+                    <dd className="font-mono text-xs">{t.spec.target_tests.join(', ') || '—'}</dd>
+                  </div>
+                  <div>
+                    <Hint as="dt" id="tile.task.belt_scope" className="label">
+                      Belt scope
+                    </Hint>
+                    <dd className="font-mono text-xs">{t.spec.belt_scope.length ? t.spec.belt_scope.join(', ') : 'BARE'}</dd>
+                  </div>
+                  <div>
+                    <Hint as="dt" id="tile.task.files" className="label">
+                      Test files
+                    </Hint>
+                    <dd className="font-mono text-xs">{t.spec.test_files.join(', ')}</dd>
+                  </div>
+                  <div>
+                    <Hint as="dt" id="tile.task.files" className="label">
+                      Source files
+                    </Hint>
+                    <dd className="font-mono text-xs">{t.spec.src_files.join(', ')}</dd>
+                  </div>
+                  <div>
+                    <Hint as="dt" id="tile.task.red_gold" className="label">
+                      RED-checked · gold
+                    </Hint>
+                    <dd>
+                      {t.spec.red_checked ? '✓ RED at parent' : '— not checked'} · {t.spec.gold_clean === null ? 'gold unchecked' : t.spec.gold_clean ? '✓ gold clean' : `✗ gold failed (${t.spec.gold_note})`}
+                    </dd>
+                  </div>
+                </dl>
+                <Hint as="details" id="tile.task.full_spec" className="mt-3 text-xs">
+                  <summary className="cursor-pointer text-on-surface-muted">Full spec</summary>
+                  <div className="mt-2">
+                    <JsonView value={t.spec} label="Task spec" />
+                  </div>
+                </Hint>
+              </Card>
+              <Card padded={false} title="Grade rows">
+                {/* below md (768 px) the table keeps the verdict — when, clean or not, the review, the
+                    evidence — and folds run, trial, builder, belts, cost, latency and provenance into
+                    the evidence drawer, so it fits a phone instead of scrolling past it (G-292) */}
+                <p className="px-5 pt-3 text-xs text-on-surface-muted md:hidden" data-testid="grades-narrow-note">
+                  On a narrow screen this table shows the verdict only: open a row’s evidence for its run, trial, builder, belts, cost and latency.
                 </p>
-              )}
-              <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-                <div>
-                  <Hint as="dt" id="tile.task.id" className="label">
-                    {isFactory(t.spec) ? 'Factory item' : 'Commit'}
-                  </Hint>
-                  <dd className="font-mono text-xs">{t.spec.task_id}</dd>
-                </div>
-                <div>
-                  <Hint as="dt" id="tile.task.authored" className="label">
-                    Authored
-                  </Hint>
-                  <dd>{fmtDate(t.spec.authored)}</dd>
-                </div>
-                <div>
-                  <Hint as="dt" id="tile.task.target_tests" className="label">
-                    Target tests
-                  </Hint>
-                  <dd className="font-mono text-xs">{t.spec.target_tests.join(', ') || '—'}</dd>
-                </div>
-                <div>
-                  <Hint as="dt" id="tile.task.belt_scope" className="label">
-                    Belt scope
-                  </Hint>
-                  <dd className="font-mono text-xs">{t.spec.belt_scope.length ? t.spec.belt_scope.join(', ') : 'BARE'}</dd>
-                </div>
-                <div>
-                  <Hint as="dt" id="tile.task.files" className="label">
-                    Test files
-                  </Hint>
-                  <dd className="font-mono text-xs">{t.spec.test_files.join(', ')}</dd>
-                </div>
-                <div>
-                  <Hint as="dt" id="tile.task.files" className="label">
-                    Source files
-                  </Hint>
-                  <dd className="font-mono text-xs">{t.spec.src_files.join(', ')}</dd>
-                </div>
-                <div>
-                  <Hint as="dt" id="tile.task.red_gold" className="label">
-                    RED-checked · gold
-                  </Hint>
-                  <dd>
-                    {t.spec.red_checked ? '✓ RED at parent' : '— not checked'} · {t.spec.gold_clean === null ? 'gold unchecked' : t.spec.gold_clean ? '✓ gold clean' : `✗ gold failed (${t.spec.gold_note})`}
-                  </dd>
-                </div>
-              </dl>
-              <Hint as="details" id="tile.task.full_spec" className="mt-3 text-xs">
-                <summary className="cursor-pointer text-on-surface-muted">Full spec</summary>
-                <div className="mt-2">
-                  <JsonView value={t.spec} label="Task spec" />
-                </div>
-              </Hint>
-            </Card>
-            <Card padded={false} title="Grade rows">
-              {/* below md (768 px) the table keeps the verdict — when, clean or not, the review, the
-                  evidence — and folds run, trial, builder, belts, cost, latency and provenance into
-                  the evidence drawer, so it fits a phone instead of scrolling past it (G-292) */}
-              <p className="px-5 pt-3 text-xs text-on-surface-muted md:hidden" data-testid="grades-narrow-note">
-                On a narrow screen this table shows the verdict only: open a row’s evidence for its run, trial, builder, belts, cost and latency.
-              </p>
-              <DataTable rows={t.grades} columns={columns} rowKey={(r) => r.row_id} caption="Grade rows for this task" dense initialSort={{ key: 'created', dir: 'desc' }} empty={<EmptyState compact title="Not graded yet" reason={isFactory(t.spec) ? 'The factory has not built this item yet.' : 'No run has replayed this task.'} />} />
-            </Card>
-          </div>
-        )}
-      </QueryBoundary>
+                <DataTable rows={t.grades} columns={columns} rowKey={(r) => r.row_id} caption="Grade rows for this task" dense initialSort={{ key: 'created', dir: 'desc' }} empty={<EmptyState compact title="Not graded yet" reason={isFactory(t.spec) ? 'The factory has not built this item yet.' : 'No run has replayed this task.'} />} />
+              </Card>
+            </div>
+          )}
+        </QueryBoundary>
+      )}
       <EvidenceDrawer packHash={open?.pack ?? null} rowHash={open?.row ?? null} onClose={() => setOpen(null)} />
     </>
   )

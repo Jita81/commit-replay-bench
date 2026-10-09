@@ -19,7 +19,12 @@
  *               threshold is the served policy's, which a deployment may tighten, so the
  *               copy points at the card that shows it (G-255, G-204); the matcher is pinned
  *               on its own strings, and the one non-policy number (the password floor) is on
- *               a list that only shrinks.
+ *               a list that only shrinks; (7) every About block with a non-goal criterion
+ *               says what its page does not do — the Ledger's (no verify on demand, no
+ *               repair, filters only what the URL carries, G-185), the Operate journey's on
+ *               Runs and Deployment (no deployment-wide budget, no dashboard, no doctor
+ *               screen, G-402) — the Operate path is named on its stops (G-396), and "Verify
+ *               proves", which read as a button that is not there, is gone.
  * How:          Reads `ui/src/App.tsx` and the nine guides as `?raw` text so the ratchet
  *               needs no React; `matchPath` through `helpFor`.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -34,7 +39,7 @@ import { describe, expect, it } from 'vitest'
 import appSource from '../App.tsx?raw'
 import { docPath, isDocName, slugify, type DocAnchor } from './docs'
 import { TERMS, type TermId } from './glossary'
-import { HELP, helpFor } from './help'
+import { HELP, OPERATE_NON_GOALS, OPERATE_PATH, helpFor } from './help'
 
 /** The guides' text, eagerly, keyed by file name — the same files ui/src/help/docs.ts bundles. */
 const DOC_TEXT = import.meta.glob(['../../../docs/{ONBOARDING-A-REPO,OPERATOR,EVIDENCE-AND-CLAIMS,GITHUB-APP,SECURITY,DATA-RETENTION,LEARNING-LOOP,DEPLOYMENT}.md', '../../../docs/reviews/human-review-guide.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
@@ -142,10 +147,40 @@ describe('HELP ratchet', () => {
     expect(learn.purpose).toContain('The product decides nothing on its own: the register acts only under an operator’s switch, and each report’s decision is made here by an operator and recorded with their name.')
   })
 
+  // G-548 — the stream starts at the board: the About blocks say so in the same terms as the
+  // page head and Home's task 8, so the page's own explanation never contradicts its head
+  it('the /factory and /home About blocks say work enters from the board through intake, beside the frozen backlog (G-548)', () => {
+    const factory = helpFor('/factory')!
+    expect(factory.purpose).toContain('Work enters from your board through intake')
+    expect(factory.purpose).toContain('a ticket in the watched column becomes a frozen backlog item')
+    expect(factory.next.operator).toContain('Switch the listener on, or freeze a backlog here, then Run the factory')
+    const home = helpFor('/home')!
+    expect(home.next.operator).toContain('Task 8 starts at your board')
+  })
+
   it('the /signoff About block links the Step 6 human-review guide and says where the read of a diff is recorded (G-481)', () => {
     const h = helpFor('/signoff')!
     expect(h.readMore.map((r) => r.to)).toContain('HUMAN-REVIEW-GUIDE')
     expect(h.next.approver).toContain('run’s Review panel')
+  })
+
+  it('every About block with a non-goal criterion says what its page does not do', () => {
+    // the Ledger (G-185): what the server does and what the page does not, and where an operator verifies
+    const ledger = helpFor('/ledger')!
+    expect(ledger.purpose).toContain('The server re-checks the chain on every load. If rows are removed from the end, only comparing with a head hash you recorded earlier shows it.')
+    expect(ledger.purpose).toContain('The page does not verify on demand, repair a chain or filter beyond what the URL carries — each as a control on the page or, where it has none, a chip; verify an export with crb ledger verify (and the store itself with --store).')
+    expect(ledger.purpose).not.toContain('each shown as a chip')
+    // the Operate journey (G-402): its non-goals where the person is — Runs and Deployment
+    expect(OPERATE_NON_GOALS).toContain('No budget spans a deployment or a repository: every limit belongs to one run.')
+    expect(OPERATE_NON_GOALS).toContain('There is no metrics dashboard and no view of the platform’s own logs (a run page streams that run’s log), and no crb doctor screen.')
+    for (const route of ['/runs', '/posture']) expect(helpFor(route)!.purpose, route).toContain(OPERATE_NON_GOALS)
+    // the path itself is named on its stops (G-396)
+    expect(OPERATE_PATH).toBe('One stop on the Operate path: health → Runs → Ledger → Settings.')
+    for (const route of ['/runs', '/ledger']) expect(helpFor(route)!.purpose, route).toContain(OPERATE_PATH)
+    // "Verify proves …" read as a button that is not there: the server verifies on read
+    for (const h of HELP) {
+      for (const s of [h.purpose, ...Object.values(h.next), h.numbers ?? '']) expect(s, h.route).not.toContain('Verify proves')
+    }
   })
 
   it('copy lint: a term word appears only when the term is on the screen; plain English throughout', () => {

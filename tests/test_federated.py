@@ -62,6 +62,8 @@ def _row(
     arm: str = "S3",
     taxonomy: str = "global/classes@v1",
     apparatus: str = "",
+    builder: str = "agentic",
+    provider: str = "cerebras",
 ) -> GradeRow:
     return posture_row(
         repo=repo,
@@ -74,9 +76,9 @@ def _row(
         capability_class=cls,
         size=size,
         language="python",
-        builder="agentic",
+        builder=builder,
         model=model,
-        provider="cerebras",
+        provider=provider,
         run_id="run-acme-2026-07-03",
         actor="alice@acme.example",
         created="2026-07-03T00:00:00+00:00",
@@ -377,3 +379,18 @@ def test_the_export_carries_s3_rows_at_the_global_vocabulary_only() -> None:
     assert all(set(d) == set(fed.ABSTRACT_ALLOWLIST) for d in out)
     assert "context_arm" not in fed.ABSTRACT_ALLOWLIST and "taxonomy" not in fed.ABSTRACT_ALLOWLIST
     assert fed.export_abstract(stay) == []
+
+
+def test_an_instrument_check_row_never_leaves_the_tenant() -> None:
+    """A ``fixture_gold`` row (provider ``fixture``) measures the instrument, never a builder:
+    exported as a cell it would reach other organisations as a builder measurement of a
+    ``gold`` model that cannot be bought. The identity is unmistakable by construction
+    (src/crb/builders/fixture_gold.py, guard 2), so the boundary reads it and keeps the row —
+    the walkthrough's abstract export found one crossing (P-665)."""
+    real = _row(task_id="1" * 16)
+    check = _row(task_id="2" * 16, builder="fixture_gold", model="gold", provider="fixture")
+    out = fed.export_abstract([real, check])
+    assert [(d["builder"], d["provider"], d["n"]) for d in out] == [("agentic", "cerebras", 1)]
+    assert fed.export_abstract([check]) == []
+    # the guard reads the provider, the field the builder forces whatever the rung says
+    assert fed.export_abstract([_row(task_id="3" * 16, provider="fixture")]) == []

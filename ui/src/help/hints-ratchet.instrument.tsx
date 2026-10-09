@@ -34,6 +34,7 @@ import type { ReactElement } from 'react'
 import type { EventSourceLike } from '../api/sse'
 import type { LedgerVerify, Role } from '../api/types'
 import { CapabilityPage } from '../screens/Capability/CapabilityPage'
+import { ConnectRepoPage } from '../screens/Connect/ConnectPage'
 import { AcceptancePage } from '../screens/Factory/AcceptancePage'
 import { ACCEPTANCE } from '../screens/Factory/acceptance.fixture'
 import { FactoryPage } from '../screens/Factory/FactoryPage'
@@ -55,6 +56,8 @@ import { RunDetailPage } from '../screens/Runs/RunDetailPage'
 import { RunsPage } from '../screens/Runs/RunsPage'
 import { TaskDetailPage } from '../screens/Runs/TaskDetailPage'
 import { SettingsPage } from '../screens/Settings/SettingsPage'
+import { envelope } from '../test/utils'
+import { ONRAMP_SCREENS } from './hints-ratchet.onramp'
 
 export interface InstrumentScreen {
   route: string
@@ -130,7 +133,7 @@ const VERSION = { crb: '2.0.0a1', apparatus: '2.2', policy: 'routing.v1', oidc_e
 const INSTALLATION = { id: 77, account_login: 'acme', account_type: 'Organization', repository_selection: 'selected', html_url: 'https://github.com/organizations/acme/settings/installations/77', suspended: false, permissions: { contents: 'read', metadata: 'read' }, can_deliver: false, recorded_by: 'admin', updated: '2026-09-15T10:00:00+00:00' }
 const GITHUB_APP = { configured: true, app_slug: 'crb', api_url: 'https://api.github.com', install_url: 'https://github.com/apps/crb/installations/new', installations: [INSTALLATION, { ...INSTALLATION, id: 78, account_login: 'beta', permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' }, can_deliver: true }] }
 const SETTINGS = { sandbox_mode: 'local', ledger_backend: 'sqlite', builders: [{ name: 'claude_code_cli', configured: true }], retention: { worktrees: false, transcripts: false }, oidc_enabled: false, apparatus_version: '2.2', policy_version: 'routing.v1', raw: { builder: { executor: 'docker', egress_network: 'none' }, sandbox: { executor: 'local' } } }
-const LEDGER_VERIFY = { rows: 3, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '3 rows, chain intact, false_q1=0', clean_without_pack: 0, signoffs: { rows: 1, chain_ok: true, broken_at: null, detail: '1 rows, chain intact' }, reviews: { rows: 0, chain_ok: true, broken_at: null, detail: '0 rows, chain intact' }, verified_at: '2026-09-27T00:00:00Z', head_row_hash: 'h'.repeat(64), events: { rows: 2, chain_ok: true, broken_at: null, detail: '2 events, chain intact', head_row_hash: 'e'.repeat(64), walk: 'full', full_walk_at: '2026-09-27T00:00:00Z' } } satisfies LedgerVerify
+const LEDGER_VERIFY = { rows: 3, ok: true, false_q1_total: 0, chain_ok: true, broken_at: null, detail: '3 rows, chain intact, false_q1=0', clean_without_pack: 0, signoffs: { rows: 1, chain_ok: true, broken_at: null, detail: '1 rows, chain intact' }, reviews: { rows: 0, chain_ok: true, broken_at: null, detail: '0 rows, chain intact' }, verified_at: '2026-09-27T00:00:00Z', head_row_hash: 'h'.repeat(64), events: { rows: 2, chain_ok: true, broken_at: null, detail: '2 events, chain intact', head_row_hash: 'e'.repeat(64), walk: 'full', full_walk_at: '2026-09-27T00:00:00Z' }, disqualified: { window_days: 7, threshold: 2, by_builder: [], over: [] } } satisfies LedgerVerify
 
 const CELL = { capability_class: 'bug.fix', size: 'XS', n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, route: 'deliver', reason: 'n=40 point=0.95 ci_low=0.835 false_q1=0 oracle=0.9', reason_code: 'deliver', cost_usd_mean: 0.34, latency_s_mean: 200, verification_tier: 'automated-pass', apparatus_versions: ['2.2'], belt_set: 'v5', oracle_strength_mean: 0.9, n_tasks: 12, n_builder_red: 2, n_budget: 0, n_protocol: 0, n_harness: 0, n_disqualified: 0, failure_split: { builder_red: 2, lint: 0, budget: 0, protocol: 0, harness: 0, disqualified: 0 }, model_point: 0.95, model_n: 40, model_ci_low: 0.835, model_ci_high: 0.985 }
 const MAP = {
@@ -308,11 +311,31 @@ const BACKLOG = {
     { id: 'I-1', title: 'Multiply', kind: 'code', capability_class: 'bug.fix', size: 'XS', level: 'L1', depends_on: [], structural_facts: ['reproduction: x'], has_authored_test: true, description: 'calc needs multiply' },
     { id: 'I-2', title: 'Divide', kind: 'code', capability_class: 'feature.add', size: 'S', level: 'L1', depends_on: ['I-1'], structural_facts: [], has_authored_test: false, description: '' },
   ],
+  // G-368 — the delivered pull requests by outcome, and when the newest was read
+  outcomes: { delivered: 1, merged: 1, closed: 0, open: 0, last_synced: '2026-09-16T08:00:00+00:00' },
 }
 const FACTORY_TASKS = [
-  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64) },
+  { id: 'I-1', title: 'Multiply', capability_class: 'bug.fix', size: 'XS', kind: 'code', status: 'accepted', dor_gaps: [], route_hint: 'build', red_proof: true, build_status: 'clean', pr_url: 'https://github.invalid/acme/alpha/pull/7', review_verdict: 'accept', last_event: 'item.outcome', cell_route: DELIVER, ...UNTOUCHED, task_id: 'c'.repeat(40), run_id: 'r'.repeat(32), pack_hash: 'p'.repeat(64), row_hash: 'h'.repeat(64), outcome: { state: 'merged', pr_number: 7, pr_url: 'https://github.invalid/acme/alpha/pull/7', merged_at: '2026-09-16T07:59:00+00:00', merged_by: 'ada', merge_sha: 'm'.repeat(40), closed_at: '', synced_at: '2026-09-16T08:00:00+00:00' } },
   { id: 'I-2', title: 'Divide', capability_class: 'feature.add', size: 'S', kind: 'code', status: 'not_ready', dor_gaps: ['method_path', 'response_shape'], route_hint: 'human', red_proof: null, build_status: 'not_started', pr_url: null, review_verdict: null, last_event: 'readiness.blocked', cell_route: NO_ROUTE, ...UNTOUCHED, refusal: { step: 'readiness', reason: 'two structural gaps are unsigned', reason_code: '', measured_route: '' } },
 ]
+/** DL-310 / F32 — a stop whose way forward is `register_evolution`, with the served draft: the
+ *  state that opens the evolution dialog (an operator) or the "an operator registers" note (a viewer). */
+const FACTORY_WEAK_TEST_STOP = {
+  ...FACTORY_TASKS[0]!,
+  status: 'oracle_needs_strengthening',
+  pr_url: null,
+  review_verdict: null,
+  outcome: null,
+  refusal: { step: 'review', reason: 'the reviewer found the oracle weak: strengthen the test and register a superseding item', reason_code: '', measured_route: '' },
+  way_forward: {
+    action: 'register_evolution',
+    route: '/factory/alpha/backlog/evolutions',
+    supersedes: 'I-1',
+    what_to_change: 'Strengthen the test so it fails for the reason the review gave, then register this item with the stronger test attached.',
+    needs_authored_test: true,
+    prefill: { id: 'I-1-v2', title: 'Multiply', kind: 'code', description: 'calc needs multiply', capability_class: 'bug.fix', size_estimate: 'XS', structural_facts: ['reproduction: x'], acceptance_criteria: ['multiply(3, 4) == 12'], depends_on: [], level: 'L1', supersedes: 'I-1' },
+  },
+}
 const INTAKE = {
   repo: 'alpha',
   listener: { enabled: true, column: 'Ready for manufacture', switched_by: 'Ada', switched_at: '2026-09-22T09:00:00Z', since: '2026-09-22T09:00:00Z' },
@@ -431,6 +454,19 @@ const REFUSALS = {
   apparatus_versions: ['2.2'],
   groups: [{ group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl https://…', truncated: false, n: 3, cost_usd: 1.2, verdict: 'unsure', candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:' }],
   decisions: [],
+  // the guard's false positives by apparatus and month (G-536): one undecided row, so the
+  // rate reads as a range and the undecided line renders
+  false_positives: {
+    periods: [{ apparatus_version: '2.2', month: '2026-09', rows_protocol: 3, honest: 1, refuse: 1, undecided: 1, rate_low: 0.3333, rate_high: 0.6667 }],
+    rows_protocol: 3,
+    honest: 1,
+    refuse: 1,
+    undecided: 1,
+    decided_groups: 1,
+    undecided_groups: 1,
+    unclassed: 0,
+    note: 'a row is a false positive when every class it fell into was decided honest',
+  },
   note: '',
 }
 const STRENGTHEN = {
@@ -444,16 +480,22 @@ const STRENGTHEN = {
 const REMEASURE = {
   repo: 'alpha',
   current_apparatus: '2.2',
-  min_n: 10,
+  min_n: 20,
   rows_total: 40,
   rows_stale: 12,
   cells: [
-    { label: 'bug.fix · XS', mode: 'sighted', capability_class: 'bug.fix', size: 'XS', n_stale: 12, stale_versions: ['2.1'], n_current: 4, n_needed: 6, est_cost_usd: 2.4, cost_known: true, requests: [{ kind: 'replay', limit: 6 }], in_flight_run_ids: [] },
-    // a cell whose runs are queued and unfinished: the page shows them in place of Queue
-    { label: 'bug.fix · S', mode: 'sighted', capability_class: 'bug.fix', size: 'S', n_stale: 3, stale_versions: ['2.1'], n_current: 0, n_needed: 10, est_cost_usd: 1.1, cost_known: true, requests: [{ kind: 'replay', limit: 10 }], in_flight_run_ids: ['r1'] },
+    // a registered reading waiting on its look: its pending commits, priced, with Queue
+    { label: 'bug.fix · XS', key: 'bug.fix · XS|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_1', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 14, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 6, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay', limit: 6 }], note: '', in_flight_run_ids: [] },
+    // a reading whose runs are queued and unfinished: the page shows them in place of Queue
+    { label: 'bug.fix · S', key: 'bug.fix · S|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_2', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 10, n_needed: 10, n_requested: 10, short_by: 0, est_cost_usd: 1.1, est_minutes: 5, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay', limit: 10 }], note: '', in_flight_run_ids: ['r1'] },
+    // a reading this plan cannot compose a replay for: queued by hand from Runs
+    { label: 'feature.add · M', key: 'feature.add · M|blind|S1@claude-opus-5', reason: 'look_pending', next_act: 'runs', arm: 'S1@claude-opus-5', reading_id: 'rdg_3', next_look: 20, mode: 'blind', n_stale: 0, stale_versions: [], n_current: 0, n_needed: 20, n_requested: 0, short_by: 20, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'S1@claude-opus-5 counts only rows whose failing test claude-opus-5 wrote; this deployment’s test author is not configured', in_flight_run_ids: [] },
+    // a stale cell with no reading: register one first, nothing to queue
+    { label: 'test.add · XS', key: 'test.add · XS|sighted|', reason: 'stale', next_act: 'register', arm: '', reading_id: '', next_look: null, mode: 'sighted', n_stale: 12, stale_versions: ['2.1'], n_current: 0, n_needed: 20, n_requested: 0, short_by: 0, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'register a reading of this cell at apparatus 2.2 first', in_flight_run_ids: [] },
   ],
   up_to_date: [],
-  summary: { cells_stale: 1, n_needed_total: 6, est_cost_usd_total: 2.4, est_minutes_total: 20, cost_known_cells: 1 },
+  cannot_clear: [{ label: 'docs.update · S', mode: 'sighted', arm: 'S3', state: 'undecided', reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_4' }],
+  summary: { cells_pending: 3, cells_stale: 1, cells_thin: 0, n_needed_total: 36, n_requested_total: 16, short_by_total: 20, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 3 },
   note: '',
 }
 
@@ -486,10 +528,10 @@ const SECRETS = { items: [{ name: 'claude_code_oauth_token', present: true, fing
 const BUILDER_LOGINS = { items: [{ builder: 'claude_code', auth: 'cli', state: 'invalid', status: 'invalid', detail: 'authentication failed (HTTP 401)', source: 'keychain', fingerprint: '', cli_version: '2.1.275', checked_at: '2026-09-27T15:47:02+00:00', age_s: 42, ttl_s: 600, trigger: 'submit', reason: '' }] }
 
 // ── the flow reading every screen shows its own stream's numbers from (G-925)
-const flowStream = (stream: string, name: string, key: string) => ({
+const flowStream = (stream: string, name: string, keys: string[]) => ({
   stream,
   name,
-  lead_times: [{ key, label: `${name} lead time`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' }],
+  lead_times: keys.map((key) => ({ key, label: `${name} lead time ${key}`, n: 2, median_s: 7200, min_s: 3600, max_s: 10_800, dropped: 0, reason: '' })),
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   spend_label: 'the replay and blind attempts graded for this repository',
   per_unit: null,
@@ -498,7 +540,7 @@ const flowStream = (stream: string, name: string, key: string) => ({
   per_unit_units: 0,
   per_unit_reason: 'no merged pull request yet to divide by',
   counts: { graded_rows: 44 },
-  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of the guide’s “real work”', why: 'nothing here times the work a person does outside this product', gap: 'G-556' }] : [],
+  not_captured: stream === 'connect-and-prove' ? [{ figure: 'the developer hours of step 2 (the guide’s “real work”), as the developer spent them', why: 'the work happens outside this product; the span from the first red probe or qualify to the first qualified task is timed above and stands in for it', gap: 'G-556' }] : [],
 })
 const FLOW = {
   repo: 'alpha',
@@ -507,12 +549,16 @@ const FLOW = {
   method: 'derived from the stored runs, graded rows, events, sign-offs and factory chain',
   spend: { usd: 0.528, rows_priced: 44, rows_unpriced: 6, apparatus_versions: ['2.3'] },
   streams: [
-    flowStream('connect-and-prove', 'Connect & prove', 'registered_to_controls'),
-    flowStream('measure', 'Measure', 'queued_to_graded'),
-    flowStream('decide-and-license', 'Decide & license', 'accepted_to_signed'),
-    flowStream('manufacture-and-deliver', 'Manufacture & deliver', 'registered_to_pr'),
-    flowStream('learn', 'Learn', 'refusal_to_strengthening'),
-    flowStream('run-the-platform', 'Run the platform', 'password_set_to_signed_in'),
+    flowStream('connect-and-prove', 'Connect & prove', ['registered_to_controls', 'registered_to_probe_green', 'step_2_span', 'mine_run', 'oracle_run', 'controls_run']),
+    flowStream('measure', 'Measure', ['queued_to_graded']),
+    flowStream('decide-and-license', 'Decide & license', ['accepted_to_signed']),
+    flowStream('manufacture-and-deliver', 'Manufacture & deliver', ['registered_to_pr']),
+    {
+      ...flowStream('learn', 'Learn', ['refusal_to_strengthening', 'finding_to_remeasurement']),
+      // the learn stream's own counts, each explained on hover (G-536)
+      counts: { refusals: 2, guard_rows_refused: 5, guard_false_positives: 1, guard_right_refusals: 2, guard_rows_undecided: 2, classes_found: 3, classes_with_a_change: 1, classes_remeasured: 1 },
+    },
+    flowStream('run-the-platform', 'Run the platform', ['password_set_to_signed_in']),
   ],
 }
 
@@ -566,6 +612,7 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
       'GET /factory/alpha/backlog': BACKLOG,
       'GET /factory/alpha/tasks': FACTORY_TASKS,
       'GET /factory/catalogue': CATALOGUE,
+      'GET /factory/alpha/intake': INTAKE,
       'GET /health': HEALTH,
       'GET /version': VERSION,
       'GET /capability-map': MAP,
@@ -642,20 +689,23 @@ export const INSTRUMENT_SCREENS: Record<string, InstrumentScreen> = {
     path: '/routing',
     element: <RoutingPage />,
     api: { 'GET /routes': ROUTES, 'GET /repos': REPOS },
-    roles: ['viewer'],
+    // an operator's branch is the empty state's replay link (the variant below); the table
+    // and the doors render the same for both (G-254)
+    roles: ['viewer', 'operator'],
   },
   '/oracle': {
     route: '/oracle?repo=alpha',
     path: '/oracle',
     element: <OraclePage />,
     api: { 'GET /oracle/alpha': ORACLE, 'GET /oracle/alpha/controls': CONTROLS_REPORT, 'GET /repos': REPOS },
-    roles: ['viewer'],
+    // the operator's branch too (G-206); its Run oracle / Run controls render in the variant below
+    roles: ['viewer', 'operator'],
   },
   '/learn': {
     route: '/learn?repo=alpha',
     path: '/learn',
     element: <LearnPage />,
-    api: { 'GET /learn/register': REGISTER, 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS },
+    api: { 'GET /learn/register': REGISTER, 'GET /learn/refusals': REFUSALS, 'GET /learn/strengthen': STRENGTHEN, 'GET /learn/remeasure': REMEASURE, 'GET /repos': REPOS, 'GET /flow': FLOW },
     // a viewer sees the register and the reports with no control; an operator gets the
     // switch, revert and register, and the three decisions the reports hand off to (G-532)
     roles: ['viewer', 'operator'],
@@ -715,8 +765,42 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
   { name: '/repos/:name tab=profile', route: '/repos/alpha?tab=profile', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer'] },
   { name: '/repos/:name tab=tasks', route: '/repos/alpha?tab=tasks', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer'] },
   { name: '/repos/:name tab=config', route: '/repos/alpha?tab=config', path: '/repos/:name', element: <RepoDetail />, api: INSTRUMENT_SCREENS['/repos/:name']!.api, roles: ['viewer', 'operator'] },
+  // G-206: nothing scored and no controls report — the state where Run oracle and Run controls render for an operator
+  {
+    name: '/oracle, nothing measured yet',
+    route: '/oracle?repo=alpha',
+    path: '/oracle',
+    element: <OraclePage />,
+    api: { 'GET /oracle/alpha': { ...ORACLE, tasks: [], cells: [] }, 'GET /oracle/alpha/controls': () => envelope(404, 'not_measured', 'no controls report'), 'GET /repos': REPOS },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByText('No controls report yet')
+    },
+  },
+  // G-269: more runs match than the page reads — the "newest 200 of n" line
+  { name: '/runs, more runs than the page', route: '/runs', path: '/runs', element: <RunsPage />, api: { ...INSTRUMENT_SCREENS['/runs']!.api, 'GET /runs': { ...RUNS, total: 437 } }, roles: ['viewer', 'operator'], open: async () => void (await screen.findByTestId('runs-limit')) },
   // G-180: a filter that arrives in a link and has no control of its own shows as a chip
   { name: '/ledger + filters from a link', route: '/ledger?repo=alpha&run_id=r1&task_id=t1&builder=fixture&language=python', path: '/ledger', element: <LedgerPage />, api: INSTRUMENT_SCREENS['/ledger']!.api, roles: ['viewer'] },
+  // Routes with nothing decided yet: the empty state offers the replay run to an operator only (G-254)
+  { name: '/routing, no decisions yet', route: '/routing?repo=alpha', path: '/routing', element: <RoutingPage />, api: { 'GET /routes': { ...ROUTES, decisions: [] }, 'GET /repos': REPOS }, roles: ['viewer', 'operator'], minHints: 29 },
+  {
+    // DL-310 / F32: the evolution dialog on the served draft, reached only from a stop whose way
+    // forward is `register_evolution` — an operator opens it; a viewer reads the note instead
+    name: '/factory + Register this evolution… (the dialog on the served draft)',
+    route: '/factory?repo=alpha',
+    path: '/factory',
+    element: <FactoryPage />,
+    api: { ...INSTRUMENT_SCREENS['/factory']!.api, 'GET /factory/alpha/tasks': [FACTORY_WEAK_TEST_STOP, FACTORY_TASKS[1]!] },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByTestId('prefill-I-1')
+      const button = screen.queryByTestId('register-evolution-I-1')
+      if (button) {
+        await userEvent.click(button)
+        await screen.findByTestId('evolution-form')
+      }
+    },
+  },
   {
     name: '/capability + open cell detail',
     route: '/capability?repo=alpha',
@@ -823,6 +907,44 @@ export const INSTRUMENT_VARIANTS: Array<InstrumentScreen & { name: string; open?
       await screen.findByTestId('account-history-list')
     },
     minHints: 61,
+  },
+  {
+    // G-117: Cancel the run asks before it posts — the question's two buttons are a state of
+    // their own the one-entry table cannot reach (the fixture's walk has a replay in flight)
+    name: '/connect/:name + Cancel the run confirm',
+    route: '/connect/alpha',
+    path: '/connect/:name',
+    element: <ConnectRepoPage />,
+    api: ONRAMP_SCREENS['/connect/:name']!.api,
+    roles: ['operator'],
+    open: async () => {
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel the run' }))
+      await screen.findByTestId('cancel-confirm')
+    },
+    minHints: 20,
+  },
+  {
+    // DL-316: the mine stage's candidate lines, Accept and Reject are a state the fixture's
+    // walk (whose notes imply nothing) cannot reach; a viewer reads them, an operator decides
+    name: '/connect/:name + config candidates',
+    route: '/connect/alpha',
+    path: '/connect/:name',
+    element: <ConnectRepoPage />,
+    api: {
+      ...ONRAMP_SCREENS['/connect/:name']!.api,
+      'GET /repos/alpha/config-candidates': {
+        repo: 'alpha',
+        items: [
+          { id: 'raise_test_timeout:runner_opts.timeout:1800', kind: 'raise_test_timeout', scope: 'repo', field: 'runner_opts.timeout', observed: 900, proposed: 1800, reason: '2 commits hit the test wall clock at the parent, the baseline or the gold; the limit in force is 900 s, and raising it lets them qualify', sources: ['a'.repeat(40), 'b'.repeat(40)] },
+          { id: 'provisioning_on:CRB_PROVISION__ENABLED:True', kind: 'provisioning_on', scope: 'deployment', field: 'CRB_PROVISION__ENABLED', observed: null, proposed: true, reason: '1 commit could not load its dependencies offline; switch dependency provisioning on for this deployment (docs/DEPLOYMENT.md §3.4), then qualify again', sources: ['c'.repeat(40)] },
+        ],
+      },
+    },
+    roles: ['viewer', 'operator'],
+    open: async () => {
+      await screen.findByTestId('config-candidates')
+    },
+    minHints: 20,
   },
   {
     name: '/repos + Add a repository dialog',

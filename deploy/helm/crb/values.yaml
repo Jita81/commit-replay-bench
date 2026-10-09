@@ -350,11 +350,11 @@ serviceMonitor:
   worker:
     enabled: false
 
-# DEPLOYMENT §9.2's four alert rules as a PrometheusRule (needs the Prometheus Operator's
+# DEPLOYMENT §9.2's seven alert rules as a PrometheusRule (needs the Prometheus Operator's
 # CRD). Off by default. `labels` are what your Prometheus's ruleSelector matches (for
 # example `release: kube-prometheus-stack`). Scrape both the api and the worker
 # (serviceMonitor.enabled and serviceMonitor.worker.enabled, or your own scrape config):
-# three rules read the worker's series, so the render refuses the rules while
+# five rules read the worker's series, so the render refuses the rules while
 # worker.metrics.port is 0. `noWorkerFor` is how long no worker exposition may be missing
 # before CrbNoWorker fires — keep it several scrape intervals long.
 prometheusRule:

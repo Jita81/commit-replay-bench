@@ -14,7 +14,8 @@
  *               controls run drives the seven negative controls through the real grader and
  *               the page renders every control with its verdict — gold ok, noop red, a
  *               tampered test disqualified (caught) — with NO verdict a VIOLATION (which
- *               would be an instrument bug).
+ *               would be an instrument bug); and that each run's duration, read from the API's
+ *               own `started` / `finished` stamps, is attached to its test (G-430).
  * How:          `startRun` for `oracle` then `controls`; `waitForRun`; assertions per control
  *               name on the Oracle page's tables.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -23,15 +24,36 @@
  *               screen under test), src/crb/core/oracle/mutation.py and
  *               src/crb/core/oracle/controls.py (the runs whose results are asserted)
  * Tested by:    ui/e2e/walkthrough/04-oracle-and-controls.spec.ts
- * Touch when:   a control is added to the matrix (`CONTROLS` here must match
- *               src/crb/core/oracle/controls.py) or the Oracle page's columns change.
+ * Touch when:   never for a new repository (it walks the primary tier target); a control is
+ *               added to the matrix (`CONTROLS` here must match src/crb/core/oracle/controls.py)
+ *               or the Oracle page's columns change; the run API's `started` / `finished`
+ *               stamps change (the oracle and controls runs' timing, G-430).
  */
-import { env, expect, expectLogAction, primary, startRun, test, waitForRun } from './support'
+import { env, expect, expectLogAction, primary, runIdFromUrl, startRun, test, waitForRun } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
 const CONTROLS = ['gold', 'noop', 'test_tamper', 'stub', 'regression', 'hardcode_cheat', 'env_poison'] as const
 const RUN_TIMEOUT_MS = 6 * 60_000
+
+/**
+ * G-430 — how long this run took, from the API's own `started` and `finished` stamps, attached
+ * to the test as an annotation (and printed, so the walkthrough's output carries it). The same
+ * stamps are what `GET /flow` folds into the connect stream's per-run median.
+ */
+async function timeRun(page: import('@playwright/test').Page, kind: string, timeoutMs: number): Promise<number> {
+  const id = runIdFromUrl(page)
+  const res = await page.request.get(`${env.baseUrl}/api/v1/runs/${id}`)
+  expect(res.ok(), `GET /runs/${id} → ${res.status()}`).toBeTruthy()
+  const run = (await res.json()) as { started: string | null; finished: string | null; apparatus_version: string }
+  const seconds = (Date.parse(run.finished ?? '') - Date.parse(run.started ?? '')) / 1000
+  expect(Number.isFinite(seconds) && seconds >= 0, `run ${id} has a readable started and finished stamp`).toBe(true)
+  const description = `${seconds.toFixed(1)} s · run ${id} · apparatus ${run.apparatus_version} · method: finished − started from GET /runs/{id}`
+  test.info().annotations.push({ type: `${kind}-run-duration`, description })
+  console.log(`[G-430] ${kind} run: ${description}`)
+  expect(seconds * 1000, `the ${kind} run stayed within the tier's timeout`).toBeLessThanOrEqual(timeoutMs)
+  return seconds
+}
 
 test.describe('04 oracle + controls', () => {
   const t = primary()
@@ -39,6 +61,7 @@ test.describe('04 oracle + controls', () => {
   test('an oracle run scores every mined task; the Oracle page shows strength, band and gate', async ({ page }) => {
     await startRun(page, t.name, { kind: 'oracle', limit: 1 })
     await waitForRun(page, 'succeeded', RUN_TIMEOUT_MS)
+    await timeRun(page, 'oracle', RUN_TIMEOUT_MS)
     await expectLogAction(page, 'oracle.mutation.scored')
     await expectLogAction(page, 'oracle.score')
 
@@ -65,6 +88,7 @@ test.describe('04 oracle + controls', () => {
   test('a controls run renders the seven negative controls with their verdicts', async ({ page }) => {
     await startRun(page, t.name, { kind: 'controls', limit: 1 })
     await waitForRun(page, 'succeeded', RUN_TIMEOUT_MS)
+    await timeRun(page, 'controls', RUN_TIMEOUT_MS)
     await expectLogAction(page, 'controls.report')
 
     await page.goto(`/oracle?repo=${encodeURIComponent(t.name)}`)

@@ -916,6 +916,49 @@ writes both heads to its log. A chain cannot show that rows were cut from its en
 the whole store was replaced; a head you recorded earlier can — it must still be in the
 chain ([DEPLOYMENT §8](DEPLOYMENT.md#8-go-live-checklist)).
 
+### 6.1 What operating costs in time, money and storage
+
+**Time — the routine.** `crb doctor` ([§1.1](#11-check-the-installation-crb-doctor)) is the
+host check: run it on the API host and on the worker host after installing, after changing
+any `CRB_*` variable, whenever a run sits `queued`, and before a sign-off you will stand
+behind. Between those moments `/health` answers the same questions from inside the process
+for the load balancer and the header pill, so nobody needs to run doctor on a timer. Export
+and verify ([§6](#6-export-and-verify-the-ledger)) is the other routine act, and it is cheap:
+exporting `1000` rows as JSONL took `0.02 s` and re-verifying their chain the way
+`GET /ledger/verify` does took `0.03 s` **[measured — n = 1000 synthetic rows; method:
+`tests/test_operating_costs.py::test_a_thousand_rows_export_and_verify_within_bound_and_grow_the_store_by_at_most_bound`,
+which appends the rows through the ledger's own writer into a temporary SQLite store, streams
+the API's JSONL export and runs the API's verify walk, timed with `perf_counter`; observed on
+2026-09-29 on one loaded Apple-silicon laptop, the same on three runs; the test holds a bound
+of `30 s` each, several times the observed figure; apparatus 2.4]**. A full audit-trail walk
+grows with the `events` table ([DEPLOYMENT §9.5](DEPLOYMENT.md#95-events)); time
+`crb ledger verify --store` on your own store for that.
+
+**Money — a sweep.** The Measure page shows an estimate before every run: the repository's
+measured mean cost per attempt multiplied by the attempts you chose, once the repository has
+measured rows of its own; until then it shows the planning band
+[ONBOARDING](ONBOARDING-A-REPO.md) quotes for Claude Sonnet, `$0.20` to `$0.60` an attempt
+**[hypothesis — a planning band, not a measurement of your repository or your prices; the
+first sweep replaces it with the repository's own mean, and the button says "estimated"
+either way]**. The cap you set (`--budget-usd`, or the page's spend cap) is what a run may
+spend at most; it stops itself there ([§8](#8-stop-conditions)). No cross-deployment figure
+is offered: models, sizes, prices and the share of attempts that climb a ladder differ, and
+`crb_builder_cost_usd_total` is a floor — an unpriced model adds nothing to it
+**[hypothesis — the reason no number is given, not a number]**.
+
+**Storage — how the store grows.** The grade ledger grew by `1,458,176` bytes for `1000`
+rows — about `1.4 MiB`, or `1.5 KB` a row **[measured — n = 1000 synthetic rows; method: the
+same test, the SQLite file's size before and after `append_many` with the engine disposed so
+no journal hides growth; the test holds a bound of `4 MiB`; apparatus 2.4]**. That is the
+rows alone. Evidence packs are stored separately, one body per pack in the `evidence` table,
+and a pack is larger than its row (it carries the grade's test-output tails and the builder's
+budget), so a store with packs grows faster than this figure; worktrees, clones and retained
+transcripts live under `CRB_HOME` on disk, not in the store
+([DATA-RETENTION](DATA-RETENTION.md)). PostgreSQL differs — page layout, indexes and TOAST
+storage of the JSON columns — so measure your own store with
+`pg_total_relation_size('grades')` and `pg_total_relation_size('evidence')` before sizing a
+volume **[hypothesis — the direction of the difference, not its size]**.
+
 ## 7. When the sandbox is unavailable
 
 **Fail closed means the run STOPS.** If Docker is missing, the daemon is unreachable, the
@@ -1015,9 +1058,31 @@ Stop delivery and investigate before any further sign-off if you observe any of:
 
 - `false_q1 > 0` anywhere (`crb_false_q1_total` metric non-zero);
 - `crb ledger verify` fails;
-- a secret in an evidence pack, log or export;
-- a sandbox escape or unexpected network egress from a test container;
-- a builder repeatedly disqualified for test tampering (shows as a rising `disqualified` count);
+- a secret in an evidence pack, log or export — the `redaction` probe on `/health` re-checks
+  the newest stored packs for the credential shapes the redactor knows and reads `down`
+  naming the pack hash, never the value ([DEPLOYMENT §9.3](DEPLOYMENT.md#93-health)); it
+  reads known shapes in stored packs only, so a log or an export is still yours to read.
+  **The way back** (DL-313): a stored pack is never deleted (the table is append-only,
+  [DATA-RETENTION](DATA-RETENTION.md)), so `down` does not clear by itself — while it holds,
+  the load balancer stops routing to the API and you reach it on the pod or the host directly
+  (`kubectl port-forward`, or the compose port). (1) Rotate the credential the pack shows
+  ([§5](#5-credentials) — after rotation the value is dead); (2) an approver acknowledges the
+  pack with the reason: `POST /api/v1/system/redaction/<pack_hash>/acknowledge`
+  `{"reason": "…"}` — one `redaction.acknowledged` event on the audit chain under their
+  name, never the value; the probe reads `ok` again at once, naming the acknowledged pack.
+  A pack acknowledged is not silence: the next leaking pack is `down` again. Nothing else
+  clears it — not a restart, not the arrival of newer packs;
+- a sandbox escape or unexpected network egress from a test container — a builder's
+  connection the egress sidecar refused shows as `crb_egress_denied_total` and the **Egress
+  denied** alert, and the run's `builder.egress_denied` events name the targets
+  ([DEPLOYMENT §9.2](DEPLOYMENT.md#92-alert-rules), which also says what the product cannot
+  see: the grading sandbox has no network, and a runtime escape needs your own sensor);
+- a builder repeatedly disqualified for test tampering — a rising `disqualified` count:
+  `GET /ledger/verify` serves it per builder over the last `7` days and the Ledger's tile
+  turns red at the threshold, `2` disqualified attempts per builder in that window
+  **[hypothesis — DL-312: a starting threshold, chosen so one accident never stops a builder
+  and two in a week always ask a person; change it when your own base rate is measured]**,
+  and the **Disqualified rising** alert reads the same count per repository;
 - attempts recorded `harness` with `error: environment: …` — the humans' own change failed
   the same scope in the same posture, so the posture moved under its qualification (a run
   stops itself after `env_stop` of them in a row, `run.environment_stop`; qualify again
@@ -1054,6 +1119,37 @@ registered from a partial read.
 | `column_too_large` | the column holds more tickets than one pass may read (`CRB_INTAKE__MAX_PER_POLL`), or the pass ran past `CRB_INTAKE__POLL_BUDGET_S` | narrow the area path or the JQL so the column holds the work that is genuinely ready, or raise the bound; a pass that ran out of time serves what it read and the rest are read next time |
 | `no_public_url` | this deployment does not know its own address, so a link on a ticket would not open | set `CRB_PUBLIC_URL` to the address people use to reach the product, on the API and the worker |
 | `lease_lost` | one tracker call took longer than the pass's lease lives, and another pass took the repository over | nothing: the pass renews its lease around every tracker call, so this needs one call slower than the lease; the pass stopped before its next call and the other pass carries on. If it recurs, the tracker is answering very slowly — raise `CRB_INTAKE__POLL_BUDGET_S`, which lengthens the lease with it |
+
+### 8.1 Factory stop conditions
+
+The loop's own words. A factory run stops an item, or refuses
+to start, with one of the words below; each is on the item's evidence chain and on the
+Factory screen, word for word. Forward mode is explained in
+[ONBOARDING Step 8](ONBOARDING-A-REPO.md#step-8--forward-mode-when-a-cell-is-trusted), the
+factory's test author in [§10](#10-the-factorys-test-author), work arriving from a board in
+[§11](#11-intake--work-arriving-from-a-board), and what happens at clone and at delivery in
+[GITHUB-APP §5](GITHUB-APP.md#5-what-happens-at-clone-and-at-delivery). None of them loses
+work: the item stays on the backlog, and a superseding item, a sign-off, a measurement or a
+fix on your side moves it on. A stop is not a defect in the factory; a stop nothing explains is.
+
+| Word | What happened | What you do |
+|---|---|---|
+| `not_ready` | the readiness gate found a structural gap nobody has signed (a missing test scaffold, a service, a class a person tests by hand) | an approver signs the gap on the Decisions inbox, or a person does the work the gap names; the next run reads the item again |
+| `no_proven_standard` | the entry gate found no proven context standard for the item's cell, or only an S3 ceiling — nothing shows what this kind and size of change needs to succeed here | measure the cell (a replay on tasks of that class and size), or an approver funds a calibration build from the Factory screen; a calibration build never opens a pull request |
+| `needs_context` | the cell has a standard, and the ticket is missing what that arm needs — the structural facts the test author reads, or a failing test a person wrote | add what the stop names to the ticket and register a superseding item; the Factory screen's evolution form pre-fills it |
+| `unsigned_cell` | the cell's standard is proven but nobody has signed it, and the sign-off clause is on (ADR-0018, the default); read again at the delivered change's own cell | an approver signs the cell on the Decisions inbox; for one run only, a second approver — never the run's own actor, never on a false-Q1 cell — may lift this clause from the run page, recorded on the chain |
+| `granularize` | the size rule reads the item as XL at its estimate or the next size up — too large to be delivered as one change | split the item into changes the map has measured, and register each |
+| `unsized` | the ticket carries no size estimate the gate can read | size the ticket (XS to XL) and register it again |
+| `not_licensed` | delivery is on and no rung of the ladder holds a licence at the item's size, so a build would cost money and could not be delivered | sign off a cell at that size, or run with delivery off to measure; `$0` was spent |
+| `size_exceeds_licence` | the change measured larger than the licence it was routed on, so its own cell is not signed | sign that cell, or split the change; the change is on the local branch — nothing was pushed and no pull request was opened |
+| `cell_not_licensed` | the final rung's builder and model at the measured size are not a licensed cell | sign that cell or route the item to a licensed rung; the change is on the local branch — nothing was pushed and no pull request was opened |
+| `calibration_build` | an approver's calibration build was accepted by its review — evidence for the standard, never a delivery | read the evidence; if the standard holds, sign the cell and register the item as work |
+| `oracle_needs_strengthening` | the review asked for a stronger test (a `weak_oracle` finding) and no changed test can be had — no test author, or the author returned the same test | register a superseding item with a stronger test attached; a rebuild against the same test would only pass it another way |
+| `oracle_not_scoreable` | the required strength probe could not score the authored test and no approver waived it for those bytes | an approver waives the probe for that test on the run page, or a superseding item carries a test the probe can score |
+| `delivery.withheld` | the change graded clean and the route gate refused delivery: the cell's route is not `deliver` at the measured size (unmeasured, thin, or the controls verdict is not `passed`) | measure the cell, run the controls, or sign the cell; the branch was not pushed. The event is metered as `crb_deliveries_total{outcome="withheld"}` |
+| `read_only` | the GitHub App installation holds no `Contents: write` and `Pull requests: write`, so the preflight refuses before any build is paid for | grant both permissions on the installation in GitHub, then *Sync installations* in Settings; `GET /factory/{repo}/delivery` says when it can |
+| `delivery_failed` | the push or the pull-request call errored after an accepting review — the installation is suspended, a permission changed, or the default branch moved | read the item's `delivery.error` event and [GITHUB-APP §5](GITHUB-APP.md#5-what-happens-at-clone-and-at-delivery); fix the installation or the branch and queue the run again; the alert **Deliveries failing** fires on the metered count |
+| `FetchRefused` | the clone under `CRB_HOME/repos/<name>` could not be fast-forwarded to the remote's default branch — the remote is unreachable, the branch is gone, or the clone holds a commit the remote does not | the run ended `failed` before anything was built; fix the remote or remove the stray commit from the clone (the product never resets a clone on its own) and queue the run again |
 
 Resume only after root cause, correction, a targeted regression run and re-qualification
 of the affected cells.
@@ -1459,9 +1555,15 @@ held-out tests are too weak to route, and the tests to strengthen. Strengthen th
 repository (the product never writes a customer's tests), score the oracle again
 (§3.1), re-run the controls, then re-measure the cell.
 
-**Re-measure — read it after an upgrade changes the apparatus.** Each cell stamped with an older
-apparatus shows how many rows it still needs, the estimated cost and the `POST /runs` bodies to
-queue. Queue the ones worth paying for from **Runs**; nothing is queued for you.
+**Top up — read it after registering a reading, and after an upgrade changes the apparatus.**
+A cell is licensed only by a reading registered before its first attempt, and only rows graded
+after it count. Each registered reading waiting on its look shows the commits it still needs,
+the estimated cost and the run that would grade them: queue it from the row, after reading the
+estimate. A cell with rows but no reading at the current apparatus — stale after an upgrade,
+or never registered — is offered nothing to replay: register a reading of it first
+(`crb reading register`, or `POST /readings`), because a replay graded before registration
+never counts and makes those commits unusable in the reading that could. Nothing is queued for
+you.
 
 
 ## 14. The context library

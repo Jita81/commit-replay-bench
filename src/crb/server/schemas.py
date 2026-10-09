@@ -282,6 +282,11 @@ class _RepoConfigFields(BaseModel):
             RepoChecks.from_config(v)  # ValueError → 422 with the reason
         return v
 
+    #: Chain the £0 stages (DL-315, ``RepoConfig.auto_stages``): the worker queues the next
+    #: free stage when the previous one succeeds and its pass fact holds. Set through this
+    #: route, so the switch is a ``repo.updated`` event with its actor like any config change.
+    auto_stages: bool | None = Field(default=None, strict=True)  # a string never switches it on
+
     @field_validator("runner")
     @classmethod
     def _runner_known(cls, v: str | None) -> str | None:
@@ -334,6 +339,38 @@ class RepoUpdateRequest(_RepoConfigFields):
     """``PUT /repos/{name}`` — a partial update; ``name`` cannot change."""
 
     language: str | None = Field(default=None, min_length=1, max_length=32)
+
+
+class ConfigCandidateOut(BaseModel):
+    """One config change the mine notes imply (DL-316, ``crb.core.mine.config_candidates``):
+    ``field`` is the dotted config path (``runner_opts.timeout``, ``lint.timeout``) or, for a
+    ``deployment`` scope, the deployment variable; ``observed`` is the configured limit that
+    was hit, ``proposed`` the value Accept applies; ``sources`` the task ids or skipped shas."""
+
+    id: str
+    kind: str
+    scope: str
+    field: str
+    observed: Any = None
+    proposed: Any = None
+    reason: str
+    sources: list[str]
+
+
+class ConfigCandidatesOut(BaseModel):
+    repo: str
+    items: list[ConfigCandidateOut]
+
+
+class CandidateDecisionOut(BaseModel):
+    """``POST /repos/{name}/config-candidates/{id}/accept|reject``: what was decided, by the
+    session, and the repository's config after it (unchanged on reject)."""
+
+    repo: str
+    id: str
+    decision: str
+    candidate: ConfigCandidateOut
+    config: dict[str, Any]
 
 
 class ProfileCell(BaseModel):
@@ -1423,11 +1460,50 @@ class EventsVerifyOut(BaseModel):
     full_walk_at: str = ""
 
 
+class DisqualifiedBuilderOut(BaseModel):
+    """One builder's disqualified rows in the window."""
+
+    builder: str
+    n: int
+
+
+class RedactionAckIn(BaseModel):
+    """``POST /system/redaction/{pack_hash}/acknowledge`` (DL-313): why the named pack no
+    longer needs to hold readiness — the credential was rotated, the incident reference."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class RedactionAckOut(BaseModel):
+    """The acknowledgement as recorded on the audit chain: who, why and when; never the
+    value the pack carries."""
+
+    pack_hash: str
+    actor: str
+    reason: str
+    acknowledged_at: str
+
+
+class DisqualifiedOut(BaseModel):
+    """The rising-disqualified stop condition, served (G-400, DL-312): rows graded
+    ``disqualified`` in the last ``window_days``, per builder, and ``over`` = the builders at
+    or past ``threshold`` — what the Ledger's tile reads and what OPERATOR §8 names. It is a
+    count of what the ledger holds; it never changes ``ok``."""
+
+    window_days: int
+    threshold: int
+    by_builder: list[DisqualifiedBuilderOut]
+    over: list[str]
+
+
 class LedgerVerifyOut(BaseModel):
     """``GET /ledger/verify`` — the grades chain, false-Q1 over the stored belts, the clean
     rows measured here whose pack is absent or does not re-hash to its name, the sign-off
     and review chains (EI-6) and the audit trail's chain (``events``, ADR-0029): ``ok`` only
-    when every one of them holds."""
+    when every one of them holds. ``disqualified`` is the rising-disqualified stop condition
+    beside them (G-400) — reported, not part of ``ok``."""
 
     rows: int
     ok: bool
@@ -1443,6 +1519,7 @@ class LedgerVerifyOut(BaseModel):
     #: store, so a chain replaced wholesale reads another head (G-601).
     head_row_hash: str = ""
     events: EventsVerifyOut
+    disqualified: DisqualifiedOut
 
 
 class LedgerImportOut(BaseModel):

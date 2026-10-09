@@ -2,9 +2,10 @@
  * 08 — a sign-off is a policy decision, refused at write (`signoff-policy.v4`: ADR-0025 as
  * ADR-0026 amends it).
  *
- *  - The primary repo's only measured cell (n = 2 from 05) is REFUSED, and the reason is
- *    visible before the approver tries: the Sign-off page's preview lists every failing
- *    clause with *observed vs threshold* — `thin_cell` (2 vs 10), `controls_escapes`
+ *  - The primary repo's thin cell (n < 10 from 05, read from the map — one attempt per
+ *    gold-clean task, never a literal) is REFUSED, and the reason is visible before the
+ *    approver tries: the Sign-off page's preview lists every failing clause with *observed
+ *    vs threshold* — `thin_cell` (n vs 10), `controls_escapes`
  *    (1 vs 0), `route_not_deliver:posture_unsealed` (the walkthrough grades on the host, so
  *    its rows license nothing under `routing.v2`), `not_standard:reading_unregistered` (no
  *    registered reading proves a standard arm), `attestation_missing` — the gate is CLOSED
@@ -29,7 +30,7 @@
  * Navigation
  * ----------
  * What it is:   Walkthrough spec 08 (sign-off), the only spec that also seeds through the API.
- * What it does: Pins that the primary repo's only measured cell (n = 2 from 05) is REFUSED with
+ * What it does: Pins that the primary repo's thin cell (n from the map, < 10) is REFUSED with
  *               every failing clause visible before the approver tries — gate CLOSED, action
  *               disabled, nothing recorded; that a second fixture repo with PARAMETRISED tests
  *               (0 escapes; its oracle scores ≥ 0.80 once measured), onboarded, probed, mined,
@@ -53,7 +54,7 @@
  *               src/crb/core/signoff.py (the clauses asserted), src/crb/server/routes/signoffs.py,
  *               src/crb/builders/fixture_gold.py (the clean rows),
  *               ui/e2e/walkthrough/05-replay-fake.spec.ts
- *               (whose n = 2 cell this spec relies on)
+ *               (whose thin cell this spec relies on; its n is read from the map)
  * Tested by:    ui/e2e/walkthrough/08-signoff.spec.ts
  * Touch when:   never for a new repository (the seeded repository is this spec's own fixture);
  *               a refusal clause or a policy default changes (src/crb/core/signoff.py) — the
@@ -62,12 +63,8 @@
  *               through Decisions → Attest, and revokes and re-signs it (G-478); the invitation
  *               path changes.
  */
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { Locator } from '@playwright/test'
-import { apiGet, apiPost, csrf, ensurePersona, env, expect, field, personaPassword, primary, signIn, startRunApi, test, waitRunApi } from './support'
+import { apiGet, apiPost, buildCalcRepo, csrf, ensurePersona, env, expect, field, personaPassword, primary, signIn, startRunApi, test, waitRunApi } from './support'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -85,32 +82,11 @@ const INVITEE_NAME = 'Walk invitee'
  * A calculator repo whose per-commit tests are parametrised — the negative control
  * `hardcode_cheat` needs a literal `assert f(<literals>) == <literal>` to special-case
  * and finds none, so it is `not_constructible` rather than an escape. Every commit is
- * RED at its parent (the module does not exist) and GREEN with its own source.
+ * RED at its parent (the module does not exist) and GREEN with its own source
+ * (`buildCalcRepo` in support.ts; 04b builds the literal-assert twin, `walk-door`).
  */
 function buildSignableRepo(): string {
-  const dir = env.work && existsSync(env.work) ? env.work : mkdtempSync(join(tmpdir(), 'crb-walk-'))
-  const src = join(dir, 'signable-src')
-  const bare = join(dir, 'signable.git')
-  const git = (...args: string[]) => execFileSync('git', ['-C', src, '-c', 'user.name=Fixture Bot', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { stdio: 'pipe' })
-  mkdirSync(join(src, 'src', 'calc'), { recursive: true })
-  mkdirSync(join(src, 'tests'), { recursive: true })
-  execFileSync('git', ['init', '-q', '-b', 'main', src], { stdio: 'pipe' })
-  writeFileSync(join(src, 'pytest.ini'), '[pytest]\ntestpaths = tests\n')
-  writeFileSync(join(src, 'src', 'calc', '__init__.py'), '"""A tiny calculator."""\n\n\ndef add(a: int, b: int) -> int:\n    return a + b\n')
-  writeFileSync(join(src, 'tests', 'test_calc.py'), 'from calc import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n')
-  git('add', '-A')
-  git('commit', '-q', '-m', 'chore: scaffold calc')
-  for (let i = 0; i < N_TASKS; i += 1) {
-    writeFileSync(join(src, 'src', 'calc', `op${i}.py`), `def op${i}(a: int, b: int) -> int:\n    return a + b + ${i}\n`)
-    writeFileSync(
-      join(src, 'tests', `test_op${i}.py`),
-      `import pytest\n\nfrom calc.op${i} import op${i}\n\n\n@pytest.mark.parametrize("a,b", [(1, 2), (3, 4), (-1, 1)])\ndef test_op${i}(a, b):\n    assert op${i}(a, b) == a + b + ${i}\n`,
-    )
-    git('add', '-A')
-    git('commit', '-q', '-m', `feat: add op${i}`)
-  }
-  execFileSync('git', ['clone', '-q', '--bare', src, bare], { stdio: 'pipe' })
-  return `file://${bare}`
+  return buildCalcRepo('signable', N_TASKS, 'parametrised')
 }
 
 const gateRow = (gate: Locator, label: string | RegExp) => gate.getByRole('listitem').filter({ hasText: label })
@@ -132,6 +108,14 @@ test.describe('08 sign-off policy', () => {
     await select.selectOption({ value: value! })
     const [cls, size] = value!.split('|')
     await expect(gate).toContainText(`Attest ${cls} × ${size}`)
+    // the cell's own n, from the map — never a literal: 05 measures from the Measure page, one
+    // attempt per gold-clean task, so the number is the repository's, not the spec's
+    const map = await apiGet(page.request, `/capability-map?repo=${encodeURIComponent(t.name)}`)
+    const chosen = (map.cells as Array<Record<string, unknown>>).find((c) => c.capability_class === cls && c.size === size)
+    expect(chosen, `the chosen cell ${cls} × ${size} on the map`).toBeTruthy()
+    const observedN = Number(chosen!.n)
+    expect(observedN).toBeGreaterThanOrEqual(1)
+    expect(observedN).toBeLessThan(10)
 
     // the evidence the approver sees: n / point / Wilson-low / false-Q1 / oracle / controls / route
     const evidence = page.getByTestId('signoff-evidence')
@@ -157,7 +141,7 @@ test.describe('08 sign-off policy', () => {
     await expect(refusals).toBeVisible()
     const thin = refusals.getByTestId('refusal-thin_cell')
     await expect(thin).toContainText('thin cell')
-    await expect(thin).toContainText(env.publicTier ? /observed [1-9]\b/ : 'observed 2')
+    await expect(thin).toContainText(`observed ${observedN}`)
     await expect(thin).toContainText('threshold 10')
     const escape = refusals.getByTestId('refusal-controls_escapes')
     if (escaped) {

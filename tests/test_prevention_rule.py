@@ -16,8 +16,9 @@ What it does: Pins registration with evidence, watch below the actionable bar, t
               never close, inconclusive on a moved key, capability classes never closed,
               displacement, first attempts only, harness rows in the denominator, zero at the
               first look always keeping, two looks only, a frozen before window, dormant
-              classes never credited, prospective links, byte-identical registers and the five
-              statuses.
+              classes never credited, prospective links, byte-identical registers, the five
+              statuses, and that a finding is paired with its change's first decided look
+              (G-536).
 How:          ``Loop`` holds a chained fixture ledger and a chained record store; each round
               appends rows, builds the register and runs ``tick`` at a fixed time.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -58,6 +59,7 @@ from crb.core.prevention import (
     build_register,
     choose_lever,
     decisive_n,
+    finding_to_remeasure,
     link_record,
     tick,
     verify_decisions,
@@ -220,6 +222,58 @@ def test_below_two_occurrences_on_two_tasks_the_class_is_watch() -> None:
     few = Loop([attempt(i=i, task_id=task(i), kind="protocol") for i in range(3)])
     assert few.register().entry(NET_SIG).qualifiers == ("watch",)  # type: ignore[union-attr]
     assert ACTIONABLE_MIN_N == 10
+
+
+def test_finding_to_remeasure_pairs_first_seen_with_the_first_decided_record() -> None:
+    """G-536: the learn stream's "time from a finding to its re-measurement" pairs a class's
+    first sighting with the FIRST ``decided`` record of a change that targets it — here the
+    line's look-1 verdict at minute 130, not its look-2 retirement at the same tick nor the
+    finish gate's keep at 170. A class no change targets is counted and never timed, and a
+    decided record naming a class its change does not target never pairs."""
+    loop, _ = _ladder_to_line()
+    loop.add(
+        exposed_to(
+            start=101,
+            n=22,
+            recur={0, 4, 8, 13, 18},
+            first_task=10,
+            labels=line_labels(loop.applied("line:T-NET").payload["what"]["line_id"]),
+            run="run-3",
+        )
+    )
+    loop.tick(130)
+    loop.mech = Mechanisms(shipped=frozenset({"finish_gate"}))
+    loop.switch(AUTO_CONFIG, 140)
+    loop.tick(150)
+    loop.add(
+        exposed_to(
+            start=151, n=12, recur=set(), first_task=20, labels=_gate_labels(loop), run="run-4"
+        )
+    )
+    loop.tick(170)
+    # a stray verdict naming the target-red class under the network line's change: that change
+    # does not target it, so it must not date the class
+    line = loop.applied("line:T-NET").payload["change_id"]
+    loop.store.append(
+        PreventionRecord(
+            kind="decided",
+            repo=REPO,
+            payload={"change_id": line, "signature": RED_SIG, "verdict": "keep", "look": "1"},
+            actor="loop",
+            created=at(175),
+        )
+    )
+    reg = loop.register()
+    got = finding_to_remeasure(reg, loop.store.records())
+    first_seen = reg.entry(NET_SIG).first_seen  # type: ignore[union-attr]
+    assert first_seen == at(min(LADDER_PROTOCOL))  # the ladder's first network refusal
+    assert got.pairs == ((NET_SIG, first_seen, at(130)),)
+    assert got.decided == 1 and got.with_change == 1
+    assert got.classes == len(reg.entries) and got.classes > got.with_change  # target-red too
+    # nothing decided yet: every class counted, none timed
+    fresh, _ = _ladder_to_line()
+    early = finding_to_remeasure(fresh.register(), fresh.store.records())
+    assert early.pairs == () and early.with_change == 1
 
 
 def test_the_ladder_line_retired_escalates_to_the_finish_gate_which_is_kept_and_closes() -> None:

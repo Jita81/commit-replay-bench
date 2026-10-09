@@ -31,25 +31,33 @@ What it does: Counts runs, graded tasks by outcome, belt failures, builder token
               (by repo), deliveries by outcome, sign-off decisions by outcome (the API),
               GitHub installation-token mints (never the token); times grades and builds;
               gauges queue depth, ``crb_false_q1_total`` (must stay 0) and the ledger row
-              count; renders the exposition for the API's ``/metrics`` less the worker-only
-              series (``render_api``, P-268) and starts the worker's, the whole registry, on
-              its port — a fixed one, ``0`` (off) or ``auto`` (a free port) — returning what it
-              did as an ``Exposition`` (listening on which port, off, or ``degraded`` with the
-              reason) that the worker records for ``/health``; a bind failure never raises into
-              the worker (pilot D5).
+              count; gauges each repository's negative-controls verdict one-hot
+              (``crb_controls_verdict{repo,state}``, refreshed by the API at scrape time so a
+              restart cannot blank it, G-920); counts the hosts the builder's egress sidecar
+              denied (``crb_egress_denied_total{repo}``, metered from the worker's
+              ``builder.egress_denied`` event, G-400); renders the exposition for the API's
+              ``/metrics`` less the worker-only series (``render_api``, P-268) and starts the
+              worker's, the whole registry, on its port — a fixed one, ``0`` (off) or ``auto``
+              (a free port) — returning what it did as an ``Exposition`` (listening on which
+              port, off, or ``degraded`` with the reason) that the worker records for
+              ``/health``; a bind failure never raises into the worker (pilot D5).
 How:          Import-time try/except picks the real registry or ``_Noop``; every metric is
               a module-level object created through ``_counter``/``_gauge``/``_histogram``;
               call-sites use ``record_grade``/``record_build``/``record_event``/
-              ``record_signoff``/``set_ledger_health``; ``fresh_registry`` rebinds every
-              metric to a new registry for tests.
+              ``record_signoff``/``set_ledger_health``/``set_controls_verdict``;
+              ``fresh_registry`` rebinds every metric to a new registry for tests.
 Layer:        observability — docs/ARCHITECTURE.md#72-observability
 ADRs:         none
 Works with:   src/crb/server/worker.py (calls the recorders after each grade and build,
-              meters events through ``record_event``, sets the queue gauge on check-in),
+              meters every event through ``record_event`` — the sealed build's
+              ``builder.egress_denied`` from src/crb/builders/container.py among them, since
+              the builders layer may not import this one — and sets the queue gauge on
+              check-in),
               src/crb/server/worker_main.py and src/crb/server/worker_metrics.py
               (``start_worker_exposition`` before the loop; the ``Exposition`` it returns is
               recorded for ``/health``),
-              src/crb/server/routes/system.py (``/metrics`` renders ``render()``),
+              src/crb/server/routes/system.py (``/metrics`` renders ``render()`` after
+              refreshing the ledger and controls gauges),
               src/crb/server/routes/signoffs.py (``record_signoff`` after each decision),
               src/crb/server/http_metrics.py (the HTTP-level metrics on the same registry),
               src/crb/core/ledger.py (the source of the false-Q1 count the gauge reflects),
@@ -95,6 +103,27 @@ DELIVERY_OUTCOMES: Mapping[str, str] = {
     "delivery.withheld": "withheld",
     "delivery.error": "failed",
 }
+
+#: The ``build``-stage event a sealed build's container session emits when the egress
+#: sidecar logged one or more ``deny`` lines (src/crb/builders/container.py, G-400): its
+#: payload's ``hosts`` are the denied ``host:port`` targets. ``record_event`` counts them into
+#: ``crb_egress_denied_total{repo}`` — the metering lives here because the builders layer and
+#: this one are siblings (pyproject's layer contract) and may not import each other.
+EGRESS_DENIED_ACTION = "builder.egress_denied"
+
+#: The ``system``-stage events the worker emits first for every run (``run.claimed`` at the
+#: claim, ``run.start`` when the run body begins): ``record_event`` PRIMES the series the
+#: ``increase()`` alerts read — ``crb_egress_denied_total{repo}`` and
+#: ``crb_tasks_total{repo,outcome="disqualified"}`` — at 0 for the run's repository, because
+#: Prometheus cannot see a series appear: a counter created on its first increment makes the
+#: first denied host of a fresh worker invisible to **Egress denied** and **Disqualified
+#: rising** fire one late (P-642).
+PRIME_ACTIONS: frozenset[str] = frozenset({"run.claimed", "run.start"})
+
+#: The one-hot states of ``crb_controls_verdict{repo,state}`` — the words
+#: :meth:`crb.core.routing.ControlsVerdict.state` returns, in the order the router applies
+#: them. Exactly one of them reads 1 per repository after a scrape.
+CONTROLS_STATES: tuple[str, ...] = ("unmeasured", "failed", "escaped", "thin", "passed")
 
 
 class _Noop:
@@ -236,6 +265,22 @@ _SPECS: tuple[tuple[str, str, str, str, list[str]], ...] = (
         [],
     ),
     ("ledger_rows", "gauge", "crb_ledger_rows", "Rows in the grade ledger.", []),
+    (
+        "controls_verdict",
+        "gauge",
+        "crb_controls_verdict",
+        "Each repository's latest negative-controls verdict at the running apparatus, one-hot "
+        "over state (unmeasured|failed|escaped|thin|passed); refreshed on every API scrape.",
+        ["repo", "state"],
+    ),
+    (
+        "egress_denied_total",
+        "counter",
+        "crb_egress_denied_total",
+        "Hosts the builder's egress sidecar denied during sealed builds, by repo "
+        "(from builder.egress_denied events).",
+        ["repo"],
+    ),
 )
 
 _FACTORIES = {"counter": _counter, "gauge": _gauge, "histogram": _histogram}
@@ -260,6 +305,8 @@ github_tokens_minted_total: Any = _metrics["github_tokens_minted_total"]
 queue_depth: Any = _metrics["queue_depth"]
 false_q1_total: Any = _metrics["false_q1_total"]
 ledger_rows: Any = _metrics["ledger_rows"]
+controls_verdict: Any = _metrics["controls_verdict"]
+egress_denied_total: Any = _metrics["egress_denied_total"]
 
 
 def specs() -> tuple[tuple[str, str, list[str]], ...]:
@@ -341,12 +388,23 @@ def record_build(
 
 def record_event(event: Any) -> None:
     """Meter what an event says (a ``CallbackSink`` on the worker's emitter): a
-    ``factory``-stage ``delivery.*`` action counts one delivery by outcome. Any other
-    event is ignored. Never raises (a sink must never break a run)."""
+    ``factory``-stage ``delivery.*`` action counts one delivery by outcome; a ``build``-stage
+    :data:`EGRESS_DENIED_ACTION` counts its denied ``hosts`` (at least one) into
+    ``crb_egress_denied_total{repo}``; a ``system``-stage :data:`PRIME_ACTIONS` event primes
+    the two series the ``increase()`` alerts read at 0 for its repository. Any other event
+    is ignored. Never raises (a sink must never break a run)."""
     try:
-        outcome = DELIVERY_OUTCOMES.get(str(getattr(event, "action", "")))
+        action = str(getattr(event, "action", ""))
+        repo = str(getattr(event, "repo", "") or "")
+        outcome = DELIVERY_OUTCOMES.get(action)
         if outcome is not None and getattr(event, "stage", "") == "factory":
-            deliveries_total.labels(str(getattr(event, "repo", "") or ""), outcome).inc()
+            deliveries_total.labels(repo, outcome).inc()
+        elif action == EGRESS_DENIED_ACTION and getattr(event, "stage", "") == "build":
+            hosts = dict(getattr(event, "payload", {}) or {}).get("hosts") or ()
+            egress_denied_total.labels(repo).inc(max(1, len(list(hosts))))
+        elif action in PRIME_ACTIONS and getattr(event, "stage", "") == "system":
+            egress_denied_total.labels(repo).inc(0)
+            tasks_total.labels(repo, "disqualified").inc(0)
     except Exception:  # pragma: no cover — defensive: metering must not affect a run
         _LOG.exception("metrics: record_event failed")
 
@@ -370,6 +428,16 @@ def set_ledger_health(*, rows: int, false_q1: int) -> None:
     false_q1_total.set(false_q1)
 
 
+def set_controls_verdict(repo: str, state: str) -> None:
+    """``crb_controls_verdict{repo,state}`` one-hot: ``state`` reads 1 and every other
+    :data:`CONTROLS_STATES` word reads 0 for ``repo`` (G-920). A state outside the vocabulary
+    is a programming error — the router's words are the gauge's."""
+    if state not in CONTROLS_STATES:
+        raise ValueError(f"unknown controls state {state!r}; expected {CONTROLS_STATES}")
+    for word in CONTROLS_STATES:
+        controls_verdict.labels(repo, word).set(1 if word == state else 0)
+
+
 #: The series only the worker records — docs/DEPLOYMENT.md §9's rows whose process is
 #: ``worker`` (tests/test_observability_metrics.py holds the two equal). The API process
 #: shares this module's registry, so without :func:`render_api` it would serve each of them
@@ -389,6 +457,7 @@ WORKER_SERIES: frozenset[str] = frozenset(
         "crb_deliveries_total",
         "crb_github_tokens_minted_total",
         "crb_queue_depth",
+        "crb_egress_denied_total",
     }
 )
 

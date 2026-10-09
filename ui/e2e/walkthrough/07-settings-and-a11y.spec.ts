@@ -356,4 +356,14 @@ test.describe('07 settings + accessibility', () => {
     await expect(page.getByText(/Append-only, hash-chained/)).toBeVisible()
     await axeClean(page, '/posture')
   })
+
+  test('Routes with decisions has no WCAG 2.1 AA violations', async ({ page }) => {
+    // the route decisions for the primary repository, with a decision rendered (G-256)
+    await page.goto(`/routing?repo=${encodeURIComponent(t.name)}`)
+    await expect(page.getByTestId('policy-rule')).toBeVisible()
+    const table = page.getByRole('table', { name: `Route decisions for ${t.name}` })
+    await expect(table.locator('tbody tr').first()).toBeVisible()
+    await expect(table.getByRole('img', { name: /^Route: / }).first()).toBeVisible()
+    await axeClean(page, '/routing')
+  })
 })

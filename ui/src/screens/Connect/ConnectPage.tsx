@@ -27,32 +27,56 @@
  *               to /results is named "Baseline", as the nav names it, and opens /results (a
  *               measured row's button; an unmeasured row's reads
  *               "Continue" and opens the walk); at phone width the repository link is the row's
- *               door to the walk. Every element a reader meets — the two connect buttons, each
- *               column header, the stage-summary pill and row action, each stage's title, status
- *               pill, "spends" pill, detail line, run link and action, and the in-flight panel's
- *               counters and Cancel — is a hint trigger (`button.connect.*`, `col.connect.*`,
- *               `pill.connect.*`, `stage.walk.*`, `pill.walk.*`, `stat.walk.*`, `link.walk.*`,
- *               `button.walk.*`) so what each shows opens on hover, focus and tap and is listed in
- *               the About block.
+ *               door to the walk, and the door column's header is visually hidden text a
+ *               screen reader names ("Next", G-127). The header offers every role the flat
+ *               list at /repos ("All repositories", G-228). The sixth stage's Measure… opens
+ *               the designed Measure page (`/connect/:name/measure`, the same surface Home task
+ *               5 opens) and posts nothing itself (G-907); a failed replay's Retry takes the
+ *               same door. Cancel the run asks first in the app's own dialog — "Cancel this
+ *               run?", Keep it running / Cancel the run — so the question is hinted, reachable
+ *               and axe-checked, never `window.confirm` (G-117). An unknown repository name
+ *               renders `UnknownRepo` ("No repository called <name>", Open Connection) under a
+ *               header that reads Not found, never a bare retry, and nothing else — no flow
+ *               card folds figures for a name that is not a repository (G-979). Under the mine
+ *               stage, the config changes the mine's notes imply
+ *               (`GET /repos/{name}/config-candidates`, DL-316) are listed with Accept and
+ *               Reject for an operator; nothing changes until one decides. "Chain the free
+ *               stages" (DL-315) is the repository's `auto_stages` switch, thrown here by an
+ *               operator through the same audited `PUT /repos/{name}` a configuration edit
+ *               makes and read as a sentence by everyone else. Every element a reader meets —
+ *               the connect buttons, each column header, the stage-summary pill and row
+ *               action, the switch, each stage's title, status pill, "spends" pill, detail
+ *               line, run link and action, each candidate and its two acts, the in-flight
+ *               panel's counters and Cancel, and the question's two buttons — is a hint
+ *               trigger (`button.connect.*`, `col.connect.*`, `pill.connect.*`,
+ *               `toggle.walk.*`, `stage.walk.*`, `pill.walk.*`, `stat.walk.*`, `link.walk.*`,
+ *               `button.walk.*`) so what each shows opens on hover, focus and tap and is listed
+ *               in the About block.
  * How:          `useAllRepos` → the table; `useRepo` + `useOracle` + `useOracleControls` +
- *               `useCapabilityMap` (+ the polled `useRun` while a stage runs, and
- *               `useQueuedRuns` only for an older server that sends no `queue_position`)
- *               → `stagesFor` → the stage list; actions are the existing mutations
- *               (`useProbeRepo`, `useCreateRun`, `useCancelRun` behind a confirm) and dialogs
- *               (`RepoNewDialog`, `RunNewDialog`); the watched run's end refetches the inputs.
- *               The eyebrow is `PageHeader`'s default (`journeyEyebrow`).
+ *               `useCapabilityMap` + `useConfigCandidates` (+ the polled `useRun` while a stage
+ *               runs, and `useQueuedRuns` only for an older server that sends no
+ *               `queue_position`) → `stagesFor` → the stage list; actions are the existing
+ *               mutations (`useProbeRepo`, `useCreateRun`, `useCancelRun` behind the `Dialog`,
+ *               `useDecideCandidate`, `useUpdateRepo` for the switch), the `RepoNewDialog`, and
+ *               `navigate` to the Measure page;
+ *               the watched run's end refetches the inputs. The eyebrow is `PageHeader`'s
+ *               default (`journeyEyebrow`).
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
- * Works with:   ui/src/screens/Connect/connection.ts (the derivation), ui/src/api/hooks.ts
- *               (`useRun`, `useQueuedRuns`, `useCancelRun`), ui/src/components/Help.tsx
- *               (`Term`), ui/src/components/Hint.tsx + ui/src/help/hints.ts (the triggers
- *               and their copy), ui/src/screens/Repos/* (registration and config live there; this
- *               screen links to them), ui/src/screens/Results/ResultsPage.tsx (the baseline,
- *               where the walk ends), ui/src/components/FlowPanel.tsx (the connect stream's own
- *               lead time and spend under the walk), docs/ONBOARDING-A-REPO.md (the same steps
- *               for the CLI)
+ * Works with:   ui/src/screens/Connect/connection.ts (the derivation), ui/src/api/hooks.ts +
+ *               ui/src/api/repoConfig.ts (`useRun`, `useQueuedRuns`, `useCancelRun`,
+ *               `useConfigCandidates`, `useDecideCandidate`, `useUpdateRepo` for the
+ *               auto_stages switch), ui/src/components/* (`Term`, `Hint` + ui/src/help/hints.ts
+ *               for the triggers and their copy, `Dialog` for the cancel question,
+ *               `UnknownRepo` for the 404 state, `FlowPanel` for the stream's own numbers
+ *               under a known repository), ui/src/screens/Repos/* (registration and config
+ *               live there; this screen links to them),
+ *               ui/src/screens/Connect/MeasurePage.tsx (where Measure… lands),
+ *               ui/src/screens/Results/ResultsPage.tsx (the baseline, where the walk ends),
+ *               docs/ONBOARDING-A-REPO.md (the same steps for the CLI)
  * Tested by:    ui/src/screens/Connect/ConnectPage.test.tsx, ui/src/help/hints-ratchet.test.tsx
- *               (every element on /connect and /connect/:name resolves to a registry id)
+ *               (every element on /connect and /connect/:name resolves to a registry id, the
+ *               cancel question included)
  * Touch when:   never for a new repository (it appears on the list once connected); a stage
  *               is added (connection.ts first); the API grows a GitHub App install flow
  *               (replace the URL field with the installation's repository picker).
@@ -64,7 +88,9 @@ import {
   useAllRepos,
   useCancelRun,
   useCapabilityMap,
+  useConfigCandidates,
   useCreateRun,
+  useDecideCandidate,
   useGitHubApp,
   useOracle,
   useOracleControls,
@@ -74,10 +100,12 @@ import {
   useRun,
 } from '../../api/hooks'
 import { isApiError } from '../../api/client'
-import type { RepoSummary, Run } from '../../api/types'
+import { useUpdateRepo } from '../../api/repoConfig'
+import type { ConfigCandidate, RepoSummary, Run } from '../../api/types'
 import type { HintId } from '../../help/hints'
 import { Button, LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
+import { Dialog } from '../../components/Dialog'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorState } from '../../components/ErrorState'
 import { FlowPanel } from '../../components/FlowPanel'
@@ -85,11 +113,11 @@ import { Term } from '../../components/Help'
 import { Hint } from '../../components/Hint'
 import { PageHeader } from '../../components/PageHeader'
 import { Pill } from '../../components/Pill'
+import { UnknownRepo, isUnknownRepo } from '../../components/UnknownRepo'
 import { useAuth } from '../../lib/auth'
 import { kOfN } from '../../lib/format'
 import type { Tone } from '../../lib/verdict'
 import { RepoNewDialog } from '../Repos/RepoNewDialog'
-import { RunNewDialog } from '../Runs/RunNewDialog'
 import { GitHubConnectDialog } from './GitHubConnectDialog'
 import { type Stage, type StageId, type StageStatus, stageComplete, stageSummary, stagesFor } from './connection'
 
@@ -194,16 +222,22 @@ export function ConnectPage() {
         title="Connect a repository"
         purpose="Point the instrument at a repository, let it learn how the code tests itself, and get to the baseline. Nothing is written to the repository; the first five stages involve no model."
         actions={
-          can('operator') ? (
-            <div className="flex flex-wrap gap-2">
-              <Button variant={ghConfigured ? 'filled' : 'outlined'} hint="button.connect.github" onClick={() => setGhOpen(true)}>
-                Connect from GitHub
-              </Button>
-              <Button variant={ghConfigured ? 'outlined' : 'filled'} hint="button.connect.url" onClick={() => setNewOpen(true)}>
-                Connect by URL
-              </Button>
-            </div>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            {/* G-228: the flat list is a door for every role, not a typed URL */}
+            <LinkButton variant="outlined" to="/repos" hint="button.connect.all_repos">
+              All repositories
+            </LinkButton>
+            {can('operator') && (
+              <>
+                <Button variant={ghConfigured ? 'filled' : 'outlined'} hint="button.connect.github" onClick={() => setGhOpen(true)}>
+                  Connect from GitHub
+                </Button>
+                <Button variant={ghConfigured ? 'outlined' : 'filled'} hint="button.connect.url" onClick={() => setNewOpen(true)}>
+                  Connect by URL
+                </Button>
+              </>
+            )}
+          </div>
         }
       />
       {gh.data && !gh.data.configured && can('admin') && (
@@ -242,7 +276,12 @@ export function ConnectPage() {
                   <th scope="col" className="py-2 pr-4 font-medium">
                     <Hint id="col.connect.last_run">Last run</Hint>
                   </th>
-                  <th scope="col" className="hidden py-2 font-medium sm:table-cell"></th>
+                  <th scope="col" className="hidden py-2 font-medium sm:table-cell">
+                    {/* G-127: the door column has a name a screen reader announces; it is not drawn */}
+                    <Hint id="col.connect.next">
+                      <span className="sr-only">Next</span>
+                    </Hint>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -355,7 +394,13 @@ export function ConnectRepoPage() {
   const probe = useProbeRepo()
   const createRun = useCreateRun()
   const cancel = useCancelRun()
-  const [measureOpen, setMeasureOpen] = useState(false)
+  const candidates = useConfigCandidates(name)
+  // DL-315: the one act that sequences the £0 stages, written through the audited update
+  const update = useUpdateRepo(name)
+  const autoStages = Boolean(repo.data?.config.auto_stages)
+  const navigate = useNavigate()
+  // G-117: the run whose cancel is being asked about; the question is the app's own dialog
+  const [confirming, setConfirming] = useState<Run | null>(null)
 
   const oracleInput = oracle.data ?? (oracle.isError && notRun(oracle.error) ? null : undefined)
   const controlsInput = controls.data ?? (controls.isError && notRun(controls.error) ? null : undefined)
@@ -394,12 +439,16 @@ export function ConnectRepoPage() {
 
   const act = (stage: Stage) => {
     if (stage.runKind === 'probe') probe.mutate(name)
-    else if (stage.runKind === 'replay') setMeasureOpen(true)
+    // G-907: the money stage is the designed Measure page (cost band, retention, confirm) —
+    // the same door Home task 5 opens — never the technical run form; a failed replay's Retry
+    // takes the same door, and nothing is posted from here
+    else if (stage.runKind === 'replay') navigate(`/connect/${encodeURIComponent(name)}/measure`)
     else if (stage.runKind) createRun.mutate({ repo: name, kind: stage.runKind })
   }
-  const cancelRun = (run: Run) => {
-    if (!window.confirm('Cancel this run? Attempts already made are still charged.')) return
-    cancel.mutate(run.id)
+  const cancelRun = (run: Run) => setConfirming(run)
+  const confirmCancel = () => {
+    if (!confirming) return
+    cancel.mutate(confirming.id, { onSettled: () => setConfirming(null) })
   }
   const busy = probe.isPending || createRun.isPending
   const actionError = probe.error ?? createRun.error ?? cancel.error
@@ -414,26 +463,33 @@ export function ConnectRepoPage() {
       <PageHeader
         title={name}
         purpose={
-          failed
-            ? 'The walk cannot say where this repository is until every read answers.'
-            : allDone
-            ? 'Every stage is done — the baseline holds what the evidence says about this repository.'
-            : next
-              ? `Next: ${next.title.toLowerCase()}. ${next.why}`
-              : 'Loading the repository…'
+          repo.isError
+            ? isUnknownRepo(repo.error)
+              ? 'Not found'
+              : 'The repository could not be read.'
+            : failed
+              ? 'The walk cannot say where this repository is until every read answers.'
+              : allDone
+                ? 'Every stage is done — the baseline holds what the evidence says about this repository.'
+                : next
+                  ? `Next: ${next.title.toLowerCase()}. ${next.why}`
+                  : 'Loading the repository…'
         }
         actions={
-          <div className="flex gap-2">
-            <LinkButton size="sm" to={`/repos/${encodeURIComponent(name)}`} hint="button.walk.configuration">
-              Configuration
-            </LinkButton>
-            <LinkButton size="sm" variant={allDone ? 'filled' : 'outlined'} to={`/results?repo=${encodeURIComponent(name)}`} hint="button.walk.baseline">
-              Baseline
-            </LinkButton>
-          </div>
+          // an unknown name has no configuration and no baseline: its one door is below (G-979)
+          repo.isError && isUnknownRepo(repo.error) ? undefined : (
+            <div className="flex gap-2">
+              <LinkButton size="sm" to={`/repos/${encodeURIComponent(name)}`} hint="button.walk.configuration">
+                Configuration
+              </LinkButton>
+              <LinkButton size="sm" variant={allDone ? 'filled' : 'outlined'} to={`/results?repo=${encodeURIComponent(name)}`} hint="button.walk.baseline">
+                Baseline
+              </LinkButton>
+            </div>
+          )
         }
       />
-      {repo.isError && <ErrorState error={repo.error} onRetry={() => void repo.refetch()} />}
+      {repo.isError && <UnknownRepo name={name} error={repo.error} onRetry={() => void repo.refetch()} />}
       {repo.data && failed && (
         <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
           <div data-testid="connect-walk-error">
@@ -445,6 +501,34 @@ export function ConnectRepoPage() {
       )}
       {repo.data && !failed && (
         <Card title="The walk" eyebrow="six stages · each says what it proves and what it costs">
+          {/* DL-315: the switch lives where the chain is seen; an operator throws it, a reader
+              reads its state; the write is the same audited PUT a configuration edit makes */}
+          <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-testid="auto-stages">
+            {can('operator') ? (
+              <label className="flex items-center gap-2">
+                <Hint
+                  as="input"
+                  id="toggle.walk.auto_stages"
+                  type="checkbox"
+                  className="h-4 w-4 accent-[var(--trust)]"
+                  data-testid="auto-stages-switch"
+                  checked={autoStages}
+                  onChange={(e: { target: { checked: boolean } }) => update.mutate({ auto_stages: e.target.checked })}
+                />
+                Chain the free stages
+              </label>
+            ) : (
+              <Hint id="toggle.walk.auto_stages" data-testid="auto-stages-state">
+                {autoStages ? 'The free stages chain: each one that passes queues the next.' : 'An operator runs each free stage, or switches the chain on.'}
+              </Hint>
+            )}
+            <span className="text-xs text-on-surface-muted">
+              {autoStages
+                ? 'Each stage that passes queues the next, up to the controls, and never a stage already done. Measure… is still yours to confirm.'
+                : 'Off: each stage waits for Run. On: each stage that passes queues the next, up to the controls; Measure… is still yours to confirm.'}
+            </span>
+          </div>
+          {update.isError && <ErrorState compact error={update.error} />}
           <ol className="m-0 list-none space-y-3 p-0" aria-label="Connection stages">
             {stages.map((s, i) => {
               const d = s.queued ? QUEUED_DISPLAY : STATUS_DISPLAY[s.status]
@@ -490,6 +574,7 @@ export function ConnectRepoPage() {
                       </p>
                     )}
                     {live && <InFlight run={live} stage={s} canCancel={can('operator')} cancelling={cancel.isPending} onCancel={() => cancelRun(live)} />}
+                    {s.id === 'mine' && <Candidates repo={name} query={candidates} canDecide={can('operator')} />}
                   </div>
                   <div className="text-right">
                     {canAct && s.runKind && can('operator') && (
@@ -508,19 +593,95 @@ export function ConnectRepoPage() {
           {actionError && <ErrorState compact error={actionError} />}
         </Card>
       )}
-      {/* the connect stream's own numbers (docs/dod/streams/connect-and-prove.md MEASURE) */}
-      <FlowPanel stream="connect-and-prove" repo={name} />
-      <RunNewDialog
-        open={measureOpen}
-        onClose={() => setMeasureOpen(false)}
-        repo={name}
-        initialKind="replay"
-        onCreated={() => {
-          setMeasureOpen(false)
-          void repo.refetch()
-        }}
-      />
+      {/* the connect stream's own numbers (docs/dod/streams/connect-and-prove.md MEASURE) — for
+          a repository the API knows; a Not found state is the whole page (G-979) */}
+      {repo.data && <FlowPanel stream="connect-and-prove" repo={name} />}
+      {/* G-117: the cancel question is the app's own dialog (hinted, reachable, axe-checked) */}
+      <Dialog
+        open={confirming !== null}
+        title="Cancel this run?"
+        onClose={() => setConfirming(null)}
+        footer={
+          <>
+            <Button hint="button.connect.cancel_keep" onClick={() => setConfirming(null)}>
+              Keep it running
+            </Button>
+            <Button variant="danger" hint="button.connect.cancel_confirm" pending={cancel.isPending} onClick={confirmCancel}>
+              Cancel the run
+            </Button>
+          </>
+        }
+      >
+        <div data-testid="cancel-confirm" className="space-y-2 text-sm">
+          <p className="m-0">Attempts already made are still charged. The worker stops between attempts, and the rows already graded are kept.</p>
+          {cancel.isError && <ErrorState compact error={cancel.error} />}
+        </div>
+      </Dialog>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// The config changes the mine's notes imply (DL-316)
+// ---------------------------------------------------------------------------
+
+/** "runner_opts.timeout: 900 s → 1800 s" — the setting, the limit hit and the proposal. */
+function candidateChange(c: ConfigCandidate): string {
+  const unit = c.field.endsWith('timeout') ? ' s' : ''
+  if (c.scope === 'deployment') return `${c.field} → ${String(c.proposed)} (a deployment setting)`
+  return `${c.field}: ${c.observed === null ? 'unset' : `${c.observed}${unit}`} → ${c.proposed}${unit}`
+}
+
+/**
+ * Under the mine stage: each candidate as one sentence a reader can hover, and — for an
+ * operator — Accept (applied through the audited config update, under the session) and
+ * Reject (recorded, nothing changed). A deployment-scoped candidate names the variable an
+ * operator sets on the deployment and offers no Accept. A failed read is said with Retry,
+ * never an empty list (the failed-reads rule).
+ */
+function Candidates({ repo, query, canDecide }: { repo: string; query: ReturnType<typeof useConfigCandidates>; canDecide: boolean }) {
+  const decide = useDecideCandidate()
+  if (query.isError) {
+    return (
+      <div className="mt-2" data-testid="config-candidates-error">
+        <ErrorState compact title="Could not read the config candidates" error={query.error} onRetry={() => void query.refetch()} />
+      </div>
+    )
+  }
+  const items = query.data?.items ?? []
+  if (items.length === 0) return null
+  return (
+    <div className="mt-2 max-w-[70ch] border-l-4 border-status-amber-fill pl-3 text-sm" data-testid="config-candidates">
+      <p className="m-0 text-xs text-on-surface-muted">The mine notes imply {items.length === 1 ? 'a configuration change' : `${items.length} configuration changes`}. Nothing changes until an operator decides.</p>
+      <ul className="m-0 mt-1 list-none space-y-2 p-0" aria-label="Configuration candidates">
+        {items.map((c) => {
+          const pending = decide.isPending && decide.variables?.id === c.id
+          return (
+            <li key={c.id} className="flex flex-wrap items-start gap-x-3 gap-y-1" data-testid={`candidate-${c.kind}`}>
+              <Hint id="stat.walk.candidate" as="div" className="min-w-0 flex-1">
+                <span className="font-mono text-xs">{candidateChange(c)}</span>
+                <span className="block text-xs text-on-surface-muted">{c.reason}</span>
+              </Hint>
+              {canDecide ? (
+                <span className="flex gap-2">
+                  {c.scope === 'repo' && (
+                    <Button size="sm" variant="filled" hint="button.walk.candidate_accept" pending={pending} onClick={() => decide.mutate({ name: repo, id: c.id, decision: 'accept' })}>
+                      Accept
+                    </Button>
+                  )}
+                  <Button size="sm" variant="outlined" hint="button.walk.candidate_reject" pending={pending} onClick={() => decide.mutate({ name: repo, id: c.id, decision: 'reject' })}>
+                    Reject
+                  </Button>
+                </span>
+              ) : (
+                <span className="text-xs text-on-surface-muted">An operator decides this.</span>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {decide.isError && <ErrorState compact error={decide.error} />}
+    </div>
   )
 }
 

@@ -128,7 +128,11 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               run's trace. On the
               same idle pass, re-derives every repository's decisions inbox and stamps the
               clock over it (``refresh_decisions``, G-516), so the age of a decision is the
-              decision's age and not the age of somebody's browser tab.
+              decision's age and not the age of somebody's browser tab. After a run of a £0
+              stage succeeds on a repository whose ``auto_stages`` switch is on, queues the
+              next free stage (``_chain_next_stage``, ``FREE_CHAIN``, DL-315) under the
+              person who switched it on — only when the finished stage's own pass fact
+              holds, once per finished run, and never a kind that spends model money.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -154,9 +158,11 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               src/crb/server/github_app.py (installation tokens for clone, fetch,
               delivery and the pull-request read), src/crb/server/reaper.py (the durable
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``),
-              src/crb/store/library.py (``mark_stale`` — the library's staleness after a mine)
+              src/crb/store/library.py (``mark_stale`` — the library's staleness after a mine),
+              src/crb/server/routes/runs.py (``new_run`` and ``submit_refusals`` — a chained
+              run is made and refused exactly as ``POST /runs`` makes one)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
-              tests/test_worker_spend.py,
+              tests/test_worker_spend.py, tests/test_worker_chain.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py
@@ -304,7 +310,7 @@ from crb.server.builder_login import (
     record_claim_refusal,
     record_refused_login,
 )
-from crb.server.decisions import record_due
+from crb.server.decisions import IDLE_KEEPS_OPEN, record_due
 from crb.server.deps import ApiError
 from crb.server.factory_state import FactoryHome, outcomes_pending, sync_outcomes
 from crb.server.flow_record import record_deliver_transitions
@@ -336,7 +342,14 @@ from crb.server.routes.decisions import rows_for as decision_rows_for
 from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
-from crb.server.routes.runs import credential_refusal
+from crb.server.routes.runs import (
+    append_system_event,
+    credential_refusal,
+    new_run,
+    submit_refusals,
+    system_trace_id,
+)
+from crb.server.schemas import BUILD_KINDS, RunCreateRequest
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     ROLE_RANK,
@@ -357,6 +370,7 @@ from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
 from crb.store.events import DbEventSink, events_of_action, last_seq
 from crb.store.jobs import (
+    ACTIVE_STATUSES,
     KIND_BLIND,
     KIND_CONTROLS,
     KIND_FACTORY,
@@ -373,10 +387,11 @@ from crb.store.jobs import (
     STATUS_SUCCEEDED,
     JobQueue,
     StaleClaim,
+    stage_queued,
 )
 from crb.store.ledger import DbLedger
 from crb.store.library import DbLibraryLedger
-from crb.store.models import EvidencePackRow, Repo, Run, Task, User, WorkerRow
+from crb.store.models import Event, EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
 #: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
@@ -516,6 +531,31 @@ class _InstallationProvider:
         return GitCredentials(
             remote=self._remote, token=self._app.installation_token(self._installation)
         )
+
+
+#: The £0 stages in walk order (DL-315): a run of one that succeeds with its pass fact
+#: chains the next when the repository's ``auto_stages`` switch is on. Every kind here
+#: constructs no builder and calls no model; a build kind is refused at the seam.
+FREE_CHAIN: tuple[str, ...] = (KIND_PROBE, KIND_MINE, KIND_QUALIFY, KIND_ORACLE, KIND_CONTROLS)
+#: The event on the repository's system trace that records one chained stage.
+CHAIN_EVENT = "connect.stage.chained"
+
+
+def stage_passed(kind: str, counts: Mapping[str, Any]) -> bool:
+    """The finished stage's OWN pass fact, from its counts — succeeded is not enough: a
+    probe is green, a mine found a gold-clean task, a qualify qualified one, an oracle
+    scored one, the controls passed a complete report. Anything else chains nothing."""
+    if kind == KIND_PROBE:
+        return counts.get("green") is True
+    if kind == KIND_MINE:
+        return int(counts.get("gold_clean") or 0) >= 1
+    if kind == KIND_QUALIFY:
+        return int(counts.get("qualified") or 0) >= 1
+    if kind == KIND_ORACLE:
+        return int(counts.get("scoreable") or 0) >= 1
+    if kind == KIND_CONTROLS:
+        return counts.get("passed") is True and counts.get("complete") is not False
+    return False
 
 
 @dataclass(frozen=True)
@@ -975,8 +1015,10 @@ class Worker:
                         self.settings,
                         name,
                         cells=self._served_map(name)[0].cells,
+                        posture_class=self._deployment_posture_class(name),
                     )
-                    record_due(db, name, rows)
+                    # F6: an item no run has reached is GET /decisions's to resolve
+                    record_due(db, name, rows, keep_open=IDLE_KEEPS_OPEN)
                     db.commit()
                 done += 1
             except Exception:  # the idle loop must survive a repository it cannot read
@@ -1373,6 +1415,8 @@ class Worker:
             return
         metrics.runs_total.labels(run.kind, status).inc()
         self._record_flow(run)
+        if status == STATUS_SUCCEEDED:
+            self._chain_next_stage(run, counts)
         emitter.emit(
             "system",
             "run.finished",
@@ -1390,7 +1434,7 @@ class Worker:
         ONLY: the check names the variable or the file, never reads a value into anything
         this returns. ``""`` when every builder the run would call has its credential."""
         try:
-            credential_refusal(run, SimpleNamespace(home=self.home, factory=self.settings.factory))
+            credential_refusal(run, self._claim_check_settings())
         except ApiError as exc:
             why = exc.message.removesuffix(" — nothing was queued")
             return (
@@ -1398,6 +1442,16 @@ class Worker:
                 "nothing was built"
             )
         return ""
+
+    def _claim_check_settings(self) -> SimpleNamespace:
+        """The settings ``credential_refusal`` is handed at claim (:meth:`_credential_gone`)
+        — a stand-in for the API's ``Settings`` carrying what the check reads: ``factory``
+        (its ``test_author``, an ``S1`` run's default author) and ``home`` (the secrets
+        directory, ``secrets_dir_for``). ``tests/test_worker_chain.py`` records every
+        attribute the check reads off the API's own ``Settings`` for a run of every kind the
+        worker can claim and fails when one does not resolve here (docs/PREVENTION.md
+        P-672, P-676)."""
+        return SimpleNamespace(home=self.home, factory=self.settings.factory)
 
     def _dead_login(self, run: Run, emitter: Emitter) -> str | None:
         """The error that fails ``run`` before any build when a login it would call was
@@ -2696,6 +2750,150 @@ class Worker:
             learning_tick(self.factory, self.home, repo)
         except Exception as exc:  # belt and braces: learning_tick itself never raises
             _LOG.warning("prevention: tick for %s failed: %s", repo, exc)
+
+    def _chain_next_stage(self, run: Run, counts: Mapping[str, Any]) -> None:
+        """DL-315: queue the next £0 stage after ``run`` succeeded, when the repository's
+        ``auto_stages`` switch is on and the stage's own pass fact holds. The actor is the
+        person whose ``repo.updated`` switched it on; ``params.chained_from`` names this
+        run; the ``connect.stage.chained`` event records it on the repository's trace.
+        Idempotent per finished run (a reclaimed run's second finish chains nothing more),
+        made and refused exactly as ``POST /runs`` would (``new_run``, ``submit_refusals``),
+        never a kind in ``BUILD_KINDS``, and never a re-walk: a next stage the repository
+        already holds — a run of it succeeded, or is queued or running — is left alone, so
+        re-running one free stage on a walked repository queues nothing a person did not
+        ask for (a failed next stage is chained again: that is the walk's Retry).
+        Observability of the walk, never a verdict: a failure is logged and the finished run
+        stands."""
+        try:
+            nxt = self._next_free_stage(run.kind)
+            if nxt is None or not stage_passed(run.kind, counts):
+                return
+            if nxt in BUILD_KINDS:
+                _LOG.error(
+                    "chain: refusing to queue %s after %s — a stage that spends is never chained",
+                    nxt,
+                    run.id[:8],
+                )
+                return
+            with self.factory() as db:
+                repo = db.get(Repo, run.repo)
+                if repo is None or not bool((repo.config_json or {}).get("auto_stages")):
+                    return
+                if self._already_chained(db, run):
+                    return
+                if self._stage_held(db, run.repo, nxt):
+                    _LOG.info(
+                        "chain: %s after %s not queued — %s already holds a %s run that "
+                        "succeeded or is in flight",
+                        nxt,
+                        run.id[:8],
+                        run.repo,
+                        nxt,
+                    )
+                    return
+                body, new = self._chain_request(db, run, nxt)
+                submit_refusals(db, self._chain_gate_settings(), body, new)
+                stage_queued(db, new)
+                append_system_event(
+                    db,
+                    trace_id=system_trace_id("repo", run.repo),
+                    action=CHAIN_EVENT,
+                    repo=run.repo,
+                    actor=new.actor,
+                    payload={
+                        "chained_from": run.id,
+                        "from_kind": run.kind,
+                        "kind": nxt,
+                        "run_id": new.id,
+                    },
+                )
+                db.commit()
+                _LOG.info("chain: %s queued after %s (%s)", nxt, run.id[:8], run.repo)
+        except Exception:
+            _LOG.exception("chain: queuing the next stage after %s failed", run.id[:8])
+
+    def _chain_request(self, db: Session, run: Run, nxt: str) -> tuple[RunCreateRequest, Run]:
+        """The request the chain queues ``nxt`` with after ``run``, and the run made of it —
+        the ONE construction of what the chain submits: the body ``POST /runs`` would be
+        sent (``qualify_first`` unset, so on), ``new_run`` under the person whose switch-on
+        the repository's trace records (else ``run``'s actor), ``params.chained_from``
+        naming ``run``. :meth:`_chain_next_stage` hands exactly this pair to
+        ``submit_refusals``, and ``tests/test_worker_chain.py`` gates exactly this pair
+        over the API's own ``Settings`` (docs/PREVENTION.md P-676)."""
+        actor = self._auto_stages_actor(db, run.repo) or run.actor
+        body = RunCreateRequest(repo=run.repo, kind=nxt)
+        new = new_run(body, actor=actor)
+        new.params_json = {**dict(new.params_json or {}), "chained_from": run.id}
+        return body, new
+
+    def _chain_gate_settings(self) -> SimpleNamespace:
+        """The settings ``submit_refusals`` is handed for a request :meth:`_chain_request`
+        makes — not the whole gate: the ``qualify_first: false`` branch reads
+        ``settings.sandbox``, which no chained body reaches. ``builder`` is here because the
+        gate reads ``settings.builder`` for every kind before the login check looks at the
+        kind; the check cannot fire for a free stage (``builder_login.GATED_KINDS`` is
+        ``BUILD_KINDS``, disjoint from ``FREE_CHAIN``, and the chain refuses a build kind),
+        so the TTL and the binary carry no meaning today. ``tests/test_worker_chain.py``
+        records every attribute the gate reads off the API's ``Settings`` for each request
+        the chain makes and fails when one does not resolve here (docs/PREVENTION.md P-672,
+        P-676)."""
+        return SimpleNamespace(
+            home=self.home,
+            factory=self.settings.factory,
+            builder=SimpleNamespace(
+                login_ttl_s=self.settings.builder_login_ttl_s, claude_binary=""
+            ),
+        )
+
+    @staticmethod
+    def _next_free_stage(kind: str) -> str | None:
+        """The stage after ``kind`` in ``FREE_CHAIN``; ``None`` for the last or a kind
+        outside the chain."""
+        if kind not in FREE_CHAIN:
+            return None
+        i = FREE_CHAIN.index(kind)
+        return FREE_CHAIN[i + 1] if i + 1 < len(FREE_CHAIN) else None
+
+    @staticmethod
+    def _already_chained(db: Session, run: Run) -> bool:
+        rows = db.execute(
+            select(Event).where(Event.repo == run.repo, Event.action == CHAIN_EVENT)
+        ).scalars()
+        return any((e.payload_json or {}).get("chained_from") == run.id for e in rows)
+
+    @staticmethod
+    def _stage_held(db: Session, repo: str, kind: str) -> bool:
+        """``True`` when the repository already holds a run of ``kind`` that succeeded or is
+        queued or running — the chain never re-walks and never doubles a stage in flight."""
+        rows = db.execute(
+            select(Run.status).where(
+                Run.repo == repo,
+                Run.kind == kind,
+                Run.status.in_((STATUS_SUCCEEDED, *ACTIVE_STATUSES)),
+            )
+        ).scalars()
+        return any(True for _ in rows)
+
+    @staticmethod
+    def _auto_stages_actor(db: Session, repo: str) -> str:
+        """The actor of the latest record that switched ``auto_stages`` on: a
+        ``repo.updated`` whose diff turned it on, or a ``repo.created`` whose config carried
+        it (``POST /repos`` accepts the switch too). Empty when no record says who."""
+        rows = db.execute(
+            select(Event)
+            .where(Event.repo == repo, Event.action.in_(("repo.updated", "repo.created")))
+            .order_by(Event.seq.desc(), Event.id.desc())
+        ).scalars()
+        for e in rows:
+            payload = e.payload_json or {}
+            if e.action == "repo.created":
+                if (payload.get("config") or {}).get("auto_stages") is True:
+                    return str(e.actor or "")
+                continue
+            change = (payload.get("diff") or {}).get("auto_stages") or {}
+            if change.get("to") is True:
+                return str(e.actor or "")
+        return ""
 
     def _ledger_health(self) -> None:
         try:
