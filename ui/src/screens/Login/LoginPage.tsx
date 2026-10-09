@@ -169,6 +169,12 @@ export function LoginPage() {
           )}
 
           <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
+            {/* a failed session check is read before the form, never under its submit button */}
+            {authError && (
+              <div className="mb-5">
+                <ErrorState compact error={authError} onRetry={recheck} title="Could not check your session" />
+              </div>
+            )}
             <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
               <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
               <TextField
@@ -195,11 +201,6 @@ export function LoginPage() {
               </Button>
             </form>
 
-            {authError && (
-              <div className="mt-5">
-                <ErrorState compact error={authError} onRetry={recheck} title="Could not check your session" />
-              </div>
-            )}
             {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
             {version.isError && (
               <div className="mt-5">

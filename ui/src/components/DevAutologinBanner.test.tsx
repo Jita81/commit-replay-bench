@@ -242,8 +242,10 @@ describe('an automatic sign-in that fails is not a refusal', () => {
   it('a server error from the POST is shown on the sign-in page', async () => {
     mockApi({ ...ROUTES, 'POST /auth/dev-autologin': () => envelope(500, 'internal', 'boom') })
     renderApp('/login')
-    expect(await screen.findByText('Could not check your session')).toBeInTheDocument()
-    expect(screen.getByRole('form', { name: 'Local account sign in' })).toBeInTheDocument()
+    const failed = await screen.findByText('Could not check your session')
+    const form = screen.getByRole('form', { name: 'Local account sign in' })
+    // above the form (login.explanation.15): read before a visitor reaches the submit button
+    expect(failed.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING, 'the failed check precedes the form').toBeTruthy()
   })
 
   it('an unreachable API during the POST is shown on the sign-in page', async () => {
