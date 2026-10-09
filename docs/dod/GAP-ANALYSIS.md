@@ -161,7 +161,7 @@ One row per gap: the change, and how much of the tree it closes.
 
 ## Our own bugs — the prevention register
 
-**508 registered · 467 closed (construction 119, gate 345, mistake-proofing 3) · 41 pending.** [measured — n = 508 rows of the `## Register` table in `docs/PREVENTION.md`, counted by status and level; method: `scripts/dod_check.py` over that file at this commit; apparatus n/a, a count of the register] A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
+**510 registered · 469 closed (construction 119, gate 347, mistake-proofing 3) · 41 pending.** [measured — n = 510 rows of the `## Register` table in `docs/PREVENTION.md`, counted by status and level; method: `scripts/dod_check.py` over that file at this commit; apparatus n/a, a count of the register] A defect is closed only with the artefact that fails if its class recurs (`docs/dod/STANDARD.md` §7); the register is `docs/PREVENTION.md`.
 
 | id | bug, with its claim tag | level | gap | what is missing |
 |---|---|---|---|---|
