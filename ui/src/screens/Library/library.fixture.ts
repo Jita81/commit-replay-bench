@@ -142,8 +142,32 @@ export const WORK_TYPE: WorkTypePage = {
     { size: 'XS', tasks: 20, standard: { arm: 'S1@gpt-oss-120b', n: 20, clean: 20, ci_low: 0.839, ci_high: 1, apparatus: '2.4', state: 'deliver', ceiling: false, reading_id: 'r1' }, next: '' },
     { size: 'S', tasks: 6, standard: null, next: 'Register a reading of this cell (S3, then S1, under the look rule). A first look needs 20 distinct commits; 6 commits of this kind and size mined so far.' },
     { size: 'M', tasks: 0, standard: null, next: 'Register a reading of this cell (S3, then S1, under the look rule). A first look needs 20 distinct commits; 0 commits of this kind and size mined so far.' },
-    { size: 'L', tasks: 0, standard: null, next: 'Register a reading.' },
-    { size: 'XL', tasks: 0, standard: null, next: 'Register a reading.' },
+    // ADR-0026 items 4 and 8 — a ceiling (S3 alone) with its forward reading, one ticket read
+    {
+      size: 'L',
+      tasks: 22,
+      standard: {
+        arm: 'S3',
+        n: 20,
+        clean: 20,
+        ci_low: 0.839,
+        ci_high: 1,
+        apparatus: '2.4',
+        state: 'deliver',
+        ceiling: true,
+        reading_id: 'r3',
+        // n differs from the passes, so a screen that swapped them would be caught
+        forward: { reading_id: 'rf', rule: 'look.v1', registered_at: '2026-09-28T10:00:00+00:00', state: 'look_pending', counted: 3, clean: 2, enrolled: 4, next_look: 20, needed: 17 },
+      },
+      next: 'Measured only against each commit’s own tests, so a ticket here is built only as a calibration build, which never opens a pull request.',
+    },
+    // a ceiling with no forward reading yet: an operator registers one on this page
+    {
+      size: 'XL',
+      tasks: 21,
+      standard: { arm: 'S3', n: 20, clean: 20, ci_low: 0.839, ci_high: 1, apparatus: '2.4', state: 'deliver', ceiling: true, reading_id: 'r5', forward: null },
+      next: 'Measured only against each commit’s own tests, so a ticket here is built only as a calibration build, which never opens a pull request.',
+    },
   ],
   quality: {
     served: true,

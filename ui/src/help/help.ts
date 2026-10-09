@@ -194,6 +194,18 @@ export const HELP: ScreenHelp[] = [
     ],
   },
   {
+    route: '/factory/acceptance',
+    purpose: 'A calibration build is measured, never delivered: a second person writes the held-out acceptance tests its first attempt is graded on — from the ticket alone, before the build, never seeing the ticket’s own failing test. A forward reading registered on the ticket’s kind and size before the tests are written counts the result; only it can turn a ceiling into a standard.',
+    next: {
+      viewer: 'Read each ticket’s state: tests needed, written, being built, graded with the first attempt’s result, built without them (and why), or cannot be graded because the ticket was attempted before.',
+      operator: 'If you did not write the ticket, did not fund its build and will not run it, write the tests a correct change must pass and save them. They are stored under your name and never shown to the builder.',
+      approver: 'Fund a calibration build on the Factory page; someone else writes its held-out tests here.',
+    },
+    numbers: 'A digest is the SHA-256 of the test files as written. A result is the first attempt’s run against them: pass, fail (a miss where a forward reading counts it — so is a build that hangs on them) or error (the tests could not be run, so the ticket leaves the reading — never a miss).',
+    terms: ['cell', 'deliver', 'signoff', 'apparatus'],
+    readMore: [{ to: 'OPERATOR#16-calibration-builds-held-out-tests-and-forward-readings', label: 'Calibration builds, held-out tests and forward readings' }],
+  },
+  {
     route: '/posture',
     purpose: `A printable statement of how this deployment is built, secured and audited, for an architecture or security review. Each row is read from the running system or names its source. ${OPERATE_NON_GOALS}`,
     next: {
@@ -351,6 +363,18 @@ export const HELP: ScreenHelp[] = [
     numbers: 'A proven standard shows its distinct commits, its 95 % Wilson interval and the apparatus it was proven under; with none, the page names the reading that would prove it. A measured effect reads unmeasured until an arm is read with and without the entry.',
     terms: ['cell', 'wilson', 'apparatus', 'signoff'],
     readMore: [{ to: 'OPERATOR#14-the-context-library', label: 'The context library' }],
+  },
+  {
+    route: '/classes',
+    purpose: 'Your organisation’s own classes of work, each a child of one global class, with one rule that reads only what a ticket carries. A version routes nothing until people have labelled a sample, its validity report passes and an approver other than its sponsor has signed it.',
+    next: {
+      viewer: 'Open a version to read its classes, its validity report and how its commits were held out, then read a class’s page.',
+      operator: 'Propose a version and you become its sponsor; another person labels its sample. Label a version someone else proposed: you see each commit and its ticket, never the class the rule gives it, and the agreement is withheld from you until you finish.',
+      approver: 'Read the report and sign a version someone else proposed; you cannot sign one you proposed. Revoke with a reason and it routes nothing.',
+    },
+    numbers: 'Agreement is Cohen’s κ between the rule and the labels of people other than its sponsor, on derivation commits that are not shown as examples. Each check of the validity report shows the threshold in force beside it: how many labelled commits the sample needs, and how many confirmation commits a class and size cell needs before a reading registered after the signature can license it.',
+    terms: ['cell', 'signoff'],
+    readMore: [{ to: 'OPERATOR#15-your-organisations-classes', label: 'Your organisation’s classes' }],
   },
   {
     route: '/tasks/:repo/:taskId',

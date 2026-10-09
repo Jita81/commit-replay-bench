@@ -580,6 +580,8 @@ LIBRARY_TABLE_OWNERS = {
     "src/crb/store/models.py",
     "src/crb/store/migrate.py",
     "src/crb/store/migrations/versions/v0016_library_acts.py",
+    # a later revision pins the append-only tables that exist at it, the library's among them
+    "src/crb/store/migrations/versions/v0017_class_sets.py",
 }
 
 

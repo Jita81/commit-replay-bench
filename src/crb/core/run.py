@@ -159,6 +159,10 @@ class RunSpec:
     context_for: ContextFor | None = None
     #: The posture the run grades in (``Posture.to_dict()``), stamped on every pack.
     posture: Mapping[str, Any] = field(default_factory=dict)
+    #: The class-set version every row of the run is stamped under (``labels.taxonomy``,
+    #: ADR-0026 item 9): ``""`` is the global vocabulary; an organisation's signed
+    #: ``<org>/classes@vN`` when a reading of its classes is being measured.
+    taxonomy: str = ""
     #: Called with the task and the row when a graded attempt is an ENVIRONMENT failure
     #: (the trial's gold control was red in the posture): the task's ladder stops there
     #: and the caller revokes its qualification (ADR-0019 §5).
@@ -299,6 +303,7 @@ def row_from(
         language=task.language or spec.config.language.value,
         builder_error=attempt.error,
         labels=dict(attempt.labels),
+        taxonomy=spec.taxonomy,
     )
 
 

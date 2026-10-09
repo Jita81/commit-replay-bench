@@ -76,8 +76,9 @@ try:
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
 
-#: The packaged head: 0016, the context library's acts (north-star Wave 4, stream L).
-HEAD = "0016"
+#: The packaged head: 0017, an organisation's class sets and the label table (north-star
+#: Wave 4b, stream CLS reserved it as 0047; the integration numbered it 0017).
+HEAD = "0017"
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -1451,8 +1452,8 @@ def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
     exists (a signature is never dropped) and otherwise drops the table."""
     migrate.upgrade(backend.url, revision="0015")
     assert "library_acts" not in inspect(backend.engine).get_table_names()
-    migrate.upgrade(backend.url)
-    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
+    migrate.upgrade(backend.url, revision="0016")
+    assert migrate.current(backend.url) == "0016"
     assert {"library_acts_no_update", "library_acts_no_delete"} <= backend.trigger_names()
     with backend.engine.begin() as c:
         _insert_library_act(c, 1)
@@ -1465,9 +1466,9 @@ def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
     ):
         cfg.attributes["connection"] = connection
         command.downgrade(cfg, "0015")
-    assert migrate.current(backend.url) == HEAD
+    assert migrate.current(backend.url) == "0016"
     fresh = _reset(backend)
-    migrate.upgrade(backend.url)
+    migrate.upgrade(backend.url, revision="0016")
     cfg = migrate.alembic_config(backend.url)
     with fresh.begin() as connection:
         cfg.attributes["connection"] = connection
@@ -1479,5 +1480,53 @@ def test_0016_adds_the_library_acts_append_only_and_never_drops_a_signature(
     init_db(fresh)
     with fresh.begin() as c:
         c.execute(text("DROP TABLE library_acts"))
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []
+
+
+def test_0017_adds_the_class_set_acts_and_the_label_table_append_only(backend: Backend) -> None:
+    """Revision 0017 (ADR-0026 item 9) adds ``class_set_acts`` — an organisation's class sets,
+    hash-chained — and ``class_labels`` — the label table a relabel writes instead of a ledger
+    row — both append-only; a downgrade is refused while either holds a row (a signature or a
+    person's label is never dropped) and otherwise drops both."""
+    migrate.upgrade(backend.url, revision="0016")
+    assert "class_set_acts" not in inspect(backend.engine).get_table_names()
+    migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
+    names = backend.trigger_names()
+    assert {"class_set_acts_no_update", "class_set_acts_no_delete"} <= names
+    assert {"class_labels_no_update", "class_labels_no_delete"} <= names
+    with backend.engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO class_labels (label_id, taxonomy, repo, task_id, capability_class, "
+                "source, labeller, created) VALUES (:id, 'acme/classes@v1', 'calc', :t, "
+                "'parser-fix', 'person', :who, '2026-09-28T00:00:00+00:00')"
+            ),
+            {"id": "1" * 32, "t": "a" * 40, "who": "b" * 32},
+        )
+    with pytest.raises(DBAPIError, match="append-only"), backend.engine.begin() as c:
+        c.execute(text("UPDATE class_labels SET capability_class = 'cli-fix'"))
+    cfg = migrate.alembic_config(backend.url)
+    with (
+        pytest.raises(RuntimeError, match="refusing to downgrade 0017"),
+        backend.engine.begin() as connection,
+    ):
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0016")
+    fresh = _reset(backend)
+    migrate.upgrade(backend.url)
+    cfg = migrate.alembic_config(backend.url)
+    with fresh.begin() as connection:
+        cfg.attributes["connection"] = connection
+        command.downgrade(cfg, "0016")
+    assert migrate.current(backend.url) == "0016"
+    assert not {"class_set_acts", "class_labels"} & set(inspect(fresh).get_table_names())
+    # a create_all schema from before the class sets adopts at 0016 and 0017 adds the tables
+    fresh = _reset(backend)
+    init_db(fresh)
+    with fresh.begin() as c:
+        c.execute(text("DROP TABLE class_set_acts"))
+        c.execute(text("DROP TABLE class_labels"))
     migrate.upgrade(backend.url)
     assert migrate.current(backend.url) == HEAD and _autogen_diff(fresh) == []

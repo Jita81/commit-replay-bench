@@ -302,7 +302,8 @@ from crb.observability.events import CallbackSink, Emitter, JsonlSink, MultiSink
 from crb.observability.metrics import parse_metrics_port
 from crb.provision import make_deps_provider
 from crb.provision.config import ProvisionConfig
-from crb.server import factory_standard
+from crb.server import class_set_state, factory_standard
+from crb.server.acceptance import held_out_reader
 from crb.server.builder_login import (
     LOGIN_INVALID_CODE,
     claim_refusal,
@@ -1159,6 +1160,8 @@ class Worker:
             # this deployment's posture class
             gate=self._standard_readers(repo),
             require_signed_cell=self.settings.factory.require_signed_cell,
+            # ADR-0026 item 9: the organisation's routing class set classifies each ticket
+            classes=class_set_state.draft_stamper(self.factory, repo),
         )
 
     def _factory_run_active(self, repo: str) -> bool:
@@ -2514,6 +2517,8 @@ class Worker:
             corpus_sha=str(p.get("corpus_sha") or ""),
             policy_version=str(p.get("policy_version") or ""),
             evaluate_api=checks.api_stable,
+            # ADR-0026 item 9: an organisation's routing class set, checked at enqueue
+            taxonomy=str(p.get("taxonomy") or ""),
             keep_worktrees=bool(
                 p.get("keep_worktrees", retain.get("worktrees", self.settings.keep_worktrees))
             ),
@@ -3271,6 +3276,9 @@ class Worker:
             readers=self._standard_readers(
                 run.repo, checks_arm=checks.arm, posture_class=gate.posture.posture_class
             ),
+            # ADR-0026 item 8 — a second person's held-out acceptance tests, read from the
+            # store after the run claims a calibration grant and graded on its first attempt
+            held_out=held_out_reader(self.factory, run.repo),
             # the loop's overlay and lines reach an item's brief only when its standard arm
             # carries +L (ADR-0026 item 8); the loop decides per item
             learning=self._learning_snapshot(ctx),
