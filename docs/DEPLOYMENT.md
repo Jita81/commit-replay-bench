@@ -499,8 +499,8 @@ pull-request workflow reports (every pull request would wait on it for ever), su
 no required check names (it could fail and the change still merge), a required check that is
 a part of an aggregator, a setting that is not strict, and a job name of 100 characters or
 more. It reads every such job as running on every pull request: it does not evaluate a
-workflow's `paths:` filter or a job-level `if:`, so a job either keeps off some pull requests
-would still be compared as if it ran on all of them [hypothesis — no pull-request workflow has
+workflow's `paths:` filter or a job-level `if:`, so a job that either keeps off some pull
+requests is still compared as if it ran on all of them [hypothesis — no pull-request workflow has
 either today; P-752's gap column]. The daily
 `branch-protection` workflow (`.github/workflows/branch-protection.yml`) runs it against the
 live setting. Reading the setting needs a token with Administration: read, which a workflow's
