@@ -26,8 +26,10 @@ What it does: Pins that a well-formed artefact tree passes; that ``met`` without
               generated "Gap ids retired" list; that a retired id is admitted only when the
               artefacts' git history (never the generated file, never a parent repository)
               or the base branch's committed gap analysis vouches for it; that an id the gap
-              analysis at the merge-base carries is restored, and refused by ``--check``,
-              when a merge resolution drops it from the retired list (P-677); that every gap the
+              analysis at the merge-base carries, open or retired, or that one this branch
+              committed since carries, is restored, and refused by ``--check``, when a merge
+              resolution drops it from the retired list — and that a gap the base opened
+              after the merge-base is not retired here (P-677); that every gap the
               order of work ranks, not only the first rows, sits in some table of the plan;
               that no plan heading quotes a rank (P-189); that a clause a reworded criterion
               dropped since the merge-base may not survive in a twin that does not wait on the
@@ -1052,12 +1054,26 @@ def test_a_merge_that_drops_an_id_the_base_retires_is_restored_and_refused(
     # has one: fetch-depth 0 and DOD_BASE) — it neither crashes nor invents a loss
     assert mod.main(["--check", "--base", "no-such-branch"]) == 0
     capsys.readouterr()
-    # regenerating restores it, and the restored file is current
+    # regenerating restores it, says where from, and the restored file is current
     assert mod.main(["--base", "base-under-test"]) == 0
-    assert "restored to the retired list" in capsys.readouterr().out
+    assert (
+        "restored G-001 to the retired list (the gap analysis at the merge-base with "
+        "base-under-test carries it)"
+    ) in capsys.readouterr().out
     assert "G-001" in _retired(root)
     assert mod.main(["--check", "--base", "base-under-test"]) == 0
     assert mod.main(["--check"]) == 0  # and with no base to read, the previous file keeps it
+    capsys.readouterr()
+    # with no previous file nothing was lost: one line at most, never one per id
+    (root / "docs/dod/GAP-ANALYSIS.md").unlink()
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert "does not retire" not in said and "is out of date" in said, said
+    assert mod.main(["--base", "base-under-test"]) == 0
+    said = capsys.readouterr().out
+    assert "restored" not in said and said.count("no previous docs/dod/GAP-ANALYSIS.md") == 1
+    assert "G-001" in _retired(root)
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
 
 
 def test_the_bases_ids_carry_into_the_retired_list_until_defined_again() -> None:
@@ -1073,6 +1089,155 @@ def test_the_bases_ids_carry_into_the_retired_list_until_defined_again() -> None
     ]
     assert mod.retired_ids(previous, {"G-001", "G-003"}, {"G-001", "G-002"}) == ["G-002"]
     assert mod.retired_ids(previous, set()) == ["G-003"]  # no base read: the previous file only
+
+
+def _open_gap(root: Path, gid: str) -> None:
+    """The fixture tree with its one gap open under ``gid``, and the plan naming it."""
+    _write_all(root, ng_state="unmet", ng_gap="G-001")
+    page = root / "docs/dod/pages/results.md"
+    page.write_text(page.read_text(encoding="utf-8").replace("G-001", gid), encoding="utf-8")
+    (root / "docs/dod/PLAN.md").write_text(PLAN.replace("G-701", f"{gid}, G-701"), encoding="utf-8")
+
+
+def _close_gaps(root: Path) -> None:
+    _write_all(root)
+    (root / "docs/dod/PLAN.md").write_text(PLAN, encoding="utf-8")
+
+
+def test_a_merge_that_keeps_the_bases_file_cannot_drop_an_id_only_the_branch_retired(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/PREVENTION.md P-677, the branch's side: the gap analysis at the merge-base never
+    holds an id only the branch carried, so a merge resolved by keeping the base's side of
+    the file dropped it, and ``--check`` read the loss back as current (G-208, G-209, G-246
+    and G-730 left #75's record so). Each gap analysis the branch committed since the
+    merge-base carries its ids too — read with ``--full-history``, since that merge is
+    TREESAME to the base's side and git's default walk would skip every version the branch
+    wrote."""
+    mod, root = tree
+    _close_gaps(root)
+    assert mod.main([]) == 0
+    _commit(root, "a tree")
+    _git(root, "branch", "-q", "base-under-test")
+    # the branch opens G-001 and closes it: its regenerated file retires G-001
+    _open_gap(root, "G-001")
+    assert mod.main([]) == 0
+    _commit(root, "open G-001")
+    _close_gaps(root)
+    assert mod.main([]) == 0
+    assert "G-001" in _retired(root)
+    closed = _commit(root, "close G-001")[:8]
+    # the base moves on, and the merge keeps the base's side of the gap analysis
+    _git(root, "checkout", "-q", "base-under-test")
+    (root / "notes.txt").write_text("the base moves on\n", encoding="utf-8")
+    _commit(root, "the base moves on")
+    _git(root, "checkout", "-q", "main")
+    _git(root, "merge", "-q", "--no-ff", "--no-commit", "base-under-test")
+    _git(root, "checkout", "base-under-test", "--", "docs/dod/GAP-ANALYSIS.md")
+    _commit(root, "merge the base: keep its gap analysis")
+    assert "G-001" not in _retired(root)
+    capsys.readouterr()
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert (
+        f"docs/dod/GAP-ANALYSIS.md does not retire G-001, which the gap analysis committed at "
+        f"{closed} carries and nothing here defines"
+    ) in said, said
+    assert "2 defect(s)" in said  # the loss and the drift it makes: nothing else is wrong
+    assert mod.main(["--base", "base-under-test"]) == 0
+    assert (
+        f"restored G-001 to the retired list (the gap analysis committed at {closed} carries it)"
+    ) in capsys.readouterr().out
+    assert "G-001" in _retired(root)
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
+    _commit(root, "restore G-001")
+    capsys.readouterr()
+    # a hand edit committed on the branch vouches for nothing (P-127): the generator drops the
+    # id, and the committed forgery is never read back as an id the list lost
+    _retire_by_hand(root, "G-123")
+    _commit(root, "a hand edit to the generated file")
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    assert "retires G-123, but no artefact" in capsys.readouterr().out
+    assert mod.main(["--base", "base-under-test"]) == 0
+    assert "dropped from the retired list" in capsys.readouterr().out
+    assert "G-123" not in _retired(root)
+    _commit(root, "regenerate")
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0, capsys.readouterr().out
+
+
+def test_an_id_the_branch_only_carried_as_open_work_is_not_dropped_with_it(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """P-677: a resolution can drop an id that the branch's file only ever carried as open
+    work — G-760 left #75's record in a merge that renumbered it to G-709 and kept a file
+    that never retired it. The open ids of each gap analysis the branch committed carry,
+    not only its retired ones."""
+    mod, root = tree
+    _close_gaps(root)
+    assert mod.main([]) == 0
+    _commit(root, "a tree")
+    _git(root, "branch", "-q", "base-under-test")
+    _open_gap(root, "G-003")
+    assert mod.main([]) == 0
+    opened = _commit(root, "open G-003")[:8]
+    # a commit closes G-003 and keeps the file from before G-003 was opened
+    _close_gaps(root)
+    assert mod.main([]) == 0
+    _git(root, "checkout", "base-under-test", "--", "docs/dod/GAP-ANALYSIS.md")
+    _commit(root, "close G-003 and keep the older gap analysis")
+    capsys.readouterr()
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert (
+        f"docs/dod/GAP-ANALYSIS.md does not retire G-003, which the gap analysis committed at "
+        f"{opened} carries and nothing here defines"
+    ) in said, said
+    assert "2 defect(s)" in said  # the loss and the drift it makes: nothing else is wrong
+    assert mod.main(["--base", "base-under-test"]) == 0
+    assert "restored G-003 to the retired list" in capsys.readouterr().out
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
+
+
+def test_the_base_is_read_at_the_merge_base_and_its_open_ids_carry_too(
+    tree: tuple[ModuleType, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """P-677 pins two reads of the base. Its ids come from the gap analysis at the merge-base,
+    never the base's tip: a gap the base opened after the branch left is not this branch's
+    work, and HEAD must not retire it. And the merge-base's OPEN ids carry, not only its
+    retired ones: a branch that closes a gap the merge-base had open, in the commit whose
+    file lost it, has no committed file of its own that names the id."""
+    mod, root = tree
+    _open_gap(root, "G-001")
+    assert mod.main([]) == 0
+    _commit(root, "G-001 is a gap")
+    _git(root, "branch", "-q", "base-under-test")
+    # the base moves on after the merge-base: it closes G-001 and opens G-002
+    _git(root, "checkout", "-q", "base-under-test")
+    _open_gap(root, "G-002")
+    assert mod.main([]) == 0
+    _commit(root, "the base opens G-002")
+    _git(root, "checkout", "-q", "main")
+    # the branch closes G-001 in a commit whose file lost it
+    _close_gaps(root)
+    assert mod.main([]) == 0
+    _drop_retired(root, "G-001")
+    _commit(root, "close G-001: the file lost it")
+    capsys.readouterr()
+    assert mod.main(["--check", "--base", "base-under-test"]) == 1
+    said = capsys.readouterr().out
+    assert (
+        "docs/dod/GAP-ANALYSIS.md does not retire G-001, which the gap analysis at the "
+        "merge-base with base-under-test carries and nothing here defines"
+    ) in said, said
+    assert "G-002" not in said, said
+    assert mod.main(["--base", "base-under-test"]) == 0
+    said = capsys.readouterr().out
+    assert (
+        "restored G-001 to the retired list (the gap analysis at the merge-base with "
+        "base-under-test carries it)"
+    ) in said, said
+    assert _retired(root) == {"G-001"}
+    assert mod.main(["--check", "--base", "base-under-test"]) == 0
 
 
 def test_a_new_gap_never_reuses_an_id_the_bases_history_closed(
