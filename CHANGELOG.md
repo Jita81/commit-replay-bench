@@ -14,14 +14,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **Every pull-request workflow's jobs are required on `main`**
   ([#72](https://github.com/Jita81/commit-replay-bench/pull/72)). On 2026-10-07 an administrator
-  added the `fresh-clone` and `commit-subjects` checks to `main`'s required list, making 18. The
-  branch-protection check compared that list with `ci.yml` alone, so it called `commit-subjects`
-  a check no job reports. It now finds every workflow whose `on:` names `pull_request` and
-  requires each of their jobs; the reading is saved in `data/branch-protection-2026-10-07/`
-  (P-752). A test that skips on a git result now fails, including through a method helper or an
-  early return in an `else`, and every suite job must fetch the whole history (P-753). The gap
-  analysis's headline totals carry their measured tag. The daily workflow needs a read-only
-  token to go green (G-930).
+  made `fresh-clone` and `commit-subjects` required on `main`, making 18. The branch-protection
+  check compared that list with `ci.yml` alone, so it called `commit-subjects` a check no job
+  reports. It now requires every job of each workflow whose `on:` names `pull_request`; its reading
+  is in `data/branch-protection-2026-10-07/` (P-752). A test that skips on a git result now fails,
+  even through a helper or an `else`, and suite jobs must fetch the whole history (P-753).
+  Gap-analysis totals carry their measured tag. The suite now runs in eleven shards: on refreshed
+  weights, nine overran half the timeout (P-740). The daily workflow needs a read-only token to go
+  green (G-930).
 
 - **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
   fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows

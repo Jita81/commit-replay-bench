@@ -547,7 +547,7 @@ JSON
 `test (py3.12)`, `test (py3.13)`, `walkthrough (browser, live stack, tier 1)` and
 `fresh-clone (every gate from uv.lock, as root, no docker daemon)` are aggregators — each a
 job that `needs` its parts and runs `if: always()`: the work runs in parallel parts
-(`test shard (py3.12, 1 of 9)` …, the walkthrough story and its screens shards, the
+(`test shard (py3.12, 1 of 11)` …, the walkthrough story and its screens shards, the
 fresh-clone gates and its shards) and the aggregator passes only when every part passed (a
 failed, cancelled or skipped part fails it), the suite's parts together ran every test
 exactly once, and, for `test`, the union's coverage is at least 70 % (P-051, P-053) **[measured — n = 4 aggregators; method: `scripts/check_branch_protection.py`'s `aggregated_parts` over ci.yml, pinned by `tests/test_ci_job_budget.py` and `tests/test_check_branch_protection.py`; apparatus n/a, a property of the product's own code, not a graded row]**. Never add a part to the list — its name changes
