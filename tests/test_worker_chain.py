@@ -12,19 +12,21 @@ What it does: Pins that a green probe on a repository whose ``auto_stages`` swit
               stage chains nothing; and that the chain never queues a ``BUILD_KINDS`` kind:
               the constant is disjoint from them, the last free stage chains nothing, and a
               chain that would name a build kind is refused at the seam; and that every
-              attribute the API's submit gate reads for a chain body resolves on the
-              worker's stand-in for the API's settings (P-676).
+              attribute the API's submit gate reads for a request the chain makes resolves
+              on the worker's stand-in for the API's settings, as does every attribute the
+              claim-time credential check reads for a run of any kind (P-676).
 How:          ``Harness`` from tests/test_worker.py runs a real probe on ``pyrepo`` through
               the local executor; the switch is seeded on the repository row and its
-              ``repo.updated`` event through ``append_system_event``. The stand-in check runs
-              ``submit_refusals`` over the API's own ``Settings`` behind a proxy that
-              records each attribute path read.
+              ``repo.updated`` event through ``append_system_event``. The stand-in checks run
+              ``submit_refusals`` on the chain's own ``Worker._chain_request`` pair, and
+              ``credential_refusal`` on a run of every claimable kind, over the API's own
+              ``Settings`` behind a proxy that records each attribute path read.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md (the qualify stage in the chain)
 Works with:   src/crb/server/worker.py (under test), src/crb/server/routes/runs.py
-              (``new_run`` / ``submit_refusals`` — how the chained run is made),
-              src/crb/server/routes/repos.py (``PUT /repos/{name}`` writes the switch),
-              tests/test_worker.py (the harness)
+              (``new_run`` / ``submit_refusals`` — how the chained run is made;
+              ``credential_refusal`` — the claim check), src/crb/server/routes/repos.py
+              (``PUT /repos/{name}`` writes the switch), tests/test_worker.py (the harness)
 Tested by:    tests/test_worker_chain.py
 Touch when:   never for a new repository; a stage is added to ``FREE_CHAIN`` or a stage's pass
               fact changes (``stage_passed``).
@@ -41,16 +43,19 @@ import pytest
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from crb.core.secrets_file import SECRETS_DIR_ENV
 from crb.server import builder_login
 from crb.server import worker as worker_mod
 from crb.server.deps import ApiError
 from crb.server.routes.runs import (
+    CREDENTIAL_CHECKS,
     append_system_event,
+    credential_refusal,
     new_run,
     submit_refusals,
     system_trace_id,
 )
-from crb.server.schemas import BUILD_KINDS
+from crb.server.schemas import BUILD_KINDS, RUN_KINDS, RunCreateRequest
 from crb.server.settings import Settings
 from crb.store.jobs import STATUS_FAILED, STATUS_QUEUED, STATUS_SUCCEEDED
 from crb.store.models import Event, Run
@@ -300,18 +305,26 @@ class _Reads:
 
 def _gate_reads(h: Harness) -> dict[str, set[str]]:
     """Every attribute path ``submit_refusals`` reads off the API's own ``Settings`` for each
-    body the chain can build — the chain's own ``_chain_body`` for every kind in
-    ``FREE_CHAIN`` (the probe, which nothing chains, included: a superset costs nothing),
-    the gate called as the chain calls it. A refusal is the gate's answer, not drift: the
-    reads made before it count."""
+    request the chain makes: the pair ``Worker._chain_request`` returns — the seam
+    ``_chain_next_stage`` itself submits, so the body, ``params.chained_from`` and the
+    switcher as actor are exactly the chain's — after a finished run of the stage before,
+    for every kind in ``FREE_CHAIN`` (the probe, which nothing chains, included, after a
+    probe: a superset costs nothing). A refusal is the gate's answer, not drift: the reads
+    made before it count."""
+    h.add_repo(auto_stages=True)
+    _switched_on(h)
+    chain = worker_mod.FREE_CHAIN
+    sources = {kind: _finished(h, chain[max(i - 1, 0)]) for i, kind in enumerate(chain)}
     api = Settings(env="dev", home=h.home)
     reads: dict[str, set[str]] = {}
     with h.factory() as db:
-        for kind in worker_mod.FREE_CHAIN:
-            body = h.worker._chain_body(pr.REPO_NAME, kind)
+        for kind, source in sources.items():
+            body, new = h.worker._chain_request(db, source, kind)
+            assert (body.kind, new.kind) == (kind, kind)
+            assert new.params_json["chained_from"] == source.id and new.actor == SWITCHER
             seen: set[str] = set()
             with contextlib.suppress(ApiError):
-                submit_refusals(db, _Reads(api, seen), body, new_run(body, actor=SWITCHER))
+                submit_refusals(db, _Reads(api, seen), body, new)
             reads[kind] = seen
     return reads
 
@@ -329,14 +342,18 @@ def _unresolved(paths: set[str], stand_in: object) -> list[str]:
     return sorted(missing)
 
 
+def _without(stand_in: SimpleNamespace, name: str) -> SimpleNamespace:
+    """``stand_in`` with its top-level field ``name`` removed."""
+    return SimpleNamespace(**{k: v for k, v in vars(stand_in).items() if k != name})
+
+
 def test_the_chain_gate_settings_carry_every_field_the_submit_gate_reads(h: Harness) -> None:
     """P-676, P-672's class come back: the chain hands ``submit_refusals`` a stand-in for the
     API's ``Settings``, and ``settings: Any`` keeps mypy blind to a field the gate reads that
     the stand-in lacks. Wave 4's login check read ``settings.builder``, the stand-in had
     none, and every chained stage raised — caught and logged, so none was ever queued. Every
-    attribute path the gate reads off the API's own settings, for every body the chain
-    builds, must resolve on the worker's stand-in."""
-    h.add_repo()
+    attribute path the gate reads off the API's own settings, for every request the chain
+    makes, must resolve on the worker's stand-in."""
     reads = _gate_reads(h)
     stand_in = h.worker._chain_gate_settings()
     missing = {kind: _unresolved(paths, stand_in) for kind, paths in reads.items()}
@@ -351,18 +368,92 @@ def test_the_chain_gate_settings_carry_every_field_the_submit_gate_reads(h: Harn
 def test_the_gate_settings_check_reports_a_stand_in_without_builder(h: Harness) -> None:
     """The negative control: the check sees the bug it exists for. Today's stand-in without
     ``builder`` — before 30c08b7b, ``home`` and ``factory`` only — is reported for every
-    chain body, and for nothing else; and without any one field the gate reads, that field
-    is reported."""
-    h.add_repo()
+    request the chain makes, and for nothing else; and without any one field the gate
+    reads, that field is reported."""
     reads = _gate_reads(h)
-    fields = vars(h.worker._chain_gate_settings())
-
-    def dropped(name: str) -> SimpleNamespace:
-        return SimpleNamespace(**{k: v for k, v in fields.items() if k != name})
-
+    stand_in = h.worker._chain_gate_settings()
     for kind, paths in reads.items():
-        missing = _unresolved(paths, dropped("builder"))
+        missing = _unresolved(paths, _without(stand_in, "builder"))
         assert missing and {p.split(".")[0] for p in missing} == {"builder"}, (kind, missing)
     every = set().union(*reads.values())
     for top in {p.split(".")[0] for p in every}:
-        assert top in _unresolved(every, dropped(top)), top
+        assert top in _unresolved(every, _without(stand_in, top)), top
+
+
+def _claimable_runs(h: Harness) -> dict[str, Run]:
+    """A run of every kind the worker can claim — ``_credential_gone`` runs on every claimed
+    run before its handler is looked up, so ``RUN_KINDS`` and every kind the worker has a
+    handler for — a build kind once per builder with a credential check
+    (``CREDENTIAL_CHECKS``), and a blind run on the ``S1`` arm with no ``test_author`` of its
+    own (the branch that calls the deployment's author)."""
+    runs: dict[str, Run] = {}
+    for kind in sorted(set(RUN_KINDS) | set(h.worker._handlers)):
+        if kind not in BUILD_KINDS:
+            runs[kind] = new_run(RunCreateRequest(repo=pr.REPO_NAME, kind=kind), actor=SWITCHER)
+            continue
+        for builder in sorted(CREDENTIAL_CHECKS):
+            body = RunCreateRequest(repo=pr.REPO_NAME, kind=kind, builder=builder, model="m")
+            runs[f"{kind}:{builder}"] = new_run(body, actor=SWITCHER)
+    s1 = new_run(
+        RunCreateRequest(repo=pr.REPO_NAME, kind="blind", builder="editblock", model="m"),
+        actor=SWITCHER,
+    )
+    s1.params_json = {**dict(s1.params_json or {}), "arm": "S1"}
+    runs["blind:S1"] = s1
+    return runs
+
+
+def _claim_reads(h: Harness) -> dict[str, set[str]]:
+    """Every attribute path ``credential_refusal`` reads off the API's own ``Settings`` for
+    each run :func:`_claimable_runs` makes — the check ``Worker._credential_gone`` runs when
+    the worker claims a run. A refusal (no credential in this environment) is the check's
+    answer, not drift: the reads made before it count."""
+    api = Settings(env="dev", home=h.home)
+    reads: dict[str, set[str]] = {}
+    for label, run in _claimable_runs(h).items():
+        seen: set[str] = set()
+        with contextlib.suppress(ApiError):
+            credential_refusal(run, _Reads(api, seen))
+        reads[label] = seen
+    return reads
+
+
+def test_the_claim_check_settings_carry_every_field_the_credential_check_reads(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-676's sibling seam: when the worker claims a run, ``_credential_gone`` hands
+    ``credential_refusal`` its own stand-in for the API's ``Settings``, which ``settings:
+    Any`` keeps mypy blind to, as the chain's was. Every attribute path the check reads off
+    the API's own settings, for a run of every kind the worker can claim, must resolve on
+    ``Worker._claim_check_settings``; a build run reads ``factory.test_author`` and ``home``
+    (the secrets directory, with ``CRB_SECRETS_DIR`` unset), so the check is not vacuous."""
+    monkeypatch.delenv(SECRETS_DIR_ENV, raising=False)
+    reads = _claim_reads(h)
+    for label, paths in reads.items():
+        if label.split(":")[0] in BUILD_KINDS:
+            assert {"factory", "factory.test_author", "home"} <= paths, (label, paths)
+    stand_in = h.worker._claim_check_settings()
+    missing = {label: _unresolved(paths, stand_in) for label, paths in reads.items()}
+    assert not any(missing.values()), (
+        f"the claim-time credential check reads settings the worker's stand-in lacks: "
+        f"{missing} — carry them in Worker._claim_check_settings (docs/PREVENTION.md P-676)"
+    )
+
+
+def test_the_claim_check_reports_a_stand_in_without_a_field_it_reads(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The negative control: without ``factory``, or without ``home``, or without any other
+    field the check reads, the claim check's stand-in is reported for exactly the runs whose
+    check reads that field, and nothing but that field is reported."""
+    monkeypatch.delenv(SECRETS_DIR_ENV, raising=False)
+    reads = _claim_reads(h)
+    stand_in = h.worker._claim_check_settings()
+    tops = {p.split(".")[0] for p in set().union(*reads.values())}
+    assert {"factory", "home"} <= tops, tops
+    for top in tops:
+        for label, paths in reads.items():
+            missing = _unresolved(paths, _without(stand_in, top))
+            read = any(p.split(".")[0] == top for p in paths)
+            assert bool(missing) == read, (top, label, missing)
+            assert {p.split(".")[0] for p in missing} <= {top}, (top, label, missing)
