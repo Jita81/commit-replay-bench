@@ -1066,7 +1066,13 @@ def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
     """The ids — open or retired — in the gap analysis committed at the merge-base of ``HEAD``
     and ``base``. That file passed this check on the pull request that wrote it, and it is
     where an id opened and closed inside a squash-merged branch survives (the squash drops the
-    branch's own artefact commits). Empty when the base does not resolve."""
+    branch's own artefact commits). Unlike a version the branch committed
+    (``branch_gap_analysis_ids``), this file is read when it has no retired list, so a branch
+    whose merge-base predates the list is asked to retire the ids the base closed before the
+    list began. Applied here, the branch's rule would drop two refusals the real record
+    raises — G-230 and G-915 at the base 50dc25fb, whose file has no retired list (the list
+    began at 9217c788; the two closed at 4b3610da and e6786444) — so the stricter read
+    stays, and ``tests/test_dod_check.py`` pins it. Empty when the base does not resolve."""
     if not _own_work_tree(root):
         return set()
     mb = _git(root, "merge-base", "HEAD", base)
@@ -1084,17 +1090,19 @@ def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
 
 def branch_gap_analysis_ids(root: Path, base: str) -> dict[str, str]:
     """The ids — open or retired — in each gap analysis this branch committed after the
-    merge-base of ``HEAD`` and ``base``, each mapped to the newest commit (short sha) whose
-    file carries it. The merge-base's file never holds an id only the branch carried, so a
-    merge resolved by keeping one side's file whole drops every id only the other side
-    carried, for good, and ``--check`` reads the loss back as current (P-677: resolutions of
-    merges inside #75's lineage dropped G-208, G-209, G-246, G-730 and G-760 so). The walk
-    takes ``--full-history``: such a merge is TREESAME to the side it kept, and git's default
-    simplification follows that side alone and skips every version the other side wrote. A
-    version with no retired list is not read — an id it held that closed before the list
-    began was never in the list. ``main`` keeps only the ids history vouches for, so a
-    committed hand edit cannot vouch for itself. Empty when ``root`` is not its own work
-    tree or the base does not resolve."""
+    merge-base of ``HEAD`` and ``base``, each mapped to a commit (short sha) whose file carries
+    it: the first the walk reads, children before parents (``--topo-order``). A version before
+    the merge-base is not read: it is the base's record, and the merge-base's own file is the
+    base's account of it (``base_gap_analysis_ids``). The merge-base's file never holds an id
+    only the branch carried, so a merge resolved by keeping one side's file whole drops every id
+    only the other side carried, for good, and ``--check`` reads the loss back as current
+    (P-677: resolutions of merges inside #75's lineage dropped G-208, G-209, G-246, G-730 and
+    G-760 so). The walk takes ``--full-history``: such a merge is TREESAME to the side it kept,
+    and git's default simplification follows that side alone and skips every version the other
+    side wrote. A version with no retired list is not read — an id it held that closed before
+    the list began was never in the list. ``main`` keeps only the ids history vouches for, so a
+    committed hand edit cannot vouch for itself. Empty when ``root`` is not its own work tree or
+    the base does not resolve."""
     if not _own_work_tree(root):
         return {}
     mb = _git(root, "merge-base", "HEAD", base)
@@ -1124,7 +1132,7 @@ def branch_gap_analysis_ids(root: Path, base: str) -> dict[str, str]:
         return {}
     raw, at = done.stdout, 0
     carried: dict[str, str] = {}
-    for rev in revs:  # children before parents: the newest commit to name an id is quoted
+    for rev in revs:  # children before parents: the first commit read to name an id is quoted
         end = raw.index(b"\n", at)
         head = raw[at:end].split()
         at = end + 1
