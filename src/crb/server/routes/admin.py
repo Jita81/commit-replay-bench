@@ -20,11 +20,6 @@ password here. Deactivation refuses the account's requests while it is inactive 
 rotates the same nonce, so its sessions end for good: re-activating it brings none back
 (AUTH-3). The same primitives serve the ``crb users`` CLI on the host.
 
-An invited account (``/invitations``) that the admin opens here instead — activates it, on
-its own or with a role change, or sets its password — has its unused link withdrawn in the
-same transaction (:func:`supersede_invitations`, reason ``superseded: …``): a one-time link
-must never outlive another way into the same account (P-353).
-
 Secrets (``/settings/secrets/*``) go through :mod:`crb.server.secrets`: a value is
 accepted on ``PUT`` and written owner-only to disk; every response — including the
 ``PUT`` itself — is a :class:`SecretStatusOut` (presence, ≤4-char fingerprint,
@@ -65,8 +60,7 @@ ADRs:         none
 Works with:   src/crb/server/auth.py (``create_local_user``, ``set_password``,
               ``set_user_active``, ``would_orphan_admins``, ``credential_version``),
               src/crb/server/routes/runs.py (``append_system_event`` / ``system_trace_id`` —
-              the account audit trail), src/crb/server/routes/invitations.py (the link an
-              admin act here withdraws), src/crb/cli/commands/users.py (the break-glass CLI
+              the account audit trail), src/crb/cli/commands/users.py (the break-glass CLI
               over the same primitives and events), src/crb/server/secrets.py
               (``SecretsFile``, the verify limiter), src/crb/server/settings.py
               (``redacted_dict``), src/crb/observability/probes.py (``probe_builders`` for
@@ -82,7 +76,6 @@ Touch when:   never for a new repository; adding a secret means a route pair her
 
 from __future__ import annotations
 
-import datetime as _dt
 import math
 from typing import Any
 
@@ -151,7 +144,7 @@ from crb.server.secrets import (
     VerifyLimiterDep,
 )
 from crb.server.settings import MIN_PASSWORD_LENGTH, ROLE_LADDER
-from crb.store.models import Event, Invitation, User
+from crb.store.models import Event, User
 
 router = APIRouter(tags=["admin"])
 _ERR = {"model": ErrorEnvelope}
@@ -257,45 +250,6 @@ def record_user_event(
             **payload,
         },
     )
-
-
-#: The first word of the reason a link is withdrawn with when the account it would open was
-#: opened another way (P-353).
-SUPERSEDED = "superseded"
-
-
-def supersede_invitations(db: Session, user: User, *, actor: str, how: str) -> int:
-    """Withdraw every unused, unexpired invitation to ``user``; the caller commits.
-
-    A one-time link is a way into one account. When that account is opened another way —
-    the admin activates it or sets its password, or the accept route finds it already
-    active — the link must stop working at that moment, not when it expires: otherwise
-    whoever holds it could still set a new password, end the person's sessions and take a
-    signing account (the independent verifiers' attack on stream S, P-353). Each link is
-    marked revoked with the reason ``superseded: <how>`` and a ``user.invite_revoked``
-    event on the account's trace — never the token. Returns how many were withdrawn."""
-    now = _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat()
-    pending = db.execute(
-        select(Invitation).where(
-            Invitation.user_id == user.id, Invitation.accepted == "", Invitation.revoked == ""
-        )
-    ).scalars()
-    withdrawn = 0
-    for inv in pending:
-        if inv.expires and inv.expires <= now:
-            continue  # an expired link opens nothing already, and its state says so
-        inv.revoked = now
-        inv.revoked_reason = f"{SUPERSEDED}: {how}"
-        record_user_event(
-            db,
-            action="user.invite_revoked",
-            actor=actor,
-            target=user,
-            invitation=inv.id,
-            reason=inv.revoked_reason,
-        )
-        withdrawn += 1
-    return withdrawn
 
 
 def sign_in_trace_id(user_id: str) -> str:
@@ -479,8 +433,6 @@ def set_role(
             actor=admin.id,
             target=user,
         )
-        if user.active:
-            supersede_invitations(db, user, actor=admin.id, how="the admin activated the account")
     db.commit()
     return _user_out(user)
 
@@ -551,7 +503,6 @@ def set_user_password(  # noqa: PLR0917 — FastAPI injects each dependency by n
     user = _get_user(db, user_id)
     set_password(user, body.password)
     record_user_event(db, action="user.password_set", actor=admin.id, target=user, by="admin")
-    supersede_invitations(db, user, actor=admin.id, how="the admin set the account's password")
     db.commit()
     if user.id == admin.id:
         cv = credential_version(user)
@@ -607,8 +558,6 @@ def set_active(
         actor=admin.id,
         target=user,
     )
-    if body.active:
-        supersede_invitations(db, user, actor=admin.id, how="the admin activated the account")
     db.commit()
     return _user_out(user)
 
