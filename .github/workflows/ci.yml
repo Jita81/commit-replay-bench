@@ -666,30 +666,34 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      # gitleaks-action lists a pull request's commits through the API on PR events;
-      # without this it fails 403 "Resource not accessible by integration" (first seen on
-      # PR #7, 2026-09-15 — pushes to a branch never needed it)
-      pull-requests: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0 # gitleaks scans the full history
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v3
-        # The action's default scanner (8.24.3) predates the top-level ``[[allowlists]]``
-        # form the config uses, so the test tree's deliberately fake credentials were 18
-        # "findings" (first CI run after the repository went public, 2026-09-16). Pin the
-        # scanner the gate runs — the version that read the config correctly locally.
+      - name: Install gitleaks (pinned, checksum verified)
+        # 8.30.1 reads the config's top-level ``[[allowlists]]``; 8.24.3, gitleaks-action's
+        # default, did not, so the test tree's deliberately fake credentials were 18 "findings"
+        # (first CI run after the repository went public, 2026-09-16). The archive is checked
+        # against the release's published SHA-256 before it runs.
         env:
           GITLEAKS_VERSION: "8.30.1"
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Required only for organisation-owned repositories; harmless when unset.
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-          GITLEAKS_CONFIG: .gitleaks.toml
-          # the verdict is the step's exit code; the report upload is what fails when the
-          # account's artifact-storage quota is full (2026-09-15)
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict -
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+      - name: gitleaks
+        # Every commit the pull request adds (base..head), or everything HEAD reaches on a push,
+        # the schedule or a manual run. gitleaks-action scanned one page of the API's commit
+        # list: 15 of #74's 558 commits, not its head (P-773).
+        env:
+          GITLEAKS: ${{ runner.temp }}/gitleaks
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/ci_gitleaks.py
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.11.3"

@@ -88,6 +88,8 @@ NOT_PROVIDED_BY_CI = {
     "tsc": "TypeScript is not installed globally on the hosted runner; the UI's own tsc runs "
     "in ui-unit, from ui/node_modules",
     "claude": "the Claude Code CLI is a live-model builder; its test runs only with a key",
+    "gitleaks": "the security job installs the pinned scanner and runs it over the history; "
+    "the shards do not download it, so the planted-credential test runs where it is installed",
 }
 #: Tools ``test-shard`` provides that the fresh-clone shards do not give root, and why. The
 #: fresh-clone declaration is ``test-shard``'s less exactly these (P-748): its tests skip there
