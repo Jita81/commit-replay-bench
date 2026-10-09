@@ -1,6 +1,6 @@
 # ADR-0003 — One routing rule
 
-**Status:** Accepted · **Amended 2026-09-13** (controls gate), **2026-09-16** (the rule gates the factory), **2026-09-19** (the gate reads the pre-run map; a rework updates its pull request) — §"Amendment" below · **Superseded in part by [ADR-0021](0021-factory-review-before-delivery.md)** (2026-09-25: the review precedes delivery; a rework no longer re-delivers inside a run) · **Superseded in part by [ADR-0026](0026-the-context-standard.md)** (2026-09-27: a cell with no proven standard stops a ticket before any spend; `deliver_override` lifts only a missing sign-off) · **Superseded in part by [ADR-0025](0025-routing-v2.md)** item 12 (2026-09-28: a change smaller than its estimate is licensed by its measured cell, not the estimate's — decision 3's last sentence)
+**Status:** Accepted · **Amended 2026-09-13** (controls gate), **2026-09-16** (the rule gates the factory), **2026-09-19** (the gate reads the pre-run map; a rework updates its pull request) — §"Amendment" below · **Section added 2026-09-28** (the inputs the rule does not read: merge outcomes and review verdicts — §"Inputs the rule does not read") · **Superseded in part by [ADR-0021](0021-factory-review-before-delivery.md)** (2026-09-25: the review precedes delivery; a rework no longer re-delivers inside a run) · **Superseded in part by [ADR-0026](0026-the-context-standard.md)** (2026-09-27: a cell with no proven standard stops a ticket before any spend; `deliver_override` lifts only a missing sign-off) · **Superseded in part by [ADR-0025](0025-routing-v2.md)** item 12 (2026-09-28: a change smaller than its estimate is licensed by its measured cell, not the estimate's — decision 3's last sentence)
 **Date:** 2026-09-13
 **Apparatus impact:** defines `routing.POLICY_VERSION = "routing.v1"` (stamped on every `RouteDecision`) and, from the amendment, `routing.CONTROLS_POLICY_VERSION = "controls-gate.v1"` (stamped as `controls_policy` on every decision that evaluated a controls verdict)
 
@@ -289,6 +289,29 @@ larger change. Tested by `tests/test_factory_loop.py`
 `tests/test_server_routes_factory.py::test_factory_delivery_fields_and_the_second_approver_override`
 and `tests/test_worker.py::test_the_worker_honours_an_override_only_from_a_second_approver`;
 DL-082.
+
+## Inputs the rule does not read
+
+*Added 2026-09-28 (DL-303, G-535).* The rule reads a cell's graded rows, its oracle, its negative
+controls, its registered reading and the policy — nothing else. Two things a person might expect it
+to read, it does not:
+
+- **Merge outcomes.** Whether a delivered pull request was merged, closed or reverted
+  (`outcome`, B-9) is recorded on the factory chain and shown on the Factory page. It feeds no
+  clause of the rule in force.
+- **Review verdicts.** A person's review of a kept patch (`accept`, `accept_with_edit`,
+  `reject`) raises a rework row on the Decisions inbox and is kept as evidence. It feeds no
+  clause either.
+
+They are left out because neither is graded the way the rule's inputs are. A merge is a team's
+choice under pressures the instrument does not see; a review verdict is one person's reading,
+not yet anchored against a second. Either may only ever move a route through a **new,
+pre-registered policy version** whose clause is graded on anchored reviews (two people, the same
+patch, agreement measured), published as an amendment here with its own version string. Until
+then a cell's route is the same whatever happened to the changes delivered from it. Tested by
+`tests/test_routing.py::test_the_rule_reads_no_merge_outcome_or_review_verdict`, which fails if a
+parameter of `route` or a field of any input it reads is named for an outcome, a merge, a review
+or a verdict.
 
 ## Alternatives considered
 

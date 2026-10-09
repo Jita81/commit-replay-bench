@@ -15,7 +15,10 @@
  *               Strong and Adequate tiles name the served policy's floors, and the About
  *               block repeats no floor that could drift from them (G-204); each caught control
  *               shows its gold witness, a red one as an instrument failure (G-952); a passed
- *               report the server reads as unmeasured says it licenses nothing (P-372).
+ *               report the server reads as unmeasured says it licenses nothing (P-372); a
+ *               failed controls read is an error card whose Retry reads it again (G-205); and
+ *               the About block says the page queues nothing, the gate is the server's and a
+ *               strength compares within one language and mutator family (G-207).
  * How:          `mockApi` + `renderApp` at `/oracle?repo=…` per role.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0010-polyglot-negative-controls.md
@@ -23,12 +26,12 @@
  * Tested by:    ui/src/screens/Oracle/OraclePage.test.tsx
  * Touch when:   never for a new repository; a band, gate or empty state is added.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { OracleReport, Principal } from '../../api/types'
 import { helpFor } from '../../help/help'
-import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, expectHintOpens, mockApi, renderApp } from '../../test/utils'
 import { OraclePage } from './OraclePage'
 
 const VIEWER: Principal = { ...PRINCIPAL, role: 'viewer' }
@@ -136,6 +139,48 @@ describe('OraclePage', () => {
     const about = helpFor('/oracle')!
     expect(about.numbers).toMatch(/policy’s deliver floor/)
     expect(about.numbers).not.toMatch(/[≥≤]\s*0?\.\d/)
+  })
+
+  it('a failed controls read shows an error card with Retry that reads the report again', async () => {
+    // G-205: a 500 on the controls report is an error with its envelope, not "never run"; Retry reads it again
+    let reads = 0
+    mockApi({
+      'GET /auth/me': VIEWER,
+      'GET /repos': { items: [{ name: 'alpha' }], total: 1, limit: 50, offset: 0 },
+      'GET /oracle/alpha': SCORED,
+      'GET /oracle/alpha/controls': () => {
+        reads += 1
+        return reads === 1
+          ? envelope(500, 'internal', 'the controls report could not be read')
+          : new Response(JSON.stringify({ repo: 'alpha', run_id: 'r1', passed: true, n_rows: 7, n_tasks: 1, violations: 0, escapes: 0, not_constructible: 1, skipped: 0, rows: [], verdict: { state: 'passed', measured: true, passed: true, constructible: 6, total: 7, share: 0.86, escapes: 0, complete: true, run_id: 'r1' } }), { headers: { 'Content-Type': 'application/json' } })
+      },
+    })
+    renderApp(<OraclePage />, { route: '/oracle?repo=alpha' })
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('HTTP 500 · internal')
+    expect(alert).toHaveTextContent('the controls report could not be read')
+    expect(screen.queryByText('No controls report yet')).toBeNull()
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await screen.findByText('Negative-control rows')
+    expect(reads).toBe(2)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('an operator with nothing measured yet is offered Run oracle and Run controls; the About block says the page queues nothing (G-206, G-207)', async () => {
+    setup(OPERATOR, EMPTY)
+    const runOracle = await screen.findByRole('link', { name: 'Run oracle' })
+    const runControls = await screen.findByRole('link', { name: 'Run controls' })
+    expect(runOracle).toHaveAttribute('href', '/runs?repo=alpha&new=oracle')
+    expect(runControls).toHaveAttribute('href', '/runs?repo=alpha&new=controls')
+    // each link explains itself on hover: the ratchet's collector requires a hint on filled
+    // buttons only, and these are outlined, so the hint is pinned here (P-615)
+    expect(runOracle).toHaveAttribute('data-hint', 'button.oracle.run_oracle')
+    expect(runControls).toHaveAttribute('data-hint', 'button.oracle.run_controls')
+    await expectHintOpens(runOracle, 'button.oracle.run_oracle')
+    const about = helpFor('/oracle')!
+    expect(about.numbers).toMatch(/This page queues nothing — Run oracle and Run controls open the Runs form/)
+    expect(about.numbers).toMatch(/the gate on each row is the server’s verdict, not arithmetic done here/)
+    expect(about.numbers).toMatch(/A strength compares only within one language and one mutator family/)
   })
 
   it('each caught control shows its gold witness; a red witness reads as an instrument failure (G-952)', async () => {

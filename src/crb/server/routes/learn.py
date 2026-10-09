@@ -7,7 +7,8 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
 
 * ``/learn/refusals`` — protocol rows → candidate guard-corpus lines, every verdict
   ``unsure``; the decisions a named person has already made are served beside them
-  (``decisions``, folded from the ``learn.refusal.accepted`` events);
+  (``decisions``, folded from the ``learn.refusal.accepted`` events), and the guard's
+  false-positive rate those decisions give, per apparatus and month (``false_positives``);
 * ``/learn/strengthen`` — oracle-held cells of the class × size map (routed under the
   repo's latest controls verdict, as ``/capability-map`` does) joined to the latest
   ``oracle.score`` events → ``test.add`` items in the frozen-backlog shape. The
@@ -17,8 +18,11 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
   two screens can never disagree about a task's strength. Every score carries the
   repo, so the item ids equal what ``crb learn strengthen --oracle <GET /oracle/{repo}>
   --controls <GET /oracle/{repo}/controls>`` derives from the exports;
-* ``/learn/remeasure`` — cells stamped with an older apparatus → ``n`` needed, cost and
-  the ``POST /runs`` bodies an operator can queue.
+* ``/learn/remeasure`` — read from the repository's registered readings (ADR-0026 item 2):
+  each reading waiting on its look → the commits it still needs in its seeded order, the
+  ``POST /runs`` body an operator can queue for them (gold-clean, in this deployment's
+  posture, with its test author) and what it costs; each cell with rows and no reading →
+  register one first, never a replay.
 
 The three reads are viewer-readable and pure. The three writes (G-532) are
 operator-gated and each one carries the **same named-person decision the CLI already
@@ -33,9 +37,10 @@ the request body, so a decision cannot be filed under somebody else's name:
   frozen backlog through :class:`~crb.server.factory_state.FactoryHome` (freeze the
   first, **evolve** the rest, so a re-registered item supersedes rather than
   overwrites); event ``learn.strengthen.registered``;
-* ``POST /learn/remeasure/queue`` — the plan's own ``POST /runs`` bodies enqueued for
-  one cell, each through the submit gate ``POST /runs`` applies (``submit_refusals``)
-  before any is enqueued, and never for a what-if plan; event ``learn.remeasure.queued``.
+* ``POST /learn/remeasure/queue`` — the plan's own ``POST /runs`` body enqueued for one
+  cell whose registered reading waits on its look, through the submit gate ``POST /runs``
+  applies (``submit_refusals``) before it is enqueued; refused ``reading_unregistered`` for
+  a cell with no such reading, and never for a what-if plan; event ``learn.remeasure.queued``.
 
 Nothing about *which* decision is right moves into the product: the item bodies and the
 run bodies are re-derived here from the ledger, never taken from the caller, so a write
@@ -51,7 +56,9 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               and writes what a named operator accepts — a corpus line, the strengthening
               items, the re-measurement runs — re-deriving each body here so the caller
               can choose but never compose; a cell whose queued runs are unfinished is
-              refused and served with those runs, so money is never spent twice (P-182).
+              refused and served with those runs, so money is never spent twice (P-182); a
+              cell with no request (no commit left it has not graded) is refused with the
+              plan's own reason, so nothing is queued that would repeat a commit.
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
@@ -79,8 +86,9 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               twin), docs/LEARNING-LOOP.md (what loops mechanically, what a human decides),
               ui/src/screens/Learn (the screen that offers the three actions)
 Tested by:    tests/test_server_routes_learn.py, tests/test_cli_learn.py
-Touch when:   never for a new repository; adding a derivation means a function in
-              src/crb/core/learn.py, a route here, a CLI verb, and a section in
+Touch when:   never for a new repository — its rows and tasks are read as they are; adding a
+              derivation means a function in src/crb/core/learn.py, a route here, a CLI verb,
+              and a section in
               docs/LEARNING-LOOP.md; a new event action needs its row in
               docs/API.md#event-vocabulary first.
 """
@@ -100,6 +108,7 @@ from sqlalchemy.orm import Session
 
 from crb.core.capability import PROJECTIONS, build_capability_map
 from crb.core.learn import (
+    REASON_PENDING,
     LearnError,
     RefusalDecision,
     RefusalReport,
@@ -108,6 +117,7 @@ from crb.core.learn import (
     StrengthenItem,
     TriageApplied,
     apply_triage,
+    guard_false_positives,
     has_line_break,
     load_oracle_scores,
     remeasure_plan,
@@ -119,9 +129,12 @@ from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
+from crb.factory.testfirst import canonical_model
 from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
+from crb.server.posture_view import deployment_posture_class
+from crb.server.prevention_state import current_checks_arm
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
     POSTURE_DEPLOYMENT,
@@ -145,7 +158,7 @@ from crb.server.schemas import TERMINAL_STATUSES, RunCreateRequest
 from crb.store.events import lock_event_writes
 from crb.store.jobs import stage_queued
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Run, Task
+from crb.store.models import Event, Repo, Run, Task
 
 router = APIRouter(tags=["learn"])
 _ERR = {"model": ErrorEnvelope}
@@ -296,20 +309,63 @@ def derive_strengthen(
     )
 
 
+def deployment_author_model(settings: object) -> str:
+    """The canonical model of this deployment's test author (``CRB_FACTORY__TEST_AUTHOR``,
+    ``builder:model[:provider]``) — the author a queued ``S1`` replay's rows name — or ``""``
+    when none is configured. The worker stamps the same (``canonical_model``)."""
+    factory_cfg = getattr(settings, "factory", None)
+    raw = str(getattr(factory_cfg, "test_author", "") or "").strip()
+    parts = raw.split(":")
+    if not raw or raw.lower() == "none" or len(parts) < 2 or not parts[1]:
+        return ""
+    return canonical_model(parts[1]) or parts[1]
+
+
 def derive_remeasure(
-    db: Session, factory: SessionFactoryDep, repo: str, *, apparatus: str
+    db: Session,
+    factory: SessionFactoryDep,
+    repo: str,
+    *,
+    apparatus: str,
+    settings: object,
+    posture_class: str | None = None,
 ) -> RemeasurePlan:
-    """The repo's re-measurement plan (``RemeasurePlan``) against ``apparatus``."""
+    """The repo's re-measurement plan (``RemeasurePlan``) against ``apparatus``, read from its
+    registered readings (ADR-0026 item 2): a top-up names only the commits a reading still
+    needs; a cell with no reading is offered registration, never a replay (P-602).
+    ``posture_class`` is the caller's own when its settings are not the API's (the worker's
+    idle pass, ``Worker._deployment_posture_class``); else the API settings decide (P-672)."""
+    every = list(DbLedger(factory).rows(repo=repo))
     # the arm the repository grades under now: a cell never pools two arms (ADR-0024)
-    rows = rows_for_arm(factory, repo, DbLedger(factory).rows(repo=repo), CHECKS_CURRENT)
-    # each task's CURRENT label: a stale task that was relabelled since would put its new
-    # rows in another cell, so the plan leaves it out and names it (decider pass 2, §3)
-    labels = {
-        str(t.task_id): (str(t.capability_class or ""), str(t.size or ""))
-        for t in db.execute(select(Task).where(Task.repo == repo)).scalars()
-    }
+    rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
+    checks = current_checks_arm(factory, repo)
+    # every reading evaluated over every row (the hierarchy reads its arms together); the
+    # plan reads those of this checks arm and the global class set — the rows it plans on
+    book = reading_book(db, repo, every)
+    outcomes = [
+        o
+        for o in book.outcomes
+        if o.reading.checks_arm == checks and o.reading.taxonomy in ("", GLOBAL_CLASS_SET)
+    ]
+    # each task's CURRENT label and whether it is gold-clean: a pending commit relabelled
+    # out of the cell, or no longer gold-clean (the worker skips it), is left out and named
+    tasks = list(db.execute(select(Task).where(Task.repo == repo)).scalars())
+    labels = {str(t.task_id): (str(t.capability_class or ""), str(t.size or "")) for t in tasks}
+    gold = [str(t.task_id) for t in tasks if t.gold_clean]
     return remeasure_plan(
-        rows, current_apparatus=apparatus, policy=DEFAULT_POLICY, task_labels=labels
+        rows,
+        readings=outcomes,
+        current_apparatus=apparatus,
+        policy=DEFAULT_POLICY,
+        task_labels=labels,
+        gold_clean_tasks=gold,
+        # a replay writes the arm the reading reads only with its test author, in its posture
+        s1_author_model=deployment_author_model(settings),
+        deployment_posture=(
+            posture_class
+            if posture_class is not None
+            else deployment_posture_class(settings, db.get(Repo, repo))
+        ),
     )
 
 
@@ -435,10 +491,15 @@ def learn_refusals(
     get_repo_or_404(db, repo)
     # Every verdict comes back "unsure" by design: the API proposes, a human decides. What
     # a person HAS decided is served beside the groups, with their name and the line.
+    report = derive_refusals(factory, repo)
+    decisions = accepted_decisions(db, repo)
     return {
         "repo": repo,
-        **derive_refusals(factory, repo).to_dict(),
-        "decisions": accepted_decisions(db, repo),
+        **report.to_dict(),
+        "decisions": decisions,
+        # the guard's false-positive rate per apparatus and month, from those decisions: a
+        # bound while any row is undecided, never a verdict nobody gave (G-536)
+        "false_positives": guard_false_positives(report, decisions).to_dict(),
     }
 
 
@@ -466,18 +527,19 @@ def learn_strengthen(
 @router.get(
     "/learn/remeasure",
     responses={401: _ERR, 404: _ERR, 409: _ERR},
-    summary="Cells stamped with an older apparatus → n needed, cost, POST /runs bodies (nothing queued)",
+    summary="Cells short of the first look, stale or thin → n needed, cost, POST /runs bodies (nothing queued)",
 )
-def learn_remeasure(
+def learn_remeasure(  # noqa: PLR0917 — FastAPI dependencies + query
     viewer: ViewerDep,
     db: DbDep,
     factory: SessionFactoryDep,
+    settings: SettingsDep,
     repo: str = Query(min_length=1, max_length=64),
     apparatus: str = Query(default=APPARATUS_VERSION, max_length=32),
 ) -> dict[str, Any]:
     del viewer
     get_repo_or_404(db, repo)
-    body = derive_remeasure(db, factory, repo, apparatus=apparatus).to_dict()
+    body = derive_remeasure(db, factory, repo, apparatus=apparatus, settings=settings).to_dict()
     # beside each cell, the runs already queued for it and not finished: the page shows them
     # in place of the Queue control. A what-if plan queues nothing, so it has none.
     for c in body["cells"]:
@@ -1028,7 +1090,7 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             f"{APPARATUS_VERSION!r} and could never clear the plan they were queued from",
             detail={"apparatus": body.apparatus, "running": APPARATUS_VERSION},
         )
-    plan = derive_remeasure(db, factory, repo, apparatus=body.apparatus)
+    plan = derive_remeasure(db, factory, repo, apparatus=body.apparatus, settings=settings)
     matches = [
         c
         for c in plan.cells
@@ -1040,17 +1102,38 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             "validation_error",
             f"cell {body.cell!r} is not in this repository's re-measurement plan for "
             f"apparatus {body.apparatus!r} — re-read GET /learn/remeasure",
-            detail={"available": [f"{c.cell.label} ({c.mode})" for c in plan.cells]},
+            detail={"available": sorted({f"{c.cell.label} ({c.mode})" for c in plan.cells})},
         )
-    if len(matches) > 1:
+    pending = [c for c in matches if c.reason == REASON_PENDING]
+    if not pending:
+        # no registered reading waits on this cell: a replay's rows could never count, and
+        # they would make its commits unusable in the reading that could (ADR-0026 item 2)
+        first = matches[0]
+        raise ApiError(
+            422,
+            "reading_unregistered",
+            f"cell {body.cell!r} has no registered reading at apparatus {body.apparatus} "
+            f"waiting on its look, so there is nothing to queue: {first.note}",
+            detail={"next_act": first.next_act, "arms": sorted(c.arm for c in matches)},
+        )
+    if len(pending) > 1:
         raise ApiError(
             422,
             "validation_error",
-            f"cell {body.cell!r} is planned in {len(matches)} modes — name one: sighted and "
+            f"cell {body.cell!r} is planned in {len(pending)} modes — name one: sighted and "
             "blind are never pooled, so they are re-measured as separate runs",
-            detail={"modes": sorted(c.mode for c in matches)},
+            detail={"modes": sorted(c.mode for c in pending)},
         )
-    cell = matches[0]
+    cell = pending[0]
+    if not cell.requests:
+        # the reading waits, but nothing this plan may compose can write rows it counts
+        # (another arm, another author or posture, or its commits are not buildable)
+        raise ApiError(
+            422,
+            "validation_error",
+            f"cell {body.cell!r} ({cell.mode}) has no run to queue: {cell.note}",
+            detail={"n_needed": cell.n_needed, "short_by": cell.short_by},
+        )
     require_jobs()  # 503 before anything is read under the lock
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued
     # whole or not at all (P-160 — the gate is the one POST /runs applies)
@@ -1103,6 +1186,8 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             "apparatus": body.apparatus,
             "run_ids": [run.id for run in runs],
             "n_needed": cell.n_needed,
+            "arm": cell.arm,
+            "reading_id": cell.reading_id,
             "est_cost_usd": round(cell.est_cost_usd, 4),
             "cost_known": cell.cost_known,
         }

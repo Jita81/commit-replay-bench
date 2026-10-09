@@ -8,7 +8,10 @@
  *               introduced as one factory item with its backlog id and told where its id
  *               comes from (the authored test's sha), and that a replayed commit keeps the
  *               commit wording (J-FAC-18); and that below md the grade table keeps Created,
- *               Clean, Review and Evidence and folds the rest into the evidence (G-292).
+ *               Clean, Review and Evidence and folds the rest into the evidence (G-292); that
+ *               the header links back to the repository and its Tasks tab (G-293); and that an
+ *               unknown task (404) reads as no such task with the way back and no Retry, while
+ *               any other failure keeps its envelope and Retry (G-294).
  * How:          `renderApp` at `/tasks/:repo/:taskId` with `mockApi` serving one task and
  *               no reviews; assertions on the spec card's copy.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -23,7 +26,7 @@
 import { screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TaskDetail } from '../../api/types'
-import { PRINCIPAL, mockApi, renderApp } from '../../test/utils'
+import { PRINCIPAL, envelope, mockApi, renderApp } from '../../test/utils'
 import { TaskDetailPage } from './TaskDetailPage'
 
 const TASK_ID = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0'
@@ -109,5 +112,47 @@ describe('TaskDetailPage', () => {
     // the hint bubbles are always in the DOM (hidden): only the page's own copy is asserted
     expect(screen.queryByText(/factory item/i, { ignore: '[role="tooltip"]' })).toBeNull()
     expect(screen.getByText(/^One replayable commit: its spec/)).toBeInTheDocument()
+  })
+
+  it('the header returns to the repository and to its Tasks tab in one click (G-293)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      [`GET /tasks/alpha/${TASK_ID}`]: task({}),
+      'GET /reviews': { items: [], total: 0, limit: 200, offset: 0 },
+    })
+    renderApp(<TaskDetailPage />, { route: `/tasks/alpha/${TASK_ID}`, path: '/tasks/:repo/:taskId' })
+    await screen.findByText('Add a divide helper')
+    const repo = screen.getByRole('link', { name: 'alpha' })
+    expect(repo).toHaveAttribute('href', '/repos/alpha')
+    expect(repo).toHaveAttribute('data-hint', 'link.task.repo')
+    const back = screen.getByRole('link', { name: 'Back to tasks' })
+    expect(back).toHaveAttribute('href', '/repos/alpha?tab=tasks')
+    expect(back).toHaveAttribute('data-hint', 'button.task.back_to_tasks')
+  })
+
+  it('an unknown task reads as no such task with the route back to the repository’s tasks, and no Retry', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      [`GET /tasks/alpha/${TASK_ID}`]: () => envelope(404, 'not_found', `no task ${TASK_ID} in alpha`),
+      'GET /reviews': { items: [], total: 0, limit: 200, offset: 0 },
+    })
+    renderApp(<TaskDetailPage />, { route: `/tasks/alpha/${TASK_ID}`, path: '/tasks/:repo/:taskId' })
+    expect(await screen.findByText('No such task in this repository')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to alpha’s tasks' })).toHaveAttribute('href', '/repos/alpha?tab=tasks')
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('any other failure keeps the error envelope and its Retry (G-294)', async () => {
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      [`GET /tasks/alpha/${TASK_ID}`]: () => envelope(500, 'internal', 'the ledger could not be read'),
+      'GET /reviews': { items: [], total: 0, limit: 200, offset: 0 },
+    })
+    renderApp(<TaskDetailPage />, { route: `/tasks/alpha/${TASK_ID}`, path: '/tasks/:repo/:taskId' })
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('HTTP 500 · internal')
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.queryByText('No such task in this repository')).toBeNull()
   })
 })

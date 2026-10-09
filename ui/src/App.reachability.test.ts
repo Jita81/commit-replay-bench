@@ -35,7 +35,6 @@ const NO_DOOR: Record<string, string> = {
   '/login': 'reached by being signed out (every route redirects here), never by a link',
   '/invite': 'reached by the one-time invitation link an admin passes on, which is minted by the API and cannot be a link in the app: nobody signed in has an invitation to accept',
   '*': 'the not-found catch-all: it is what an unknown path renders, not a destination',
-  '/repos': 'the flat repositories list the Connection journey replaced; kept routable for a bookmark and for the links the docs already print, and every repository page is reached from Connection',
 }
 
 describe('every route has a door', () => {

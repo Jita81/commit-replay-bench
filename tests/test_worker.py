@@ -2210,6 +2210,42 @@ def test_an_s1_run_whose_test_authors_credential_went_stops_at_claim(
     assert list(h.worker.ledger.rows(run_id=run.id)) == []
 
 
+def test_an_s1_run_on_the_deployments_test_author_whose_credential_went_stops_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-676's claim seam, at its call site: an ``S1`` run that names no ``test_author`` of
+    its own calls the deployment's (``CRB_FACTORY__TEST_AUTHOR``), which the claim-time
+    check reads off ``factory`` in the settings ``_credential_gone`` hands it. Those must be
+    exactly ``Worker._claim_check_settings`` — ``home`` and ``factory``, the stand-in the
+    read-recording tests in tests/test_worker_chain.py check — never a narrower one built
+    in place: ``credential_refusal`` reads ``factory`` with a ``getattr`` default, so a
+    stand-in without it checks no author at all and the run goes past the claim."""
+    from dataclasses import replace as dc_replace
+
+    from crb.server.settings import FactorySettings
+
+    for key in ("CEREBRAS_API_KEY", "OPENAI_API_KEY", "CRB_OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    h.worker.settings = dc_replace(
+        h.worker.settings, factory=FactorySettings(test_author="editblock:gpt-oss-120b")
+    )
+    handed: list[Any] = []
+    check = worker_mod.credential_refusal
+
+    def recorded(run: Run, settings: Any) -> None:
+        handed.append(settings)
+        check(run, settings)
+
+    monkeypatch.setattr(worker_mod, "credential_refusal", recorded)
+    run = h.enqueue("blind", params_json={"arm": "S1"})
+    done = h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("builder_credential_missing: "), done.error
+    assert "nothing was built" in done.error
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert [vars(s) for s in handed] == [vars(h.worker._claim_check_settings())]
+
+
 def test_a_factory_run_builds_nothing_in_a_cell_with_no_proven_standard(h: Harness) -> None:
     """ADR-0026 item 8, as the worker runs it: with no registered reading (the seam's truth
     until stream R lands) the item stops ``no_proven_standard`` before any spend, delivery
@@ -2244,8 +2280,10 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
         assert due_records(db) == []
     # not due again until the interval has passed (the idle loop calls it every poll)
     assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S / 2) == 0
-    # a second item with no structural facts: the run refuses it at readiness, which is a
-    # decision waiting on an approver
+    # a second item with no structural facts: the run stops it before any spend — its cell has
+    # no proven standard (ADR-0026 item 8), so it waits NOT BUILT, the row the inbox shows for
+    # it (F6: one derivation, so the clock keeps the row a person reads, not a gap row the
+    # screen never showed)
     gapped = BacklogItem(
         id="I-2",
         title="Add divide to calc",
@@ -2262,14 +2300,15 @@ def test_the_idle_pass_keeps_the_decisions_clock_running_with_nobody_looking(h: 
     assert h.worker.refresh_decisions(now=1000.0 + DECISIONS_REFRESH_S) == 1
     with h.factory() as db:
         rows = {(r.kind, r.key): r for r in due_records(db)}
-    assert ("gap_unsigned", "I-2") in rows, rows
-    rec = rows[("gap_unsigned", "I-2")]
+    assert ("not_built", "I-2") in rows, rows
+    rec = rows[("not_built", "I-2")]
     assert rec.repo == pr.REPO_NAME and rec.first_due and rec.resolved == ""
-    assert rec.act_role == "approver" and "structural gap" in rec.title
+    # no proven standard: an approver funds the calibration build (never an operator's Decide)
+    assert rec.act_role == "approver" and "is not built" in rec.title
     # the stamp is the decision's, not the reader's: a later pass does not move it
     assert h.worker.refresh_decisions(now=1000.0 + 3 * DECISIONS_REFRESH_S) == 1
     with h.factory() as db:
-        again = {(r.kind, r.key): r for r in due_records(db)}[("gap_unsigned", "I-2")]
+        again = {(r.kind, r.key): r for r in due_records(db)}[("not_built", "I-2")]
     assert again.first_due == rec.first_due and again.last_seen >= rec.last_seen
 
 

@@ -21,6 +21,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   read an earlier render; each now waits for what it reads, and a test fails on a new one-shot
   read until it is judged settled.
 
+- **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
+  fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
+  the guard's false-positive rate and tops up only the rows a registered reading counts. `GET
+  /decisions` serves the inbox once, and a refused cancel says why. Exports report what they
+  downloaded, and every route decision is a door. Factory, Home and Baseline start at the board and
+  close the loop on screen. Every stop condition has a surface, and the operator guide states what
+  operating costs. The walk chains its free stages and turns mine notes into decisions. Tier-1 proof
+  walks each journey through its own doors. DL-300 to DL-320, P-600 to P-677.
+
 - **The secrets scan reads every commit a pull request adds** (P-773, P-675;
   [#79](https://github.com/Jita81/commit-replay-bench/pull/79)). gitleaks-action chose a pull
   request's commits from one 30-commit page of the API: on #74 it scanned 15 of 558 and not the

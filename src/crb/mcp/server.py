@@ -358,7 +358,7 @@ def build_server(api: CrbApi) -> MCPServer[Any]:
     # --- learning loop ----------------------------------------------------------------------
     @s.tool(
         annotations=READ,
-        description="Which cells are stale on the current apparatus and what re-measuring them would cost (GET /learn/remeasure).",
+        description="Which registered readings wait on their look, the commits each still needs and what they would cost, and which cells need a reading registered first (GET /learn/remeasure).",
     )
     def crb_remeasure_plan(repo: str) -> Any:
         return _safe(lambda: api.get("/learn/remeasure", repo=repo))

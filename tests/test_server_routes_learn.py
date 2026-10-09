@@ -22,8 +22,12 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               rest and supersedes a re-registered one; that an unknown id and an in-flight
               factory run are refused with nothing written; that an item the backlog record
               refuses registers nothing, and a record moved under the request records exactly
-              what landed (P-432); that reading the three reports queues no run and writes
-              nothing; that queueing enqueues the PLAN's
+              what landed (P-432); that the refusal report serves the guard's false-positive
+              rate from the decisions (G-536); that reading the three reports queues no run and
+              writes nothing; that a registered reading's top-up is its pending commits, queued
+              through the submit gate, and a cell with no registered reading — or one this
+              deployment cannot write rows for — queues nothing (G-565, P-602); that queueing
+              enqueues the PLAN's
               own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
               (a cell whose builder has no credential is refused whole — P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
@@ -41,7 +45,9 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               one cell spend once, a prevention record landing mid-queue costs nothing, two
               decisions at once are both on record, and two first registrations keep both
               items (EI-1, EI-7).
-How:          ``make_env`` over the seed; a protocol row appended through ``DbLedger``; the CLI
+How:          ``make_env`` over the seed, with ``tests.fixtures.proven``'s qualified tasks and a
+              reading registered through ``POST /readings`` for the top-up; a protocol row
+              appended through ``DbLedger``; the CLI
               invoked over the API's own exports for the parity case; the writes driven through
               ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
               the ``events`` table.
@@ -87,9 +93,14 @@ from crb.server.app import API_PREFIX
 from crb.server.factory_state import FactoryHome
 from crb.server.routes import learn as learn_routes
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Grade, Run
+from crb.store.models import Event, Grade, Run, Task
 from fixtures.concurrency import at_once, pause_after
 from fixtures.posture import dict_at_apparatus
+from fixtures.proven import AUTHOR as PROVEN_AUTHOR
+from fixtures.proven import CELL as PROVEN_CELL
+from fixtures.proven import add_rows as add_proven_rows
+from fixtures.proven import add_tasks as add_proven_tasks
+from fixtures.proven import register_via_api
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -175,8 +186,8 @@ STALE_CELL = "replay|backend.route.add|M|python|editblock|gpt-oss-120b|cerebras"
 
 def _add_stale_rows(env: Env, n: int = 2, *, labels: dict[str, str] | None = None) -> None:
     """Append ``n`` rows of seed task 5 graded under apparatus 2.0 through the write path, so
-    the plan AT THE RUNNING APPARATUS holds :data:`STALE_CELL` (an editblock cell, so its
-    runs need a builder credential). ``labels`` are merged into the rows' own."""
+    the plan AT THE RUNNING APPARATUS holds :data:`STALE_CELL` with rows of an older apparatus.
+    ``labels`` are merged into the rows' own."""
     from crb.core.ledger import GradeRow
 
     ledger = DbLedger(env.factory)
@@ -369,8 +380,12 @@ def test_cli_over_the_exports_derives_the_route_items(
 def test_remeasure_nothing_stale_until_the_apparatus_moves(env: Env) -> None:
     d = env.get(f"/learn/remeasure?repo={ALPHA}").json()
     assert d["current_apparatus"] == APPARATUS_VERSION
-    # only the legacy cell (apparatus 1.0-census) is older than the live instrument
-    assert [c["stale_versions"] for c in d["cells"]] == [["1.0-census"]]
+    # only the legacy cell (apparatus 1.0-census) is older than the live instrument; every
+    # other cell in the plan is there because it is short of the first look (G-565)
+    stale = [c for c in d["cells"] if c["reason"] == "stale"]
+    assert [c["stale_versions"] for c in stale] == [["1.0-census"]]
+    assert all(c["stale_versions"] == [] for c in d["cells"] if c["reason"] == "thin")
+    assert d["summary"]["cells_stale"] == 1
     d2 = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
     assert d2["rows_stale"] == d2["rows_total"] and len(d2["cells"]) >= 3
     for c in d2["cells"]:
@@ -563,6 +578,36 @@ def test_accepting_a_refusal_writes_the_line_under_the_operators_name(env: Env) 
     assert again.status_code == 201, again.text
     assert again.json()["honest_added"] == [] and again.json()["already_present"] is True
     assert corpus.read_text(encoding="utf-8") == text
+
+
+def test_the_refusal_report_serves_the_guard_false_positive_rate_from_the_decisions(
+    env: Env,
+) -> None:
+    """G-536: ``GET /learn/refusals`` serves the guard's false-positive rate per apparatus and
+    month, derived from the ``learn.refusal.accepted`` events. The seed's row carries two
+    classes: while one is undecided the row is undecided (the rate is the bound [0, 1]); once
+    one is decided refuse, the guard was right to stop the row."""
+    _add_protocol_row(env)
+
+    def fp() -> dict[str, Any]:
+        out: dict[str, Any] = env.get(f"/learn/refusals?repo={ALPHA}").json()["false_positives"]
+        return out
+
+    (period,) = fp()["periods"]
+    assert period["apparatus_version"] == APPARATUS_VERSION
+    assert (period["rows_protocol"], period["honest"], period["refuse"], period["undecided"]) == (
+        1,
+        0,
+        0,
+        1,
+    )
+    assert (period["rate_low"], period["rate_high"]) == (0.0, 1.0)
+    assert _accept(env, _group(env, "archaeology")["group_id"], "honest").status_code == 201
+    assert (fp()["undecided"], fp()["decided_groups"], fp()["undecided_groups"]) == (1, 1, 1)
+    assert _accept(env, _group(env, "network")["group_id"], "refuse").status_code == 201
+    (period,) = fp()["periods"]
+    assert (period["honest"], period["refuse"], period["undecided"]) == (0, 1, 0)
+    assert (period["rate_low"], period["rate_high"]) == (0.0, 0.0)
 
 
 def test_accepting_refuses_exactly_what_the_cli_refuses(env: Env) -> None:
@@ -795,35 +840,145 @@ def _queued_events(env: Env) -> list[Event]:
         )
 
 
-def test_queueing_a_remeasurement_enqueues_the_plans_own_bodies(
+#: The cell a registered reading reads in these tests (``tests.fixtures.proven``): 40
+#: qualified commits of bug.fix × XS on the seed's editblock builder, so a run needs a
+#: builder credential and meets the submit gate on its own merits.
+READ_CELL = "|".join(PROVEN_CELL.values())
+
+
+def _sealed(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """This deployment grades in the sealed posture the reading counts (docker, copy tree)."""
+    monkeypatch.setattr(env.settings.sandbox, "executor", "docker")
+
+
+def _add_reading(env: Env, *, graded: int = 0, hierarchy: tuple[str, ...] = ("S3",)) -> Any:
+    """40 qualified commits of :data:`READ_CELL`, a reading registered over them through
+    ``POST /readings``, and a clean sealed first attempt on the first ``graded`` of its seeded
+    order, graded after the registration. Returns the reading as the route served it."""
+    add_proven_tasks(env.factory)
+    r = register_via_api(env, hierarchy=hierarchy)
+    assert r.status_code == 201, r.text
+    reading = r.json()
+    if graded:
+        add_proven_rows(env.factory, reading["pool"][:graded], arm="S3")
+    return reading
+
+
+def _read_cell(env: Env) -> dict[str, Any]:
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    return next(c for c in plan["cells"] if c["label"] == READ_CELL)
+
+
+def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_submit_gate(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-565, P-602: a cell whose registered reading waits on its look is offered its top-up —
+    the commits the reading still needs, in its seeded order, priced — and queued from one act:
+    the plan's own body, put to the submit gate ``POST /runs`` applies before it is enqueued,
+    recorded with the operator's identity, the arm and the reading. A pending commit that is
+    no longer gold-clean is left out: the worker would skip it."""
+    del builder_keys
+    from crb.server.routes import learn as learn_routes
+
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, graded=12)
+    pool = reading["pool"]
+    with env.factory() as s:
+        task = s.get(Task, (ALPHA, pool[13]))
+        assert task is not None
+        task.gold_clean = False
+        s.commit()
+    cell = _read_cell(env)
+    assert (cell["reason"], cell["next_act"], cell["arm"], cell["mode"]) == (
+        "look_pending",
+        "replay",
+        "S3",
+        "sighted",
+    )
+    assert (cell["n_current"], cell["next_look"], cell["n_needed"]) == (12, 20, 8)
+    assert cell["reading_id"] == reading["reading_id"]
+    (request,) = cell["requests"]
+    assert request["task_ids"] == [pool[12], *pool[14:20]] and pool[13] not in request["task_ids"]
+    assert request["learning"] == "off" and request["kind"] == "replay"
+    assert (cell["n_requested"], cell["short_by"]) == (7, 1) and "gold-clean" in cell["note"]
+    gated: list[str] = []
+    prechecked: list[str] = []
+    real_gate = learn_routes.submit_refusals
+
+    def gate(db: Any, settings: Any, validated: Any, run: Any, *, login: bool = True) -> None:
+        # the whole gate once before the lock, then every refusal but the login check again
+        # on the run it stages, under the lock (P-729)
+        (prechecked if login else gated).append(run.id)
+        real_gate(db, settings, validated, run, login=login)
+
+    monkeypatch.setattr(learn_routes, "submit_refusals", gate)
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=READ_CELL)
+    assert r.status_code == 201, r.text
+    d = r.json()
+    assert d["run_ids"] == gated and len(gated) == len(prechecked) == 1 and d["n_needed"] == 8
+    (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
+    assert run["status"] == "queued" and run["builder"] == "editblock"
+    assert run["task_ids"] == request["task_ids"] and run["mode"] == "sighted"
+    assert env.get("/runs").json()["total"] == before + 1
+    (event,) = _queued_events(env)
+    assert event.actor == user_id(USERS["admin"])
+    assert event.payload_json["cell"] == READ_CELL and event.payload_json["run_ids"] == d["run_ids"]
+    assert event.payload_json["arm"] == "S3"
+    assert event.payload_json["reading_id"] == reading["reading_id"]
+    assert event.payload_json["apparatus"] == APPARATUS_VERSION
+
+
+def test_a_cell_with_no_registered_reading_is_offered_registration_and_queues_nothing(
     env: Env, builder_keys: None
 ) -> None:
-    """Money is spent only on an operator's instruction, and only on the bodies the plan
-    computed: the caller names a cell, the product composes the runs. The cell is genuinely
-    stale at the RUNNING apparatus, and its builder has a credential (a placeholder)."""
+    """ADR-0026 item 2: rows graded before a reading is registered never count, and a commit
+    graded under an arm can no longer enter that arm's reading (``pool_seen``). So every cell
+    of the seed — rows, no reading — is offered registration with no request, and queueing it
+    is refused 422 ``reading_unregistered`` with nothing queued or recorded."""
     del builder_keys
     _add_stale_rows(env)
     plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
-    cell = next(c for c in plan["cells"] if c["label"] == STALE_CELL)
+    assert plan["cells"] and plan["summary"]["cells_pending"] == 0
+    for c in plan["cells"]:
+        assert c["next_act"] == "register" and c["requests"] == [], c
+        assert "register a reading" in c["note"]
+    stale = next(c for c in plan["cells"] if c["label"] == STALE_CELL and c["reason"] == "stale")
+    assert stale["n_needed"] == plan["min_n"] == 20
     before = env.get("/runs").json()["total"]
-    r = _queue(env, cell=cell["label"])
-    assert r.status_code == 201, r.text
-    d = r.json()
-    assert len(d["run_ids"]) == len(cell["requests"]) == 2
-    assert d["n_needed"] == cell["n_needed"] and d["cost_known"] is True
-    assert env.get("/runs").json()["total"] == before + len(d["run_ids"])
-    queued = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
-    for run, request in zip(queued, cell["requests"], strict=True):
-        assert run["status"] == "queued" and run["repo"] == ALPHA
-        assert run["kind"] == request["kind"] and run["mode"] == request["mode"]
-        assert run["builder"] == request["builder"] == "editblock"
-        assert run["model"] == request["model"]
-        assert run["task_ids"] == request["task_ids"]
-    (event,) = _queued_events(env)
-    assert event.actor == user_id(USERS["admin"])
-    assert event.payload_json["run_ids"] == d["run_ids"]
-    assert event.payload_json["cell"] == cell["label"]
-    assert event.payload_json["apparatus"] == APPARATUS_VERSION
+    r = _queue(env, cell=STALE_CELL)
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == "reading_unregistered"
+    assert "register a reading" in envelope(r)["message"]
+    assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
+
+
+def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replayed arm counts only rows graded in the reading's posture (sealed). A deployment
+    that grades on the host would write rows the reading can never count, so the cell says so
+    and queueing it is refused with nothing queued; an ``S1`` arm is asked for only when the
+    deployment's test author is the arm's author."""
+    del builder_keys
+    pool = _add_reading(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"))["pool"]
+    host = _read_cell(env)
+    assert host["requests"] == [] and host["next_act"] == "runs"
+    assert "docker/copy/sealed" in host["note"]
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=READ_CELL)
+    assert r.status_code == 422 and "docker/copy/sealed" in envelope(r)["message"]
+    assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
+    # sealed, and the S3 ceiling delivered: the reading waits on S1@<author>
+    _sealed(env, monkeypatch)
+    add_proven_rows(env.factory, pool[:20], arm="S3")
+    s1 = _read_cell(env)
+    assert s1["requests"] == [] and PROVEN_AUTHOR in s1["note"]  # no author configured
+    monkeypatch.setattr(env.settings.factory, "test_author", f"editblock:{PROVEN_AUTHOR}")
+    authored = _read_cell(env)
+    (req,) = authored["requests"]
+    assert (req["kind"], req["mode"], req["arm"]) == ("blind", "blind", "S1")
+    assert req["task_ids"] == pool[:20]
 
 
 def test_queueing_refuses_a_cell_whose_builder_has_no_credential(
@@ -835,9 +990,10 @@ def test_queueing_refuses_a_cell_whose_builder_has_no_credential(
     whole cell is refused with nothing queued and nothing on the chain."""
     for key in ("ANTHROPIC_API_KEY", "CEREBRAS_API_KEY"):
         monkeypatch.delenv(key, raising=False)
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
-    r = _queue(env, cell=STALE_CELL)
+    r = _queue(env, cell=READ_CELL)
     assert r.status_code == 422, r.text
     err = envelope(r)
     assert err["code"] == "builder_credential_missing"
@@ -847,16 +1003,19 @@ def test_queueing_refuses_a_cell_whose_builder_has_no_credential(
     assert _queued_events(env) == []
 
 
-def test_a_what_if_plan_queues_nothing(env: Env, builder_keys: None) -> None:
+def test_a_what_if_plan_queues_nothing(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A plan read against another apparatus (the CLI's ``--apparatus``) is a preview: its
     runs would grade under the RUNNING apparatus and could never clear the plan they were
     queued from. The server refuses it, not only the page, with nothing queued."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     whatif = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
     assert whatif["cells"], whatif
     before = env.get("/runs").json()["total"]
-    for cell in (whatif["cells"][0]["label"], STALE_CELL):
+    for cell in (whatif["cells"][0]["label"], READ_CELL):
         r = _queue(env, cell=cell, apparatus="9.9")
         assert r.status_code == 422, r.text
         assert envelope(r)["code"] == "validation_error"
@@ -865,10 +1024,12 @@ def test_a_what_if_plan_queues_nothing(env: Env, builder_keys: None) -> None:
     assert env.get("/runs").json()["total"] == before
     assert _queued_events(env) == []
     # naming the running apparatus is the same as naming none
-    assert _queue(env, cell=STALE_CELL, apparatus=APPARATUS_VERSION).status_code == 201
+    assert _queue(env, cell=READ_CELL, apparatus=APPARATUS_VERSION).status_code == 201
 
 
-def test_a_cell_whose_runs_are_in_flight_is_not_queued_again(env: Env, builder_keys: None) -> None:
+def test_a_cell_whose_runs_are_in_flight_is_not_queued_again(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Queueing spends money, so it is idempotent while the runs it queued are unfinished:
     the plan is derived from graded rows only, so it still holds the cell after the first
     queue, and a double click or a second operator would otherwise spend the estimate twice.
@@ -876,31 +1037,30 @@ def test_a_cell_whose_runs_are_in_flight_is_not_queued_again(env: Env, builder_k
     queued, the plan serves the runs in flight beside the cell, and once they finish the cell
     may be queued again."""
     del builder_keys
-    _add_stale_rows(env)
-    first = _queue(env, cell=STALE_CELL)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
+    first = _queue(env, cell=READ_CELL)
     assert first.status_code == 201, first.text
     run_ids = first.json()["run_ids"]
     total = env.get("/runs").json()["total"]
-    again = _queue(env, cell=STALE_CELL)
+    again = _queue(env, cell=READ_CELL)
     assert again.status_code == 409, again.text
     assert envelope(again)["code"] == "remeasure_already_queued"
     assert sorted(envelope(again)["detail"]["run_ids"]) == sorted(run_ids)
     assert env.get("/runs").json()["total"] == total
     assert len(_queued_events(env)) == 1
-    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
-    cell = next(c for c in plan["cells"] if c["label"] == STALE_CELL)
-    assert sorted(cell["in_flight_run_ids"]) == sorted(run_ids)
+    assert sorted(_read_cell(env)["in_flight_run_ids"]) == sorted(run_ids)
     # a what-if plan never offers the queue, and says nothing of what is in flight
     whatif = env.get(f"/learn/remeasure?repo={ALPHA}&apparatus=9.9").json()
     assert all(c["in_flight_run_ids"] == [] for c in whatif["cells"])
-    # the runs finish without clearing the cell: it may be queued again
+    # the runs finish without grading the cell: it may be queued again
     with env.factory() as s:
         for rid in run_ids:
             run = s.get(Run, rid)
             assert run is not None
             run.status = "failed"
         s.commit()
-    assert _queue(env, cell=STALE_CELL).status_code == 201
+    assert _queue(env, cell=READ_CELL).status_code == 201
 
 
 def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
@@ -913,7 +1073,8 @@ def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
     in another thread and the first waits (up to 3 s) for it to check as well — which it can
     only do if the check is not held by the first request's lock."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     second = TestClient(env.client.app)
     login(second, "admin")
@@ -924,7 +1085,7 @@ def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
 
     def run_second() -> None:
         results["second"] = second.post(
-            f"{API_PREFIX}/learn/remeasure/queue?repo={ALPHA}", json={"cell": STALE_CELL}
+            f"{API_PREFIX}/learn/remeasure/queue?repo={ALPHA}", json={"cell": READ_CELL}
         )
 
     thread = threading.Thread(target=run_second)
@@ -940,7 +1101,7 @@ def test_two_concurrent_queues_of_one_cell_spend_the_estimate_once(
         return out
 
     monkeypatch.setattr(learn_routes, "in_flight_runs", checked)
-    first = _queue(env, cell=STALE_CELL)
+    first = _queue(env, cell=READ_CELL)
     thread.join(timeout=90)
     assert not thread.is_alive()
     codes = sorted([first.status_code, results["second"].status_code])
@@ -962,7 +1123,8 @@ def test_a_lost_seq_race_on_the_learn_trace_is_retried_with_nothing_queued_twice
     rolls both back and the queue is written again — never runs on the queue with no event
     behind them, which the page would offer to queue (and pay for) a second time."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     real_commit = Session.commit
     lost = [False]
@@ -978,7 +1140,7 @@ def test_a_lost_seq_race_on_the_learn_trace_is_retried_with_nothing_queued_twice
         real_commit(self)
 
     monkeypatch.setattr(Session, "commit", commit)
-    r = _queue(env, cell=STALE_CELL)
+    r = _queue(env, cell=READ_CELL)
     assert lost[0]
     assert r.status_code == 201, r.text
     run_ids = r.json()["run_ids"]
@@ -994,7 +1156,8 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
     one of the ``_QUEUE_ATTEMPTS`` tries, the route answers the documented 409
     ``remeasure_concurrent_write`` — no run on the queue and no event naming one."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     real_commit = Session.commit
     lost = [0]
@@ -1010,7 +1173,7 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
         real_commit(self)
 
     monkeypatch.setattr(Session, "commit", commit)
-    r = _queue(env, cell=STALE_CELL)
+    r = _queue(env, cell=READ_CELL)
     assert lost[0] == learn_routes._QUEUE_ATTEMPTS
     assert r.status_code == 409, r.text
     assert envelope(r)["code"] == "remeasure_concurrent_write"
@@ -1018,31 +1181,52 @@ def test_a_queue_that_loses_every_seq_race_answers_409_with_nothing_queued(
     assert _queued_events(env) == []
 
 
-def test_a_queue_that_fails_part_way_queues_nothing(env: Env, builder_keys: None) -> None:
-    """P-420: a cell is queued whole or not at all. When the second run of a cell cannot be
-    written, the first is not left on the queue with no event naming it."""
+@pytest.mark.parametrize("refused_insert", ["event", "run"])
+def test_a_queue_that_fails_part_way_queues_nothing(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch, refused_insert: str
+) -> None:
+    """P-420: a cell is queued whole or not at all. A registered reading's top-up is one run
+    (Wave 6), so the write can fail at either of its two inserts. When the event that names
+    the run cannot be written, the run — written first — is not left on the queue with no
+    event naming it; when the run cannot be written, no event is left on the trace naming a
+    queue that never happened. Each case covers the other's blind spot. The event case holds
+    the order — the run is written before its event; an event flushed first is rolled back
+    with the refused run, so only the order shows it — and its last check is vacuous, since
+    its event is never written. The run case is the one that sees an event outlive its run:
+    an event committed on its own, or a refused run dropped and its event written anyway."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     inserts = [0]
+    refused = [0]
 
-    def refuse_the_second(_mapper: Any, _connection: Any, _target: Any) -> None:
+    def count_the_run(_mapper: Any, _connection: Any, _target: Any) -> None:
         inserts[0] += 1
-        if inserts[0] == 2:
-            raise RuntimeError("the queue refused the second run")
+        if refused_insert == "run":
+            refused[0] += 1
+            raise RuntimeError("the queue refused the run")
 
-    sa_event.listen(Run, "before_insert", refuse_the_second)
+    def refuse_the_event(_mapper: Any, _connection: Any, target: Any) -> None:
+        if refused_insert == "event" and target.action == "learn.remeasure.queued":
+            refused[0] += 1
+            raise RuntimeError("the queue refused the event that names its run")
+
+    sa_event.listen(Run, "before_insert", count_the_run)
+    sa_event.listen(Event, "before_insert", refuse_the_event)
     try:
         try:
-            r = _queue(env, cell=STALE_CELL)
+            r = _queue(env, cell=READ_CELL)
         except RuntimeError:
             r = None
     finally:
-        sa_event.remove(Run, "before_insert", refuse_the_second)
-    assert inserts[0] == 2
+        sa_event.remove(Run, "before_insert", count_the_run)
+        sa_event.remove(Event, "before_insert", refuse_the_event)
+    # event: the run was written, then its event refused; run: the run's insert was refused
+    assert inserts[0] == 1 and refused[0] == 1
     assert r is None or r.status_code == 500
     assert env.get("/runs").json()["total"] == before
-    assert _queued_events(env) == []
+    assert _queued_events(env) == []  # meaningful in the run case: the event could be written
 
 
 def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unlocked(
@@ -1054,7 +1238,8 @@ def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unloc
     carry on as if it held the lock and run the check and the runs unserialised (the P-420
     double spend, with nothing to say so)."""
     del builder_keys
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     real = learn_routes.submit_refusals
     opened = [False]
@@ -1068,7 +1253,7 @@ def test_a_transaction_already_open_makes_the_queue_refuse_rather_than_run_unloc
 
     monkeypatch.setattr(learn_routes, "submit_refusals", opens_a_transaction)
     try:
-        r = _queue(env, cell=STALE_CELL)
+        r = _queue(env, cell=READ_CELL)
     except RuntimeError as exc:
         assert "already open" in str(exc)
         r = None
@@ -1209,8 +1394,13 @@ def test_every_learn_write_that_loses_a_seq_race_is_recorded_once_with_its_side_
     bodies = {
         "/learn/refusals/accept": {"group_id": group["group_id"], "verdict": "honest"},
         "/learn/strengthen/register": {"item_ids": [item_id]},
-        "/learn/remeasure/queue": {"cell": STALE_CELL},
+        "/learn/remeasure/queue": {"cell": READ_CELL},
     }
+    if path == "/learn/remeasure/queue":
+        # since Wave 6 only a registered reading's top-up is queued; its commits and its
+        # reading are added after the reports above are read, which they would change
+        _sealed(env, monkeypatch)
+        _add_reading(env)
     runs_before = env.get("/runs").json()["total"]
     real_commit = Session.commit
     lost = [0]
@@ -1345,12 +1535,12 @@ def test_a_note_is_one_line_so_it_can_never_write_a_corpus_line(env: Env) -> Non
 
 
 def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
-    env: Env, builder_keys: None
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """ADR-0024: a row graded with belt 6 on is never counted with one graded without. The
     strengthen and remeasure reads, and the register and queue writes that re-derive them,
-    read the arm the repository grades under now — so a write can never act on a cell its
-    report did not show, and a switch of arm moves both together."""
+    read the arm the repository grades under now — rows AND registered readings — so a write
+    can never act on a cell its report did not show, and a switch of arm moves both together."""
     del builder_keys
     from crb.core.checks import LABEL_CHECKS
     from crb.core.ledger import LABEL_API_STABLE
@@ -1360,28 +1550,43 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     _add_stale_rows(env, labels={LABEL_CHECKS: belt6, LABEL_API_STABLE: "true"})
     legacy = _legacy_cell(env)
     item_id = env.get(f"/learn/strengthen?repo={ALPHA}").json()["items"][0]["id"]
+    _sealed(env, monkeypatch)
+    _add_reading(env)  # registered while every switch is off: it reads the off arm
 
-    def planned() -> list[str]:
+    def cells() -> dict[str, set[str]]:
         r = env.get(f"/learn/remeasure?repo={ALPHA}")
         assert r.status_code == 200, r.text
-        return [c["label"] for c in r.json()["cells"]]
+        out: dict[str, set[str]] = {}
+        for c in r.json()["cells"]:
+            out.setdefault(c["label"], set()).add(c["reason"])
+        return out
+
+    def planned() -> list[str]:
+        return sorted(label for label, reasons in cells().items() if "stale" in reasons)
 
     # every switch off: the belt-6 rows are another arm's, and neither read nor write sees them
+    # — the cell reads thin on this arm's own rows, never stale on the other arm's; the
+    # reading registered on this arm waits on its look
     assert planned() == [legacy]
-    assert _queue(env, cell=STALE_CELL).status_code == 422
+    assert cells()[STALE_CELL] == {"thin"} and cells()[READ_CELL] == {"look_pending"}
     # the repository switches belt 6 on: only the belt-6 arm is read, by the reads AND writes
     assert env.put(f"/repos/{ALPHA}", json={"checks": {"api_stable": True}}).status_code == 200
     assert planned() == [STALE_CELL]
+    assert READ_CELL not in cells()  # its reading counts the off arm's rows only
+    before = env.get("/runs").json()["total"]
     assert _queue(env, cell=legacy).status_code == 422
+    gone = _queue(env, cell=READ_CELL)
+    assert gone.status_code == 422 and envelope(gone)["code"] == "validation_error"
     strengthen = env.get(f"/learn/strengthen?repo={ALPHA}")
     assert strengthen.status_code == 200, strengthen.text
     assert "bug.fix|S" not in strengthen.json()["cells_flagged"]
     stale = env.post(f"/learn/strengthen/register?repo={ALPHA}", json={"item_ids": [item_id]})
     assert stale.status_code == 422 and envelope(stale)["detail"]["unknown"] == [item_id]
-    before = env.get("/runs").json()["total"]
-    queued = _queue(env, cell=STALE_CELL)
-    assert queued.status_code == 201, queued.text
-    assert env.get("/runs").json()["total"] == before + len(queued.json()["run_ids"])
+    # the write finds the belt-6 cell its report shows, and refuses it for want of a reading
+    unregistered = _queue(env, cell=STALE_CELL)
+    assert unregistered.status_code == 422, unregistered.text
+    assert envelope(unregistered)["code"] == "reading_unregistered"
+    assert env.get("/runs").json()["total"] == before
 
 
 # ---------------------------------------------------------------------------
@@ -1404,10 +1609,11 @@ def test_two_simultaneous_queues_of_one_cell_spend_the_estimate_once(
     del builder_keys
     import crb.server.routes.learn as learn_routes
 
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     pause_after(monkeypatch, learn_routes, "in_flight_runs", threading.Barrier(2))
-    results = at_once(lambda: _queue(env, cell=STALE_CELL), lambda: _queue(env, cell=STALE_CELL))
+    results = at_once(lambda: _queue(env, cell=READ_CELL), lambda: _queue(env, cell=READ_CELL))
     assert sorted(map(_status, results)) == [201, 409], [getattr(r, "text", r) for r in results]
     won = next(r for r in results if r.status_code == 201)
     lost = next(r for r in results if r.status_code == 409)
@@ -1434,7 +1640,8 @@ def test_a_prevention_record_landing_while_a_queue_commits_costs_nothing(
     from crb.server.prevention_state import ConcurrentAppend, EventsPreventionStore
     from prevention_fixtures import switched
 
-    _add_stale_rows(env)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
     before = env.get("/runs").json()["total"]
     tick: dict[str, Any] = {}
 
@@ -1461,7 +1668,7 @@ def test_a_prevention_record_landing_while_a_queue_commits_costs_nothing(
         return out
 
     monkeypatch.setattr(learn_routes, "append_system_event", append_then_race)
-    r = _queue(env, cell=STALE_CELL)
+    r = _queue(env, cell=READ_CELL)
     worker.join(timeout=30)
     assert r.status_code == 201, r.text
     assert "record" in tick, "the worker's prevention record was lost"
@@ -1598,8 +1805,10 @@ def test_the_login_check_runs_before_the_learn_lock_never_under_it(
 
     monkeypatch.setattr(runs_routes, "login_refusal", login)
     monkeypatch.setattr(learn_routes, "lock_event_writes", lock)
-    _add_stale_rows(env)
-    r = _queue(env, cell=STALE_CELL)
+    _sealed(env, monkeypatch)
+    _add_reading(env)
+    r = _queue(env, cell=READ_CELL)
     assert r.status_code == 201, r.text
-    assert order.count("login") == len(r.json()["run_ids"]) == 2
+    # a registered reading's top-up is one run (Wave 6): it meets the login check once
+    assert order.count("login") == len(r.json()["run_ids"]) == 1
     assert "lock" in order and "login" not in order[order.index("lock") :], order

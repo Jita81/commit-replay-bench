@@ -13,6 +13,8 @@
  *               `blocked` (so the walk never offers step 4 before step 3); that the first
  *               measurement is the only stage that spends; that a failed or cancelled
  *               measurement with no rows reads as such, never "not started" (J-ONR-6); that
+ *               the proving stages' lines say no model is involved and the measure stage is
+ *               the only one that spends (G-429); that
  *               the polled run turns the ellipsis lines into k of n, counters and spend, and
  *               a queued run into its place in the queue (J-TEL-6); and the GitHub-URL →
  *               name rule.
@@ -56,6 +58,21 @@ describe('stagesFor', () => {
     expect(stageSummary(s)).toEqual({ label: 'toolchain probed', status: 'todo' })
     // only the first measurement spends
     expect(s.filter((x) => x.spends).map((x) => x.id)).toEqual(['measure'])
+  })
+
+  it('a Done probe stage reads the runner’s own summary line (the last non-empty line of the transcript), the same line the Configuration tab shows — never pytest’s dots (P-662)', () => {
+    // the probe stores the runner's tail: the progress line first, the summary last
+    const detail = 'tests/test_calc.py .                                                    [100%]\n1 passed in 0.08s\n'
+    const s = stagesFor({ repo: repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail } }) })
+    expect(s[1]?.status).toBe('done')
+    expect(s[1]?.detail).toBe('ok — 1 passed in 0.08s')
+    // a failed probe names the summary too, not the dots
+    const down = stagesFor({ repo: repo({ probe: { status: 'down', run_id: 'r1', checked: 'x', detail: 'collecting ...\nERROR: pytest: command not found\n' } }) })
+    expect(down[1]?.status).toBe('failed')
+    expect(down[1]?.detail).toBe('ERROR: pytest: command not found')
+    // a one-line detail is that line; a long line is cut with an ellipsis
+    expect(stagesFor({ repo: repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'pytest 8' } }) })[1]?.detail).toBe('ok — pytest 8')
+    expect(stagesFor({ repo: repo({ probe: { status: 'ok', run_id: 'r1', checked: 'x', detail: 'x'.repeat(200) } }) })[1]?.detail).toBe(`ok — ${'x'.repeat(160)}…`)
   })
 
   it('a running probe or mine run marks its stage in progress with the run to watch', () => {
@@ -116,6 +133,25 @@ describe('stagesFor', () => {
     const s = stagesFor({ repo: r, oracle: null, controls: null })
     expect(s[3]?.status).toBe('todo')
     expect(s[4]?.status).toBe('blocked')
+  })
+})
+
+describe('stagesFor — the £0 non-goal is in the stage lines (G-429)', () => {
+  it('the proving stages say no model is involved and spend nothing; measure is the only stage that spends', () => {
+    const fresh = repo()
+    const s = stagesFor({ repo: fresh, oracle: null, controls: null })
+    // each stage's "to do" line names the cost: no model involved
+    expect(s[1]?.detail).toBe('run the probe (a few seconds; no model involved)')
+    expect(s[2]?.detail).toBe('mine the history (minutes; no model involved)')
+    expect(s[3]?.detail).toBe('score the oracle (minutes to an hour; no model involved)')
+    expect(s[4]?.detail).toBe('run the controls (minutes to an hour; no model involved)')
+    for (const id of ['register', 'probe', 'mine', 'oracle', 'controls']) expect(s.find((x) => x.id === id)?.spends, id).toBe(false)
+    // and the money step is the next one: the sixth stage, and only it, spends
+    expect(s[5]?.detail).toBe('start a small sighted replay (spends model budget)')
+    expect(s.filter((x) => x.spends).map((x) => x.id)).toEqual(['measure'])
+    // the same holds once the stages are done: nothing but measure ever spends
+    const done = stagesFor({ repo: MEASURED, oracle: ORACLE, controls: CONTROLS_OK, measuredRows: 31 })
+    expect(done.filter((x) => x.spends).map((x) => x.id)).toEqual(['measure'])
   })
 })
 

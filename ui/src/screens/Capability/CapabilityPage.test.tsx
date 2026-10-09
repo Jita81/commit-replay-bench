@@ -14,8 +14,11 @@
  *               a map whose refetch fails shows the error and no controls pill, the page
  *               reading every query only through `currentData` (PR #54 review); and that
  *               the open cell's cost and latency carry their known n, interval and apparatus,
- *               an unknown reading as the dash (F35); and that Export CSV is offered to a
- *               viewer, as the About block and the button's hint say (G-102).
+ *               an unknown reading as the dash (F35); that Export CSV is offered to a
+ *               viewer, as the About block and the button's hint say (G-102), and says what
+ *               it downloaded or names the error with Retry (G-101); that no `?repo=` shows
+ *               the most recently updated repository (G-977); and that `?cell=` opens that
+ *               cell's detail on arrival and a projection change drops it (G-253).
  * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
  *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
  *               `controls-*` test ids; `qc.refetchQueries()` for a refetch; the page's own
@@ -31,6 +34,7 @@
  *               fixtures and assert its rendering here.
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CapabilityCell, CapabilityMap } from '../../api/types'
 import { helpFor } from '../../help/help'
@@ -284,7 +288,10 @@ describe('CapabilityPage', () => {
       'GET /capability-map': empty,
     })
     renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
-    expect(await screen.findByRole('link', { name: 'Start a replay run' })).toBeInTheDocument()
+    const start = await screen.findByRole('link', { name: 'Start a replay run' })
+    expect(start).toHaveAttribute('href', '/runs?repo=sqlalchemy&new=replay')
+    // an outlined link is not one the hint collector requires, so its hint is pinned here (G-254)
+    expect(start).toHaveAttribute('data-hint', 'button.capability.start_replay')
   })
 
   it('a viewer is offered Export CSV, and the About block and the hint say anyone signed in can take it (G-102)', async () => {
@@ -299,6 +306,71 @@ describe('CapabilityPage', () => {
     // the viewer's own About line names the export, so the button is offered to the role the copy says
     expect(helpFor('/capability')!.next.viewer).toContain('Anyone signed in can press Export CSV')
     expect(hintText('button.capability.export')).toContain('Anyone signed in can take it')
+  })
+
+  it('Export CSV says it downloaded n rows, and a failed export names the error with Retry', async () => {
+    const createObjectURL = vi.fn(() => 'blob:x')
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    try {
+      let calls = 0
+      mockApi({
+        'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+        'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+        'GET /capability-map': MAP,
+        'GET /ledger/export': () =>
+          ++calls === 1
+            ? envelope(500, 'internal', 'The export could not be written.')
+            : new Response('row_id,clean\nr1,true\nr2,true\nr3,false\n', { status: 200, headers: { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="crb-ledger-sqlalchemy.csv"' } }),
+      })
+      renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+      const link = await screen.findByRole('link', { name: /Export CSV/ })
+      await userEvent.click(link)
+      // the map's own false-Q1 alert is on this page too: the export's envelope is the error state
+      const alert = await screen.findByTestId('error-state')
+      expect(alert).toHaveTextContent('The export could not be written.')
+      expect(alert).toHaveTextContent('HTTP 500 · internal')
+      expect(click).not.toHaveBeenCalled()
+      await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Downloaded crb-ledger-sqlalchemy.csv — 3 rows'))
+      expect(screen.queryByTestId('error-state')).toBeNull()
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(click).toHaveBeenCalledTimes(1)
+    } finally {
+      delete (URL as unknown as Record<string, unknown>).createObjectURL
+      delete (URL as unknown as Record<string, unknown>).revokeObjectURL
+    }
+  })
+
+  it("with no ?repo= the most recently updated repository's map is shown (as the Baseline) (G-977)", async () => {
+    const repo = (name: string, updated: string) => ({ name, language: 'python', runner: 'pytest', url: '', last_run: null, created: '2026-09-01T00:00:00Z', updated, config: {} })
+    const api = mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [repo('older', '2026-09-02T00:00:00Z'), repo('sqlalchemy', '2026-09-10T00:00:00Z'), repo('old', '2026-08-01T00:00:00Z')], total: 3, limit: 500, offset: 0 },
+      'GET /capability-map': MAP,
+    })
+    renderApp(<CapabilityPage />, { route: '/capability' })
+    // the map is read for the latest repository, and the picker shows it — nobody chose it by hand
+    await waitFor(() => expect(api.calls.some((c) => c.path === '/capability-map' && new URL(c.url, 'http://x').searchParams.get('repo') === 'sqlalchemy')).toBe(true))
+    await waitFor(() => expect(screen.getByTestId('repo-picker')).toHaveValue('sqlalchemy'))
+    expect(await screen.findByTestId('cell-measured')).toBeInTheDocument()
+    expect(api.calls.filter((c) => c.path === '/capability-map').every((c) => new URL(c.url, 'http://x').searchParams.get('repo') === 'sqlalchemy')).toBe(true)
+  })
+
+  it("?cell= opens that cell's detail on arrival", async () => {
+    mockApi({
+      'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': MAP,
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy&cell=bug.fix%7CS' })
+    // the detail card is open on arrival, with its close button and the cell's doors
+    const close = await screen.findByRole('button', { name: 'close' })
+    expect(close).toHaveAttribute('data-hint', 'button.capability.close')
+    expect(screen.getByRole('link', { name: 'Rows in ledger' })).toHaveAttribute('href', '/ledger?repo=sqlalchemy&capability_class=bug.fix&size=S')
+    // the rule stands: a projection change drops the selection
+    await userEvent.click(screen.getByRole('checkbox', { name: /by language/ }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'close' })).toBeNull())
   })
 
   it('renders the error envelope honestly when the map fails', async () => {

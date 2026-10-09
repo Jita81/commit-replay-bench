@@ -24,8 +24,12 @@
  * ----------
  * What it is:   The walkthrough's fixtures and helpers: `env` (the `CRB_E2E_*` contract),
  *               `targets()` / `primary()` (the repos per tier), the signed-in `test`, `field`,
- *               `signIn`, `signOut`, `personaPassword`, `startRun`, `waitForRun`, `runStatus`,
- *               `expectLogAction`, `stackHealth` (an axe sweep runs through ui/e2e/axe.ts); the
+ *               `signIn`, `signOut`, `personaPassword`, `startRun` (from the repo page, or from
+ *               the Runs page's own button with `{from: 'runs'}`), `waitForRun`, `runStatus`,
+ *               `expectLogAction`, `stackHealth` (an axe sweep runs through ui/e2e/axe.ts),
+ *               `exportAndVerifyLedger` (Export JSONL → `crb ledger verify`), `workDir`,
+ *               `buildCalcRepo` (a calculator fixture with literal or parametrised tests, served
+ *               as a bare `file://` clone — 04b's `walk-door` and 08's `walk-signable`); the
  *               seeding helpers `csrf`, `apiGet`, `apiPost`, `startRunApi`, `waitRunApi`,
  *               `ensurePersona`.
  * What it does: Makes every spec drive a REAL stack through the UI — sign-in through the
@@ -41,6 +45,9 @@
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         none
  * Works with:   scripts/walkthrough.sh (boots the stack and exports `CRB_E2E_*`),
+ *               ui/src/screens/Runs/RunsPage.tsx (its "Start run" button, `startRun` from 'runs'),
+ *               ui/src/screens/Ledger/LedgerPage.tsx (the Export JSONL link `exportAndVerifyLedger`
+ *               follows),
  *               ui/playwright.walkthrough.config.ts (the config that runs these specs in
  *               order), ui/e2e/walkthrough/README.md (tiers, variables, selectors),
  *               tests/fixtures/pyrepo.py (the tier-1 fixture repository),
@@ -56,7 +63,11 @@
  */
 
 import { expect, request as playwrightRequest, test as base, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { createHmac } from 'node:crypto'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 export type BeltPolicy = 'TARGET_ONLY' | 'AFFECTED_DIRS' | 'BARE'
 
@@ -335,6 +346,12 @@ export async function expectLogAction(page: Page, action: string): Promise<void>
 
 export interface StartRunOptions {
   kind: 'mine' | 'replay' | 'blind' | 'oracle' | 'controls' | 'probe' | 'setup'
+  /**
+   * Where the dialog is opened from: the repository page's "Start a run" (the default), or the
+   * Runs page's own "Start run" with the repository carried by `?repo=` (G-268) — the dialog
+   * then arrives with the Repo preset and locked, which the helper asserts.
+   */
+  from?: 'repo' | 'runs'
   limit?: number
   builder?: string
   model?: string
@@ -354,14 +371,25 @@ const BUDGET_FIELD_LABELS = {
 } as const
 
 /**
- * Open the repo page, click "Start a run", fill the dialog and queue it. Resolves
- * once the app has navigated to the new run's page; returns the run id.
+ * Open the repo page (or, with `from: 'runs'`, the Runs page filtered to the repository) and
+ * click its start button; fill the dialog and queue it. Resolves once the app has navigated
+ * to the new run's page; returns the run id.
  */
 export async function startRun(page: Page, repo: string, opts: StartRunOptions): Promise<string> {
-  await page.goto(`/repos/${encodeURIComponent(repo)}`)
-  await page.getByRole('button', { name: 'Start a run' }).click()
+  if (opts.from === 'runs') {
+    await page.goto(`/runs?repo=${encodeURIComponent(repo)}`)
+    await page.getByRole('button', { name: 'Start run', exact: true }).click()
+  } else {
+    await page.goto(`/repos/${encodeURIComponent(repo)}`)
+    await page.getByRole('button', { name: 'Start a run' }).click()
+  }
   const dialog = page.getByRole('dialog', { name: 'Start a run' })
   await expect(dialog).toBeVisible()
+  if (opts.from === 'runs') {
+    // the Runs page carried the repository into the dialog: preset, and not offered for change
+    await expect(field(dialog, 'Repo')).toHaveValue(repo)
+    await expect(field(dialog, 'Repo')).toBeDisabled()
+  }
   await field(dialog, 'Kind').selectOption(opts.kind)
   if (opts.kind === 'replay' || opts.kind === 'blind') {
     await field(dialog, 'Builder').fill(opts.builder ?? '')
@@ -376,6 +404,95 @@ export async function startRun(page: Page, repo: string, opts: StartRunOptions):
   await dialog.getByRole('button', { name: 'Queue run' }).click()
   await page.waitForURL(/\/runs\/[0-9a-f]{32}$/)
   return runIdFromUrl(page)
+}
+
+// --- downloads and fixtures ------------------------------------------------------------------
+
+/** Where downloads and built fixture repositories land: `CRB_E2E_WORK`, else a temp dir. */
+export function workDir(): string {
+  return env.work && existsSync(env.work) ? env.work : mkdtempSync(join(tmpdir(), 'crb-walk-'))
+}
+
+export interface LedgerExport {
+  path: string
+  rows: Array<Record<string, unknown>>
+  /** `crb ledger verify --json`'s verdict, or `null` when `CRB_E2E_CRB` is not set (annotated). */
+  verdict: { ok: boolean; rows: number; false_q1: number; chain_ok: boolean } | null
+}
+
+/**
+ * From /ledger, press Export JSONL, save the file as `ledger-<tag>.jsonl`, and verify it: every
+ * row carries a 64-hex `row_hash` and a string `prev_hash`, and — when the CLI is available —
+ * `crb ledger verify --path … --json` answers `ok`, `chain_ok`, `false_q1 = 0` and the row count
+ * the file has. The one export-and-verify every spec that proves the chain shares (05, 06).
+ */
+export async function exportAndVerifyLedger(page: Page, tag: string): Promise<LedgerExport> {
+  await page.goto('/ledger')
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('link', { name: 'Export JSONL' }).click()])
+  expect(download.suggestedFilename()).toMatch(/\.jsonl$/)
+  const path = join(workDir(), `ledger-${tag}.jsonl`)
+  await download.saveAs(path)
+  const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean)
+  expect(lines.length).toBeGreaterThanOrEqual(1)
+  const rows = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+  for (const r of rows) {
+    expect(String(r.row_hash)).toMatch(/^[0-9a-f]{64}$/)
+    expect(typeof r.prev_hash).toBe('string')
+  }
+  let verdict: LedgerExport['verdict'] = null
+  if (env.crb && existsSync(env.crb)) {
+    const out = execFileSync(env.crb, ['ledger', 'verify', '--path', path, '--json'], { encoding: 'utf8' })
+    verdict = JSON.parse(out) as NonNullable<LedgerExport['verdict']>
+    expect(verdict.ok, out).toBe(true)
+    expect(verdict.chain_ok, out).toBe(true)
+    expect(verdict.false_q1, out).toBe(0)
+    expect(verdict.rows).toBe(rows.length)
+  } else {
+    base.info().annotations.push({ type: 'note', description: 'CRB_E2E_CRB not set: chain checked by row_hash presence + row count only' })
+  }
+  return { path, rows, verdict }
+}
+
+export type CalcTests = 'literal' | 'parametrised'
+
+/**
+ * A calculator repository of `n` coupled src+test commits after a scaffold, built with `git init`
+ * under `workDir()` and served as a bare `file://` clone. Every commit is RED at its parent (the
+ * module does not exist) and GREEN with its own source — the shape the miner admits. The tests'
+ * shape decides what the negative controls find, deterministically:
+ *
+ *  - `literal`: `assert opN(1, 2) == <literal>` — the `hardcode_cheat` control can special-case
+ *    it and grades clean, so the controls report carries ≥ 1 escape (the tier-1 fixture's own
+ *    finding; 04b walks it on `walk-door`);
+ *  - `parametrised`: three `(a, b)` cases — the cheat finds no literal to special-case and is
+ *    `not_constructible`, so the report has 0 escapes (08's `walk-signable`).
+ */
+export function buildCalcRepo(slug: string, n: number, tests: CalcTests): string {
+  const dir = workDir()
+  const src = join(dir, `${slug}-src`)
+  const bare = join(dir, `${slug}.git`)
+  const git = (...args: string[]) => execFileSync('git', ['-C', src, '-c', 'user.name=Fixture Bot', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', ...args], { stdio: 'pipe' })
+  mkdirSync(join(src, 'src', 'calc'), { recursive: true })
+  mkdirSync(join(src, 'tests'), { recursive: true })
+  execFileSync('git', ['init', '-q', '-b', 'main', src], { stdio: 'pipe' })
+  writeFileSync(join(src, 'pytest.ini'), '[pytest]\ntestpaths = tests\n')
+  writeFileSync(join(src, 'src', 'calc', '__init__.py'), '"""A tiny calculator."""\n\n\ndef add(a: int, b: int) -> int:\n    return a + b\n')
+  writeFileSync(join(src, 'tests', 'test_calc.py'), 'from calc import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n')
+  git('add', '-A')
+  git('commit', '-q', '-m', 'chore: scaffold calc')
+  for (let i = 0; i < n; i += 1) {
+    writeFileSync(join(src, 'src', 'calc', `op${i}.py`), `def op${i}(a: int, b: int) -> int:\n    return a + b + ${i}\n`)
+    writeFileSync(
+      join(src, 'tests', `test_op${i}.py`),
+      tests === 'parametrised'
+        ? `import pytest\n\nfrom calc.op${i} import op${i}\n\n\n@pytest.mark.parametrize("a,b", [(1, 2), (3, 4), (-1, 1)])\ndef test_op${i}(a, b):\n    assert op${i}(a, b) == a + b + ${i}\n`
+        : `from calc.op${i} import op${i}\n\n\ndef test_op${i}():\n    assert op${i}(1, 2) == ${3 + i}\n`,
+    )
+    git('add', '-A')
+    git('commit', '-q', '-m', `feat: add op${i}`)
+  }
+  execFileSync('git', ['clone', '-q', '--bare', src, bare], { stdio: 'pipe' })
+  return `file://${bare}`
 }
 
 // --- the API, for seeding (never for what a spec asserts about a screen) ------------------

@@ -13,6 +13,9 @@
  *               arrive here) only for a role that can start one; a viewer or approver
  *               reads who acts instead (J-FAC-12); operators get "Start run". `&tasks=<sha,…>`
  *               fills the dialog's task ids and `&from=learn` its loop-step line (G-352).
+ *               It reads the newest 200 matching runs and does not page (a declared non-goal):
+ *               when more match, a line under the table says "the newest 200 of n", and a line
+ *               under the filters names where probe, label and factory runs start (G-269).
  * How:          `useRepoParam` + `useSearchParams` for the filters → `useRuns` → `DataTable`;
  *               `RunNewDialog` navigates to the new run on success.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
@@ -55,6 +58,9 @@ const STATUSES: RunStatus[] = ['queued', 'running', 'succeeded', 'failed', 'canc
 /** The kind filter's options: every kind a run can have, not only the kinds the dialog starts (a probe comes from the repo page, a label from the CLI, a factory run from /factory). */
 const KIND_FILTERS: readonly RunKind[] = [...RUN_KINDS, 'probe', 'label', 'factory']
 
+/** The newest runs one page reads; there is no paging (the page's declared non-goal), so a longer list says so. */
+export const RUNS_LIMIT = 200
+
 /** Done / total as a bar with `role="progressbar"`; red when failed, green when succeeded. `hint` is the list's id by default (dense, no tab stop); the run page passes its own. */
 export function Progress({ done, total, status, hint = 'chart.runs.progress', tabStop = false }: { done: number; total: number; status: RunStatus; hint?: HintId; tabStop?: boolean }) {
   const pct = total > 0 ? done / total : 0
@@ -82,7 +88,7 @@ export function RunsPage() {
   const [starting, setStarting] = useState(initialNew !== null)
   const { can } = useAuth()
   const navigate = useNavigate()
-  const runs = useRuns({ repo: repo || undefined, kind: kind || undefined, status: status || undefined, limit: 200 })
+  const runs = useRuns({ repo: repo || undefined, kind: kind || undefined, status: status || undefined, limit: RUNS_LIMIT })
 
   const setFilter = (k: string, v: string) => {
     const next = new URLSearchParams(params)
@@ -153,30 +159,41 @@ export function RunsPage() {
           </>
         }
       />
+      {/* G-269: the three kinds this page lists but never starts, and where each is started */}
+      <Hint as="p" id="stat.runs.kind_origin" className="mb-4 max-w-[60em] text-sm text-on-surface-muted">
+        This page starts mine, qualify, replay, blind, oracle and controls runs. Probe runs start from a repository’s page (Probe now), factory runs from the Factory page (Run the factory), and label runs through the API (<code>POST /runs</code> with kind <code>label</code>); they are listed here too.
+      </Hint>
       <Card padded={false}>
         <QueryBoundary query={runs} loading="Loading runs…">
           {(page) => (
-            <DataTable
-              rows={page.items}
-              columns={columns}
-              rowKey={(r) => r.id}
-              caption="Runs"
-              initialSort={{ key: 'created', dir: 'desc' }}
-              onRowClick={(r) => navigate(`/runs/${encodeURIComponent(r.id)}`)}
-              empty={
-                <EmptyState
-                  title="No runs match"
-                  reason={
-                    repo || kind || status
-                      ? 'Nothing matches these filters yet.'
-                      : can('operator')
-                        ? 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. Start one here to produce ledger rows; the factory is started from Factory.'
-                        : 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. An operator starts a run; it spends model budget. The factory is started from Factory.'
-                  }
-                  action={can('operator') ? <Button variant="filled" onClick={() => setStarting(true)} hint="button.runs.start">Start a run</Button> : undefined}
-                />
-              }
-            />
+            <>
+              <DataTable
+                rows={page.items}
+                columns={columns}
+                rowKey={(r) => r.id}
+                caption="Runs"
+                initialSort={{ key: 'created', dir: 'desc' }}
+                onRowClick={(r) => navigate(`/runs/${encodeURIComponent(r.id)}`)}
+                empty={
+                  <EmptyState
+                    title="No runs match"
+                    reason={
+                      repo || kind || status
+                        ? 'Nothing matches these filters yet.'
+                        : can('operator')
+                          ? 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. Start one here to produce ledger rows; the factory is started from Factory.'
+                          : 'A run is a mine, replay, blind, oracle, controls or factory job over one repo. An operator starts a run; it spends model budget. The factory is started from Factory.'
+                    }
+                    action={can('operator') ? <Button variant="filled" onClick={() => setStarting(true)} hint="button.runs.start">Start a run</Button> : undefined}
+                  />
+                }
+              />
+              {page.total > page.items.length && (
+                <Hint as="p" id="stat.runs.limit" className="border-t border-border px-5 py-3 text-sm text-on-surface-muted" data-testid="runs-limit">
+                  Showing the newest {fmtInt(page.items.length)} of {fmtInt(page.total)} runs — narrow them with the filters.
+                </Hint>
+              )}
+            </>
           )}
         </QueryBoundary>
       </Card>

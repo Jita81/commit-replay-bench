@@ -50,6 +50,8 @@ export const HINTS = {
     'A row in this cell was credited clean although its belts contradict it (false-Q1). Nothing measured in the cell is evidence until the ledger is audited.',
   'route.not_yet_measured':
     'No graded attempt exists for this cell. It says nothing, not zero: a rate appears once a replay puts rows here.',
+  'button.shared.unknown_repo':
+    'Open Connection, which lists every repository this deployment knows, to find the one you meant or to connect it.',
   'belt.tests_unmodified':
     'Belt 1: the builder did not change any test file. A tick means the tests that grade the attempt are the repository’s own; a cross disqualifies the row.',
   'belt.target_green':
@@ -135,6 +137,18 @@ export const HINTS = {
     'From the pull request opening to a person merging it, taking the merge time the host itself reported. A pull request nobody has merged is not counted, so this is the wait of the ones that landed.',
   'flow.registered_to_merged':
     'The whole of manufacture: from the item being registered to its pull request being merged. This is the number a delivery team feels, and it includes every wait on a person inside it.',
+  'flow.registered_to_probe_green':
+    'From registering the repository to the first probe that finished green: how long it took to prove the toolchain, dependencies and layout right. A failed probe does not count, and a later green one does not move it.',
+  'flow.step_2_span':
+    'From the first probe or qualify after registration that said the repository was not ready to the first qualify that qualified a task. It is an estimate of the developer’s time on making the oracle reproducible, which happens outside the product: elapsed time, not effort.',
+  'flow.mine_run':
+    'How long one mine run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. A failed run is not counted, because it did not do the work.',
+  'flow.oracle_run':
+    'How long one oracle run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. It grows with the number of tasks and the size of the test suite.',
+  'flow.controls_run':
+    'How long one negative-controls run takes on this repository, from the worker starting it to it finishing: the median over the runs that succeeded. A failed run is not counted.',
+  'flow.finding_to_remeasurement':
+    'From a bug class first appearing in the ledger to the first time the loop measured a change aimed at it and recorded what the change did. A class with no change, or one not yet read at its first look, is counted below and not timed.',
   'flow.refusal_to_strengthening':
     'From a refusal being raised to a strengthening item being registered that supersedes what was refused. It says how quickly a stop becomes work, and a refusal nobody has answered is not counted.',
   'flow.installed_to_healthy':
@@ -151,6 +165,20 @@ export const HINTS = {
     'The product refused to fold these figures, and the message says why — most often a graded row that fails its own belts, which the ledger will not load. Nothing is shown rather than a number built on rows the product does not trust.',
   'flow.counts':
     'The plain counts behind the durations above: what entered this stream, what came out and what stopped. They are counts, not rates — no interval belongs on them.',
+  'flow.learn.guard_rows_refused':
+    'How many graded rows the guard stopped as a protocol violation in this repository, whatever anyone has decided about them.',
+  'flow.learn.guard_false_positives':
+    'Refused rows in which every class they fell into was decided honest by a person: the guard was wrong to stop them.',
+  'flow.learn.guard_right_refusals':
+    'Refused rows with at least one class a person decided should stay refused: the guard was right to stop them.',
+  'flow.learn.guard_rows_undecided':
+    'Refused rows with a class nobody has decided yet, or no class at all. They are counted as neither verdict.',
+  'flow.learn.classes_found':
+    'How many bug classes the prevention register holds for this repository: each kind of failure the loop has seen at least once.',
+  'flow.learn.classes_with_a_change':
+    'How many of those classes a prevention change has been applied to, so the loop can measure whether it helped.',
+  'flow.learn.classes_remeasured':
+    'How many of those classes have had a change measured again at its first look, with what the change did recorded. These are the classes the lead time above is timed over.',
   'flow.not_captured':
     'Figures this stream’s definition of done asks for that nothing in the product records. They are named here with the gap that would close them, so their absence is never read as a zero.',
 
@@ -176,11 +204,13 @@ export const HINTS = {
   'nav.decisions':
     'Step 3: everything waiting on a person across every repository. The number is how many decisions are ready now.',
   'nav.decisions_count':
-    'How many decisions are waiting on a person right now, across every repository. It counts sign-offs due, gaps to sign and factory items to decide; it is not a quality figure.',
+    'How many decisions are waiting on a person right now, across every repository. It counts every row on the Decisions page — sign-offs due or gone stale, cells to strengthen or re-measure, factory items to decide, preventions and library entries to sign; it is not a quality figure.',
   'nav.factory':
     'Step 4: deliver new work under the baseline — a frozen backlog, a RED proof, a build under the belts and a pull request only where the map routes deliver.',
   'nav.posture':
     'A printable statement of how this deployment is built, secured and audited, for an architecture or security review.',
+  'nav.instrument_group':
+    'The Operate path — the evidence behind the journey and the instrument’s own health: Runs (where an operator starts and watches one), the Map grid, Routes, the Oracle, Learn, the Ledger and, for admins, Settings. The operating routine is health → Runs → Ledger → Settings.',
   'nav.runs':
     'Every run the worker has executed or queued, with its progress and cost; where an operator starts one.',
   'nav.capability':
@@ -241,6 +271,10 @@ export const HINTS = {
     'Where the factory is: blocked before any measurement, waiting for a backlog, frozen and ready to run, in progress item k of n, or Completed once an item has a pull request or was accepted.',
   'button.home.continue':
     'Go to the first task you can act on now. Nothing spends money until a run you can see and cancel is queued.',
+  'stat.home.intake_state':
+    'Where task 8’s work comes from: the enterprise’s own board, read through intake. The state says whether the repository’s listener is on and which column it watches; a ready ticket still waits for an operator’s Register act.',
+  'banner.home.probe':
+    'A health probe that is degraded or down, with the detail the probe reported. The link opens the guide section that says what to do; the pill in the header shows the same status on every screen.',
 
   // ── /connect (screens/Connect/ConnectPage.tsx · ConnectPage)
   'button.connect.github':
@@ -263,6 +297,10 @@ export const HINTS = {
     'Continue opens the walk at its next stage; Baseline opens what the evidence says once every stage holds rows.',
   'button.connect.empty_connect':
     'Start the walk for a first repository: register, probe, mine, oracle, controls, then a first measurement.',
+  'button.connect.all_repos':
+    'The flat list of every repository on this deployment, with its probe, task counts and last run. Add one there by URL when the GitHub App is not configured.',
+  'col.connect.next':
+    'Where each repository goes next: the row’s door. Continue opens the walk at its next stage; Baseline opens the evidence once every stage holds rows.',
 
   // ── Connect from GitHub dialog (screens/Connect/GitHubConnectDialog.tsx)
   'field.github.installation':
@@ -314,7 +352,15 @@ export const HINTS = {
   'pill.walk.spends':
     'This stage calls a model and costs money. Every other stage is free.',
   'button.walk.run_stage':
-    'Queue this stage’s run. Run and Retry cost nothing; Measure… opens the estimate for the one stage that spends. A queued run can be cancelled from Runs.',
+    'Queue this stage’s run. Run and Retry cost nothing; Measure… opens the Measure page — the estimate and the confirm for the one stage that spends — and posts nothing itself. A queued run can be cancelled from Runs.',
+  'toggle.walk.auto_stages':
+    'Chain the free stages. On, each £0 stage that passes queues the next — probe, mine, qualify, oracle, controls — under your name, never a stage already done or in flight, and never Measure…, which always waits for a person. It is the repository’s auto_stages setting, recorded as a configuration change.',
+  'stat.walk.candidate':
+    'A configuration change the mine’s notes imply: the setting, the limit in force and the value Accept would apply, with how many commits imply it. Nothing changes until an operator decides.',
+  'button.walk.candidate_accept':
+    'Apply this change to the repository’s configuration under your name, validated and recorded exactly as a hand edit. The commits it names are held — not offered again — until a later mine or qualify run finishes; re-qualify them to see whether it helped.',
+  'button.walk.candidate_reject':
+    'Decline this change and record that you did. The configuration is untouched, and the same note is not offered again.',
   'stat.walk.stage_detail':
     'What the stage found, as counts (tasks mined, mutants killed, controls constructed) or the probe’s first line. Counts, not rates: the rates with n and interval are on the Baseline.',
   'link.walk.open_run':
@@ -326,7 +372,11 @@ export const HINTS = {
   'link.walk.inflight_open':
     'Watch the live log and per-task rows of this run.',
   'button.walk.cancel':
-    'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
+    'Stop the run. A queued run ends at once; a running one stops between tasks and the command in flight is killed. Attempts already made are still charged and their rows are kept.',
+  'button.connect.cancel_keep':
+    'Close this question and leave the run running. Nothing is posted.',
+  'button.connect.cancel_confirm':
+    'Ask the worker to stop the run: a queued run ends at once; a running one stops between tasks and the command in flight is killed. Attempts already made are still charged and their rows are kept.',
 
   // ── /connect/:name/measure (screens/Connect/MeasurePage.tsx)
   'link.measure.back':
@@ -344,7 +394,7 @@ export const HINTS = {
   'field.measure.retain_transcripts':
     'Keep the builder’s conversation for each attempt. Off by default; it can contain code from your repository, so it is in scope for your retention policy.',
   'stat.measure.estimate':
-    'A planning band for this run: the number of attempts times a per-attempt cost. With no measured mean for this repository it uses the range earlier repositories showed and carries no apparatus; once this repository has measured attempts it uses their mean (n shown) with ±20 % around it. It is not a measured interval.',
+    'A planning band, not a measured interval: attempts times a per-attempt cost. With no measured mean for this repository it uses the range earlier repositories showed; once this repository has measured attempts it uses their mean (n shown) with ±20 % around it. A builder with a known price per attempt — only the test-only fixture, at $0 — is priced at that price and reads neither the band nor the mean.',
   'summary.measure.builder':
     'The builder and model this deployment will use for every attempt, chosen from the credentials the admin configured. Every knob opens the full run form.',
   'link.measure.every_knob':
@@ -352,13 +402,17 @@ export const HINTS = {
   'summary.measure.budget_cap':
     'The most this run may spend, and how it keeps to it: before each attempt it counts what it has spent plus what that attempt could cost, and stops if the sum would pass the cap. An attempt with no cost cap of its own is counted at the dearest attempt so far, nothing before the first, so a run can pass its cap by up to one attempt; it then stops and says so.',
   'field.measure.spend_cap':
-    'The most this measurement should spend, in US dollars. It starts at the top of the estimate. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass this amount by up to one attempt.',
+    'The most this measurement should spend, in US dollars. It starts at the top of the estimate, or at $1 when the estimate is $0. The run stops before an attempt that could take its spend past it; an attempt with no cost cap of its own is counted at the dearest attempt so far, so the run can pass this amount by up to one attempt.',
   'text.measure.spend_cap_unpriced':
     'Why the run was not queued and what to do: this page always caps the run, and a cap needs the price of the model. An admin can add the price, or you can use the full run form, which can run with no cap.',
   'banner.measure.spend_cap_stop':
     'The last measurement stopped at its spend cap: before an attempt that could have passed it, or after an attempt with no cost cap of its own passed it. The attempts it made are graded and kept; start another run to reach the tasks it did not.',
   'summary.measure.retention':
     'What this run will keep beyond grades and hashes, from the two boxes above.',
+  'field.measure.preflight':
+    'Off by default. When on, the repository’s own formatter and linter run on each attempt’s changed files after the build, fix what they can, and the builder gets one bounded repair call; that call is part of the attempt’s spend. The rows record a separate arm, the builder plus “+preflight”, which is never pooled with plain rows — so switch it on only for a measurement you mean to compare.',
+  'summary.measure.outage_stop':
+    'The circuit breaker this run keeps at the worker’s default: after three attempts in a row that the provider refused — a usage limit, a dead credential — the run stops and says so instead of writing a refused row for every remaining attempt. The full run form can change the number.',
   'summary.measure.posture':
     'Whether the sandbox that runs the tests is sealed (docker) so the rows count as evidence, or a local executor whose rows are a development reading only.',
   'button.measure.start':
@@ -436,7 +490,11 @@ export const HINTS = {
   'button.results.all_decisions':
     'Every decision waiting on a person, across every repository.',
   'stat.results.waiting_count':
-    'How many decisions are waiting on a person for this repository alone: sign-offs due, gaps to sign and factory items to decide.',
+    'How many decisions are waiting on a person for this repository alone — the same rows, and the same number, as its card on the Decisions page. A sign-off gone stale is listed there in its own section.',
+  'stat.results.waiting_more':
+    'How many of this repository’s decisions the card is not showing: it lists the first six, and the full list is on Decisions.',
+  'button.results.back_to_walk':
+    'Go back to the connection walk, where the controls and the oracle run and a measurement is queued: the step that produces the gate that is not green here.',
 
   // ── /library/:repo (screens/Library/LibraryPage.tsx) — the context library, ADR-0026 item 10
   'link.library.back':
@@ -673,15 +731,17 @@ export const HINTS = {
   'stat.decisions.repo_count':
     'How many of the decisions above belong to this repository; each is listed under it.',
   'pill.decisions.kind':
-    'The kind of decision: must not ship (false-Q1), sign-off due, a structural gap to sign, a factory item routed to a person, a review to read, delivery withheld by the route, or a library entry to sign, gone stale or retired by measurement.',
+    'The kind of decision: must not ship (false-Q1), sign-off due, a sign-off gone stale, a structural gap to sign, an item not built, a factory item routed to a person, a review to read, delivery withheld by the route, a cell held until its tests are stronger, a cell measured on an earlier apparatus, or a library entry to sign, gone stale or retired by measurement.',
   'stat.decisions.waiting':
     'How long this decision has been waiting, from the moment the product first saw it was due. The clock is the server’s and runs whether or not anybody has this page open.',
   'stat.decisions.evidence':
-    'The cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker.',
+    'On a cell row: the cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker. On a re-measurement row: the rows needed to reach the rule’s first look, the estimated cost (or “cost not known” when no row recorded one), and the builder/model@provider it is re-measured on. On a factory or library row: what is missing or waiting.',
   'button.decisions.act':
-    'Take this decision. It opens the sign-off form with the cell chosen, the factory item, or the ledger row, depending on the kind.',
+    'Opens the page where this decision is taken — the sign-off form with the cell chosen, the Factory item, Learn (to strengthen the tests or queue a re-measurement), the Library entry, or the Ledger, depending on the kind. Nothing is recorded until you act there.',
   'button.decisions.read':
     'Read the decision without acting. The role that can act is named under the button.',
+  'stat.decisions.who_acts':
+    'The role that takes this decision. You can read it; a person with that role, or a higher one, acts on it. Admins give roles in the Users card on the Settings page.',
   'tile.decisions.stale':
     'A cell signed under an earlier apparatus, or on a checks arm the repository no longer grades under (the format step or the public-API check was switched since). It is kept as history and licenses nothing until an approver re-signs it on the current instrument or revokes it.',
   'button.decisions.resign':
@@ -924,6 +984,54 @@ export const HINTS = {
     'Drop this item from the backlog being frozen. Ids of removed items are not reused.',
   'button.factory.item_add':
     'Add a further item with the next free id.',
+  'stat.factory.intake_state':
+    'Where the work comes from: the enterprise’s own board, read through intake. The state says whether this repository’s listener is on and which column it watches; a ready ticket still waits for an operator’s Register act, and nothing here means a ticket will be built.',
+  'button.factory.item_task':
+    'Open the item’s task page: its specification, the authored failing test, the belt scope, the source files and every graded trial against it.',
+  'stat.factory.outcomes':
+    'The pull requests the factory delivered on this repository and how they ended, by count: delivered, merged, closed without merging, and still open. A merge is a person’s act, so this is never a rate; the time is when the newest outcome was read from GitHub.',
+  'button.factory.sync_outcomes':
+    'Read each delivered pull request’s state from GitHub now and record a merge or a close on the evidence chain. An open pull request records nothing; a refused read records nothing and says why.',
+  'note.factory.viewer_outcomes':
+    'Reading the outcomes back from GitHub is an operator’s act; the counts here are the record as it stands.',
+  'stat.factory.sync_report':
+    'What the last sync did: how many pull requests it checked, how many it recorded as merged or closed, how many are still open, and any it could not read, which the next sync tries again.',
+  'pill.factory.outcome':
+    'This item’s delivered pull request and its fate as last read from GitHub: open, merged (and by whom), or closed without merging. Opens the pull request.',
+  'button.factory.register_evolution':
+    'Open the drafted replacement item to check it and register it: a new item chained onto the frozen backlog that supersedes this one. The frozen hash stays and the old chain is kept; nothing is registered until you press Register.',
+  'note.factory.viewer_registers':
+    'Registering the evolution is an operator’s act; the drafted item is shown so anyone can read what would be registered.',
+  'item.factory.superseded':
+    'This item was replaced by an evolution: its own chain stays on the record, and the next factory run works the evolution instead.',
+  'field.factory.evolution_id':
+    'The id the evolution is registered under: the next free one, served by the API. A frozen record never reuses an id, so it cannot be changed here.',
+  'field.factory.evolution_supersedes':
+    'The item this evolution replaces. The record refuses an item that was already superseded, so it cannot be changed here.',
+  'field.factory.evolution_title':
+    'The evolution’s title, prefilled from the item it replaces.',
+  'field.factory.evolution_class':
+    'The kind of change, which decides the structural questions readiness asks and the cell the route gate reads.',
+  'field.factory.evolution_size':
+    'The estimated size, which with the class names the cell whose measured route decides whether a pull request may open.',
+  'field.factory.evolution_kind':
+    'What is being changed: code, infrastructure or an operator act.',
+  'field.factory.evolution_level':
+    'The level of change the item claims; the entry gate reads it with the class and size.',
+  'field.factory.evolution_description':
+    'What and why, in the item’s own words, followed by why the last attempt stopped. A description is never a diff.',
+  'field.factory.evolution_facts':
+    'The structural facts, one per line as slot: fact. A structural slot left empty is the gap the next run stops on until an approver signs it.',
+  'field.factory.evolution_criteria':
+    'Acceptance criteria, one per line: what a reviewer checks the change against. Optional.',
+  'field.factory.evolution_depends':
+    'The items this evolution waits on, by id; the loop works items in dependency order.',
+  'field.factory.evolution_test_path':
+    'Where the failing test lives inside the repository. A stop about the test cannot be registered without one.',
+  'field.factory.evolution_test_content':
+    'The test itself: it must fail today and pass once the change is made. The RED proof checks the first half before any build is paid for.',
+  'button.factory.evolution_submit':
+    'Register the evolution onto the frozen backlog under your name. Refused while a factory run is active, for an id already on the record, or for an item already superseded.',
 
   // ── /factory/intake — work arriving from the team's own board (ADR-0017)
   'stat.intake.listener':
@@ -1298,6 +1406,10 @@ export const HINTS = {
     'Builder-reported dollars, summed over the run’s attempts. A measurement, not an estimate.',
   'col.runs.created':
     'When the run was queued. Newest first by default.',
+  'stat.runs.kind_origin':
+    'Where each kind of run is started. This page’s Start run form starts the measurement runs; a probe starts from its repository, the factory from the Factory page, and a label run through the API. Every kind is listed here whichever way it started.',
+  'stat.runs.limit':
+    'This list reads the newest 200 runs that match the filters and says how many match in all. It does not page: choose a repository, a kind or a status to reach an older run.',
 
   // ── Start a run dialog (screens/Runs/RunNewDialog.tsx)
   'field.run_new.repo':
@@ -1359,7 +1471,7 @@ export const HINTS = {
   'pill.run.status':
     'Queued means nothing has started or been spent; Running means a worker holds it; Succeeded, Failed and Cancelled are final and keep every graded row.',
   'pill.run.cancel_requested':
-    'Someone asked the run to stop; the worker ends it after the attempt in flight.',
+    'Someone asked the run to stop; the worker ends it between tasks and kills the command in flight.',
   'stat.run.identity':
     'The mode, builder, model, provider and ladder this run graded under. A rate quoted without these is not a claim.',
   'link.run.repo':
@@ -1367,7 +1479,7 @@ export const HINTS = {
   'button.run.deliver_override':
     'Let this factory run build and deliver items whose cell’s proven standard nobody has signed yet. It lifts the sign-off clause and nothing else: a cell that does not route deliver still opens no pull request, and a cell with a wrong clean verdict (the honesty floor) is never lifted. A second approver’s act: the person who queued the run cannot grant it. Recorded under your name on the run’s trace.',
   'button.run.cancel':
-    'Stop after the attempt in flight. Attempts already made are still charged and their rows are kept.',
+    'Stop the run. A queued run ends at once; a running one stops between tasks and the command in flight is killed. Attempts already made are still charged and their rows are kept.',
   'chart.run.progress':
     'Tasks attempted out of tasks planned, as a share.',
   'stat.run.queue':
@@ -1423,7 +1535,13 @@ export const HINTS = {
   'button.run.event_error_hide':
     'Close the full error message and leave the log on its own. The row it came from stays where it is.',
   'col.run_tasks.task':
-    'The task attempted, shortened. Click the row to open the evidence pack of its last trial.',
+    'The task attempted, shortened. The id opens the task’s own page — its spec and every graded trial of it on this repository, with each trial’s review; clicking anywhere else on the row opens the evidence pack of its last trial.',
+  'link.task.repo':
+    'The repository this task was mined from; opens its overview.',
+  'button.task.back_to_tasks':
+    'Open the repository’s Tasks tab: every task mined from it, with its class, size and gold check.',
+  'link.run_tasks.task':
+    'Open this task’s page: its spec and every graded trial of it on this repository, with each trial’s review. The rest of the row opens this run’s evidence pack instead.',
   'col.run_tasks.cell':
     'The class and size tier the task falls in: the cell its row counts toward on the map.',
   'col.run_tasks.trials':
@@ -1642,6 +1760,12 @@ export const HINTS = {
     'How many cells route this way, out of every measured cell (n). Counts of cells, not attempts.',
   'col.routing.cell':
     'The class and size (and language, builder, model or provider where projected) the decision is for.',
+  'col.routing.doors':
+    'Where to go from a decision: its rows on the ledger, and its class × size cell on the map with the detail card open.',
+  'button.routing.rows':
+    'Open the ledger rows behind this decision: the repository, class and size, and the language, builder and model where the decision carries them. The ledger page does not filter by provider or process step, so a decision projected by either opens every row of its class and size.',
+  'button.routing.map_cell':
+    'Open this decision’s cell on the map: the class × size aggregate, whatever the decision was projected by, with its detail card already open.',
   'col.routing.route':
     'The route the published rule gave the cell from its own evidence.',
   'col.routing.code':
@@ -1763,15 +1887,15 @@ export const HINTS = {
   'stat.learn.stale_rows':
     'Rows older than the current apparatus out of every row for this repository. Stale evidence is kept as history and licenses nothing.',
   'stat.learn.needed':
-    'Commits still needed on the current apparatus to bring every stale cell to the look rule’s first look (routing.v2), over the cells that are stale. A reading is read only at its looks.',
+    'Commits the registered readings still need before their next looks, summed over the readings waiting on a look (routing.v2). A cell with no registered reading is not counted here: it needs a reading registered first.',
   'stat.learn.remeasure_cost':
-    'Each stale cell’s own mean row cost times the rows it still needs, summed over the cells with a known cost. A dash means no cost is known.',
+    'Each cell’s own mean row cost times the commits its runs ask for, times up to 3 attempts per commit for a blind cell (the ladder’s rungs), summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
-    'The class and size whose rows predate the current apparatus.',
+    'The cell: its process step, class, size, language, builder, model and provider, then the mode and the context arm it is about. Two arms are never pooled.',
   'col.learn_remeasure.counts':
-    'Rows on older apparatus versions (named), rows on the current one, and how many more the rule needs.',
+    'Rows on older apparatus versions (named); the distinct commits read so far (by the registered reading, or, with none, the commits with a first attempt); and how many more commits are needed, with the reason and what to do next under it.',
   'col.learn_remeasure.cost':
-    'The cell’s mean row cost times the rows needed; a question mark when no cost is known.',
+    'The cell’s mean row cost times the commits its runs ask for (times up to 3 for a blind cell). It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
   'col.learn_remeasure.runs':
     'How many run requests the plan lists to close the gap.',
   'link.learn.oracle':
@@ -1826,6 +1950,22 @@ export const HINTS = {
   // the three decisions beside the reports (G-532), each one a named operator's decision
   'pill.learn.decided':
     'The verdict a named person recorded for this class, and the corpus the line was written into: honest allows the command, refused keeps the guard refusing it.',
+  'col.learn_refusals.fp_apparatus':
+    'The apparatus version the refused rows were graded under. Rates of two versions are never blended, because a change to the guard changes what it refuses.',
+  'col.learn_refusals.fp_month':
+    'The calendar month the refused rows were graded in, so a change in the rate over time can be seen.',
+  'col.learn_refusals.fp_rows':
+    'How many rows the guard refused in this version and month: the n the rate is taken over.',
+  'col.learn_refusals.fp_honest':
+    'Refused rows in which every class they fell into was decided honest by a person: the guard stopped a command it should have allowed. These are its false positives.',
+  'col.learn_refusals.fp_refuse':
+    'Refused rows with a class a person decided refused: the guard was right to stop them.',
+  'col.learn_refusals.fp_undecided':
+    'Refused rows nobody has judged yet. They are counted as neither verdict, so the rate beside them is a range until someone decides their class.',
+  'col.learn_refusals.fp_rate':
+    'False positives divided by the rows refused. While rows are undecided it shows the range: the low end counts every undecided row as a right refusal, the high end as a false positive.',
+  'text.learn.fp_undecided':
+    'How many refused rows no person has judged yet, in how many classes, and how many fell into no class at all. When an operator decides a class above, the range of the rate in the table narrows; a row in no class keeps its part of the range open.',
   'col.learn_refusals.decide':
     'Records your verdict on this class. Only an operator sees this column, and the decision is stored with the name of whoever made it.',
   'button.learn.decide_refusal':
@@ -1854,12 +1994,26 @@ export const HINTS = {
     'What the registration did: the item id, the backlog it is on now, and the item it replaced if any.',
   'link.learn.factory':
     'The factory for this repository, where the backlog is read and a run that builds the item is queued.',
+  'col.learn_remeasure.reason':
+    'Why the cell is in the plan: look pending when its registered reading still needs commits before its next look; stale or thin when it has rows but no reading is registered on it at this apparatus, so none of them can count yet.',
+  'pill.learn.remeasure_reason':
+    'Look pending means a registered reading waits for first attempts on commits it has not read. Stale means the cell’s evidence expired when the apparatus changed; thin means its rows are current. Neither of those two has a reading to count rows.',
+  'text.learn.remeasure_short':
+    'Why this cell needs what it needs, and what to do next: queue the commits its reading still needs, register a reading first, or queue a run by hand because this plan cannot compose one the reading would count.',
+  'text.learn.remeasure_cannot_clear':
+    'Cells whose registered reading has decided against them: insufficient at its third miss (never read again), or undecided because its pool is too small for the next look. No further attempt on that reading can bring them to deliver.',
   'col.learn_remeasure.queue':
     'Queues this cell’s re-measurement runs. Only an operator sees this column, and the estimate is shown before anything is sent.',
   'button.learn.queue_remeasure':
     'Shows what queueing this cell would run and cost before anything is sent.',
   'link.learn.remeasure_in_flight':
     'The runs already queued for this cell and not yet finished. Queue comes back once they have graded, so the same estimate is never spent twice.',
+  'text.learn.remeasure_register':
+    'This cell has rows but no registered reading at this apparatus. Rows graded before a reading is registered never count, so nothing is queued here: register a reading of the cell first (crb reading register, or POST /readings).',
+  'link.learn.remeasure_by_hand':
+    'The runs page for this repository. The reading waits on an arm this plan cannot compose a replay for (another test author, the loop switch, a factory arm or another posture), so the run is queued there by hand.',
+  'link.learn.remeasure_mine':
+    'The mine runs of this repository. New commits count only in a new reading, once they are labelled into the cell and qualified.',
   'button.learn.cancel_queue':
     'Closes the confirmation. Nothing is queued and nothing is spent.',
   'button.learn.confirm_queue':
@@ -1924,6 +2078,10 @@ export const HINTS = {
     'Rows credited clean against a failed belt, across the whole ledger. Must be 0; it is the number everything else defends.',
   'stat.ledger.matching':
     'Rows matching the current filters, out of the whole ledger; the table shows one page of them.',
+  'stat.ledger.disqualified':
+    'Attempts disqualified in the last window, summed over builders, against the threshold the deployment sets per builder. A builder over it is a stop condition: it is named under the number and the tile turns red. A dash means this server does not serve the figure.',
+  'button.ledger.clear_filters':
+    'Remove every filter, the repository included, and show the whole ledger again. The address bar is reset with it, so the link you followed no longer narrows the rows.',
   'button.ledger.remove_filter':
     'A filter that came with the link you followed, with no control of its own on this page. Matching rows counts only the rows it lets through; press it to remove the filter. A value a select on this page does not offer (Size xl, say) reads "not applied": the rows are not narrowed by it, and pressing it removes it from the link.',
   'field.ledger.clean':
@@ -2215,6 +2373,12 @@ export const SHARED_IDS: readonly HintId[] = [
   'flow.pr_to_merged',
   'flow.registered_to_merged',
   'flow.refusal_to_strengthening',
+  'flow.registered_to_probe_green',
+  'flow.step_2_span',
+  'flow.mine_run',
+  'flow.oracle_run',
+  'flow.controls_run',
+  'flow.finding_to_remeasurement',
   'flow.password_set_to_signed_in',
   'flow.installed_to_healthy',
   'flow.spend',
@@ -2236,7 +2400,7 @@ export const MIN_HINTS: Record<string, number> = {
   '/home': 10,
   '/connect': 8,
   '/connect/:name': 14,
-  '/connect/:name/measure': 10,
+  '/connect/:name/measure': 18,
   '/results': 31,
   '/decisions': 6,
   // a signed entry, an unsigned one and a work type with slots, sizes and the quality table
@@ -2258,10 +2422,12 @@ export const MIN_HINTS: Record<string, number> = {
   '/runs/:id': 24,
   '/tasks/:repo/:taskId': 16,
   '/capability': 30,
-  '/routing': 20,
+  '/routing': 55,
   '/oracle': 22,
-  '/learn': 44,
-  '/ledger': 26,
+  // a viewer's Learn page under the ratchet's fixtures: the reports, the remeasure plan's four
+  // kinds of entry and the learn stream's FlowPanel with each of its counts explained (G-536)
+  '/learn': 87,
+  '/ledger': 47,
   // a viewer's Settings: health, the login card read-only, the GitHub App, and their own
   // "Change my password" card; the admin's configuration and Users card (and the deeper
   // set-password dialog and account history) are held by the ratchet's variants

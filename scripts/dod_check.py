@@ -25,7 +25,10 @@ its file cites (or, in the register, no pending row); a ``PLAN.md`` wave item th
 gap id the record defines or has retired; a gap the order of work ranks that no table of
 the plan names, and a plan heading that quotes a rank; a retired id that neither the
 artefacts' git history nor the base branch's committed gap analysis shows was a gap (the
-generated file never vouches for itself); a new gap id that the base's history at the
+generated file never vouches for itself); an id missing from the retired list that nothing
+here defines but a committed gap analysis carries — the one at the merge-base, or one this
+branch committed since, for an id history vouches for (P-677: a merge resolution dropped
+it, and the list only grows); a new gap id that the base's history at the
 merge-base already used for a gap closed there (P-463: one id, two meanings); a twin left in
 old words — a clause of at least
 ``TWIN_MIN_WORDS`` words that a criterion reworded since the merge-base with the base branch
@@ -52,7 +55,9 @@ What it does: Parses every artefact under docs/dod/, validates ids, categories, 
               prevention register's pending rows, each with its claim tag); refuses a gap
               line nothing cites, a PLAN.md wave item that is not a gap, a ranked gap in no
               table of the plan, a plan heading that quotes a rank, a retired id that git
-              history does not vouch for, a new gap id the base's history already closed
+              history does not vouch for, an id the merge-base's gap analysis or one this
+              branch committed carries that the retired list lost (P-677), a new gap id
+              the base's history already closed
               (P-463), a twin criterion left in the words another
               criterion dropped since the base (P-236), and a value a Proposed ADR leaves to
               the operator stated as settled (P-237); --check exits
@@ -955,16 +960,42 @@ def previous_ids(text: str) -> tuple[set[str], set[str]]:
     return open_ids, retired
 
 
-def retired_ids(previous: str, defined: set[str]) -> list[str]:
+def retired_ids(previous: str, defined: set[str], base: set[str] | None = None) -> list[str]:
     """Every id the order of work once carried that nothing defines any more — closed, or
     merged into another id. It only grows (an id defined again leaves it), so a wave that
     closes a gap never breaks the plan that named it.
 
-    It is carried forward from the previous gap analysis; ``main`` keeps only the ids that
-    ``history_gap_ids`` or ``base_gap_analysis_ids`` vouch for, so that file never vouches
-    for itself."""
+    It is carried forward from the previous gap analysis AND from ``base`` — the ids, open or
+    retired, of the committed gap analyses: the one at the merge-base
+    (``base_gap_analysis_ids``) and each one this branch committed since
+    (``branch_gap_analysis_ids``). The previous file alone cannot keep the list growing: a
+    merge resolution that drops an id from it drops it for good, and the next run reads the
+    loss back as current (P-677). ``main`` keeps only the ids that ``history_gap_ids`` or
+    ``base_gap_analysis_ids`` vouch for, so no gap analysis vouches for itself."""
     open_ids, retired = previous_ids(previous)
-    return sorted((open_ids | retired) - defined, key=_gap_key)
+    return sorted((open_ids | retired | (base or set())) - defined, key=_gap_key)
+
+
+def lost_ids(carried: list[str], previous: str, sources: dict[str, str]) -> dict[str, str]:
+    """The carried ids a committed gap analysis holds — each mapped to the one that names it
+    (``sources``) — that the previous file has lost: a merge resolution dropped them (P-677:
+    G-945 left the retired list in the merge of #73 into #75, and ``--check`` read the loss
+    back as current). The generator restores each; ``--check`` names each one."""
+    open_ids, retired = previous_ids(previous)
+    return {
+        gid: sources[gid] for gid in carried if gid in sources and gid not in open_ids | retired
+    }
+
+
+def validate_not_lost(lost: dict[str, str]) -> list[str]:
+    """``--check``'s refusal of each id ``lost_ids`` found, naming the gap analysis that
+    carries it."""
+    return [
+        f"docs/dod/GAP-ANALYSIS.md does not retire {gid}, which {source} carries and nothing "
+        "here defines — the list only grows, so a merge resolution must not drop an id: run "
+        "scripts/dod_check.py and commit it"
+        for gid, source in lost.items()
+    ]
 
 
 #: Where a gap id is defined or cited by hand: the artefacts and the register — never the
@@ -1035,7 +1066,13 @@ def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
     """The ids — open or retired — in the gap analysis committed at the merge-base of ``HEAD``
     and ``base``. That file passed this check on the pull request that wrote it, and it is
     where an id opened and closed inside a squash-merged branch survives (the squash drops the
-    branch's own artefact commits). Empty when the base does not resolve."""
+    branch's own artefact commits). Unlike a version the branch committed
+    (``branch_gap_analysis_ids``), this file is read when it has no retired list, so a branch
+    whose merge-base predates the list is asked to retire the ids the base closed before the
+    list began. Applied here, the branch's rule would drop two refusals the real record
+    raises — G-230 and G-915 at the base 50dc25fb, whose file has no retired list (the list
+    began at 9217c788; the two closed at 4b3610da and e6786444) — so the stricter read
+    stays, and ``tests/test_dod_check.py`` pins it. Empty when the base does not resolve."""
     if not _own_work_tree(root):
         return set()
     mb = _git(root, "merge-base", "HEAD", base)
@@ -1049,6 +1086,66 @@ def base_gap_analysis_ids(root: Path, base: str) -> set[str]:
         return set()
     open_ids, retired = previous_ids(text)
     return open_ids | retired
+
+
+def branch_gap_analysis_ids(root: Path, base: str) -> dict[str, str]:
+    """The ids — open or retired — in each gap analysis this branch committed after the
+    merge-base of ``HEAD`` and ``base``, each mapped to a commit (short sha) whose file carries
+    it: the first the walk reads, children before parents (``--topo-order``). A version before
+    the merge-base is not read: it is the base's record, and the merge-base's own file is the
+    base's account of it (``base_gap_analysis_ids``). The merge-base's file never holds an id
+    only the branch carried, so a merge resolved by keeping one side's file whole drops every id
+    only the other side carried, for good, and ``--check`` reads the loss back as current
+    (P-677: resolutions of merges inside #75's lineage dropped G-208, G-209, G-246, G-730 and
+    G-760 so). The walk takes ``--full-history``: such a merge is TREESAME to the side it kept,
+    and git's default simplification follows that side alone and skips every version the other
+    side wrote. A version with no retired list is not read — an id it held that closed before
+    the list began was never in the list. ``main`` keeps only the ids history vouches for, so a
+    committed hand edit cannot vouch for itself. Empty when ``root`` is not its own work tree or
+    the base does not resolve."""
+    if not _own_work_tree(root):
+        return {}
+    mb = _git(root, "merge-base", "HEAD", base)
+    if mb is None:
+        return {}
+    rel = (
+        OUT.relative_to(root).as_posix() if OUT.is_relative_to(root) else "docs/dod/GAP-ANALYSIS.md"
+    )
+    revs = (
+        _git(
+            root, "rev-list", "--full-history", "--topo-order", "HEAD", f"^{mb.strip()}", "--", rel
+        )
+        or ""
+    ).split()
+    if not revs:
+        return {}
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "--batch"],
+            input="".join(f"{rev}:{rel}\n" for rev in revs).encode(),
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return {}
+    if done.returncode != 0:
+        return {}
+    raw, at = done.stdout, 0
+    carried: dict[str, str] = {}
+    for rev in revs:  # children before parents: the first commit read to name an id is quoted
+        end = raw.index(b"\n", at)
+        head = raw[at:end].split()
+        at = end + 1
+        if len(head) != 3:  # "<rev>:<path> missing": the commit deleted the file
+            continue
+        size = int(head[2])
+        text = raw[at : at + size].decode("utf-8", errors="replace")
+        at += size + 1
+        if RETIRED_HEAD in text:
+            open_ids, retired = previous_ids(text)
+            for gid in open_ids | retired:
+                carried.setdefault(gid, rev[:8])
+    return carried
 
 
 _OPEN_GAP_LINE = r"^- \*\*G-[0-9]{3}\*\*"
@@ -1598,10 +1695,23 @@ def main(argv: list[str] | None = None) -> int:
     cited_rows = {c.gap for a in arts for c in a.criteria} | pending_gaps
     defined = {g for a in arts for g in a.gaps} | set(pgaps) | (set(backlog) & cited_rows)
     previous = OUT.read_text(encoding="utf-8") if OUT.is_file() else ""
-    carried = retired_ids(previous, defined)
+    # the committed gap analyses' ids carry forward too — the merge-base's, and each one this
+    # branch committed — so a merge that drops one from the previous file cannot drop it for
+    # good (P-677); a base that does not resolve adds nothing, as in every other read of the
+    # base here — CI always has it (fetch-depth: 0 and DOD_BASE)
+    base_ids = base_gap_analysis_ids(ROOT, args.base)
     # the previous file cannot vouch for itself: an id stays retired only while the artefacts'
-    # history or the base's committed gap analysis shows it was a gap (P-127)
-    vouched = history_gap_ids(ROOT) | base_gap_analysis_ids(ROOT, args.base)
+    # history or the base's committed gap analysis shows it was a gap (P-127) — and the
+    # branch's own committed files are generated files too, so they carry only vouched ids
+    vouched = history_gap_ids(ROOT) | base_ids
+    sources = {
+        gid: f"the gap analysis committed at {sha}"
+        for gid, sha in branch_gap_analysis_ids(ROOT, args.base).items()
+        if gid in vouched
+    }
+    sources.update(dict.fromkeys(base_ids, f"the gap analysis at the merge-base with {args.base}"))
+    carried = retired_ids(previous, defined, set(sources))
+    lost = lost_ids(carried, previous, sources)
     retired = [gid for gid in carried if gid in vouched]
     unvouched = validate_retired([g for g in carried if g not in vouched], args.base, ROOT)
     errors.extend(
@@ -1616,9 +1726,19 @@ def main(argv: list[str] | None = None) -> int:
     errors.extend(validate_plan(items, defined | set(retired)))
     if args.check:
         errors.extend(unvouched)
+        if previous:  # no file at all is refused once, as out of date, below
+            errors.extend(validate_not_lost(lost))
     else:
         for note in unvouched:
             print(f"dropped from the retired list: {note}")
+        if previous:
+            for gid, source in lost.items():
+                print(f"restored {gid} to the retired list ({source} carries it)")
+        elif lost:  # a first run: nothing was lost, so one line, not one per id
+            print(
+                f"no previous docs/dod/GAP-ANALYSIS.md: {len(lost)} id(s) the committed gap "
+                "analyses carry start the retired list"
+            )
     roll_up(arts)
     if PLAN.is_file():
         ranked_gaps = [c.gap for _s, _f, _a, c in _rank(arts)]
