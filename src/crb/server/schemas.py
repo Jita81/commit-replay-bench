@@ -724,6 +724,11 @@ class RunCreateRequest(BaseModel):
     #: a sealed checkout of each commit's parent, it must be RED there, the builder builds
     #: against it and the grade is the commit's held-out tests. Stored as ``params.arm``.
     arm: Literal["S1"] | None = None
+    #: ``replay`` and ``blind`` runs only: the class-set version every row is stamped under
+    #: (``labels.taxonomy``, ADR-0026 item 9) — an organisation's ``<org>/classes@vN`` that
+    #: covers the repository and routes (signed by two people, its validity report passing);
+    #: refused 409 otherwise. Absent = the global vocabulary. Stored as ``params.taxonomy``.
+    taxonomy: str | None = Field(default=None, max_length=96)
     #: ``factory`` runs only: the frozen backlog this run is meant to work. When set it
     #: must equal the repo's ACTIVE backlog hash or the request is refused (409
     #: ``backlog_hash_mismatch``); the active hash is always stamped into

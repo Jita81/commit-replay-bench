@@ -4,7 +4,8 @@
  *
  * Navigation
  * ----------
- * What it is:   `useLibrary`, `useWorkTypePage` and `useLibraryAct` over `/library`
+ * What it is:   `useLibrary`, `useWorkTypePage` and `useLibraryAct` over `/library`, and
+ *               `useRegisterForward` over `POST /readings/forward` (a ceiling's forward reading)
  *               (docs/API.md#library), with the query keys they share, so the page and the
  *               Decisions inbox read one cache.
  * What it does: Fetches the index and a work type's page; posts an act and refreshes both reads
@@ -23,7 +24,7 @@
  */
 import { useMutation, useQuery, useQueryClient, type UseMutationResult, type UseQueryResult } from '@tanstack/react-query'
 import { api, type ApiError } from '../../api/client'
-import type { LibraryEntry, LibraryIndex, LibraryMineRun, LibraryProposeRequest, WorkTypePage } from '../../api/types'
+import type { ForwardReadingRequest, LibraryEntry, LibraryIndex, LibraryMineRun, LibraryProposeRequest, WorkTypePage } from '../../api/types'
 
 const enc = encodeURIComponent
 
@@ -75,6 +76,20 @@ export function useLibraryMine(repo: string): UseMutationResult<LibraryMineRun, 
     mutationFn: ({ commit }) => api<LibraryMineRun>(`/library/${enc(repo)}/mine`, { method: 'POST', body: { commit: commit.trim() } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['library', repo] })
+    },
+  })
+}
+
+/** `POST /readings/forward` (operator) — register the forward reading of a ceiling before its
+ *  first calibration build (ADR-0026 items 4 and 8); refreshes the work type's page so the
+ *  ceiling row shows the reading's state. A refusal (`not_a_ceiling`, `budget_spent`, a cell
+ *  key the reading cannot name) comes back as the API's error. */
+export function useRegisterForward(repo: string): UseMutationResult<{ reading_id: string }, ApiError, ForwardReadingRequest> {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body) => api<{ reading_id: string }>('/readings/forward', { method: 'POST', body }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['library', repo] })
     },
   })
 }
