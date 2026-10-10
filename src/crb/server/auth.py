@@ -310,9 +310,11 @@ def lock_users_table(db: Session) -> None:
     :class:`~crb.store.events.LockOrderError` at once, on every dialect (P-227).
 
     pysqlite defers BEGIN until the first write, so a caller's earlier reads open no
-    transaction; the routes that write an account or its link take it before they read
-    (P-785, a ratchet in ``tests/test_store_db.py``), and ``set_user_active`` refreshes the
-    row once it holds it. Fails closed (P-430, P-429's class): when a transaction
+    transaction; the routes that write an account or its link take it before they read, or
+    read only the account before it and read it again under it before they write (P-785, a
+    ratchet in ``tests/test_store_db.py``: the self-service password change verifies first,
+    so a guess never holds the lock), and ``set_user_active`` refreshes the row once it
+    holds it. Fails closed (P-430, P-429's class): when a transaction
     is already open, ``BEGIN IMMEDIATE`` cannot run and its error is not a documented proof
     that this session holds the write lock (a deferred ``BEGIN`` holds none; SQLite does
     take the lock before it raises, by the order of its ``OP_Transaction`` and
@@ -704,13 +706,12 @@ def session_signature_valid(settings: Settings, session_token: str) -> bool:
 # --- dependencies ----------------------------------------------------------------
 
 
-def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principal:
-    """The logged-in principal, or 401 (``unauthenticated`` / ``session_expired``)."""
-    token = session_token_of(request, settings)
-    if not token:
-        raise ApiError(401, "unauthenticated", "login required")
-    uid, cv = read_session_claims(settings, token)
-    user = db.get(User, uid)
+def refuse_an_ended_session(user: User | None, cv: str) -> User:
+    """``user`` when a session bound to credential version ``cv`` still holds on it, else
+    401: ``unauthenticated`` for an account that is unknown or disabled, ``session_revoked``
+    when its password changed or its nonce was rotated after the session was issued.
+    :func:`current_user` asks when a request starts; a route that does slow work before it
+    takes the users lock asks again under it, so an admin's act in between holds (P-785)."""
     if user is None or not user.active:
         raise ApiError(401, "unauthenticated", "account unknown or disabled")
     if not hmac.compare_digest(cv.encode(), credential_version(user).encode()):
@@ -718,6 +719,16 @@ def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principa
         # after this session was issued, or the token predates version stamping: the
         # session is over, whoever holds the cookie.
         raise ApiError(401, "session_revoked", "session no longer valid; log in again")
+    return user
+
+
+def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principal:
+    """The logged-in principal, or 401 (``unauthenticated`` / ``session_expired``)."""
+    token = session_token_of(request, settings)
+    if not token:
+        raise ApiError(401, "unauthenticated", "login required")
+    uid, cv = read_session_claims(settings, token)
+    user = refuse_an_ended_session(db.get(User, uid), cv)
     request.state.user_id = user.id
     return Principal.model_validate(user)
 

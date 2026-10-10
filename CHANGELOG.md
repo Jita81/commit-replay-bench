@@ -13,17 +13,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **An account or its link is written only under the users lock** (P-785;
-  [#85](https://github.com/Jita81/commit-replay-bench/pull/85)). Withdrawing an invitation and an
-  admin's password set took no lock, the admin's activation read the account before it took one,
-  and the self-service password change took none, while the link's acceptance holds it. A
-  withdrawal that read "pending" while the link was being accepted returned 200 and stamped it
-  revoked as well as accepted; on PostgreSQL a password set at that moment was replaced by the
-  person's own, and the withdrawn link was stamped accepted; a self-service change that had
-  verified the old password stored its own over an admin's reset. All four routes now take the
-  lock before they read, and the admin routes read the account from the database, never from the
-  session's copy. A ratchet fails any route that writes an account's password or active flag, or
-  withdraws or spends a link, and calls through its session before it takes the lock; it sees
-  keyword and named sessions, async routes and helpers, and names the routes it found.
+  [#85](https://github.com/Jita81/commit-replay-bench/pull/85)). Four routes read the link or
+  the account without the lock the link's acceptance holds: a withdrawal racing an acceptance
+  stamped the link revoked as well as accepted, an admin's password set was replaced by the
+  person's own, and a self-service change stored its password over an admin's reset. The routes
+  now take the lock before they read; the self-service change verifies first, so a guess never
+  holds it, then reads the account again under it and refuses a session an admin ended. A
+  ratchet fails any route that writes an account or spends a link and reads before the lock.
 
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's

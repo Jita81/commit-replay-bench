@@ -1360,49 +1360,69 @@ def _change_own(dana: Any) -> Any:
     )
 
 
-def test_an_admin_reset_while_the_person_changes_their_own_password_waits_its_turn(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+#: an admin's act on ``dana`` — method, path under the account, body — with the password the
+#: account keeps after it and the code the racing change is refused with
+ADMIN_ACTS: dict[str, tuple[str, str, dict[str, Any] | None, str, str]] = {
+    "reset": ("put", "/password", {"password": ADMIN_PW}, ADMIN_PW, "session_revoked"),
+    "sign_out_everywhere": ("post", "/sessions/revoke", None, CHOSEN_PW, "session_revoked"),
+    "disable": ("put", "/active", {"active": False}, CHOSEN_PW, "unauthenticated"),
+}
+
+
+@pytest.mark.parametrize("act", sorted(ADMIN_ACTS))
+def test_an_admin_act_while_the_person_changes_their_own_password_holds(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, act: str
 ) -> None:
     """Found widening #85's ratchet to every route that writes an account, 2026-10-10: the
     self-service password change took no ``users`` lock. A change that had verified the
     current password went on to store its own while an admin's reset committed in between:
-    the reset was lost, and the account opened with the person's password, not the
-    admin's. The change is held after its verify; the admin's reset is let go at that
-    moment. It now waits for the lock: the change completes, then the admin's password is
-    set over it."""
+    the reset was lost, and the account opened with the person's password, not the admin's.
+    A sign-out everywhere or a disable in that gap was lost the same way, and the change set
+    a fresh cookie for the session the admin had ended. The change verifies before the lock
+    (argon2 is slow) and is held there while the admin acts; under the lock it reads the
+    account again, finds its session ended, and writes nothing."""
     import threading
 
     from fastapi.testclient import TestClient
 
     import crb.server.routes.admin as admin_routes
+    from crb.server.auth import verify_password
+    from crb.store.models import User
     from fixtures.concurrency import at_once
     from fixtures.server_seed import API_PREFIX
 
+    method, path, body, kept, refused_with = ADMIN_ACTS[act]
     app = _app(backend, tmp_path, monkeypatch)
-    verified, reset = threading.Event(), threading.Event()
+    verified, acted = threading.Event(), threading.Event()
     real_verify = admin_routes.verify_password
 
     def verify_then_wait(stored: str, password: str) -> bool:
         ok = real_verify(stored, password)
         verified.set()
-        # while the change holds the lock the reset cannot finish, and this wait times out
-        reset.wait(timeout=2)
+        # a change that verified under the lock would keep the admin waiting: this times out
+        acted.wait(timeout=5)
         return ok
 
     with TestClient(app) as admin:
         uid, dana = _dana_signed_in(app, admin)
         monkeypatch.setattr(admin_routes, "verify_password", verify_then_wait)
 
-        def admin_resets() -> Any:
+        def admin_acts() -> Any:
             assert verified.wait(timeout=5), "the change never verified the password"
-            r = admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": ADMIN_PW})
-            reset.set()
+            url = f"{API_PREFIX}/users/{uid}{path}"
+            r = admin.request(method.upper(), url, json=body)
+            acted.set()
             return r
 
-        changed, set_by_admin = at_once(lambda: _change_own(dana), admin_resets)
-    codes = [getattr(r, "status_code", r) for r in (changed, set_by_admin)]
-    assert codes == [200, 200], codes
-    assert (_sign_in(app, ADMIN_PW), _sign_in(app, SELF_PW)) == (200, 401)
+        changed, by_admin = at_once(lambda: _change_own(dana), admin_acts)
+    codes = [getattr(r, "status_code", r) for r in (changed, by_admin)]
+    assert codes == [401, 200], codes
+    assert changed.json()["error"]["code"] == refused_with
+    with backend.factory() as s:
+        row = s.get(User, uid)
+        assert row is not None and row.password_hash is not None
+        assert (verify_password(row.password_hash, kept), row.active) == (True, act != "disable")
+        assert not verify_password(row.password_hash, SELF_PW)
 
 
 def test_an_admin_route_reads_the_account_from_the_database_not_the_session(
@@ -1456,7 +1476,15 @@ def _users_lock_audit(source: str) -> dict[str, str | None]:
     a module that names ``Invitation`` (an assignment, plain, annotated, augmented or to a
     tuple; ``setattr``; ``.values(...)``), or calls a function of the module that does
     either, at any depth. A call goes through a session when it is a method of one or takes
-    one as an argument, positional or keyword."""
+    one as an argument, positional or keyword.
+
+    A route passes when its first call through the session is ``lock_users_table``, or when
+    everything it reads before the lock is the account (``_get_user``) and its first call
+    through the session after the lock reads the account again, before anything writes:
+    ``_get_user`` refreshes the very object it returned before (``populate_existing``), so
+    nothing the route writes is the earlier reading's. What the route decided from that
+    reading is its own test's to prove (the self-service change verifies the password before
+    the lock, then refuses a session an admin ended in between)."""
     import ast
 
     tree = ast.parse(source)
@@ -1528,22 +1556,28 @@ def _users_lock_audit(source: str) -> dict[str, str | None]:
         ):
             continue
         names = sessions(fn)
-        first = min(
-            (c for c in calls[fn] if through(c, names)),
-            key=lambda c: (c.lineno, c.col_offset),
-            default=None,
-        )
-        if first is None:
+        ordered = sorted(calls[fn], key=lambda c: (c.lineno, c.col_offset))
+        via = [c for c in ordered if through(c, names)]
+        if not via:
             audit[fn.name] = f"{fn.name}:-"
-        else:
-            audit[fn.name] = (
-                None if called(first) == "lock_users_table" else (f"{fn.name}:{first.lineno}")
-            )
+            continue
+        locks = [i for i, c in enumerate(via) if called(c) == "lock_users_table"]
+        before = via[: locks[0]] if locks else via
+        after = via[locks[0] + 1 :] if locks else []
+        first_write = next((c for c in ordered if called(c) in writers), None)
+        reread = bool(
+            before
+            and after
+            and all(called(c) == "_get_user" for c in before)
+            and called(after[0]) == "_get_user"
+            and (first_write is None or ordered.index(after[0]) < ordered.index(first_write))
+        )
+        audit[fn.name] = None if not before or reread else f"{fn.name}:{via[0].lineno}"
     return audit
 
 
 def _reads_before_the_users_lock(source: str) -> list[str]:
-    """The routes of :func:`_users_lock_audit` that do not take the lock first."""
+    """The routes of :func:`_users_lock_audit` that read before the lock and act on it."""
     return sorted(bad for bad in _users_lock_audit(source).values() if bad)
 
 
@@ -1554,7 +1588,9 @@ def test_a_route_that_writes_an_account_or_a_link_takes_the_users_lock_before_it
     reads the link or the account before it takes that lock acts on a reading the lock's
     holder is about to make false. #81's two findings and #85's were that shape. Every such
     route in the routes package takes ``lock_users_table`` before its first call through
-    its session — and the ratchet finds exactly the routes it found when it was written."""
+    its session, or reads only the account before it and reads the account again under it
+    before it writes — and the ratchet finds exactly the routes it found when it was
+    written."""
     import crb.server.routes as routes_pkg
 
     root = Path(routes_pkg.__file__).parent
@@ -1664,6 +1700,42 @@ def revoke_all(db):
 def set_pw(user, db):
     set_password(user, "x")
 """,
+        # the account read before the lock and never again under it
+        "no_reread": """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    lock_users_table(db)
+    set_password(user, body.new_password)
+""",
+        # read again, but only after the write
+        "reread_after_the_write": """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    lock_users_table(db)
+    set_password(user, body.new_password)
+    _get_user(db, me.id)
+""",
+        # something other than the account read before the lock
+        "link_read_then_reread": """
+@router.put("/users/{user_id}/password")
+def set_pw(user_id, db):
+    inv = db.get(Invitation, user_id)
+    lock_users_table(db)
+    user = _get_user(db, user_id)
+    supersede_invitations(db, user, actor="a", how="b")
+""",
+        # another call through the session comes between the lock and the re-read
+        "reread_not_first": """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    lock_users_table(db)
+    db.flush()
+    _get_user(db, me.id)
+    set_password(user, body.new_password)
+""",
     }
     refused = {
         "read_first": ["revoke:4"],
@@ -1679,6 +1751,10 @@ def set_pw(user, db):
         "setattr_stamp": ["revoke:4"],
         "values_stamp": ["revoke_all:4"],
         "never_locks": ["set_pw:-"],
+        "no_reread": ["change:4"],
+        "reread_after_the_write": ["change:4"],
+        "link_read_then_reread": ["set_pw:4"],
+        "reread_not_first": ["change:4"],
     }
     assert {k: _reads_before_the_users_lock(src) for k, src in probes.items()} == refused
     locked_first = """
@@ -1707,7 +1783,18 @@ def decide(decision_id, db):
     row = db.get(Decision, decision_id)
     row.accepted = "now"
 """
+    # the self-service change's shape: verify before the lock, read the account again under it
+    reread_under_the_lock = """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    verify_password(user.password_hash, body.current_password)
+    lock_users_table(db)
+    user = refuse_an_ended_session(_get_user(db, me.id), "cv")
+    set_password(user, body.new_password)
+"""
     assert _users_lock_audit(locked_first) == {"set_pw": None}
+    assert _users_lock_audit(reread_under_the_lock) == {"change": None}
     assert _users_lock_audit(locked_by_keyword) == {"change": None}
     assert _users_lock_audit(no_link) == {}
     assert _users_lock_audit(not_an_invitation) == {}

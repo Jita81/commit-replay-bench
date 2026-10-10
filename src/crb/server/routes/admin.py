@@ -115,7 +115,10 @@ from crb.server.auth import (
     is_local_account,
     lock_users_table,
     rate_limited_error,
+    read_session_claims,
+    refuse_an_ended_session,
     rotate_session_nonce,
+    session_token_of,
     set_account_active,
     set_csrf_cookie,
     set_password,
@@ -507,10 +510,6 @@ def change_own_password(  # noqa: PLR0917 — FastAPI injects each dependency by
     per-(username, ip) limiter, so a borrowed session cannot guess it online), the new one
     is hashed and stored, and a fresh session cookie is set on this response so the
     browser that made the change stays signed in while every other session ends."""
-    # Under the lock an admin's reset of this password holds: a change that had verified the
-    # old password went on to replace the admin's with its own (found widening #85's
-    # ratchet, 2026-10-10; docs/PREVENTION.md P-785).
-    lock_users_table(db)
     user = _get_user(db, me.id)
     if not is_local_account(user):
         raise ApiError(
@@ -527,9 +526,18 @@ def change_own_password(  # noqa: PLR0917 — FastAPI injects each dependency by
         slot = limiter.acquire(username, ip)
     except LoginRateLimited as exc:
         raise rate_limited_error(exc, "too many failed attempts; try again later") from None
+    # verified before the lock, as the login verifies: argon2 is slow, and under the lock
+    # every guess would hold the users lock (on SQLite, the database's write lock)
     if not verify_password(user.password_hash, body.current_password):
         raise ApiError(401, "invalid_credentials", "current password is incorrect")
     limiter.succeed(slot)
+    # Under the lock an admin's act on this account holds: a change that had verified the
+    # old password went on to replace an admin's reset with its own (found widening #85's
+    # ratchet, 2026-10-10; docs/PREVENTION.md P-785). The row is read again, and a session
+    # that a reset, a sign-out everywhere or a disable ended in between writes nothing.
+    lock_users_table(db)
+    _, cv = read_session_claims(settings, session_token_of(request, settings))
+    user = refuse_an_ended_session(_get_user(db, me.id), cv)
     set_password(user, body.new_password)
     record_user_event(db, action="user.password_set", actor=me.id, target=user, by="self")
     db.commit()
