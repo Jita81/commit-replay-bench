@@ -742,9 +742,8 @@ def _stored(
     event (EI-8). A file cannot join the transaction, so a crash, or a commit that fails
     after the write, can still leave the change unrecorded; a lost ``seq`` race writes the
     same value again, which is safe."""
-    out: dict[str, Any] = {}
 
-    def write() -> None:
+    def write() -> Any:
         try:
             fp = secrets.fingerprint_of(secret, token)
         except ValueError as exc:
@@ -754,14 +753,13 @@ def _stored(
         )
         db.flush()
         try:
-            out["status"] = secrets.set(secret, token, set_by=set_by)
+            return secrets.set(secret, token, set_by=set_by)
         except ValueError as exc:
             raise ApiError(422, "invalid_token", str(exc)) from None
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
 
-    commit_audited(db, write)
-    return _status_out(out["status"])
+    return _status_out(commit_audited(db, write))
 
 
 def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatusOut:
@@ -772,25 +770,24 @@ def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatus
     :func:`_stored` stores (P-440, P-443). A lost ``seq`` race runs ``write`` again and the
     removal is safe to repeat, but a run after the file went finds nothing, so whether the
     secret existed is read on the first run only."""
-    out: dict[str, Any] = {}
+    first_run: dict[str, bool] = {}  # kept across runs on purpose; the status is returned
 
-    def write() -> None:
+    def write() -> Any:
         try:
-            if "existed" not in out:
-                out["existed"] = bool(secrets.status(secret).present)
+            if "existed" not in first_run:
+                first_run["existed"] = bool(secrets.status(secret).present)
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
         _record_secret_change(
-            db, removed=True, actor=actor, secret=secret, existed=out["existed"], via="api"
+            db, removed=True, actor=actor, secret=secret, existed=first_run["existed"], via="api"
         )
         db.flush()
         try:
-            out["status"] = secrets.delete(secret)
+            return secrets.delete(secret)
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
 
-    commit_audited(db, write)
-    return _status_out(out["status"])
+    return _status_out(commit_audited(db, write))
 
 
 def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> None:

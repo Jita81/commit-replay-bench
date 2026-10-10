@@ -487,11 +487,9 @@ def _complete_oidc(
     issuer = str(claims.get("iss") or settings.oidc.issuer)
     role = map_role(claims, settings.oidc)
     source = settings.oidc.role_from_claims
-    signed_in: list[User] = []
 
-    def _signed_in() -> None:
+    def _signed_in() -> User:
         # Re-run whole on a retry: the rollback undid the upsert as well as the events.
-        signed_in.clear()
         before = _stored_role(db, issuer, claims)
         user = upsert_oidc_user(
             db,
@@ -535,7 +533,7 @@ def _complete_oidc(
         user.last_login = _now()
         record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
         record_sign_in(db, user=user, by="oidc")
-        signed_in.append(user)
+        return user
 
     def _users_first() -> None:
         # the role read, the last-admin count and the write are one serialised step, under
@@ -543,7 +541,8 @@ def _complete_oidc(
         lock_users_table(db)
 
     try:
-        commit_audited(db, _signed_in, before=_users_first if source == "always" else None)
+        # returned, not collected: the account is the committed attempt's (P-785)
+        return commit_audited(db, _signed_in, before=_users_first if source == "always" else None)
     except _AccountDisabled as off:
         db.rollback()
         account = db.get(User, off.user_id)
@@ -565,7 +564,6 @@ def _complete_oidc(
         db.rollback()
         log.warning("oidc sign-in could not be written: %s", type(exc).__name__)
         raise ApiError(503, "oidc_failed", "the sign-in could not be recorded") from exc
-    return signed_in[0]
 
 
 class _AccountDisabled(Exception):
