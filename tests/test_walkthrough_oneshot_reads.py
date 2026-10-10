@@ -17,11 +17,16 @@ Navigation
 What it is:   The ratchet over one-shot DOM reads in ui/e2e/walkthrough: every line that
               awaits or returns one is listed in ``SETTLED`` with a reason, and every entry
               there is still a line in the walkthrough.
-What it does: Scans the walkthrough's ``.ts`` files line by line for a read (``READ``), leaving
-              out comments and lines that retry it (``expect.poll(``, ``.toPass(``); fails on a
+What it does: Scans the walkthrough's ``.ts`` files statement by statement for a read
+              (``READ``): a line that continues the one above (it starts with ``.``, or the
+              line above ends with ``(``, ``,``, ``=`` and the like) joins it, so a read split
+              across lines is seen; comments are left out; a retried span (``expect.poll(``
+              to its closing bracket, the ``expect(`` a ``.toPass(`` is chained onto) is cut
+              out before the match, so a one-shot read beside a retry is still seen. Fails on a
               read that ``SETTLED`` does not hold, printing an entry ready to paste once the
               read is judged settled, and on an entry no line matches any more. Negative
-              controls prove the scan sees a racy read and passes over a retried one.
+              controls prove the scan sees a racy, a split and a mixed read and passes over
+              a retried one.
 How:          A multiset (``Counter``) of (file, line with its whitespace collapsed) on each
               side, so two identical reads in one file need two entries. It reads direct calls
               only: a helper that reads (``focusedIs``, ``widestOverflow``) is judged once, at
@@ -54,9 +59,13 @@ READ = re.compile(
     r"|count|isVisible|isHidden|isChecked|isEnabled|isDisabled|isEditable|inputValue"
     r"|allTextContents|allInnerTexts|boundingBox|all|evaluate|evaluateAll)\("
 )
-#: A line holding one of these retries the read on it.
-#: ``.poll(`` also catches an ``expect`` chained onto the next line.
+#: Each retries the read inside it: ``expect.poll(...)`` and ``expect(...).toPass(``.
 RETRIES = (".poll(", ".toPass(")
+#: A line continues the statement above when it starts with one of these ...
+CONTINUES_FROM = (".", ")", "?", ":")
+#: ... or when the line above ends with one of these.
+CONTINUES_AFTER = ("(", ",", "=", "=>", "&&", "||", "?", ":", "[")
+COMMENT = ("//", "*", "/*")
 
 # Why a read cannot see an earlier render. Each entry in SETTLED names one.
 #: A web-first wait just above proved this content drawn, and nothing redraws it after.
@@ -430,13 +439,83 @@ SETTLED: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def _reads_in(text: str) -> list[tuple[int, str]]:
-    found: list[tuple[int, str]] = []
+def _statements(text: str) -> list[tuple[int, str]]:
+    """Each statement with the number of its first line, whitespace collapsed.
+
+    A line that continues the one above (``CONTINUES_FROM``, ``CONTINUES_AFTER``) joins it;
+    a comment never joins or is joined.
+    """
+    out: list[tuple[int, str]] = []
     for number, line in enumerate(text.splitlines(), 1):
         code = " ".join(line.split())
-        if code.startswith(("//", "*", "/*")) or any(r in code for r in RETRIES):
-            continue  # a comment names a read; a retried read is not one-shot
-        if READ.search(code):
+        if not code:
+            continue
+        if (
+            out
+            and not out[-1][1].startswith(COMMENT)
+            and not code.startswith(COMMENT)
+            and (code.startswith(CONTINUES_FROM) or out[-1][1].endswith(CONTINUES_AFTER))
+        ):
+            first, above = out[-1]
+            out[-1] = (first, f"{above} {code}")
+        else:
+            out.append((number, code))
+    return out
+
+
+def _bracket_end(code: str, start: int) -> int | None:
+    """The index of the ``)`` closing the ``(`` at ``start``, skipping string literals."""
+    depth, quote, i = 0, "", start
+    while i < len(code):
+        char = code[i]
+        if quote:
+            if char == "\\":
+                i += 1
+            elif char == quote:
+                quote = ""
+        elif char in "'\"`":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def _without_retries(code: str) -> str | None:
+    """``code`` with each retried span cut out: ``.poll(`` to its closing bracket, and the
+    ``expect(`` call a ``.toPass(`` is chained onto, with the ``.toPass(...)`` itself.
+
+    None when a bracket does not balance: the statement then reads as retried whole, never
+    as a one-shot read, which is the rule the scan held before it cut spans.
+    """
+    while True:
+        poll, to_pass = code.find(".poll("), code.find(".toPass(")
+        if poll < 0 and to_pass < 0:
+            return code
+        if to_pass < 0 or 0 <= poll < to_pass:
+            end = _bracket_end(code, poll + len(".poll"))
+            if end is None:
+                return None
+            code = code[:poll] + code[end + 1 :]
+            continue
+        start = code.rfind("expect(", 0, to_pass)
+        end = _bracket_end(code, to_pass + len(".toPass"))
+        if start < 0 or end is None or _bracket_end(code, start + len("expect")) != to_pass - 1:
+            return None
+        code = code[:start] + code[end + 1 :]
+
+
+def _reads_in(text: str) -> list[tuple[int, str]]:
+    found: list[tuple[int, str]] = []
+    for number, code in _statements(text):
+        if code.startswith(COMMENT):
+            continue  # a comment names a read
+        one_shot = _without_retries(code)  # a retried read is not one-shot
+        if one_shot is not None and READ.search(one_shot):
             found.append((number, code))
     return found
 
@@ -496,5 +575,21 @@ def test_the_scan_sees_a_racy_read_and_passes_over_a_retried_one() -> None:
         "  .poll(async () => (await pill.getAttribute('aria-label')) ?? '', { timeout: 5_000 })\n"
         "await expect(async () => expect(await tile.textContent()).toBe('3')).toPass()\n"
         "const [a, b] = await Promise.all([one(), two()])\n"
+        "await expect.poll(() => page.getByText(')').count()).toBe(1)\n"
     )
     assert _reads_in(settled) == []
+    # a read split across lines, and a one-shot read on the same line as a retried one, are
+    # both found; the split read is reported at its first line
+    split = (
+        "const label = await page\n"
+        "  .getByTestId('run-status')\n"
+        "  .getAttribute('aria-label')\n"
+        "expect(await tile.textContent()).toBe('3'); await expect.poll(() => rows.count()).toBe(1)\n"
+        "await expect(\n"
+        "  rows,\n"
+        ").toHaveCount(await page.getByRole('row').count())\n"
+    )
+    assert [n for n, _ in _reads_in(split)] == [1, 4, 5]
+    assert _reads_in(split)[0][1] == (
+        "const label = await page .getByTestId('run-status') .getAttribute('aria-label')"
+    )
