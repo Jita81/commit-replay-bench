@@ -112,12 +112,14 @@ for (const t of targets()) {
       await expectLogAction(page, 'repo.clone.start')
       await expectLogAction(page, 'repo.clone.done')
       // The environment phase runs only when the runner says the host is not ready
-      // (a pinned interpreter is ready; a fresh public clone is not).
+      // (a pinned interpreter is ready; a fresh public clone is not). It runs before the probe,
+      // so ask whether it ran only once the probe's rows are on the log: the log streams, and an
+      // earlier read can miss a setup.auto row still on its way (P-782)
+      await expectLogAction(page, 'probe.start')
+      await expectLogAction(page, 'probe.done')
       if ((await log.getByText('setup.auto', { exact: true }).count()) > 0) {
         await expectLogAction(page, 'setup.done')
       }
-      await expectLogAction(page, 'probe.start')
-      await expectLogAction(page, 'probe.done')
       // the clone URL on the log never carries credentials, and the done row reports a head sha
       const cloneDone = log.locator('div', { hasText: 'repo.clone.done' }).last()
       await expect(cloneDone).toContainText('head=')

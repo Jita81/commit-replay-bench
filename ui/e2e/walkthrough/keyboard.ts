@@ -1,7 +1,8 @@
 /**
  * The keyboard and settling helpers the walkthrough's screen specs share: `settle` (a page is
  * painted), `bubbleOf` (the hint bubble a trigger names), `tabTo` (reach a control by Tab
- * alone), `escapeUntil`, `focusedIs` and `chooseByKeyboard`.
+ * alone), `escapeUntil`, `focusedIs`, `chooseByKeyboard`, and `countPointer` with
+ * `pointerEvents` (the guard that the pointer never reached the page).
  *
  * 11-screens sweeps every route for every persona on a stack of its own (its CI jobs are
  * sharded by persona); 11b-keyboard operates the five controls a keyboard person has to use,
@@ -16,7 +17,8 @@
  *               its `aria-describedby`; presses Tab (or Shift+Tab) until focus reaches a
  *               selector, failing with the path focus took; presses Escape once per open
  *               layer; answers whether focus is on or inside an element; chooses a select's
- *               first real option by type-ahead.
+ *               first real option by type-ahead; records every pointer event that reaches a
+ *               page, in every document it loads, so a keyboard spec can require none (P-781).
  * How:          `page.keyboard` only — never `focus()` or a click — so a control is proven
  *               reachable, not only operable once something else focused it.
  * Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -24,8 +26,8 @@
  * Works with:   ui/e2e/walkthrough/11-screens.spec.ts and ui/e2e/walkthrough/11b-keyboard.spec.ts
  *               (the callers), ui/src/components/Hint.tsx (the bubbles `bubbleOf` finds),
  *               ui/src/components/Layout.tsx (the skip link `tabTo` starts from)
- * Tested by:    ui/e2e/walkthrough/11b-keyboard.spec.ts (its negative control proves `tabTo`
- *               fails on a control that cannot take focus)
+ * Tested by:    ui/e2e/walkthrough/11b-keyboard.spec.ts (its negative controls prove `tabTo`
+ *               fails on a control that cannot take focus, and the pointer guard sees a pointer)
  * Touch when:   never for a new repository; a screen spec needs another way to drive the page
  *               by keyboard (add it here, with a negative control in 11b).
  */
@@ -64,7 +66,12 @@ export async function bubbleOf(page: Page, el: Locator): Promise<Locator> {
  */
 export async function tabTo(page: Page, selector: string, where: string, opts: { fromTop?: boolean; backwards?: boolean; maxTabs?: number } = {}): Promise<number> {
   const { fromTop = true, backwards = false, maxTabs = 120 } = opts
+  // Tab only once the page has drawn what it is aiming for: a Tab pressed while the page is
+  // still rendering lands on whatever has painted so far, and the read after it then reads an
+  // earlier render (P-782). A control that is in the page but cannot take focus still fails.
+  await expect(page.locator(selector).first(), `${where}: ${selector} is not on the page to Tab to`).toBeAttached()
   if (fromTop) {
+    await expect(page.getByRole('link', { name: 'Skip to content' }), `${where}: the page has no skip link to start from`).toBeAttached()
     await page.keyboard.press('Tab')
     expect(await page.evaluate(() => document.activeElement?.textContent?.trim()), `${where}: the first Tab after the page loaded did not land on the skip link`).toBe('Skip to content')
     await page.keyboard.press('Enter')
@@ -88,10 +95,46 @@ export async function tabTo(page: Page, selector: string, where: string, opts: {
  * Press Escape until `done` holds, at most `max` times. One Escape closes the innermost open
  * thing: a hint bubble the focus opened is closed first (Hint spends that press), then the
  * disclosure, menu or dialog behind it — so a keyboard person needs one press per layer, and
- * never more than two here.
+ * never more than two here. That count holds only while no pointer is on the page: a hint
+ * under a resting pointer can open between two presses and spend the second (P-781), which is
+ * why 11b signs in by keyboard and `countPointer` fails a step the pointer reached.
  */
 export async function escapeUntil(page: Page, done: () => Promise<boolean>, max = 2): Promise<void> {
   for (let i = 0; i < max && !(await done()); i += 1) await page.keyboard.press('Escape')
+}
+
+/** The pointer events `countPointer` has recorded on each page it armed, oldest first. */
+const pointerSeen = new WeakMap<Page, string[]>()
+
+/**
+ * Arm `page` to record every pointer event that reaches it — in every document it loads, so
+ * one that arrives before a navigation still counts — for `pointerEvents` to report. A
+ * keyboard spec requires none: a pointer resting on the page is sent mouseover events as Tab
+ * scrolls the page under it (a click-based sign-in left one at 640, 466 on PR #58's CI), the
+ * hint it rests on opens, and that bubble spends an Escape the step meant for its control.
+ * Call it before the first navigation.
+ */
+export async function countPointer(page: Page): Promise<void> {
+  const seen: string[] = []
+  pointerSeen.set(page, seen)
+  await page.exposeFunction('__crbPointerSeen', (type: string) => {
+    seen.push(type)
+  })
+  await page.addInitScript(() => {
+    const w = window as unknown as { __crbPointerSeen?: (type: string) => Promise<void> }
+    for (const type of ['pointerover', 'pointermove', 'pointerdown', 'mouseover', 'mousemove', 'mousedown']) {
+      window.addEventListener(type, () => void w.__crbPointerSeen?.(type), { capture: true, passive: true })
+    }
+  })
+}
+
+/**
+ * The pointer events recorded on `page` since `countPointer` armed it, oldest first. A
+ * round trip to the page first, so a report still in flight from it has arrived.
+ */
+export async function pointerEvents(page: Page): Promise<readonly string[]> {
+  await page.evaluate(() => 0).catch(() => undefined)
+  return [...(pointerSeen.get(page) ?? [])]
 }
 
 /** Whether focus is on `locator`'s element or inside it (a dialog, a menu, a confirmation). */
@@ -106,12 +149,16 @@ export async function focusedIs(locator: Locator): Promise<boolean> {
  * and assert the value changed, so a select a keyboard person cannot operate fails.
  */
 export async function chooseByKeyboard(page: Page, where: string): Promise<void> {
-  const { before, prefix } = await page.evaluate(() => {
-    const sel = document.activeElement as HTMLSelectElement | null
-    const first = sel ? Array.from(sel.options).find((o) => o.value !== '') : undefined
-    return { before: sel?.value ?? '', prefix: (first?.textContent ?? '').trim().split(/\s/)[0] ?? '' }
-  })
-  expect(prefix, `${where}: the focused control is not a select with an option to choose`).not.toBe('')
+  const read = () =>
+    page.evaluate(() => {
+      const sel = document.activeElement as HTMLSelectElement | null
+      const first = sel instanceof HTMLSelectElement ? Array.from(sel.options).find((o) => o.value !== '') : undefined
+      return { before: sel instanceof HTMLSelectElement ? sel.value : '', prefix: (first?.textContent ?? '').trim().split(/\s/)[0] ?? '' }
+    })
+  // a select's options can arrive after the select does (they come from a query): wait for a
+  // real one rather than reading the first render's empty list (P-782)
+  await expect.poll(async () => (await read()).prefix, { message: `${where}: the focused control is not a select with an option to choose` }).not.toBe('')
+  const { before, prefix } = await read()
   await page.keyboard.type(prefix)
   await expect.poll(() => page.evaluate(() => (document.activeElement as HTMLSelectElement | null)?.value ?? ''), { message: `${where}: typing "${prefix}" did not choose an option` }).not.toBe(before)
 }

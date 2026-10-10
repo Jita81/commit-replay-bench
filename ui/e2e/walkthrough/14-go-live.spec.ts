@@ -115,7 +115,11 @@ test.describe('14 go live', () => {
   test('the Deployment page reads one row of each group against the deployment’s own probes, and every row names its source', async ({ page }) => {
     await page.goto('/posture')
     await expect(page.getByText('Run the platform · Deploy and go live · 3 of 4 · Deployment')).toBeVisible()
-    const footer = (await page.getByRole('contentinfo').textContent()) ?? ''
+    // the footer's versions come from GET /version, after the page: read them once they are
+    // there, not the footer's first render (P-782)
+    const contentinfo = page.getByRole('contentinfo')
+    await expect(contentinfo).toContainText(/crb \S+ · apparatus \S+ · policy \S+/)
+    const footer = (await contentinfo.textContent()) ?? ''
     const version = /crb (\S+) · apparatus (\S+) · policy (\S+)/.exec(footer)
     expect(version, footer).not.toBeNull()
     // Build and apparatus: the version the footer (GET /version) carries

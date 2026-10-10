@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The walkthrough waits for what it reads** (P-781, P-782;
+  [#78](https://github.com/Jita81/commit-replay-bench/pull/78)). 11b-keyboard signed in by
+  clicking, which left the pointer on the page: on PR #58's CI a hint it rested on opened between
+  two Escapes and spent the second, so a step failed. Every 11b step now signs in with Enter and
+  fails when a pointer event reached its page. Then `main` went red when 14-go-live read the
+  footer once, before `GET /version` answered. Of the walkthrough's 109 one-shot reads, 18 could
+  read an earlier render; each now waits for what it reads, and a test fails on a new one-shot
+  read until it is judged settled.
+
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
   proposed values, so its status is Accepted and PLAN's operator acts are done.

@@ -241,6 +241,9 @@ test.describe('12 intake from a ticket (fake tracker)', () => {
     await page.setViewportSize({ width: 375, height: 800 })
     await page.goto(`/factory/intake?repo=${REPO}`)
     await expect(page.getByRole('heading', { name: 'Work arriving from your board' })).toBeVisible()
+    // the heading is the page's own; the intake reading draws after it — measure that page, not
+    // the first render (P-782)
+    await expect(page.locator('main').getByText('Loading…', { exact: true })).toHaveCount(0)
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     expect(overflow).toBeLessThanOrEqual(1)
   })
