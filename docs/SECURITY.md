@@ -642,17 +642,24 @@ machine:
   `CRB_BIND_HOST` is a loopback address, and refuses it alongside `CRB_LOCAL_AUTH_ENABLED=false`
   (it signs in a local account, which that setting turns away at `/auth/login`); `crb serve` checks the address it is about to bind
   again, so `--host 0.0.0.0` is refused too (`dev_autologin_refusal_for`,
-  `crb.server.main.serve`). The container image's entrypoint refuses to run any role with the
-  variable set, because a container is never a development stack on one machine
-  (`deploy/entrypoint.sh`). There is no override flag. [measured — n = 15 test cases under
+  `crb.server.main.serve`). The container image's entrypoint refuses to run any role with it
+  set, because a container is never a development stack on one machine
+  (`deploy/entrypoint.sh`). It reads the environment the way the settings do — any letter
+  case, and `auth` as JSON on `CRB_AUTH` as well as `CRB_AUTH__DEV_AUTOLOGIN` — refuses any
+  non-empty value, and refuses too when its scan cannot prove it read the environment
+  (P-784). There is no override flag. [measured — n = 15 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestSettings`: off by default; `prod`
   refuses, as an argument and from the environment (2); four non-loopback binds refuse and
   four loopback binds admit (8); local sign-in switched off refuses; a malformed username
   refuses; `serve` refuses `--host
-  0.0.0.0` before uvicorn starts; the admin `/settings` view names it; pass/fail, not a rate] [measured — n = 4 test cases under
+  0.0.0.0` before uvicorn starts; the admin `/settings` view names it; pass/fail, not a rate] [measured — n = 14 test cases under
   apparatus 2.2 in `tests/test_server_dev_autologin.py::TestTheContainerImage`: the
   entrypoint refuses `serve`, `worker` and `migrate` with the variable set before anything
-  runs, and runs `serve` as before without it; pass/fail, not a rate]
+  runs (3); each of six spellings `Settings` reads as on — upper, lower and mixed case,
+  `CRB_AUTH` JSON in two cases, a value starting with a newline — is refused (6); it runs
+  `serve` as before without it (1); a scan that fails, prints nothing or cannot see the
+  environment refuses (3); a ratchet pins every way `Settings` reads `auth` (1); pass/fail,
+  not a rate]
 - **What the start-up check cannot see.** A process manager that runs the app factory itself
   (`uvicorn --factory crb.server.app:create_app --host …`, or gunicorn) binds an address the
   settings never see, so `crb` cannot refuse that bind at start-up. On that path only the
@@ -755,7 +762,7 @@ rebinding) arrives with its own name in `Host` and is refused.
 | T11 | Session hijack / CSRF / privilege escalation | API | 3.3 `__Host-` cookies, session-bound CSRF, revocable sessions (logout, sign out everywhere), 3.4 RBAC, first-login OIDC roles |
 | T11a | Online password guessing, one account or sprayed across many | API | 3.4 per-(username, address) and per-address limits in the process; the proxy's limiter in production |
 | T11b | An operator, or a model through the MCP tools, points the deployment at an arbitrary host directory | API host | 3.4 `clone_path` confined to `$CRB_HOME/repos`; elsewhere admin-only and recorded; symbolic-link escapes refused |
-| T11c | Automatic sign-in (`CRB_AUTH__DEV_AUTOLOGIN`) is used from another machine, through a proxy, by a hostile web page, or left on in production | API | 3.8: refused at start-up outside `CRB_ENV=dev` and on a non-loopback bind (no override); the container entrypoint refuses any role with it set; per request only a loopback peer, arriving on a loopback address, with no forwarding header, a loopback `Host`, no foreign `Origin` and not `cross-site` — anything else is answered as "off"; the project's Vite dev and preview proxy adds `X-Forwarded-For` for any client not on this machine; an ordinary session — the same cookies, credential version (session nonce included) and session-bound CSRF token as a password sign-in, so sign-out and sign out everywhere end it and it never touches the login limiter; an audit event and a log line per sign-in; `crb doctor` and a banner on every page say it is on, and `/health` and `/version` say so only to a caller that could use it. Residual: every local user and process on the machine can use it; a same-host proxy or tunnel that strips forwarding headers would expose it; a process manager that runs `uvicorn --factory` binds an address `crb` cannot check at start-up, so only the per-request checks apply there |
+| T11c | Automatic sign-in (`CRB_AUTH__DEV_AUTOLOGIN`) is used from another machine, through a proxy, by a hostile web page, or left on in production | API | 3.8: refused at start-up outside `CRB_ENV=dev` and on a non-loopback bind (no override); the container entrypoint refuses any role with it set, however the settings would read it; per request only a loopback peer, arriving on a loopback address, with no forwarding header, a loopback `Host`, no foreign `Origin` and not `cross-site` — anything else is answered as "off"; the project's Vite dev and preview proxy adds `X-Forwarded-For` for any client not on this machine; an ordinary session — the same cookies, credential version (session nonce included) and session-bound CSRF token as a password sign-in, so sign-out and sign out everywhere end it and it never touches the login limiter; an audit event and a log line per sign-in; `crb doctor` and a banner on every page say it is on, and `/health` and `/version` say so only to a caller that could use it. Residual: every local user and process on the machine can use it; a same-host proxy or tunnel that strips forwarding headers would expose it; a process manager that runs `uvicorn --factory` binds an address `crb` cannot check at start-up, so only the per-request checks apply there |
 | T12 | Cross-organisation data leakage via the federated export | export | allowlist of abstract fields only, k-anonymity, opt-in; consumption not implemented (`crb.core.federated`) |
 | T13 | A weak oracle lets a semantically wrong patch pass | grade | not a mechanical false-Q1; measured and gated by oracle strength (`crb.core.oracle`), routed to `human` below 0.8 |
 | T14 | A dependency fetch runs untrusted code with a network (an install script, a source build) | provision | 3.1.1: wheels only, `npm ci --ignore-scripts`, `go mod download`; anything that must build runs in a second container with `--network=none`; a Python source distribution is refused |

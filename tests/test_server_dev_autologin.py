@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -89,23 +90,29 @@ AUTOLOGIN = f"{API_PREFIX}/auth/dev-autologin"
 
 @pytest.fixture(autouse=True)
 def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # any letter case: the settings read ``crb_auth`` as surely as ``CRB_AUTH`` (P-784)
     for key in list(os.environ):
-        if key.startswith("CRB_"):
+        if key.upper().startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
 
 
-def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
-    """Dev settings with the bootstrap admin ``root``; automatic sign-in as ``root`` unless
-    ``auth`` is overridden."""
-    base: dict[str, Any] = {
+def settings_base(tmp_path: Path) -> dict[str, Any]:
+    """Dev settings with the bootstrap admin ``root`` and no ``auth`` — which the environment
+    then supplies, if anything does."""
+    return {
         "env": "dev",
         "home": tmp_path,
         "secret_key": SecretStr("s" * 40),
         "sandbox": {"executor": "local"},
         "bootstrap_admin": {"username": "root", "password": ROOT_PW},
         "log_format": "text",
-        "auth": {"dev_autologin": "root"},
     }
+
+
+def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
+    """Dev settings with the bootstrap admin ``root``; automatic sign-in as ``root`` unless
+    ``auth`` is overridden."""
+    base = settings_base(tmp_path) | {"auth": {"dev_autologin": "root"}}
     base.update(overrides)
     return Settings(**base)
 
@@ -749,9 +756,10 @@ class TestAuditAndReporting:
 ENTRYPOINT = Path(__file__).resolve().parent.parent / "deploy" / "entrypoint.sh"
 
 
-def _run_entrypoint(tmp_path: Path, role: str, autologin: str) -> tuple[int, str, list[str]]:
-    """Run ``deploy/entrypoint.sh <role>`` with ``uvicorn`` and ``python`` replaced by stubs
-    that only record that they ran; returns (exit code, stderr, what ran)."""
+def _run_entrypoint(tmp_path: Path, role: str, extra: dict[str, str]) -> tuple[int, str, list[str]]:
+    """Run ``deploy/entrypoint.sh <role>`` under ``PATH`` plus ``extra`` only, with ``uvicorn``
+    and ``python`` replaced by stubs that only record that they ran; returns (exit code,
+    stderr, what ran)."""
     import subprocess
 
     bin_dir = tmp_path / "bin"
@@ -761,7 +769,7 @@ def _run_entrypoint(tmp_path: Path, role: str, autologin: str) -> tuple[int, str
         stub = bin_dir / name
         stub.write_text(f'#!/bin/sh\necho "{name} $*" >> "{ran}"\n')
         stub.chmod(0o755)
-    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "CRB_AUTH__DEV_AUTOLOGIN": autologin}
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", **extra}
     proc = subprocess.run(
         ["/bin/sh", str(ENTRYPOINT), role],
         env=env,
@@ -774,6 +782,20 @@ def _run_entrypoint(tmp_path: Path, role: str, autologin: str) -> tuple[int, str
     return proc.returncode, proc.stderr, lines
 
 
+#: Every spelling the settings read as "automatic sign-in on" (``case_sensitive=False`` and
+#: ``env_nested_delimiter="__"``: any letter case, and ``auth`` as JSON on ``CRB_AUTH``), and
+#: a value the validator strips to a username. CodeRabbit on #58 found the old entrypoint
+#: let four of these start (all but the first and the last), each read as on (P-784).
+AUTOLOGIN_SPELLINGS: list[tuple[str, str]] = [
+    ("CRB_AUTH__DEV_AUTOLOGIN", "root"),
+    ("crb_auth__dev_autologin", "root"),
+    ("Crb_Auth__Dev_AutoLogin", "root"),
+    ("CRB_AUTH", '{"dev_autologin": "root"}'),
+    ("crb_auth", '{"dev_autologin": "root"}'),
+    ("CRB_AUTH__DEV_AUTOLOGIN", "\nroot"),
+]
+
+
 class TestTheContainerImage:
     @pytest.mark.parametrize("role", ["serve", "worker", "migrate"])
     def test_the_entrypoint_refuses_to_run_anything_with_it_set(
@@ -782,10 +804,95 @@ class TestTheContainerImage:
         """A container is never a loopback-only development stack, and ``uvicorn --factory
         --host`` binds an address the settings never see — so the image refuses before any
         role starts, whatever ``CRB_BIND_HOST`` says."""
-        code, stderr, ran = _run_entrypoint(tmp_path, role, "root")
+        code, stderr, ran = _run_entrypoint(tmp_path, role, {"CRB_AUTH__DEV_AUTOLOGIN": "root"})
         assert code != 0 and ran == []
         assert "CRB_AUTH__DEV_AUTOLOGIN" in stderr and "container" in stderr
 
+    @pytest.mark.parametrize(("name", "value"), AUTOLOGIN_SPELLINGS)
+    def test_every_spelling_the_settings_read_as_on_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, value: str
+    ) -> None:
+        """The refusal is the settings' own reading, not one spelling: for each way the
+        environment turns automatic sign-in on, ``Settings`` reads it as on AND the entrypoint
+        refuses — so the two cannot drift apart one spelling at a time."""
+        monkeypatch.setenv(name, value)
+        assert Settings(**settings_base(tmp_path)).auth.dev_autologin == "root"
+        code, stderr, ran = _run_entrypoint(tmp_path, "serve", {name: value})
+        assert code != 0 and ran == []
+        assert name in stderr and "container" in stderr
+
     def test_the_entrypoint_runs_as_before_with_it_unset(self, tmp_path: Path) -> None:
-        code, _stderr, ran = _run_entrypoint(tmp_path, "serve", "")
+        code, _stderr, ran = _run_entrypoint(tmp_path, "serve", {"CRB_AUTH__DEV_AUTOLOGIN": ""})
         assert code == 0 and len(ran) == 1 and ran[0].startswith("uvicorn --factory")
+
+    @pytest.mark.parametrize(
+        "awk",
+        [
+            "exit 1",  # fails
+            "exit 0",  # prints nothing and "succeeds"
+            'exec /usr/bin/awk "$@"',  # runs, but under an environment without the canary
+        ],
+    )
+    def test_a_scan_that_cannot_prove_it_read_the_environment_refuses(
+        self, tmp_path: Path, awk: str
+    ) -> None:
+        """Fail-closed: an ``awk`` that fails, one that prints nothing, or one that cannot see
+        the environment is a refusal — never a pass that starts the role unchecked."""
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        broken = bin_dir / "awk"
+        if awk.startswith("exec"):
+            awk = f"unset CRB_ENTRYPOINT_SCAN\n{awk}"
+        broken.write_text(f"#!/bin/sh\n{awk}\n")
+        broken.chmod(0o755)
+        code, stderr, ran = _run_entrypoint(tmp_path, "serve", {})
+        assert code != 0 and ran == []
+        assert "could not be read" in stderr
+
+    def test_the_settings_still_read_auth_only_the_ways_the_entrypoint_checks(self) -> None:
+        """The ratchet behind the refusal: it reads ``CRB_AUTH__DEV_AUTOLOGIN`` and ``CRB_AUTH``
+        in any letter case because that is every way ``Settings`` reads ``auth`` today. A new
+        source (a ``.env`` file, a secrets directory, the command line, a custom source), a
+        new alias, a new field on ``AuthSettings``, or a construction that passes its own
+        source would be a way in the entrypoint does not check — change it there first, then here (docs/PREVENTION.md P-784)."""
+        from pydantic_settings import BaseSettings
+
+        from crb.server.settings import AuthSettings
+
+        config = Settings.model_config
+        assert config.get("env_prefix") == "CRB_"
+        assert config.get("env_nested_delimiter") == "__"
+        assert config.get("case_sensitive") is False
+        assert config.get("env_prefix_target", "variable") == "variable"
+        assert config.get("env_nested_max_split") is None
+        for source in (
+            "env_file",
+            "secrets_dir",
+            "cli_parse_args",
+            "json_file",
+            "toml_file",
+            "yaml_file",
+        ):
+            assert not config.get(source), source
+        assert (
+            Settings.settings_customise_sources.__func__  # type: ignore[attr-defined]
+            is BaseSettings.settings_customise_sources.__func__  # type: ignore[attr-defined]
+        )
+        field = Settings.model_fields["auth"]
+        assert field.alias is None and field.validation_alias is None
+        assert set(AuthSettings.model_fields) == {"dev_autologin"}
+        dev = AuthSettings.model_fields["dev_autologin"]
+        assert dev.alias is None and dev.validation_alias is None
+        # nor per construction: no code builds Settings with its own .env file, secrets
+        # directory, command line, prefix or delimiter
+        per_call = re.compile(
+            r"\b_(?:env_file|secrets_dir|cli_\w+|env_prefix\w*|env_nested_\w+|case_sensitive)\s*="
+        )
+        src = ENTRYPOINT.parent.parent / "src" / "crb"
+        found = [
+            f"{path.relative_to(src)}:{n}"
+            for path in sorted(src.rglob("*.py"))
+            for n, line in enumerate(path.read_text().splitlines(), 1)
+            if per_call.search(line)
+        ]
+        assert found == []
