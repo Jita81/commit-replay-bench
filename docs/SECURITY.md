@@ -639,7 +639,7 @@ machine:
 
 - **Refused at start-up outside a development stack.** `Settings` refuses the variable
   unless `CRB_ENV=dev` (the default `prod`, and any other value, refuses) and unless
-  `CRB_BIND_HOST` is a loopback address, and refuses it alongside `CRB_LOCAL_AUTH_ENABLED=false`
+  `CRB_BIND_HOST` is a loopback address, and refuses it whenever `CRB_LOCAL_AUTH_ENABLED=false`
   (it signs in a local account, which that setting turns away at `/auth/login`); `crb serve` checks the address it is about to bind
   again, so `--host 0.0.0.0` is refused too (`dev_autologin_refusal_for`,
   `crb.server.main.serve`). The container image's entrypoint refuses to run any role with it
