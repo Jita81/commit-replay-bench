@@ -64,6 +64,7 @@ export const ADR_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['0024', '"Clean" means working, by construction: the format step, the finish gate, belt 6 `api_stable`, and one switchboard'],
   ['0025', 'routing.v2: a route reads one apparatus, counts each distinct change once by its first observed attempt, and never delivers on an unmeasured oracle or unmeasured controls'],
   ['0026', 'The context standard: pre-registered context arms, a look rule with one error budget per cell, a leak guard, an entry gate, class sets held out by commit, and a library that reaches a brief only when measured'],
+  ['0027', 'Automatic sign-in for a development stack, on loopback only'],
   ['0028', 'The moments the flow reading needs are recorded when they happen, never derived'],
   ['0029', 'The audit trail is hash-chained, and both chains\' heads are served to be kept outside the store'],
   ['0030', 'A run keeps the spend cap it declares, and stops before the work that could pass it'],

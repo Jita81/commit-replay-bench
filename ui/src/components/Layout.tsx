@@ -42,11 +42,12 @@
  * ADRs:         none
  * Works with:   ui/src/App.tsx (mounts this under `RequireAuth`), ui/src/components/Hint.tsx
  *               (the trigger), ui/src/help/hints.ts (`nav.*`, `pill.shell.*`, `button.shell.*`,
- *               `banner.shell.stop_condition`), ui/src/components/Help.tsx
+ *               `banner.shell.stop_condition`), ui/src/components/DevAutologinBanner.tsx (the
+ *               automatic sign-in strip at the top of the header), ui/src/components/Help.tsx
  *               (`AboutThisScreen`, mounted once here), ui/src/components/PageHeader.tsx
  *               (defaults its eyebrow to `journeyEyebrow`), ui/src/lib/auth.tsx (the
- *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`),
- *               ui/src/lib/verdict.ts (`probeDisplay` for the health pill)
+ *               principal), ui/src/api/hooks.ts (`useHealth`, `useVersion`, `useLogout`; the
+ *               health pill reads `probeDisplay` from ui/src/lib/verdict.ts)
  * Tested by:    ui/src/help/hints-ratchet.test.tsx (every element of the
  *               shell carries a hint), ui/src/components/Layout.test.tsx (the steps, the
  *               eyebrow, Help, the About block, the Menu, the instrument row by role),
@@ -61,6 +62,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, matchPath, useLocation, useNavigate } from 'react-router'
 import { useHealth, useLogout, useVersion } from '../api/hooks'
+import { DevAutologinBanner } from './DevAutologinBanner'
 import { useAuth } from '../lib/auth'
 import { useScrollToHash } from '../lib/scrollToHash'
 import { useTheme } from '../lib/theme'
@@ -240,6 +242,7 @@ export function Layout() {
         Skip to content
       </a>
       <header className="print:hidden" data-testid="shell-header">
+        <DevAutologinBanner />
         <div className="bg-primary text-on-primary">
           <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-2 gap-y-3 px-5 py-3 sm:gap-6 sm:py-4">
             <NavLink to="/home" className="flex items-center gap-2 text-on-primary no-underline sm:gap-3">

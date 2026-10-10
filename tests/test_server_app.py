@@ -25,9 +25,9 @@ Works with:   src/crb/server/app.py (under test), src/crb/server/settings.py (th
               (``require_role``), docs/API.md (conventions the envelope tests pin),
               docs/SECURITY.md
 Tested by:    tests/test_server_app.py
-Touch when:   never for a new repository; a domain exception is mapped to a reserved code (a case
-              here and docs/API.md); a security header or middleware is added; a settings field
-              gains validation.
+Touch when:   never for a new repository; a domain exception is mapped to a reserved code (a
+              case here and docs/API.md); a security header or middleware is added; a settings
+              field gains validation.
 """
 
 from __future__ import annotations
@@ -303,11 +303,13 @@ class TestVersion:
             "policy",
             "uptime_s",
             "oidc_enabled",
+            "dev_autologin",
             "belt_set",
             "signoff_policy",
             "licence",
         }
         assert d["oidc_enabled"] is False  # the test settings configure no provider
+        assert d["dev_autologin"] is False  # off unless CRB_AUTH__DEV_AUTOLOGIN names an account
 
 
 class TestMiddleware:

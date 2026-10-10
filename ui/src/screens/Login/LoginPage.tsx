@@ -12,10 +12,13 @@
  *               error envelope on a wrong password (never a blank form), and returns the user
  *               to the `?next=` path — same-origin paths only, so a crafted link cannot bounce
  *               a session to another host. An already-authenticated visitor is redirected
- *               straight to `next`, and while that check is in flight the form is not offered
- *               (a status line stands in), so nothing typed is lost to the redirect (P-352).
- *               Both fields and both sign-in buttons carry a hint (`field.login.*`,
- *               `button.login.*`) so the form explains itself on hover,
+ *               straight to `next`; until the session check settles (the automatic sign-in
+ *               included) a status line stands in for the form, so it never flashes before a
+ *               redirect and nothing typed is lost to one (P-352), and a failed check is shown
+ *               above the form with a retry. While a development stack has automatic sign-in
+ *               on, the banner above the form says so (`DevAutologinBanner`). Both fields and
+ *               both sign-in buttons carry a hint
+ *               (`field.login.*`, `button.login.*`) so the form explains itself on hover,
  *               focus and tap before a person has any role at all. Every stop names its way
  *               forward where the person meets it: a wrong password's envelope says who sets a
  *               new one (G-460); a 429 is "Too many failed sign-ins" with the wait in seconds
@@ -39,14 +42,17 @@
  *               copy), src/crb/server/routes/auth.py (login and the OIDC start URL),
  *               src/crb/server/auth.py (the session and CSRF cookies the login sets, and
  *               `session_ttl`, the length the session note states), ui/src/components/Help.tsx
- *               (`AboutThisScreen`, fed by the `/login` entry in ui/src/help/help.ts)
+ *               (`AboutThisScreen`, fed by the `/login` entry in ui/src/help/help.ts),
+ *               ui/src/components/DevAutologinBanner.tsx (the automatic sign-in strip)
  * Tested by:    ui/src/screens/Login/LoginPage.test.tsx (the strapline; the hints resolve;
  *               every stop's next step; the /version states),
  *               tests/test_server_auth.py (the session note matches `session_ttl`),
  *               ui/e2e/walkthrough/13-recover-an-account.spec.ts (the recovery, timed),
  *               ui/e2e/smoke.spec.ts (renders against a mocked API, OIDC button href, axe),
  *               ui/e2e/walkthrough/01-login.spec.ts (wrong password → envelope; right one →
- *               the role chip), ui/src/components/Help.test.tsx (the About block mounts here)
+ *               the role chip), ui/src/components/Help.test.tsx (the About block mounts here),
+ *               ui/src/components/DevAutologinBanner.test.tsx (the status while an automatic
+ *               sign-in settles; a failed one shown above the form)
  * Touch when:   never for a new repository; the OIDC start path or the login body changes
  *               (docs/API.md "Auth").
  */
@@ -58,6 +64,7 @@ import { AnchorButton, Button } from '../../components/Button'
 import { ErrorState } from '../../components/ErrorState'
 import { AboutThisScreen } from '../../components/Help'
 import { TextField } from '../../components/Field'
+import { DevAutologinBanner } from '../../components/DevAutologinBanner'
 import { BRAND } from '../../components/Layout'
 import { useAuth } from '../../lib/auth'
 
@@ -108,7 +115,7 @@ function failureTitle(error: ApiError): string | undefined {
 
 /** The screen; redirects to `next` once a session exists. */
 export function LoginPage() {
-  const { me, loading } = useAuth()
+  const { me, loading, error: authError, refetch: recheck } = useAuth()
   const [params] = useSearchParams()
   const next = safeNext(params.get('next'))
   // a failed organisation sign-in comes back here as `?error=<code>` (G-188)
@@ -121,6 +128,22 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
 
   if (!loading && me) return <Navigate to={next} replace />
+  // Until the session check settles (`/auth/me`, and on a development stack the automatic
+  // sign-in), the form is not shown: a visitor about to be signed in never sees it flash, and
+  // a form shown for that moment takes typing that the redirect then throws away (P-352).
+  if (loading) {
+    return (
+      <div className="flex min-h-screen flex-col bg-surface text-on-surface">
+        <DevAutologinBanner />
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-on-surface-muted" role="status" data-testid="login-checking-session">
+          <span>Checking whether you are already signed in…</span>
+          {/* the session check waits on `/version` (it says whether automatic sign-in is on), so
+              the pending organisation check is named here too, never silent (G-191) */}
+          {version.isPending && <span className="text-[11px]">Checking for an organisation sign-in…</span>}
+        </div>
+      </div>
+    )
+  }
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -128,30 +151,30 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-10 text-on-surface">
-      <main className="w-full max-w-[420px] space-y-6">
-        <header className="space-y-1 text-center">
-          <div className="label">Sign in</div>
-          <h1 className="text-[26px] leading-8">{BRAND}</h1>
-          <p className="text-sm text-on-surface-muted">Measures what an AI builder can be trusted to change in your repository, graded by your own tests.</p>
-        </header>
+    <div className="flex min-h-screen flex-col bg-surface text-on-surface">
+      <DevAutologinBanner />
+      <div className="flex flex-1 items-center justify-center px-4 py-10">
+        <main className="w-full max-w-[420px] space-y-6">
+          <header className="space-y-1 text-center">
+            <div className="label">Sign in</div>
+            <h1 className="text-[26px] leading-8">{BRAND}</h1>
+            <p className="text-sm text-on-surface-muted">Measures what an AI builder can be trusted to change in your repository, graded by your own tests.</p>
+          </header>
 
-        {oidcError !== null && (
-          <div role="alert" data-testid="login-oidc-error" className="rounded-[var(--radius-card)] border border-status-red/40 bg-status-red-soft px-4 py-3 text-on-surface">
-            <div className="font-serif text-[16px] font-semibold text-status-red">Organisation sign-in did not complete</div>
-            <p className="m-0 text-sm">{OIDC_FAILURE_REASONS[oidcError] ?? OIDC_FAILURE_FALLBACK}</p>
-          </div>
-        )}
+          {oidcError !== null && (
+            <div role="alert" data-testid="login-oidc-error" className="rounded-[var(--radius-card)] border border-status-red/40 bg-status-red-soft px-4 py-3 text-on-surface">
+              <div className="font-serif text-[16px] font-semibold text-status-red">Organisation sign-in did not complete</div>
+              <p className="m-0 text-sm">{OIDC_FAILURE_REASONS[oidcError] ?? OIDC_FAILURE_FALLBACK}</p>
+            </div>
+          )}
 
-        <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
-          {/* While the session check is in flight the form is not offered: a signed-in visitor
-              is about to be redirected, and a form shown for that moment takes typing that the
-              redirect then throws away (P-352). */}
-          {loading ? (
-            <p role="status" data-testid="login-checking-session" className="m-0 text-sm text-on-surface-muted">
-              Checking whether you are already signed in…
-            </p>
-          ) : (
+          <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
+            {/* a failed session check is read before the form, never under its submit button */}
+            {authError && (
+              <div className="mb-5">
+                <ErrorState compact error={authError} onRetry={recheck} title="Could not check your session" />
+              </div>
+            )}
             <form onSubmit={submit} className="space-y-4" aria-label="Local account sign in">
               <TextField label="Username" hint="field.login.username" name="username" autoComplete="username" required value={username} onChange={(e) => setUsername(e.target.value)} />
               <TextField
@@ -177,45 +200,45 @@ export function LoginPage() {
                 {login.isPending ? 'Signing in…' : 'Sign in'}
               </Button>
             </form>
-          )}
 
-          {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
-          {version.isError && (
-            <div className="mt-5">
-              <ErrorState compact error={version.error} onRetry={() => void version.refetch()} title="Could not check for an organisation sign-in" />
-            </div>
-          )}
-          {oidc && (
-            <>
-              <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">
-                <span className="h-px flex-1 bg-border" />
-                or
-                <span className="h-px flex-1 bg-border" />
+            {version.isPending && <p className="mt-5 text-center text-[11px] text-on-surface-muted">Checking for an organisation sign-in…</p>}
+            {version.isError && (
+              <div className="mt-5">
+                <ErrorState compact error={version.error} onRetry={() => void version.refetch()} title="Could not check for an organisation sign-in" />
               </div>
+            )}
+            {oidc && (
+              <>
+                <div className="my-5 flex items-center gap-3 text-[11px] text-on-surface-muted">
+                  <span className="h-px flex-1 bg-border" />
+                  or
+                  <span className="h-px flex-1 bg-border" />
+                </div>
 
-              <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} hint="button.login.oidc" className="w-full">
-                Sign in with organisation account
-              </AnchorButton>
-            </>
-          )}
-        </section>
+                <AnchorButton href={apiUrl(`/auth/oidc/start?next=${encodeURIComponent(next)}`)} hint="button.login.oidc" className="w-full">
+                  Sign in with organisation account
+                </AnchorButton>
+              </>
+            )}
+          </section>
 
-        {/* The stop has a way forward. This page signs people in and does nothing else, so it
-            names who can reset a password or reactivate an account: an admin on Settings (the
-            Users card), or the person who runs the deployment (`crb users`, docs/OPERATOR.md §9). */}
-        <p className="text-center text-[13px] text-on-surface-muted">
-          Forgotten your password, or locked out? Ask an admin to reset it on the Settings screen, or ask the person who runs this deployment. Accounts are not created, reset or reactivated here.
-        </p>
+          {/* The stop has a way forward. This page signs people in and does nothing else, so it
+              names who can reset a password or reactivate an account: an admin on Settings (the
+              Users card), or the person who runs the deployment (`crb users`, docs/OPERATOR.md §9). */}
+          <p className="text-center text-[13px] text-on-surface-muted">
+            Forgotten your password, or locked out? Ask an admin to reset it on the Settings screen, or ask the person who runs this deployment. Accounts are not created, reset or reactivated here.
+          </p>
 
-        {/* The length is the server's default (`Settings.session_ttl`); tests/test_server_auth.py
-            fails if the two drift (docs/PREVENTION.md). */}
-        <p className="text-center text-[11px] text-on-surface-muted" data-testid="login-session-note">
-          A session lasts 8 hours unless this deployment sets another length. Signing out ends it on every device.
-        </p>
+          {/* The length is the server's default (`Settings.session_ttl`); tests/test_server_auth.py
+              fails if the two drift (docs/PREVENTION.md). */}
+          <p className="text-center text-[11px] text-on-surface-muted" data-testid="login-session-note">
+            A session lasts 8 hours unless this deployment sets another length. Signing out ends it on every device.
+          </p>
 
-        {/* The screen sits outside the shell, so it mounts its own About block (G-926). */}
-        <AboutThisScreen />
-      </main>
+          {/* The screen sits outside the shell, so it mounts its own About block (G-926). */}
+          <AboutThisScreen />
+        </main>
+      </div>
     </div>
   )
 }

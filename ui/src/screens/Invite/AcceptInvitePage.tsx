@@ -16,25 +16,33 @@
  *               screen" block (the `/invite` entry in ui/src/help/help.ts).
  *               A link with no token, or one the server refuses (used, withdrawn, expired), is
  *               a plain sentence with a way forward: ask your admin for a new one.
+ *               On a development stack with automatic sign-in on, the page shows the banner
+ *               that says so and turns the automatic sign-in off for the rest of the page load:
+ *               the invitee is not the stack's account, so neither this page nor the /login its
+ *               "Sign in" link opens signs the browser in as that account (ADR-0027).
  * How:          `useSearchParams` for the token → `useAcceptInvitation` on submit → the
  *               success panel replaces the form and links to /login. Nothing is stored in the
  *               browser and the token is never rendered.
  * Layer:        ui — docs/ARCHITECTURE.md#44-outer-layers
  * ADRs:         docs/adr/0016-two-person-rule-is-a-policy-clause-not-an-apparatus-move.md
  *               (why the second person matters enough to have a page of their own)
- * Works with:   ui/src/api/hooks.ts (`useAcceptInvitation`), ui/src/App.tsx (the route, outside
+ * Works with:   ui/src/api/hooks.ts (`useAcceptInvitation`, `suppressDevAutologin`),
+ *               ui/src/components/DevAutologinBanner.tsx (the automatic sign-in strip),
+ *               ui/src/App.tsx (the route, outside
  *               the shell, deliberately unlinked — see `App.reachability.test.ts`),
  *               ui/src/screens/Settings/InviteApproverCard.tsx (where the link comes from),
  *               ui/src/screens/Login/LoginPage.tsx (where it sends the person next),
  *               src/crb/server/routes/invitations.py (the route it posts to)
- * Tested by:    ui/src/screens/Invite/AcceptInvitePage.test.tsx
+ * Tested by:    ui/src/screens/Invite/AcceptInvitePage.test.tsx,
+ *               ui/src/components/DevAutologinBanner.test.tsx (no automatic sign-in on /invite)
  * Touch when:   never for a new repository; the accept body or the minimum password length
  *               changes (they are the server's, `MIN_PASSWORD_LENGTH`).
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { useAcceptInvitation } from '../../api/hooks'
+import { suppressDevAutologin, useAcceptInvitation } from '../../api/hooks'
 import { Button } from '../../components/Button'
+import { DevAutologinBanner } from '../../components/DevAutologinBanner'
 import { ErrorState } from '../../components/ErrorState'
 import { AboutThisScreen } from '../../components/Help'
 import { TextField } from '../../components/Field'
@@ -65,6 +73,11 @@ export function AcceptInvitePage() {
   const tooShort = touched && password.length < MIN_PASSWORD ? problem : undefined
   const mismatch = touched && !tooShort && problem ? problem : undefined
   const refused = useRef<HTMLDivElement>(null)
+  // an invitee is not the stack's account: no automatic sign-in for the rest of this page load
+  // (this child effect runs before the session check can answer, so it is never too late)
+  useEffect(() => {
+    suppressDevAutologin()
+  }, [])
   useEffect(() => {
     if (!asked) return
     const name = password.length < MIN_PASSWORD ? 'new-password' : 'new-password-again'
@@ -88,69 +101,72 @@ export function AcceptInvitePage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface px-4 py-10 text-on-surface">
-      <main className="w-full max-w-[420px] space-y-6">
-        <header className="space-y-1 text-center">
-          <div className="label">Accept your invitation</div>
-          <h1 className="text-[26px] leading-8">{BRAND}</h1>
-          <p className="text-sm text-on-surface-muted">Someone has invited you to review and sign off what this deployment measures. Choose a password and the account is yours.</p>
-        </header>
+    <div className="flex min-h-screen flex-col bg-surface text-on-surface">
+      <DevAutologinBanner />
+      <div className="flex flex-1 items-center justify-center px-4 py-10">
+        <main className="w-full max-w-[420px] space-y-6">
+          <header className="space-y-1 text-center">
+            <div className="label">Accept your invitation</div>
+            <h1 className="text-[26px] leading-8">{BRAND}</h1>
+            <p className="text-sm text-on-surface-muted">Someone has invited you to review and sign off what this deployment measures. Choose a password and the account is yours.</p>
+          </header>
 
-        <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
-          {accept.isSuccess ? (
-            <div className="space-y-4" data-testid="invite-accepted">
-              <Hint as="p" id="stat.invite.accepted" className="m-0 text-[16px]">
-                <strong>{accept.data.username}</strong> is now active as <strong>{accept.data.role}</strong>. Sign in with the password you have just chosen.
+          <section className="rounded-[var(--radius-card)] border border-border bg-surface-container p-6 shadow-[var(--shadow-card)]">
+            {accept.isSuccess ? (
+              <div className="space-y-4" data-testid="invite-accepted">
+                <Hint as="p" id="stat.invite.accepted" className="m-0 text-[16px]">
+                  <strong>{accept.data.username}</strong> is now active as <strong>{accept.data.role}</strong>. Sign in with the password you have just chosen.
+                </Hint>
+                <Hint as={Link} id="link.invite.sign_in" to="/login" className="inline-block rounded-[4px] bg-primary px-4 py-3 text-[19px] leading-[1.2] text-on-primary no-underline">
+                  Sign in
+                </Hint>
+              </div>
+            ) : !token ? (
+              <Hint as="p" id="stat.invite.no_token" className="m-0 text-[16px]" data-testid="invite-no-token">
+                This page needs the link from your invitation, and this address has no invitation in it. Open the link you were sent, or ask your admin for a new one.
               </Hint>
-              <Hint as={Link} id="link.invite.sign_in" to="/login" className="inline-block rounded-[4px] bg-primary px-4 py-3 text-[19px] leading-[1.2] text-on-primary no-underline">
-                Sign in
-              </Hint>
-            </div>
-          ) : !token ? (
-            <Hint as="p" id="stat.invite.no_token" className="m-0 text-[16px]" data-testid="invite-no-token">
-              This page needs the link from your invitation, and this address has no invitation in it. Open the link you were sent, or ask your admin for a new one.
-            </Hint>
-          ) : (
-            <form onSubmit={submit} className="space-y-4" aria-label="Choose your password">
-              <TextField
-                label="New password"
-                hint="field.invite.password"
-                name="new-password"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                error={tooShort}
-              />
-              <TextField
-                label="New password again"
-                hint="field.invite.password_again"
-                name="new-password-again"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={again}
-                onChange={(e) => setAgain(e.target.value)}
-                error={mismatch}
-              />
-              {accept.isError && (
-                <div ref={refused} tabIndex={-1} data-testid="invite-refused">
-                  <ErrorState compact error={accept.error} title={accept.error.status === 401 ? 'This invitation link cannot be used' : undefined} />
-                </div>
-              )}
-              <Button type="submit" variant="filled" hint="button.invite.accept" className="w-full" pending={accept.isPending}>
-                {accept.isPending ? 'Setting your password…' : 'Set my password'}
-              </Button>
-            </form>
-          )}
-        </section>
+            ) : (
+              <form onSubmit={submit} className="space-y-4" aria-label="Choose your password">
+                <TextField
+                  label="New password"
+                  hint="field.invite.password"
+                  name="new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  error={tooShort}
+                />
+                <TextField
+                  label="New password again"
+                  hint="field.invite.password_again"
+                  name="new-password-again"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  value={again}
+                  onChange={(e) => setAgain(e.target.value)}
+                  error={mismatch}
+                />
+                {accept.isError && (
+                  <div ref={refused} tabIndex={-1} data-testid="invite-refused">
+                    <ErrorState compact error={accept.error} title={accept.error.status === 401 ? 'This invitation link cannot be used' : undefined} />
+                  </div>
+                )}
+                <Button type="submit" variant="filled" hint="button.invite.accept" className="w-full" pending={accept.isPending}>
+                  {accept.isPending ? 'Setting your password…' : 'Set my password'}
+                </Button>
+              </form>
+            )}
+          </section>
 
-        <p className="text-center text-[13px] text-on-surface-muted">An invitation link works once and expires. Nobody — including the admin who invited you — can read the password you choose here.</p>
+          <p className="text-center text-[13px] text-on-surface-muted">An invitation link works once and expires. Nobody — including the admin who invited you — can read the password you choose here.</p>
 
-        {/* Outside the shell, like /login: it mounts its own About block (G-926). */}
-        <AboutThisScreen />
-      </main>
+          {/* Outside the shell, like /login: it mounts its own About block (G-926). */}
+          <AboutThisScreen />
+        </main>
+      </div>
     </div>
   )
 }

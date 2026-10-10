@@ -262,6 +262,7 @@ DOCTOR_LINES = (
     "builders",
     "claude_code",
     "settings",
+    "dev_autologin",
     "home",
     "github_app",
     "database",
@@ -633,6 +634,7 @@ class TestDoctorReport:
         rows = _lines(out)
         assert list(rows) == list(DOCTOR_LINES)
         assert rows["settings"][0] == "ok" and rows["home"][0] == "warn"  # dev, under tmp
+        assert rows["dev_autologin"] == ("ok", "off")  # off unless CRB_AUTH__DEV_AUTOLOGIN
         assert rows["github_app"][0] == "skip"
         # a fresh store has no append-only row: the line never claims a write it did not try
         assert rows["database"] == ("ok", f"answers · {APPEND_ONLY_UNTRIED_DETAIL}")

@@ -37,9 +37,10 @@
  *               Pydantic side of the same shapes)
  * Tested by:    ui/src/api/types.test.ts (`ladderEntryLabel`), ui/src/components/BeltPills.test.tsx
  *               (`beltNamesFor`), and every screen test through the fixtures it types
- * Touch when:   never for a new repository; docs/API.md changes a response (a new field, a new run
- *               kind, a fifth belt set) — change this file first, then the hook and the screen; a
- *               new `Runner` or `Language` value here must match src/crb/core/spec.py.
+ * Touch when:   never for a new repository; docs/API.md changes a response (a new field, a new
+ *               run kind, a fifth belt set) — change this file first, then the hook and the
+ *               screen; a new `Runner` or `Language` value here must match
+ *               src/crb/core/spec.py.
  */
 
 // ---------------------------------------------------------------------------
@@ -178,6 +179,8 @@ export interface DeploymentPosture {
 export interface Health {
   status: ProbeStatus
   probes: Probe[]
+  /** Automatic sign-in on a development stack (ADR-0027) — beside the probes, never one of them. */
+  dev_autologin?: 'on' | 'off'
   /** The deployment's posture (ADR-0023). Absent on an older server. */
   posture?: DeploymentPosture
 }
@@ -189,6 +192,9 @@ export interface Version {
   policy: string
   /** An organisation (OpenID Connect) sign-in is configured; unauthenticated, names nothing. */
   oidc_enabled: boolean
+  /** A development stack signs a browser on its own machine in without a password (ADR-0027);
+   * names no account. Optional so a fixture written before it existed reads as off. */
+  dev_autologin?: boolean
   /** The belt set grade rows are written under now (G-212: read, never stated by the page). */
   belt_set?: string
   /** The sign-off policy the write boundary enforces now. */

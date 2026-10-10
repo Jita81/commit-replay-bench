@@ -16,26 +16,71 @@
 # Navigation
 # ----------
 # What it is:   The container entrypoint: one image, the role chosen by the first argument.
-# What it does: ``serve`` runs uvicorn on the app factory (optionally migrating first under
+# What it does: Refuses to run any role while automatic sign-in is set by any spelling the
+#               settings read — ``CRB_AUTH__DEV_AUTOLOGIN`` or ``CRB_AUTH`` in any letter case
+#               (ADR-0027);
+#               ``serve`` runs uvicorn on the app factory (optionally migrating first under
 #               ``CRB_MIGRATE_ON_START=1`` — single-host convenience only), ``worker`` the queue
 #               consumer, ``migrate`` / ``check`` the Alembic CLI, ``shell`` a debugging shell,
 #               anything else is exec'd verbatim. Every role is ``exec``'d so it is PID 1 and
 #               receives SIGTERM directly.
-# How:          A ``case`` on ``$1``; the bind host / port, worker count, forwarded IPs and graceful
-#               timeout come from ``CRB_*`` environment variables with safe defaults.
+# How:          ``awk`` over ``ENVIRON`` for the refusal (fail-closed: a failed scan refuses);
+#               a ``case`` on ``$1``; the bind host / port, worker count, forwarded IPs and
+#               graceful timeout come from ``CRB_*`` environment variables with safe defaults.
 # Layer:        deploy — docs/ARCHITECTURE.md#6-deployment-view
-# ADRs:         none
+# ADRs:         docs/adr/0027-dev-autologin-on-loopback.md (the automatic sign-in refusal)
 # Works with:   deploy/Dockerfile (installs it as ``crb-entrypoint`` and sets it as ENTRYPOINT),
 #               deploy/docker-compose.yml and deploy/helm/crb/templates/api-deployment.yaml (pass
 #               the role), src/crb/server/app.py (``create_app``), src/crb/server/worker_main.py,
 #               src/crb/store/migrate.py, docs/DEPLOYMENT.md (the image and its roles, §2)
-# Tested by:    untested — no unit test; the container smoke in .github/workflows/ci.yml runs the
-#               ``migrate upgrade`` and ``migrate current`` roles through the built image
-# Touch when:   a role is added to the image (a ``case`` arm, docs/DEPLOYMENT.md and the Helm
-#               template that runs it); a uvicorn flag changes (keep ``--proxy-headers`` scoped to
-#               ``CRB_FORWARDED_ALLOW_IPS``).
+# Tested by:    tests/test_server_dev_autologin.py (the automatic sign-in refusal, with uvicorn
+#               and python stubbed, against every spelling ``Settings`` reads as on); the
+#               container smoke in .github/workflows/ci.yml runs the
+#               ``migrate upgrade`` and ``migrate current`` roles through the built image, and
+#               checks that the image refuses three spellings of automatic sign-in
+# Touch when:   never for a new repository; a role is added to the image (a ``case`` arm,
+#               docs/DEPLOYMENT.md and the Helm template that runs it); a uvicorn flag changes
+#               (keep ``--proxy-headers`` scoped to ``CRB_FORWARDED_ALLOW_IPS``); the settings
+#               gain a way to read ``auth`` (a source, an alias, a field on ``AuthSettings``) —
+#               the refusal must read it too (docs/PREVENTION.md P-784).
 
 set -eu
+
+# Automatic sign-in (ADR-0027) is for a development stack on one machine. A container is
+# never that, and `uvicorn --factory --host` binds an address the settings never see, so the
+# image refuses to run any role with it set, whatever CRB_BIND_HOST says. No override.
+#
+# The test is the settings' own reading, not one spelling: they read the environment in any
+# letter case (case_sensitive=False) and take `auth` as JSON on CRB_AUTH as well as
+# CRB_AUTH__DEV_AUTOLOGIN, so a lower-case name or `CRB_AUTH={"dev_autologin": ...}` turns
+# it on as surely as the documented name. Any non-empty value refuses, even one the settings
+# would read as off. A scan that fails refuses too: under `set -e` a broken check must never
+# read as a pass. So the scan proves it ran — it sees its own canary in the environment and
+# ends with `scanned` — and anything short of that proof refuses.
+scan=$(CRB_ENTRYPOINT_SCAN=1 awk 'BEGIN {
+    if (ENVIRON["CRB_ENTRYPOINT_SCAN"] != "1") exit 2
+    for (name in ENVIRON) {
+        lower = tolower(name)
+        if ((lower == "crb_auth__dev_autologin" || lower == "crb_auth") && ENVIRON[name] != "")
+            printf "%s ", name
+    }
+    printf "scanned"
+}') || scan=""
+case "$scan" in
+    *scanned) autologin_set="${scan%scanned}" ;;
+    *)
+        echo "crb-entrypoint: refusing to start: the environment could not be read, so automatic" \
+            "sign-in cannot be ruled out (docs/adr/0027-dev-autologin-on-loopback.md)." >&2
+        exit 64
+        ;;
+esac
+if [ -n "$autologin_set" ]; then
+    echo "crb-entrypoint: refusing to start: automatic sign-in is set (${autologin_set% }; the" \
+        "settings read CRB_AUTH__DEV_AUTOLOGIN and CRB_AUTH in any letter case), and it is for" \
+        "a development stack on one machine, never a container" \
+        "(docs/adr/0027-dev-autologin-on-loopback.md). Unset it." >&2
+    exit 64
+fi
 
 role="${1:-serve}"
 if [ "$#" -gt 0 ]; then
