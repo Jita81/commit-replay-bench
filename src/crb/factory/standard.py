@@ -26,10 +26,10 @@ larger than its estimate) or ``cell_not_licensed``.
 
 **The size rule.** Until the organisation's points-to-churn agreement passes
 (:func:`points_agreement_passed`), the gate reads the cell the estimate names AND the
-next larger one and applies the more demanding (ADR-0026 [operator] value): no standard
-is more demanding than a ceiling, a ceiling than ``S2``, ``S2`` than ``S1``. An item
-without an estimate is ``unsized`` and goes to a person — it can never claim a smaller
-cell.
+next larger one and applies the more demanding (ADR-0026 item 8, fixed by the operator,
+DL-371): no standard is more demanding than a ceiling, a ceiling than ``S2``, ``S2`` than
+``S1``. An item without an estimate is ``unsized`` and goes to a person — it can never claim
+a smaller cell.
 
 **The readers.** The gate is handed a :class:`Readers`: the server binds it to the
 store's registered readings (routing.v2) through ``crb.server.factory_standard``, on one
@@ -68,9 +68,9 @@ Works with:   src/crb/factory/loop.py (``_assess`` calls ``decide_entry``; ``_de
               src/crb/server/decisions.py (``cell_signed`` decides "sign-off due")
 Tested by:    tests/test_factory_entry_gate.py, tests/test_server_decisions.py
 Touch when:   never for a new repository; the organisation's validity report lands
-              (:func:`points_agreement_passed`); the operator fixes ADR-0026 item 8's size value; a
-              new stop is added (a code here, a status in loop.py, a sentence in feedback.py and the
-              UI).
+              (:func:`points_agreement_passed`); a recorded decision changes ADR-0026 item 8's
+              size value; a new stop is added (a code here, a status in loop.py, a sentence in
+              feedback.py and the UI).
 Claims:       a proven standard licenses an attempt on its arm, never a merge; "not built" is
               the gate's word, never "built and withheld" (docs/EVIDENCE-AND-CLAIMS.md).
 """

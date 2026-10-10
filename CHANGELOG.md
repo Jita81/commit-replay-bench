@@ -20,6 +20,23 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   the worker, the inbox, the map and the class page. The map serves it beside the tier as each
   cell's `signed`, and null where the gate never reads it. G-103 and G-303 record what is left.
 
+- **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
+  [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
+  proposed values, so its status is Accepted and PLAN's operator acts are done.
+  [docs/reviews/2026-10-09-wave-3-registration.md](docs/reviews/2026-10-09-wave-3-registration.md)
+  sets out item 13's protocol; the £80 ceiling with its stage-1 line, stop rule and report; Claude
+  as the reviewer Paul tasked, with Paul's random draw to measure agreement; the stage-2 statement's
+  formula; and the steps after the restart, each not yet run. The product does not hold a campaign's
+  ceiling: Claude Code holds it by stopping the campaign (P-775, G-957).
+
+- **A killed command no longer holds its runner open** (P-774, defect I-09;
+  [#83](https://github.com/Jita81/commit-replay-bench/pull/83)). After a kill, every runner waited
+  with no bound for the killed command's output, and a process the group kill missed kept the pipes
+  open: a cancel test waited 60 s against its 10 s bound. Docker runs, local runs, the Docker
+  stream, the claude CLI handle and the provision fetch now kill the group again and then wait at
+  most `POST_KILL_DRAIN_S` (5 s). After that they keep the output read so far and log what still
+  holds the pipes. A ratchet fails any unbounded wait in a module that kills.
+
 - **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
   fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
   the guard's false-positive rate and tops up only the rows a registered reading counts. `GET

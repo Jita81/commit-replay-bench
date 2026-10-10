@@ -269,14 +269,14 @@ These are not wave items; each unblocks the work named beside it.
 | cut 2.0.0b1: the tag, the chart as an OCI artifact, a `v*` tag-protection ruleset | G-604 (release.22) | after Wave 4 |
 | a penetration test | F46, named in G-317's line | before go-live |
 | add a fine-grained token with Administration: read as the secret `BRANCH_PROTECTION_TOKEN` | G-930 (`product.evidence.6`): the daily `branch-protection` workflow goes green | any time |
-| accept ADR-0026 and fix its [operator] values: the per-cell budget, the first look, the size rule, the class-set split and thresholds | Wave 2's R and F, built on the proposals | now: Wave 2 is built on them |
-| once ADR-0026 is accepted, drop the `[operator]` markers on the values it fixed | the record reads as decided | after the acceptance |
+| accept ADR-0026 and fix the values it left to the operator: the per-cell budget, the first look, the size rule, the class-set split and thresholds | Wave 2's R and F, built on the proposals | **done** 2026-10-09: Paul Glover accepted every value as proposed (DL-371) |
+| once ADR-0026 is accepted, drop the proposal markers on the values it fixed | the record reads as decided | **done** 2026-10-09 (DL-371) |
 | merge `feat/ns1`, then open the pull request for `feat/ns2` and replace the `pull/new/feat/ns2` links in CHANGELOG with `pull/<n>` | Wave 2 on `main`; G-997's twin for Wave 2 | after `feat/ns1` merges |
 | run CI on the `feat/ns2` pull request, so the `fresh-clone` job and the other new jobs have their first runs | G-664 (`product.evidence.205`) | when the pull request opens |
 | add `fresh-clone` to `main`'s required checks | G-930's list; a skipped job no longer passes a merge | after its first green run |
 | upgrade across revision 0013 as DEPLOYMENT says: scale the API and the worker to 0, run the migration, never `helm rollback` across 0013 | the hash-chained audit trail on a running stack | at the first deploy of Wave 2 |
 | rebuild the shared development environment from `uv.lock` with CI's extras | G-766 | now |
-| register and fund the Wave 3 readings | Wave 3 | after Wave 2 |
+| register and fund the Wave 3 readings | Wave 3 | after Wave 2; funded 2026-10-09 with a hard ceiling of £80 in two stages (DL-371); the registration is prepared in `docs/reviews/2026-10-09-wave-3-registration.md` and not yet run |
 | a person-labelled sample and a second person for class sets and library entries | Wave 5 | after Wave 4 |
 
 ## After Wave 4, in gap order
@@ -294,6 +294,7 @@ These are not wave items; each unblocks the work named beside it.
 | what stream CLS left open: the linked-ticket reader, a replay pool keyed by the rule's class alone and the factory's own-cell licence for an organisation's class, class sets on Decisions, the map's organisation cells, and the merge, split and separation-test tools | G-761, G-762, G-763, G-764 |
 | the product | F43, G-604, F21, G-600 |
 | what Wave 6's Decisions stream left open: the browser's inbox fold, which no screen reads now | G-775 |
+| what the Wave 3 registration found: a campaign's money ceiling, which the product does not hold | G-957 |
 | what G-738 left open: the way forward of an unsigned stop on a cell that does not route `deliver`, and the map's tier shown without the entry gate's reading | G-103, G-303 |
 
 ## What each wave must do to its own artefacts
