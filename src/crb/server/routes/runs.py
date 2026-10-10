@@ -308,10 +308,11 @@ def append_system_event(
 AUDIT_ATTEMPTS = 3
 
 
-def commit_audited(
-    db: Session, write: Callable[[], None], *, before: Callable[[], None] | None = None
-) -> None:
-    """Apply ``write`` (a state change and its ``system`` event) and commit them together.
+def commit_audited[T](
+    db: Session, write: Callable[[], T], *, before: Callable[[], None] | None = None
+) -> T:
+    """Apply ``write`` (a state change and its ``system`` event), commit them together and
+    return what the committed attempt of ``write`` returned.
 
     ``before`` takes the locks that rank ahead of the ``events`` write lock (the ``users``
     lock, :data:`crb.store.events.TAKEN_BEFORE_EVENTS`) and runs first on EVERY attempt, so
@@ -328,19 +329,25 @@ def commit_audited(
     transaction is rolled back and ``write`` runs again on fresh rows (DL-068). The break
     can surface inside ``write`` too: a later query there (the next ``seq`` of the sign-in
     trace, ADR-0028 §8) autoflushes the earlier insert, so both are guarded.
+
+    A ``write`` hands its outcome back by returning it, never by filling a list the caller
+    holds: an attempt that is rolled back left its entry there, so a sign-in whose retry
+    was refused still got the first attempt's session.
     """
-    for attempt in range(AUDIT_ATTEMPTS):
+    attempt = 1
+    while True:
         if before is not None:
             before()
         lock_event_writes(db)
         try:
-            write()
+            committed = write()
             db.commit()
-            return
+            return committed
         except IntegrityError:
             db.rollback()
-            if attempt == AUDIT_ATTEMPTS - 1:
+            if attempt == AUDIT_ATTEMPTS:
                 raise
+        attempt += 1
 
 
 def _read_events_local(

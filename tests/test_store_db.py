@@ -1599,6 +1599,74 @@ def _straddles_a_reset(
     assert (_sign_in(app, ADMIN_PW), _sign_in(app, CHOSEN_PW)) == (200, 401)
 
 
+def test_a_sign_in_whose_retry_is_refused_keeps_no_session_from_the_lost_attempt(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #85, 2026-10-10: the sign-in's write left its session in a list the route
+    held, and the audited commit's retry (DL-068) runs the write again after a rollback. An
+    attempt that lost the trace's ``seq`` race had filled the list; the retry, after an admin
+    turned the account off, refused and recorded the refusal, and the route still issued the
+    lost attempt's session. The write now returns its outcome, and only the committed
+    attempt's reaches the route. Staged: the first attempt runs whole and then loses the
+    race; the account is turned off before the retry takes the lock."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy import select
+
+    import crb.server.routes.auth as auth_routes
+    from crb.store.models import User
+    from fixtures.server_seed import API_PREFIX
+
+    app = _app(backend, tmp_path, monkeypatch)
+    real_commit = auth_routes.commit_audited
+    lost: list[bool] = []
+
+    def lose_the_first_attempt(db: Any, write: Any, *, before: Any = None) -> Any:
+        if write.__name__ != "_signed_in":
+            return real_commit(db, write, before=before)
+
+        def write_then_lose() -> Any:
+            out = write()
+            if not lost:
+                lost.append(True)
+                raise IntegrityError("INSERT INTO events", {}, Exception("uq_events_trace_seq"))
+            return out
+
+        def turned_off_then_locked() -> None:
+            if lost:  # the retry: an admin's act committed after the lost attempt rolled back
+                with app.state.session_factory() as other:
+                    account = other.get(User, uid)
+                    assert account is not None
+                    account.active = False
+                    other.commit()
+            if before is not None:
+                before()
+
+        return real_commit(db, write_then_lose, before=turned_off_then_locked)
+
+    with TestClient(app) as admin:
+        uid, _ = _dana_signed_in(app, admin)
+    with app.state.session_factory() as s:
+        logins = len(s.scalars(select(Event).where(Event.action == "user.login")).all())
+    monkeypatch.setattr(auth_routes, "commit_audited", lose_the_first_attempt)
+    c = TestClient(app)
+    r = c.post(f"{API_PREFIX}/auth/login", json={"username": "dana", "password": CHOSEN_PW})
+    assert lost == [True], "the sign-in's first attempt never lost its race"
+    assert r.status_code == 401, r.text
+    assert r.json()["error"]["code"] == "invalid_credentials"
+    assert "crb_session" not in c.cookies and "crb_csrf" not in c.cookies
+    with app.state.session_factory() as s:
+        failed = s.scalars(select(Event).where(Event.action == "user.login_failed")).all()
+        # the answer is the one every failure gets; the trail keeps why
+        assert [(e.payload_json["target"], e.payload_json["reason"]) for e in failed] == [
+            (uid, "account_disabled")
+        ]
+        # the lost attempt's sign-in was rolled back with it
+        assert len(s.scalars(select(Event).where(Event.action == "user.login")).all()) == logins
+    # the refusal still holds its slot: the limiter was never told the sign-in succeeded
+    app.state.login_limiter.limit = 1
+    assert _sign_in(app, CHOSEN_PW) == 429
+
+
 def test_an_admin_route_reads_the_account_from_the_database_not_the_session(
     backend: Backend,
 ) -> None:
@@ -1684,10 +1752,10 @@ def _users_lock_audit(
 
     The lock is taken where the route's body, at its top level, either calls
     ``lock_users_table`` through the session, or calls ``commit_audited(db, write,
-    before=first)`` with ``write`` and ``first`` functions of its own, used nowhere else,
-    and ``first`` calling ``lock_users_table`` before anything else. A lock under an ``if``
-    or in a function nothing calls is no lock. Every call is placed by the top-level
-    statement it is in, and a call in ``write`` or ``first`` is under the lock.
+    before=first)``, its result kept or not, with ``write`` and ``first`` functions of its
+    own, used nowhere else, and ``first`` calling ``lock_users_table`` before anything else.
+    A lock under an ``if`` or in a function nothing calls is no lock. Every call is placed by
+    the top-level statement it is in, and a call in ``write`` or ``first`` is under the lock.
 
     A route passes when nothing before the lock goes through the session or writes; when
     nothing after ``commit_audited`` does either, and nothing after the first top-level
@@ -1759,9 +1827,9 @@ def _users_lock_audit(
         return any(isinstance(v, ast.Name) and v.id in names for v in given)
 
     def call_of(stmt: ast.stmt) -> ast.Call | None:
-        return (
-            stmt.value if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) else None
-        )
+        # the statement's call, its result kept or not (``signed = commit_audited(...)``)
+        value = stmt.value if isinstance(stmt, ast.Expr | ast.Assign | ast.AnnAssign) else None
+        return value if isinstance(value, ast.Call) else None
 
     def locks(stmt: ast.stmt, names: set[str]) -> bool:
         c = call_of(stmt)
@@ -2415,7 +2483,8 @@ def login(body, db):
     def _signed_in():
         account = db.get(User, uid, populate_existing=True)
         upgrade_password_hash(account, "verified", "new")
-    commit_audited(db, _signed_in, before=_users_first)
+        return account
+    signed = commit_audited(db, _signed_in, before=_users_first)
 """
     # the sign-out's shape: nothing through the session before the lock
     sign_out = """

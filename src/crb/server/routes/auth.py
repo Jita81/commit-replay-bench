@@ -217,24 +217,23 @@ def login(
     uid, verified = user.id, user.password_hash or ""
     # hashed before the lock, as the password was verified before it: argon2 is slow
     upgraded = rehash_if_outdated(verified, body.password)
-    signed: list[tuple[str, Principal]] = []
 
     def _users_first() -> None:
         lock_users_table(db)
 
-    def _signed_in() -> None:
+    def _signed_in() -> tuple[str, Principal] | None:
         # Read again under the users lock, so an admin's act that committed after the password
         # verified holds: a sign-in with the old password straddling a reset got a session
         # the reset could not end, and its hash upgrade replaced the reset (P-785).
         account = db.get(User, uid, populate_existing=True)
         if account is None or not account.active:
             _record_failed_login(db, body.username)
-            return  # refused, below: on the trail like every refused sign-in (DL-068)
+            return None  # refused, below: on the trail like every refused sign-in (DL-068)
         moved = account.password_hash != verified
         # the hash moved since the verify: the password typed must open the new one
         if moved and not verify_password(account.password_hash or "", body.password):
             _record_failed_login(db, body.username)
-            return
+            return None
         if upgraded is not None:
             # stored only over the hash the password was verified against (P-785)
             upgrade_password_hash(account, verified, upgraded)
@@ -243,17 +242,18 @@ def login(
         # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
         record_sign_in(db, user=account, by="local")
         # the session's version from the row as committed, never a later reading of it
-        signed[:] = [(credential_version(account), Principal.model_validate(account))]
+        return credential_version(account), Principal.model_validate(account)
 
-    commit_audited(db, _signed_in, before=_users_first)
-    if not signed:
+    # returned, not collected: a retry's refusal must not keep a rolled-back attempt's session
+    signed = commit_audited(db, _signed_in, before=_users_first)
+    if signed is None:
         # refused under the lock, its password right a moment before: the commit recorded
         # the refusal and let the lock go, and the reserved slot stands as the failure (the
         # name is an account's, as the verify found it)
         log.info("login failed", extra={"username": body.username, "client": ip})
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
     limiter.succeed(slot)  # only now: a sign-in refused under the lock still failed
-    cv, principal = signed[0]
+    cv, principal = signed
     request.state.user_id = uid
     set_session_cookie(response, settings, uid, cv)
     set_csrf_cookie(response, settings, uid, cv)
