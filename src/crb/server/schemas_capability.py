@@ -18,7 +18,8 @@ carry (action #4):
   when fewer than two rows are known or the rows span more than one apparatus.
 
 Nothing here is computed: every field is a core ``to_dict`` value re-typed so the
-OpenAPI document is honest and a drift is a diff.
+OpenAPI document is honest and a drift is a diff — except a cell's ``signed``, which
+the route fills from the entry gate's own reading (P-411).
 
 Navigation
 ----------
@@ -32,7 +33,8 @@ What it does: Re-types the core's ``to_dict`` values (``CapabilityCell``, ``Rout
 How:          Pydantic subclasses of the shapes in src/crb/server/schemas.py; no arithmetic.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md
-Works with:   src/crb/server/routes/capability.py (the only producer), src/crb/server/schemas.py
+Works with:   src/crb/server/routes/capability.py (the only producer; fills ``signed`` from
+              ``crb.factory.standard.cell_signed``), src/crb/server/schemas.py
               (the base shapes), src/crb/core/routing.py (``REASON_CODES``,
               ``CONTROLS_STATES``), src/crb/core/ledger.py (``FAILURE_KINDS``),
               src/crb/core/economics.py (``Economics.to_dict`` — ``EconomicsOut``),
@@ -277,6 +279,15 @@ class CapabilityCellSplitOut(CapabilityCellOut):
     #: Every arm of the reading that speaks for the cell (``null`` — none registered).
     reading: ReadingOut | None = None
     standard: CellStandardOut | None = None
+    #: Whether the entry gate reads the cell's (class × size) proven standard as signed: an
+    #: active sign-off made on its arm, class-set version, reading and apparatus, on the
+    #: repository's own checks arm and this deployment's posture class, whatever this view's
+    #: filters (``crb.factory.standard.cell_signed``, ADR-0026 item 8). The ONE reading of
+    #: "signed" (P-411): ``verification_tier`` records the sign-off overlay, which matches
+    #: sign-offs by another rule and never says whether an item would be built. ``null`` for a
+    #: cell that pools classes or sizes — the gate reads one class × size — and on an
+    #: organisation's class-set view, whose cells are keyed by the global parent (G-763).
+    signed: bool | None = None
     #: What the cell's briefs carried beyond their arm (label → distinct values): shown as
     #: provenance, never a reason to split the cell (ADR-0026 item 1).
     provenance: dict[str, list[str]] = Field(default_factory=dict)

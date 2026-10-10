@@ -220,6 +220,7 @@ from crb.factory.standard import (
     licensing_rungs,
     own_cell_licence,
     sizes_to_read,
+    standard_signed,
 )
 from crb.factory.testfirst import (
     AuthoredTest,
@@ -566,7 +567,7 @@ def _licence_line(standard: Standard | None, override_by: str) -> str:
     override of the sign-off clause (one person, one run, never a human attestation of the
     cell) or a deployment that does not require a signed cell. Never "signed" unless the
     delivered cell's standard itself carries an active sign-off."""
-    if standard is not None and standard.signed:
+    if standard is not None and standard_signed(standard):
         return (
             f"**signed cell** — the cell's proven standard (`{standard.arm}`) carries an "
             "active sign-off"
@@ -1102,7 +1103,7 @@ class FactoryLoop:
         may lift it. ``route`` is the delivered cell's route (the honesty floor's reading)."""
         s = self.spec
         std = lic.standard
-        if not s.require_signed_cell or (std is not None and std.signed):
+        if not s.require_signed_cell or standard_signed(std):
             return ""
         override = entry_override or self._override_by()
         refused = _override_refusal(route, override, actor=s.actor) if override else ""
@@ -1297,7 +1298,7 @@ class FactoryLoop:
             "estimated_cell": f"{item.capability_class}|{item.size_estimate}",
             "licence": {
                 **lic.to_dict(),
-                "signed": bool(lic.standard is not None and lic.standard.signed),
+                "signed": standard_signed(lic.standard),
                 "override_by": override,
             },
         }

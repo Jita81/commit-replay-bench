@@ -98,7 +98,7 @@ import httpx
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.capability import PROJECTION_CLASS_SIZE
 from crb.core.redact import redact_and_cap_head
@@ -118,10 +118,10 @@ from crb.factory.readiness import CATALOGUE, SLOT_VALUE, assess, sign, slots_for
 from crb.factory.standard import (
     CALIBRATABLE,
     NEED_FAILING_TEST,
-    CellRef,
     Entry,
     Readers,
     StandardFor,
+    cell_signed,
     gate_for,
     is_test_need,
 )
@@ -165,8 +165,6 @@ from crb.server.intake import (
     poll_repository,
     register_approved,
 )
-from crb.server.posture_view import deployment_posture_class
-from crb.server.prevention_state import checks_arm_in
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
     POSTURE_DEPLOYMENT,
@@ -1142,10 +1140,29 @@ def list_tasks(
     repo: str, viewer: ViewerDep, db: DbDep, factory: SessionFactoryDep, settings: SettingsDep
 ) -> list[FactoryTaskOut]:
     del viewer
+    return tasks_for(db, factory, settings, repo)
+
+
+def tasks_for(
+    db: Session,
+    factory: sessionmaker[Session],
+    settings: Any,
+    repo: str,
+    *,
+    readers: Readers | None = None,
+) -> list[FactoryTaskOut]:
+    """``GET /factory/{repo}/tasks``'s items (404 for a repository nobody connected). The
+    entry gate's readers are bound once — or given, by a caller that has bound them already
+    (the Decisions inbox, P-411) — and shared by the cell routes' ``deliverable`` and the
+    preview of an item no run has reached."""
     get_repo_or_404(db, repo)
     home = _home(settings, repo)
     views = home.task_views()
-    routes = _cell_routes(db, factory, repo, settings) if views else {}
+    if not views:
+        return []
+    if readers is None:
+        readers = _readers(db, settings, repo)
+    routes = _cell_routes(db, factory, repo, settings, readers.standard_for)
     # G-904 — the stopped item's own record, so its way forward can carry the superseding
     # item already drafted; ``taken`` keeps that draft's id off one the register route
     # would refuse. A repository whose backlog has gone serves the way forward without it.
@@ -1161,7 +1178,6 @@ def list_tasks(
         ).all():
             run_by_row[str(row_id)] = str(run_id or "")
     out: list[FactoryTaskOut] = []
-    readers: Readers | None = None
     for v in views:
         d = v.to_dict()
         d.pop("row_id")
@@ -1169,8 +1185,6 @@ def list_tasks(
         if d.get("entry") is None and v.status == "pending" and item is not None:
             # ADR-0026 item 8 — an item no run has reached yet is told now what the next
             # run's pre-build check will say: not built, and why (the same gate call)
-            if readers is None:
-                readers = _readers(db, settings, repo)
             preview = _entry_preview(
                 home, item, readers, require_signed_cell=settings.factory.require_signed_cell
             )
@@ -1193,7 +1207,11 @@ def list_tasks(
 
 
 def _cell_routes(
-    db: DbDep, factory: SessionFactoryDep, repo: str, settings: Settings
+    db: DbDep,
+    factory: SessionFactoryDep,
+    repo: str,
+    settings: Settings,
+    standard_for: StandardFor | None = None,
 ) -> dict[str, CellRouteOut]:
     """``class|size`` → the map's decision, from exactly the reading the worker's delivery
     gate uses (:meth:`crb.server.worker.Worker._route_lookup`): sighted rows and every
@@ -1206,9 +1224,11 @@ def _cell_routes(
     SAME two clauses the loop enforces — the route, and the sign-off the entry gate reads
     on the cell's proven standard (``standard_for``, ADR-0026 item 8: signed on its arm,
     class-set version and reading) — so what the screen predicts before a run spends
-    anything and what the gate does cannot disagree."""
+    anything and what the gate does cannot disagree. ``standard_for`` is a caller's binding
+    of the gate's readers (one per request); without it this binds them."""
     require_signed_cell = settings.factory.require_signed_cell
-    standard_for = _readers(db, settings, repo).standard_for
+    if standard_for is None:
+        standard_for = _readers(db, settings, repo).standard_for
     rows = rows_for_arm(
         factory,
         repo,
@@ -1226,7 +1246,7 @@ def _cell_routes(
             continue
         d = c.decision
         st = c.stats
-        signed = _standard_signed(standard_for, c.key.capability_class, c.key.size)
+        signed = cell_signed(standard_for, c.key.capability_class, c.key.size)
         out[f"{c.key.capability_class}|{c.key.size}"] = CellRouteOut(
             route=d.route,
             reason_code=d.reason_code,
@@ -1241,14 +1261,6 @@ def _cell_routes(
             deliverable=d.route == ROUTE_DELIVER and (signed or not require_signed_cell),
         )
     return out
-
-
-def _standard_signed(standard_for: StandardFor, capability_class: str, size: str) -> bool:
-    """Whether the cell's proven standard carries an active sign-off — the SAME reading the
-    entry gate's sign-off clause makes (:func:`crb.factory.standard.decide_entry`); a cell
-    with no proven standard, or only a ceiling, is never signed."""
-    std = standard_for(CellRef(capability_class, size))
-    return std is not None and std.licenses and std.signed
 
 
 @router.post(
@@ -1332,14 +1344,9 @@ class ProbeWaiverOut(BaseModel):
 
 def _readers(db: Session, settings: Any, repo: str) -> Readers:
     """The store-bound entry-gate readers for ``repo`` — on the repository's own checks arm
-    and this deployment's posture class, as the next run's worker binds them."""
-    repo_row = db.get(Repo, repo)
-    return factory_standard.readers_in(
-        db,
-        repo,
-        checks_arm=checks_arm_in(db, repo),
-        posture_class=deployment_posture_class(settings, repo_row),
-    )
+    and this deployment's posture class, as the next run's worker binds them
+    (:func:`crb.server.factory_standard.deployment_readers`, the inbox's binding too)."""
+    return factory_standard.deployment_readers(db, settings, repo)
 
 
 def _entry_preview(

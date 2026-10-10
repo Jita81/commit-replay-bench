@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
+  [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off
+  the capability map's tier while the entry gate reads the cell's signed standard, so it could ask
+  nobody while the gate stopped a cell's tickets, or keep asking for a cell the gate already
+  licensed. One predicate, `cell_signed`, now decides "signed" for the gate, the factory routes,
+  the worker, the inbox, the map and the class page. The map serves it beside the tier as each
+  cell's `signed`, and null where the gate never reads it. G-103 and G-303 record what is left.
+
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
   proposed values, so its status is Accepted and PLAN's operator acts are done.

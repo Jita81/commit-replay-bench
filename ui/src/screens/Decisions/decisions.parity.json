@@ -1,5 +1,5 @@
 {
-  "about": "One repository's inputs, and the rows both derivations must produce from them: src/crb/server/decisions.py (tests/test_server_decisions.py::test_server_rows_match_the_ui_fixture) and decisions.ts's decisionsFor (decisions.test.ts). Change it only with both.",
+  "about": "One repository's inputs, and the rows both derivations must produce from them: src/crb/server/decisions.py (tests/test_server_decisions.py::test_server_rows_match_the_ui_fixture) and decisions.ts's decisionsFor (decisions.test.ts). A cell's `signed` is the entry gate's own reading of its proven standard, as GET /capability-map serves it: it, not the tier or the sign-off list, decides \"sign-off due\" (bug.fix|S: the map lifted, the gate unsigned — due; bug.fix|XL: the gate signed, the map not lifted — no row; P-411, G-738). Change it only with both.",
   "repo": "alpha",
   "cells": [
     {
@@ -14,6 +14,7 @@
       "reason": "false-Q1 in the cell",
       "reason_code": "false_q1",
       "verification_tier": "automated-pass",
+      "signed": false,
       "shortfalls": []
     },
     {
@@ -28,6 +29,7 @@
       "reason": "every clause holds",
       "reason_code": "deliver",
       "verification_tier": "automated-pass",
+      "signed": false,
       "shortfalls": []
     },
     {
@@ -42,6 +44,37 @@
       "reason": "every clause holds",
       "reason_code": "deliver",
       "verification_tier": "human-verified",
+      "signed": true,
+      "shortfalls": []
+    },
+    {
+      "capability_class": "bug.fix",
+      "size": "S",
+      "n": 40,
+      "n_tasks": 12,
+      "point": 0.9,
+      "ci_low": 0.8,
+      "ci_high": 0.96,
+      "route": "deliver",
+      "reason": "every clause holds",
+      "reason_code": "deliver",
+      "verification_tier": "human-verified",
+      "signed": false,
+      "shortfalls": []
+    },
+    {
+      "capability_class": "bug.fix",
+      "size": "XL",
+      "n": 24,
+      "n_tasks": 10,
+      "point": 0.9,
+      "ci_low": 0.8,
+      "ci_high": 0.96,
+      "route": "deliver",
+      "reason": "every clause holds",
+      "reason_code": "deliver",
+      "verification_tier": "automated-pass",
+      "signed": true,
       "shortfalls": []
     },
     {
@@ -56,6 +89,7 @@
       "reason": "oracle strength 0.58 < 0.80 — green cannot license auto-delivery",
       "reason_code": "oracle_weak",
       "verification_tier": "automated-pass",
+      "signed": false,
       "shortfalls": []
     },
     {
@@ -70,6 +104,7 @@
       "reason": "no registered reading for the arm",
       "reason_code": "reading_unregistered",
       "verification_tier": "automated-pass",
+      "signed": false,
       "shortfalls": [
         {
           "code": "reading_unregistered",
@@ -99,6 +134,7 @@
       "reason": "the reading decided against the arm",
       "reason_code": "insufficient",
       "verification_tier": "automated-pass",
+      "signed": false,
       "shortfalls": []
     },
     {
@@ -113,6 +149,7 @@
       "reason": "no rows",
       "reason_code": "n_below_min",
       "verification_tier": "automated-pass",
+      "signed": false,
       "shortfalls": []
     }
   ],
@@ -123,6 +160,16 @@
       "cell": {
         "capability_class": "bug.fix",
         "size": "L"
+      },
+      "revoked": false,
+      "stale": false
+    },
+    {
+      "id": "s-2",
+      "repo": "alpha",
+      "cell": {
+        "capability_class": "bug.fix",
+        "size": "S"
       },
       "revoked": false,
       "stale": false
@@ -412,6 +459,16 @@
       "reason_code": "",
       "act": "Decide",
       "href": "/factory?repo=alpha&item=I-2"
+    },
+    {
+      "kind": "signoff_due",
+      "key": "bug.fix|S",
+      "title": "bug.fix × S clears the bar — attest it or decline",
+      "role": "approver",
+      "evidence": "n=40 on 12 tasks · 90% [80%, 96%] · deliver",
+      "reason_code": "deliver",
+      "act": "Attest",
+      "href": "/signoff?repo=alpha&cell=bug.fix%7CS"
     },
     {
       "kind": "signoff_due",
