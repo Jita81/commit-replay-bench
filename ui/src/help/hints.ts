@@ -228,7 +228,7 @@ export const HINTS = {
   'banner.shell.stop_condition':
     'A row on the ledger was credited clean although its belts contradict it. Delivery is halted everywhere until it is investigated; no setting can hide this banner.',
   'banner.shell.dev_autologin':
-    'This stack signs in any browser on the same computer as one named account, without a password. It works only on this machine and never through a proxy, and the server refuses to start with it in production. Sign out still works; reloading the page signs you in again.',
+    'This stack signs in any browser on the same computer as one named account, without a password. It refuses a request from another computer or one a proxy marks as forwarded (the UI dev server on this computer still works), and the server refuses to start with it in production. Sign out still works; reloading the page signs you in again.',
   'nav.version_line':
     'The three versions every claim cites: crb (the software), apparatus (the instrument that graded the rows) and policy (the routing rule). A sign-off made under an older apparatus is stale.',
   'nav.footer_help':
