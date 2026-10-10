@@ -283,10 +283,27 @@ def authenticate_local(db: Session, username: str, password: str) -> User | None
     ok = verify_password(stored, password)
     if user is None or not ok or not user.active:
         return None
-    # Transparent upgrade when argon2's parameters have moved on since the hash was made.
-    if hasher.check_needs_rehash(user.password_hash):
-        user.password_hash = hasher.hash(password)
+    # It writes nothing: the account is read again under the users lock before the sign-in
+    # writes it, and a hash upgrade is stored there (:func:`upgrade_password_hash`, P-785).
     return user
+
+
+def rehash_if_outdated(stored: str, password: str) -> str | None:
+    """A fresh hash of ``password`` when argon2's parameters have moved on since ``stored``
+    was made, else ``None``. It writes nothing: argon2 is slow, so the sign-in hashes before
+    the users lock and stores the result under it, with :func:`upgrade_password_hash`."""
+    if not stored or not hasher.check_needs_rehash(stored):
+        return None
+    return hasher.hash(password)
+
+
+def upgrade_password_hash(user: User, upgraded: str) -> None:
+    """Store ``upgraded`` — the same password, hashed under argon2's current parameters — on
+    ``user``; the caller commits. It is written under the users lock, and only while the
+    stored hash is still the one the password was verified against: a sign-in that verified
+    before an admin's reset stored its upgrade over the reset, and the old password opened
+    the account again (P-785). The hash moves, so :func:`credential_version` does too."""
+    user.password_hash = upgraded
 
 
 def count_users(db: Session) -> int:
@@ -1257,6 +1274,7 @@ __all__ = [
     "read_oidc_cookie",
     "read_session",
     "read_session_claims",
+    "rehash_if_outdated",
     "require_role",
     "rotate_session_nonce",
     "safe_next_path",
@@ -1270,6 +1288,7 @@ __all__ = [
     "set_password",
     "set_session_cookie",
     "set_user_active",
+    "upgrade_password_hash",
     "upsert_oidc_user",
     "validate_role",
     "validate_username",

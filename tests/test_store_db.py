@@ -1425,6 +1425,169 @@ def test_an_admin_act_while_the_person_changes_their_own_password_holds(
         assert not verify_password(row.password_hash, SELF_PW)
 
 
+@pytest.mark.parametrize("by", ["admin", "self"])
+def test_a_sign_out_everywhere_while_the_person_changes_their_password_holds(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, by: str
+) -> None:
+    """Found widening #85's ratchet to every write of a session nonce, 2026-10-10: a sign-out
+    everywhere — an admin's, or the person's own logout on another device — rotated the
+    nonce without the users lock. One that came while a password change held the lock,
+    after the change had found its session current, committed first; the change then set a
+    fresh cookie for the session that had just been ended, and it stayed signed in. The
+    change is held under the lock until the sign-out has reached the lock; the sign-out
+    waits there until the change commits, then reads the account again: an admin's ends
+    every session, the change's fresh one too, and the other device's logout finds its
+    session already ended by the change and rotates nothing."""
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.routes.admin as admin_routes
+    import crb.server.routes.auth as auth_routes
+    from crb.server.auth import verify_password
+    from crb.store.models import User
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX
+
+    app = _app(backend, tmp_path, monkeypatch)
+    held, reached = threading.Event(), threading.Event()
+    real_refuse, real_lock = admin_routes.refuse_an_ended_session, admin_routes.lock_users_table
+    refused: list[bool] = []
+
+    def refuse_then_hold(user: Any, cv: str) -> Any:
+        account = real_refuse(user, cv)
+        if not refused:
+            refused.append(True)
+            held.set()  # under the lock, the session found current
+            # a sign-out that does not wait for the lock never reaches it: this times out
+            reached.wait(timeout=3)
+        return account
+
+    def lock_then_note(db: Any) -> None:
+        if held.is_set():
+            reached.set()
+        real_lock(db)
+
+    with TestClient(app) as admin:
+        uid, dana = _dana_signed_in(app, admin)
+        other = TestClient(app)  # the person's other device
+        r = other.post(f"{API_PREFIX}/auth/login", json={"username": "dana", "password": CHOSEN_PW})
+        assert r.status_code == 200, r.text
+        other.headers["X-CSRF-Token"] = other.cookies["crb_csrf"]
+        monkeypatch.setattr(admin_routes, "refuse_an_ended_session", refuse_then_hold)
+        monkeypatch.setattr(admin_routes, "lock_users_table", lock_then_note)
+        monkeypatch.setattr(auth_routes, "lock_users_table", lock_then_note)
+
+        def signs_out() -> Any:
+            assert held.wait(timeout=5), "the change never took the lock"
+            try:
+                if by == "admin":
+                    return admin.post(f"{API_PREFIX}/users/{uid}/sessions/revoke")
+                return other.post(f"{API_PREFIX}/auth/logout")
+            finally:
+                reached.set()
+
+        changed, signed_out = at_once(lambda: _change_own(dana), signs_out)
+        me = dana.get(f"{API_PREFIX}/auth/me").status_code
+    codes = [getattr(r, "status_code", r) for r in (changed, signed_out)]
+    with backend.factory() as s:
+        row = s.get(User, uid)
+        assert row is not None and row.password_hash is not None
+        rows = s.execute(text("SELECT action FROM events WHERE action LIKE 'user.sessions_%'"))
+        ended = sorted(a for (a,) in rows)
+        kept = verify_password(row.password_hash, SELF_PW)
+    if by == "admin":
+        # the change committed first; the sign-out everywhere ended its fresh session too
+        assert (codes, kept, ended, me) == ([200, 200], True, ["user.sessions_revoked"], 401)
+    else:
+        # the change committed first and ended the other device's session itself: the
+        # logout found it ended and rotated nothing, and this device stays signed in
+        assert (codes, kept, ended, me) == ([200, 204], True, [], 200)
+
+
+def test_a_sign_in_that_straddles_an_admin_reset_is_refused(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Found widening #85's ratchet to every write of a password hash, 2026-10-10: a sign-in
+    verified the password, then wrote the account (its last sign-in, and an argon2 upgrade
+    of the hash) without the users lock. An admin's reset that committed in between was
+    undone by the upgrade, and the old password opened the account again; without an
+    upgrade the sign-in still got a session for the password the reset had replaced. The
+    sign-in verifies before the lock (argon2 is slow) and is held there while the admin
+    resets; under the lock it reads the account again, finds the hash moved, checks the
+    password against the new one and is refused."""
+    _straddles_a_reset(backend, tmp_path, monkeypatch, rehash=False)
+
+
+def test_a_sign_in_that_straddles_an_admin_reset_never_upgrades_over_it(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sign-in of :func:`test_a_sign_in_that_straddles_an_admin_reset_is_refused`, with
+    argon2's parameters moved on since the hash was made: the upgrade it hashed before the
+    lock is of the old password, and it is never stored over the reset."""
+    _straddles_a_reset(backend, tmp_path, monkeypatch, rehash=True)
+
+
+def _straddles_a_reset(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rehash: bool
+) -> None:
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.auth as auth_mod
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX
+
+    app = _app(backend, tmp_path, monkeypatch)
+    verified, reset = threading.Event(), threading.Event()
+    real_verify, real_hasher = auth_mod.verify_password, auth_mod.hasher
+    checked: list[bool] = []
+
+    class _Outdated:
+        """argon2's hasher, with every stored hash made under parameters since moved on."""
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real_hasher, name)
+
+        def check_needs_rehash(self, stored: str) -> bool:
+            return True
+
+    def verify_then_wait(stored: str, password: str) -> bool:
+        ok = real_verify(stored, password)
+        if not checked:
+            checked.append(True)
+            verified.set()
+            # a sign-in that verified under the lock would keep the admin waiting: this
+            # times out
+            reset.wait(timeout=5)
+        return ok
+
+    with TestClient(app) as admin:
+        uid, _ = _dana_signed_in(app, admin)
+        if rehash:
+            monkeypatch.setattr(auth_mod, "hasher", _Outdated())
+        monkeypatch.setattr(auth_mod, "verify_password", verify_then_wait)
+
+        def signs_in() -> Any:
+            return TestClient(app).post(
+                f"{API_PREFIX}/auth/login", json={"username": "dana", "password": CHOSEN_PW}
+            )
+
+        def admin_resets() -> Any:
+            assert verified.wait(timeout=5), "the sign-in never verified the password"
+            try:
+                return admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": ADMIN_PW})
+            finally:
+                reset.set()
+
+        signed_in, by_admin = at_once(signs_in, admin_resets)
+    codes = [getattr(r, "status_code", r) for r in (signed_in, by_admin)]
+    assert codes == [401, 200], codes
+    assert signed_in.json()["error"]["code"] == "invalid_credentials"
+    assert (_sign_in(app, ADMIN_PW), _sign_in(app, CHOSEN_PW)) == (200, 401)
+
+
 def test_an_admin_route_reads_the_account_from_the_database_not_the_session(
     backend: Backend,
 ) -> None:
@@ -1449,11 +1612,21 @@ def test_an_admin_route_reads_the_account_from_the_database_not_the_session(
         assert _get_user(held, uid).display_name == "changed in another session"
 
 
-#: what writes an account's password or active flag, or withdraws every pending link — and,
-#: beside these, a route's own stamp on an ``Invitation`` and any helper that calls one
+#: what writes an account's password hash, session nonce or active flag, or withdraws every
+#: pending link — and, beside these, a route's own stamp on an ``Invitation`` and any helper
+#: that calls one
 USERS_WRITERS = frozenset(
-    {"supersede_invitations", "set_password", "set_account_active", "set_user_active"}
+    {
+        "supersede_invitations",
+        "set_password",
+        "set_account_active",
+        "set_user_active",
+        "rotate_session_nonce",
+        "upgrade_password_hash",
+    }
 )
+#: the account's fields that the users lock guards: every assignment of one is in a writer
+ACCOUNT_FIELDS = frozenset({"password_hash", "session_nonce", "active"})
 LINK_STAMPS = frozenset({"revoked", "accepted"})
 ROUTE_VERBS = frozenset({"get", "post", "put", "patch", "delete", "api_route"})
 #: a parameter is a session when it is named ``db`` or annotated with one of these
@@ -1461,31 +1634,59 @@ SESSION_TYPES = frozenset({"DbDep", "Session"})
 #: what the ratchet finds in the routes package today: a route that leaves it fell out of
 #: the class, or out of the ratchet's sight
 USERS_WRITING_ROUTES = {
-    "admin.py": {"set_role", "change_own_password", "set_user_password", "set_active"},
+    "admin.py": {
+        "set_role",
+        "change_own_password",
+        "set_user_password",
+        "set_active",
+        "revoke_user_sessions",
+    },
+    "auth.py": {"login", "logout"},
     "invitations.py": {"revoke_invitation", "accept_invitation"},
+}
+#: the routes that check a password before the lock (argon2 is slow) and read the account
+#: again under it, each with the race test that proves what it decided from the first
+#: reading still holds when an admin acts in between
+VERIFIED_FIRST = {
+    "admin.py": {
+        "change_own_password": "test_an_admin_act_while_the_person_changes_their_own_password_holds"
+    },
+    "auth.py": {"login": "test_a_sign_in_that_straddles_an_admin_reset_is_refused"},
 }
 
 
-def _users_lock_audit(source: str) -> dict[str, str | None]:
+def _users_lock_audit(
+    source: str, verified_first: frozenset[str] = frozenset()
+) -> dict[str, str | None]:
     """Each route in ``source`` that writes an account or withdraws or spends a link, with
-    ``name:line`` of its first call through a session when that call is not
-    ``lock_users_table`` (``name:-`` when nothing goes through a session), else ``None``.
+    ``name:line`` of the first call that refuses it, ``name:-`` when nothing does but it
+    never takes the lock, else ``None``.
 
     A route is a function decorated ``router.<verb>(...)``, ``async`` or not. It is in the
     class when it calls one of :data:`USERS_WRITERS`, stamps ``revoked`` or ``accepted`` in
     a module that names ``Invitation`` (an assignment, plain, annotated, augmented or to a
     tuple; ``setattr``; ``.values(...)``), or calls a function of the module that does
-    either, at any depth. A call goes through a session when it is a method of one or takes
-    one as an argument, positional or keyword.
+    either, at any depth — its own nested functions included. A call goes through the
+    session when it is a method of it or takes it as an argument, positional or keyword; a
+    route with two sessions is refused at its ``def``, as the ratchet cannot tell which one
+    the lock holds.
 
-    A route passes when its first call through the session is ``lock_users_table``, or when
-    everything it reads before the lock is the account (``_get_user``) and its first call
-    through the session after the lock reads the account again, before anything writes:
-    ``_get_user`` refreshes the very object it returned before (``populate_existing``), so
-    nothing the route writes is the earlier reading's. What the route decided from that
-    reading is its own test's to prove (the self-service change verifies the password before
-    the lock, then refuses a session an admin ended in between)."""
+    The lock is taken where the route's body, at its top level, either calls
+    ``lock_users_table`` through the session, or calls ``commit_audited(db, write,
+    before=first)`` with ``write`` and ``first`` functions of its own, used nowhere else,
+    and ``first`` calling ``lock_users_table`` before anything else. A lock under an ``if``
+    or in a function nothing calls is no lock. Every call is placed by the top-level
+    statement it is in, and a call in ``write`` or ``first`` is under the lock.
+
+    A route passes when nothing before the lock goes through the session or writes; when
+    nothing after ``commit_audited`` does either, and nothing after the first top-level
+    ``commit()`` that follows a plain lock writes. A route in ``verified_first`` may read
+    before the lock, writing nothing, when its first call through the session under the
+    lock reads the account again — ``_get_user(db, …)``, the same call as any it made
+    before, or ``db.get(User, …, populate_existing=True)`` — before anything writes: what
+    it decided from the first reading is its own race test's to prove."""
     import ast
+    from collections import Counter
 
     tree = ast.parse(source)
     funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
@@ -1528,15 +1729,15 @@ def _users_lock_audit(source: str) -> dict[str, str | None]:
     ):  # a helper that calls a writer is one
         writers |= more
 
-    def sessions(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    def sessions(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
         a = fn.args
-        found = set()
+        found = []
         for p in [*a.posonlyargs, *a.args, *a.kwonlyargs]:
             ann = [] if p.annotation is None else list(ast.walk(p.annotation))
             types = {n.id for n in ann if isinstance(n, ast.Name)}
             types |= {n.attr for n in ann if isinstance(n, ast.Attribute)}
             if p.arg == "db" or types & SESSION_TYPES:
-                found.add(p.arg)
+                found.append(p.arg)
         return found
 
     def through(c: ast.Call, names: set[str]) -> bool:
@@ -1545,6 +1746,64 @@ def _users_lock_audit(source: str) -> dict[str, str | None]:
             return True
         given = [*c.args, *(k.value for k in c.keywords)]
         return any(isinstance(v, ast.Name) and v.id in names for v in given)
+
+    def call_of(stmt: ast.stmt) -> ast.Call | None:
+        return (
+            stmt.value if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) else None
+        )
+
+    def locks(stmt: ast.stmt, names: set[str]) -> bool:
+        c = call_of(stmt)
+        return c is not None and called(c) == "lock_users_table" and through(c, names)
+
+    def commits(stmt: ast.stmt, names: set[str]) -> bool:
+        c = call_of(stmt)
+        on = c.func.value if c is not None and isinstance(c.func, ast.Attribute) else None
+        return called(c) == "commit" and isinstance(on, ast.Name) and on.id in names if c else False
+
+    def locked_commit(
+        stmt: ast.stmt, fn: ast.FunctionDef | ast.AsyncFunctionDef, names: set[str]
+    ) -> set[ast.stmt]:
+        """``write`` and ``first`` of a ``commit_audited`` that takes the lock, else none."""
+        c = call_of(stmt)
+        if c is None or called(c) != "commit_audited" or len(c.args) != 2:
+            return set()
+        db, write = c.args
+        first = next((k.value for k in c.keywords if k.arg == "before"), None)
+        if not (
+            isinstance(db, ast.Name)
+            and db.id in names
+            and isinstance(write, ast.Name)
+            and isinstance(first, ast.Name)
+        ):
+            return set()
+        own = {d.name: d for d in fn.body if isinstance(d, ast.FunctionDef)}
+        steps = own.get(write.id), own.get(first.id)
+        uses = Counter(n.id for n in body(fn) if isinstance(n, ast.Name))
+        if steps[0] is None or steps[1] is None or not steps[1].body:
+            return set()
+        if not locks(steps[1].body[0], names) or uses[write.id] != 1 or uses[first.id] != 1:
+            return set()
+        return {steps[0], steps[1]}
+
+    def reads_again(c: ast.Call, names: set[str]) -> bool:
+        if called(c) == "_get_user" and isinstance(c.func, ast.Name):
+            return bool(c.args) and isinstance(c.args[0], ast.Name) and c.args[0].id in names
+        on = c.func.value if isinstance(c.func, ast.Attribute) else None
+        return (
+            called(c) == "get"
+            and isinstance(on, ast.Name)
+            and on.id in names
+            and bool(c.args)
+            and isinstance(c.args[0], ast.Name)
+            and c.args[0].id == "User"
+            and any(
+                k.arg == "populate_existing"
+                and isinstance(k.value, ast.Constant)
+                and k.value.value is True
+                for k in c.keywords
+            )
+        )
 
     audit: dict[str, str | None] = {}
     for fn in funcs:
@@ -1555,49 +1814,107 @@ def _users_lock_audit(source: str) -> dict[str, str | None]:
             for d in fn.decorator_list
         ):
             continue
-        names = sessions(fn)
-        ordered = sorted(calls[fn], key=lambda c: (c.lineno, c.col_offset))
-        via = [c for c in ordered if through(c, names)]
-        if not via:
-            audit[fn.name] = f"{fn.name}:-"
+        found = sessions(fn)
+        if len(found) > 1:
+            audit[fn.name] = f"{fn.name}:{fn.lineno}"
             continue
-        locks = [i for i, c in enumerate(via) if called(c) == "lock_users_table"]
-        before = via[: locks[0]] if locks else via
-        after = via[locks[0] + 1 :] if locks else []
-        first_write = next((c for c in ordered if called(c) in writers), None)
-        reread = bool(
-            before
-            and after
-            and all(called(c) == "_get_user" for c in before)
-            and called(after[0]) == "_get_user"
-            and (first_write is None or ordered.index(after[0]) < ordered.index(first_write))
+        names = set(found)
+        point, steps = None, set()
+        for i, stmt in enumerate(fn.body):
+            steps = locked_commit(stmt, fn, names)
+            if locks(stmt, names) or steps:
+                point = i
+                break
+        last = next(
+            (
+                j
+                for j in range(len(fn.body))
+                if point is not None and j > point and commits(fn.body[j], names)
+            ),
+            None,
         )
-        audit[fn.name] = None if not before or reread else f"{fn.name}:{via[0].lineno}"
+        placed: list[tuple[str, ast.Call]] = []
+        for i, stmt in enumerate(fn.body):
+            if i == point:
+                continue
+            if stmt in steps:
+                where = "under"
+            elif point is None or i < point:
+                where = "before"
+            elif steps:
+                where = "after"
+            elif last is not None and i > last:
+                where = "committed"
+            else:
+                where = "under"
+            placed += [(where, n) for n in ast.walk(stmt) if isinstance(n, ast.Call)]
+        placed.sort(key=lambda p: (p[1].lineno, p[1].col_offset))
+
+        def via(c: ast.Call) -> bool:
+            return through(c, names)  # noqa: B023 — read in this iteration only
+
+        def writes(c: ast.Call) -> bool:
+            return called(c) in writers
+
+        if point is None:
+            first = next((c for _, c in placed if via(c) and called(c) != "lock_users_table"), None)
+            first = first or next((c for _, c in placed if writes(c)), None)
+            audit[fn.name] = f"{fn.name}:{first.lineno}" if first else f"{fn.name}:-"
+            continue
+        before = [c for w, c in placed if w == "before"]
+        under = [c for w, c in placed if w == "under"]
+        bad = [c for w, c in placed if w == "after" and (via(c) or writes(c))]
+        bad += [c for w, c in placed if w == "committed" and writes(c)]
+        if fn.name not in verified_first:
+            bad += [c for c in before if via(c) or writes(c)]
+        else:
+            bad += [c for c in before if writes(c)]
+            read = [c for c in before if via(c)]
+            again = next((c for c in under if via(c) and called(c) != "lock_users_table"), None)
+            write = next((c for c in under if writes(c)), None)
+            held = (
+                again is not None
+                and reads_again(again, names)
+                and (write is None or under.index(again) < under.index(write))
+                and all(ast.dump(c) == ast.dump(again) for c in read if called(c) == "_get_user")
+            )
+            bad += read[:1] if read and not held else []
+        first = min(bad, key=lambda c: (c.lineno, c.col_offset), default=None)
+        audit[fn.name] = f"{fn.name}:{first.lineno}" if first else None
     return audit
 
 
-def _reads_before_the_users_lock(source: str) -> list[str]:
+def _reads_before_the_users_lock(
+    source: str, verified_first: frozenset[str] = frozenset()
+) -> list[str]:
     """The routes of :func:`_users_lock_audit` that read before the lock and act on it."""
-    return sorted(bad for bad in _users_lock_audit(source).values() if bad)
+    return sorted(bad for bad in _users_lock_audit(source, verified_first).values() if bad)
 
 
 def test_a_route_that_writes_an_account_or_a_link_takes_the_users_lock_before_it_reads() -> None:
     """P-785, the class: the acceptance holds the ``users`` lock from before it reads the
-    link until it commits, and every other write of an account's password or active flag
-    holds it too, so a route that writes one of them, or withdraws or spends a link, and
-    reads the link or the account before it takes that lock acts on a reading the lock's
-    holder is about to make false. #81's two findings and #85's were that shape. Every such
-    route in the routes package takes ``lock_users_table`` before its first call through
-    its session, or reads only the account before it and reads the account again under it
-    before it writes — and the ratchet finds exactly the routes it found when it was
-    written."""
+    link until it commits, and every other write of an account's password, session nonce
+    or active flag holds it too, so a route that writes one of them, or withdraws or spends
+    a link, and reads the link or the account before it takes that lock acts on a reading
+    the lock's holder is about to make false. #81's two findings and #85's were that shape.
+    Every such route in the routes package takes ``lock_users_table`` before its first call
+    through its session, or is one of :data:`VERIFIED_FIRST` and reads the account again
+    under it before it writes; and the ratchet finds exactly the routes it found when it
+    was written."""
     import crb.server.routes as routes_pkg
 
+    for tests in VERIFIED_FIRST.values():
+        for name in tests.values():
+            assert callable(globals().get(name)), f"{name}: the race test is gone"
     root = Path(routes_pkg.__file__).parent
     audits = {
         path.name: audit
         for path in sorted(root.glob("*.py"))
-        if (audit := _users_lock_audit(path.read_text()))
+        if (
+            audit := _users_lock_audit(
+                path.read_text(), frozenset(VERIFIED_FIRST.get(path.name, {}))
+            )
+        )
     }
     offenders = {
         name: bad
@@ -1608,9 +1925,136 @@ def test_a_route_that_writes_an_account_or_a_link_takes_the_users_lock_before_it
     assert {name: set(audit) for name, audit in audits.items()} == USERS_WRITING_ROUTES
 
 
+def _account_field_writers(root: Path) -> tuple[set[str], dict[str, set[str]]]:
+    """Every function under ``root`` that assigns one of :data:`ACCOUNT_FIELDS` itself, as
+    ``path:name``, and every function that does or calls one that does, at any depth, by
+    the module it is in. A call is followed by its name: imported ``from crb…``, a module
+    imported under an alias, or a function of the same module. A nested function is its
+    own function, never a part of the one it is in."""
+    import ast
+
+    nested = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+    def own(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+        todo: list[ast.AST] = [s for s in fn.body if not isinstance(s, nested)]
+        out: list[ast.AST] = []
+        while todo:
+            n = todo.pop()
+            out.append(n)
+            todo.extend(c for c in ast.iter_child_nodes(n) if not isinstance(c, nested))
+        return out
+
+    def assigns(n: ast.AST) -> bool:
+        targets: list[ast.expr] = []
+        if isinstance(n, ast.Assign):
+            targets = n.targets
+        elif isinstance(n, (ast.AugAssign, ast.AnnAssign)):
+            targets = [n.target]
+        for t in targets:
+            for e in t.elts if isinstance(t, (ast.Tuple, ast.List)) else [t]:
+                if isinstance(e, ast.Attribute) and e.attr in ACCOUNT_FIELDS:
+                    return True
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "setattr":
+            key = n.args[1] if len(n.args) > 1 else None
+            return isinstance(key, ast.Constant) and key.value in ACCOUNT_FIELDS
+        return False
+
+    def path_of(module: str) -> str | None:
+        return module[4:].replace(".", "/") + ".py" if module.startswith("crb.") else None
+
+    mods: dict[str, tuple[dict[str, tuple[str, str]], dict[str, str], list[Any]]] = {}
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        names: dict[str, tuple[str, str]] = {}
+        aliases: dict[str, str] = {}
+        funcs: list[Any] = []
+        for n in ast.walk(ast.parse(path.read_text())):
+            if isinstance(n, ast.ImportFrom) and n.module and n.level == 0:
+                for a in n.names:
+                    if src := path_of(n.module):
+                        names[a.asname or a.name] = (src, a.name)
+                    if sub := path_of(f"{n.module}.{a.name}"):
+                        aliases[a.asname or a.name] = sub
+            elif isinstance(n, ast.Import):
+                for a in n.names:
+                    if a.asname and (sub := path_of(a.name)):
+                        aliases[a.asname] = sub
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                funcs.append((n, own(n)))
+        mods[rel] = (names, aliases, funcs)
+
+    def target(rel: str, c: ast.Call) -> tuple[str, str] | None:
+        names, aliases, _ = mods[rel]
+        if isinstance(c.func, ast.Name):
+            return names.get(c.func.id, (rel, c.func.id))
+        on = c.func.value if isinstance(c.func, ast.Attribute) else None
+        if isinstance(c.func, ast.Attribute) and isinstance(on, ast.Name) and on.id in aliases:
+            return aliases[on.id], c.func.attr
+        return None
+
+    every = [(rel, fn, nodes) for rel, (_, _, funcs) in mods.items() for fn, nodes in funcs]
+    found = {(rel, fn.name) for rel, fn, nodes in every if any(assigns(n) for n in nodes)}
+    direct = {f"{rel}:{name}" for rel, name in found}
+    while (
+        more := {
+            (rel, fn.name)
+            for rel, fn, nodes in every
+            if any(isinstance(n, ast.Call) and target(rel, n) in found for n in nodes)
+        }
+        - found
+    ):
+        found |= more
+    reach: dict[str, set[str]] = {}
+    for rel, name in found:
+        reach.setdefault(rel, set()).add(name)
+    return direct, reach
+
+
+def test_every_write_of_an_account_field_is_under_the_users_lock_ratchet() -> None:
+    """P-785, widened 2026-10-10: the lock ratchet above follows :data:`USERS_WRITERS` by
+    name, so a function that writes an account's password hash, session nonce or active
+    flag without being one of them, and a route that reaches one through it, were outside
+    its sight — the sign-in upgraded a password hash, and the sign-out and the revocation
+    of every session rotated a nonce, without the lock, and the ratchet passed. Every
+    assignment of :data:`ACCOUNT_FIELDS` in the package is in a function of the writers
+    the ratchet follows, and every function that reaches one is a writer, a route the
+    ratchet audits or a step of one, or a command line kept outside the server."""
+    import ast
+
+    import crb.server
+    import crb.server.routes as routes_pkg
+    from crb.cli.commands import users as cli_users
+
+    direct, reach = _account_field_writers(Path(crb.server.__file__).parents[1])  # src/crb
+    assert direct == {
+        "server/auth.py:rotate_session_nonce",
+        "server/auth.py:set_account_active",
+        "server/auth.py:set_password",
+        "server/auth.py:upgrade_password_hash",
+    }
+    assert reach.pop("server/auth.py") <= USERS_WRITERS
+    # the operator's command line sets a password with nothing else running: a known gap
+    assert reach.pop("cli/commands/users.py") == {"_go"}, cli_users.__file__
+    root = Path(routes_pkg.__file__).parent
+    for rel, names in reach.items():
+        assert rel.startswith("server/routes/"), (rel, names)
+        tree = ast.parse((root / Path(rel).name).read_text())
+        routes = USERS_WRITING_ROUTES.get(Path(rel).name, set())
+        steps = {
+            d.name
+            for fn in ast.walk(tree)
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name in routes
+            for d in fn.body
+            if isinstance(d, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        assert names <= routes | steps, (rel, names - routes - steps)
+
+
 def test_the_lock_ratchet_catches_a_read_before_the_lock() -> None:
     """The shapes #81 and #85 found are refused, with every way of writing them the ratchet
-    claims to see, and the shapes the fixes wrote pass."""
+    claims to see — a lock it cannot be sure is taken, a write after the lock ends, an
+    audited commit whose first step is not the lock — and the shapes the fixes wrote
+    pass."""
     probes = {
         # #81: the withdrawal read the link, then locked
         "read_first": """
@@ -1736,6 +2180,115 @@ def change(body, me, db):
     _get_user(db, me.id)
     set_password(user, body.new_password)
 """,
+        # a lock that only one branch takes is no lock
+        "branch_only_lock": """
+@router.put("/users/{user_id}/password")
+def set_pw(body, db):
+    if body.lock:
+        lock_users_table(db)
+    user = _get_user(db, body.user_id)
+    set_password(user, "x")
+""",
+        # nor is one in a function nothing calls
+        "lock_in_dead_def": """
+@router.put("/users/{user_id}/password")
+def set_pw(body, db):
+    def _never():
+        lock_users_table(db)
+    user = _get_user(db, body.user_id)
+    set_password(user, "x")
+""",
+        # a write on a way out before the lock
+        "early_return_unlocked": """
+@router.put("/users/{user_id}/password")
+def set_pw(body, db):
+    user = body.user
+    if body.quick:
+        set_password(user, "x")
+        return
+    lock_users_table(db)
+""",
+        # a route with two sessions: which one holds the lock?
+        "two_sessions": """
+@router.put("/users/me/password")
+def change(body, me, db, other: Session):
+    lock_users_table(db)
+    set_password(_get_user(other, me.id), body.new_password)
+""",
+        # a write after the commit that ended the lock
+        "write_after_commit": """
+@router.put("/users/{user_id}/password")
+def set_pw(user_id, db):
+    lock_users_table(db)
+    user = _get_user(db, user_id)
+    db.commit()
+    set_password(user, "x")
+""",
+        # the sign-out's shape without ``before=``: commit_audited takes the events lock only
+        "audited_without_first": """
+@router.post("/auth/logout")
+def logout(db):
+    def _users_first():
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, "u", populate_existing=True))
+    commit_audited(db, _ended)
+""",
+        # a check through the session before the audited commit
+        "checked_before_audited": """
+@router.post("/auth/logout")
+def logout(db):
+    if db.get(User, "u") is None:
+        return
+    def _users_first():
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, "u", populate_existing=True))
+    commit_audited(db, _ended, before=_users_first)
+""",
+        # a first step that is only sometimes given
+        "first_sometimes": """
+@router.post("/auth/logout")
+def logout(db, uid):
+    def _users_first():
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, uid, populate_existing=True))
+    commit_audited(db, _ended, before=_users_first if uid else None)
+""",
+        # a first step that goes through the session before it locks
+        "first_reads_then_locks": """
+@router.post("/auth/logout")
+def logout(db):
+    def _users_first():
+        db.flush()
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, "u", populate_existing=True))
+    commit_audited(db, _ended, before=_users_first)
+""",
+        # the write step also run on its own, outside the lock
+        "write_step_run_twice": """
+@router.post("/auth/logout")
+def logout(db):
+    def _users_first():
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, "u", populate_existing=True))
+    _ended()
+    commit_audited(db, _ended, before=_users_first)
+""",
+        # a call through the session after the audited commit
+        "used_after_audited": """
+@router.post("/auth/logout")
+def logout(db):
+    def _users_first():
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, "u", populate_existing=True))
+    commit_audited(db, _ended, before=_users_first)
+    rotate_session_nonce(db.get(User, "u"))
+""",
     }
     refused = {
         "read_first": ["revoke:4"],
@@ -1750,13 +2303,60 @@ def change(body, me, db):
         "augmented_stamp": ["revoke:4"],
         "setattr_stamp": ["revoke:4"],
         "values_stamp": ["revoke_all:4"],
-        "never_locks": ["set_pw:-"],
+        "never_locks": ["set_pw:4"],
         "no_reread": ["change:4"],
         "reread_after_the_write": ["change:4"],
         "link_read_then_reread": ["set_pw:4"],
         "reread_not_first": ["change:4"],
+        "branch_only_lock": ["set_pw:6"],
+        "lock_in_dead_def": ["set_pw:6"],
+        "early_return_unlocked": ["set_pw:6"],
+        "two_sessions": ["change:3"],
+        "write_after_commit": ["set_pw:7"],
+        "audited_without_first": ["logout:7"],
+        "checked_before_audited": ["logout:4"],
+        "first_sometimes": ["logout:7"],
+        "first_reads_then_locks": ["logout:5"],
+        "write_step_run_twice": ["logout:7"],
+        "used_after_audited": ["logout:9"],
     }
     assert {k: _reads_before_the_users_lock(src) for k, src in probes.items()} == refused
+    # a route allowed to verify first is held to the same shapes: no re-read, one after
+    # the write or after another call, another account's or another session's
+    verified = frozenset({"change"})
+    allowed = {
+        k: _reads_before_the_users_lock(probes[k], verified)
+        for k in ("own_password", "no_reread", "reread_after_the_write", "reread_not_first")
+    }
+    assert allowed == {k: ["change:4"] for k in allowed}
+    reread_other_account = """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    lock_users_table(db)
+    user = _get_user(db, body.user_id)
+    set_password(user, body.new_password)
+"""
+    reread_other_session = """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    lock_users_table(db)
+    with factory() as other:
+        user = _get_user(other, me.id)
+    set_password(user, body.new_password)
+"""
+    written_before_the_lock = """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    set_password(user, body.new_password)
+    lock_users_table(db)
+    _get_user(db, me.id)
+"""
+    for shape in (reread_other_account, reread_other_session):
+        assert _reads_before_the_users_lock(shape, verified) == ["change:4"], shape
+    assert _reads_before_the_users_lock(written_before_the_lock, verified) == ["change:5"]
     locked_first = """
 @router.put("/users/{user_id}/password")
 def set_pw(user_id, db):
@@ -1793,8 +2393,35 @@ def change(body, me, db):
     user = refuse_an_ended_session(_get_user(db, me.id), "cv")
     set_password(user, body.new_password)
 """
+    # the sign-in's shape: verify before the lock, read the account again in the write step
+    sign_in = """
+@router.post("/auth/login")
+def login(body, db):
+    user = authenticate_local(db, body.username, body.password)
+    uid = user.id
+    def _users_first():
+        lock_users_table(db)
+    def _signed_in():
+        account = db.get(User, uid, populate_existing=True)
+        upgrade_password_hash(account, "new")
+    commit_audited(db, _signed_in, before=_users_first)
+"""
+    # the sign-out's shape: nothing through the session before the lock
+    sign_out = """
+@router.post("/auth/logout")
+def logout(db):
+    def _users_first():
+        lock_users_table(db)
+    def _ended():
+        rotate_session_nonce(db.get(User, "u", populate_existing=True))
+    commit_audited(db, _ended, before=_users_first)
+"""
     assert _users_lock_audit(locked_first) == {"set_pw": None}
-    assert _users_lock_audit(reread_under_the_lock) == {"change": None}
+    assert _users_lock_audit(reread_under_the_lock, verified) == {"change": None}
+    assert _users_lock_audit(reread_under_the_lock) == {"change": "change:4"}
+    assert _users_lock_audit(sign_in, frozenset({"login"})) == {"login": None}
+    assert _users_lock_audit(sign_in) == {"login": "login:4"}
+    assert _users_lock_audit(sign_out) == {"logout": None}
     assert _users_lock_audit(locked_by_keyword) == {"change": None}
     assert _users_lock_audit(no_link) == {}
     assert _users_lock_audit(not_an_invitation) == {}

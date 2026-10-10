@@ -593,6 +593,10 @@ def revoke_user_sessions(
     change). The account can sign in again at once; to keep it out, deactivate it as well.
     Recorded as ``user.sessions_revoked``. When an admin signs themself out everywhere,
     this response clears their cookies too."""
+    # Under the lock a self-service password change holds: one that had found its session
+    # current went on to set a fresh cookie for it after this rotation committed, and the
+    # session signed out everywhere stayed signed in (P-785).
+    lock_users_table(db)
     user = _get_user(db, user_id)
     rotate_session_nonce(user)
     record_user_event(db, action="user.sessions_revoked", actor=admin.id, target=user)
