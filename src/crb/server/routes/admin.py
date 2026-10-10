@@ -548,6 +548,10 @@ def set_user_password(  # noqa: PLR0917 — FastAPI injects each dependency by n
 ) -> UserOut:
     """Set a local account's password. Every session the account holds ends on its next
     request; when the admin sets their own, this response re-issues their cookie."""
+    # Under the lock an acceptance of the account's link holds: one that had read the link
+    # as pending went on to replace this password with the person's and stamp the withdrawn
+    # link accepted (CodeRabbit on #81, 2026-10-10; docs/PREVENTION.md P-785).
+    lock_users_table(db)
     user = _get_user(db, user_id)
     set_password(user, body.password)
     record_user_event(db, action="user.password_set", actor=admin.id, target=user, by="admin")
@@ -597,6 +601,10 @@ def set_active(
     when it would leave no active admin, or none who can sign in. Idempotent. The
     idempotency and last-admin decisions are ``set_user_active``'s, taken under the users
     lock on a re-read row — the ``user`` loaded here is only the handle."""
+    # Activating withdraws the account's link, so the lock comes before any read, as in every
+    # route that withdraws or spends a link (docs/PREVENTION.md P-785); ``set_user_active``
+    # takes it again, which re-enters it, and still re-reads the row.
+    lock_users_table(db)
     user = _get_user(db, user_id)
     if not set_user_active(db, user, body.active, sign_in=SignInPaths.of(settings)):
         db.rollback()  # nothing to write: release the users lock now, not at teardown

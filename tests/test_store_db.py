@@ -24,15 +24,18 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               trace's ``seq`` until it commits (EI-1) and the events write lock holds a second
               writer until the first commits (P-196), and that the ``users`` lock is never
               taken after the ``events`` lock, so an organisation sign-in and an admin act at
-              once never deadlock (P-227), and that the decisions clock joins a concurrent
-              first stamp in both dialects (P-357).
+              once never deadlock (P-227), that the decisions clock joins a concurrent
+              first stamp in both dialects (P-357), and that a link's withdrawal and an admin's
+              password set wait for an acceptance under the ``users`` lock, with a ratchet on
+              every route that withdraws or spends a link (P-785).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/db.py (under test), src/crb/store/models.py (``APPEND_ONLY_TABLES``
               and the rows), tests/conftest_store.py (the backends), tests/test_store_migrate.py
-              (the same triggers through Alembic), docs/SECURITY.md (evidence integrity, §3.5)
+              (the same triggers through Alembic), docs/SECURITY.md (evidence integrity, §3.5),
+              src/crb/server/routes/invitations.py and src/crb/server/routes/admin.py (P-785)
 Tested by:    tests/test_store_db.py
 Touch when:   never for a new repository; a table is added (decide whether it is
               append-only — if so, add it to ``APPEND_ONLY_TABLES`` and ``_one_row`` here, and a
@@ -1133,6 +1136,288 @@ def test_an_organisation_sign_in_and_an_admin_act_at_once_never_deadlock(
             ),
         )
     assert results == [302, 200], results
+
+
+# ---------------------------------------------------------------------------
+# an invitation's link is spent, withdrawn or superseded one at a time (P-785)
+# ---------------------------------------------------------------------------
+
+#: the password the invited person chooses on the link's page, and the one the admin sets
+CHOSEN_PW = "the-person-chose-this-one"
+ADMIN_PW = "the-admin-set-this-one-instead"
+
+
+def _invited(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, admin: Any
+) -> tuple[dict[str, Any], Any]:
+    """``admin`` (a ``TestClient`` on the app :func:`_app` built) signs in as the seed's admin
+    and invites ``dana``; the acceptance of that link is then held at the barrier returned,
+    after it took the ``users`` lock and read the link as pending and before it writes
+    anything. Returns the invitation as created, and the barrier the other request meets."""
+    import threading
+
+    import crb.server.routes.invitations as invitation_routes
+    from fixtures.concurrency import pause_after
+    from fixtures.server_seed import API_PREFIX, login
+
+    login(admin, "admin")
+    r = admin.post(f"{API_PREFIX}/invitations", json={"username": "dana"})
+    assert r.status_code == 201, r.text
+    gate = threading.Barrier(2)
+    # ``is_local_account`` is the acceptance's first call after its read of the link
+    pause_after(monkeypatch, invitation_routes, "is_local_account", gate, timeout=5)
+    return dict(r.json()), gate
+
+
+def _app(backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The application on ``backend`` with the seed's accounts and no ambient settings."""
+    import os
+
+    from crb.server.app import create_app
+    from fixtures.server_seed import add_users, make_settings
+
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    store_db.init_db(backend.engine)
+    add_users(backend.factory)
+    return create_app(make_settings(tmp_path), backend.factory)
+
+
+def _accept(app: Any, token: str) -> Any:
+    from fastapi.testclient import TestClient
+
+    from fixtures.server_seed import API_PREFIX
+
+    return TestClient(app).post(
+        f"{API_PREFIX}/invitations/accept", json={"token": token, "password": CHOSEN_PW}
+    )
+
+
+def _invite_actions(backend: Backend) -> list[str]:
+    """What became of the link: the ``user.invite_*`` events, not the ``user.invited`` one."""
+    with backend.factory() as s:
+        rows = s.execute(text("SELECT action FROM events WHERE action LIKE 'user.invite%'"))
+        return sorted(a for (a,) in rows if a.startswith("user.invite_"))
+
+
+def test_a_link_withdrawn_while_it_is_being_accepted_is_refused_not_stamped_twice(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #81, 2026-10-10: the withdraw route read the invitation before it took
+    the ``users`` lock. On PostgreSQL a withdrawal that read ``pending`` while an acceptance
+    was in flight stamped ``revoked`` on a link the acceptance then stamped ``accepted``: one
+    invitation with both stamps and both events, and an open account the list called
+    withdrawn. The acceptance is held after it read the link as pending, with the lock
+    held; the withdrawal is let go at that moment. It now waits for the lock, reads the
+    spent link and is refused (409 ``already_accepted``), and the link carries one stamp."""
+    from fastapi.testclient import TestClient
+
+    from crb.store.models import Invitation
+
+    app = _app(backend, tmp_path, monkeypatch)
+    with TestClient(app) as admin:
+        made, gate = _invited(backend, tmp_path, monkeypatch, admin)
+        accepted, withdrawn = _accept_and_withdraw(app, admin, made, gate, monkeypatch)
+    codes = [getattr(r, "status_code", r) for r in (accepted, withdrawn)]
+    assert codes == [200, 409], codes
+    assert withdrawn.json()["error"]["code"] == "already_accepted"
+    inv_id = made["invitation"]["id"]
+    with backend.factory() as s:
+        inv = s.get(Invitation, inv_id)
+        assert inv is not None and inv.accepted and not inv.revoked
+    assert _invite_actions(backend) == ["user.invite_accepted"]
+
+
+def _accept_and_withdraw(
+    app: Any, admin: Any, made: dict[str, Any], gate: Any, monkeypatch: pytest.MonkeyPatch
+) -> list[Any]:
+    """The held acceptance and the admin's withdrawal of the same link, at once. The
+    withdrawal starts once the acceptance holds the ``users`` lock, and meets it at ``gate``
+    just before it asks for that lock itself."""
+    import itertools
+    import threading
+
+    import crb.server.routes.invitations as invitation_routes
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX
+
+    inv_id = made["invitation"]["id"]
+    locked = threading.Event()
+    calls = itertools.count()
+    real_lock = invitation_routes.lock_users_table
+
+    def lock(db: object) -> None:
+        if next(calls) == 0:  # the acceptance's own lock, taken first
+            real_lock(db)  # type: ignore[arg-type]
+            locked.set()
+            return
+        # the withdrawal meets the held acceptance here, then asks for the lock
+        with contextlib.suppress(threading.BrokenBarrierError):
+            gate.wait(timeout=5)
+        real_lock(db)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(invitation_routes, "lock_users_table", lock)
+
+    def withdraw() -> Any:
+        assert locked.wait(timeout=5), "the acceptance never took the users lock"
+        return admin.post(
+            f"{API_PREFIX}/invitations/{inv_id}/revoke", json={"reason": "sent to the wrong person"}
+        )
+
+    return at_once(lambda: _accept(app, made["token"]), withdraw)
+
+
+def test_an_admin_password_set_while_the_link_is_being_accepted_waits_its_turn(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #81, 2026-10-10: the admin's password route read the account before it
+    took the ``users`` lock. On PostgreSQL it set the admin's password and withdrew the link
+    while an acceptance that had already read the link as pending went on: it activated the
+    account, replaced the admin's password with the person's and stamped the withdrawn link
+    accepted. The acceptance is held after its read, with the lock held; the admin's
+    request is let go at that moment. It now waits for the lock: the acceptance completes,
+    then the admin's password is set over it and withdraws nothing, because nothing is
+    pending."""
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.routes.admin as admin_routes
+    from crb.store.models import Invitation
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX
+
+    app = _app(backend, tmp_path, monkeypatch)
+    real_lock = admin_routes.lock_users_table
+
+    def admin_waits_before_users(db: object) -> None:
+        with contextlib.suppress(threading.BrokenBarrierError):
+            gate.wait(timeout=5)
+        real_lock(db)  # type: ignore[arg-type]
+
+    with TestClient(app) as admin:
+        made, gate = _invited(backend, tmp_path, monkeypatch, admin)
+        uid, inv_id = made["invitation"]["user_id"], made["invitation"]["id"]
+        monkeypatch.setattr(admin_routes, "lock_users_table", admin_waits_before_users)
+        accepted, set_by_admin = at_once(
+            lambda: _accept(app, made["token"]),
+            lambda: admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": ADMIN_PW}),
+        )
+    codes = [getattr(r, "status_code", r) for r in (accepted, set_by_admin)]
+    assert codes == [200, 200], codes
+    with backend.factory() as s:
+        inv = s.get(Invitation, inv_id)
+        assert inv is not None and inv.accepted and not inv.revoked
+    assert _invite_actions(backend) == ["user.invite_accepted"]
+
+    def sign_in(password: str) -> int:
+        r = TestClient(app).post(
+            f"{API_PREFIX}/auth/login", json={"username": "dana", "password": password}
+        )
+        return r.status_code
+
+    assert (sign_in(ADMIN_PW), sign_in(CHOSEN_PW)) == (200, 401)
+
+
+#: what withdraws or spends a link: the helper that withdraws every pending one, and a
+#: route's own stamp on an ``Invitation``
+LINK_WRITERS = frozenset({"supersede_invitations"})
+LINK_STAMPS = frozenset({"revoked", "accepted"})
+
+
+def _reads_before_the_users_lock(source: str) -> list[str]:
+    """Each route in ``source`` that withdraws or spends a link but reads through ``db``
+    before it calls ``lock_users_table(db)``: ``name:line`` of the first such read."""
+    import ast
+
+    found = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef) or not any(
+            isinstance(d, ast.Call)
+            and isinstance(d.func, ast.Attribute)
+            and d.func.attr in {"get", "post", "put", "patch", "delete"}
+            for d in fn.decorator_list
+        ):
+            continue
+        nodes = list(ast.walk(fn))
+        calls = sorted(
+            (n for n in nodes if isinstance(n, ast.Call)), key=lambda n: (n.lineno, n.col_offset)
+        )
+        name = lambda c: c.func.id if isinstance(c.func, ast.Name) else getattr(c.func, "attr", "")  # noqa: E731
+        stamps = any(
+            isinstance(t, ast.Attribute) and t.attr in LINK_STAMPS
+            for n in nodes
+            if isinstance(n, ast.Assign)
+            for t in n.targets
+        )
+        if not stamps and not any(name(c) in LINK_WRITERS for c in calls):
+            continue
+
+        def reads_db(c: ast.Call) -> bool:
+            on_db = (
+                isinstance(c.func, ast.Attribute)
+                and isinstance(c.func.value, ast.Name)
+                and c.func.value.id == "db"
+            )
+            return on_db or any(isinstance(a, ast.Name) and a.id == "db" for a in c.args)
+
+        first = next((c for c in calls if reads_db(c)), None)
+        if first is not None and name(first) != "lock_users_table":
+            found.append(f"{fn.name}:{first.lineno}")
+    return found
+
+
+def test_a_route_that_withdraws_or_spends_a_link_takes_the_users_lock_before_it_reads() -> None:
+    """P-785, the class: the acceptance holds the ``users`` lock from before it reads the
+    link until it commits, so a route that withdraws or spends a link and reads the link or
+    the account before it takes that lock acts on a reading the acceptance is about to make
+    false. Both of #81's findings were that shape. Every route in the routes package that
+    calls :func:`supersede_invitations` or stamps ``revoked`` or ``accepted`` takes
+    ``lock_users_table(db)`` before its first read through ``db``."""
+    import crb.server.routes as routes_pkg
+
+    root = Path(routes_pkg.__file__).parent
+    offenders = {
+        path.name: bad
+        for path in sorted(root.glob("*.py"))
+        if (bad := _reads_before_the_users_lock(path.read_text()))
+    }
+    assert offenders == {}, offenders
+    # the ratchet sees what it guards: the routes that withdraw or spend a link are there
+    assert "revoke_invitation" in (root / "invitations.py").read_text()
+
+
+def test_the_lock_ratchet_catches_a_read_before_the_lock() -> None:
+    """The shapes #81 found are refused, and the shapes the fix wrote pass."""
+    read_first = """
+@router.post("/invitations/{invitation_id}/revoke")
+def revoke(invitation_id, db):
+    inv = db.get(Invitation, invitation_id)
+    lock_users_table(db)
+    inv.revoked = "now"
+"""
+    helper_first = """
+@router.put("/users/{user_id}/password")
+def set_pw(user_id, db):
+    user = _get_user(db, user_id)
+    supersede_invitations(db, user, actor="a", how="b")
+"""
+    locked_first = """
+@router.put("/users/{user_id}/password")
+def set_pw(user_id, db):
+    lock_users_table(db)
+    user = _get_user(db, user_id)
+    supersede_invitations(db, user, actor="a", how="b")
+"""
+    no_link = """
+@router.put("/users/{user_id}/role")
+def set_role(user_id, db):
+    user = _get_user(db, user_id)
+"""
+    assert _reads_before_the_users_lock(read_first) == ["revoke:4"]
+    assert _reads_before_the_users_lock(helper_first) == ["set_pw:4"]
+    assert _reads_before_the_users_lock(locked_first) == []
+    assert _reads_before_the_users_lock(no_link) == []
 
 
 # ---------------------------------------------------------------------------
