@@ -52,8 +52,11 @@ What it does: ``decide_entry`` returns the stop (or the entry) for one item befo
               licence before the build and on the delivered change's measured cell after it —
               a standard of another arm licenses nothing.
 How:          ``CellRef`` → ``StandardFor`` (a callable the worker binds to the pre-run map) →
-              ``Standard`` (arm, ceiling, signed); ``more_demanding`` orders two cells;
-              ``Entry`` / ``Licence`` are the recorded decisions.
+              ``Standard`` (arm, ceiling, signed); ``standard_signed`` / ``cell_signed`` is the
+              ONE reading of "signed" — the sign-off clause here, and every reader that must
+              agree with it (the task preview, the worker's lookup, the decisions inbox, the
+              map's ``signed``; P-411); ``more_demanding`` orders two cells; ``Entry`` /
+              ``Licence`` are the recorded decisions.
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 8),
               docs/adr/0003-one-routing-rule.md (the route gate; superseded in part)
@@ -61,8 +64,9 @@ Works with:   src/crb/factory/loop.py (``_assess`` calls ``decide_entry``; ``_de
               ``own_cell_licence``), src/crb/server/factory_standard.py (the store-bound readers),
               src/crb/server/worker.py (binds them once per run, before any build),
               src/crb/intake/feedback.py (the ticket's words for each stop),
-              src/crb/server/routes/factory.py (the calibration route and the task view)
-Tested by:    tests/test_factory_entry_gate.py
+              src/crb/server/routes/factory.py (the calibration route and the task view),
+              src/crb/server/decisions.py (``cell_signed`` decides "sign-off due")
+Tested by:    tests/test_factory_entry_gate.py, tests/test_server_decisions.py
 Touch when:   never for a new repository; the organisation's validity report lands
               (:func:`points_agreement_passed`); the operator fixes ADR-0026 item 8's size value; a
               new stop is added (a code here, a status in loop.py, a sentence in feedback.py and the
@@ -249,6 +253,21 @@ class ArmReading:
 
 #: ``cell → Standard | None`` — the reader the gate is given (bound to the pre-run map).
 StandardFor = Callable[[CellRef], "Standard | None"]
+
+
+def standard_signed(standard: Standard | None) -> bool:
+    """Whether a cell's proven standard carries an active sign-off, as the entry gate's
+    sign-off clause reads it (:func:`decide_entry`): no proven standard, or only an ``S3``
+    ceiling, is never signed. The ONE reading of "signed" — the gate, the task preview, the
+    worker's lookup, the decisions inbox, the map's ``signed``, the class page and the run's
+    licence line all call it (P-411); only :meth:`Standard.to_dict` serves the raw field."""
+    return standard is not None and standard.licenses and standard.signed
+
+
+def cell_signed(standard_for: StandardFor, capability_class: str, size: str) -> bool:
+    """:func:`standard_signed` of the (class × size) cell's standard, read through the gate's
+    own reader — what an item of that class and size would meet at the sign-off clause."""
+    return standard_signed(standard_for(CellRef(capability_class, size)))
 
 
 # --- the validity report's seam (ADR-0026 item 9) -----------------------------------------
@@ -501,7 +520,7 @@ def decide_entry(
     # EVERY cell the size rule read must be signed, not only the one applied: a signed
     # larger cell never hides an unsigned estimate cell (none read is missing a standard
     # or a ceiling here — either would have been the more demanding and stopped above)
-    unsigned = [sz for sz, st in read if st is None or not st.signed]
+    unsigned = [sz for sz, st in read if not standard_signed(st)]
     if require_signed_cell and unsigned:
         if not override_by:
             where = f"{capability_class} {' and '.join(unsigned)}"
@@ -707,6 +726,7 @@ __all__ = [
     "Readers",
     "Standard",
     "StandardFor",
+    "cell_signed",
     "decide_entry",
     "gate_for",
     "is_test_need",
@@ -716,4 +736,5 @@ __all__ = [
     "own_cell_licence",
     "points_agreement_passed",
     "sizes_to_read",
+    "standard_signed",
 ]

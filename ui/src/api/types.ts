@@ -1119,6 +1119,8 @@ export interface CapabilityCell {
   /** Every arm of the reading that speaks for the cell; `null` — none registered. */
   reading?: ReadingOutcome | null
   standard?: CellStandard | null
+  /** The entry gate's own reading of the (class × size) cell's proven standard: an active sign-off it reads, on the repository's checks arm and this deployment's posture class, whatever the view's filters. The ONE reading of "signed" (P-411) — `verification_tier` is the overlay's record, a second rule. `null` for a cell pooling classes or sizes, and on an organisation's class-set view (G-763). */
+  signed?: boolean | null
   /** What the briefs carried beyond their arm (label → distinct values) — never a split. */
   provenance?: Record<string, string[]>
 }

@@ -288,7 +288,7 @@ from crb.factory.delivery import (
     github_open_pr_fn,
 )
 from crb.factory.loop import FactoryLoop, FactorySpec, ItemOutcome
-from crb.factory.standard import CellRef, Readers
+from crb.factory.standard import Readers, cell_signed
 from crb.factory.testfirst import (
     AuthoredTest,
     TestAuthor,
@@ -3067,8 +3067,7 @@ class Worker:
             for c in cmap.cells:
                 if c.decision is not None:
                     st = c.stats
-                    std = standard_for(CellRef(c.key.capability_class, c.key.size))
-                    signed = std is not None and std.licenses and std.signed
+                    signed = cell_signed(standard_for, c.key.capability_class, c.key.size)
                     cache[f"{c.key.capability_class}|{c.key.size}"] = {
                         **c.decision.to_dict(),
                         "apparatus_versions": list(st.apparatus_versions) if st else [],

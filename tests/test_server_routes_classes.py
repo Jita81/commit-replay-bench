@@ -317,6 +317,25 @@ def test_a_signed_version_whose_report_passes_routes_and_its_class_page_reads_in
     assert [e.action for e in _events(env)][-2:] == ["class_set.signed", "class_set.revoked"]
 
 
+def test_a_ceiling_never_reads_signed_on_the_class_page(
+    env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-411: the class page reads "signed" by the gate's own clause (``standard_signed``),
+    not the bound standard's raw flag — so ``S3``, a ceiling that licenses nothing, never
+    reads signed there, whatever a sign-off record says."""
+    from crb.factory.standard import Readers, Standard
+    from crb.server import factory_standard
+
+    ceiling = Standard("S3", signed=True, reading_id="r-ceiling")
+    monkeypatch.setattr(
+        factory_standard, "readers_in", lambda *a, **k: Readers(standard_for=lambda c: ceiling)
+    )
+    _propose(env, PARSER, CLI, CHORE)
+    page = env.get(f"/classes/{ORG}/v/1/classes/parser-fix").json()
+    standards = [x["standard"] for x in page["sizes"]]
+    assert standards and all(s["ceiling"] is True and s["signed"] is False for s in standards)
+
+
 def test_versions_are_numbered_and_the_index_lists_them(env: Env) -> None:
     _propose(env, PARSER, CLI)
     v2 = _propose(env, PARSER, CLI, CHORE)

@@ -98,7 +98,7 @@ from crb.core.library import (
 from crb.core.redact import redact
 from crb.core.taxonomy import CLASS_DEFINITIONS, UNCLASSIFIED
 from crb.factory.readiness import slots_for
-from crb.factory.standard import CellRef
+from crb.factory.standard import CellRef, standard_signed
 from crb.observability.events import StepStatus
 from crb.server import factory_standard
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep
@@ -434,7 +434,7 @@ def class_page(
                         {
                             "arm": std.arm,
                             "reading_id": std.reading_id,
-                            "signed": std.signed,
+                            "signed": standard_signed(std),
                             "ceiling": not std.licenses,
                         }
                         if std is not None

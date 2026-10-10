@@ -294,6 +294,7 @@ These are not wave items; each unblocks the work named beside it.
 | what stream CLS left open: the linked-ticket reader, a replay pool keyed by the rule's class alone and the factory's own-cell licence for an organisation's class, class sets on Decisions, the map's organisation cells, and the merge, split and separation-test tools | G-761, G-762, G-763, G-764 |
 | the product | F43, G-604, F21, G-600 |
 | what Wave 6's Decisions stream left open: the browser's inbox fold, which no screen reads now | G-775 |
+| what G-738 left open: the way forward of an unsigned stop on a cell that does not route `deliver`, and the map's tier shown without the entry gate's reading | G-103, G-303 |
 
 ## What each wave must do to its own artefacts
 

@@ -4,9 +4,11 @@
  * Navigation
  * ----------
  * What it is:   Tests for `decisionsFor`.
- * What it does: Pins that a `deliver` cell without an active sign-off is "sign-off due"
- *               (approver, deep-linked with `?cell=`), that a signed cell is not, that a
- *               revoked sign-off does not count as signed, that a `human` cell is "routed
+ * What it does: Pins that a `deliver` cell the entry gate does not read as signed (the
+ *               served `signed`, never the tier — G-738) is "sign-off due" (approver,
+ *               deep-linked with `?cell=`), that a cell it reads signed is not, that a cell
+ *               served without that reading falls back to the active sign-offs (a revoked one
+ *               does not count), that a `human` cell is "routed
  *               to a human" carrying its reason, that `do_not_ship` sorts first, that an
  *               unsigned structural gap on a factory item is a row for the approver, that
  *               a review verdict of accept-with-edit / reject is a rework row, that a clean
@@ -55,7 +57,17 @@ describe('decisionsFor', () => {
     expect(evidenceStats({ evidence: 'method_path, response_shape' })).toBe('method_path, response_shape')
   })
 
-  it('an active sign-off clears the row; a revoked one does not', () => {
+  it('the entry gate’s own reading, served as signed, decides: never the tier or the sign-off list (G-738)', () => {
+    // the map lifted the cell and a sign-off is active, but the gate reads its standard unsigned: due
+    const earned = cell({ verification_tier: 'human-verified', signed: false })
+    const due = decisionsFor({ repo: 'alpha', cells: [earned], signoffs: [signoff({})], tasks: [] })
+    expect(due.map((r) => [r.kind, r.key, r.role])).toEqual([['signoff_due', 'bug.fix|XS', 'approver']])
+    // the gate reads it signed though nothing listed lifts the map: nobody is waiting
+    const signed = cell({ verification_tier: 'automated-pass', signed: true })
+    expect(decisionsFor({ repo: 'alpha', cells: [signed], signoffs: [], tasks: [] })).toHaveLength(0)
+  })
+
+  it('an active sign-off clears the row; a revoked one does not — for a cell served without the gate’s reading, the list is the fallback', () => {
     expect(decisionsFor({ repo: 'alpha', cells: [cell({})], signoffs: [signoff({})], tasks: [] })).toHaveLength(0)
     expect(decisionsFor({ repo: 'alpha', cells: [cell({})], signoffs: [signoff({ revoked: true })], tasks: [] })).toHaveLength(1)
   })

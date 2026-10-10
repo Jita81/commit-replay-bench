@@ -20,8 +20,10 @@ What it does: Pins that only measured cells appear at one apparatus (``apparatus
               human; thin or unmeasured controls withhold deliver; a finished controls run with
               counts but no event still counts), the thin cell calibrates, the legacy cell is a
               separate apparatus, summaries with and without a profile, projections, the empty
-              repo and 404, that a sign-off lifts the tier, that a false-Q1 row inserted around
-              the ledger REFUSES the map, that a viewer reads, the per-cell route decisions
+              repo and 404, that a sign-off lifts the tier, that each class × size cell serves
+              the entry gate's own ``signed`` reading beside it (G-738), that a false-Q1 row
+              inserted around the ledger REFUSES the map, that a viewer reads, the per-cell
+              route decisions
               following the latest verdict, the failure split per repo and run, that
               sighted and blind rows are never pooled, and that every cell and the map carry
               their economics (known counts, t intervals, apparatus) and refuse to pool
@@ -59,8 +61,19 @@ from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
 from fixtures import pyrepo as pr
 from fixtures.posture import posture_row
-from fixtures.proven import S1
-from fixtures.server_seed import ALPHA, BETA, RUN_IDS, Env, envelope, login, make_env, task_id
+from fixtures.proven import S1, add_rows, add_tasks, commit
+from fixtures.readings import SEALED
+from fixtures.server_seed import (
+    ALPHA,
+    BETA,
+    DELIVER_CELL,
+    RUN_IDS,
+    Env,
+    envelope,
+    login,
+    make_env,
+    task_id,
+)
 from fixtures.signoff_seed import attested_body, clear_policy, prove_deliver_cell, score_oracle
 
 CELL_KEYS = {
@@ -584,6 +597,39 @@ class TestCapabilityMap:
         assert summary["signoffs_applied"] == 1
         # the attestation is repo-scoped: beta's (empty) map does not borrow it
         assert env.get(f"/capability-map?repo={BETA}").json()["summary"]["signoffs_applied"] == 0
+
+    def test_a_cell_serves_the_entry_gates_own_signed_reading(self, env: Env) -> None:
+        """G-738 (P-411): beside the overlay's tier, a class × size cell serves ``signed`` —
+        the entry gate's own reading of its proven standard. An approver's attestation of one
+        builder's cell is read by the gate (``signed`` true) but never lifts the pooled map
+        cell, whose tier stays ``automated-pass``; a cell pooling sizes serves ``null``, as the
+        gate reads one class × size."""
+        login(env.client, "approver")
+        clear_policy(env)
+        assert _cells(env)["bug.fix|S"]["signed"] is False
+        r = env.post("/signoffs", json=attested_body(env, DELIVER_CELL, note="ok"))
+        assert r.status_code == 201, r.text
+        lifted = _cells(env)["bug.fix|S"]
+        assert lifted["signed"] is True and lifted["verification_tier"] == "automated-pass"
+        pooled = env.get(f"/capability-map?repo={ALPHA}&by=class").json()["cells"]
+        assert pooled and all(c["signed"] is None for c in pooled)
+
+    def test_an_organisations_class_set_view_serves_no_signed_reading(self, env: Env) -> None:
+        """P-411 / G-763: an organisation's class-set view keys its cells by the global parent,
+        while the entry gate reads an organisation-classified item at the organisation class's
+        own cell — so the view serves ``signed: null``, never the global standard's reading."""
+        login(env.client, "approver")
+        clear_policy(env)
+        r = env.post("/signoffs", json=attested_body(env, DELIVER_CELL, note="ok"))
+        assert r.status_code == 201, r.text
+        acme = "acme/classes@v1"
+        org_rows = [commit(i, "acme") for i in range(3)]
+        add_tasks(env.factory, 3, prefix="acme", cell=DELIVER_CELL)
+        add_rows(env.factory, org_rows, arm="S3", labels={"taxonomy": acme}, cell=DELIVER_CELL)
+        assert _cells(env)["bug.fix|S"]["signed"] is True
+        org = _cells(env, f"&taxonomy={acme}&posture={SEALED}")
+        assert org["bug.fix|S"]["taxonomy"] == acme
+        assert all(c["signed"] is None for c in org.values())
 
     def test_false_q1_row_refuses_the_map(self, env: Env) -> None:
         """A false-Q1 row inserted straight through the ORM (bypassing DbLedger) makes the

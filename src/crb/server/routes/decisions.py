@@ -32,22 +32,25 @@ Navigation
 What it is:   The ``/decisions`` route module — every due decision with its act, its link, the
               moment it became due and how long it has waited; or, with ``?count=1``, the
               badge's count.
-What it does: Reads each repository's inputs (the signed map, the factory tasks as served, the
-              prevention register, the library index, the stale sign-offs, the re-measurement
-              plan), derives the rows, fits each to the viewer's role, records when each row
-              first became due (the full reading only) and serves them. Never decides anything
-              and never writes evidence.
+What it does: Reads each repository's inputs (the signed map, the entry gate's reader of each
+              cell's proven standard, the factory tasks as served, the prevention register, the
+              library index, the stale sign-offs, the re-measurement plan), derives the rows,
+              fits each to the viewer's role, records when each row first became due (the full
+              reading only) and serves them. Never decides anything and never writes evidence.
 How:          ``inbox_for`` → ``rows_for_mode`` → ``rows_for_apparatus`` → ``rows_for_arm`` →
-              ``filter_posture`` → ``signed_map``; ``list_tasks``, ``register_for``,
+              ``filter_posture`` → ``signed_map``; ``deployment_readers``, bound once per
+              repository (the gate's ``standard_for``: a ``deliver`` cell is due when the gate
+              reads it unsigned — P-411); ``tasks_for`` on that binding, ``register_for``,
               ``library_index``, ``signoff_out`` and ``derive_remeasure`` (each route's own
               function, so a row reads what that page reads) → ``decision_rows`` →
               ``record_due`` → ``for_viewer`` → the response (the count's with its ``ETag``).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md,
               docs/adr/0015-signoffs-expire-with-the-apparatus.md
-Works with:   src/crb/server/decisions.py (the derivation and the clock),
+Works with:   src/crb/server/decisions.py (the derivation and the clock; its ``standard_for``
+              is the gate's reader, factory_standard.py's ``deployment_readers``),
               src/crb/server/routes/capability.py (``signed_map`` — the one reading),
-              src/crb/server/routes/factory.py (``list_tasks`` — the items as served),
+              src/crb/server/routes/factory.py (``tasks_for`` — the items as served),
               src/crb/server/routes/library.py (``library_index`` — the entries),
               src/crb/server/routes/learn.py (``derive_remeasure`` — the stale cells),
               src/crb/server/worker.py (the idle pass that keeps the clock running),
@@ -74,6 +77,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityCell
 from crb.core.redact import redact
 from crb.core.version import APPARATUS_VERSION
+from crb.factory.standard import Readers
+from crb.server import factory_standard
 from crb.server.auth import ViewerDep
 from crb.server.decisions import (
     DecisionRow,
@@ -103,7 +108,7 @@ from crb.server.routes.capability import (
     rows_for_mode,
     signed_map,
 )
-from crb.server.routes.factory import _way_forward, list_tasks
+from crb.server.routes.factory import _way_forward, tasks_for
 from crb.server.routes.learn import derive_remeasure, in_flight_runs
 from crb.server.routes.library import library_index
 from crb.server.routes.oracle import latest_controls_verdict
@@ -238,13 +243,14 @@ def _served_cells(
 
 
 def _served_tasks(
-    db: Session, factory: sessionmaker[Session], settings: Any, repo: str
+    db: Session, factory: sessionmaker[Session], settings: Any, repo: str, readers: Readers
 ) -> list[dict[str, Any]]:
     """The factory items as ``GET /factory/{repo}/tasks`` serves them — its own function, so an
     item not yet run carries the entry gate's preview and a stopped one its way forward, as
-    the Factory page shows. No backlog is no rows."""
+    the Factory page shows — read through the inbox's one binding of the gate's ``readers``.
+    No backlog is no rows."""
     try:
-        return [t.model_dump() for t in list_tasks(repo, _READER, db, factory, settings)]
+        return [t.model_dump() for t in tasks_for(db, factory, settings, repo, readers=readers)]
     except ApiError as exc:
         if exc.status_code == 404:
             return []
@@ -324,11 +330,14 @@ def inbox_for(
     (:data:`crb.server.decisions.IDLE_KEEPS_OPEN`) and this route resolves that kind."""
     if cells is None:
         cells = _served_cells(db, factory, settings, repo)
+    posture = posture_now(db, settings, repo) if posture_class is None else posture_class
+    # "sign-off due" is the entry gate's own reading (P-411): its readers, bound once as the
+    # next run's worker binds them — the repository's checks arm, this posture class — and
+    # shared with the factory items' preview and cell routes
+    gate = factory_standard.deployment_readers(db, settings, repo, posture_class=posture)
     if posture_class is None:
-        posture = posture_now(db, settings, repo)
-        tasks = _served_tasks(db, factory, settings, repo)
+        tasks = _served_tasks(db, factory, settings, repo, gate)
     else:
-        posture = posture_class
         tasks = _chain_tasks(settings, repo)
     register = register_for(db, factory, settings.home, repo, settings=settings).to_dict()
     plan, busy = _remeasure(db, factory, settings, repo, posture_class=posture_class)
@@ -341,6 +350,7 @@ def inbox_for(
         stale=_stale_signoffs(db, repo, posture),
         remeasure=plan,
         in_flight=busy,
+        standard_for=gate.standard_for,
     )
     return Inbox(rows=rows, measured=any(c.n > 0 for c in cells))
 

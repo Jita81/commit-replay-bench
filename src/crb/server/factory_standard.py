@@ -27,7 +27,9 @@ What it does: Reads every registered reading of the repository and the ledger's 
               comment; ``forward_states`` serves each ceiling's forward reading with its n.
 How:          ``readers_in`` / ``bind_readers`` → one read of readings, rows and sign-offs →
               closures over them; ``crb.core.reading.outcomes_for_cell`` per matching reading cell →
-              ``latest_outcome`` → ``Standard``.
+              ``latest_outcome`` → ``Standard``. ``deployment_readers`` is the API's binding
+              (the repository's checks arm, the deployment's posture class), shared by every
+              server reader that must say what the gate would.
 Layer:        server — docs/ARCHITECTURE.md#41-c4-level-2--containers
 ADRs:         docs/adr/0026-the-context-standard.md (items 2, 6 and 8),
               docs/adr/0025-routing-v2.md (the one apparatus a reading counts)
@@ -37,9 +39,12 @@ Works with:   src/crb/factory/standard.py (the gate, ``Readers``, ``CellRef``),
               src/crb/server/prevention_state.py (``current_checks_arm``),
               src/crb/server/posture_view.py (``deployment_posture_class``),
               src/crb/server/worker.py (binds it once per run and per intake pass),
-              src/crb/server/routes/factory.py (the task preview, calibration and polls)
+              src/crb/server/routes/factory.py (the task preview, calibration and polls; the
+              inbox's "sign-off due" in routes/decisions.py and the map's ``signed`` in
+              routes/capability.py read the same ``deployment_readers``)
 Tested by:    tests/test_factory_standard_binding.py,
-              tests/test_governed_delivery_e2e.py, tests/test_forward_reading_e2e.py
+              tests/test_governed_delivery_e2e.py, tests/test_forward_reading_e2e.py,
+              tests/test_server_decisions.py, tests/test_server_routes_capability.py
 Touch when:   never for a new repository; a new scope a reading counts on (bind it here,
               beside the checks arm and the posture class); the sign-off's binding changes.
 """
@@ -68,9 +73,12 @@ from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.standard import ArmReading, CellRef, Readers, Standard, points_agreement_passed
 from crb.server.class_set_state import routing_versions, size_agreement_passed
+from crb.server.posture_view import deployment_posture_class
+from crb.server.prevention_state import checks_arm_in
 from crb.server.routes.readings import load_readings
 from crb.server.routes.signoffs import load_signoff_records
 from crb.store.ledger import rows_in
+from crb.store.models import Repo
 
 
 def _matches(reading_cell: Mapping[str, str], cell: CellRef) -> bool:
@@ -309,6 +317,22 @@ def readers_in(session: Session, repo: str, *, checks_arm: str, posture_class: s
     )
 
 
+def deployment_readers(
+    session: Session, settings: Any, repo: str, *, posture_class: str | None = None
+) -> Readers:
+    """:func:`readers_in` bound as the next run's worker binds them when nothing overrides the
+    binding: on the repository's own checks arm (:func:`checks_arm_in`) and this deployment's
+    posture class (:func:`deployment_posture_class`) — or ``posture_class``, the worker's own
+    reading of it, whose settings the API's do not carry. The binding every server reader of
+    the gate's sign-off shares, so the task preview, the decisions inbox and the map's
+    ``signed`` read the standard the gate would (P-411)."""
+    if posture_class is None:
+        posture_class = deployment_posture_class(settings, session.get(Repo, repo))
+    return readers_in(
+        session, repo, checks_arm=checks_arm_in(session, repo), posture_class=posture_class
+    )
+
+
 def bind_readers(
     factory: sessionmaker[Session],
     repo: str,
@@ -324,6 +348,7 @@ def bind_readers(
 __all__ = [
     "arm_readings_of",
     "bind_readers",
+    "deployment_readers",
     "forward_states",
     "outcome_for",
     "readers_in",

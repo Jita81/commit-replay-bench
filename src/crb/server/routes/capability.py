@@ -33,10 +33,14 @@ What it does: Loads the repo's rows as ``GradeRow`` (a false-Q1 row refuses to l
               reduces them under the ONE routing rule with the repo's latest controls
               verdict and task-level oracle scores, overlays active sign-offs at read time,
               and returns only MEASURED cells — absence is honest-empty; every cell and the
-              map carry their economics (known counts, t intervals, apparatus — F35).
+              map carry their economics (known counts, t intervals, apparatus — F35); each
+              (class × size) cell of the global class set carries ``signed``, the entry
+              gate's own reading of its proven standard's sign-off (P-411), beside the
+              overlay's ``verification_tier`` (``null`` on an organisation's view — G-763).
 How:          ``rows_for_mode`` → ``rows_for_apparatus`` → ``rows_for_arm`` → ``signed_map``
               (= ``build_capability_map`` + ``apply_signoffs_to_map``) → ``cell_out`` per
-              measured cell; ``parse_by`` maps the ``?by=`` aliases onto ``CELL_FIELDS``.
+              measured cell, with the gate's ``standard_for`` (``deployment_readers``) →
+              ``cell_signed``; ``parse_by`` maps the ``?by=`` aliases onto ``CELL_FIELDS``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0003-one-routing-rule.md, docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/capability.py (``build_capability_map``, ``CapabilityCell`` — its
@@ -45,6 +49,8 @@ Works with:   src/crb/core/capability.py (``build_capability_map``, ``Capability
               src/crb/server/routes/oracle.py (``latest_controls_verdict`` /
               ``oracle_by_task`` — the one source shared with sign-off),
               src/crb/server/routes/signoffs.py (``load_signoff_records`` for the overlay),
+              src/crb/server/factory_standard.py (``deployment_readers`` — the entry gate's
+              reader, for ``signed``),
               src/crb/server/schemas_capability.py (the response shapes),
               src/crb/server/factory_state.py (``delivery_counts`` — the factory chain's
               pull requests per cell, served as ``n_delivered`` / ``n_merged``),
@@ -73,6 +79,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from crb.core.capability import (
     PROJECTION_CELL,
     PROJECTION_CLASS_SIZE,
+    WILDCARD,
     CapabilityCell,
     CapabilityMap,
     RepoChangeProfile,
@@ -95,6 +102,8 @@ from crb.core.signoff import apply_signoffs_to_map
 from crb.core.spec import SIZE_TIER_NAMES
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.core.version import APPARATUS_VERSION
+from crb.factory.standard import StandardFor, cell_signed
+from crb.server import factory_standard
 from crb.server.auth import ViewerDep
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import DeliveryCounts, FactoryHome, delivery_counts_matching
@@ -471,10 +480,14 @@ def cell_out(
     c: CapabilityCell,
     deliveries: Mapping[tuple[str, str], DeliveryCounts] | None = None,
     readings: Sequence[Reading] = (),
+    standard_for: StandardFor | None = None,
 ) -> CapabilityCellSplitOut:
     """A MEASURED cell as the API serves it: key, stats, decision, split, tier, apparatus —
     and, from the factory evidence chain, how many pull requests were delivered from the
-    cell and how many merged (B-9 / F30; counts, never a rate)."""
+    cell and how many merged (B-9 / F30; counts, never a rate). With the entry gate's
+    ``standard_for``, ``signed`` is the gate's own reading of the cell's (class × size)
+    standard (``cell_signed``, P-411) — ``null`` for a cell that pools classes or sizes, and
+    for every cell when no ``standard_for`` is given (an organisation's view, G-763)."""
     # only measured cells are serialised, and every measured cell carries its economics
     assert c.stats is not None and c.decision is not None and c.economics is not None
     s = c.stats
@@ -482,7 +495,10 @@ def cell_out(
         deliveries or {}, c.key.capability_class, c.key.size
     )
     key: dict[str, Any] = {**c.key.to_dict(), **v2_cell_fields(c, readings)}
+    cls, size = c.key.capability_class, c.key.size
+    pooled = WILDCARD in (cls, size)  # the gate reads one class × size, never a pool
     return CapabilityCellSplitOut(
+        signed=None if standard_for is None or pooled else cell_signed(standard_for, cls, size),
         n_delivered=n_delivered,
         n_merged=n_merged,
         **key,
@@ -650,6 +666,13 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     readings = load_readings(db, repo)
     cells = [c for c in cmap.cells if c.measured]
     deliveries = FactoryHome(settings.home, repo).delivery_counts()
+    # the entry gate's reader, bound as the next run's worker binds it: ``signed`` is what an
+    # item of the cell would meet at the sign-off clause, whatever this view's mode, apparatus,
+    # posture or checks filters (P-411). On an organisation's class-set view the cells are
+    # keyed by the global parent (G-763) while the gate reads the organisation class's own
+    # cell, so the view serves no ``signed`` rather than the global standard's reading.
+    gate = factory_standard.deployment_readers(db, settings, repo)
+    standard_for = gate.standard_for if taxonomy == GLOBAL_CLASS_SET else None
     by_route = {route: len(cs) for route, cs in cmap.by_route().items()}
     # total_cells = the grid the projection spans over values SEEN in the rows, so the UI
     # can say "12 of 20 measured" without inventing cells the repo never produces.
@@ -664,7 +687,7 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
         sizes=_distinct(rows, "size"),
         languages=_distinct(rows, "language"),
         models=_distinct(rows, "model"),
-        cells=[cell_out(c, deliveries, readings) for c in cells],
+        cells=[cell_out(c, deliveries, readings, standard_for) for c in cells],
         summary=CapabilitySummary(
             trusted_autonomy_coverage=tac,
             earned_coverage=earned,
