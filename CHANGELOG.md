@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **A killed command no longer holds its runner open** (P-774, defect I-09;
+  [#83](https://github.com/Jita81/commit-replay-bench/pull/83)). After a kill, every runner waited
+  with no bound for the killed command's output, and a process the group kill missed kept the pipes
+  open: a cancel test waited 60 s against its 10 s bound. Docker runs, local runs, the Docker
+  stream, the claude CLI handle and the provision fetch now kill the group again and then wait at
+  most `POST_KILL_DRAIN_S` (5 s). After that they keep the output read so far and log what still
+  holds the pipes. A ratchet fails any unbounded wait in a module that kills.
+
 - **Wave 6: the seven north-star streams land together** (north-star Wave 6, streams lrn, dec, pgs,
   fac, ops, cnx and prf; [#75](https://github.com/Jita81/commit-replay-bench/pull/75)). Learn shows
   the guard's false-positive rate and tops up only the rows a registered reading counts. `GET
