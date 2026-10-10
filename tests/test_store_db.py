@@ -2414,7 +2414,7 @@ def login(body, db):
         lock_users_table(db)
     def _signed_in():
         account = db.get(User, uid, populate_existing=True)
-        upgrade_password_hash(account, "new")
+        upgrade_password_hash(account, "verified", "new")
     commit_audited(db, _signed_in, before=_users_first)
 """
     # the sign-out's shape: nothing through the session before the lock

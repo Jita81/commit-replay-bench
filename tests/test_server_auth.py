@@ -144,6 +144,22 @@ class TestPrimitives:
         assert not verify_password("", USER_PW)  # unknown-user path: still a real verify
         assert not verify_password("not-a-hash", USER_PW)
 
+    def test_the_upgrade_writes_only_over_the_hash_it_verified(self) -> None:
+        # P-785: a sign-in that verified before an admin's reset must not store its upgrade
+        # over the reset, so the helper itself checks; no caller can forget to
+        from crb.server.auth import upgrade_password_hash
+        from crb.store.models import User
+
+        user = User(id="u1", subject="local:u", issuer="local", password_hash="$argon2id$old")
+        assert upgrade_password_hash(user, "$argon2id$old", "$argon2id$new")
+        assert user.password_hash == "$argon2id$new"
+        user.password_hash = "$argon2id$reset"  # an admin's reset, after the verify
+        assert not upgrade_password_hash(user, "$argon2id$new", "$argon2id$upgraded")
+        assert user.password_hash == "$argon2id$reset"
+        user.password_hash = None  # no password at all: nothing was verified against it
+        assert not upgrade_password_hash(user, "$argon2id$reset", "$argon2id$upgraded")
+        assert user.password_hash is None
+
     def test_hash_rejects_short_password(self) -> None:
         with pytest.raises(ValueError, match="at least 12"):
             hash_password("short")

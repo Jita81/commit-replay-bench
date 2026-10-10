@@ -230,13 +230,14 @@ def login(
         if account is None or not account.active:
             _record_failed_login(db, body.username)
             return  # refused, below: on the trail like every refused sign-in (DL-068)
-        if account.password_hash != verified:
-            # the hash moved since the verify: the password typed must open the new one
-            if not verify_password(account.password_hash or "", body.password):
-                _record_failed_login(db, body.username)
-                return
-        elif upgraded is not None:
-            upgrade_password_hash(account, upgraded)
+        moved = account.password_hash != verified
+        # the hash moved since the verify: the password typed must open the new one
+        if moved and not verify_password(account.password_hash or "", body.password):
+            _record_failed_login(db, body.username)
+            return
+        if upgraded is not None:
+            # stored only over the hash the password was verified against (P-785)
+            upgrade_password_hash(account, verified, upgraded)
         account.last_login = _now()
         record_user_event(db, action="user.login", actor=uid, target=account, method="local")
         # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset

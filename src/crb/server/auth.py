@@ -297,13 +297,17 @@ def rehash_if_outdated(stored: str, password: str) -> str | None:
     return hasher.hash(password)
 
 
-def upgrade_password_hash(user: User, upgraded: str) -> None:
+def upgrade_password_hash(user: User, verified: str, upgraded: str) -> bool:
     """Store ``upgraded`` — the same password, hashed under argon2's current parameters — on
-    ``user``; the caller commits. It is written under the users lock, and only while the
-    stored hash is still the one the password was verified against: a sign-in that verified
+    ``user``, under the users lock; the caller commits. It writes only while the stored hash
+    is still ``verified``, the one the password was checked against: a sign-in that verified
     before an admin's reset stored its upgrade over the reset, and the old password opened
-    the account again (P-785). The hash moves, so :func:`credential_version` does too."""
+    the account again (P-785). Returns whether it wrote. The hash moves, so
+    :func:`credential_version` does too."""
+    if (user.password_hash or "") != verified:
+        return False
     user.password_hash = upgraded
+    return True
 
 
 def count_users(db: Session) -> int:
