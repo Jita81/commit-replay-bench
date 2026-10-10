@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **An account or its link is written only under the users lock** (P-785;
+  [#85](https://github.com/Jita81/commit-replay-bench/pull/85)). Seven routes read the link or
+  the account without the lock its acceptance holds: a withdrawal stamped a link revoked and
+  accepted, an admin's password set was replaced by the person's, a self-service change or a
+  sign-in stored a hash over an admin's reset, and a sign-out everywhere let a password change
+  keep the session it ended. Each now takes the lock before it reads; a password is verified
+  first, so a guess never holds it, then the account is read again under it. Two ratchets fail
+  a route that reads before the lock, or any new writer of a password, nonce or active flag.
+
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
   proposed values, so its status is Accepted and PLAN's operator acts are done.

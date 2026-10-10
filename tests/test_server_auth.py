@@ -144,6 +144,22 @@ class TestPrimitives:
         assert not verify_password("", USER_PW)  # unknown-user path: still a real verify
         assert not verify_password("not-a-hash", USER_PW)
 
+    def test_the_upgrade_writes_only_over_the_hash_it_verified(self) -> None:
+        # P-785: a sign-in that verified before an admin's reset must not store its upgrade
+        # over the reset, so the helper itself checks; no caller can forget to
+        from crb.server.auth import upgrade_password_hash
+        from crb.store.models import User
+
+        user = User(id="u1", subject="local:u", issuer="local", password_hash="$argon2id$old")
+        assert upgrade_password_hash(user, "$argon2id$old", "$argon2id$new")
+        assert user.password_hash == "$argon2id$new"
+        user.password_hash = "$argon2id$reset"  # an admin's reset, after the verify
+        assert not upgrade_password_hash(user, "$argon2id$new", "$argon2id$upgraded")
+        assert user.password_hash == "$argon2id$reset"
+        user.password_hash = None  # no password at all: nothing was verified against it
+        assert not upgrade_password_hash(user, "$argon2id$reset", "$argon2id$upgraded")
+        assert user.password_hash is None
+
     def test_hash_rejects_short_password(self) -> None:
         with pytest.raises(ValueError, match="at least 12"):
             hash_password("short")
@@ -1848,3 +1864,93 @@ def test_every_sign_in_record_commits_through_the_retry() -> None:
         if isinstance(fn, ast.FunctionDef) and "commit_audited" in called(fn)
     ]
     assert {"login", "_complete_oidc"} <= set(commits_audited)
+
+
+def _outcomes_collected(source: str) -> list[str]:
+    """``function:line`` of each read, after a ``commit_audited`` call, of a container the
+    write handed to it fills (``signed[:] = …``, ``out["status"] = …``, ``signed_in.append``).
+    A rolled-back attempt leaves its entry there, so what the caller reads may be the lost
+    attempt's: a write hands its outcome back by returning it. A container the write only
+    reads back itself, on a later run, is a memo and is not counted."""
+    import ast
+
+    mutators = {"append", "extend", "insert", "clear", "add", "update", "pop", "setdefault"}
+    found: list[str] = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        own = {d.name: d for d in fn.body if isinstance(d, ast.FunctionDef)}
+        for c in ast.walk(fn):
+            if not (isinstance(c, ast.Call) and getattr(c.func, "id", "") == "commit_audited"):
+                continue
+            w = c.args[1] if len(c.args) > 1 else None
+            write = own.get(w.id) if isinstance(w, ast.Name) else w
+            if not isinstance(write, ast.FunctionDef | ast.Lambda):
+                continue
+            a = write.args
+            bound = {p.arg for p in [*a.posonlyargs, *a.args, *a.kwonlyargs]}
+            bound |= {
+                n.id
+                for n in ast.walk(write)
+                if isinstance(n, ast.Name) and type(n.ctx) is ast.Store
+            }
+            filled: set[str] = set()
+            for n in ast.walk(write):
+                f = n.func if isinstance(n, ast.Call) else None
+                if isinstance(f, ast.Attribute) and f.attr in mutators:
+                    on = f.value
+                    filled |= {on.id} if isinstance(on, ast.Name) and on.id not in bound else set()
+                targets = n.targets if isinstance(n, ast.Assign) else []
+                targets += [n.target] if isinstance(n, ast.AugAssign | ast.AnnAssign) else []
+                for t in targets:
+                    on = t.value if isinstance(t, ast.Subscript) else None
+                    filled |= {on.id} if isinstance(on, ast.Name) and on.id not in bound else set()
+            end = c.end_lineno or c.lineno
+            found += [
+                f"{fn.name}:{n.lineno}"
+                for n in ast.walk(fn)
+                if isinstance(n, ast.Name) and n.id in filled and n.lineno > end
+            ]
+    return sorted(set(found))
+
+
+def test_an_audited_write_hands_its_outcome_back_by_returning_it() -> None:
+    """P-785: ``commit_audited`` runs its write again after a lost ``seq`` race, and the
+    sign-in collected its session in a list, so a retry refused under the lock still issued
+    the rolled-back attempt's session (#85). No caller under ``src/crb`` reads, after the
+    commit, what its write left in a container it holds. The checker is shown that shape
+    first, from the sign-in as it was, so it cannot pass by finding nothing."""
+    before = (
+        "def sign_in(db):\n"
+        "    signed = []\n"
+        "    def _signed_in():\n"
+        "        signed[:] = [session(db)]\n"
+        "    commit_audited(db, _signed_in)\n"
+        "    return signed[0]\n"
+        "def callback(db):\n"
+        "    signed_in = []\n"
+        "    def _signed_in():\n"
+        "        signed_in.clear()\n"
+        "        signed_in.append(upsert(db))\n"
+        "    commit_audited(db, _signed_in)\n"
+        "    return signed_in[0]\n"
+    )
+    assert _outcomes_collected(before) == ["callback:13", "sign_in:6"]
+    memo = (
+        "def removed(db):\n"
+        "    first_run = {}\n"
+        "    def write():\n"
+        "        if 'existed' not in first_run:\n"
+        "            first_run['existed'] = probe()\n"
+        "        return remove(db, first_run['existed'])\n"
+        "    return answer(commit_audited(db, write))\n"
+    )
+    assert _outcomes_collected(memo) == []
+    root = Path("src/crb")
+    assert (root / "server/routes/runs.py").is_file()
+    found = {
+        path.relative_to(root).as_posix(): bad
+        for path in sorted(root.rglob("*.py"))
+        if (bad := _outcomes_collected(path.read_text(encoding="utf-8")))
+    }
+    assert found == {}, f"return the write's outcome from commit_audited: {found}"

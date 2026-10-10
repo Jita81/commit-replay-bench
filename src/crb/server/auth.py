@@ -283,10 +283,31 @@ def authenticate_local(db: Session, username: str, password: str) -> User | None
     ok = verify_password(stored, password)
     if user is None or not ok or not user.active:
         return None
-    # Transparent upgrade when argon2's parameters have moved on since the hash was made.
-    if hasher.check_needs_rehash(user.password_hash):
-        user.password_hash = hasher.hash(password)
+    # It writes nothing: the account is read again under the users lock before the sign-in
+    # writes it, and a hash upgrade is stored there (:func:`upgrade_password_hash`, P-785).
     return user
+
+
+def rehash_if_outdated(stored: str, password: str) -> str | None:
+    """A fresh hash of ``password`` when argon2's parameters have moved on since ``stored``
+    was made, else ``None``. It writes nothing: argon2 is slow, so the sign-in hashes before
+    the users lock and stores the result under it, with :func:`upgrade_password_hash`."""
+    if not stored or not hasher.check_needs_rehash(stored):
+        return None
+    return hasher.hash(password)
+
+
+def upgrade_password_hash(user: User, verified: str, upgraded: str) -> bool:
+    """Store ``upgraded`` — the same password, hashed under argon2's current parameters — on
+    ``user``, under the users lock; the caller commits. It writes only while the stored hash
+    is still ``verified``, the one the password was checked against: a sign-in that verified
+    before an admin's reset stored its upgrade over the reset, and the old password opened
+    the account again (P-785). Returns whether it wrote. The hash moves, so
+    :func:`credential_version` does too."""
+    if (user.password_hash or "") != verified:
+        return False
+    user.password_hash = upgraded
+    return True
 
 
 def count_users(db: Session) -> int:
@@ -309,9 +330,12 @@ def lock_users_table(db: Session) -> None:
     PostgreSQL. Asking for it after the events lock raises
     :class:`~crb.store.events.LockOrderError` at once, on every dialect (P-227).
 
-    pysqlite defers BEGIN until the first write, so the lock is taken after a caller's
-    reads; every caller (``set_role``, ``set_user_active`` from the route and from ``crb
-    users``) only reads before it. Fails closed (P-430, P-429's class): when a transaction
+    pysqlite defers BEGIN until the first write, so a caller's earlier reads open no
+    transaction; the routes that write an account or its link take it before they read, or
+    read only the account before it and read it again under it before they write (P-785, a
+    ratchet in ``tests/test_store_db.py``: the self-service password change verifies first,
+    so a guess never holds the lock), and ``set_user_active`` refreshes the row once it
+    holds it. Fails closed (P-430, P-429's class): when a transaction
     is already open, ``BEGIN IMMEDIATE`` cannot run and its error is not a documented proof
     that this session holds the write lock (a deferred ``BEGIN`` holds none; SQLite does
     take the lock before it raises, by the order of its ``OP_Transaction`` and
@@ -703,13 +727,12 @@ def session_signature_valid(settings: Settings, session_token: str) -> bool:
 # --- dependencies ----------------------------------------------------------------
 
 
-def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principal:
-    """The logged-in principal, or 401 (``unauthenticated`` / ``session_expired``)."""
-    token = session_token_of(request, settings)
-    if not token:
-        raise ApiError(401, "unauthenticated", "login required")
-    uid, cv = read_session_claims(settings, token)
-    user = db.get(User, uid)
+def refuse_an_ended_session(user: User | None, cv: str) -> User:
+    """``user`` when a session bound to credential version ``cv`` still holds on it, else
+    401: ``unauthenticated`` for an account that is unknown or disabled, ``session_revoked``
+    when its password changed or its nonce was rotated after the session was issued.
+    :func:`current_user` asks when a request starts; a route that does slow work before it
+    takes the users lock asks again under it, so an admin's act in between holds (P-785)."""
     if user is None or not user.active:
         raise ApiError(401, "unauthenticated", "account unknown or disabled")
     if not hmac.compare_digest(cv.encode(), credential_version(user).encode()):
@@ -717,6 +740,16 @@ def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principa
         # after this session was issued, or the token predates version stamping: the
         # session is over, whoever holds the cookie.
         raise ApiError(401, "session_revoked", "session no longer valid; log in again")
+    return user
+
+
+def current_user(request: Request, settings: SettingsDep, db: DbDep) -> Principal:
+    """The logged-in principal, or 401 (``unauthenticated`` / ``session_expired``)."""
+    token = session_token_of(request, settings)
+    if not token:
+        raise ApiError(401, "unauthenticated", "login required")
+    uid, cv = read_session_claims(settings, token)
+    user = refuse_an_ended_session(db.get(User, uid), cv)
     request.state.user_id = user.id
     return Principal.model_validate(user)
 
@@ -1245,6 +1278,7 @@ __all__ = [
     "read_oidc_cookie",
     "read_session",
     "read_session_claims",
+    "rehash_if_outdated",
     "require_role",
     "rotate_session_nonce",
     "safe_next_path",
@@ -1258,6 +1292,7 @@ __all__ = [
     "set_password",
     "set_session_cookie",
     "set_user_active",
+    "upgrade_password_hash",
     "upsert_oidc_user",
     "validate_role",
     "validate_username",

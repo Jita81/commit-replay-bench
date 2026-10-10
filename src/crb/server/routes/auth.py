@@ -85,13 +85,16 @@ from crb.server.auth import (
     rate_limited_error,
     read_oidc_cookie,
     read_session_claims,
+    rehash_if_outdated,
     rotate_session_nonce,
     safe_next_path,
     session_token_of,
     set_csrf_cookie,
     set_oidc_cookie,
     set_session_cookie,
+    upgrade_password_hash,
     upsert_oidc_user,
+    verify_password,
 )
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, Principal, SettingsDep, client_ip
 from crb.server.routes.admin import record_sign_in, record_user_event
@@ -211,25 +214,50 @@ def login(
         )
         commit_audited(db, lambda: _record_failed_login(db, body.username))
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
-    limiter.succeed(slot)
-    uid = user.id
+    uid, verified = user.id, user.password_hash or ""
+    # hashed before the lock, as the password was verified before it: argon2 is slow
+    upgraded = rehash_if_outdated(verified, body.password)
 
-    def _signed_in() -> None:
-        account = db.get(User, uid)
-        if account is None:  # deleted between the check and the write
-            raise ApiError(401, "invalid_credentials", "username or password is incorrect")
+    def _users_first() -> None:
+        lock_users_table(db)
+
+    def _signed_in() -> tuple[str, Principal] | None:
+        # Read again under the users lock, so an admin's act that committed after the password
+        # verified holds: a sign-in with the old password straddling a reset got a session
+        # the reset could not end, and its hash upgrade replaced the reset (P-785).
+        account = db.get(User, uid, populate_existing=True)
+        if account is None or not account.active:
+            _record_failed_login(db, body.username)
+            return None  # refused, below: on the trail like every refused sign-in (DL-068)
+        moved = account.password_hash != verified
+        # the hash moved since the verify: the password typed must open the new one
+        if moved and not verify_password(account.password_hash or "", body.password):
+            _record_failed_login(db, body.username)
+            return None
+        if upgraded is not None:
+            # stored only over the hash the password was verified against (P-785)
+            upgrade_password_hash(account, verified, upgraded)
         account.last_login = _now()
         record_user_event(db, action="user.login", actor=uid, target=account, method="local")
         # every sign-in, not just the latest: a recovery is timed to the FIRST after a reset
         record_sign_in(db, user=account, by="local")
+        # the session's version from the row as committed, never a later reading of it
+        return credential_version(account), Principal.model_validate(account)
 
-    commit_audited(db, _signed_in)
-    user = db.get(User, uid) or user
-    request.state.user_id = user.id
-    cv = credential_version(user)
-    set_session_cookie(response, settings, user.id, cv)
-    set_csrf_cookie(response, settings, user.id, cv)
-    return Principal.model_validate(user)
+    # returned, not collected: a retry's refusal must not keep a rolled-back attempt's session
+    signed = commit_audited(db, _signed_in, before=_users_first)
+    if signed is None:
+        # refused under the lock, its password right a moment before: the commit recorded
+        # the refusal and let the lock go, and the reserved slot stands as the failure (the
+        # name is an account's, as the verify found it)
+        log.info("login failed", extra={"username": body.username, "client": ip})
+        raise ApiError(401, "invalid_credentials", "username or password is incorrect")
+    limiter.succeed(slot)  # only now: a sign-in refused under the lock still failed
+    cv, principal = signed
+    request.state.user_id = uid
+    set_session_cookie(response, settings, uid, cv)
+    set_csrf_cookie(response, settings, uid, cv)
+    return principal
 
 
 @router.post(
@@ -244,28 +272,32 @@ def logout(request: Request, settings: SettingsDep, db: DbDep) -> Response:
     absent cookie rotates nothing (it cannot be used to sign somebody else out) and still
     gets the cookies cleared. A rotation is an account change, so it is one
     ``user.sessions_ended`` event (``by: self``) on the account's trail, the account as
-    actor (EI-8 — the admin's "sign out everywhere" wrote one; this did not)."""
+    actor (EI-8 — the admin's "sign out everywhere" wrote one; this did not). The session is
+    checked under the users lock, so a password change that found the session current
+    cannot set a fresh cookie for it after this rotation (P-785)."""
     token = session_token_of(request, settings)
-    if token:
-        try:
-            uid, cv = read_session_claims(settings, token)
-        except ApiError:
-            uid, cv = "", ""
-        user = db.get(User, uid) if uid else None
-        if user is not None and hmac.compare_digest(cv.encode(), credential_version(user).encode()):
-
-            def _ended() -> None:
-                account = db.get(User, uid)
-                if account is None:  # deleted between the check and the write
-                    return
-                rotate_session_nonce(account)
-                record_user_event(
-                    db, action="user.sessions_ended", actor=uid, target=account, by="self"
-                )
-
-            commit_audited(db, _ended)
+    try:
+        uid, cv = read_session_claims(settings, token) if token else ("", "")
+    except ApiError:
+        uid, cv = "", ""
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookies(response, settings)
+    if not uid:
+        return response  # an absent or forged cookie never takes the lock
+
+    def _users_first() -> None:
+        lock_users_table(db)
+
+    def _ended() -> None:
+        account = db.get(User, uid, populate_existing=True)
+        if account is None or not hmac.compare_digest(
+            cv.encode(), credential_version(account).encode()
+        ):
+            return  # a stale, forged or already ended session rotates nothing
+        rotate_session_nonce(account)
+        record_user_event(db, action="user.sessions_ended", actor=uid, target=account, by="self")
+
+    commit_audited(db, _ended, before=_users_first)
     return response
 
 
@@ -455,11 +487,9 @@ def _complete_oidc(
     issuer = str(claims.get("iss") or settings.oidc.issuer)
     role = map_role(claims, settings.oidc)
     source = settings.oidc.role_from_claims
-    signed_in: list[User] = []
 
-    def _signed_in() -> None:
+    def _signed_in() -> User:
         # Re-run whole on a retry: the rollback undid the upsert as well as the events.
-        signed_in.clear()
         before = _stored_role(db, issuer, claims)
         user = upsert_oidc_user(
             db,
@@ -503,7 +533,7 @@ def _complete_oidc(
         user.last_login = _now()
         record_user_event(db, action="user.login", actor=user.id, target=user, method="oidc")
         record_sign_in(db, user=user, by="oidc")
-        signed_in.append(user)
+        return user
 
     def _users_first() -> None:
         # the role read, the last-admin count and the write are one serialised step, under
@@ -511,7 +541,8 @@ def _complete_oidc(
         lock_users_table(db)
 
     try:
-        commit_audited(db, _signed_in, before=_users_first if source == "always" else None)
+        # returned, not collected: the account is the committed attempt's (P-785)
+        return commit_audited(db, _signed_in, before=_users_first if source == "always" else None)
     except _AccountDisabled as off:
         db.rollback()
         account = db.get(User, off.user_id)
@@ -533,7 +564,6 @@ def _complete_oidc(
         db.rollback()
         log.warning("oidc sign-in could not be written: %s", type(exc).__name__)
         raise ApiError(503, "oidc_failed", "the sign-in could not be recorded") from exc
-    return signed_in[0]
 
 
 class _AccountDisabled(Exception):
