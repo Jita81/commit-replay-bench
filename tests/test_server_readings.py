@@ -163,7 +163,7 @@ def test_the_loop_on_and_off_are_two_arms_on_the_map_and_value(env: Env) -> None
     assert loop_on["context_arm"] == "S3+L" and loop_on["n"] == 6
     # the playbook digests are provenance: two of them, one cell
     assert loop_on["provenance"]["learn_playbook"] == ["p1", "p2"]
-    value = env.get(f"/value?repo={ALPHA}&checks=off").json()
+    value = env.get(f"/value?repo={ALPHA}&checks=off&posture={SEALED}").json()
     xs = [c for c in value["cells"] if (c["capability_class"], c["size"]) == ("bug.fix", "XS")]
     assert sorted((c["context_arm"], c["attempts"]) for c in xs) == [("S3", 4), ("S3+L", 6)]
     assert all(c["first_attempts"]["n"] == c["attempts"] for c in xs)

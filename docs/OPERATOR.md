@@ -483,6 +483,10 @@ gate, decide clean): switching it changes no cell. **A sign-off is of one arm to
 before the switch goes stale (the Decisions inbox lists it with the arm it was signed on and
 the arm read now) and lifts nothing on the new arm until an approver signs it again; the
 scorecard's headline (`/value?repo=…`) and the failure split read the repository's own arm.
+The scorecard reads one posture class too — the deployment's by default, another on
+`posture=<class>` — and refuses `posture=all` when its rows span more than one class (422
+`posture_pooling_refused`, naming each), because a pound spent in one buys a different
+measurement (ADR-0019 §8).
 
 To see what the product derives for a checkout against what its CI runs, and the gaps:
 

@@ -188,6 +188,45 @@ def test_a_jsonl_export_reads_through_the_grade_row(vb: ModuleType, tmp_path: Pa
     assert v.failure_kind == "budget" and v.row_hash == row.row_hash and v.detail == "max_turns"
 
 
+def test_the_baseline_reads_one_posture_class_and_refuses_two(
+    vb: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADR-0019 §8 (P-135): an export holding a host row and a sealed row is two instruments.
+    Without ``--posture`` the script refuses (exit 2) and names both classes; ``--posture``
+    reads only the class it names, and the page says which class it read."""
+    rows = [
+        posture_row(
+            repo="alpha",
+            task_id=f"{i:040x}",
+            clean=False,
+            tests_unmodified=True,
+            target_green=False,
+            no_new_failures=None,
+            source_changed=None,
+            mode="blind",
+            labels={"stop_reason": "max_turns", **labels},
+        )
+        for i, labels in enumerate(({}, {"posture_class": "docker/copy/sealed"}))
+    ]
+    p = tmp_path / "ledger.jsonl"
+    prev, lines = "0" * 64, []
+    for row in rows:
+        chained = row.chained(prev)
+        prev = chained.row_hash
+        lines.append(json.dumps(chained.to_dict()))
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as refused:
+        vb.main(["--ledger", str(p)])
+    assert refused.value.code == 2
+    err = capsys.readouterr().err
+    assert "docker/copy/sealed" in err and "local/inplace/host-env" in err and "--posture" in err
+    assert vb.main(["--ledger", str(p), "--posture", "docker/copy/sealed", "--format", "json"]) == 0
+    rep = json.loads(capsys.readouterr().out)
+    assert (rep["rows"], rep["posture_class"]) == (1, "docker/copy/sealed")
+    out = vb.render_markdown(vb.read_ledger(p), [], posture="local/inplace/host-env")
+    assert "posture local/inplace/host-env |" in out.splitlines()[0]
+
+
 def test_the_scorecard_says_your_login_apart_from_the_provider(
     vb: ModuleType, tmp_path: Path
 ) -> None:

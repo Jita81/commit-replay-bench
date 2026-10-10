@@ -58,6 +58,7 @@ from crb.core.value import (
     MIN_REVIEWS_FOR_REVIEW_BASIS,
     ClassStatus,
     KindRegister,
+    PosturePoolingError,
     ReviewVerdict,
     ValueRow,
     default_register,
@@ -385,6 +386,44 @@ def test_the_default_scope_is_the_current_apparatus_and_pooling_is_flagged() -> 
     assert pooled["rows"] == 2 and pooled["pooled"] is True
     assert pooled["apparatus_versions"] == ["2.1", APPARATUS_VERSION]
     assert len(select_rows(rows, repo="beta", apparatus="all")) == 0
+
+
+def test_the_scorecard_reads_one_posture_class_and_refuses_to_reduce_two() -> None:
+    """ADR-0019 §8 (P-135): posture is a filter, never a blend. A named class reads only its
+    rows, down to the every-repository review fallback (beta's sealed reviews never lend a
+    host reading a pooled precision); ``all``, the default, reads the one class a scope
+    holds and refuses two, naming them: a pound spent in a sealed container and a pound
+    spent on the host buy two measurements, never one rate per pound."""
+    host, sealed = "local/inplace/host-env", "docker/copy/sealed"
+    rows = [
+        *(dataclasses.replace(vr(i, kind=FAILURE_CLEAN), posture_class=host) for i in (1, 2)),
+        dataclasses.replace(vr(3, kind=FAILURE_BUDGET, cost=4.0), posture_class=sealed),
+        *(
+            dataclasses.replace(vr(i, kind=FAILURE_CLEAN, repo="beta"), posture_class=sealed)
+            for i in range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
+        ),
+    ]
+    vs = [
+        verdict(i, mergeable=True, repo="beta", row_hash=f"{i:064x}")
+        for i in range(10, 10 + MIN_REVIEWS_FOR_REVIEW_BASIS)
+    ]
+    one = value_report(rows, vs, repo="alpha", posture=host).to_dict()
+    assert (one["posture"], one["posture_class"], one["rows"]) == (host, host, 2)
+    ns = one["north_star"]
+    assert (ns["clean"], ns["n_attempts"], ns["spend_usd"]) == (2, 2, pytest.approx(2.0))
+    assert (
+        ns["precision_basis"] == BASIS_PROXY and one["process_loss"]["kinds"]["budget"]["rows"] == 0
+    )
+    other = value_report(rows, vs, repo="alpha", posture=sealed).to_dict()
+    assert other["rows"] == 1 and other["north_star"]["spend_usd"] == pytest.approx(4.0)
+    assert value_report(rows, vs, repo="beta").to_dict()["posture_class"] == sealed
+    with pytest.raises(PosturePoolingError, match="ADR-0019") as refused:
+        value_report(rows, vs, repo="alpha")
+    assert refused.value.classes == (sealed, host)
+    with pytest.raises(PosturePoolingError):
+        value_report(rows, vs)
+    unrecorded = value_report([vr(1, kind=FAILURE_CLEAN)], []).to_dict()
+    assert (unrecorded["posture"], unrecorded["posture_class"]) == ("all", "")
 
 
 # --- process loss -----------------------------------------------------------------------

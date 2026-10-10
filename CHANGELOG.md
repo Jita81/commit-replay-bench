@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The value scorecard reads one posture class** (P-135, G-991, ADR-0019 §8;
+  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). `GET /value`
+  summed spend and counted working changes over every posture class, so a sealed row and a host
+  row shared one rate per pound. It now reads the deployment's class by default, as the map does,
+  and another with `posture=<class>`. A pre-2.3 row is placed by its run's executor, and a Docker
+  one is counted `unqualified_posture`. `posture=all` reads the one class the scope holds; over two
+  it is refused 422 `posture_pooling_refused`, naming them. `scripts/value_baseline.py` takes
+  `--posture` and refuses two classes too.
+
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
   proposed values, so its status is Accepted and PLAN's operator acts are done.
