@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **An admin act and the same person's sign-in no longer deadlock on PostgreSQL** (P-786;
+  [#86](https://github.com/Jita81/commit-replay-bench/pull/86)). Setting an account's
+  password, role or active flag, or signing its sessions out, wrote the account's row and then
+  waited for the audit trail's lock, while the person's sign-in holds that lock and then
+  writes the same row; on PostgreSQL the two at once deadlocked and one answered 500. The
+  events lock no longer flushes a pending write before it waits, on any dialect, so the row
+  is written under the lock; asking for the lock after a `users` row was written in the same
+  transaction is refused at once, on SQLite as well, so a new path cannot bring the order
+  back.
+
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's
   proposed values, so its status is Accepted and PLAN's operator acts are done.

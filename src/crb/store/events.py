@@ -41,7 +41,8 @@ What it does: Writes every ``StepEvent`` as one ``events`` row and never raises 
               resume cursor; allocates the next ``seq`` for out-of-band system events under
               the same write lock the ledger uses, and lends that lock to a caller that
               reads a trace's ``seq`` itself (``lock_event_writes``: the server's audited
-              commit, ``append_system_event`` and the unsealed-override record); chains every
+              commit, ``append_system_event`` and the unsealed-override record) before any
+              ``users`` row the transaction writes (P-786); chains every
               new row in its writer's own flush under that same lock; walks the whole chain
               and reads its head; and, for the page that reads it often, walks only the events
               written since its last clean walk between bounded full walks
@@ -95,7 +96,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.event_chain import GENESIS_HASH, EventChainReport, event_row_hash, walk_event_chain
 from crb.observability.events import StepEvent, StepStatus
-from crb.store.models import Event
+from crb.store.models import Event, User
 
 _LOG = logging.getLogger(__name__)
 
@@ -174,19 +175,54 @@ def lock_event_writes(s: Session) -> None:
     the explicit write removes the dependence on it.
     PostgreSQL: a transaction-scoped advisory lock (id 7332 — one id per table, see
     ``crb.store.jobs``), re-entrant within the transaction. Other dialects: no-op."""
+    refuse_events_after_users_rows(s)
     dialect = s.get_bind().dialect.name
-    if dialect == "sqlite":
-        # no autoflush: a pending ORM write flushed by the lock's own statement would open
-        # the transaction first; unflushed, it is written later, under the lock
-        with s.no_autoflush:
+    # no autoflush on ANY dialect: a pending ORM write flushed by the lock's own statement
+    # would run before the lock — on SQLite it would open the transaction first, on
+    # PostgreSQL a pending ``UPDATE users`` would lock its row BEFORE the events lock, while
+    # a sign-in holds the events lock and then writes that row: a deadlock. Unflushed, it
+    # is written later, under the lock (the users ROW ranks after the events lock, P-786).
+    with s.no_autoflush:
+        if dialect == "sqlite":
             driver = s.connection().connection.driver_connection
             if getattr(driver, "in_transaction", False):
                 s.execute(text("DELETE FROM events WHERE 0"))
             else:
                 s.execute(text("BEGIN IMMEDIATE"))
-    elif dialect == "postgresql":
-        s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
+        elif dialect == "postgresql":
+            s.execute(text("SELECT pg_advisory_xact_lock(7332)"))  # events
     write_locks_held(s).add(EVENTS_LOCK)
+
+
+#: A row lock on an existing ``users`` row, as :func:`write_locks_held` records it: a flush
+#: that updated or deleted one. It ranks AFTER the events lock (the sign-in holds events,
+#: then writes its row), so asking for the events lock while holding it is refused (P-786).
+USERS_ROWS = "users rows"
+
+
+def _note_users_rows(session: Session, _flush_context: Any) -> None:
+    """``after_flush``: record that this transaction now holds a ``users`` row lock."""
+    if any(isinstance(o, User) for o in session.deleted) or any(
+        isinstance(o, User) and session.is_modified(o) for o in session.dirty
+    ):
+        write_locks_held(session).add(USERS_ROWS)
+
+
+if not sa_event.contains(Session, "after_flush", _note_users_rows):
+    sa_event.listen(Session, "after_flush", _note_users_rows)
+
+
+def refuse_events_after_users_rows(s: Session) -> None:
+    """Raise :class:`LockOrderError` when ``s`` already wrote an existing ``users`` row and
+    now asks for the events lock it does not yet hold: the order every sign-in uses is the
+    events lock, then the row, so the other order deadlocks on PostgreSQL."""
+    held = write_locks_held(s)
+    if USERS_ROWS in held and EVENTS_LOCK not in held:
+        raise LockOrderError(
+            "the events write lock was asked for after a users row was written in one "
+            "transaction; write the row after the lock (leave it unflushed), or an admin act "
+            "and a sign-in of the same account deadlock on PostgreSQL"
+        )
 
 
 #: The ``events`` write lock's name in :func:`write_locks_held`.
