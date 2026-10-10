@@ -214,7 +214,6 @@ def login(
         )
         commit_audited(db, lambda: _record_failed_login(db, body.username))
         raise ApiError(401, "invalid_credentials", "username or password is incorrect")
-    limiter.succeed(slot)
     uid, verified = user.id, user.password_hash or ""
     # hashed before the lock, as the password was verified before it: argon2 is slow
     upgraded = rehash_if_outdated(verified, body.password)
@@ -229,11 +228,13 @@ def login(
         # the reset could not end, and its hash upgrade replaced the reset (P-785).
         account = db.get(User, uid, populate_existing=True)
         if account is None or not account.active:
-            raise ApiError(401, "invalid_credentials", "username or password is incorrect")
+            _record_failed_login(db, body.username)
+            return  # refused, below: on the trail like every refused sign-in (DL-068)
         if account.password_hash != verified:
             # the hash moved since the verify: the password typed must open the new one
             if not verify_password(account.password_hash or "", body.password):
-                raise ApiError(401, "invalid_credentials", "username or password is incorrect")
+                _record_failed_login(db, body.username)
+                return
         elif upgraded is not None:
             upgrade_password_hash(account, upgraded)
         account.last_login = _now()
@@ -244,6 +245,13 @@ def login(
         signed[:] = [(credential_version(account), Principal.model_validate(account))]
 
     commit_audited(db, _signed_in, before=_users_first)
+    if not signed:
+        # refused under the lock, its password right a moment before: the commit recorded
+        # the refusal and let the lock go, and the reserved slot stands as the failure (the
+        # name is an account's, as the verify found it)
+        log.info("login failed", extra={"username": body.username, "client": ip})
+        raise ApiError(401, "invalid_credentials", "username or password is incorrect")
+    limiter.succeed(slot)  # only now: a sign-in refused under the lock still failed
     cv, principal = signed[0]
     request.state.user_id = uid
     set_session_cookie(response, settings, uid, cv)

@@ -1534,6 +1534,7 @@ def _straddles_a_reset(
     import threading
 
     from fastapi.testclient import TestClient
+    from sqlalchemy import select
 
     import crb.server.auth as auth_mod
     from fixtures.concurrency import at_once
@@ -1585,6 +1586,16 @@ def _straddles_a_reset(
     codes = [getattr(r, "status_code", r) for r in (signed_in, by_admin)]
     assert codes == [401, 200], codes
     assert signed_in.json()["error"]["code"] == "invalid_credentials"
+    # a refusal like any other: on the account's trail, and still counted by the limiter
+    with app.state.session_factory() as s:
+        failed = s.scalars(select(Event).where(Event.action == "user.login_failed")).all()
+        assert [(e.payload_json["target"], e.payload_json["reason"]) for e in failed] == [
+            (uid, "invalid_credentials")
+        ]
+    limiter, limit = app.state.login_limiter, app.state.login_limiter.limit
+    limiter.limit = 1  # the refused attempt holds the one slot this leaves
+    assert _sign_in(app, ADMIN_PW) == 429
+    limiter.limit = limit
     assert (_sign_in(app, ADMIN_PW), _sign_in(app, CHOSEN_PW)) == (200, 401)
 
 
