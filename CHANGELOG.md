@@ -12,14 +12,18 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **A link is withdrawn, or its account's password set, only under the users lock** (P-785;
+- **An account or its link is written only under the users lock** (P-785;
   [#85](https://github.com/Jita81/commit-replay-bench/pull/85)). Withdrawing an invitation and an
-  admin's password set read the link, or its account, before they took the lock that the link's
-  acceptance holds. A withdrawal that read "pending" while the link was being accepted returned 200
-  and stamped it revoked as well as accepted; on PostgreSQL a password set at that moment was
-  replaced by the person's own, and the withdrawn link was stamped accepted. Both routes, and the
-  admin's activation, now take the lock before they read. A ratchet fails any route that withdraws
-  or spends a link and reads through the session before it takes the lock.
+  admin's password set took no lock, the admin's activation read the account before it took one,
+  and the self-service password change took none, while the link's acceptance holds it. A
+  withdrawal that read "pending" while the link was being accepted returned 200 and stamped it
+  revoked as well as accepted; on PostgreSQL a password set at that moment was replaced by the
+  person's own, and the withdrawn link was stamped accepted; a self-service change that had
+  verified the old password stored its own over an admin's reset. All four routes now take the
+  lock before they read, and the admin routes read the account from the database, never from the
+  session's copy. A ratchet fails any route that writes an account's password or active flag, or
+  withdraws or spends a link, and calls through its session before it takes the lock; it sees
+  keyword and named sessions, async routes and helpers, and names the routes it found.
 
 - **ADR-0026 accepted; the Wave 3 registration prepared, not run** (decision 7, DL-371;
   [#82](https://github.com/Jita81/commit-replay-bench/pull/82)). Paul Glover accepted ADR-0026's

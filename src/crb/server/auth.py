@@ -309,9 +309,10 @@ def lock_users_table(db: Session) -> None:
     PostgreSQL. Asking for it after the events lock raises
     :class:`~crb.store.events.LockOrderError` at once, on every dialect (P-227).
 
-    pysqlite defers BEGIN until the first write, so the lock is taken after a caller's
-    reads; every caller (``set_role``, ``set_user_active`` from the route and from ``crb
-    users``) only reads before it. Fails closed (P-430, P-429's class): when a transaction
+    pysqlite defers BEGIN until the first write, so a caller's earlier reads open no
+    transaction; the routes that write an account or its link take it before they read
+    (P-785, a ratchet in ``tests/test_store_db.py``), and ``set_user_active`` refreshes the
+    row once it holds it. Fails closed (P-430, P-429's class): when a transaction
     is already open, ``BEGIN IMMEDIATE`` cannot run and its error is not a documented proof
     that this session holds the write lock (a deferred ``BEGIN`` holds none; SQLite does
     take the lock before it raises, by the order of its ``OP_Transaction`` and

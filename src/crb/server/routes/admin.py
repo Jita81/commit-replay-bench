@@ -322,7 +322,10 @@ def _username(user: User) -> str:
 
 
 def _get_user(db: Session, user_id: str) -> User:
-    user = db.get(User, user_id)
+    # Read from the database, never from the session's identity map: the routes call this
+    # under the users lock, and a copy of the row the session still held from before the
+    # lock would be answered without a read (docs/PREVENTION.md P-785).
+    user = db.get(User, user_id, populate_existing=True)
     if user is None:
         raise ApiError(404, "not_found", f"no user {user_id!r}")
     return user
@@ -504,6 +507,10 @@ def change_own_password(  # noqa: PLR0917 — FastAPI injects each dependency by
     per-(username, ip) limiter, so a borrowed session cannot guess it online), the new one
     is hashed and stored, and a fresh session cookie is set on this response so the
     browser that made the change stays signed in while every other session ends."""
+    # Under the lock an admin's reset of this password holds: a change that had verified the
+    # old password went on to replace the admin's with its own (found widening #85's
+    # ratchet, 2026-10-10; docs/PREVENTION.md P-785).
+    lock_users_table(db)
     user = _get_user(db, me.id)
     if not is_local_account(user):
         raise ApiError(

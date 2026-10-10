@@ -1204,12 +1204,13 @@ def test_a_link_withdrawn_while_it_is_being_accepted_is_refused_not_stamped_twic
     backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """CodeRabbit on #81, 2026-10-10: the withdraw route read the invitation before it took
-    the ``users`` lock. On PostgreSQL a withdrawal that read ``pending`` while an acceptance
-    was in flight stamped ``revoked`` on a link the acceptance then stamped ``accepted``: one
-    invitation with both stamps and both events, and an open account the list called
-    withdrawn. The acceptance is held after it read the link as pending, with the lock
-    held; the withdrawal is let go at that moment. It now waits for the lock, reads the
-    spent link and is refused (409 ``already_accepted``), and the link carries one stamp."""
+    the ``users`` lock. On both dialects a withdrawal that read ``pending`` while an
+    acceptance was in flight stamped ``revoked`` on a link the acceptance then stamped
+    ``accepted``: one invitation with both stamps and both events, and an open account the
+    list called withdrawn. The acceptance is held after it read the link as pending, with
+    the lock held; the withdrawal is let go at that moment. It now waits for the lock, reads
+    the spent link and is refused (409 ``already_accepted``), and the link carries one
+    stamp."""
     from fastapi.testclient import TestClient
 
     from crb.store.models import Invitation
@@ -1310,98 +1311,376 @@ def test_an_admin_password_set_while_the_link_is_being_accepted_waits_its_turn(
         assert inv is not None and inv.accepted and not inv.revoked
     assert _invite_actions(backend) == ["user.invite_accepted"]
 
-    def sign_in(password: str) -> int:
-        r = TestClient(app).post(
-            f"{API_PREFIX}/auth/login", json={"username": "dana", "password": password}
-        )
-        return r.status_code
-
-    assert (sign_in(ADMIN_PW), sign_in(CHOSEN_PW)) == (200, 401)
+    assert (_sign_in(app, ADMIN_PW), _sign_in(app, CHOSEN_PW)) == (200, 401)
 
 
-#: what withdraws or spends a link: the helper that withdraws every pending one, and a
-#: route's own stamp on an ``Invitation``
-LINK_WRITERS = frozenset({"supersede_invitations"})
+#: the password the person changes theirs to on their own account page
+SELF_PW = "the-person-changed-it-to-this"
+
+
+def _sign_in(app: Any, password: str) -> int:
+    """The status of ``dana``'s sign-in with ``password``, on a client of its own."""
+    from fastapi.testclient import TestClient
+
+    from fixtures.server_seed import API_PREFIX
+
+    r = TestClient(app).post(
+        f"{API_PREFIX}/auth/login", json={"username": "dana", "password": password}
+    )
+    return r.status_code
+
+
+def _dana_signed_in(app: Any, admin: Any) -> tuple[str, Any]:
+    """``admin`` signs in as the seed's admin and invites ``dana``, who accepts the link with
+    :data:`CHOSEN_PW` and signs in on a client of their own. Returns the account's id and
+    that client, its CSRF header set."""
+    from fastapi.testclient import TestClient
+
+    from fixtures.server_seed import API_PREFIX, login
+
+    login(admin, "admin")
+    r = admin.post(f"{API_PREFIX}/invitations", json={"username": "dana"})
+    assert r.status_code == 201, r.text
+    made = r.json()
+    accepted = _accept(app, made["token"])
+    assert accepted.status_code == 200, accepted.text
+    dana = TestClient(app)
+    r = dana.post(f"{API_PREFIX}/auth/login", json={"username": "dana", "password": CHOSEN_PW})
+    assert r.status_code == 200, r.text
+    dana.headers["X-CSRF-Token"] = dana.cookies["crb_csrf"]
+    return made["invitation"]["user_id"], dana
+
+
+def _change_own(dana: Any) -> Any:
+    from fixtures.server_seed import API_PREFIX
+
+    return dana.put(
+        f"{API_PREFIX}/users/me/password",
+        json={"current_password": CHOSEN_PW, "new_password": SELF_PW},
+    )
+
+
+def test_an_admin_reset_while_the_person_changes_their_own_password_waits_its_turn(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Found widening #85's ratchet to every route that writes an account, 2026-10-10: the
+    self-service password change took no ``users`` lock. A change that had verified the
+    current password went on to store its own while an admin's reset committed in between:
+    the reset was lost, and the account opened with the person's password, not the
+    admin's. The change is held after its verify; the admin's reset is let go at that
+    moment. It now waits for the lock: the change completes, then the admin's password is
+    set over it."""
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.routes.admin as admin_routes
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX
+
+    app = _app(backend, tmp_path, monkeypatch)
+    verified, reset = threading.Event(), threading.Event()
+    real_verify = admin_routes.verify_password
+
+    def verify_then_wait(stored: str, password: str) -> bool:
+        ok = real_verify(stored, password)
+        verified.set()
+        # while the change holds the lock the reset cannot finish, and this wait times out
+        reset.wait(timeout=2)
+        return ok
+
+    with TestClient(app) as admin:
+        uid, dana = _dana_signed_in(app, admin)
+        monkeypatch.setattr(admin_routes, "verify_password", verify_then_wait)
+
+        def admin_resets() -> Any:
+            assert verified.wait(timeout=5), "the change never verified the password"
+            r = admin.put(f"{API_PREFIX}/users/{uid}/password", json={"password": ADMIN_PW})
+            reset.set()
+            return r
+
+        changed, set_by_admin = at_once(lambda: _change_own(dana), admin_resets)
+    codes = [getattr(r, "status_code", r) for r in (changed, set_by_admin)]
+    assert codes == [200, 200], codes
+    assert (_sign_in(app, ADMIN_PW), _sign_in(app, SELF_PW)) == (200, 401)
+
+
+def test_an_admin_route_reads_the_account_from_the_database_not_the_session(
+    backend: Backend,
+) -> None:
+    """``_get_user`` is the admin routes' read of an account under the ``users`` lock, so it
+    reads the row: a copy the same session still holds from before the lock — the identity
+    map's, which a plain ``get`` answers from without a query — is refreshed, never
+    returned as it was (P-785)."""
+    from crb.server.routes.admin import _get_user
+    from crb.store.models import User
+    from fixtures.server_seed import add_users, user_id
+
+    store_db.init_db(backend.engine)
+    add_users(backend.factory)
+    uid = user_id("viewer1")
+    with backend.factory() as held, backend.factory() as other:
+        before = held.get(User, uid)  # held, as a route would hold it across its lock
+        assert before is not None
+        row = other.get(User, uid)
+        assert row is not None
+        row.display_name = "changed in another session"
+        other.commit()
+        assert _get_user(held, uid).display_name == "changed in another session"
+
+
+#: what writes an account's password or active flag, or withdraws every pending link — and,
+#: beside these, a route's own stamp on an ``Invitation`` and any helper that calls one
+USERS_WRITERS = frozenset(
+    {"supersede_invitations", "set_password", "set_account_active", "set_user_active"}
+)
 LINK_STAMPS = frozenset({"revoked", "accepted"})
+ROUTE_VERBS = frozenset({"get", "post", "put", "patch", "delete", "api_route"})
+#: a parameter is a session when it is named ``db`` or annotated with one of these
+SESSION_TYPES = frozenset({"DbDep", "Session"})
+#: what the ratchet finds in the routes package today: a route that leaves it fell out of
+#: the class, or out of the ratchet's sight
+USERS_WRITING_ROUTES = {
+    "admin.py": {"set_role", "change_own_password", "set_user_password", "set_active"},
+    "invitations.py": {"revoke_invitation", "accept_invitation"},
+}
 
 
-def _reads_before_the_users_lock(source: str) -> list[str]:
-    """Each route in ``source`` that withdraws or spends a link but reads through ``db``
-    before it calls ``lock_users_table(db)``: ``name:line`` of the first such read."""
+def _users_lock_audit(source: str) -> dict[str, str | None]:
+    """Each route in ``source`` that writes an account or withdraws or spends a link, with
+    ``name:line`` of its first call through a session when that call is not
+    ``lock_users_table`` (``name:-`` when nothing goes through a session), else ``None``.
+
+    A route is a function decorated ``router.<verb>(...)``, ``async`` or not. It is in the
+    class when it calls one of :data:`USERS_WRITERS`, stamps ``revoked`` or ``accepted`` in
+    a module that names ``Invitation`` (an assignment, plain, annotated, augmented or to a
+    tuple; ``setattr``; ``.values(...)``), or calls a function of the module that does
+    either, at any depth. A call goes through a session when it is a method of one or takes
+    one as an argument, positional or keyword."""
     import ast
 
-    found = []
-    for fn in ast.walk(ast.parse(source)):
-        if not isinstance(fn, ast.FunctionDef) or not any(
+    tree = ast.parse(source)
+    funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    names_invitation = any(
+        (isinstance(n, ast.Name) and n.id == "Invitation")
+        or (isinstance(n, ast.alias) and (n.asname or n.name) == "Invitation")
+        for n in ast.walk(tree)
+    )
+
+    def called(c: ast.Call) -> str:
+        return c.func.id if isinstance(c.func, ast.Name) else getattr(c.func, "attr", "")
+
+    def body(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.AST]:
+        return [n for stmt in fn.body for n in ast.walk(stmt)]  # never the decorators
+
+    def is_stamp(t: ast.AST) -> bool:
+        if isinstance(t, (ast.Tuple, ast.List)):
+            return any(is_stamp(e) for e in t.elts)
+        return isinstance(t, ast.Attribute) and t.attr in LINK_STAMPS
+
+    def stamps(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        for n in body(fn) if names_invitation else []:
+            if isinstance(n, ast.Assign) and any(is_stamp(t) for t in n.targets):
+                return True
+            if isinstance(n, (ast.AnnAssign, ast.AugAssign)) and is_stamp(n.target):
+                return True
+            if not isinstance(n, ast.Call):
+                continue
+            key = n.args[1] if called(n) == "setattr" and len(n.args) > 1 else None
+            if isinstance(key, ast.Constant) and key.value in LINK_STAMPS:
+                return True
+            if called(n) == "values" and any(k.arg in LINK_STAMPS for k in n.keywords):
+                return True
+        return False
+
+    calls = {fn: [n for n in body(fn) if isinstance(n, ast.Call)] for fn in funcs}
+    writers = set(USERS_WRITERS) | {fn.name for fn in funcs if stamps(fn)}
+    while (
+        more := {fn.name for fn in funcs if any(called(c) in writers for c in calls[fn])} - writers
+    ):  # a helper that calls a writer is one
+        writers |= more
+
+    def sessions(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+        a = fn.args
+        found = set()
+        for p in [*a.posonlyargs, *a.args, *a.kwonlyargs]:
+            ann = [] if p.annotation is None else list(ast.walk(p.annotation))
+            types = {n.id for n in ann if isinstance(n, ast.Name)}
+            types |= {n.attr for n in ann if isinstance(n, ast.Attribute)}
+            if p.arg == "db" or types & SESSION_TYPES:
+                found.add(p.arg)
+        return found
+
+    def through(c: ast.Call, names: set[str]) -> bool:
+        on = c.func.value if isinstance(c.func, ast.Attribute) else None
+        if isinstance(on, ast.Name) and on.id in names:
+            return True
+        given = [*c.args, *(k.value for k in c.keywords)]
+        return any(isinstance(v, ast.Name) and v.id in names for v in given)
+
+    audit: dict[str, str | None] = {}
+    for fn in funcs:
+        if fn.name not in writers or not any(
             isinstance(d, ast.Call)
             and isinstance(d.func, ast.Attribute)
-            and d.func.attr in {"get", "post", "put", "patch", "delete"}
+            and d.func.attr in ROUTE_VERBS
             for d in fn.decorator_list
         ):
             continue
-        nodes = list(ast.walk(fn))
-        calls = sorted(
-            (n for n in nodes if isinstance(n, ast.Call)), key=lambda n: (n.lineno, n.col_offset)
+        names = sessions(fn)
+        first = min(
+            (c for c in calls[fn] if through(c, names)),
+            key=lambda c: (c.lineno, c.col_offset),
+            default=None,
         )
-        name = lambda c: c.func.id if isinstance(c.func, ast.Name) else getattr(c.func, "attr", "")  # noqa: E731
-        stamps = any(
-            isinstance(t, ast.Attribute) and t.attr in LINK_STAMPS
-            for n in nodes
-            if isinstance(n, ast.Assign)
-            for t in n.targets
-        )
-        if not stamps and not any(name(c) in LINK_WRITERS for c in calls):
-            continue
-
-        def reads_db(c: ast.Call) -> bool:
-            on_db = (
-                isinstance(c.func, ast.Attribute)
-                and isinstance(c.func.value, ast.Name)
-                and c.func.value.id == "db"
+        if first is None:
+            audit[fn.name] = f"{fn.name}:-"
+        else:
+            audit[fn.name] = (
+                None if called(first) == "lock_users_table" else (f"{fn.name}:{first.lineno}")
             )
-            return on_db or any(isinstance(a, ast.Name) and a.id == "db" for a in c.args)
-
-        first = next((c for c in calls if reads_db(c)), None)
-        if first is not None and name(first) != "lock_users_table":
-            found.append(f"{fn.name}:{first.lineno}")
-    return found
+    return audit
 
 
-def test_a_route_that_withdraws_or_spends_a_link_takes_the_users_lock_before_it_reads() -> None:
+def _reads_before_the_users_lock(source: str) -> list[str]:
+    """The routes of :func:`_users_lock_audit` that do not take the lock first."""
+    return sorted(bad for bad in _users_lock_audit(source).values() if bad)
+
+
+def test_a_route_that_writes_an_account_or_a_link_takes_the_users_lock_before_it_reads() -> None:
     """P-785, the class: the acceptance holds the ``users`` lock from before it reads the
-    link until it commits, so a route that withdraws or spends a link and reads the link or
-    the account before it takes that lock acts on a reading the acceptance is about to make
-    false. Both of #81's findings were that shape. Every route in the routes package that
-    calls :func:`supersede_invitations` or stamps ``revoked`` or ``accepted`` takes
-    ``lock_users_table(db)`` before its first read through ``db``."""
+    link until it commits, and every other write of an account's password or active flag
+    holds it too, so a route that writes one of them, or withdraws or spends a link, and
+    reads the link or the account before it takes that lock acts on a reading the lock's
+    holder is about to make false. #81's two findings and #85's were that shape. Every such
+    route in the routes package takes ``lock_users_table`` before its first call through
+    its session — and the ratchet finds exactly the routes it found when it was written."""
     import crb.server.routes as routes_pkg
 
     root = Path(routes_pkg.__file__).parent
-    offenders = {
-        path.name: bad
+    audits = {
+        path.name: audit
         for path in sorted(root.glob("*.py"))
-        if (bad := _reads_before_the_users_lock(path.read_text()))
+        if (audit := _users_lock_audit(path.read_text()))
+    }
+    offenders = {
+        name: bad
+        for name, audit in audits.items()
+        if (bad := sorted(v for v in audit.values() if v))
     }
     assert offenders == {}, offenders
-    # the ratchet sees what it guards: the routes that withdraw or spend a link are there
-    assert "revoke_invitation" in (root / "invitations.py").read_text()
+    assert {name: set(audit) for name, audit in audits.items()} == USERS_WRITING_ROUTES
 
 
 def test_the_lock_ratchet_catches_a_read_before_the_lock() -> None:
-    """The shapes #81 found are refused, and the shapes the fix wrote pass."""
-    read_first = """
+    """The shapes #81 and #85 found are refused, with every way of writing them the ratchet
+    claims to see, and the shapes the fixes wrote pass."""
+    probes = {
+        # #81: the withdrawal read the link, then locked
+        "read_first": """
 @router.post("/invitations/{invitation_id}/revoke")
 def revoke(invitation_id, db):
     inv = db.get(Invitation, invitation_id)
     lock_users_table(db)
     inv.revoked = "now"
-"""
-    helper_first = """
+""",
+        # #81: the admin's password route read the account through a helper
+        "helper_first": """
 @router.put("/users/{user_id}/password")
 def set_pw(user_id, db):
     user = _get_user(db, user_id)
     supersede_invitations(db, user, actor="a", how="b")
-"""
+""",
+        # CodeRabbit on #85: the session passed by keyword
+        "keyword_first": """
+@router.put("/users/{user_id}/password")
+def set_pw(user_id, db):
+    user = _get_user(db=db, user_id=user_id)
+    supersede_invitations(db, user, actor="a", how="b")
+""",
+        # #85: the self-service change read the account and wrote its password
+        "own_password": """
+@router.put("/users/me/password")
+def change(body, me, db):
+    user = _get_user(db, me.id)
+    set_password(user, body.new_password)
+""",
+        "async_route": """
+@router.post("/invitations/{invitation_id}/revoke")
+async def revoke(invitation_id, db):
+    inv = db.get(Invitation, invitation_id)
+    inv.revoked = "now"
+""",
+        "named_session": """
+@router.put("/users/{user_id}/active")
+def set_active(user_id, session: DbDep):
+    user = session.get(User, user_id)
+    lock_users_table(session)
+    set_user_active(session, user, False, sign_in=None)
+""",
+        "helper_stamps": """
+from crb.store.models import Invitation
+
+def _spend(db, inv):
+    inv.accepted = "now"
+
+@router.post("/invitations/accept")
+def accept(token, db):
+    inv = db.get(Invitation, token)
+    lock_users_table(db)
+    _spend(db, inv)
+""",
+        "tuple_stamp": """
+@router.post("/invitations/{invitation_id}/revoke")
+def revoke(invitation_id, db):
+    inv = db.get(Invitation, invitation_id)
+    inv.revoked, inv.reason = "now", "r"
+""",
+        "annotated_stamp": """
+@router.post("/invitations/{invitation_id}/revoke")
+def revoke(invitation_id, db):
+    inv = db.get(Invitation, invitation_id)
+    inv.revoked: str = "now"
+""",
+        "augmented_stamp": """
+@router.post("/invitations/{invitation_id}/revoke")
+def revoke(invitation_id, db):
+    inv = db.get(Invitation, invitation_id)
+    inv.accepted += "now"
+""",
+        "setattr_stamp": """
+@router.post("/invitations/{invitation_id}/revoke")
+def revoke(invitation_id, db):
+    inv = db.get(Invitation, invitation_id)
+    setattr(inv, "revoked", "now")
+""",
+        "values_stamp": """
+@router.post("/invitations/revoke-all")
+def revoke_all(db):
+    db.execute(update(Invitation).values(revoked="now"))
+""",
+        "never_locks": """
+@router.put("/users/{user_id}/password")
+def set_pw(user, db):
+    set_password(user, "x")
+""",
+    }
+    refused = {
+        "read_first": ["revoke:4"],
+        "helper_first": ["set_pw:4"],
+        "keyword_first": ["set_pw:4"],
+        "own_password": ["change:4"],
+        "async_route": ["revoke:4"],
+        "named_session": ["set_active:4"],
+        "helper_stamps": ["accept:9"],
+        "tuple_stamp": ["revoke:4"],
+        "annotated_stamp": ["revoke:4"],
+        "augmented_stamp": ["revoke:4"],
+        "setattr_stamp": ["revoke:4"],
+        "values_stamp": ["revoke_all:4"],
+        "never_locks": ["set_pw:-"],
+    }
+    assert {k: _reads_before_the_users_lock(src) for k, src in probes.items()} == refused
     locked_first = """
 @router.put("/users/{user_id}/password")
 def set_pw(user_id, db):
@@ -1409,15 +1688,29 @@ def set_pw(user_id, db):
     user = _get_user(db, user_id)
     supersede_invitations(db, user, actor="a", how="b")
 """
+    locked_by_keyword = """
+@router.put("/users/me/password")
+def change(body, me, db):
+    lock_users_table(db=db)
+    user = _get_user(db, me.id)
+    set_password(user, body.new_password)
+"""
     no_link = """
 @router.put("/users/{user_id}/role")
 def set_role(user_id, db):
     user = _get_user(db, user_id)
 """
-    assert _reads_before_the_users_lock(read_first) == ["revoke:4"]
-    assert _reads_before_the_users_lock(helper_first) == ["set_pw:4"]
-    assert _reads_before_the_users_lock(locked_first) == []
-    assert _reads_before_the_users_lock(no_link) == []
+    # ``accepted`` on a row that is not an invitation, in a module that names none
+    not_an_invitation = """
+@router.post("/decisions/{decision_id}")
+def decide(decision_id, db):
+    row = db.get(Decision, decision_id)
+    row.accepted = "now"
+"""
+    assert _users_lock_audit(locked_first) == {"set_pw": None}
+    assert _users_lock_audit(locked_by_keyword) == {"change": None}
+    assert _users_lock_audit(no_link) == {}
+    assert _users_lock_audit(not_an_invitation) == {}
 
 
 # ---------------------------------------------------------------------------
