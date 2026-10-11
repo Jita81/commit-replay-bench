@@ -481,7 +481,7 @@ def test_a_campaign_reading_reads_each_commit_by_its_first_admitted_attempt(
     reads only rows of runs its campaign admitted, so each commit is read by its first
     ADMITTED attempt. A miss from a run posted outside the campaign, then a clean row from an
     admitted run, counts clean; a clean row outside, then an admitted miss, counts the miss.
-    The look outside buys nothing: no commit leaves the pool, and each commit is decided by
+    The rows outside buy nothing here: no commit leaves the pool, and each is decided by
     the admitted run's row (its own ``row_hash``, read back through ``load_readings``)."""
     init_db(backend.engine)
     info = seed(backend.factory)

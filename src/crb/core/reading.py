@@ -741,8 +741,9 @@ def register(
     graded it;
     ``budget_spent`` when the cell's spend plus this rule's P(deliver | 0.80) would exceed
     the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules;
-    ``campaign_unsupported_reading`` when it names a campaign that could not hold every run it
-    counts (:func:`campaign_unsupported`). The caller writes the returned reading as a
+    ``campaign_unsupported_reading`` when it names a campaign on the factory's cell
+    (:func:`campaign_unsupported`); a replay or blind reading may name one. The caller writes
+    the returned reading as a
     ``reading.registered`` event before any attempt.
     """
     cell_d = {str(k): str(v) for k, v in cell.items()}
@@ -1093,13 +1094,10 @@ def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
     the reading's repository, apparatus, class-set version and checks arm, graded after the
     registration and never imported. The ticket (``labels.item_id``) is the pool's unit; its
     class, size and language were fixed when it was enrolled, and a builder, model or
-    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`). A
-    forward reading never names a campaign (``campaign_unsupported_reading``, DL-382), so its
-    admission check (:func:`_admitted_run`) is a belt only: it holds if that refusal ever
-    lapses."""
+    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`). Which
+    runs' rows the reading sees is :func:`_arm_forward`'s choice, before this check."""
     if (
-        not _admitted_run(reading, row)
-        or row.imported
+        row.imported
         or row.repo != reading.repo
         or row.process_step != PROCESS_FACTORY
         or row.context_arm != arm
@@ -1124,12 +1122,23 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
     held-out tests are run once, so there is no re-run: an attempt the instrument could not
     observe (``harness``, ``outage``) or whose held-out tests could not be run (``error``)
     leaves the pool with its reason, never a miss; ``fail`` is a miss; ``pass`` on a clean
-    build is clean. A ticket with no attempt yet is pending."""
+    build is clean. A ticket with no attempt yet is pending.
+
+    A forward reading may name no campaign (``campaign_unsupported_reading``, DL-382). If one
+    does (a record written by hand), it reads as a replay reading does: only rows of runs its
+    campaign admitted (:func:`_admitted_run`) are seen, so a ticket is read by its first
+    ADMITTED attempt, and a row of any other run neither decides a ticket nor makes it
+    leave."""
     first: dict[str, GradeRow] = {}
     pool = set(reading.pool)
     for r in rows:
         item = r.labels.get("item_id", "")
-        if item in pool and item not in first and _forward_attempt(reading, r):
+        if (
+            item in pool
+            and item not in first
+            and _forward_attempt(reading, r)
+            and _admitted_run(reading, r)
+        ):
             first[item] = r
     by_item = dict(reading.enrolled)
     fields = ("builder", "model", "provider")
@@ -1175,9 +1184,11 @@ def arm_reading(
     read when it is in the arm's scope (:func:`_in_scope`) and its run was admitted
     (:func:`_admitted_run`). A row of any other run is invisible to it, whatever its failure
     kind: it is not a first attempt, not a harness re-run toward ``max_reruns``, not an
-    outage and not ``gold_not_clean``. A commit is read by its first admitted attempt. A look
-    outside the campaign buys no selection: the admitted attempt is an independent draw, a
-    commit with none holds the prefix pending, and no filing makes a commit leave. A
+    outage and not ``gold_not_clean``. A commit is read by its first admitted attempt, so a
+    filing outside the campaign cannot choose the admitted draw: a row outside it neither
+    decides a commit nor makes it leave, and a commit with none holds the prefix pending. An
+    admitted ``harness`` row still counts toward ``max_reruns``, so an operator who induces
+    one on an admitted run can choose which commits leave (P-792, open). A
     campaign-named reading whose admissions were never read counts nothing: every commit
     waits."""
     if reading.admissions_unread:

@@ -431,8 +431,10 @@ def test_a_row_of_an_unadmitted_run_is_invisible_whatever_its_failure_kind() -> 
     Three harness failures outside then an admitted clean row count clean (inside, they
     would have spent the two re-runs and the commit would have left ``harness``); an
     admitted harness failure, a miss outside, then an admitted clean row count clean; an
-    outage outside then an admitted miss counts the miss; and a commit whose only rows are
-    outside the campaign is pending."""
+    outage outside then an admitted miss counts the miss; a commit whose only rows are
+    outside the campaign is pending; and an outage outside never lends its change to its
+    commit, so a later commit's admitted miss of that change is read, not left as the same
+    change."""
     reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
     first, second, third, fourth = reading.pool[:4]
 
@@ -461,6 +463,20 @@ def test_a_row_of_an_unadmitted_run_is_invisible_whatever_its_failure_kind() -> 
         (None, "", ""),
     ]
     assert arm.look.state == STATE_LOOK_PENDING and arm.look.counted == 3
+    # the loop skips an outage either way; only its change label could show, and it must
+    # not: the commit keeps its own change and the later admitted miss of that change is read
+    fifth, sixth = reading.pool[4:6]
+    shared = _hashed(
+        [
+            sealed_row(fifth, clean=False, run_id="run-out", change="chg-a", labels=outage),
+            sealed_row(sixth, clean=False, run_id="run-in", change="chg-a"),
+        ]
+    )
+    got = arm_reading(reading, "S3", shared).commits[4:6]
+    assert [(c.change, c.outcome, c.left, c.row_hash) for c in got] == [
+        (fifth, None, "", ""),
+        ("chg-a", False, "", shared[1].row_hash),
+    ]
     # the same harness failures by an admitted run spend the re-runs: the commit leaves
     inside = [harness(first, "run-in") for _ in range(3)]
     assert arm_reading(reading, "S3", inside).commits[0].left == LEFT_HARNESS

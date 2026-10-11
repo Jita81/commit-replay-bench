@@ -394,16 +394,23 @@ def test_an_enrolled_ticket_whose_first_attempt_was_not_graded_leaves_the_pool()
 def test_a_forward_reading_under_a_campaign_counts_only_first_attempts_admitted_under_it() -> None:
     """DL-382, fail closed: a forward reading that names a campaign (a record written by hand —
     ``POST /readings/forward`` refuses one) counts a ticket's first attempt only when its run
-    was admitted under that campaign. Read without the campaign's admissions every ticket
-    waits — none is counted and none leaves on a guess; read with them, a first attempt from
-    a run outside the campaign decides its ticket uncounted (it leaves, never a later retry)."""
+    was admitted under that campaign, as a replay reading does (DL-382, option (b)). Read
+    without the campaign's admissions every ticket waits — none is counted and none leaves on
+    a guess; read with them, a row of a run outside the campaign is invisible: its ticket
+    waits, and is then read by its first ADMITTED attempt. An outside miss never makes the
+    ticket leave, and an admitted retry decides it."""
     _reading, _rows, ceiling = _ceiling()
     recs = [_record(i) for i in range(3)]
     named = replace(_forward(ceiling), campaign_id="cmp_" + "a" * 24, reading_id="")
-    fwd = with_enrolment(named, recs)
-    rows = [_s2_row(recs[0], run_id="run-in"), _s2_row(recs[1], run_id="run-out")]
-    unread = evaluate(fwd, rows).arms["S2"]
+    fwd = with_admissions(with_enrolment(named, recs), {"run-in"})
+    outside = _s2_row(recs[1], result=RESULT_FAIL, clean=False, run_id="run-out")
+    rows = [_s2_row(recs[0], run_id="run-in"), outside]
+    unread = evaluate(with_enrolment(named, recs), rows).arms["S2"]
     assert unread.look.counted == 0 and [c.left for c in unread.commits] == ["", "", ""]
-    arm = evaluate(with_admissions(fwd, {"run-in"}), rows).arms["S2"]
+    arm = evaluate(fwd, rows).arms["S2"]
     assert arm.look.counted == 1 and arm.commits[0].outcome is True
-    assert arm.commits[1].left == LEFT_NOT_GRADED and arm.commits[2].left == ""
+    assert [(c.outcome, c.left) for c in arm.commits[1:]] == [(None, ""), (None, "")]
+    retry = _s2_row(recs[1], run_id="run-in", created="2026-09-27T16:00:00+00:00")
+    again = evaluate(fwd, [*rows, retry]).arms["S2"]
+    assert again.look.counted == 2 and again.commits[1].outcome is True
+    assert not any(c.left for c in again.commits)
