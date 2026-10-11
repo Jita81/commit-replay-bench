@@ -41,8 +41,10 @@ Touch when:   never for a new repository; a lifecycle route or a ``user.*`` even
 from __future__ import annotations
 
 import os
+import sqlite3
 import threading
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -404,36 +406,43 @@ class TestActive:
         assert r.status_code == 422
         assert client.put(f"{API_PREFIX}/users/{root}/active", json={}).status_code == 422
 
-    def test_guard_reads_the_row_under_the_lock_not_the_callers_snapshot(
+    def test_no_write_lands_between_the_routes_read_and_its_guard(
         self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Two admins, root and x. Request A loads x (an operator) before the users lock;
-        between that read and the lock another session promotes x to admin and demotes
-        root. A guard that trusted A's snapshot ("x is an operator, no admin at stake")
-        deactivated the last admin — reproduced by the verifier on 2026-09-21. The guard
-        must decide on the row as it is under the lock: 409 ``last_admin``, and one active
-        admin remains."""
+        """The verifier's interleaving (2026-09-21): request A loaded x (an operator) before
+        the users lock, another session then promoted x to admin and demoted root, and a
+        guard that trusted A's snapshot ("x is an operator, no admin at stake") deactivated
+        the last admin. The route now takes the lock before it loads x (P-785), so that write
+        cannot land between A's read and its guard: SQLite refuses it while A holds the write
+        lock, and A decides on the rows as they are (x an operator, root the one admin). The
+        guard's own re-read under the lock, for a caller that read before taking it, is
+        ``test_primitive_refreshes_under_the_lock``."""
         login(client)
         root = client.get(f"{API_PREFIX}/auth/me").json()["id"]
         x = create(client, "xx", "operator")
         real_get_user = admin_routes._get_user
+        refused: list[str] = []
 
         def get_then_race(db: Any, user_id: str) -> Any:
             user = real_get_user(db, user_id)
             if user_id == x:
-                with app.state.session_factory() as other:
-                    other.get(User, x).role = "admin"
-                    other.get(User, root).role = "operator"
-                    other.commit()
+                # its own connection with a short busy timeout, not the app's 30 s one
+                with closing(sqlite3.connect(db.get_bind().url.database, timeout=0.05)) as other:
+                    try:
+                        other.execute("UPDATE users SET role = 'admin' WHERE id = ?", (x,))
+                        other.execute("UPDATE users SET role = 'operator' WHERE id = ?", (root,))
+                        other.commit()
+                    except sqlite3.OperationalError as exc:
+                        refused.append(str(exc))
             return user
 
         monkeypatch.setattr(admin_routes, "_get_user", get_then_race)
         r = client.put(f"{API_PREFIX}/users/{x}/active", json={"active": False})
-        assert r.status_code == 409 and err(r)["code"] == "last_admin"
+        assert refused == ["database is locked"]
+        assert r.status_code == 200 and r.json()["active"] is False, r.text
         with app.state.session_factory() as s:
-            assert count_active_admins(s) == 1
-            assert s.get(User, x).active is True
-        assert [e.action for e in events_for(app, x)] == ["user.created"]  # nothing written
+            assert count_active_admins(s) == 1 and s.get(User, root).role == "admin"
+            assert s.get(User, x).role == "operator"
 
     def test_primitive_refreshes_under_the_lock(self, client: TestClient, app: Any) -> None:
         """The same interleaving on ``set_user_active`` directly — the one implementation
@@ -508,24 +517,28 @@ class TestActive:
     def test_a_transaction_already_open_refuses_a_deactivation_rather_than_run_unlocked(
         self, client: TestClient, app: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """P-430 at the route: a deferred ``BEGIN`` opened before the users lock (here after
-        the target's read) makes ``PUT /users/{id}/active`` refuse with nothing written,
-        not deactivate the account with its last-admin guard unserialised."""
+        """P-430 at the route: a deferred ``BEGIN`` opened before the users lock (here just
+        before the route takes it, which is now ahead of the target's read: P-785) makes
+        ``PUT /users/{id}/active`` refuse with nothing written, not deactivate the account
+        with its last-admin guard unserialised."""
         login(client)
         x = create(client, "xx", "operator")
-        real_get_user = admin_routes._get_user
+        real_lock = admin_routes.lock_users_table
+        opened = [False]
 
-        def get_then_begin(db: Any, user_id: str) -> Any:
-            user = real_get_user(db, user_id)
-            db.execute(text("BEGIN"))  # a transaction, but no write lock
-            return user
+        def begin_then_lock(db: Any) -> None:
+            if not opened[0]:
+                opened[0] = True
+                db.execute(text("BEGIN"))  # a transaction, but no write lock
+            real_lock(db)
 
-        monkeypatch.setattr(admin_routes, "_get_user", get_then_begin)
+        monkeypatch.setattr(admin_routes, "lock_users_table", begin_then_lock)
         try:
             r = client.put(f"{API_PREFIX}/users/{x}/active", json={"active": False})
         except RuntimeError as exc:
             assert "already open" in str(exc)
             r = None
+        assert opened[0]
         assert r is None or r.status_code == 500, r.text
         with app.state.session_factory() as s:
             assert s.get(User, x).active is True
