@@ -1184,7 +1184,11 @@ def test_an_admin_act_and_the_same_persons_sign_in_at_once_never_deadlock(
     account's row and then waited for the ``events`` lock, the sign-in's ``last_login``
     then waited for the row, and the database broke the cycle with a 500 for one of them
     (``DeadlockDetected``), for each of the four acts. Now the act waits with the row
-    unwritten (another connection can still lock it), and both complete."""
+    unwritten (another connection can still lock it), and both complete.
+
+    Both paths take the ``users`` lock before the ``events`` lock (P-785), so the act
+    waits on the ``users`` lock the held sign-in already has. The wrapper hands back the
+    sign-in's result, which says whether the sign-in was refused."""
     if backend.dialect != "postgresql":
         pytest.skip("a row lock is PostgreSQL's: SQLite's write lock is the whole database")
     import os
@@ -1207,14 +1211,14 @@ def test_an_admin_act_and_the_same_persons_sign_in_at_once_never_deadlock(
     held, go = threading.Event(), threading.Event()
     real_commit_audited = auth_routes.commit_audited
 
-    def sign_in_holds_the_events_lock(db: Any, write: Any, *, before: Any = None) -> None:
+    def sign_in_holds_the_events_lock(db: Any, write: Any, *, before: Any = None) -> Any:
         if getattr(write, "__name__", "") != "_signed_in":
             return real_commit_audited(db, write, before=before)
 
-        def held_write() -> None:  # commit_audited has taken the events lock
+        def held_write() -> Any:  # commit_audited has taken the users and events locks
             held.set()
             go.wait(timeout=30)
-            write()
+            return write()
 
         return real_commit_audited(db, held_write, before=before)
 
@@ -1245,7 +1249,7 @@ def test_an_admin_act_and_the_same_persons_sign_in_at_once_never_deadlock(
                 deadline = time.monotonic() + 15
                 waiting = (
                     "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
-                    "AND objid = 7332 AND NOT granted"
+                    "AND objid = 7336 AND NOT granted"
                 )
                 with monitor.connect() as c:
                     while not c.execute(text(waiting)).first():
