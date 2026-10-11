@@ -47,7 +47,8 @@ What it is:   The runner contract (``TestRunner`` protocol, ``BaseRunner`` plumb
 What it does: Resolves target and belt scopes from the repo config; runs one scope through an
               executor and fails closed when a non-zero exit carries no attributable test id;
               carries the ids of the tests that passed when the runner reports them (belt 2
-              requires them: ``TestRun.passed``, ADR-0048 decision 7);
+              requires them: ``TestRun.passed``, ADR-0048 decision 7), with the run root inside
+              an id relocated to ``<root>`` as whole path components (``relocate_ids``);
               runs the one network-permitted setup phase on the host (refused under docker) and
               keeps its redacted record; starts and stamps the oracle's services; on the host,
               runs every test command in the runner's declared environment (ADR-0048); runs a
@@ -977,33 +978,44 @@ def parse_pytest_passes(text: str) -> frozenset[str]:
     return frozenset(_PASS_LINE.findall(text))
 
 
+#: The edges a root needle must sit between to be whole path components: not preceded by a
+#: character a path component holds (so ``tests/work`` and ``/private/tmp`` are not ``/work``
+#: and ``/tmp``), and followed by ``/`` or by a character no component holds (so
+#: ``/workspace`` and ``/work-2`` are not ``/work``). A ``-`` may precede the root, since pytest
+#: joins several parametrize values with it (``test[1-/work/x]``). Missing a root is the
+#: strict direction — belt 2 refuses an honest gold — so the edges lean that way.
+_ROOT_EDGE = (r"(?<![\w.~+@])", r"(?![\w.~+@-])")
+
+
 def relocate_ids(ids: frozenset[str], root: Path) -> frozenset[str]:
-    """Replace this run's root path, wherever it appears inside a test id, with the fixed token
-    ``<root>``, so ids compare across runs rooted at different absolute paths.
+    """Replace this run's root path, wherever it appears inside a test id as whole path
+    components, with the fixed token ``<root>``, so ids compare across runs rooted at different
+    absolute paths.
 
     A glob- or ``tmp_path``-parametrized id carries the worktree path in its parametrize value
     (``tests/t.py::test[/work/data/case1.txt]``, or the host-absolute equivalent). The gold is
     qualified under one root and a patch graded under another, so the raw ids never match and
     the honest gold would miss belt 2 (R1-F4-2). ``/work`` is the container mount; ``realpath``
-    covers a root reached through a symlink (``/tmp`` → ``/private/tmp`` on macOS). Longest
-    needle first, so a path that is a prefix of another does not shadow it. Only an absolute
-    root is a needle — a relative root (``.`` in a parser unit test) would rewrite the ``.`` in
-    every ``foo.py`` id. The node path (``tests/t.py::test``) is already root-relative and left
-    untouched.
+    covers a root reached through a symlink (``/tmp`` → ``/private/tmp`` on macOS). One pass,
+    longest needle first, so a path that is a prefix of another does not shadow it. A needle
+    matches only as whole path components (:data:`_ROOT_EDGE`): ``tests/workers``,
+    ``github.com/acme/worker``, ``[/workspace/data]`` and a sibling of the root (``/x/trial2``
+    beside ``/x/trial``) keep their text, which a plain substring replacement mangled
+    (R2-REG-2). Only an absolute root other than ``/`` is a needle — a relative root (``.`` in a
+    parser unit test) would rewrite the ``.`` in every ``foo.py`` id, and ``/`` every slash.
+    The node path (``tests/t.py::test``) is already root-relative and left untouched.
     """
     needles = {"/work"}
     if os.path.isabs(str(root)):
         needles.add(str(root))
         with contextlib.suppress(OSError):  # realpath on a path is effectively total
             needles.add(os.path.realpath(root))
-    ordered = sorted((n for n in needles if n), key=len, reverse=True)
-
-    def _one(test_id: str) -> str:
-        for needle in ordered:
-            test_id = test_id.replace(needle, "<root>")
-        return test_id
-
-    return frozenset(_one(i) for i in ids)
+    ordered = sorted((n for n in needles if n and n != "/"), key=len, reverse=True)
+    # one pass over every needle, so a root already replaced is not rescanned (a repo's own
+    # ``work/`` under a host root stays ``<root>/work``, not ``<root><root>``)
+    alternatives = "|".join(re.escape(n) for n in ordered)
+    pattern = re.compile(f"{_ROOT_EDGE[0]}(?:{alternatives}){_ROOT_EDGE[1]}")
+    return frozenset(pattern.sub("<root>", i) for i in ids)
 
 
 _PASS_SUMMARY_LINE = re.compile(r"^PASSED\s+\S+[^\n]*(?:\n|\Z)", re.M)

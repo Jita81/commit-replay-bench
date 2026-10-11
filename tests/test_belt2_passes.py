@@ -23,7 +23,8 @@ Navigation
 ----------
 What it is:   The suite for belt 2's pass requirement (F4).
 What it does: Pins that the Go and pytest parsers report the tests that passed and that the
-              pytest command asks for them; that qualification records the target tests the
+              pytest command asks for them; that ``relocate_ids`` rewrites the run root only
+              as whole path components; that qualification records the target tests the
               gold passed; and, end to end on real toolchains, that a patch which makes the
               target exit 0 without its tests passing never grades clean while the honest
               gold still does, under the record qualification writes and under the older
@@ -120,6 +121,29 @@ def test_the_go_parser_reports_no_pass_for_a_package_that_ran_no_test() -> None:
     run = _go_parse(events, rc=0)
     assert run.green is True
     assert run.passed == frozenset()
+
+
+def test_relocate_ids_rewrites_only_whole_root_components(tmp_path: Path) -> None:
+    """R2-REG-2: the root (and the container's ``/work``) is replaced only as whole path
+    components. A plain substring replacement turned ``tests/workers`` into
+    ``tests<root>ers`` and ``[/workspace/data]`` into ``[<root>space/data]``."""
+    root = tmp_path / "trial"
+    kept = {
+        "tests/workers/t.py::test_w",
+        "github.com/acme/worker::TestW",
+        "tests/t.py::test[/workspace/data]",
+        "tests/t.py::test[/work-2/x]",
+        f"tests/t.py::test[{tmp_path}/trial2/x]",
+    }
+    moved = {
+        "tests/t.py::test[/work/data/c1.txt]": "tests/t.py::test[<root>/data/c1.txt]",
+        "tests/t.py::test[1-/work/c2.txt]": "tests/t.py::test[1-<root>/c2.txt]",
+        "tests/t.py::test[/work]": "tests/t.py::test[<root>]",
+        f"tests/t.py::test[{root}/work/c3.txt]": "tests/t.py::test[<root>/work/c3.txt]",
+    }
+    assert rb.relocate_ids(frozenset(kept | set(moved)), root) == frozenset(
+        kept | set(moved.values())
+    )
 
 
 def _pytest_runner() -> rb.BaseRunner:
