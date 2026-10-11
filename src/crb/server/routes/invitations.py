@@ -412,6 +412,10 @@ def revoke_invitation(
 ) -> InvitationOut:
     """The link stops working. The account stays as it is — inactive, unusable — because
     removing an account is a different act with a different record."""
+    # Read the link under the lock its acceptance holds: a withdrawal that read "pending"
+    # while the link was being accepted stamped it revoked as well as accepted, on an account
+    # the acceptance opened (CodeRabbit on #81, 2026-10-10; docs/PREVENTION.md P-785).
+    lock_users_table(db)
     inv = db.get(Invitation, invitation_id)
     if inv is None:
         raise ApiError(404, "not_found", f"no invitation {invitation_id!r}")
@@ -424,7 +428,9 @@ def revoke_invitation(
             "than the link",
         )
     if state == STATE_REVOKED:
-        return _out(inv, db.get(User, inv.user_id))
+        out = _out(inv, db.get(User, inv.user_id))
+        db.rollback()  # nothing to write: release the users lock now, not at teardown
+        return out
     inv.revoked = _iso(_now())
     inv.revoked_reason = body.reason
     user = db.get(User, inv.user_id)
