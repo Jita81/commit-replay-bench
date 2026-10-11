@@ -252,13 +252,13 @@ test.describe(`05 replay (${BUILDER})`, () => {
     await select.selectOption({ value: `${cellClass}|${cellSize}` })
     await expect(gate).toContainText(`Attest ${cellClass} × ${cellSize}`)
     await field(page, 'Attestation statement').fill('walkthrough: attempting to sign off a thin cell')
-    // n < 10 (and 04's controls escape): the server's preview refuses, the gate is CLOSED on
+    // fewer than 10 distinct tasks (and 04's controls escape): the server's preview refuses, the gate is CLOSED on
     // exactly those criteria, and the action is disabled — nothing is sent, nothing is recorded.
     await expect(gate).toHaveAttribute('data-state', 'CLOSED')
     const row = (label: string | RegExp) => gate.getByRole('listitem').filter({ hasText: label })
     await expect(row('Cell is measured')).toContainText(/✓\s*satisfied:/)
     await expect(row('false-Q1 = 0')).toContainText(/✓\s*satisfied:/)
-    await expect(row('n ≥ 10')).toContainText(/✗\s*not satisfied:/)
+    await expect(row('distinct tasks ≥ 10')).toContainText(/✗\s*not satisfied:/)
     await expect(row('Route = deliver')).toContainText(/✗\s*not satisfied:/)
     // the cell's own n (2 in tier 1, where both tasks share a cell; whatever the real mine
     // produced in tier 2 — the two graded tasks may land in different cells)

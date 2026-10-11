@@ -15,7 +15,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
   ceiling the product holds** (P-787 to P-791, G-957, DL-372 to DL-381;
   [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading requires `hypothesis`
-  and `smallest_effect`, hashed into its id; `thin_cell` counts distinct tasks. A reading
+  and `smallest_effect`, hashed into its id; `thin_cell` counts distinct tasks, and the
+  sign-off gate's row shows that count with the attempts beside it. A reading
   registers, and a run under one is admitted, only when sandbox and builder both run on docker.
   `POST /campaigns` holds a ceiling in pounds at a stated rate: a run filed under it needs
   `max_cost_usd` and is admitted only while its cap plus headroom fits what is left, else 409

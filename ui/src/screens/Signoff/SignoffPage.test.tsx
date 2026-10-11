@@ -14,6 +14,8 @@
  *               clauses and a 409 `false_q1_refused` as the floor; that other errors render
  *               as the envelope with the gate as the preview says; that a pre-policy
  *               record is listed without a fabricated snapshot next to a policy record;
+ *               that the thin-cell row counts distinct tasks, the number the server checks,
+ *               with the attempts beside them, and says so when a server serves no count;
  *               that the header says in two sentences what the screen is for and keeps the
  *               refusal clauses behind a Details; that a viewer gets the gate, the evidence
  *               and the attestations but never the form; that with no repository the
@@ -41,7 +43,7 @@ import { unhinted } from '../../help/hints-collector'
 import { PRINCIPAL, envelope, expectHintOpens, json, mockApi, renderApp } from '../../test/utils'
 import type { CapabilityMapWithControls, ControlsVerdict } from '../Capability/contract'
 import { SignoffPage } from './SignoffPage'
-import type { SignoffPreview, SignoffRefusal, SignoffWithPolicy } from './contract'
+import type { SignoffPreview, SignoffPreviewEvidence, SignoffRefusal, SignoffWithPolicy } from './contract'
 
 const ROW = 'c'.repeat(64)
 const ROW2 = 'd'.repeat(64)
@@ -306,7 +308,7 @@ describe('SignoffPage (signoff-policy.v3)', () => {
     expect(screen.getByTestId('signoff-gate')).toHaveAttribute('data-state', 'CLOSED')
     expect(gateRow(gate, 'Cell is measured').textContent).toMatch(/satisfied:/)
     expect(gateRow(gate, 'false-Q1 = 0').textContent).toMatch(/✓\s*satisfied:/)
-    expect(gateRow(gate, 'n ≥ 10').textContent).toMatch(/✓\s*satisfied:/)
+    expect(gateRow(gate, 'distinct tasks ≥ 10').textContent).toMatch(/✓\s*satisfied:/)
     expect(gateRow(gate, /Negative controls passed/).textContent).toMatch(/✗\s*not satisfied:/)
     expect(gateRow(gate, /Oracle strength measured and ≥ 0\.80/).textContent).toMatch(/✗\s*not satisfied:/)
     expect(gateRow(gate, /Oracle strength measured/).textContent).toContain('strength 0.58 · 3 of 4 task(s) scored')
@@ -916,6 +918,39 @@ describe('SignoffPage — the second person’s gate says everything before anyo
     }
     // a clause that already says its own way forward gets no second line
     expect(within(list).queryByTestId('refusal-next-attestation_missing')).toBeNull()
+  })
+
+  it('the thin-cell row counts distinct tasks, the number the server checks, with the attempts beside it: 16 rows on 4 commits are 4 (P-788)', async () => {
+    const thin: SignoffRefusal = { code: 'thin_cell', message: 'tasks=4 < n_min=10', threshold: 10, observed: 4, overridable: true }
+    const clustered = preview({ evidence: { ...preview().evidence, n: 16, n_tasks: 4, clean: 16 }, refusals: [thin, ATTESTATION_MISSING] })
+    mockApi(base({ 'GET /signoffs/preview': clustered }))
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(gateRow(gate, 'distinct tasks ≥ 10')).toBeDefined())
+    const row = gateRow(gate, 'distinct tasks ≥ 10')
+    expect(row.textContent).toMatch(/✗\s*not satisfied:/)
+    expect(row.textContent).toContain('tasks = 4 (n = 16 attempts)')
+    // no row states the attempt count as the bar: the server reads tasks
+    expect(gateRow(gate, 'n ≥ 10')).toBeUndefined()
+  })
+
+  it('on a server that does not serve distinct tasks the thin-cell row says so, never a task count of 0', async () => {
+    const older: SignoffPreviewEvidence = { ...preview().evidence, n: 16 }
+    delete older.n_tasks
+    mockApi(base({ 'GET /signoffs/preview': preview({ evidence: older }) }))
+    renderApp(<SignoffPage />, { route: '/signoff?repo=r' })
+    const user = userEvent.setup()
+    await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
+    await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
+    const gate = screen.getByTestId('signoff-gate')
+    await waitFor(() => expect(gateRow(gate, 'distinct tasks ≥ 10')).toBeDefined())
+    const row = gateRow(gate, 'distinct tasks ≥ 10')
+    expect(row.textContent).toContain('n = 16 attempts')
+    expect(row.textContent).toContain('this server does not count distinct tasks')
+    expect(row.textContent).not.toContain('tasks = ')
   })
 
   it('the gate says whether the evidence was graded in the sealed posture, as advice that never holds the gate (G-480)', async () => {

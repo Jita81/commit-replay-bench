@@ -181,6 +181,8 @@ export interface SignoffOracle {
 export interface SignoffPreviewEvidence {
   measured: boolean
   n: number
+  /** Distinct tasks behind `n` — the count `thin_cell` checks (16 rows on 4 commits are 4); absent on a server older than the field. */
+  n_tasks?: number
   clean: number
   point: number | null
   ci_low: number | null
