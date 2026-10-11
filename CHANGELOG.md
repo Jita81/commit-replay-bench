@@ -18,8 +18,9 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   accepted, an admin's password set was replaced by the person's, a self-service change or a
   sign-in stored a hash over an admin's reset, and a sign-out everywhere let a password change
   keep the session it ended. Each now takes the lock before it reads; a password is verified
-  first, so a guess never holds it, then the account is read again under it. Two ratchets fail
-  a route that reads before the lock, or any new writer of a password, nonce or active flag.
+  first, so a guess never holds it, then the account is read again under it. The break-glass
+  `crb users set-password` takes it too. Two ratchets fail a route that reads before the lock,
+  or any new writer of a password, nonce or active flag.
 
 - **Every pull-request workflow's jobs are required on `main`**
   ([#72](https://github.com/Jita81/commit-replay-bench/pull/72)). On 2026-10-07 an administrator

@@ -1667,6 +1667,20 @@ def test_a_sign_in_that_straddles_an_admin_reset_never_upgrades_over_it(
     _straddles_a_reset(backend, tmp_path, monkeypatch, rehash=True)
 
 
+class _Outdated:
+    """argon2's hasher, with every stored hash made under parameters since moved on: each
+    sign-in hashes its password again, and stores the upgrade under the users lock."""
+
+    def __init__(self, real: Any) -> None:
+        self._real = real
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+    def check_needs_rehash(self, stored: str) -> bool:
+        return True
+
+
 def _straddles_a_reset(
     backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, rehash: bool
 ) -> None:
@@ -1681,17 +1695,8 @@ def _straddles_a_reset(
 
     app = _app(backend, tmp_path, monkeypatch)
     verified, reset = threading.Event(), threading.Event()
-    real_verify, real_hasher = auth_mod.verify_password, auth_mod.hasher
+    real_verify = auth_mod.verify_password
     checked: list[bool] = []
-
-    class _Outdated:
-        """argon2's hasher, with every stored hash made under parameters since moved on."""
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(real_hasher, name)
-
-        def check_needs_rehash(self, stored: str) -> bool:
-            return True
 
     def verify_then_wait(stored: str, password: str) -> bool:
         ok = real_verify(stored, password)
@@ -1706,7 +1711,7 @@ def _straddles_a_reset(
     with TestClient(app) as admin:
         uid, _ = _dana_signed_in(app, admin)
         if rehash:
-            monkeypatch.setattr(auth_mod, "hasher", _Outdated())
+            monkeypatch.setattr(auth_mod, "hasher", _Outdated(auth_mod.hasher))
         monkeypatch.setattr(auth_mod, "verify_password", verify_then_wait)
 
         def signs_in() -> Any:
@@ -1736,6 +1741,91 @@ def _straddles_a_reset(
     assert _sign_in(app, ADMIN_PW) == 429
     limiter.limit = limit
     assert (_sign_in(app, ADMIN_PW), _sign_in(app, CHOSEN_PW)) == (200, 401)
+
+
+def test_a_cli_reset_waits_on_the_users_lock_a_sign_in_holds(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #85, 2026-10-11: ``crb users set-password`` wrote the hash without the
+    users lock, the one write of an account field outside it. A sign-in held under the lock,
+    the account read again and its hash upgrade not yet stored, did not hold the row. With
+    the users lock taken out of the reset, it waited instead on the events lock its own event
+    takes, its row not yet written, and its password still stood (PostgreSQL 16.15,
+    2026-10-11): what ordered it was a side effect of the event, and no lost update was
+    reproduced. The reset now waits on the users lock and reads the account again once it
+    holds it, as every other writer does, and the password it sets is the one that stands."""
+    if backend.dialect != "postgresql":
+        pytest.skip("SQLite's write lock is the whole database: the reset waits on any dialect")
+    import os
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.auth as auth_mod
+    import crb.server.routes.auth as auth_routes
+    from crb.cli.commands.users import PASSWORD_FILE_ENV
+    from crb.cli.main import main
+    from crb.server.app import create_app
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX, USER_PW, add_users, make_settings
+
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    store_db.init_db(backend.engine)
+    add_users(backend.factory)
+    app = create_app(make_settings(tmp_path), backend.factory)
+    new_pw = tmp_path / "pw.txt"
+    new_pw.write_text(ADMIN_PW + "\n", encoding="utf-8")
+    monkeypatch.setenv(PASSWORD_FILE_ENV, str(new_pw))
+    monkeypatch.setattr(auth_mod, "hasher", _Outdated(auth_mod.hasher))
+    held, go = threading.Event(), threading.Event()
+    real_upgrade = auth_routes.upgrade_password_hash
+
+    def upgrade_when_released(user: Any, verified: str, upgraded: str) -> bool:
+        # the sign-in holds the users lock and has read the account again under it
+        if not held.is_set():
+            held.set()
+            go.wait(timeout=30)
+        return bool(real_upgrade(user, verified, upgraded))
+
+    monkeypatch.setattr(auth_routes, "upgrade_password_hash", upgrade_when_released)
+
+    def sign_in(password: str) -> int:
+        creds = {"username": "viewer1", "password": password}
+        return TestClient(app).post(f"{API_PREFIX}/auth/login", json=creds).status_code
+
+    def cli_resets() -> int:
+        assert held.wait(timeout=15), "the sign-in never reached its hash upgrade"
+        return main(["users", "set-password", "viewer1", "--database-url", backend.url])
+
+    monitor = backend.new_engine()
+    waited: list[bool] = []
+
+    def release_when_the_reset_waits() -> None:
+        assert held.wait(timeout=15)
+        deadline = time.monotonic() + 5
+        waiting = (
+            "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+            "AND classid = 0 AND objid = 7336 AND objsubid = 1 AND NOT granted"
+        )
+        with monitor.connect() as c:
+            while not (found := c.execute(text(waiting)).first() is not None):
+                if time.monotonic() > deadline:
+                    break
+                time.sleep(0.02)
+                c.rollback()
+        waited.append(found)
+        go.set()
+
+    try:
+        codes = at_once(lambda: sign_in(USER_PW), cli_resets, release_when_the_reset_waits)
+    finally:
+        go.set()
+        monitor.dispose()
+    assert (codes[:2], waited) == ([200, 0], [True]), (codes, waited)
+    # the password the operator set stands; the upgrade of the old one never replaced it
+    assert (sign_in(ADMIN_PW), sign_in(USER_PW)) == (200, 401)
 
 
 def test_a_sign_in_whose_retry_is_refused_keeps_no_session_from_the_lost_attempt(
@@ -2226,6 +2316,84 @@ def _account_field_writers(root: Path) -> tuple[set[str], dict[str, set[str]]]:
     return direct, reach
 
 
+def _cli_writes_outside_the_users_lock(source: str) -> list[str]:
+    """Each function in ``source`` that calls one of :data:`USERS_WRITERS` without the users
+    lock, as ``name:line``. ``set_user_active`` takes the lock and reads the account again
+    itself, first; any other writer needs, at the function's top level and before the first
+    statement that calls one, ``lock_users_table(db)`` followed at once by
+    ``db.refresh(…)`` — the verb read the account, and may have prompted, before it."""
+    import ast
+    from itertools import pairwise
+
+    nested = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+    def called(c: ast.Call) -> str:
+        return c.func.id if isinstance(c.func, ast.Name) else getattr(c.func, "attr", "")
+
+    def writes(stmt: ast.stmt) -> bool:
+        todo: list[ast.AST] = [stmt]
+        while todo:
+            n = todo.pop()
+            if isinstance(n, ast.Call) and called(n) in USERS_WRITERS - {"set_user_active"}:
+                return True
+            todo.extend(c for c in ast.iter_child_nodes(n) if not isinstance(c, nested))
+        return False
+
+    def on_db(stmt: ast.stmt, name: str) -> bool:
+        c = stmt.value if isinstance(stmt, ast.Expr) else None
+        if not isinstance(c, ast.Call) or called(c) != name:
+            return False
+        if name == "refresh":
+            on = c.func.value if isinstance(c.func, ast.Attribute) else None
+            return isinstance(on, ast.Name) and on.id == "db"
+        return [a.id for a in c.args if isinstance(a, ast.Name)] == ["db"]
+
+    out = []
+    for fn in ast.walk(ast.parse(source)):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        own = [s for s in fn.body if not isinstance(s, nested)]
+        first = next((i for i, s in enumerate(own) if writes(s)), None)
+        if first is None:
+            continue
+        before = own[:first]
+        if not any(
+            on_db(a, "lock_users_table") and on_db(b, "refresh") for a, b in pairwise(before)
+        ):
+            out.append(f"{fn.name}:{own[first].lineno}")
+    return out
+
+
+def test_the_cli_lock_check_catches_a_write_outside_the_lock() -> None:
+    """The shapes :func:`_cli_writes_outside_the_users_lock` refuses — the reset as it was,
+    the lock after the write, the lock without the account read again, the lock under an
+    ``if`` — and the shapes it lets through: the fix, and a verb that only deactivates."""
+    head = "def cmd(args):\n    def _go(db, where):\n        user = _local_user(db, args.u)\n"
+    probes = {
+        "unlocked": "        set_password(user, pw)\n",
+        "lock_after": "        set_password(user, pw)\n        lock_users_table(db)\n",
+        "no_reread": "        lock_users_table(db)\n        set_password(user, pw)\n",
+        "under_if": (
+            "        if args.x:\n            lock_users_table(db)\n"
+            "        db.refresh(user)\n        set_password(user, pw)\n"
+        ),
+        "fixed": (
+            "        pw = read_password(confirm=True)\n        lock_users_table(db)\n"
+            "        db.refresh(user)\n        set_password(user, pw)\n"
+        ),
+        "activate": "        set_user_active(db, user, True, sign_in=None)\n",
+    }
+    found = {k: _cli_writes_outside_the_users_lock(head + v) for k, v in probes.items()}
+    assert found == {
+        "unlocked": ["_go:4"],
+        "lock_after": ["_go:4"],
+        "no_reread": ["_go:5"],
+        "under_if": ["_go:7"],
+        "fixed": [],
+        "activate": [],
+    }
+
+
 def test_every_write_of_an_account_field_is_under_the_users_lock_ratchet() -> None:
     """P-785, widened 2026-10-10: the lock ratchet above follows :data:`USERS_WRITERS` by
     name, so a function that writes an account's password hash, session nonce or active
@@ -2234,7 +2402,8 @@ def test_every_write_of_an_account_field_is_under_the_users_lock_ratchet() -> No
     of every session rotated a nonce, without the lock, and the ratchet passed. Every
     assignment of :data:`ACCOUNT_FIELDS` in the package is in a function of the writers
     the ratchet follows, and every function that reaches one is a writer, a route the
-    ratchet audits or a step of one, or a command line kept outside the server."""
+    ratchet audits or a step of one, or a verb of the operator's command line that takes
+    the lock itself (:func:`_cli_writes_outside_the_users_lock`)."""
     import ast
 
     from crb.cli.commands import users as cli_users
@@ -2247,8 +2416,10 @@ def test_every_write_of_an_account_field_is_under_the_users_lock_ratchet() -> No
         "server/auth.py:upgrade_password_hash",
     }
     assert reach.pop("server/auth.py") <= USERS_WRITERS
-    # the operator's command line sets a password with nothing else running: a known gap
+    # the operator's command line: its verbs take the lock themselves (CodeRabbit on #85)
     assert reach.pop("cli/commands/users.py") == {"_go"}, cli_users.__file__
+    cli = (SRC_CRB / "cli" / "commands" / "users.py").read_text()
+    assert _cli_writes_outside_the_users_lock(cli) == []
     root = SRC_CRB / "server" / "routes"
     for rel, names in reach.items():
         assert rel.startswith("server/routes/"), (rel, names)
