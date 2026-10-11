@@ -48,6 +48,18 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   reads each ticket's first factory attempt after registration, counts it only when it was
   graded on the record that enrolled the ticket and otherwise lets the ticket leave the pool
   (``not_graded``), and it alone can make a ceiling a standard.
+* **The reserved attempt** (``attempt_rule`` ``reserved.v1``, P-792). A reading registered
+  under it (``max_reruns`` 0, a named ``budget_profile``; both hashed, a legacy reading's id
+  unchanged) reads each enrolled commit (:func:`enrolled` — the pool, one commit per change,
+  the first ``n`` of a descriptive arm) by the one ``r1`` row its reservation
+  (:class:`Reservation`, the ``reading.reserved`` event the store loads with
+  :func:`with_reservations`) wrote — that run, that claim, stamped with the reservation's
+  event id. Nothing leaves and nothing is re-run: a harness failure, an outage, belt 5
+  switched off, a disqualification, a treatment other than the one reserved, or a settled
+  reservation with no row is a miss named by its reason (``CommitReading.reason``); fail
+  closed. A run of such a reading carries only :data:`RESERVED_RUN_PARAMS` on the reading's
+  own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``). The legacy rule
+  (``first_observed.v0``) is the loop above, unchanged.
 
 Navigation
 ----------
@@ -69,10 +81,17 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               arm of a reading over the ledger's rows in the seeded order; stops the
               hierarchy at the first arm that does not deliver; names the standard, a ceiling
               or no proven standard, and the commits still needed; registers a ceiling's
-              forward reading and enrols its calibration builds.
+              forward reading and enrols its calibration builds. Under ``reserved.v1``
+              (``attempt_rule``, P-792) reads each enrolled commit by its reservation's row
+              alone (``with_reservations``, ``enrolled``, ``_reserved_verdict``; every
+              failure a named miss, none a leave; unread reservations read pending) and
+              refuses a run that could steer a reserved attempt (``reading_run_refusal``:
+              the param whitelist, the default pool, executor, timeout and ladder, the
+              reading's cell and arms, the loop off on the reading's budget profile).
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
               taking each commit's first observed ``r1`` attempt this deployment graded after
-              registration on the reading's checks arm (never an imported row) →
+              registration on the reading's checks arm (never an imported row) — or, under
+              ``reserved.v1``, the one row stamped with the commit's reservation →
               ``look_state`` applies the rule → ``evaluate`` reads the hierarchy →
               ``standard_of`` answers the factory's gate on one checks arm and posture class.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -85,14 +104,19 @@ Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
               ``change_id``, ``sealed``), src/crb/core/routing.py (routes a cell on its
               reading), src/crb/core/capability.py (serves every arm's reading),
               src/crb/core/signoff.py (a sign-off stamps the reading's id),
+              src/crb/store/events.py and src/crb/store/models.py (``READING_RESERVED_ACTION``,
+              the one reservation per reading, arm and commit),
               src/crb/server/routes/readings.py (the events store and ``POST /readings``),
               src/crb/cli/commands/reading.py (``crb reading register``)
 Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py,
-              tests/test_forward_reading.py, tests/test_forward_reading_e2e.py
+              tests/test_forward_reading.py, tests/test_forward_reading_e2e.py,
+              tests/test_p792_reserved.py (reserved.v1 and the legacy goldens)
 Touch when:   never for a new repository; a rule is added (a row in ``RULES`` with its exact
               P(deliver | 0.80) — an ADR amending ADR-0026 item 5 first); the counting rule changes
               (an apparatus bump); the operator fixes another budget
-              (``CRB_READING__CELL_ERROR_BUDGET``); never for a new repository.
+              (``CRB_READING__CELL_ERROR_BUDGET``); a run gains a param (it is refused on a
+              reserved.v1 reading until ``RESERVED_RUN_PARAMS`` names it — and only if it
+              cannot steer an attempt); never for a new repository.
 Claims:       A reading bounds the chance of certifying a cell whose true first-attempt rate is
               0.80 by its rule's P(deliver | 0.80); it says nothing about correctness or
               working software (docs/EVIDENCE-AND-CLAIMS.md).
@@ -115,7 +139,15 @@ from crb.core.acceptance import (
     held_out_graded,
     held_out_result,
 )
-from crb.core.context_arm import BASE_S2, parse_arm
+from crb.core.context_arm import (
+    BASE_A0,
+    BASE_S1,
+    BASE_S2,
+    BASE_S3,
+    LEARN_OFF,
+    ContextArm,
+    parse_arm,
+)
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     CELL_FIELDS,
@@ -161,6 +193,42 @@ BUDGET_ENV = "CRB_READING__CELL_ERROR_BUDGET"
 #: A harness row is re-run before its look is read; after this many unobserved ``r1`` attempts
 #: the commit leaves the pool (``harness``) instead of waiting for ever.
 DEFAULT_MAX_RERUNS = 2
+
+# --- the attempt rule (P-792) ---------------------------------------------------------
+#: The legacy rule: a commit is read by its first OBSERVED attempt, a harness row is re-run
+#: up to ``max_reruns``, and a commit the instrument cannot grade leaves the pool. Its name is
+#: never hashed — a reading registered under it is stored with ``attempt_rule`` ``""``, so a
+#: legacy reading's id never moves.
+ATTEMPT_RULE_LEGACY = "first_observed.v0"
+#: The reserved rule: a commit is read by the ONE attempt reserved for it on an arm (a
+#: ``reading.reserved`` event written before the build), whatever that attempt's exit. A
+#: harness failure, an outage, a disabled linter, a cancel, a kill or a run that ended
+#: without a row is a miss, never a leave and never a re-run, so nothing chosen after the
+#: reservation can choose which commits the reading reads (fail closed). It is hashed.
+ATTEMPT_RULE_RESERVED = "reserved.v1"
+ATTEMPT_RULES: tuple[str, ...] = (ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED)
+#: Why a run skips a commit without reserving it: another reservation holds it, or a forward
+#: reading never enrolled the ticket. A skipped commit stays pending.
+SKIP_COMMIT_RESERVED = "commit_reserved"
+SKIP_TASK_NOT_ENROLLED = "task_not_enrolled"
+RESERVE_SKIPS: tuple[str, ...] = (SKIP_COMMIT_RESERVED, SKIP_TASK_NOT_ENROLLED)
+#: Why a run halts before reserving: its treatment is not the one the reading pinned, its
+#: arm is not one the reading reads, its claim is no longer its own, or a cancel was asked.
+HALT_TREATMENT_MISMATCH = "reading_treatment_mismatch"
+HALT_ARM_UNKNOWN = "reading_arm_unknown"
+HALT_RUN_NOT_OWNED = "run_not_owned"
+HALT_CANCEL_REQUESTED = "cancel_requested"
+RESERVE_HALTS: tuple[str, ...] = (
+    HALT_TREATMENT_MISMATCH,
+    HALT_ARM_UNKNOWN,
+    HALT_RUN_NOT_OWNED,
+    HALT_CANCEL_REQUESTED,
+)
+#: The labels the worker stamps on a reserved ``r1`` row (inside the hashed body): the
+#: reservation's event id, the treatment digest it reserved under, and the run's claim.
+LABEL_RESERVATION = "reservation"
+LABEL_TREATMENT = "treatment"
+LABEL_CLAIM = "claim"
 
 # --- arm states -----------------------------------------------------------------
 STATE_DELIVER = "deliver"
@@ -229,6 +297,13 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_EXISTS,
 )
+#: A run of a reserved.v1 reading that carries a field the reading does not allow
+#: (:func:`reading_run_refusal`): refused at submit (422) and again at claim.
+REFUSAL_RUN_FIELDS = "reading_run_fields"
+#: A run that must name its reading and does not (409, at submit).
+REFUSAL_READING_REQUIRED = "reading_required"
+#: The refusals of a RUN of a reading, beside the registration refusals above.
+RUN_REFUSAL_CODES: tuple[str, ...] = (REFUSAL_RUN_FIELDS, REFUSAL_READING_REQUIRED)
 #: The fields of a reading's body that say who registered it and when, not what it reads:
 #: a retried registration differs from the first only in these (P-793).
 PROVENANCE_FIELDS: tuple[str, ...] = ("registered_at", "actor")
@@ -412,6 +487,30 @@ def _parse_ts(ts: str) -> _dt.datetime | None:
 
 
 @dataclass(frozen=True)
+class Reservation:
+    """One ``reading.reserved`` event as the store loads it: the attempt reserved for one
+    commit (``task_id`` — a forward reading's ticket, its ``item_id``) on one arm of a
+    reserved.v1 reading, before its build. Only the row that attempt wrote can decide the
+    commit (:func:`arm_reading`)."""
+
+    arm: str
+    task_id: str
+    run_id: str
+    #: The event's id: the reserved row carries it as ``labels.reservation``.
+    event_id: str
+    #: The event's ``Event.id``: it counts only when written after the registration's.
+    event_seq_id: int
+    #: The run's claim (its ``reclaims``) when it reserved: the row carries it as
+    #: ``labels.claim``, so a later claim's row of the same run never decides the commit.
+    claim: int
+    #: The treatment digest the run reserved under: the row carries it as ``labels.treatment``.
+    treatment: str
+    hold_usd: float | None
+    #: The run is terminal, or reclaimed past ``claim``: a reservation with no row is a miss.
+    settled: bool
+
+
+@dataclass(frozen=True)
 class Reading:
     """One registered reading — the ``reading.registered`` event's payload."""
 
@@ -458,6 +557,13 @@ class Reading:
     #: (``admitted``). ``""`` for a reading under no campaign — hashed when present, so a
     #: legacy reading's id never moves and an edited campaign fails ``verify``.
     campaign_id: str = ""
+    #: How a commit is read (P-792): ``""`` — the legacy first-observed rule
+    #: (:data:`ATTEMPT_RULE_LEGACY`), never hashed so a legacy id never moves — or
+    #: :data:`ATTEMPT_RULE_RESERVED`, hashed, under which only the attempt reserved for a
+    #: commit decides it, ``max_reruns`` is 0, and every run spends on ``budget_profile``
+    #: (hashed only with the rule).
+    attempt_rule: str = ""
+    budget_profile: str = ""
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
@@ -467,10 +573,22 @@ class Reading:
     #: A campaign-named reading counts a row only when its ``run_id`` is here; ``None`` means
     #: the admissions were never read, and then it counts NO row (fail closed, DL-382).
     admitted: frozenset[str] | None = field(default=None, compare=False)
+    #: A reserved.v1 reading's registration event (its ``Event.id``) and its reservations,
+    #: the first per ``(arm, task_id)`` — READ from the reading's trace
+    #: (:func:`with_reservations`), never registered or hashed. ``None`` (or no registration
+    #: event) means they were never read, and then every commit reads pending, never a hit.
+    registered_event_id: int = field(default=0, compare=False)
+    reservations: Mapping[tuple[str, str], Reservation] | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
         object.__setattr__(self, "changes", dict(self.changes))
+        if self.attempt_rule == ATTEMPT_RULE_LEGACY:
+            object.__setattr__(self, "attempt_rule", "")  # the legacy rule is never hashed
+        if not self.attempt_rule:
+            object.__setattr__(self, "budget_profile", "")
+        if self.reservations is not None:
+            object.__setattr__(self, "reservations", dict(self.reservations))
         object.__setattr__(self, "hierarchy", tuple(self.hierarchy))
         object.__setattr__(self, "pool", tuple(self.pool))
         object.__setattr__(
@@ -498,6 +616,17 @@ class Reading:
         until they are (:func:`with_admissions`) — a reader that cannot know which runs the
         campaign admitted counts none of them, never all (DL-382)."""
         return bool(self.campaign_id) and self.admitted is None
+
+    @property
+    def reserved(self) -> bool:
+        """The reading counts reserved attempts (:data:`ATTEMPT_RULE_RESERVED`)."""
+        return self.attempt_rule == ATTEMPT_RULE_RESERVED
+
+    @property
+    def reservations_unread(self) -> bool:
+        """A reserved.v1 reading whose reservations, or whose registration event, were never
+        read (:func:`with_reservations`): it reads every commit pending until they are."""
+        return self.reserved and (self.reservations is None or self.registered_event_id <= 0)
 
     @property
     def prospective(self) -> bool:
@@ -545,6 +674,11 @@ class Reading:
                 else {}
             ),
             **({"campaign_id": self.campaign_id} if self.campaign_id else {}),
+            **(
+                {"attempt_rule": self.attempt_rule, "budget_profile": self.budget_profile}
+                if self.attempt_rule
+                else {}
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -582,6 +716,8 @@ class Reading:
                 None if d.get("smallest_effect") is None else float(d["smallest_effect"])
             ),
             campaign_id=str(d.get("campaign_id", "") or ""),
+            attempt_rule=str(d.get("attempt_rule", "") or ""),
+            budget_profile=str(d.get("budget_profile", "") or ""),
         )
 
     def verify(self) -> bool:
@@ -750,6 +886,33 @@ def _validate(
     return ""
 
 
+def _attempt_rule_of(attempt_rule: str, *, max_reruns: int, budget_profile: str) -> tuple[str, str]:
+    """The ``(attempt_rule, budget_profile)`` a registration stores, or
+    :class:`ReadingRefused` ``invalid_reading``: the legacy rule is stored as ``""`` with no
+    profile (so its id never moves); reserved.v1 re-runs nothing (``max_reruns`` 0 — a
+    harness row is the reserved attempt's miss, never a second draw) and names the budget
+    profile every non-loop run of it spends on (P-792 channel C7); any other rule is
+    refused."""
+    rule = attempt_rule.strip()
+    if rule in ("", ATTEMPT_RULE_LEGACY):
+        return "", ""
+    if rule != ATTEMPT_RULE_RESERVED:
+        raise ReadingRefused(
+            f"unknown attempt rule {attempt_rule!r}; expected one of {list(ATTEMPT_RULES)}",
+            code=REFUSAL_INVALID,
+        )
+    profile = budget_profile.strip()
+    if max_reruns != 0 or not profile:
+        raise ReadingRefused(
+            f"a {ATTEMPT_RULE_RESERVED} reading reads one reserved attempt per commit, so it "
+            f"re-runs nothing (max_reruns 0, not {max_reruns}) and names the budget profile "
+            f"its runs spend on (budget_profile {budget_profile!r}) — P-792",
+            code=REFUSAL_INVALID,
+            detail={"max_reruns": max_reruns, "budget_profile": budget_profile},
+        )
+    return rule, profile
+
+
 def campaign_unsupported(process_step: str) -> str:
     """Why a reading on a cell of ``process_step`` may not name a campaign, or ``""`` (DL-382).
 
@@ -795,6 +958,8 @@ def register(
     hypothesis: str = "",
     smallest_effect: float | None = None,
     campaign_id: str = "",
+    attempt_rule: str = "",
+    budget_profile: str = "",
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -807,9 +972,10 @@ def register(
     ``budget_spent`` when the cell's spend plus this rule's P(deliver | 0.80) would exceed
     the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules;
     ``campaign_unsupported_reading`` when it names a campaign on the factory's cell
-    (:func:`campaign_unsupported`); a replay or blind reading may name one. The caller writes
-    the returned reading as a
-    ``reading.registered`` event before any attempt.
+    (:func:`campaign_unsupported`); a replay or blind reading may name one. ``attempt_rule``
+    :data:`ATTEMPT_RULE_RESERVED` needs ``max_reruns`` 0 and a ``budget_profile``
+    (``invalid_reading`` otherwise, as is an unknown rule; :func:`_attempt_rule_of`). The
+    caller writes the returned reading as a ``reading.registered`` event before any attempt.
     """
     cell_d = {str(k): str(v) for k, v in cell.items()}
     hier = tuple(str(a).strip() for a in hierarchy)
@@ -827,6 +993,9 @@ def register(
         why = str(exc)
     if why:
         raise ReadingRefused(why, code=REFUSAL_INVALID)
+    attempt, profile = _attempt_rule_of(
+        attempt_rule, max_reruns=max_reruns, budget_profile=budget_profile
+    )
     step = cell_d.get("process_step", "")
     unsupported = campaign_unsupported(step) if campaign_id else ""
     if unsupported:
@@ -865,6 +1034,8 @@ def register(
         hypothesis=hypothesis,
         smallest_effect=smallest_effect,
         campaign_id=campaign_id,
+        attempt_rule=attempt,
+        budget_profile=profile,
     )
     prior = list(existing)
     _refuse_twin(reading, prior)
@@ -914,6 +1085,8 @@ def register_forward(
     now: str = "",
     hypothesis: str = "",
     smallest_effect: float | None = None,
+    attempt_rule: str = "",
+    budget_profile: str = "",
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -929,7 +1102,9 @@ def register_forward(
     written after it — no ticket is chosen by a person, and none exists yet. It names no
     campaign (DL-382, :func:`campaign_unsupported`): its builds are factory runs, which carry
     no ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
-    be filed under its campaign — ``POST /readings/forward`` refuses a ``campaign_id``."""
+    be filed under its campaign — ``POST /readings/forward`` refuses a ``campaign_id``.
+    Under ``attempt_rule`` :data:`ATTEMPT_RULE_RESERVED` it re-runs nothing (``max_reruns``
+    0) and names its ``budget_profile``, as :func:`register` requires."""
     if ceiling.state != OUTCOME_CEILING:
         raise ReadingRefused(
             f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
@@ -957,6 +1132,11 @@ def register_forward(
     )
     if why:
         raise ReadingRefused(why, code=REFUSAL_INVALID)
+    reserved = attempt_rule.strip() == ATTEMPT_RULE_RESERVED
+    max_reruns = 0 if reserved else DEFAULT_MAX_RERUNS
+    attempt, profile = _attempt_rule_of(
+        attempt_rule, max_reruns=max_reruns, budget_profile=budget_profile
+    )
     cap = cell_error_budget() if budget is None else budget
     spend = rule_spend(rule)
     reading = Reading(
@@ -979,6 +1159,9 @@ def register_forward(
         budget_cell=base.budget_key[1],
         hypothesis=hypothesis,
         smallest_effect=smallest_effect,
+        max_reruns=max_reruns,
+        attempt_rule=attempt,
+        budget_profile=profile,
     )
     prior = list(existing)
     _refuse_twin(reading, prior)
@@ -1043,6 +1226,57 @@ def with_admissions(reading: Reading, run_ids: Iterable[str]) -> Reading:
     return replace(reading, admitted=frozenset(str(r) for r in run_ids if r))
 
 
+def with_reservations(
+    reading: Reading, reservations: Iterable[Reservation], registered_event_id: int
+) -> Reading:
+    """A reserved.v1 ``reading`` with its ``reading.reserved`` events and the ``Event.id`` of
+    its ``reading.registered`` event — READ from the reading's trace, never registered or
+    hashed, so the id is unchanged. The first reservation per ``(arm, task_id)`` by
+    ``event_seq_id`` is the one that counts (the store's unique index holds at most one; this
+    keeps the rule without it). Any other reading is returned unchanged."""
+    if not reading.reserved:
+        return reading
+    first: dict[tuple[str, str], Reservation] = {}
+    for res in reservations:
+        key = (res.arm, res.task_id)
+        if key not in first or res.event_seq_id < first[key].event_seq_id:
+            first[key] = res
+    return replace(reading, reservations=first, registered_event_id=int(registered_event_id))
+
+
+def _descriptive_count(reading: Reading, arm: str, limit: int) -> int:
+    """A descriptive arm's fixed count (``limit`` when the caller gives it), or 0 for a
+    hierarchy arm."""
+    return limit or (0 if arm in reading.hierarchy else dict(reading.descriptive).get(arm, 0))
+
+
+def _enrolled(reading: Reading, arm: str, limit: int = 0) -> tuple[str, ...]:
+    """:func:`enrolled`, with a descriptive arm's count given (``limit``) or taken from the
+    reading's descriptive arms."""
+    if arm not in reading.arms:
+        return ()
+    out: list[str] = []
+    seen: set[str] = set()
+    for commit in reading.pool:
+        change = reading.changes.get(commit) or commit
+        if change in seen:
+            continue
+        seen.add(change)
+        out.append(commit)
+    n = _descriptive_count(reading, arm, limit)
+    return tuple(out[:n]) if n else tuple(out)
+
+
+def enrolled(reading: Reading, arm: str) -> tuple[str, ...]:
+    """The commits ``arm`` of a reserved.v1 ``reading`` reads, in order, fixed at
+    registration and blind to every outcome: the pool in the seeded order (a forward
+    reading's enrolled tickets, in enrolment order), less each commit whose change — by the
+    REGISTERED ``changes``, never a row's label — repeats an earlier commit's; a descriptive
+    arm reads the first of these up to its fixed count. ``()`` for an arm the reading does
+    not read. Nothing a run does after registration moves a commit in or out."""
+    return _enrolled(reading, arm)
+
+
 # ---------------------------------------------------------------------------
 # Counting one arm
 # ---------------------------------------------------------------------------
@@ -1056,7 +1290,10 @@ class CommitReading:
     change: str
     outcome: bool | None  # clean / miss / pending
     left: str = ""  # why it left the pool ("" = it did not)
-    row_hash: str = ""  # the first observed attempt
+    row_hash: str = ""  # the first observed attempt (reserved.v1: the reserved attempt's row)
+    #: reserved.v1: why the reserved attempt is not a hit (``"miss"``, ``"harness"``,
+    #: ``"unobserved"``, …) or ``"pending"``; ``""`` for a hit and on the legacy rule.
+    reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1065,6 +1302,7 @@ class CommitReading:
             "outcome": self.outcome,
             "left": self.left,
             "row_hash": self.row_hash,
+            "reason": self.reason,
         }
 
 
@@ -1245,6 +1483,125 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
     return ArmReading(arm, look_state(kept, reading.rule, open_pool=True), tuple(out))
 
 
+def _row_unit(reading: Reading, row: GradeRow) -> str:
+    """The pool unit ``row`` attempts: a forward reading's ticket (``labels.item_id``), or
+    the commit (``task_id``)."""
+    return row.labels.get("item_id", "") if reading.prospective else row.task_id
+
+
+def _reserved_candidates(
+    reading: Reading, res: Reservation, rows: Iterable[GradeRow]
+) -> list[GradeRow]:
+    """The rows ``res``'s attempt wrote: its run, its commit, rung ``r1``, stamped with its
+    event id and its claim. A row of another run, of another reservation (another arm's,
+    another reading's) or of a later claim of the same run is never one of them."""
+    return [
+        r
+        for r in rows
+        if r.run_id == res.run_id
+        and _row_unit(reading, r) == res.task_id
+        and r.trial.strip().lower() == RUNG_R1
+        and res.event_id
+        and r.labels.get(LABEL_RESERVATION, "") == res.event_id
+        and r.labels.get(LABEL_CLAIM, "") == str(res.claim)
+    ]
+
+
+def _reserved_verdict(
+    reading: Reading, arm: str, res: Reservation | None, rows: Sequence[GradeRow]
+) -> tuple[bool | None, str]:
+    """The verdict of one commit on ``arm`` of a reserved.v1 reading: ``(True, "")`` a hit,
+    ``(False, reason)`` a miss, ``(None, "pending")`` not yet decided. The reserved attempt's
+    row alone decides it, whatever any other row says (P-792, fail closed):
+
+    * no reservation, or the reading's reservations (or admissions) never read — pending;
+    * no reserved row — a miss (``unobserved``) once the run is settled (terminal, or
+      reclaimed past the reserving claim), pending until then; two rows — ``duplicate``;
+    * the one row is a hit only when its run was admitted, it is in the arm's scope
+      (:func:`_in_scope`; for a forward reading :func:`_counts_forward` on the record that
+      enrolled the ticket — ``not_graded`` otherwise), its reservation was written after the
+      registration, it is not a harness failure or an outage, its gold is not red, belt 5 could
+      not have changed it, it was built on the treatment it reserved, it is clean and not
+      disqualified — and, forward, its held-out tests passed on the reading's builder, model
+      and provider. Each failed check is a miss named by its reason, never a leave and never
+      a re-run: an instrument failure after the reservation is the reading's cost."""
+    if res is None or reading.reservations_unread or reading.admissions_unread:
+        return None, "pending"
+    found = _reserved_candidates(reading, res, rows)
+    if not found:
+        return (False, "unobserved") if res.settled else (None, "pending")
+    if len(found) > 1:
+        return False, "duplicate"
+    r = found[0]
+    if not _admitted_run(reading, r):
+        return False, "not_admitted"
+    if reading.prospective:
+        by_item = dict(reading.enrolled)
+        if not _counts_forward(reading, arm, r) or (
+            r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(res.task_id, "")
+        ):
+            return False, LEFT_NOT_GRADED
+    elif not _in_scope(reading, arm, r):
+        return False, "out_of_scope"
+    checks: tuple[tuple[bool, str], ...] = (
+        (res.event_seq_id > reading.registered_event_id, "before_registration"),
+        (r.failure_kind != FAILURE_HARNESS, "harness"),
+        (r.failure_kind != FAILURE_OUTAGE, "outage"),
+        (r.gold_clean is not False, "gold_red"),
+        (not lint_could_change(r), "lint_disabled"),
+        (
+            bool(res.treatment) and r.labels.get(LABEL_TREATMENT, "") == res.treatment,
+            "treatment_mismatch",
+        ),
+        (not r.disqualified, "disqualified"),
+        (r.clean, "miss"),
+    )
+    for ok, reason in checks:
+        if not ok:
+            return False, reason
+    if reading.prospective:
+        if held_out_result(r.labels) != RESULT_PASS:
+            return False, "held_out"
+        if any(getattr(r, f) != reading.cell.get(f, "") for f in ("builder", "model", "provider")):
+            return False, LEFT_OTHER_CELL
+    return True, ""
+
+
+def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: int) -> ArmReading:
+    """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
+    by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
+    commits as they stand; a descriptive arm tallies its fixed count."""
+    reservations = reading.reservations or {}
+    events = {res.event_id for res in reservations.values() if res.event_id}
+    stamped: dict[str, list[GradeRow]] = {}
+    for r in rows:
+        ev = r.labels.get(LABEL_RESERVATION, "")
+        if ev in events:
+            stamped.setdefault(ev, []).append(r)
+    out: list[CommitReading] = []
+    for commit in _enrolled(reading, arm, limit):
+        res = reservations.get((arm, commit))
+        mine = stamped.get(res.event_id, []) if res is not None else []
+        outcome, reason = _reserved_verdict(reading, arm, res, mine)
+        found = _reserved_candidates(reading, res, mine) if res is not None else []
+        out.append(
+            CommitReading(
+                commit,
+                reading.changes.get(commit) or commit,
+                outcome,
+                "",
+                found[0].row_hash if len(found) == 1 and outcome is not None else "",
+                reason,
+            )
+        )
+    outcomes = [c.outcome for c in out]
+    n = _descriptive_count(reading, arm, limit)
+    if n:
+        return ArmReading(arm, _descriptive_look(outcomes, n), tuple(out), descriptive=True)
+    look = look_state(outcomes, reading.rule, open_pool=reading.prospective)
+    return ArmReading(arm, look, tuple(out))
+
+
 def arm_reading(
     reading: Reading, arm: str, rows: Sequence[GradeRow], *, limit: int = 0
 ) -> ArmReading:
@@ -1267,7 +1624,13 @@ def arm_reading(
     admitted ``harness`` row still counts toward ``max_reruns``, so an operator who induces
     one on an admitted run can choose which commits leave (P-792, open). A
     campaign-named reading whose admissions were never read counts nothing: every commit
-    waits."""
+    waits.
+
+    A reserved.v1 reading reads each enrolled commit by its reserved attempt alone
+    (:func:`_arm_reserved`, :func:`_reserved_verdict`): no commit leaves, nothing is re-run,
+    and this loop is never entered."""
+    if reading.reserved:
+        return _arm_reserved(reading, arm, rows, limit)
     if reading.admissions_unread:
         rows = ()  # fail closed: which runs the campaign admitted is unknown here
     if reading.prospective:
@@ -1649,6 +2012,141 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
     return ArmVerdict(arm, a.look.state, needed=a.look.needed, next_look=a.look.next_look, **common)
 
 
+# ---------------------------------------------------------------------------
+# The runs of a reserved.v1 reading
+# ---------------------------------------------------------------------------
+
+#: The only ``params`` keys a run of a reserved.v1 reading may carry (P-792 channels C3, C5
+#: and C7): none of them can steer how an attempt is built or graded once it is reserved — no
+#: ``builder_config``, ``budget``, ``checks``, ``preflight``, ``escalation``, ``retain``,
+#: ``taxonomy`` or ``ladder`` key.
+RESERVED_RUN_PARAMS: frozenset[str] = frozenset(
+    {
+        "task_ids",
+        "limit",
+        "pool",
+        "executor",
+        "timeout",
+        "max_cost_usd",
+        "budget_profile",
+        "learning",
+        "arm",
+        "test_author",
+        "reading_id",
+        "campaign_id",
+        "outage_stop",
+        "env_stop",
+        "qualify_first",
+    }
+)
+#: The one ladder a run of a reserved.v1 reading climbs: what ``POST /runs`` stores for a
+#: run that names none (``new_run``: ``ladder or ["r1"]``) — one rung, the reading's own cell.
+RESERVED_RUN_LADDER: tuple[str, ...] = (RUNG_R1,)
+#: The ``params`` a reserved run keeps at the value ``POST /runs`` stores when it is unset.
+_RESERVED_RUN_DEFAULTS: Mapping[str, Any] = {"pool": "", "executor": "", "timeout": 0}
+#: The run kinds a reserved.v1 reading reads (``crb.store.jobs`` ``KIND_REPLAY`` and
+#: ``KIND_BLIND``; core never imports the store), the mode each runs in, and its arm's base.
+_RESERVED_RUN_KINDS: Mapping[str, tuple[str, str]] = {
+    "replay": ("sighted", BASE_S3),
+    "blind": ("blind", BASE_A0),
+}
+
+
+def _test_author_model(test_author: str) -> str:
+    """The model a ``test_author`` (``builder:model[:provider]``) names, as an ``S1`` arm
+    names its author: lower case, without an ``@`` version or a ``vendor/`` prefix. A dated
+    model id is not mapped to its alias here (core holds no pricing table), so it does not
+    match the reading's author and is refused."""
+    parts = test_author.split(":")
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip().lower().split("@", 1)[0].rsplit("/", 1)[-1]
+
+
+def reading_run_refusal(
+    reading: Reading,
+    *,
+    kind: str,
+    mode: str,
+    builder: str,
+    model: str,
+    provider: str,
+    ladder: Sequence[Any],
+    params: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Why a run of ``reading`` may not reserve its commits — ``("", {})`` when it may — as
+    ``(REFUSAL_RUN_FIELDS, {"fields": [...], "reasons": {field: why}, "arm": arm})``. The pure
+    whitelist, one rule for ``POST /runs`` and the worker's claim (P-792): a reserved attempt
+    can be steered by nothing a run chooses, so a run of a reserved.v1 reading
+
+    * carries only the :data:`RESERVED_RUN_PARAMS` keys, with ``pool``, ``executor`` and
+      ``timeout`` at their defaults, and climbs :data:`RESERVED_RUN_LADDER` (``ladder`` is the
+      ladder as stored);
+    * builds on the reading's own builder, model and provider;
+    * runs an arm the reading reads: a sighted replay ``S3``, a blind run ``A0``, a blind run
+      with ``arm: S1`` the reading's ``S1@<author>`` (a ``test_author``, when named, names that
+      author); with neither ``learning`` nor ``budget_profile`` the arm is its ``+L`` twin;
+    * on a non-loop arm, runs with the loop off (``learning: off``) on the reading's budget
+      profile (C7), so no run spends on another profile.
+
+    A ``factory`` run is refused here (``kind``): the forward reading's runs are reserved by
+    the factory, not by this whitelist. A legacy reading is never refused by it."""
+    if not reading.reserved:
+        return "", {}
+    rule = ATTEMPT_RULE_RESERVED
+    reasons: dict[str, str] = {}
+    for key in sorted(set(params) - RESERVED_RUN_PARAMS):
+        reasons[key] = f"a run of a {rule} reading carries no {key!r}: it could steer an attempt"
+    for key, default in _RESERVED_RUN_DEFAULTS.items():
+        if params.get(key, default) not in (default, None):
+            reasons[key] = f"a run of a {rule} reading keeps {key} at its default {default!r}"
+    if [*ladder] != [*RESERVED_RUN_LADDER]:
+        reasons["ladder"] = (
+            f"a run of a {rule} reading climbs the one ladder {list(RESERVED_RUN_LADDER)}, "
+            "the reading's own cell"
+        )
+    for name, value in (("builder", builder), ("model", model), ("provider", provider)):
+        if (value or "") != reading.cell.get(name, ""):
+            reasons[name] = f"the reading's cell is built by {name} {reading.cell.get(name)!r}"
+    shape = _RESERVED_RUN_KINDS.get(kind)
+    if shape is None:
+        reasons["kind"] = f"a {rule} reading reads {sorted(_RESERVED_RUN_KINDS)} runs"
+    elif mode != shape[0]:
+        reasons["mode"] = f"a {kind} run of a {rule} reading runs {shape[0]}"
+    named = str(params.get("arm", "") or "")
+    s1 = named == BASE_S1
+    if named not in ("", BASE_S1) or (s1 and kind != "blind"):
+        reasons["arm"] = "a run names arm S1 on a blind run, or no arm"
+    test_author = str(params.get("test_author", "") or "")
+    if test_author and (not s1 or _test_author_model(test_author) != reading.author_model):
+        reasons["test_author"] = (
+            f"a test author is named only on the S1 arm, as the reading's "
+            f"{reading.author_model or 'no author'}"
+        )
+    loop = "learning" not in params and "budget_profile" not in params
+    if not loop:
+        if params.get("learning") != LEARN_OFF:
+            reasons["learning"] = f"a non-loop arm runs with learning {LEARN_OFF!r}"
+        if params.get("budget_profile") != reading.budget_profile:
+            reasons["budget_profile"] = (
+                f"a non-loop arm spends on the reading's budget profile {reading.budget_profile!r}"
+            )
+    arm = ""
+    if shape is not None and not reasons.keys() & {"kind", "mode", "arm", "test_author"}:
+        try:
+            base = (
+                ContextArm(BASE_S1, reading.author_model) if s1 else ContextArm(shape[1])
+            ).with_loop(loop)
+            arm = base.id
+        except ValueError:
+            arm = ""
+        if arm not in reading.arms:
+            reasons["arm"] = f"the run's arm {arm!r} is not one the reading reads"
+    if not reasons:
+        return "", {}
+    return REFUSAL_RUN_FIELDS, {"fields": sorted(reasons), "reasons": reasons, "arm": arm}
+
+
 def describe_rules() -> str:
     """The look rules as one sentence each, with their exact P(deliver | 0.80)."""
     parts = []
@@ -1660,7 +2158,17 @@ def describe_rules() -> str:
 
 __all__ = [
     "ARM_STATES",
+    "ATTEMPT_RULES",
+    "ATTEMPT_RULE_LEGACY",
+    "ATTEMPT_RULE_RESERVED",
     "CELL_ERROR_BUDGET",
+    "HALT_ARM_UNKNOWN",
+    "HALT_CANCEL_REQUESTED",
+    "HALT_RUN_NOT_OWNED",
+    "HALT_TREATMENT_MISMATCH",
+    "LABEL_CLAIM",
+    "LABEL_RESERVATION",
+    "LABEL_TREATMENT",
     "LEFT_HELD_OUT_ERROR",
     "LEFT_NOT_GRADED",
     "LEFT_OTHER_CELL",
@@ -1677,8 +2185,17 @@ __all__ = [
     "REFUSAL_NOT_A_CEILING",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
+    "REFUSAL_READING_REQUIRED",
+    "REFUSAL_RUN_FIELDS",
+    "RESERVED_RUN_LADDER",
+    "RESERVED_RUN_PARAMS",
+    "RESERVE_HALTS",
+    "RESERVE_SKIPS",
     "RULES",
     "RULE_LOOK_V1",
+    "RUN_REFUSAL_CODES",
+    "SKIP_COMMIT_RESERVED",
+    "SKIP_TASK_NOT_ENROLLED",
     "VERDICT_CEILING",
     "VERDICT_DELIVER",
     "VERDICT_DESCRIPTIVE",
@@ -1693,12 +2210,14 @@ __all__ = [
     "Reading",
     "ReadingOutcome",
     "ReadingRefused",
+    "Reservation",
     "Standard",
     "arm_reading",
     "budget_spent",
     "campaign_unsupported",
     "canonical_cell_key",
     "cell_error_budget",
+    "enrolled",
     "evaluate",
     "first_per_id",
     "latest_outcome",
@@ -1708,6 +2227,7 @@ __all__ = [
     "pool_by_rule",
     "pool_digest",
     "reading_cell_key",
+    "reading_run_refusal",
     "refuse_unless_blind",
     "register",
     "register_forward",
@@ -1720,4 +2240,5 @@ __all__ = [
     "verdict_for",
     "with_admissions",
     "with_enrolment",
+    "with_reservations",
 ]
