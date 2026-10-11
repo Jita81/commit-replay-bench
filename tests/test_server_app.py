@@ -206,6 +206,7 @@ class TestFactory:
             "admin",
             "auth",
             "builders",
+            "campaigns",
             "capability",
             "classes",
             "decisions",

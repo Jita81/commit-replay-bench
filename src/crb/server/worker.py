@@ -2542,11 +2542,28 @@ class Worker:
         # F5b — the run's own spend cap, asked before every attempt (``RunSpec.admit``)
         cap = SpendCap.from_params(p)
         halted: list[Halt] = []
+        # P-775 — an S1 run's test author writes a test before every attempt and no row: its
+        # calls are the run's spend (a first claim's on the run's events, this claim's on the
+        # author, built with the arm below), and each attempt is reserved at one more pass
+        s1_author: TestAuthor | None = None
+        authored_before = (
+            self._authored_before(run.id)
+            if cap is not None and str(p.get("arm") or "") == ARM_S1
+            else []
+        )
+
+        def spent_now() -> Spend:
+            spent = Spend.of_rows(self.ledger.rows(run_id=run.id))
+            if s1_author is None:
+                return spent
+            return spent.with_authoring([*authored_before, *getattr(s1_author, "calls", ())])
 
         def admit(task: TaskSpec, rung_index: int) -> str:
             assert cap is not None
             attempt_cap = budget_for_rung(ladder.rungs[rung_index - 1], budget).max_cost_usd
-            halt = cap.check(Spend.of_rows(self.ledger.rows(run_id=run.id)), reserve=attempt_cap)
+            spent = spent_now()
+            passes = int(getattr(s1_author, "attempts", 1) or 0) if s1_author is not None else 0
+            halt = cap.check(spent, reserve=attempt_cap, authoring=spent.dearest_authoring * passes)
             if halt is not None:
                 halted.append(halt)
             return halt.reason if halt is not None else ""
@@ -2605,6 +2622,7 @@ class Worker:
             admit=admit if cap is not None else None,
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
+        s1_author = self._s1_author(ctx, ladder, mode)
         build_fn = build_fn_for(
             ladder,
             budget=budget,
@@ -2633,7 +2651,7 @@ class Worker:
             # absent label = every switch OFF under the default block (rows as before)
             checks=checks if checks.any_on or not checks.repo.is_default else None,
             learning=learning,
-            s1=self._s1_arm(ctx, ladder, mode),
+            s1=self._s1_arm_of(ctx, s1_author) if s1_author is not None else None,
         )
         self._progress(ctx, 0, total)
 
@@ -2706,7 +2724,7 @@ class Worker:
         self._learning_tick(run.repo)
         if cap is not None and not halted and not self._cancelled(ctx):
             # the last attempt had no cost cap of its own and may have passed the run's
-            over = cap.passed(Spend.of_rows(self.ledger.rows(run_id=run.id)))
+            over = cap.passed(spent_now())
             if over is not None:
                 halted.append(over)
         if halted and not self._cancelled(ctx):
@@ -2747,6 +2765,13 @@ class Worker:
         grades on the commit's held-out tests, so it runs blind; it needs a test author; and
         the author's model is never a build rung's (DL-050, DL-059 C3 — the same identity
         check the factory applies)."""
+        author = self._s1_author(ctx, ladder, mode)
+        return self._s1_arm_of(ctx, author) if author is not None else None
+
+    def _s1_author(self, ctx: RunContext, ladder: EscalationLadder, mode: str) -> TestAuthor | None:
+        """The ``S1`` arm's test author, refused as :meth:`_s1_arm` says, or ``None`` when
+        the run is not on the arm. The replay keeps it: its ``calls`` are the run's spend
+        (P-775)."""
         if str(ctx.params.get("arm") or "") != ARM_S1:
             return None
         if mode != REPLAY_MODE[BASE_S1]:
@@ -2762,6 +2787,10 @@ class Worker:
         label = author_label(author)
         for i, rung in enumerate(ladder.rungs, start=1):
             assert_distinct_identity(label, rung.label, role=f"build rung {i}")
+        return author
+
+    def _s1_arm_of(self, ctx: RunContext, author: TestAuthor) -> S1Arm:
+        """The ``S1`` arm around ``author``: it writes one test in the sealed checkout."""
         config = ctx.config
 
         def write(workspace: Any, subject: str, message: str) -> tuple[str, str]:
@@ -3371,18 +3400,7 @@ class Worker:
         halted: list[Halt] = []
         # the test author's model calls are the run's spend too, though they write no row:
         # the ones a first claim made are on its events, this claim's on the author
-        authored_before = (
-            [
-                {
-                    **e.payload,
-                    "action": e.action,
-                    "cost_usd": e.cost_usd if e.cost_usd is not None else e.payload.get("cost_usd"),
-                }
-                for e in events_of_action(self.factory, run.id, AUTHOR_ATTEMPT)
-            ]
-            if cap is not None
-            else []
-        )
+        authored_before = self._authored_before(run.id) if cap is not None else []
 
         def spent_now() -> Spend:
             calls = list(getattr(test_author, "calls", ()) or ())
@@ -3470,6 +3488,19 @@ class Worker:
             "system", "run.spend_cap", status=StepStatus.SKIPPED, reason=halt.reason, **halt.payload
         )
         return STATUS_FAILED, counts, halt.reason
+
+    def _authored_before(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's ``author.attempt`` events so far, each with its cost, for
+        :meth:`Spend.with_authoring`: the calls a first claim's test author made are on the
+        run's events, not on the author a reclaim builds, so they are read back."""
+        return [
+            {
+                **e.payload,
+                "action": e.action,
+                "cost_usd": e.cost_usd if e.cost_usd is not None else e.payload.get("cost_usd"),
+            }
+            for e in events_of_action(self.factory, run_id, AUTHOR_ATTEMPT)
+        ]
 
     def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
         """The run's test author, or ``None`` when this deployment has none.

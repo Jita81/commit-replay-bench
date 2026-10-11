@@ -797,6 +797,14 @@ class RunCreateRequest(BaseModel):
     #: and fails the run (``run.refused``, code ``reading_unsealed``) before any builder call.
     #: Stored as ``params.reading_id`` only when set.
     reading_id: str | None = Field(default=None, pattern=r"^rdg_[0-9a-f]{24}$")
+    #: Build runs only: the campaign this run is filed under (``cmp_<24 hex>``, G-957). The
+    #: run must name ``max_cost_usd`` (422 ``campaign_cap_required``) and, on ``arm: S1``,
+    #: ``task_ids`` or ``limit`` (422 ``campaign_s1_unbounded``); it is refused 404
+    #: ``campaign_unknown`` unless the campaign verifies, and 409 ``campaign_ceiling`` /
+    #: ``campaign_cost_unknown`` / ``campaign_overrun`` when the campaign's tally cannot hold
+    #: it — read and decided under the events write lock, before anything is queued.
+    #: Stored as ``params.campaign_id`` only when set.
+    campaign_id: str | None = Field(default=None, pattern=r"^cmp_[0-9a-f]{24}$")
 
     @field_validator("kind")
     @classmethod
@@ -929,6 +937,11 @@ class RunCreateRequest(BaseModel):
             raise ValueError(
                 f"reading_id applies to replay and blind runs only: a {self.kind!r} run is "
                 "not a reading's measurement"
+            )
+        if self.campaign_id is not None and self.kind not in BUILD_KINDS:
+            raise ValueError(
+                f"campaign_id applies to build runs only ({sorted(BUILD_KINDS)}): a "
+                f"{self.kind!r} run spends nothing a campaign holds"
             )
         return self
 

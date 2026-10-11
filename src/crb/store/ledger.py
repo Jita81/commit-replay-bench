@@ -120,6 +120,16 @@ def rows_in(session: Session, repo: str) -> list[GradeRow]:
     return [_from_model(m) for m in session.execute(q).scalars()]
 
 
+def rows_of_runs(session: Session, run_ids: Iterable[str]) -> list[GradeRow]:
+    """The rows these runs wrote, in chain (``seq``) order, read in the caller's session —
+    what a campaign's tally sums under the events write lock (G-957)."""
+    ids = list(run_ids)
+    if not ids:
+        return []
+    q = select(Grade).where(Grade.run_id.in_(ids)).order_by(Grade.seq)
+    return [_from_model(m) for m in session.execute(q).scalars()]
+
+
 class DbLedger:
     """The ``grades`` table as a hash-chained ledger of :class:`GradeRow`, plus the
     content-addressed ``evidence`` packs the rows point at."""

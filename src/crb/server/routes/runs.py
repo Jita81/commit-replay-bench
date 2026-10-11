@@ -53,7 +53,9 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
               the operator as actor), src/crb/store/events.py (``lock_event_writes`` — the
               one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
-              queued run becomes; the counts shapes per kind), src/crb/store/models.py
+              queued run becomes; the counts shapes per kind), src/crb/server/campaigns.py
+              (``campaign_tally``: a run filed under a campaign is admitted under its money
+              ceiling, G-957), src/crb/store/models.py
               (Run, Grade, Event, User — the override's display name resolved at read),
               docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
               factory posture),
@@ -94,6 +96,13 @@ from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
 from crb.builders.openai_client import ProviderMismatch, resolve_endpoint, resolved_endpoint
 from crb.builders.openai_client import credential_missing as openai_credential_missing
+from crb.core.campaign import (
+    CAMPAIGN_ADMITTED,
+    REFUSAL_CAP_REQUIRED,
+    REFUSAL_S1_UNBOUNDED,
+    REFUSAL_UNKNOWN,
+    planned_commits,
+)
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
@@ -101,6 +110,7 @@ from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.builder_login import login_refusal
+from crb.server.campaigns import campaign_of, campaign_tally
 from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
@@ -127,8 +137,8 @@ from crb.server.schemas import (
 from crb.server.secrets import secrets_dir_for
 from crb.server.spend_cap import unpriced_rungs
 from crb.store.db import make_session_factory
-from crb.store.events import lock_event_writes
-from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
+from crb.store.events import append_event_checked, lock_event_writes
+from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED, stage_queued
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
 log = logging.getLogger("crb.server.runs")
@@ -703,6 +713,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["taxonomy"] = body.taxonomy
     if body.reading_id is not None:
         params["reading_id"] = body.reading_id
+    if body.campaign_id is not None:
+        params["campaign_id"] = body.campaign_id
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
@@ -954,6 +966,96 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
         )
 
 
+def campaign_refusal(db: Session, body: RunCreateRequest) -> None:
+    """G-957 — what a run filed under a campaign must name, and the campaign itself. 422
+    ``campaign_cap_required``: no ``max_cost_usd``, so nothing could be held for it; 422
+    ``campaign_s1_unbounded``: an ``S1`` run naming neither ``task_ids`` nor ``limit``, whose
+    author headroom (per commit) could not be counted; 404 ``campaign_unknown``: no verified
+    campaign has that id. The tally itself is read where the run is admitted
+    (:func:`admit_under_campaign`), under the events write lock."""
+    if body.campaign_id is None:
+        return
+    detail = {"campaign_id": body.campaign_id}
+    if body.max_cost_usd is None:
+        raise ApiError(
+            422,
+            REFUSAL_CAP_REQUIRED,
+            "a run filed under a campaign names its max_cost_usd: the campaign holds the "
+            "run's cap plus its headroom until it finishes, so a run without one cannot be held",
+            detail=detail,
+        )
+    if body.arm is not None and planned_commits(list(body.task_ids), body.limit) is None:
+        raise ApiError(
+            422,
+            REFUSAL_S1_UNBOUNDED,
+            "an S1 run filed under a campaign names task_ids or a limit: its test author's "
+            "headroom is held per commit, so its commits must be counted",
+            detail=detail,
+        )
+    if campaign_of(db, body.campaign_id) is None:
+        raise ApiError(
+            404, REFUSAL_UNKNOWN, f"no verified campaign {body.campaign_id!r}", detail=detail
+        )
+
+
+def admit_under_campaign(
+    factory: sessionmaker[Session], settings: Any, body: RunCreateRequest, run: Run, *, actor: str
+) -> Run:
+    """Queue ``run`` under its campaign only while the campaign holds it (G-957): under the
+    events write lock, every submit refusal again but the login check (which ran before the
+    lock, P-729), then the campaign's tally — its runs' rows and test-author calls spent,
+    the unspent cap and headroom of every run still queued or running held — and, when this
+    run's cap plus its headroom still fits under the released line, the run is staged and
+    its ``campaign.admitted`` event written in ONE transaction. Refused 409
+    ``campaign_ceiling`` (it would pass the line), ``campaign_cost_unknown`` or
+    ``campaign_overrun`` (the campaign is stopped) — before anything is queued or spent; two
+    submits cannot both take the last of the line."""
+    campaign_id = str(body.campaign_id)
+    s1 = body.arm is not None
+    commits = planned_commits(list(body.task_ids), body.limit) or 0
+    cap = float(body.max_cost_usd or 0.0)
+
+    def build(s: Session) -> dict[str, Any]:
+        submit_refusals(s, settings, body, run, login=False)
+        campaign = campaign_of(s, campaign_id)
+        if campaign is None:  # pragma: no cover — submit_refusals refused it just above
+            raise ApiError(404, REFUSAL_UNKNOWN, f"no verified campaign {campaign_id!r}")
+        now = campaign_tally(s, campaign)
+        refused = now.refusal(cap_usd=cap, s1=s1, commits=commits)
+        if refused is not None:
+            raise ApiError(
+                409,
+                refused.code,
+                str(refused),
+                detail={"campaign_id": campaign_id, **refused.detail},
+            )
+        headroom = now.headroom(s1=s1, commits_left=commits)
+        staged = stage_queued(s, run)
+        return {
+            "campaign_id": campaign_id,
+            "run_id": staged.id,
+            "repo": staged.repo,
+            "kind": staged.kind,
+            "cap_usd": round(cap, 6),
+            "s1": s1,
+            "commits": commits,
+            "headroom_usd": headroom,
+            **now.to_dict(),
+            "left_usd_after": round(now.left_usd - cap - headroom, 6),
+        }
+
+    append_event_checked(
+        factory,
+        trace_id=campaign_id,
+        stage="system",
+        action=CAMPAIGN_ADMITTED,
+        build=build,
+        actor=actor,
+        repo=body.repo,
+    )
+    return run
+
+
 def submit_refusals(
     db: Session, settings: Any, body: RunCreateRequest, run: Run, *, login: bool = True
 ) -> None:
@@ -976,6 +1078,10 @@ def submit_refusals(
     * 409 ``reading_unsealed`` — a run filed under a reading whose sandbox executor or the
       deployment's builder executor is not ``docker``: its rows could never be the reading's
       sealed measurement (P-789; the worker re-checks at claim);
+    * 422 ``campaign_cap_required`` / ``campaign_s1_unbounded``, 404 ``campaign_unknown`` —
+      a run filed under a campaign without a cap, an ``S1`` one without counted commits, or
+      under no verified campaign (G-957; :func:`campaign_refusal` — the campaign's tally is
+      read where the run is admitted, :func:`admit_under_campaign`);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -1007,6 +1113,7 @@ def submit_refusals(
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    campaign_refusal(db, body)
     if body.reading_id is not None:
         reading_refusal(db, settings, body)
     if not login:
@@ -1097,7 +1204,11 @@ def create_run(
             # that is also a rung on the ladder before anything is built
             params["test_author"] = body.test_author.strip()
         run.params_json = params
-    run = api.enqueue(factory, run)
+    if body.campaign_id is not None:
+        # G-957: the campaign's tally is read and the run staged under one lock
+        run = admit_under_campaign(factory, settings, body, run, actor=operator.id)
+    else:
+        run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)
 
@@ -1387,7 +1498,9 @@ __all__ = [
     "SSE_PAGE",
     "SSE_POLL_S",
     "JobsApi",
+    "admit_under_campaign",
     "append_system_event",
+    "campaign_refusal",
     "derive_counts",
     "event_stream",
     "event_to_dict",

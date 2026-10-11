@@ -1,0 +1,356 @@
+"""A campaign's money ceiling, held by the product (G-957): the record, the tally, the rule.
+
+Q-06: each campaign is approved with a stated maximum. Wave 3 is funded with a hard ceiling of
+£80 in two stages (DL-371), and until now the only limit the product kept was a run's own
+``max_cost_usd`` — per run, in dollars, a guard (G-938). A **campaign** is the approval as a
+record: its name, its ceiling in pounds, the pounds released so far (a stage), the rate the
+pounds convert to dollars at (stored as the operator gave it, never fetched) and the decision
+that approved it, hashed into its id so an edited ceiling no longer verifies.
+
+**The tally** is the Wave 3 registration's rule (docs/reviews/2026-10-09-wave-3-registration.md,
+"The tally"), kept by the product instead of by hand:
+
+* **spent** — for every run filed under the campaign, what its ledger rows cost plus each of
+  its test author's ``author.attempt`` calls (an ``S1`` replay's author writes no row, P-775);
+* **held** — for every run queued or running, its cap less what it has spent, plus its headroom;
+* **headroom** — the dearest single attempt the campaign has seen, or
+  :data:`HEADROOM_FIRST_USD` before the first priced one (a run capped at $0.10 once spent $5.00
+  on its first attempt, P-261: a run's cap is a guard until G-938 bounds each call); for an
+  ``S1`` run, plus its commits still to run times the dearest author call seen, or
+  :data:`AUTHOR_CALL_FIRST_USD` before the first.
+
+A run is admitted only while spent, held, its own cap and its own headroom together stay at or
+under the **line** — the released pounds at the rate, never more than the ceiling. A cost the
+tally cannot know (a row or an author call with ``cost_known`` false) and a run whose spend
+passed its cap plus its headroom each stop the campaign: nothing more is admitted.
+
+Navigation
+----------
+What it is:   The campaign record (``Campaign``: ceiling and released pounds, the rate, the
+              decision, a content-hashed id) and the pure tally over its runs (``tally``).
+What it does: Hashes a campaign into ``cmp_<24 hex>`` and verifies it; folds the releases into
+              the line (never above the ceiling, never lowered); sums each run's rows and author
+              calls; holds each queued or running run's unspent cap plus its headroom; answers
+              whether one more run with a cap fits (``Tally.refusal``: ``campaign_ceiling``,
+              ``campaign_cost_unknown``, ``campaign_overrun``, or ``None``).
+How:          ``canonical_json`` + ``sha256_text`` over the record's body → ``tally`` takes the
+              line and one ``MemberRun`` per run (the server reads them under the events write
+              lock) → ``Tally.headroom`` → ``Tally.refusal``.
+Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
+ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's spend cap is a guard)
+Works with:   src/crb/server/campaigns.py (reads the record, the releases and each run's spend
+              from the store), src/crb/server/routes/campaigns.py (registers, releases, serves),
+              src/crb/server/routes/runs.py (``POST /runs`` admits a run under a campaign),
+              src/crb/server/spend_cap.py (``Spend``: the rule a run's own cap sums by),
+              src/crb/core/evidence.py (``canonical_json``, ``sha256_text``)
+Tested by:    tests/test_campaign.py, tests/test_server_campaigns.py
+Touch when:   never for a new repository; the registration's tally or stop rule changes (a
+              decision first, then this module's refusals and
+              docs/API.md#campaigns-a-campaigns-money-ceiling).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from typing import Any
+
+from crb.core.evidence import canonical_json, sha256_text
+
+CAMPAIGN_SCHEMA = "crb.campaign.v1"
+#: The events a campaign's trace (its id) holds: registered once, released per stage, and one
+#: per run admitted under it, written in the same transaction as the run is queued.
+CAMPAIGN_REGISTERED = "campaign.registered"
+CAMPAIGN_RELEASED = "campaign.released"
+CAMPAIGN_ADMITTED = "campaign.admitted"
+CAMPAIGN_ID_PREFIX = "cmp_"
+
+#: A run's headroom before the campaign has seen a priced attempt (P-261).
+HEADROOM_FIRST_USD = 5.00
+#: An ``S1`` run's headroom per commit still to run before a priced author call (ADR-0026 item
+#: 13's upper assumption).
+AUTHOR_CALL_FIRST_USD = 0.15
+#: Cents are the ledger's precision; a sum of float costs may miss the line by less.
+_EPSILON = 1e-9
+
+#: 409 — the run's cap and headroom would pass what is left under the line.
+REFUSAL_CEILING = "campaign_ceiling"
+#: 409 — a run of the campaign has a cost the tally cannot know: the campaign is stopped.
+REFUSAL_COST_UNKNOWN = "campaign_cost_unknown"
+#: 409 — a run of the campaign spent past its cap plus its headroom: the campaign is stopped.
+REFUSAL_OVERRUN = "campaign_overrun"
+#: 409 — a campaign of that name is registered already.
+REFUSAL_EXISTS = "campaign_exists"
+#: 409 — a release that does not raise the line, or would pass the ceiling.
+REFUSAL_RELEASE = "campaign_release_invalid"
+#: 404 — no verified campaign has that id.
+REFUSAL_UNKNOWN = "campaign_unknown"
+#: 422 — a run filed under a campaign names no ``max_cost_usd``: nothing could be held for it.
+REFUSAL_CAP_REQUIRED = "campaign_cap_required"
+#: 422 — an ``S1`` run under a campaign names neither ``task_ids`` nor ``limit``: its author's
+#: headroom is per commit, so its commits must be counted.
+REFUSAL_S1_UNBOUNDED = "campaign_s1_unbounded"
+
+#: The run statuses whose unspent cap is held.
+_ACTIVE = frozenset({"queued", "running"})
+
+
+class CampaignRefused(ValueError):
+    """A campaign refusal: its stable ``code`` and a ``detail`` the API serves."""
+
+    def __init__(self, message: str, *, code: str, detail: Mapping[str, Any] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.detail: dict[str, Any] = dict(detail or {})
+
+
+def _usd(v: float) -> str:
+    return f"${v:,.2f}"
+
+
+def _gbp(v: float) -> str:
+    return f"£{v:,.2f}"
+
+
+@dataclass(frozen=True)
+class Campaign:
+    """One approved campaign — the ``campaign.registered`` event's payload."""
+
+    name: str
+    ceiling_gbp: float
+    released_gbp: float
+    rate_usd_per_gbp: float
+    decision: str
+    actor: str
+    registered_at: str
+    schema: str = CAMPAIGN_SCHEMA
+    campaign_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.campaign_id:
+            digest = sha256_text(canonical_json(self.body()))[:24]
+            object.__setattr__(self, "campaign_id", CAMPAIGN_ID_PREFIX + digest)
+
+    def body(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "name": self.name,
+            "ceiling_gbp": self.ceiling_gbp,
+            "released_gbp": self.released_gbp,
+            "rate_usd_per_gbp": self.rate_usd_per_gbp,
+            "decision": self.decision,
+            "actor": self.actor,
+            "registered_at": self.registered_at,
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.body(), "campaign_id": self.campaign_id}
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Campaign:
+        return cls(
+            name=str(d.get("name", "")),
+            ceiling_gbp=float(d.get("ceiling_gbp", 0.0) or 0.0),
+            released_gbp=float(d.get("released_gbp", 0.0) or 0.0),
+            rate_usd_per_gbp=float(d.get("rate_usd_per_gbp", 0.0) or 0.0),
+            decision=str(d.get("decision", "")),
+            actor=str(d.get("actor", "")),
+            registered_at=str(d.get("registered_at", "")),
+            schema=str(d.get("schema", CAMPAIGN_SCHEMA)),
+            campaign_id=str(d.get("campaign_id", "")),
+        )
+
+    def verify(self) -> bool:
+        """The stored id is the one its body gives, and the body is a ceiling the tally can
+        keep: a positive rate, and a release above nothing and within the ceiling."""
+        fresh = replace(self, campaign_id="")
+        return (
+            fresh.campaign_id == self.campaign_id
+            and self.rate_usd_per_gbp > 0
+            and 0 < self.released_gbp <= self.ceiling_gbp
+        )
+
+    def usd(self, gbp: float) -> float:
+        """Pounds in dollars at the campaign's own rate, to the cent."""
+        return round(gbp * self.rate_usd_per_gbp, 2)
+
+    def line_gbp(self, releases: Iterable[float] = ()) -> float:
+        """The pounds released so far: the most any release named, never above the ceiling
+        and never below the registration's own release."""
+        return min(self.ceiling_gbp, max([self.released_gbp, *releases]))
+
+
+def planned_commits(task_ids: Sequence[str], limit: int | None) -> int | None:
+    """How many commits a run will replay: its named commits, at most its limit; ``None``
+    when it names neither (the whole pool, which the tally cannot count)."""
+    n: int | None = len(task_ids) if task_ids else None
+    if limit is not None:
+        n = limit if n is None else min(n, limit)
+    return n
+
+
+@dataclass(frozen=True)
+class MemberRun:
+    """One run filed under a campaign, as the store has it now: its admission (cap, arm,
+    commits) and what it has spent — its rows and its test author's calls apart."""
+
+    run_id: str
+    status: str
+    cap_usd: float
+    s1: bool = False
+    commits: int = 0
+    commits_done: int = 0
+    rows_usd: float = 0.0
+    dearest_row_usd: float = 0.0
+    rows_unknown: int = 0
+    authoring_usd: float = 0.0
+    dearest_author_usd: float = 0.0
+    authors_unknown: int = 0
+
+    @property
+    def spent_usd(self) -> float:
+        return self.rows_usd + self.authoring_usd
+
+    @property
+    def active(self) -> bool:
+        return self.status in _ACTIVE
+
+    @property
+    def unknown(self) -> int:
+        return self.rows_unknown + self.authors_unknown
+
+    @property
+    def commits_left(self) -> int:
+        """The commits it has still to run: none once it has finished."""
+        return max(0, self.commits - self.commits_done) if self.active else 0
+
+
+@dataclass(frozen=True)
+class Tally:
+    """A campaign's money now: the line, what its runs spent (author calls apart), what is
+    held for the runs still to finish, the dearest attempt and author call seen, and the runs
+    that stop it."""
+
+    line_usd: float
+    spent_usd: float
+    authoring_usd: float
+    held_usd: float
+    dearest_attempt_usd: float | None
+    dearest_author_usd: float | None
+    unknown_runs: tuple[str, ...] = ()
+    overrun_runs: tuple[str, ...] = ()
+
+    @property
+    def left_usd(self) -> float:
+        return round(self.line_usd - self.spent_usd - self.held_usd, 6)
+
+    def headroom(self, *, s1: bool, commits_left: int) -> float:
+        """What a run may pass its cap by: the dearest attempt seen (or $5.00 before the
+        first), and for an ``S1`` run its commits still to run times the dearest author call
+        seen (or $0.15 before the first)."""
+        attempt = self.dearest_attempt_usd
+        out = HEADROOM_FIRST_USD if attempt is None else attempt
+        if s1:
+            call = self.dearest_author_usd
+            out += max(0, commits_left) * (AUTHOR_CALL_FIRST_USD if call is None else call)
+        return round(out, 6)
+
+    def refusal(self, *, cap_usd: float, s1: bool, commits: int) -> CampaignRefused | None:
+        """Why one more run with ``cap_usd`` (and, for ``S1``, ``commits`` commits) may not
+        be admitted, or ``None``: a stopped campaign first, then the line."""
+        if self.unknown_runs:
+            return CampaignRefused(
+                f"campaign stopped: {len(self.unknown_runs)} run(s) spent a cost the tally "
+                "cannot know (cost_known false) — nothing more is admitted; nothing was queued",
+                code=REFUSAL_COST_UNKNOWN,
+                detail={"run_ids": list(self.unknown_runs)},
+            )
+        if self.overrun_runs:
+            return CampaignRefused(
+                f"campaign stopped: {len(self.overrun_runs)} run(s) spent past their cap plus "
+                "their headroom — nothing more is admitted; nothing was queued",
+                code=REFUSAL_OVERRUN,
+                detail={"run_ids": list(self.overrun_runs)},
+            )
+        headroom = self.headroom(s1=s1, commits_left=commits)
+        need = cap_usd + headroom
+        if self.spent_usd + self.held_usd + need > self.line_usd + _EPSILON:
+            return CampaignRefused(
+                f"campaign ceiling: {_usd(self.spent_usd)} spent and {_usd(self.held_usd)} "
+                f"held of the {_usd(self.line_usd)} line leave {_usd(max(0.0, self.left_usd))};"
+                f" this run's cap {_usd(cap_usd)} plus its headroom {_usd(headroom)} would "
+                "pass it — nothing was queued",
+                code=REFUSAL_CEILING,
+                detail={
+                    **self.to_dict(),
+                    "cap_usd": round(cap_usd, 6),
+                    "headroom_usd": headroom,
+                },
+            )
+        return None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "line_usd": round(self.line_usd, 2),
+            "spent_usd": round(self.spent_usd, 6),
+            "authoring_usd": round(self.authoring_usd, 6),
+            "held_usd": round(self.held_usd, 6),
+            "left_usd": self.left_usd,
+            "dearest_attempt_usd": self.dearest_attempt_usd,
+            "dearest_author_call_usd": self.dearest_author_usd,
+        }
+
+
+def tally(line_usd: float, members: Sequence[MemberRun]) -> Tally:
+    """The campaign's tally over its runs (the registration's rule; see the module)."""
+    attempts = [m.dearest_row_usd for m in members if m.dearest_row_usd > 0]
+    calls = [m.dearest_author_usd for m in members if m.dearest_author_usd > 0]
+    base = Tally(
+        line_usd=line_usd,
+        spent_usd=sum(m.spent_usd for m in members),
+        authoring_usd=sum(m.authoring_usd for m in members),
+        held_usd=0.0,
+        dearest_attempt_usd=max(attempts) if attempts else None,
+        dearest_author_usd=max(calls) if calls else None,
+    )
+    held = 0.0
+    overrun: list[str] = []
+    for m in members:
+        if m.active:
+            held += max(0.0, m.cap_usd - m.spent_usd)
+            held += base.headroom(s1=m.s1, commits_left=m.commits_left)
+        # A run overran when its spend passed the most it was ever admitted to: its cap plus
+        # the headroom of all its commits (a finished run keeps what its authoring was granted).
+        if m.spent_usd > m.cap_usd + base.headroom(s1=m.s1, commits_left=m.commits) + _EPSILON:
+            overrun.append(m.run_id)
+    return replace(
+        base,
+        held_usd=held,
+        unknown_runs=tuple(m.run_id for m in members if m.unknown),
+        overrun_runs=tuple(overrun),
+    )
+
+
+__all__ = [
+    "AUTHOR_CALL_FIRST_USD",
+    "CAMPAIGN_ADMITTED",
+    "CAMPAIGN_ID_PREFIX",
+    "CAMPAIGN_REGISTERED",
+    "CAMPAIGN_RELEASED",
+    "CAMPAIGN_SCHEMA",
+    "HEADROOM_FIRST_USD",
+    "REFUSAL_CAP_REQUIRED",
+    "REFUSAL_CEILING",
+    "REFUSAL_COST_UNKNOWN",
+    "REFUSAL_EXISTS",
+    "REFUSAL_OVERRUN",
+    "REFUSAL_RELEASE",
+    "REFUSAL_S1_UNBOUNDED",
+    "REFUSAL_UNKNOWN",
+    "Campaign",
+    "CampaignRefused",
+    "MemberRun",
+    "Tally",
+    "planned_commits",
+    "tally",
+]
