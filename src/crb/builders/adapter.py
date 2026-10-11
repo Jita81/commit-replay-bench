@@ -12,6 +12,9 @@ one place that knows both sides:
   from and ``POST /runs`` refuses at submit with;
 * :func:`ladder_labels` is the inverse — the labels the orchestrator will hand
   back, disambiguated so two rungs never share one;
+* :func:`run_arm_for` is the one arm every attempt of a run carries (``A0`` / ``S3`` /
+  ``S1@<author>``, ``+L`` with the loop on) — the closure stamps it, and a caller outside
+  the closure can name it before the build;
 * :func:`build_fn_for` builds the callable: rung label → builder instance
   (cached per rung), :class:`~crb.builders.base.BuildBrief` from the task, one
   ``builder.build(...)`` call, and a :class:`~crb.core.run.BuildAttempt` back.
@@ -60,14 +63,16 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               ``S1`` first has the test author write a test in a sealed checkout of the parent and
               proves it RED (removing it before the grade; an author whose provider refused the
               call is recorded ``model_error:`` so the ledger reads an outage — P-293), stamps
-              every attempt with the run's one arm (P-295), runs one ``builder.build`` — on the host
-              or against a sealed checkout in a container — writes the redacted transcript to a
-              file, maps the outcome to a ``BuildAttempt`` and discards the source edits of any
-              errored attempt so it can never grade clean-with-error. A sealed attempt whose
-              container kill went UNCONFIRMED (cancel / wall clock; the daemon never reported it
-              stopped) is never silent: the outcome's errors and ``extra`` say so, the attempt's
-              pack notes carry ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the
-              container to the caller (the worker records it and reaps it).
+              every attempt with the run's one arm (``run_arm_for``, module level so a caller
+              outside the closure names the same arm — P-295), runs one ``builder.build`` — on
+              the host or against a sealed checkout in a container — writes the redacted
+              transcript to a file, maps the outcome to a ``BuildAttempt`` and discards the
+              source edits of any errored attempt so it can never grade clean-with-error. A
+              sealed attempt whose container kill went UNCONFIRMED (cancel / wall clock; the
+              daemon never reported it stopped) is never silent: the outcome's errors and
+              ``extra`` say so, the attempt's pack notes carry ``kill_confirmed: false``, and
+              ``on_kill_unconfirmed`` hands the container to the caller (the worker records it
+              and reaps it).
 How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
               (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
               ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
@@ -219,6 +224,21 @@ def git_commit_dates(repo: Any, shas: Sequence[str]) -> dict[str, str]:
 def loop_on(learning: LearningSnapshot | None) -> bool:
     """Whether the repository's loop switch is part of this run's arm (``+L``)."""
     return learning is not None and not learning.opted_out and learning.auto_apply != AUTO_OFF
+
+
+def run_arm_for(
+    mode: str, *, learning: LearningSnapshot | None, s1_author_model: str | None
+) -> str:
+    """The arm EVERY attempt of a run is stamped with (ADR-0026 item 1): ``S1@<author>`` on
+    the ``S1`` arm (``s1_author_model`` set), else the run's own arm — blind ``A0``, sighted
+    ``S3`` — each with ``+L`` when the repository's loop switch is on for the run. One answer
+    per run, so an authoring failure or a harness refusal lands in the same arm as a success
+    (docs/PREVENTION.md P-295). :func:`build_fn_for`'s closure stamps it; at module level a
+    caller outside the closure names the arm the run's rows will carry."""
+    if s1_author_model is not None:
+        return context_arm_for(base=ARM_S1, author=s1_author_model, plus_l=loop_on(learning))
+    base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
+    return context_arm_for(base=base, plus_l=loop_on(learning))
 
 
 #: The HTTP statuses that mean the provider refused the key itself: nothing was observed.
@@ -876,20 +896,12 @@ def build_fn_for(
             return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
         return path, content
 
-    def arm_of(mode: str) -> str:
-        """The run's own arm: blind ``A0``, sighted ``S3``, with ``+L`` when the repository's
-        loop switch is on for the run (ADR-0026 item 1)."""
-        base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
-        return context_arm_for(base=base, plus_l=loop_on(learning))
-
     def run_arm(mode: str) -> str:
-        """The arm EVERY attempt of this run is stamped with — ``S1@<author>`` (with ``+L``
-        when the loop is on) on the ``S1`` arm, else :func:`arm_of` — worked out once, so an
-        authoring failure or a harness refusal lands in the same arm as a success
-        (docs/PREVENTION.md P-295)."""
-        if s1 is not None:
-            return context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
-        return arm_of(mode)
+        """The arm EVERY attempt of this run is stamped with: :func:`run_arm_for` over this
+        run's loop snapshot and ``S1`` author (docs/PREVENTION.md P-295)."""
+        return run_arm_for(
+            mode, learning=learning, s1_author_model=s1.author_model if s1 is not None else None
+        )
 
     #: the finish gate's parent verdicts per (task, mode, commands) — see ``baseline_for``
     baselines: dict[tuple[str, str, tuple[CheckCommand, ...]], dict[str, bool | None]] = {}
@@ -1127,9 +1139,9 @@ def build_fn_for(
                 retrospective=True,
                 root=str(ws.root),
             )
-        else:
+        else:  # no S1 author here, so run_arm is the run's own A0 / S3 arm
             composed = compose(
-                arm_of(mode),
+                run_arm(mode),
                 ticket,
                 repo=task.repo,
                 language=task.language,
@@ -1585,6 +1597,7 @@ __all__ = [
     "ladder_labels",
     "note_unconfirmed_kills",
     "parse_rung_label",
+    "run_arm_for",
     "rung_from_object",
     "rung_index",
     "rungs_from_entries",

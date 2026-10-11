@@ -12,10 +12,13 @@ What it does: Pins that a sighted brief carries the tests and the test command b
               rung, an unregistered builder, a builder exception, a model error or a protocol
               violation each become a recorded error row (redacted) — and that a violation which
               landed the gold patch is discarded before grading, so "clean + error" is impossible
-              by construction; that ``attempt_error`` caps the detail never the prefix; that the
-              transcript is written to a file, never inlined; that the sighted test command is
-              best-effort and brings the oracle services up (mesh-client, DL-024); and that a
-              run climbs the ladder (rung 1 red → rung 2 gold clean) into two chained rows.
+              by construction; that ``run_arm_for`` is the arm the closure stamps on each exit
+              (refusal, composed brief, S1 authoring failure) in both modes, loop on and off,
+              with and without an S1 author (P-295); that ``attempt_error`` caps the detail
+              never the prefix; that the transcript is written to a file, never inlined; that
+              the sighted test command is best-effort and brings the oracle services up
+              (mesh-client, DL-024); and that a run climbs the ladder (rung 1 red → rung 2 gold
+              clean) into two chained rows.
 How:          ``FakeBuilder`` registered as ``fake`` with a scripted behaviour → ``adapter`` /
               ``run`` over ``pyrepo`` with the real ``PytestRunner`` and ``LocalExecutor``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -52,9 +55,12 @@ from crb.builders.base import (
     EventFn,
     Rung,
 )
+from crb.builders.brief import LABEL_CONTEXT_ARM, S1Arm
 from crb.core.execution import LocalExecutor
+from crb.core.grade import MODE_SIGHTED, MODES
 from crb.core.ledger import JsonlLedger, verify_chain
 from crb.core.lint import LintPlan, LintTool
+from crb.core.prevention import AUTO_CONFIG, AUTO_CONTEXT, AUTO_OFF, LearningSnapshot
 from crb.core.run import BuildAttempt, RunSpec, run
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
@@ -358,6 +364,77 @@ def test_message_for_failure_falls_back_to_subject(
     finally:
         ws.remove()
     assert FakeBuilder.briefs[0].message == "feat: add subtract"
+
+
+# --- build_fn: the run's arm ----------------------------------------------------------------
+
+#: RED at ``pyrepo``'s parent (the feat commit adds ``subtract``, never ``multiply``)
+_S1_TEST = (
+    "tests/test_s1_multiply.py",
+    "from calc import multiply\n\n\ndef test_multiply():\n    assert multiply(3, 4) == 12\n",
+)
+
+#: the loop switch as a run can hold it: no snapshot, off, opted out, and the two on settings
+_LOOP: dict[str, LearningSnapshot | None] = {
+    "none": None,
+    "off": LearningSnapshot(repo=pr.REPO_NAME, auto_apply=AUTO_OFF),
+    "opted_out": LearningSnapshot(repo=pr.REPO_NAME, auto_apply=AUTO_CONTEXT, opted_out=True),
+    "context": LearningSnapshot(repo=pr.REPO_NAME, auto_apply=AUTO_CONTEXT),
+    "config": LearningSnapshot(repo=pr.REPO_NAME, auto_apply=AUTO_CONFIG),
+}
+
+
+def _authored(_ws: Any, _subject: str, _message: str) -> tuple[str, str]:
+    return _S1_TEST
+
+
+def _author_raises(_ws: Any, _subject: str, _message: str) -> tuple[str, str]:
+    raise RuntimeError("the author fell over")
+
+
+@pytest.mark.parametrize("author", [None, "t1"])
+@pytest.mark.parametrize("loop", list(_LOOP))
+@pytest.mark.parametrize("mode", MODES)
+def test_run_arm_for_matches_the_closure_for_every_mode(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    harness: dict[str, Any],
+    mode: str,
+    loop: str,
+    author: str | None,
+) -> None:
+    """``run_arm_for`` is the arm the build closure stamps on every attempt of a run, so a
+    caller outside the closure names the same arm the rows will carry (P-295). The closure
+    stamps it on three exits: a refusal before the brief is composed (an unknown rung), the
+    composed brief, and on the ``S1`` arm an authoring failure. ``MODES`` is every mode the
+    closure is handed: a ``replay`` run builds sighted, a ``blind`` run blind, and
+    ``RunSpec`` refuses any other mode."""
+    learning = _LOOP[loop]
+    base = f"S1@{author}" if author else ("S3" if mode == MODE_SIGHTED else "A0")
+    expected = base + ("+L" if loop in ("context", "config") else "")
+
+    def stamped(s1: S1Arm | None, rung: str, name: str) -> str:
+        fn = adapter.build_fn_for(
+            _ladder("noop"), budget=Budget(), learning=learning, s1=s1, **harness
+        )
+        ws = pyrepo.trial(tmp_path / name, overlay_tests=mode == MODE_SIGHTED)
+        try:
+            attempt = fn(ws, pyrepo.feat_task(), mode, rung)
+        finally:
+            ws.remove()
+        return attempt.labels[LABEL_CONTEXT_ARM]
+
+    s1 = S1Arm(author=_authored, author_model=author) if author else None
+    exits = {
+        "refused": stamped(s1, "fake:zzz", "refused"),
+        "composed": stamped(s1, "fake:m0", "composed"),
+    }
+    if author:
+        exits["authoring"] = stamped(
+            S1Arm(author=_author_raises, author_model=author), "fake:m0", "authoring"
+        )
+    assert adapter.run_arm_for(mode, learning=learning, s1_author_model=author) == expected
+    assert exits == dict.fromkeys(exits, expected)
 
 
 # --- build_fn: failures are recorded, never raised ----------------------------------------
