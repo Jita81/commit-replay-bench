@@ -23,6 +23,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   calls count; overrunning admitted headroom stops the campaign. CI builds and runs the Go
   builder image; the operator's 2026-10-11 decisions are recorded.
 
+- **The walkthrough waits for what it reads** (P-781, P-782;
+  [#78](https://github.com/Jita81/commit-replay-bench/pull/78)). 11b-keyboard signed in by
+  clicking, which left the pointer on the page: on PR #58's CI a hint it rested on opened between
+  two Escapes and spent the second, so a step failed. Every 11b step now signs in with Enter and
+  fails when a pointer event reached its page. Then `main` went red when 14-go-live read the
+  footer once, before `GET /version` answered. Of the walkthrough's 109 one-shot reads, 18 could
+  read an earlier render; each now waits for what it reads, and a test fails on a new one-shot
+  read until it is judged settled.
+
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen
   clean patches a person read" would not have merged; all thirteen verdicts are Claude's, ten the

@@ -441,6 +441,13 @@ test.describe('10 factory (fixture_gold)', () => {
       await signIn(page)
       await page.goto(`/factory?repo=${encodeURIComponent(t.name)}`)
       await expect(page.getByTestId('factory-item-I-2')).toBeVisible()
+      // measure the whole page, not the first card to draw: the readiness checklist, the flow
+      // tiles and every loading card have answered (P-782)
+      await expect(page.getByTestId('before-you-start')).toBeVisible()
+      // the flow card draws only for a stream the reading holds, and only once it has answered
+      const flow = (await (await page.request.get(`${env.baseUrl}/api/v1/flow?repo=${encodeURIComponent(t.name)}`)).json()) as { streams: Array<{ stream: string }> }
+      if (flow.streams.some((x) => x.stream === 'manufacture-and-deliver')) await expect(page.locator('#flow-manufacture-and-deliver')).toBeVisible()
+      await expect(page.getByText('Loading…')).toHaveCount(0)
       // on failure, name the elements whose right edge passes the viewport — the culprit, not a number
       const widths = await page.evaluate(() => {
         const inner = window.innerWidth
