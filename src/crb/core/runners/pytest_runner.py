@@ -77,6 +77,7 @@ from crb.core.runners.base import (
     host_check,
     parse_pytest_failures,
     parse_pytest_passes,
+    relocate_ids,
     tail_of,
     without_pytest_passes,
 )
@@ -333,7 +334,7 @@ class PytestRunner(BaseRunner):
         no result line at all (``os._exit(0)``). The tail leaves the PASSED lines out, so it
         reads as the ``-rfE`` tail did."""
         text = result.combined
-        failing = parse_pytest_failures(text)
+        failing = relocate_ids(parse_pytest_failures(text), root)
         parse_error = ""
         stop = _PYTEST_STOP.search(text)
         if stop:
@@ -357,7 +358,7 @@ class PytestRunner(BaseRunner):
             tail_of(without_pytest_passes(text)),  # the tail -rfE printed: passes crowd it
             duration_s=result.duration_s,
             parse_error=parse_error,
-            passed=parse_pytest_passes(text) - failing,
+            passed=relocate_ids(parse_pytest_passes(text), root) - failing,
         )
 
     def is_valid_oracle(self, root: Path, test_file: str) -> bool:

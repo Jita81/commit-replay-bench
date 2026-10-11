@@ -419,6 +419,41 @@ def _with(q: Qualification, *, red: dict[str, Any] | None = None, **gold: Any) -
     return dataclasses.replace(q, red=red if red is not None else dict(q.red), gold=new_gold)
 
 
+# R1-F4-2 (the Wave 3 red team): a glob-parametrized test whose ids carry the absolute worktree
+# path in their parametrize value (``test_sub_cases[/abs/tests/data/case1.txt]``). The gold is
+# qualified under one root and graded under another, so the raw ids never match and the honest
+# gold would miss belt 2 — unless the runner relocates the root to a fixed token first.
+_PY_GLOB_INITIAL = {
+    ".gitignore": ".pytest_scratch\n__pycache__\n.pytest_cache\n",
+    "pkg/__init__.py": "",
+    _PY_SRC: "def sub(a, b):\n    return a + b\n",  # the bug both data cases catch
+    "tests/data/case1.txt": "3 2 1\n",
+    "tests/data/case2.txt": "3 -2 5\n",
+}
+_PY_GLOB_FEAT = {
+    _PY_SRC: "def sub(a, b):\n    return a - b\n",
+    "tests/test_sub_cases.py": (
+        "import glob\n"
+        "import os\n\n"
+        "import pytest\n\n"
+        "from pkg.sub import sub\n\n"
+        "HERE = os.path.dirname(os.path.abspath(__file__))\n\n\n"
+        '@pytest.mark.parametrize("path", sorted(glob.glob(os.path.join(HERE, "data", "*.txt"))))\n'
+        "def test_sub_cases(path):\n"
+        "    with open(path) as fh:\n"
+        "        a, b, want = (int(x) for x in fh.read().split())\n"
+        "    assert sub(a, b) == want\n"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def py_glob_task(tmp_path_factory: pytest.TempPathFactory) -> _Qualified:
+    tmp = tmp_path_factory.mktemp("belt2-py-glob")
+    root, feat_sha = two_commit_repo(tmp / "repo", _PY_GLOB_INITIAL, _PY_GLOB_FEAT)
+    return _qualify(root, feat_sha, _PY_CONFIG, tmp / "scratch")
+
+
 def test_a_python_qualification_records_the_target_tests_the_gold_passed(
     py_task: _Qualified,
 ) -> None:
@@ -500,6 +535,19 @@ def test_a_source_that_patches_pytest_machinery_is_disqualified(
     res = _graded(py_task, tmp_path / "trial", {_PY_SRC: hack})
     assert res.clean is False and res.disqualified is True
     assert "test infrastructure modified" in res.dq_reason
+
+
+def test_the_honest_python_glob_gold_grades_clean(py_glob_task: _Qualified, tmp_path: Path) -> None:
+    """R1-F4-2: the gold's PASSED ids carry the absolute worktree path inside their parametrize
+    value. ``relocate_ids`` rewrites the root to ``<root>`` so the ids compare across the
+    qualify root and the grade root; without it belt 2's ``target_passed`` check would refuse
+    the honest gold. Clean both with the gold's record and when it falls back to the RED ids."""
+    captured = py_glob_task.q.gold["target_passed"]
+    assert len(captured) == 2, captured
+    assert all(i.startswith("tests/test_sub_cases.py::test_sub_cases[<root>/") for i in captured)
+    assert _graded(py_glob_task, tmp_path / "trial", {}).clean is True
+    old = _with(py_glob_task.q, target_passed=None)
+    assert _graded(py_glob_task, tmp_path / "fallback", {}, q=old).clean is True
 
 
 # --- the records belt 2 falls back on --------------------------------------

@@ -977,6 +977,35 @@ def parse_pytest_passes(text: str) -> frozenset[str]:
     return frozenset(_PASS_LINE.findall(text))
 
 
+def relocate_ids(ids: frozenset[str], root: Path) -> frozenset[str]:
+    """Replace this run's root path, wherever it appears inside a test id, with the fixed token
+    ``<root>``, so ids compare across runs rooted at different absolute paths.
+
+    A glob- or ``tmp_path``-parametrized id carries the worktree path in its parametrize value
+    (``tests/t.py::test[/work/data/case1.txt]``, or the host-absolute equivalent). The gold is
+    qualified under one root and a patch graded under another, so the raw ids never match and
+    the honest gold would miss belt 2 (R1-F4-2). ``/work`` is the container mount; ``realpath``
+    covers a root reached through a symlink (``/tmp`` → ``/private/tmp`` on macOS). Longest
+    needle first, so a path that is a prefix of another does not shadow it. Only an absolute
+    root is a needle — a relative root (``.`` in a parser unit test) would rewrite the ``.`` in
+    every ``foo.py`` id. The node path (``tests/t.py::test``) is already root-relative and left
+    untouched.
+    """
+    needles = {"/work"}
+    if os.path.isabs(str(root)):
+        needles.add(str(root))
+        with contextlib.suppress(OSError):  # realpath on a path is effectively total
+            needles.add(os.path.realpath(root))
+    ordered = sorted((n for n in needles if n), key=len, reverse=True)
+
+    def _one(test_id: str) -> str:
+        for needle in ordered:
+            test_id = test_id.replace(needle, "<root>")
+        return test_id
+
+    return frozenset(_one(i) for i in ids)
+
+
 _PASS_SUMMARY_LINE = re.compile(r"^PASSED\s+\S+[^\n]*(?:\n|\Z)", re.M)
 #: The short-summary banner with no failure or error under it (an all-pass run's, once its
 #: PASSED lines are gone).

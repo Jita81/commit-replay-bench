@@ -60,6 +60,7 @@ from crb.core.runners.base import (
     SetupStep,
     TestRun,
     host_check,
+    relocate_ids,
     tail_of,
 )
 from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
@@ -350,11 +351,12 @@ class GoRunner(BaseRunner):
                 f"; and {len(problems) - 5} more" if len(problems) > 5 else ""
             )
             parse_error = f"unattributed failure ({shown_problems})"
+        failing_ids = relocate_ids(frozenset(failing), root)
         return TestRun(
             result.returncode,
-            frozenset(failing),
+            failing_ids,
             tail_of(result.combined),
             duration_s=result.duration_s,
             parse_error=parse_error,
-            passed=frozenset(passed - failing),
+            passed=relocate_ids(frozenset(passed), root) - failing_ids,
         )
