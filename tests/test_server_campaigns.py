@@ -29,9 +29,9 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               run outside; a legacy reading counts it as before).
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
-              ``append_event``; four threads through ``admit_under_campaign``; the admissions
+              ``append_event``; four threads through ``admit_under_campaign`` and the admissions
               reader and ``GET /readings`` under a campaign also on the ``backend`` fixture
-              (PostgreSQL when it is configured).
+              (PostgreSQL when it is configured; CI's ``test-postgres`` job runs this file).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
 Works with:   src/crb/server/routes/campaigns.py (the routes under test),
@@ -597,9 +597,23 @@ def test_a_record_that_does_not_rehash_holds_no_ceiling(env: Env) -> None:
     assert r.status_code == 404 and envelope(r)["code"] == "campaign_unknown"
 
 
-def test_concurrent_submits_never_both_take_the_last_of_the_line(env: Env) -> None:
+@pytest.fixture
+def backend_env(backend: Backend, tmp_path: Path) -> Iterator[Env]:
+    """``make_env`` on the ``backend`` store: seeded, with users, signed in as the operator."""
+    init_db(backend.engine)
+    info = seed(backend.factory)
+    add_users(backend.factory)
+    settings = make_settings(tmp_path)
+    with TestClient(create_app(settings, backend.factory)) as client:
+        login(client, "operator")
+        yield Env(client=client, factory=backend.factory, info=info, settings=settings)
+
+
+def test_concurrent_submits_never_both_take_the_last_of_the_line(backend_env: Env) -> None:
     """The tally is read and the run staged under the events write lock: four $20 runs
-    racing for a $54.00 line ($25 held each) admit exactly two."""
+    racing for a $54.00 line ($25 held each) admit exactly two, on each store — SQLite's
+    ``BEGIN IMMEDIATE`` and PostgreSQL's transaction-scoped advisory lock alike (P-790)."""
+    env = backend_env
     cid = _register(env)["campaign_id"]
     body = RunCreateRequest.model_validate({**GOLD, "max_cost_usd": 20, "campaign_id": cid})
     barrier = threading.Barrier(4)

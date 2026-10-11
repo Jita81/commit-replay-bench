@@ -807,8 +807,10 @@ jobs:
         run: |
           # test_store_events_chain.py: the audit trail's chain, and the two-writer race that
           # only PostgreSQL's concurrency can lose without the lock (ADR-0029)
+          # test_server_campaigns.py: four submits racing for a campaign's last dollars, admitted
+          # under the advisory lock, and GET /readings under a campaign (P-790)
           .venv/bin/pytest -q tests/test_store_db.py tests/test_store_ledger.py tests/test_store_migrate.py \
-            tests/test_store_events_chain.py -rs --junitxml=store-postgres.xml
+            tests/test_store_events_chain.py tests/test_server_campaigns.py -rs --junitxml=store-postgres.xml
           if grep -q 'CRB_TEST_POSTGRES_URL not set' store-postgres.xml; then
             echo '::error::postgres parametrisation was skipped'; exit 1
           fi
