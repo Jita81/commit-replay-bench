@@ -46,6 +46,14 @@ Honesty properties
   which the unchanged grader then grades. A sandbox that cannot be provided is
   :class:`~crb.core.execution.SandboxUnavailable` and propagates — the run stops —
   rather than becoming a recorded attempt on the host.
+* **The sealed session's set binds what the builder is told and what the gate re-runs**
+  (F87-1). A sealed attempt renders the brief's test commands under the builder's
+  dependency binding — the set its container mounts — and runs the finish gate's
+  declared commands, baseline and re-run, under the same set. A brief command that would
+  still assign a session env key a different value (``GOMODCACHE=/tmp/gomod`` over the
+  mounted ``/deps/gomod``) is :class:`~crb.core.execution.SandboxUnavailable` — the run
+  stops, no row, no retry — never a brief that tells the builder to empty its own module
+  cache.
 
 Navigation
 ----------
@@ -71,7 +79,8 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               pack notes carry ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the
               container to the caller (the worker records it and reaps it).
 How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
-              (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
+              (services up, env prefix; sealed, under the builder's binding and checked by
+              ``session_env_overrides``) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
               ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
               + ``copy_back``) → ``attempt_error`` → ``discard``.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
@@ -81,13 +90,16 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
 Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and calls this),
               src/crb/builders/base.py (brief, budget, outcome), src/crb/builders/__init__.py
               (``builder_for_rung``), src/crb/builders/container.py (the sealed path;
-              ``ContainerSession.unconfirmed_kills``), src/crb/server/reaper.py (what the
-              worker does with an ``UnconfirmedKill``),
+              ``ContainerSession.unconfirmed_kills``; ``builder_deps_view``, the env the
+              session's set gives the container, which the brief's commands and the finish
+              gate's ``command_baseline`` / ``verify`` are rendered and run under),
+              src/crb/server/reaper.py (what the worker does with an ``UnconfirmedKill``),
               src/crb/builders/budget.py (per-rung budget), src/crb/core/ledger.py (why an
               errored attempt must not carry a patch), src/crb/server/worker.py (the caller
               that supplies ``container`` from the environment)
 Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py,
-              tests/test_builders_finish_gate.py, tests/test_replay_s1_arm.py (the S1 step)
+              tests/test_builders_finish_gate.py, tests/test_replay_s1_arm.py (the S1 step),
+              tests/test_builders_sealed_deps.py, tests/test_ratchet_sealed_deps.py (F87-1)
 Touch when:   never for a new repository (the sighted test command comes from the runner);
               a new builder that must run sealed is added to ``SEALABLE_BUILDERS`` in
               src/crb/builders/container.py; a new attempt error kind must keep its prefix on
@@ -141,11 +153,12 @@ from crb.builders.container import (
     SealedCheckout,
     SessionFactory,
     UnconfirmedKill,
+    builder_deps_view,
 )
 from crb.builders.openai_client import ModelCallError
 from crb.builders.toolcheck import runner_tool_missing
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
-from crb.core.deps import TaskDeps
+from crb.core.deps import DepsBinding, TaskDeps
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.finish_gate import (
@@ -592,6 +605,7 @@ def sighted_test_command(
     target_tests: Sequence[str],
     *,
     authored: str | None = None,
+    deps: DepsBinding | None,
 ) -> str:
     """A human-readable command for the target tests (sighted briefs only).
 
@@ -603,10 +617,22 @@ def sighted_test_command(
     the grader gets the MESH sandbox, so the builder must too — otherwise it reaches
     for ``docker`` / ``curl localhost:8701`` itself and the sealed posture refuses it
     (mesh-client, 2 of 4 sighted attempts, 2026-09-15).
+
+    ``deps`` is the task's BUILDER binding when the builder runs in a sealed container
+    session (``None`` otherwise, and the command is what it always was). The command is
+    rendered under it and the session's own view of it (:func:`builder_deps_view`) laid
+    over, so the prefix the builder copies points its toolchain at the set the container
+    mounted: unbound, the Go runner's ``GOMODCACHE=/tmp/gomod`` overrode ``/deps/gomod``
+    inside the container and no module resolved (F87-1). A binding that is not the
+    builder's, or a prefix that would still differ from that view
+    (:func:`session_env_overrides`), is :class:`SandboxUnavailable`: the run stops, and
+    nothing is recorded against the builder.
     """
+    view = builder_deps_view(deps)[1] if deps is not None else {}
     try:
         timeout = int(runner.opts.get("timeout", runner.default_timeout))
-        cmd = runner.command(root, tuple(target_tests), executor=executor, timeout=timeout)
+        with runner.deps_bound(deps) if deps is not None else contextlib.nullcontext():
+            cmd = runner.command(root, tuple(target_tests), executor=executor, timeout=timeout)
         env = dict(cmd.env)
         if runner.has_services():
             runner.ensure_services(executor, root, authored=authored)
@@ -616,9 +642,40 @@ def sighted_test_command(
     # The runner's environment (PYTHONPATH, GOFLAGS, NODE_PATH …) is part of the command:
     # without it a builder sees ImportErrors and reaches for `pip install`, which the
     # no-network rule then refuses — measured on pallets/click (5/5 attempts errored).
+    # The session's dependency env is last: inside the container it is the one that holds.
+    env.update(view)
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(env.items()))
     argv = " ".join(shlex.quote(a) for a in cmd.argv)
-    return f"{env_prefix} {argv}".strip()
+    rendered = f"{env_prefix} {argv}".strip()
+    clash = session_env_overrides(rendered, view)
+    if clash:
+        raise SandboxUnavailable(
+            "the brief's test command would override the sealed session's dependency env: "
+            + ", ".join(clash)
+        )
+    return rendered
+
+
+def session_env_overrides(command: str, view: Mapping[str, str]) -> list[str]:
+    """``KEY=value`` assignments leading ``command`` that differ from the sealed session's
+    dependency env ``view`` (:func:`builder_deps_view`) — each one, run as written inside
+    the container, points the toolchain away from the mounted set. ``[]`` when none does
+    (or ``view`` is empty: no sealed session); a command that cannot be split is read as
+    overriding every key of ``view``."""
+    if not view:
+        return []
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return sorted(view)
+    out: list[str] = []
+    for word in words:
+        key, eq, value = word.partition("=")
+        if not eq or not key.isidentifier():
+            break  # the first word that is not an assignment is the command itself
+        if key in view and value != view[key]:
+            out.append(f"{key}={value} (the session sets {view[key]})")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -673,12 +730,16 @@ class Preflight:
 @dataclass(frozen=True)
 class _Gate:
     """The finish gate for one attempt, set up before the build: the plan and declared
-    commands it re-runs, the checklist the brief carries, the commands' parent verdicts."""
+    commands it re-runs, the checklist the brief carries, the commands' parent verdicts and
+    the binding they ran under."""
 
     plan: LintPlan | None
     commands: tuple[CheckCommand, ...]
     lines: tuple[str, ...]
     baseline: Mapping[str, bool | None]
+    #: the binding the commands run under, baseline and re-run alike — the builder's set
+    #: when its session mounts one (``None``: unbound, as on the host)
+    deps: DepsBinding | None
 
 
 def _repair_budget(rung_budget: Budget) -> Budget:
@@ -986,8 +1047,12 @@ def build_fn_for(
             return context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
         return arm_of(mode)
 
-    #: the finish gate's parent verdicts per (task, mode, commands) — see ``baseline_for``
-    baselines: dict[tuple[str, str, tuple[CheckCommand, ...]], dict[str, bool | None]] = {}
+    #: the finish gate's parent verdicts per (task, mode, commands, binding) — see
+    #: ``baseline_for``; the binding is its (scheme, key), ``None`` when unbound
+    baselines: dict[
+        tuple[str, str, tuple[CheckCommand, ...], tuple[str, str] | None],
+        dict[str, bool | None],
+    ] = {}
     overrides = dict(builder_overrides or {})
     builders: dict[int, Builder] = {}
     tdir = Path(transcript_dir) if transcript_dir else None
@@ -1162,18 +1227,26 @@ def build_fn_for(
             return _failed_attempt(
                 rung_label, mode, f"builder unavailable: {type(exc).__name__}: {exc}"
             )
+        # the set the sealed session mounts: the commands the brief shows and the finish
+        # gate's checks run under it, as the builder's own calls inside the session do
+        session_deps = session_set(task) if sealed else None
         test_command = (
             sighted_test_command(
-                runner, executor, ws.root, task.target_tests, authored=task.authored
+                runner,
+                executor,
+                ws.root,
+                task.target_tests,
+                authored=task.authored,
+                deps=session_deps,
             )
             if mode == MODE_SIGHTED
             else ""
         )
         # the harness command without a scope discloses the environment, never the oracle
         harness_command = sighted_test_command(
-            runner, executor, ws.root, (), authored=task.authored
+            runner, executor, ws.root, (), authored=task.authored, deps=session_deps
         )
-        gate = _gate_setup(ws, task, mode, test_command or harness_command)
+        gate = _gate_setup(ws, task, mode, test_command or harness_command, session_deps)
         if isinstance(gate, str):
             return _failed_attempt(rung_label, mode, gate)
         texts, _ids, dropped, id_of = context_lines(ws, task)
@@ -1214,7 +1287,7 @@ def build_fn_for(
                 test_files=(s1_path,),
                 target_tests=s1_scope,
                 test_command=sighted_test_command(
-                    runner, executor, ws.root, s1_scope, authored=task.authored
+                    runner, executor, ws.root, s1_scope, authored=task.authored, deps=session_deps
                 ),
                 harness_command=harness_command,
                 finish_checks=gate.lines if gate is not None else (),
@@ -1310,12 +1383,21 @@ def build_fn_for(
         )
         return discard(ws, task, attempt)
 
+    def session_set(task: TaskSpec) -> DepsBinding | None:
+        """The builder set a sealed session mounts for ``task`` (``builder_run_args`` mounts
+        one only when it is sealed), else ``None``: the commands run unbound, as before."""
+        task_deps = deps_for(task) if deps_for is not None else None
+        if task_deps is None or not task_deps.builder.sealed:
+            return None
+        return task_deps.builder
+
     def _gate_setup(
-        ws: Workspace, task: TaskSpec, mode: str, test_command: str
+        ws: Workspace, task: TaskSpec, mode: str, test_command: str, deps: DepsBinding | None
     ) -> _Gate | str | None:
         """The finish gate's pre-build half: the checklist the brief carries and the
-        declared commands' verdicts on the untouched worktree. ``None`` — the gate is off;
-        a ``str`` — the checklist would name the oracle (refused before any spend)."""
+        declared commands' verdicts on the untouched worktree, under ``deps`` (the sealed
+        session's set, or ``None``). ``None`` — the gate is off; a ``str`` — the checklist
+        would name the oracle (refused before any spend)."""
         if checks is None or not checks.finish_gate:
             return None
         try:
@@ -1332,19 +1414,25 @@ def build_fn_for(
                 assert_no_oracle(lines, (*task.test_files, *task.target_tests))
             except OracleLeak as exc:
                 return f"finish gate refused: {exc}"
-        return _Gate(plan, commands, lines, baseline_for(ws, task, mode, commands))
+        return _Gate(plan, commands, lines, baseline_for(ws, task, mode, commands, deps), deps)
 
     def baseline_for(
-        ws: Workspace, task: TaskSpec, mode: str, commands: tuple[CheckCommand, ...]
+        ws: Workspace,
+        task: TaskSpec,
+        mode: str,
+        commands: tuple[CheckCommand, ...],
+        deps: DepsBinding | None,
     ) -> dict[str, bool | None]:
-        """The commands' verdicts at the parent, measured once per task, mode and command
-        list: every rung and retry starts from the same untouched worktree, so re-running
-        up to 8 commands before each build only spent unbudgeted time."""
+        """The commands' verdicts at the parent, measured once per task, mode, command
+        list and binding: every rung and retry starts from the same untouched worktree, so
+        re-running up to 8 commands before each build only spent unbudgeted time. A rung
+        that runs sealed and one that does not are measured apart (unbound, ``go vet``
+        resolves no module with the network off: F87-1)."""
         if not commands:
             return {}
-        key = (task.task_id, mode, commands)
+        key = (task.task_id, mode, commands, (deps.scheme, deps.key) if deps else None)
         if key not in baselines:
-            baselines[key] = command_baseline(commands, executor, ws.root)
+            baselines[key] = command_baseline(commands, executor, ws.root, deps=deps)
         return dict(baselines[key])
 
     def run_checks(  # noqa: PLR0917 — one step of the build, many collaborators
@@ -1442,6 +1530,7 @@ def build_fn_for(
                 ws.root,
                 _changed_source_files(ws, config),
                 baseline=gate.baseline,
+                deps=gate.deps,
             )
 
         run = check()
@@ -1685,6 +1774,7 @@ __all__ = [
     "rung_from_object",
     "rung_index",
     "rungs_from_entries",
+    "session_env_overrides",
     "sighted_test_command",
     "unconfirmed_kill_error",
 ]
