@@ -15,15 +15,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a
   product-held ceiling** (P-787 to P-791, P-796 to P-798, G-957, DL-372 to DL-383, DL-390,
   DL-391; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
-  `hypothesis`, `smallest_effect`, campaign; `thin_cell` counts distinct tasks. Registration
-  and admission need docker sandbox, builder in-posture (409 `reading_posture_mismatch`).
-  `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd`, admitted within cap plus
-  headroom (409 `campaign_ceiling`); only campaign-admitted runs count
-  (409 `campaign_required`); `S1` author calls count; an overrun stops it. CI builds and runs
-  the Go builder image; operator decisions recorded. Belt 2 needs gold's target passes, rejects
-  pytest-machinery patches, relocates ids. In-build model calls are `nested_model_call`
-  misses; the claude tripwire catches argument-position, `env -S`-wrapped calls. Claude Code
-  costs messages once.
+  `hypothesis`, `smallest_effect`, campaign; `thin_cell` counts distinct tasks. Registration,
+  admission need docker sandbox, builder in-posture (409 `reading_posture_mismatch`).
+  `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd` within cap plus headroom
+  (409 `campaign_ceiling`); only campaign-admitted runs count (409 `campaign_required`); `S1`
+  author calls count; overruns stop it. CI builds/runs the Go builder image; operator
+  decisions recorded. Belt 2 needs gold's target passes, ids relocated per component; belt 1b
+  disqualifies pytest-machinery patches. In-build model calls are `nested_model_call` misses,
+  caught at any argument or wrapper (`env -`, `--prefix`). Claude Code costs messages once.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen

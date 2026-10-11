@@ -233,7 +233,8 @@ the row's kind is `protocol`, so the commit is read as missed and never re-run (
 Round-1 red-teaming widened the guard: it now catches the CLI at any argument position (behind
 `timeout`, inside an `os.system`/`subprocess.run` string, or written to a script and run) and
 unwraps `env -S` and other command wrappers, a written script caught by the tripwire reading the
-write (R1-F5-1, HON-R1-F5-1, R1-NEW-1).
+write (R1-F5-1, HON-R1-F5-1, R1-NEW-1). Round-2 red-teaming made it parse the wrappers' options
+as the tools do (`env -`, `unshare`'s value options, `--prefix` abbreviations; R2-REG-1, R2-HON-1).
 **Known gap:** the tripwire reads text. A call that is encoded or reached indirectly passes it,
 and its spend would go unmetered: the tally holds the builder's reported cost only. Closing it
 needs a proxy on the container's one allowed host that understands the API.
@@ -269,6 +270,11 @@ campaign, as that answer asks.
 
 **What it reviews.** Every clean row of the blind arms — `A0`, `A0+L` and `S1@<author>` — that a
 reading counts. `S3` is sighted and is not reviewed.
+
+**Known gap: a forged Go pass.** The round-2 red team found that a non-test Go source can make
+`go test -json` report the target tests passed when they never ran, and belt 2 grades that patch
+clean (F4-GO-TEST2JSON-SPOOF, high; P-796). It reaches the cobra cells and is not closed in this
+change. Until it is, a clean cobra row rests on this review as well as on the belts.
 
 **How a verdict is filed.** `POST /api/v1/reviews`, as an operator, with the row's
 `grade_row_hash`, a statement, the findings, `mergeable`, and `patch_sha256` from
