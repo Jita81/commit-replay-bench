@@ -29,7 +29,10 @@ What it does: Appends hash-chained rows under a per-table write lock, re-asserti
               imported inside the hash (``import_stamp``); exports rows that verify
               standalone. Refuses a review whose row
               is unknown, whose pack is not the row's, or which has nothing to anchor to.
-How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` → insert → commit;
+How:          ``append`` = lock → the caller's ``guard`` → last ``row_hash`` →
+              ``GradeRow.chained`` → insert → commit; the lock order is the grades lock
+              (7331) first, then the guard's ``runs`` row lock (``FOR UPDATE``), and nothing
+              may take 7331 or the events lock (7332) while it holds a ``runs`` row lock;
               ``verify`` re-walks the chain with the core's ``verify_chain``;
               ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
               ``check_review_anchor``, then chains and inserts the same way;
@@ -45,9 +48,10 @@ Works with:   src/crb/core/ledger.py (``GradeRow``, ``verify_chain``, ``GENESIS_
               rule), src/crb/store/models.py (the ``Grade`` / ``Review`` / ``EvidencePackRow``
               columns), src/crb/store/db.py (the triggers that make append-only true at the
               database), src/crb/server/worker.py (the writer), src/crb/server/routes/ledger.py
-              (verify / export over HTTP)
+              (verify / export over HTTP), src/crb/store/jobs.py (``claim_guard``, the guard a
+              reserved attempt's append runs under the lock)
 Tested by:    tests/test_store_ledger.py, tests/test_store_reviews.py, tests/test_store_db.py,
-              tests/test_store_migrate.py
+              tests/test_store_migrate.py, tests/test_p792_reserved_store.py
 Touch when:   never for a new repository; when ``GradeRow`` or ``ReviewRecord`` gains a field
               (the column tuples are derived from the dataclasses, so a new field needs a
               migration and a ``labels``-style exclusion if it is not a column); changing the
@@ -60,7 +64,7 @@ Claims:       A verified chain proves rows were not edited or reordered since th
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -130,6 +134,12 @@ def rows_of_runs(session: Session, run_ids: Iterable[str]) -> list[GradeRow]:
     return [_from_model(m) for m in session.execute(q).scalars()]
 
 
+class AttemptSettled(RuntimeError):
+    """The attempt a row belongs to is settled: its run was reclaimed, finished, or claimed
+    by another worker, so the reading may already have read the commit as a miss (P-792 C1).
+    Raised by a ``DbLedger.append`` guard under the grades lock; the row is not written."""
+
+
 class DbLedger:
     """The ``grades`` table as a hash-chained ledger of :class:`GradeRow`, plus the
     content-addressed ``evidence`` packs the rows point at."""
@@ -155,15 +165,22 @@ class DbLedger:
         ).scalar_one_or_none()
         return last or GENESIS_HASH
 
-    def append(self, row: GradeRow) -> GradeRow:
+    def append(self, row: GradeRow, *, guard: Callable[[Session], None] | None = None) -> GradeRow:
         """Chain ``row`` onto the head and insert it; returns the chained copy.
 
         The invariant check runs BEFORE the lock is taken so a false-Q1 row costs nothing
         but the exception; the database constraint and triggers are the second line.
+
+        ``guard`` runs in the append's transaction, under the grades lock and before the head
+        is read; it raises (:class:`AttemptSettled` for a settled attempt) to refuse the row,
+        which is then not written. :func:`crb.store.jobs.claim_guard` is the guard of a
+        reserved attempt; it locks the run's row, after the grades lock — the one order.
         """
         row.assert_invariants()
         with self._factory() as s:
             self._lock(s)
+            if guard is not None:
+                guard(s)
             chained = row.chained(self._last_hash(s))
             s.add(_to_model(chained))
             s.commit()
