@@ -55,6 +55,7 @@ from crb.core.reading import (
     OUTCOME_STANDARD,
     POOL_RULE_CALIBRATION,
     REFUSAL_BUDGET_SPENT,
+    REFUSAL_EXISTS,
     REFUSAL_NOT_A_CEILING,
     RULE_LOOK_V1_LATE,
     STATE_DELIVER,
@@ -196,11 +197,25 @@ def test_a_forward_reading_registers_only_on_a_ceiling_and_reads_s2_on_the_facto
 
 def test_a_forward_reading_spends_from_the_ceilings_one_budget() -> None:
     """ADR-0026 item 5: one budget per cell, across every phase — a forward reading spends
-    from the ceiling's cell, never a fresh one; a second look.v1 would overspend 5%."""
+    from the ceiling's cell, never a fresh one; a second look.v1 would overspend 5%. The same
+    forward reading registered again is a retry, refused ``reading_exists`` before the budget
+    is read (P-793)."""
     reading, _rows, ceiling = _ceiling()
     fwd = _forward(ceiling)
     assert fwd.budget_key == reading.budget_key
     assert budget_spent([reading, fwd], reading.budget_key) == pytest.approx(2 * fwd.spend)
+    with pytest.raises(ReadingRefused) as exc:
+        register_forward(  # the same forward reading again: a retry
+            ceiling=ceiling,
+            builder=BUILDER,
+            model=MODEL,
+            provider=PROVIDER,
+            actor="op-1",
+            existing=[reading, fwd],
+            now=FWD_AT,
+        )
+    assert exc.value.code == REFUSAL_EXISTS
+    assert exc.value.detail == {"reading_id": fwd.reading_id}
     with pytest.raises(ReadingRefused) as exc:
         register_forward(
             ceiling=ceiling,
@@ -210,6 +225,7 @@ def test_a_forward_reading_spends_from_the_ceilings_one_budget() -> None:
             actor="op-1",
             existing=[reading, fwd],
             now=FWD_AT,
+            hypothesis="a second question",
         )
     assert exc.value.code == REFUSAL_BUDGET_SPENT
     late = register_forward(

@@ -16,7 +16,9 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               first admitted attempt, a row of any other run invisible whatever its failure
               kind and a look outside the campaign buying no selection (none when its
               admissions were not read; a legacy reading as before, DL-382), and registration
-              refused ``pool_seen`` and ``budget_spent``.
+              refused ``reading_exists`` (a reading already registered, before the pool and
+              the budget are read — P-793), ``pool_seen`` and ``budget_spent``, the budget
+              counting each ``reading_id`` once.
 How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5)
@@ -51,9 +53,11 @@ from crb.core.reading import (
     STATE_UNDECIDED,
     ReadingRefused,
     arm_reading,
+    budget_spent,
     canonical_cell_key,
     cell_error_budget,
     evaluate,
+    first_per_id,
     look_state,
     p_deliver,
     seed_of,
@@ -250,6 +254,34 @@ def test_registering_beyond_the_cells_budget_is_refused_budget_spent() -> None:
     assert register_reading(
         commits(40, "e"), existing=[first], budget=0.025, rule=RULE_LOOK_V1_LATE
     )
+
+
+def test_register_refuses_an_id_already_registered_before_budget() -> None:
+    """P-793: a registration that is a reading already registered — the same id, or the same
+    content under another second or actor — is refused ``reading_exists`` naming the first,
+    before ``pool_seen`` and ``budget_spent`` are read: a retry is the reading once, never a
+    second spend. Another rule on the same pool is another reading and registers."""
+    first = register_reading(commits(40, "a"))
+    second = register_reading(commits(40, "b"), existing=[first])
+    later = "2026-09-27T10:00:07+00:00"
+    graded = rows_for([True] * 3, list(first.pool))
+    for retry in ({}, {"now": later}, {"rows": graded}, {"now": later, "rows": graded}):
+        with pytest.raises(ReadingRefused) as exc:
+            register_reading(commits(40, "a"), existing=[first, second], **retry)  # type: ignore[arg-type]
+        assert exc.value.code == "reading_exists", (retry, exc.value.code)
+        assert exc.value.detail == {"reading_id": first.reading_id}
+    late = register_reading(commits(40, "a"), existing=[first, second], rule=RULE_LOOK_V1_LATE)
+    assert late.reading_id != first.reading_id and late.pool_sha256 == first.pool_sha256
+
+
+def test_the_budget_counts_each_reading_id_once() -> None:
+    """P-793: readings read from a store that holds one twice spend it once, in the order
+    first registered."""
+    first = register_reading(commits(40, "a"))
+    second = register_reading(commits(40, "b"), existing=[first])
+    spent = budget_spent([first, first, second, first], first.budget_key)
+    assert spent == pytest.approx(first.spend + second.spend)
+    assert first_per_id([first, second, first, second]) == [first, second]
 
 
 def test_the_budget_may_be_tightened_by_the_operator_never_loosened() -> None:

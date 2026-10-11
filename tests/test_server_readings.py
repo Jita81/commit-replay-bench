@@ -17,9 +17,14 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               rows never counted (P-321), an S3-only standard read as a ceiling, a reading
               naming an unknown campaign refused ``campaign_unknown``, and a reading on the
               factory's cell — the forward reading included — naming any campaign refused
-              ``campaign_unsupported_reading`` by both routes (DL-382).
+              ``campaign_unsupported_reading`` by both routes (DL-382); a retried
+              registration and a retried forward reading — the same second or later, the same
+              operator or another, two racing on SQLite and PostgreSQL — refused 409
+              ``reading_exists`` naming the first, nothing written, and a store already
+              holding a reading twice listing and spending it once (P-793).
 How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
-              controls report; no model, no docker.
+              controls report; the race on each store backend (``tests.conftest_store``); no
+              model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0025-routing-v2.md, docs/adr/0026-the-context-standard.md
 Works with:   src/crb/server/routes/readings.py (``POST`` and ``GET /readings``, ``standard_for``),
@@ -55,6 +60,11 @@ from fixtures.proven import (
 )
 from fixtures.readings import HYPOTHESIS, SEALED, SEALED_SETTINGS, SMALLEST_EFFECT
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
+
+try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
+    from tests.conftest_store import Backend, backend, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import Backend, backend, pg_schema  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -136,8 +146,8 @@ def test_a_cell_with_no_reading_reads_no_proven_standard_and_names_the_next_meas
 
 def test_registering_is_an_operators_act_and_refuses_what_the_rules_forbid(env: Env) -> None:
     _proven(env)
-    # the same commits again: already graded under an arm of the hierarchy
-    again = register_via_api(env)
+    # the same commits again, a second question: already graded under an arm of the hierarchy
+    again = register_via_api(env, hypothesis=f"{HYPOTHESIS}, the same commits again")
     assert again.status_code == 409 and again.json()["error"]["code"] == "pool_seen"
     # a replayed arm on an unsealed posture class
     host = register_via_api(env, posture_class="local/inplace/host-env")
@@ -635,3 +645,198 @@ def test_a_reading_on_the_factorys_cell_naming_a_campaign_is_refused_422_with_no
     plain = register_via_api(env, hierarchy=("S2",), cell=fcell)
     assert plain.status_code == 201, plain.text
     assert _registered_events(env) == 1
+
+
+# --- a retried registration is the same reading once (P-793) ---------------------------------
+
+#: The first registration's second, and a retry's seven seconds later: ``registered_at`` is in
+#: the reading's hash at whole seconds, so only a retry in the same second re-hashes to the
+#: first reading's id — the refusal reads the reading's content, not its id alone.
+FIRST_AT = "2026-10-11T12:00:00+00:00"
+RETRY_AT = "2026-10-11T12:00:07+00:00"
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """The registration's clock (``crb.core.reading.utc_now_iso``), set by the test."""
+    now = {"at": FIRST_AT}
+    monkeypatch.setattr("crb.core.reading.utc_now_iso", lambda: now["at"])
+    return now
+
+
+RETRIES = [
+    pytest.param(FIRST_AT, "", id="same-second"),
+    pytest.param(RETRY_AT, "", id="seconds-later"),
+    pytest.param(FIRST_AT, "operator", id="another-operator"),
+]
+
+
+@pytest.mark.parametrize(("retry_at", "role"), RETRIES)
+def test_a_retried_registration_is_refused_reading_exists_and_writes_nothing(
+    env: Env, clock: dict[str, str], retry_at: str, role: str
+) -> None:
+    """The same body sent again — a retried request, by the same operator or another, in the
+    same second or later — is refused 409 ``reading_exists`` naming the reading already
+    registered, and writes nothing: ``GET /readings`` lists the reading once and the cell's
+    budget reads one reading's spend. Another question on the same cell is not a retry."""
+    add_tasks(env.factory)
+    first = register_via_api(env)
+    assert first.status_code == 201, first.text
+    rid = first.json()["reading_id"]
+    clock["at"] = retry_at
+    if role:
+        logout(env.client)
+        login(env.client, role)
+    retry = register_via_api(env)
+    assert retry.status_code == 409, retry.text
+    err = envelope(retry)
+    assert err["code"] == "reading_exists", err
+    assert err["detail"] == {"reading_id": rid}
+    assert _registered_events(env) == 1
+    served = env.get(f"/readings?repo={ALPHA}").json()
+    assert [o["reading_id"] for o in served["readings"]] == [rid]
+    (cell,) = served["budgets"]
+    assert cell["readings"] == 1
+    assert cell["spent"] == pytest.approx(first.json()["spend"], abs=1e-6)
+    other = register_via_api(env, hypothesis=f"{HYPOTHESIS}, a second question")
+    assert other.status_code == 201, other.text
+    assert _registered_events(env) == 2
+
+
+@pytest.mark.parametrize("retry_at", ["2026-10-11T12:01:00+00:00", "2026-10-11T12:01:07+00:00"])
+def test_a_retried_forward_registration_is_refused_reading_exists(
+    env: Env, clock: dict[str, str], retry_at: str
+) -> None:
+    """``POST /readings/forward`` sent twice with the same body is refused 409
+    ``reading_exists`` naming the forward reading, before the ceiling's budget is read: the
+    retry is the same reading, never a second one that would overspend the cell."""
+    from fixtures.server_seed import BUILDER, MODEL, PROVIDER
+
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    first = r.json()["pool"][:20]
+    add_rows(env.factory, first, arm="S3")
+    add_rows(env.factory, first[:3], arm=S1, clean=False)
+    add_rows(env.factory, first[3:], arm=S1)
+    add_oracle_and_controls(env.factory, first)
+    body = {
+        "repo": ALPHA,
+        "promotes": r.json()["reading_id"],
+        "builder": BUILDER,
+        "model": MODEL,
+        "provider": PROVIDER,
+        "hypothesis": HYPOTHESIS,
+        "smallest_effect": SMALLEST_EFFECT,
+    }
+    clock["at"] = "2026-10-11T12:01:00+00:00"
+    fwd = env.post("/readings/forward", json=body)
+    assert fwd.status_code == 201, fwd.text
+    clock["at"] = retry_at
+    retry = env.post("/readings/forward", json=body)
+    assert retry.status_code == 409, retry.text
+    err = envelope(retry)
+    assert err["code"] == "reading_exists", err
+    assert err["detail"] == {"reading_id": fwd.json()["reading_id"]}
+    assert _registered_events(env) == 2
+    served = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    assert [o["reading_id"] for o in served] == [r.json()["reading_id"], fwd.json()["reading_id"]]
+
+
+def test_a_store_holding_a_duplicate_registration_counts_it_once(env: Env) -> None:
+    """A store written before P-793 may hold one reading's event twice (a retried request
+    answered 201): every reader keeps the first per ``reading_id``, so ``GET /readings`` lists
+    it once, the cell's budget reads one reading's spend, and a second question still fits
+    beside it."""
+    from crb.core.reading import READING_EVENT_ACTION
+    from crb.store.events import append_event
+
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    payload = r.json()
+    for _ in range(2):
+        append_event(
+            env.factory,
+            trace_id=f"readings:{ALPHA}",
+            stage="system",
+            action=READING_EVENT_ACTION,
+            repo=ALPHA,
+            payload=payload,
+        )
+    assert _registered_events(env) == 3
+    served = env.get(f"/readings?repo={ALPHA}").json()
+    assert [o["reading_id"] for o in served["readings"]] == [payload["reading_id"]]
+    (cell,) = served["budgets"]
+    assert cell["readings"] == 1
+    assert f"{cell['spent']:.2%}" == "2.10%"
+    assert cell["spent"] == pytest.approx(payload["spend"], abs=1e-6)
+    other = register_via_api(env, hypothesis=f"{HYPOTHESIS}, a second question")
+    assert other.status_code == 201, other.text
+
+
+def test_two_racing_retries_register_one_reading_on_each_store(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refusal reads the readings already registered under the events store's write
+    lock — SQLite's ``BEGIN IMMEDIATE`` and PostgreSQL's advisory lock alike — so two copies
+    of one registration sent at once write one reading: one answers 201, the other 409
+    ``reading_exists`` naming it."""
+    import threading
+
+    from fastapi.testclient import TestClient
+
+    from crb.server.app import create_app
+    from crb.server.deps import ApiError, Principal
+    from crb.server.routes.readings import ReadingIn, register_reading
+    from crb.store.db import init_db
+    from fixtures.server_seed import add_users, make_settings, seed
+
+    monkeypatch.setattr("crb.core.reading.utc_now_iso", lambda: FIRST_AT)
+    init_db(backend.engine)
+    seed(backend.factory)
+    add_users(backend.factory)
+    add_tasks(backend.factory)
+    settings = make_settings(tmp_path, **SEALED_SETTINGS)
+    body = ReadingIn.model_validate(
+        {
+            "repo": ALPHA,
+            "cell": CELL,
+            "hierarchy": ["S3", S1],
+            "posture_class": SEALED,
+            "author_model": AUTHOR,
+            "hypothesis": HYPOTHESIS,
+            "smallest_effect": SMALLEST_EFFECT,
+        }
+    )
+    barrier = threading.Barrier(2)
+    outcomes: list[tuple[str, str]] = []
+    lock = threading.Lock()
+
+    def send(actor: str) -> None:
+        who = Principal(id=actor, display_name=actor, email="", role="operator", issuer="local")
+        barrier.wait()
+        with backend.factory() as db:
+            try:
+                got = (
+                    "201",
+                    str(register_reading(body, who, db, backend.factory, settings)["reading_id"]),
+                )
+            except ApiError as exc:
+                got = (exc.code, str(exc.detail.get("reading_id", "")))
+        with lock:
+            outcomes.append(got)
+
+    threads = [threading.Thread(target=send, args=(a,)) for a in ("op-a", "op-b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert sorted(code for code, _ in outcomes) == ["201", "reading_exists"], outcomes
+    assert len({rid for _, rid in outcomes}) == 1, outcomes
+    with TestClient(create_app(settings, backend.factory)) as client:
+        login(client, "operator")
+        served = client.get(f"/api/v1/readings?repo={ALPHA}").json()
+    assert [o["reading_id"] for o in served["readings"]] == [outcomes[0][1]]
+    (cell,) = served["budgets"]
+    assert cell["readings"] == 1
