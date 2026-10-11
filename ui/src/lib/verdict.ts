@@ -411,6 +411,7 @@ export const ACTION_HELP: Record<string, string> = {
   'user.invite_accepted': 'The invited person used their one-time link and chose their own password: the account is switched on.',
   'user.invite_revoked': 'An admin withdrew an unused invitation link, with a reason; the link no longer works.',
   'user.login': 'The account signed in, with a local password or through the organisation’s identity provider.',
+  'auth.dev_autologin': 'A development stack signed a browser on its own machine in as this account without a password (automatic sign-in, never in production).',
   'user.login_failed': 'A sign-in was refused: a wrong password, or the account is turned off. Nothing that was typed is recorded.',
   'library.proposed': 'An entry was proposed for the context library — by a person, who is its sponsor, or by a miner, and then it waits for a person to sponsor it.',
   'library.mined': 'The miners read the repository’s files at one commit and proposed library entries from them; none is signed.',
