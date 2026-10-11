@@ -30,21 +30,23 @@ abstract cells, never code.
 
 > Status: **2.0.0a1 on `main`, 2.0.0b1 in preparation** (apparatus **2.3**, belt set v5) — a public, Apache-2.0
 > repository since 2026-09-16 with **CI green on `main`** — every job in
-> [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request, and
-> branch protection requires the checks on its required list before anything merges: 16
-> required checks (the Python suite once per Python version and the tier-1 walkthrough, each
-> through an aggregator over its parallel parts, `dod`, `claims`, `ui-unit`, `ui-smoke`,
-> `sandbox-images` and `sbom` among them), with a branch required to be up to date; the list
-> is a repository setting only an administrator can change
-> ([docs/DEPLOYMENT.md §3.4](docs/DEPLOYMENT.md) names the call)
-> **[measured 2026-09-27 — the required-checks list read from the repository setting
-> (`gh api …/branches/main/protection`) and compared with the workflow's check names by
-> `scripts/check_branch_protection.py`, n = 16 required checks in the reading of 27 September,
-> which found the same checks as the reading of 26 September; rows: data/branch-protection-2026-09-27/;
+> [`.github/workflows/ci.yml`](.github/workflows/ci.yml) and
+> [`.github/workflows/commit-subjects.yml`](.github/workflows/commit-subjects.yml) runs on
+> every pull request, and branch protection requires the checks on its required list before
+> anything merges: 18 required checks (the Python suite once per Python version, the tier-1
+> walkthrough and the fresh-clone check, each through an aggregator over its parallel parts,
+> `dod`, `claims`, `ui-unit`, `ui-smoke`, `sandbox-images`, `sbom` and `commit-subjects` among
+> them), with a branch required to be up to date; the list is a repository setting only an
+> administrator can change ([docs/DEPLOYMENT.md §3.4](docs/DEPLOYMENT.md) names the call)
+> **[measured 2026-10-07 — the required-checks list read from the repository setting
+> (`gh api …/branches/main/protection`) and compared with the check names of every
+> pull-request workflow by `scripts/check_branch_protection.py`, n = 18 required checks in the
+> reading of 7 October, which found the checks of the reading of 27 September plus
+> `fresh-clone` and `commit-subjects`; rows: data/branch-protection-2026-10-07/;
 > apparatus 2.3 — a repository setting, not a graded number, so no interval]**. One
-> workflow outside `ci.yml` is red by design: the daily `branch-protection` check fails until an
-> administrator adds the `BRANCH_PROTECTION_TOKEN` secret it reads the setting with (G-930;
-> [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
+> workflow outside `ci.yml` has yet to pass on `main`: the daily `branch-protection` check reads
+> the setting with the `BRANCH_PROTECTION_TOKEN` secret an administrator added on 2026-10-09,
+> and so far it is green only on a pull request's branch (G-930; [DEPLOYMENT §3.4](docs/DEPLOYMENT.md)) — and every change since
 > 2026-09-15 reviewed by CodeRabbit (ADR-0013). Every phase of the product plan has shipped (P0–P7: engine, oracle,
 > builders, store, server, UI, factory, deployment) plus the MCP server (P8) so Claude Code
 > can drive a deployment. `v2.0.0a1` is tagged and its image is on GHCR; `v2.0.0b1` will be
