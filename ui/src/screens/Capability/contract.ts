@@ -286,7 +286,7 @@ export const REASON_DISPLAY: Record<ReasonCode, string> = {
   oracle_weak: 'oracle too weak to license auto-delivery',
   controls_escapes: 'a measurement control escaped the oracle',
   insufficient: 'the reading read insufficient — never read again',
-  undecided: 'the pool ended before a look decided — mine further back',
+  undecided: 'the pool cannot reach its next look, so it never delivers — mine further back',
   ceiling: "the commit's own tests delivered — a ceiling, never a licence",
   leaner_standard: "delivered, but the cell's standard is a leaner arm",
   controls_unmeasured: 'negative controls never run at this apparatus',
