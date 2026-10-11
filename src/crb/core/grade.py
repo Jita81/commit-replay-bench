@@ -133,7 +133,7 @@ from crb.core.posture import Posture, PostureMismatch
 from crb.core.redact import redact_and_cap
 from crb.core.runners.base import BaseRunner, TestRun
 from crb.core.spec import RepoConfig, TaskSpec
-from crb.core.test_infra import infra_sections_changed, matching_rule
+from crb.core.test_infra import framework_tamper, infra_sections_changed, matching_rule
 from crb.core.workspace import DiffStats, Workspace
 
 if TYPE_CHECKING:  # the record type only; crb.core.qualify imports this module
@@ -474,7 +474,10 @@ def infra_tampered(
     ``exclude`` is the task's own test files (overlaid by the harness, held
     byte-for-byte by belt 1a). A section-aware file (``pyproject.toml``…) counts
     only when its oracle-relevant sections differ between the parent and the
-    worktree; an absent side is the empty document. Sorted, for stable evidence.
+    worktree; an absent side is the empty document. A non-test Python source that
+    is not in the table counts when it begins naming pytest's own machinery
+    (:func:`crb.core.test_infra.framework_tamper`), which forges the target passes.
+    Sorted, for stable evidence.
     """
     skip = set(exclude)
     language, runner = config.language.value, config.runner
@@ -484,6 +487,13 @@ def infra_tampered(
             continue
         rule = matching_rule(rel, language, runner=runner)
         if rule is None:
+            # A non-test source is not in the table, but a Python one that patches pytest's
+            # own machinery forges every target test's PASS (belt 1b never sees it; R1-F4-1).
+            if rel.lower().endswith(".py"):
+                before = ws.parent_text(rel) or ""
+                after = ws.read(rel) if ws.exists(rel) else ""
+                if framework_tamper(before, after, language):
+                    out.append(rel)
             continue
         if rule.partial:
             before = ws.parent_text(rel) or ""

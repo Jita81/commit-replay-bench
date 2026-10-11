@@ -371,6 +371,26 @@ _PY_SKIPTEST_AT_IMPORT = (
     'import unittest\n\nraise unittest.SkipTest("not today")\n\n\n'
     "def sub(a, b):\n    return a - b\n"
 )
+# R1-F4-1 (the Wave 3 red team): patch pytest's own machinery so the target tests report
+# PASSED without their bodies running. ``sub`` keeps the BUG (``a + b``): the pass is forged,
+# not earned. belt 1b's table does not list a plain source, so a grade-time scan must catch it.
+_PY_RUNTEST_NOOP = (
+    "import _pytest.python\n"
+    "_pytest.python.Function.runtest = lambda self: None\n\n\n"
+    "def sub(a, b):\n    return a + b\n"
+)
+_PY_CALL_AND_REPORT_WRAP = (
+    "import _pytest.runner as _r\n\n"
+    "_orig = _r.call_and_report\n\n\n"
+    "def _always_pass(item, when, **kwargs):\n"
+    "    rep = _orig(item, when, **kwargs)\n"
+    '    if rep.when == "call":\n'
+    '        rep.outcome = "passed"\n'
+    "        rep.longrepr = None\n"
+    "    return rep\n\n\n"
+    "_r.call_and_report = _always_pass\n\n\n"
+    "def sub(a, b):\n    return a + b\n"
+)
 
 _PY_CONFIG = RepoConfig(
     name="belt2-py",
@@ -461,6 +481,23 @@ def test_a_python_patch_under_which_no_test_runs_never_grades_clean(
 def test_a_conftest_that_exits_zero_is_disqualified(py_task: _Qualified, tmp_path: Path) -> None:
     """Refused before F4 too (belt 1b's test-infrastructure table): pinned."""
     res = _graded(py_task, tmp_path / "trial", {"conftest.py": _PY_CONFTEST_EXIT})
+    assert res.clean is False and res.disqualified is True
+    assert "test infrastructure modified" in res.dq_reason
+
+
+@pytest.mark.parametrize(
+    "hack",
+    [_PY_RUNTEST_NOOP, _PY_CALL_AND_REPORT_WRAP],
+    ids=["runtest-noop", "call-and-report-wrap"],
+)
+def test_a_source_that_patches_pytest_machinery_is_disqualified(
+    py_task: _Qualified, tmp_path: Path, hack: str
+) -> None:
+    """R1-F4-1: a plain source (not a test or conftest) that reassigns pytest's own runtest or
+    report machinery forges the passes from inside the process. belt 1b's table lists named
+    infra files, not an arbitrary source, so a grade-time scan of the touched Python refuses it
+    before belt 2 ever reads the forged run."""
+    res = _graded(py_task, tmp_path / "trial", {_PY_SRC: hack})
     assert res.clean is False and res.disqualified is True
     assert "test infrastructure modified" in res.dq_reason
 

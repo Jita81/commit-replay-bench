@@ -73,26 +73,36 @@ Known residuals (documented, not covered)
   ``go`` directive are honest edit targets and are not treated as oracle config.
 * Python module shadowing through ``runner_opts.pythonpath_suffix`` roots (a
   ``pytest.py`` under ``src/``) — only the repository root is covered.
+* In-process pytest-machinery tamper (:func:`framework_tamper`) is matched on the
+  literal names ``_pytest``, ``pluggy``, ``runtest``, ``call_and_report`` and the
+  ``pytest_runtest_*`` hooks: a source that assembles the attribute name from pieces
+  (``getattr(mod, "run" + "test")``), or reaches the run through ``gc`` / another
+  object graph, is not matched. Closing that needs the gold witness, which judges
+  the honest gold's own run, not the text.
 * Dependency trees (``node_modules``, ``vendor``, ``.venv``) are git-ignored and are
   the sandbox's responsibility (ADR-0005), not belt 1's.
 
 Navigation
 ----------
 What it is:   Belt 1b's table — which files, per language and runner, are part of the
-              oracle's execution environment (``INFRA_RULES``), and the section-aware
-              comparison for files that are only partly so.
+              oracle's execution environment (``INFRA_RULES``), the section-aware
+              comparison for files that are only partly so, and a text scan for a Python
+              source that patches pytest's own machinery (``framework_tamper``).
 What it does: Answers "is this path test infrastructure?" from a documented pattern table
               in which every rule carries its reason; for ``pyproject.toml``, ``setup.cfg``,
               ``tox.ini``, ``package.json``, ``go.mod``, ``pom.xml`` and ``Cargo.toml``
               decides whether an edit touched the oracle-relevant sections (pytest, jest,
               mocha, babel, surefire, dev-dependencies, the linters belt 5 reads) rather
-              than a version or a runtime dependency. Fails closed on anything it cannot
+              than a version or a runtime dependency; and flags a non-test Python source that
+              starts naming ``_pytest`` / ``pluggy`` / ``runtest`` / ``call_and_report`` /
+              a ``pytest_runtest_*`` hook (a forged PASS). Fails closed on anything it cannot
               parse, anything too large, and any XML with a DOCTYPE.
 How:          ``rules_for`` (language + optional runner narrowing) → ``matching_rule``
               (whole-file rules beat section-aware ones) → ``is_test_infra``;
               ``infra_sections_changed`` projects both sides of the file onto the relevant
               key paths (TOML / JSON), section bodies (INI), directives (go.mod) or
-              elements (pom.xml) and compares the projections.
+              elements (pom.xml) and compares the projections; ``framework_tamper`` matches a
+              fixed set of pytest-internal names and flags any the after text introduces.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0010-polyglot-negative-controls.md
@@ -770,11 +780,42 @@ def infra_sections_changed(
     return bool(before != after)
 
 
+#: Names that only a source patching pytest's own machinery introduces: the ``_pytest``
+#: package, ``pluggy``, ``Function.runtest``, ``runner.call_and_report`` and the
+#: ``pytest_runtest_*`` / ``pytest_pyfunc_call`` hook names. A source that reassigns any of
+#: these makes the target tests report PASSED without running (belt 1b does not see it,
+#: because the file is not in the pattern table and carries no runner config; R1-F4-1).
+_FRAMEWORK_TAMPER_RE = re.compile(
+    r"\b_pytest\b|\bpluggy\b|\bruntest\b|\bcall_and_report\b|"
+    r"\bpytest_runtest_\w+|\bpytest_pyfunc_call\b"
+)
+
+
+def framework_tamper(before_text: str, after_text: str, language: str) -> bool:
+    """Did a Python source start naming pytest's own machinery (``_pytest``, ``pluggy``,
+    ``runtest``, ``call_and_report``, a ``pytest_runtest_*`` hook) that its parent did not?
+
+    A non-test source that patches ``_pytest.python.Function.runtest`` to a no-op, or wraps
+    ``_pytest.runner.call_and_report``, makes every target test report PASSED without its body
+    running — so belt 2's ``target_passed`` check is satisfied by a forged pass. The file is
+    not in :data:`INFRA_RULES` (no runner config, not a conftest), so belt 1b never looks at
+    it; this scan does, at grade time, for Python only. It is anchored on the set of distinct
+    names GROWING (``after`` minus ``before``), so a repository whose own code already names
+    these — a pytest plugin under measurement — is not disqualified for keeping them (R1-F4-1).
+    """
+    if _language_value(language) != _PY:
+        return False
+    before = set(_FRAMEWORK_TAMPER_RE.findall(before_text))
+    after = set(_FRAMEWORK_TAMPER_RE.findall(after_text))
+    return bool(after - before)
+
+
 __all__ = [
     "ANY_LANGUAGE",
     "INFRA_RULES",
     "MAX_PARSE_BYTES",
     "InfraRule",
+    "framework_tamper",
     "infra_sections_changed",
     "is_test_infra",
     "matching_rule",

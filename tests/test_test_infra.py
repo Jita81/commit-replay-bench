@@ -758,3 +758,47 @@ class TestWholeFileAndNonInfra:
         assert not ti.infra_sections_changed(
             "go.mod", "", "replace a => b", "python"
         )  # wrong language
+
+
+class TestFrameworkTamper:
+    """``framework_tamper``: a plain Python source that reaches into pytest's own machinery to
+    forge the run. belt 1b's table lists named infra files; this scan covers any touched source.
+    """
+
+    @pytest.mark.parametrize(
+        "after",
+        [
+            "import _pytest.python\n_pytest.python.Function.runtest = lambda self: None\n",
+            "import _pytest.runner as r\nr.call_and_report = lambda *a, **k: None\n",
+            'import sys\nsys.modules["_pytest.python"].Function.runtest = None\n',
+            'm = __import__("importlib").import_module("_pytest.runner")\nm.runtestprotocol = None\n',
+            "import pluggy\npluggy._hooks = None\n",
+            "def pytest_runtest_makereport():\n    return None\n",
+            "def pytest_pyfunc_call(pyfuncitem):\n    return True\n",
+        ],
+        ids=[
+            "runtest-attr",
+            "call-and-report",
+            "sys-modules-spelling",
+            "importlib-spelling",
+            "pluggy",
+            "runtest-hook",
+            "pyfunc-call-hook",
+        ],
+    )
+    def test_reaching_into_pytest_machinery_is_tamper(self, after: str) -> None:
+        assert ti.framework_tamper("def sub(a, b):\n    return a + b\n", after, "python")
+
+    def test_a_name_already_present_in_the_parent_is_not_new_tamper(self) -> None:
+        before = "import _pytest.python\n_pytest.python.Function.runtest = _orig\n"
+        assert not ti.framework_tamper(before, before + "x = 1\n", "python")
+
+    def test_an_honest_source_edit_is_not_tamper(self) -> None:
+        assert not ti.framework_tamper(
+            "def sub(a, b):\n    return a + b\n", "def sub(a, b):\n    return a - b\n", "python"
+        )
+
+    def test_a_non_python_language_is_never_tamper(self) -> None:
+        after = "import _pytest.python\n_pytest.python.Function.runtest = None\n"
+        assert not ti.framework_tamper("", after, "go")
+        assert not ti.framework_tamper("", after, "javascript")
