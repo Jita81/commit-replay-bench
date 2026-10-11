@@ -1249,7 +1249,7 @@ def test_an_admin_act_and_the_same_persons_sign_in_at_once_never_deadlock(
                 deadline = time.monotonic() + 15
                 waiting = (
                     "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
-                    "AND objid = 7336 AND NOT granted"
+                    "AND classid = 0 AND objid = 7336 AND objsubid = 1 AND NOT granted"
                 )
                 with monitor.connect() as c:
                     while not c.execute(text(waiting)).first():
