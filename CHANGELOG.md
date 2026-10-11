@@ -22,6 +22,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `campaign_ceiling`; `S1` author calls count. CI builds and runs the Go builder image, which
   now builds. The operator's 2026-10-11 decisions are recorded.
 
+- **An admin act and the same person's sign-in no longer deadlock on PostgreSQL** (P-786;
+  [#86](https://github.com/Jita81/commit-replay-bench/pull/86)). Setting an account's
+  password, role or active flag, or signing its sessions out, wrote the account's row and then
+  waited for the audit trail's lock, while the person's sign-in holds that lock and then
+  writes the same row; on PostgreSQL the two at once deadlocked and one answered 500. The
+  events lock no longer flushes a pending write before it waits, on any dialect, so the row
+  is written under the lock; asking for the lock after a `users` row was written in the same
+  transaction is refused at once, on SQLite as well, so a new path cannot bring the order
+  back.
+
 - **A development stack signs a browser in on its own machine; production cannot**
   ([#58](https://github.com/Jita81/commit-replay-bench/pull/58)). `CRB_AUTH__DEV_AUTOLOGIN=<username>`
   (off by default, ADR-0027, DL-240) signs a browser on the same computer in as one local account.

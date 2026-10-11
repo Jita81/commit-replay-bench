@@ -24,8 +24,10 @@ What it does: Pins the database-URL precedence, that a SQLite engine creates the
               trace's ``seq`` until it commits (EI-1) and the events write lock holds a second
               writer until the first commits (P-196), and that the ``users`` lock is never
               taken after the ``events`` lock, so an organisation sign-in and an admin act at
-              once never deadlock (P-227), and that the decisions clock joins a concurrent
-              first stamp in both dialects (P-357).
+              once never deadlock (P-227), and that no ``users`` row is written before the
+              ``events`` lock, so an admin act and the same person's sign-in at once never
+              deadlock (P-786), and that the decisions clock joins a concurrent first stamp
+              in both dialects (P-357).
 How:          ``conftest_store.backend`` gives an EMPTY database per dialect; one valid ORM row
               per append-only table is inserted and then attacked.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -65,6 +67,7 @@ from crb.store.models import (
     Run,
     Signoff,
     TaskQualification,
+    User,
 )
 
 try:
@@ -1133,6 +1136,135 @@ def test_an_organisation_sign_in_and_an_admin_act_at_once_never_deadlock(
             ),
         )
     assert results == [302, 200], results
+
+
+def test_the_events_lock_is_never_taken_after_a_users_row_is_written(backend: Backend) -> None:
+    """P-786: a sign-in takes the ``events`` lock and then writes its own ``users`` row
+    (``last_login``), while an admin act wrote the row first and then asked for the
+    ``events`` lock; on PostgreSQL the two orders deadlock. The one order is the ``events``
+    lock before a ``users`` row, and asking for the lock after a flushed row is refused at
+    once, on either dialect. A write left pending (the order every route uses) is written
+    after the lock, and a new transaction starts with no row held."""
+    from crb.server.auth import set_password
+    from crb.server.routes.runs import append_system_event
+    from crb.store.events import LockOrderError, lock_event_writes
+    from fixtures.server_seed import add_users, user_id
+
+    store_db.init_db(backend.engine)
+    add_users(backend.factory)
+    uid = user_id("viewer1")
+    with backend.factory() as s:  # the row written, then the lock: refused
+        set_password(s.get(User, uid), "a-long-enough-password")  # type: ignore[arg-type]
+        s.flush()
+        with pytest.raises(LockOrderError, match="users row"):
+            lock_event_writes(s)
+        s.rollback()
+    with backend.factory() as s:  # the write pending, the lock, then the row
+        set_password(s.get(User, uid), "a-long-enough-password")  # type: ignore[arg-type]
+        append_system_event(s, trace_id="users:x", action="user.password_set", actor="t")
+        s.commit()
+    with backend.factory() as s:  # a new transaction starts with no row held
+        account = s.get(User, uid)
+        assert account is not None
+        account.last_login = "2026-10-10T00:00:00+00:00"
+        s.commit()
+        lock_event_writes(s)
+        s.commit()
+
+
+@pytest.mark.parametrize("act", ["password", "role", "active", "revoke"])
+def test_an_admin_act_and_the_same_persons_sign_in_at_once_never_deadlock(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, act: str
+) -> None:
+    """P-786, end to end: the person's sign-in held just after it took the ``events`` lock,
+    and an admin's act on that account started meanwhile. On PostgreSQL the act wrote the
+    account's row and then waited for the ``events`` lock, the sign-in's ``last_login``
+    then waited for the row, and the database broke the cycle with a 500 for one of them
+    (``DeadlockDetected``), for each of the four acts. Now the act waits with the row
+    unwritten (another connection can still lock it), and both complete."""
+    if backend.dialect != "postgresql":
+        pytest.skip("a row lock is PostgreSQL's: SQLite's write lock is the whole database")
+    import os
+    import threading
+    import time
+
+    from fastapi.testclient import TestClient
+
+    import crb.server.routes.auth as auth_routes
+    from crb.server.app import create_app
+    from fixtures.concurrency import at_once
+    from fixtures.server_seed import API_PREFIX, USER_PW, add_users, login, make_settings, user_id
+
+    for key in [k for k in os.environ if k.startswith("CRB_")]:
+        monkeypatch.delenv(key, raising=False)
+    store_db.init_db(backend.engine)
+    add_users(backend.factory)
+    app = create_app(make_settings(tmp_path), backend.factory)
+    victim = user_id("viewer1")
+    held, go = threading.Event(), threading.Event()
+    real_commit_audited = auth_routes.commit_audited
+
+    def sign_in_holds_the_events_lock(db: Any, write: Any, *, before: Any = None) -> None:
+        if getattr(write, "__name__", "") != "_signed_in":
+            return real_commit_audited(db, write, before=before)
+
+        def held_write() -> None:  # commit_audited has taken the events lock
+            held.set()
+            go.wait(timeout=30)
+            write()
+
+        return real_commit_audited(db, held_write, before=before)
+
+    paths = {
+        "password": ("put", f"/users/{victim}/password", {"password": "an-admin-chosen-password"}),
+        "role": ("put", f"/users/{victim}/role", {"role": "operator"}),
+        "active": ("put", f"/users/{victim}/active", {"active": False}),
+        "revoke": ("post", f"/users/{victim}/sessions/revoke", None),
+    }
+    verb, path, body = paths[act]
+    monitor = backend.new_engine()
+    row_free: list[bool] = []
+    try:
+        with TestClient(app, raise_server_exceptions=False) as admin:
+            login(admin, "admin")  # before the hold: only the person's sign-in is held
+            monkeypatch.setattr(auth_routes, "commit_audited", sign_in_holds_the_events_lock)
+
+            def sign_in() -> int:
+                c = TestClient(app, raise_server_exceptions=False)
+                creds = {"username": "viewer1", "password": USER_PW}
+                return c.post(f"{API_PREFIX}/auth/login", json=creds).status_code
+
+            def admin_acts() -> int:
+                assert held.wait(timeout=15), "the sign-in never reached its audited commit"
+                return getattr(admin, verb)(f"{API_PREFIX}{path}", json=body).status_code
+
+            def release_when_the_act_waits() -> None:
+                deadline = time.monotonic() + 15
+                waiting = (
+                    "SELECT 1 FROM pg_locks WHERE locktype = 'advisory' "
+                    "AND objid = 7332 AND NOT granted"
+                )
+                with monitor.connect() as c:
+                    while not c.execute(text(waiting)).first():
+                        assert time.monotonic() < deadline, "the act never waited on the lock"
+                        time.sleep(0.02)
+                        c.rollback()
+                    try:
+                        c.execute(
+                            text("SELECT id FROM users WHERE id = :u FOR UPDATE NOWAIT"),
+                            {"u": victim},
+                        )
+                        row_free.append(True)
+                    except DBAPIError:
+                        row_free.append(False)
+                    c.rollback()
+                go.set()
+
+            codes = at_once(sign_in, admin_acts, release_when_the_act_waits)
+    finally:
+        go.set()
+        monitor.dispose()
+    assert (codes[:2], row_free) == ([200, 200], [True]), (codes, row_free)
 
 
 # ---------------------------------------------------------------------------
