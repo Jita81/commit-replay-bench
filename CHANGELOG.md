@@ -23,6 +23,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   calls count; overrunning admitted headroom stops the campaign. CI builds and runs the Go
   builder image; the operator's 2026-10-11 decisions are recorded.
 
+- **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
+  [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off
+  the capability map's tier while the entry gate reads the cell's signed standard, so it could ask
+  nobody while the gate stopped a cell's tickets, or keep asking for a cell the gate already
+  licensed. One predicate, `cell_signed`, now decides "signed" for the gate, the factory routes,
+  the worker, the inbox, the map and the class page. The map serves it beside the tier as each
+  cell's `signed`, and null where the gate never reads it. G-103 and G-303 record what is left.
+
 - **The walkthrough waits for what it reads** (P-781, P-782;
   [#78](https://github.com/Jita81/commit-replay-bench/pull/78)). 11b-keyboard signed in by
   clicking, which left the pointer on the page: on PR #58's CI a hint it rested on opened between

@@ -295,6 +295,7 @@ These are not wave items; each unblocks the work named beside it.
 | the product | F43, G-604, F21, G-600 |
 | what Wave 6's Decisions stream left open: the browser's inbox fold, which no screen reads now | G-775 |
 | what the Wave 3 registration found: a campaign's money ceiling, which the product does not hold | G-957 |
+| what G-738 left open: the way forward of an unsigned stop on a cell that does not route `deliver`, and the map's tier shown without the entry gate's reading | G-103, G-303 |
 
 ## What each wave must do to its own artefacts
 
