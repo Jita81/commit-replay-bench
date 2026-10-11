@@ -57,7 +57,9 @@ How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one tr
               ``EventChainVerifier`` = the last clean walk's (id, head, count) re-checked, then
               a walk resumed from it; ``events_head`` = count + last ``row_hash``;
               ``append_event_checked`` = lock → decide the payload → insert, raising instead
-              of dropping (the registered readings of ADR-0026 item 2).
+              of dropping (the registered readings of ADR-0026 item 2), with the
+              ``task_id`` and ``step_id`` a caller names (a reservation's commit and arm,
+              P-792; ``''`` by default, so the row and its hash are unchanged).
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0029-the-audit-trail-is-hash-chained.md
@@ -705,12 +707,18 @@ def append_event_checked(
     build: Callable[[Session], dict[str, Any]],
     actor: str = "",
     repo: str = "",
+    task_id: str = "",
+    step_id: str = "",
 ) -> StepEvent:
     """Write one event whose payload is decided UNDER the write lock: ``build(session)``
     reads what it must (and may raise to refuse) and returns the payload; the event is
     inserted with the next ``seq`` in the same transaction. Unlike :func:`append_event`
     nothing is swallowed — a record that decides something (a registered reading, whose
-    budget two concurrent writers must not both spend) is written or the caller hears why."""
+    budget two concurrent writers must not both spend) is written or the caller hears why.
+
+    ``task_id`` and ``step_id`` are stored on the row as given (a reading's reservation is
+    keyed by its trace, arm and commit, P-792). Both default to the envelope's own ``''``, so
+    a caller that names neither writes, and chains, exactly the row it wrote before."""
     with factory() as s:
         lock_event_writes(s)
         payload = build(s)
@@ -728,8 +736,10 @@ def append_event_checked(
             stage=stage,
             action=action,
             status=StepStatus.OK,
+            step_id=step_id,
             actor=actor,
             repo=repo,
+            task_id=task_id,
             payload=dict(payload),
             seq=nxt,
         )
