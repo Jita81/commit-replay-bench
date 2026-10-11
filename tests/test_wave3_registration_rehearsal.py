@@ -43,7 +43,8 @@ Works with:   docs/reviews/2026-10-09-wave-3-registration.md (the record rehears
               src/crb/server/routes/readings.py (the registration and ``GET /readings``),
               src/crb/server/routes/runs.py (``submit_refusals``, ``admit_under_campaign``),
               src/crb/server/routes/learn.py (the remeasure plan and its queue),
-              tests/test_server_campaigns.py, tests/test_server_readings.py (the route suites)
+              tests/test_server_campaigns.py (the campaign route suite),
+              tests/test_server_readings.py (the readings route suite)
 Tested by:    this file
 Touch when:   never for a new repository; when the Wave 3 registration record changes a
               request, a body or a success condition of steps 4, 6, 7 or 9, or the product
