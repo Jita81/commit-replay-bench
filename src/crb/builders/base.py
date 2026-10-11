@@ -47,8 +47,11 @@ How:          Frozen dataclasses with ``__post_init__`` invariants → the guard
               normalisation + symlink resolution for ``TestFileGuard``; for the shell guard,
               the nested-model-call text scan over the whole command →
               heredoc stripping → substitution hoisting → newline splitting → ``shlex`` →
-              per-segment unwrap (wrappers, assignments, keywords) → per-executable rules
-              (git verbs, package managers, inline-code scan).
+              per-segment unwrap (wrappers, assignments, keywords; a wrapper that carries a
+              command string — ``env -S``, ``script``/``su``/``sg``/``flock`` ``-c`` — is
+              unwound to the command it runs, ``setsid``/``busybox``/``chroot``/``taskset`` to
+              their positional) → per-executable rules (git verbs, package managers,
+              inline-code scan).
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0012-builder-in-a-sealed-container.md
@@ -1053,7 +1056,30 @@ _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
         ),
         0,
     ),
+    # R1-NEW-1 (the Wave 3 red team): more leaders that run another command. ``setsid`` and
+    # ``busybox`` take a plain command; ``chroot DIR cmd`` and ``taskset CPU cmd`` skip one
+    # positional first (``taskset``'s ``-c`` is a FLAG here, not a value opt, so the cpu-list
+    # is that skipped positional — else ``taskset -c 0-3 git log`` would bypass).
+    "setsid": (frozenset(), 0),
+    "busybox": (frozenset(), 0),
+    "chroot": (_words("--userspec --groups"), 1),
+    "unshare": (_words("-S --setuid -G --setgid -R --root -w --wd"), 0),
+    "taskset": (frozenset(), 1),
 }
+#: Wrappers whose wrapped command is a STRING carried by ``-c``/``--command`` (or, for
+#: ``env``, by ``-S``/``--split-string``): dropping that value — as the old option-skip did —
+#: let the command behind it run unchecked (R1-NEW-1). ``_rewrap`` shlex-splits ``env``'s
+#: value and re-expresses the others as ``sh -c <cmd>`` so the recursive shell check sees it.
+_STRING_WRAPPERS: frozenset[str] = frozenset({"script", "su", "sg", "flock"})
+_ENV_VALUE_OPTS: frozenset[str] = _words("-u --unset -C --chdir -S --split-string")
+_ENV_SPLIT_OPTS: frozenset[str] = _words("-S --split-string")
+_SCRIPT_VALUE_OPTS: frozenset[str] = _words(
+    "-c --command -o --output-limit -t --timing -I --log-in -O --log-out -B --log-io "
+    "-T --log-timing -m --logging-format -E --echo"
+)
+_SU_VALUE_OPTS: frozenset[str] = _words("-c --command -s --shell -g --group -G --supp-group")
+_FLOCK_VALUE_OPTS: frozenset[str] = _words("-w --timeout -E --conflict-exit-code -c --command")
+_COMMAND_OPTS: frozenset[str] = _words("-c --command")
 _SHELLS: frozenset[str] = _words("sh bash zsh dash fish ksh")
 #: Environment variables that point git at ANOTHER repository / object store.
 _GIT_ENV_REDIRECT: frozenset[str] = _words(
@@ -1430,11 +1456,128 @@ def _split_lines(flat: str) -> str | None:
     return None if quote else "".join(out)
 
 
+class _UnparsableCommand(Exception):
+    """A wrapper's command string could not be tokenised (an unbalanced quote). Fail
+    closed: the caller refuses the segment rather than letting the wrapped command run
+    unseen (R1-NEW-1)."""
+
+
+def _getopts(
+    words: Sequence[str], value_opts: frozenset[str], *, permute: bool
+) -> tuple[list[tuple[str, str | None]], list[str]]:
+    """A small, never-raising option parser: return ``(options, positionals)``.
+
+    ``--`` ends the options (the rest are positionals). A ``--name=val`` carries an
+    attached value; a ``--name`` in ``value_opts`` takes the next word. A short cluster
+    (``-qc``) splits per character, and a character whose ``-x`` is in ``value_opts`` takes
+    the attached remainder or the next word. With ``permute=False`` the first positional
+    stops option parsing and every later word is a positional (so ``taskset -c 0-3 git log``
+    keeps ``git log`` as positionals after the cpu-list); with ``permute=True`` options and
+    positionals may interleave (``su bob -c 'git log'``)."""
+    opts: list[tuple[str, str | None]] = []
+    pos: list[str] = []
+    i, n = 0, len(words)
+    while i < n:
+        w = words[i]
+        if w == "--":
+            pos.extend(words[i + 1 :])
+            break
+        if w == "-" or not w.startswith("-"):
+            pos.append(w)
+            i += 1
+            if not permute:
+                pos.extend(words[i:])
+                break
+            continue
+        if w.startswith("--"):
+            name, eq, val = w.partition("=")
+            if eq:
+                opts.append((name, val))
+            elif name in value_opts and i + 1 < n:
+                opts.append((name, words[i + 1]))
+                i += 1
+            else:
+                opts.append((name, None))
+            i += 1
+            continue
+        j = 1
+        while j < len(w):
+            flag = "-" + w[j]
+            if flag in value_opts:
+                rest = w[j + 1 :]
+                if rest:
+                    opts.append((flag, rest))
+                elif i + 1 < n:
+                    opts.append((flag, words[i + 1]))
+                    i += 1
+                else:
+                    opts.append((flag, None))
+                break
+            opts.append((flag, None))
+            j += 1
+        i += 1
+    return opts, pos
+
+
+def _opt_value(opts: Sequence[tuple[str, str | None]], names: frozenset[str]) -> str | None:
+    """The last value given for any option in ``names`` (last wins), or ``None``."""
+    value: str | None = None
+    for name, val in opts:
+        if name in names and val is not None:
+            value = val
+    return value
+
+
+def _rewrap(name: str, args: Sequence[str]) -> list[str]:
+    """Re-express the command a string-carrying or command-skipping wrapper runs, so the
+    caller checks it instead of the wrapper (R1-NEW-1). ``args`` is what follows the wrapper
+    name. ``env`` shlex-splits its ``-S``/``--split-string`` value and prepends it; ``script``,
+    ``su``, ``sg`` and ``flock`` expose their ``-c``/``--command`` string as ``sh -c <cmd>``;
+    every other wrapper drops its options and the leading ``skip`` positionals. Raises
+    :class:`_UnparsableCommand` when ``env``'s split value has an unbalanced quote."""
+    if name == "env":
+        opts, pos = _getopts(args, _ENV_VALUE_OPTS, permute=False)
+        split = _opt_value(opts, _ENV_SPLIT_OPTS)
+        inline: list[str] = []
+        if split is not None:
+            try:
+                inline = shlex.split(split)
+            except ValueError as exc:
+                raise _UnparsableCommand from exc
+        return inline + pos
+    if name in ("script", "su"):
+        value_opts = _SCRIPT_VALUE_OPTS if name == "script" else _SU_VALUE_OPTS
+        opts, _pos = _getopts(args, value_opts, permute=True)
+        cmd = _opt_value(opts, _COMMAND_OPTS)
+        return ["sh", "-c", cmd] if cmd is not None else []
+    if name == "sg":
+        rest = list(args)
+        if rest and rest[0] == "-":  # a login shell marker
+            rest = rest[1:]
+        if rest:  # the group name
+            rest = rest[1:]
+        if rest and rest[0] in _COMMAND_OPTS:
+            rest = rest[1:]
+        cmd = " ".join(rest)
+        return ["sh", "-c", cmd] if cmd else []
+    if name == "flock":
+        opts, pos = _getopts(args, _FLOCK_VALUE_OPTS, permute=True)
+        cmd = _opt_value(opts, _COMMAND_OPTS)
+        if cmd is not None:
+            return ["sh", "-c", cmd]
+        return pos[1:]  # drop the lock file / fd, run the rest
+    value_opts, skip = _WRAPPERS[name]
+    _opts, pos = _getopts(args, value_opts, permute=False)
+    return pos[skip:]
+
+
 def _unwrap(argv: Sequence[str]) -> tuple[list[str] | None, dict[str, str]]:
     """Strip leading ``VAR=value`` assignments (returned), shell keywords, function
-    definitions and command WRAPPERS (``env``, ``sudo``, ``timeout 30``, ``xargs -n1``…)
+    definitions and command WRAPPERS (``env``, ``sudo``, ``timeout 30``, ``xargs -n1``,
+    ``setsid``, ``script -c``, ``su -c``, ``sg``, ``flock -c``, ``chroot``, ``taskset``…)
     so the executable that actually runs is ``args[0]``. ``None`` for a loop/case
-    header (``for f in …``), which runs nothing itself."""
+    header (``for f in …``), which runs nothing itself. Raises :class:`_UnparsableCommand`
+    when a wrapper's command string cannot be tokenised."""
     args = list(argv)
     assigns: dict[str, str] = {}
     while args:
@@ -1456,15 +1599,8 @@ def _unwrap(argv: Sequence[str]) -> tuple[list[str] | None, dict[str, str]]:
             args = args[1:]
             continue
         name = Path(head).name
-        if name in _WRAPPERS:
-            value_opts, skip = _WRAPPERS[name]
-            args = args[1:]
-            while args and args[0].startswith("-"):
-                if args[0] == "--":
-                    args = args[1:]
-                    break
-                args = args[2:] if args[0] in value_opts else args[1:]
-            args = args[skip:]
+        if name in _WRAPPERS or name in _STRING_WRAPPERS:
+            args = _rewrap(name, args[1:])
             continue
         break
     return args, assigns
@@ -2008,7 +2144,10 @@ class GitArchaeologyGuard:
         """Check one pipeline segment: unwrap → ``GIT_*`` redirects → shells / ``eval`` /
         ``alias`` → network tools → git → ``.git`` paths and write targets → inline code →
         ``find -exec`` → package and build tools. First refusal wins."""
-        args, assigns = _unwrap(seg)
+        try:
+            args, assigns = _unwrap(seg)
+        except _UnparsableCommand:
+            return "archaeology: could not parse the command safely (wrapper command string)"
         redirected = sorted(set(assigns) & _GIT_ENV_REDIRECT)
         if redirected:
             return f"archaeology: '{redirected[0]}=' points git at another repository"

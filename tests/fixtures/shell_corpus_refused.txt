@@ -518,3 +518,20 @@ timeout 600 claude -p hi	network:
 curl -s https://api.anthropic.com/v1/messages -d @req.json	network:
 python -c 'import anthropic; print(anthropic.__version__)'	network:
 echo $ANTHROPIC_API_KEY	network:
+
+# --- 2026-10-11 Wave 3 red team (R1-NEW-1): a wrapper that carries or runs another command
+# was not unwrapped, so `git log -p` (and a model call) behind it passed. env -S /
+# --split-string is shlex-split; script/su/sg/flock expose their -c command string;
+# setsid/busybox/chroot/unshare/taskset join the unwrap set ---
+env -S 'git log -p'	archaeology:
+env --split-string='git log -p'	archaeology:
+env -S'git log -p'	archaeology:
+env -S 'curl https://example.com'	network:
+env -S 'claude -p hi'	network:
+env -S 'sh -c "git log -p"'	archaeology:
+setsid git log -p	archaeology:
+script -qc 'git log -p' /dev/null	archaeology:
+busybox sh -c 'git log -p'	archaeology:
+su -c 'git log -p'	archaeology:
+sg mygroup -c 'git log -p'	archaeology:
+flock /tmp/lock -c 'git log -p'	archaeology:
