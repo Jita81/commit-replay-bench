@@ -665,6 +665,80 @@ def test_s1_red_requires_the_authored_ids(tmp_path: Path, monkeypatch: pytest.Mo
     assert adapter.authored_red("jest", "a.test.js", "", frozenset({"adds"}), ()) is None
 
 
+#: An authored Go file whose one test is a fuzz target: ``go test`` runs its seed corpus,
+#: and a failing seed reports ``FuzzNew/seed#0`` and then ``FuzzNew``.
+GO_FUZZ_SRC = (
+    'package calc\n\nimport "testing"\n\n'
+    "func FuzzNew(f *testing.F) {\n\tf.Add(2)\n\tf.Fuzz(func(t *testing.T, n int) {\n"
+    '\t\tif Add(n, n) != 5 {\n\t\t\tt.Fatal("want 5")\n\t\t}\n\t})\n}\n'
+)
+#: A testify suite method, and the runner that runs it: ``TestCalcSuite/TestNew``.
+GO_SUITE_METHOD = "func (s *CalcSuite) TestNew() {\n\ts.Equal(5, Add(2, 2))\n}\n"
+GO_SUITE_RUNNER = "func TestCalcSuite(t *testing.T) {\n\tsuite.Run(t, new(CalcSuite))\n}\n"
+
+
+def test_s1_red_counts_each_top_level_go_test_the_author_defines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RT2-V2-1: the Go rule read only ``func TestX(t *testing.T)``, so the two other
+    top-level tests ``go test`` runs — a fuzz target's seed corpus (``FuzzNew/seed#0``) and
+    an example with an ``// Output:`` comment (``ExampleNew``) — were refused "no test it
+    defines fails there" while the authored test was the one failing. Each now counts by
+    its own name, and an old test failing beside it still never does. A testify suite
+    method counts only under a runner the file defines: an id's second segment is any
+    subtest's name (an old test's ``t.Run("TestNew", …)`` carries it too), so a method that
+    a runner in another file runs stays refused — a limit the refusal now states."""
+    pkg = gorepo.CALC_PKG
+    old = f"{pkg}::TestOld"
+    seeds = frozenset({f"{pkg}::FuzzNew/seed#0", f"{pkg}::FuzzNew"})
+    assert adapter.authored_red("go", GO_AUTHORED, GO_FUZZ_SRC, seeds | {old}, ()) == seeds
+    example = (
+        'package calc\n\nimport "fmt"\n\n'
+        "func ExampleNew() {\n\tfmt.Println(Add(2, 2))\n\t// Output: 5\n}\n"
+    )
+    failing = frozenset({f"{pkg}::ExampleNew", old})
+    assert adapter.authored_red("go", GO_AUTHORED, example, failing, ()) == {f"{pkg}::ExampleNew"}
+    # a function that only looks like one is not a test go runs
+    lookalike = "package calc\n\nfunc FuzzNew(n int) {}\n\nfunc ExampleNew(n int) {}\n"
+    assert adapter.authored_red("go", GO_AUTHORED, lookalike, seeds, ()) == frozenset()
+    # a suite: counted under its own runner, refused when another file's runner runs it
+    in_suite = frozenset({f"{pkg}::TestCalcSuite/TestNew", f"{pkg}::TestCalcSuite"})
+    whole = "package calc\n\n" + GO_SUITE_RUNNER + GO_SUITE_METHOD
+    assert adapter.authored_red("go", GO_AUTHORED, whole, in_suite, ()) == in_suite
+    method_only = "package calc\n\n" + GO_SUITE_METHOD
+    assert adapter.authored_red("go", GO_AUTHORED, method_only, in_suite, ()) == frozenset()
+    # through the BuildFn: the failing seed is the authored test's RED, and the builder runs
+    fuzz = ExecResult(
+        1,
+        _go_events(
+            ("run", "FuzzNew"),
+            ("run", "FuzzNew/seed#0"),
+            ("fail", "FuzzNew/seed#0"),
+            ("fail", "FuzzNew"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(tmp_path / "fuzz", monkeypatch, _Docker(fuzz), src=GO_FUZZ_SRC)
+    assert not (attempt.error or "").startswith("authoring:"), attempt.error
+    assert _Idle.calls == 1
+    suite = ExecResult(
+        1,
+        _go_events(
+            ("run", "TestCalcSuite"),
+            ("run", "TestCalcSuite/TestNew"),
+            ("fail", "TestCalcSuite/TestNew"),
+            ("fail", "TestCalcSuite"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(tmp_path / "suite", monkeypatch, _Docker(suite), src=method_only)
+    assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
+    assert derive_failure_kind(clean=False, disqualified=False, error=attempt.error) == (
+        FAILURE_AUTHORING
+    )
+    assert _Idle.calls == 0
+
+
 def test_s1_unattributed_red_with_red_env_probe_is_harness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

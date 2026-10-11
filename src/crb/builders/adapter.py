@@ -211,9 +211,21 @@ EXTRA_CONTAINER = "container"
 #: failure kind is ``authoring`` — against the arm, never the builder, never ``harness``.
 AUTHORING_PREFIX = "authoring: "
 
-#: ``func TestX(t *testing.T)`` (the parameter may be unnamed): a test an authored Go file
-#: defines. ``TestMain`` takes ``*testing.M`` and is never one.
-_GO_TEST_FUNC = re.compile(r"^func\s+(Test\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?T\s*\)", re.M)
+#: The top-level tests ``go test`` runs that an authored Go file can define (a parameter
+#: may be unnamed): ``func TestX(t *testing.T)``, ``func FuzzX(f *testing.F)`` (its seed
+#: corpus fails as ``FuzzX/seed#0``) and ``func ExampleX()`` (run when it has an
+#: ``// Output:`` comment). ``TestMain`` takes ``*testing.M`` and is never one.
+_GO_TEST_FUNCS = (
+    re.compile(r"^func\s+(Test\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?T\s*\)", re.M),
+    re.compile(r"^func\s+(Fuzz\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?F\s*\)", re.M),
+    re.compile(r"^func\s+(Example\w*)\s*\(\s*\)", re.M),
+)
+
+#: What a Go RED is counted by, as the ``S1`` refusal states it (:func:`authored_red`).
+GO_RED_RULE = (
+    "a Go test counts by a top-level Test, Fuzz or Example func the file declares, "
+    "never by a suite method that a runner in another file runs"
+)
 
 
 def authored_red(
@@ -223,9 +235,17 @@ def authored_red(
     the task's ``baseline`` — the only RED the S1 step accepts (F87-1 part 3). A RED from a
     test already failing beside it never proves the authored test discriminates anything.
 
-    * ``go``: ``<pkg>::TestX`` for each ``func TestX`` in ``content``, a subtest
-      (``TestX/sub``) counting as its test. The RED scope is the whole package, so an old
-      test that fails there is the reason this rule exists.
+    * ``go``: ``<pkg>::<name>`` for each top-level test func in ``content`` —
+      ``func TestX(t *testing.T)``, ``func FuzzX(f *testing.F)`` or ``func ExampleX()`` — a
+      subtest (``TestX/sub``, ``FuzzX/seed#0``) counting as its test. The RED scope is the
+      whole package, so an old test that fails there is the reason this rule exists. A
+      testify suite method (``func (s *S) TestY()``) counts only under a runner the file
+      defines, by that runner's name; one that a runner in another file runs is refused
+      (:data:`GO_RED_RULE`, the arm's ``authoring`` miss): its id's second segment is any
+      subtest's name, which an old test's ``t.Run("TestY", …)`` or another suite's method
+      carries too, so it cannot attribute a RED to this file — and a method on another
+      file's suite is a reference to another test file, which the author is told never to
+      make. A limit that only ever refuses, never admits (P-800).
     * ``pytest``: a node id in ``path`` (``path::test_x``, or ``path`` itself for a
       collection error), read from the root or from a ``rootdir`` nearer the file. The scope
       is the file already; the rule takes out the baseline of a file the author overwrote.
@@ -234,7 +254,7 @@ def authored_red(
     report titles, cargo a module path inside one binary, surefire a class name), so any
     failing id stands, as it always has: no ``S1`` reading runs those runners yet."""
     if runner_name == "go":
-        names = set(_GO_TEST_FUNC.findall(content))
+        names = {name for pattern in _GO_TEST_FUNCS for name in pattern.findall(content)}
         own = {f for f in failing if f.partition("::")[2].split("/", 1)[0] in names}
     elif runner_name == "pytest":
 
@@ -1026,9 +1046,10 @@ def build_fn_for(
         if own is not None and not own:
             remove_authored(ws)
             shown = ", ".join(sorted(red.failing)[:3])
+            rule = f"; {GO_RED_RULE}" if runner.name == "go" else ""
             return fail(
                 f"the authored test {path!r} is not RED at the parent: no test it defines "
-                f"fails there (failing: {shown})"
+                f"fails there{rule} (failing: {shown})"
             )
         return path, content
 
