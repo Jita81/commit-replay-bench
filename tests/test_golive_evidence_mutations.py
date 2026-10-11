@@ -141,6 +141,14 @@ MUTATIONS: tuple[Mutation, ...] = (
         ),
     ),
     Mutation(
+        "automatic sign-in on reads off",
+        "deploy-and-go-live.truth.4",
+        GOLIVE,
+        "if settings.auth.dev_autologin:",
+        "if False:",
+        (f"{T_GOLIVE}::test_automatic_sign_in_on_leaves_its_line_unproven_and_names_no_account",),
+    ),
+    Mutation(
         "a factory build on the host leaves the builder sealed",
         "deploy-and-go-live.truth.4",
         GOLIVE,
