@@ -44,7 +44,8 @@ What it does: Migrates a database to the packaged head in one transaction, adopt
               ``crb doctor`` both read: the applied revision against the packaged head, for an
               unversioned store the revision its fingerprints correspond to, and at head
               whether the schema was compared with the models and matched (``schema_drift``
-              names each difference).
+              names each difference, an index's partial predicate among them, which Alembic's
+              ``compare_metadata`` does not read).
 How:          ``upgrade`` = engine → ``_adopt_unversioned_schema`` (marker walk, parity
               diff at head) → ``command.upgrade`` on the same connection →
               ``install_append_only_triggers``; ``install_append_only_triggers_on`` adapts an
@@ -62,9 +63,10 @@ Works with:   src/crb/store/migrations/env.py (receives the connection through
               reads ``head_status_on``)
 Tested by:    tests/test_store_migrate.py
 Touch when:   never for a new repository; every new revision that ADDS a column appends a
-              ``REVISION_MARKERS`` entry and one that ADDS a table appends a
-              ``REVISION_TABLES`` entry — or adoption of a newer ``init_db`` database
-              breaks; the upgrade procedure is documented in docs/DEPLOYMENT.md#6-upgrade.
+              ``REVISION_MARKERS`` entry, one that ADDS a table a ``REVISION_TABLES`` entry
+              and one that ADDS only an index a ``REVISION_INDEXES`` entry — or adoption of a
+              newer ``init_db`` database breaks; the upgrade procedure is documented in
+              docs/DEPLOYMENT.md#6-upgrade.
 """
 
 from __future__ import annotations
@@ -126,8 +128,12 @@ REVISION_TABLES: tuple[tuple[str, str], ...] = (
 )
 #: ``(revision, table, index)`` — the INDEX a revision adds when it adds no column or table.
 #: Walked after :data:`REVISION_MARKERS` in the same way: a ``create_all`` schema that
-#: carries the index is at least at that revision.
-REVISION_INDEXES: tuple[tuple[str, str, str], ...] = (("0004", "events", "uq_events_trace_seq"),)
+#: carries the index is at least at that revision. The index is matched by NAME; a partial
+#: index's predicate is compared at head by :func:`schema_drift` (0018's reservation index).
+REVISION_INDEXES: tuple[tuple[str, str, str], ...] = (
+    ("0004", "events", "uq_events_trace_seq"),
+    ("0018", "events", "uq_events_reading_reserved"),
+)
 
 
 class SchemaStateError(RuntimeError):
@@ -256,7 +262,7 @@ def _adopt_unversioned_schema(connection: Connection, cfg: Config) -> None:
         )
     revision = _unversioned_revision(connection)
     if revision == head_revision():
-        diff = compare_metadata(MigrationContext.configure(connection), Base.metadata)
+        diff = _model_differences(connection)
         if diff:
             raise SchemaStateError(
                 "database has every crb table, no alembic_version, and a schema that is "
@@ -380,15 +386,66 @@ def _describe_difference(diff: object) -> str:
     return " ".join(words)[:160]
 
 
+#: What a predicate's reflection adds to the text a model declares: PostgreSQL casts each
+#: side (``((action)::text = 'reading.reserved'::text)``); SQLite returns the text verbatim.
+_PREDICATE_CASTS: tuple[str, ...] = ("::character varying", "::varchar", "::text")
+
+
+def _normal_predicate(sql: object) -> str:
+    """A partial index's WHERE clause in the form the models' text and both dialects'
+    reflections of it share: the casts PostgreSQL adds, every parenthesis and all whitespace
+    removed. Not a SQL parser — two predicates that differ only in their grouping read the
+    same — but enough to tell a declared predicate from a different one or from none."""
+    if sql is None:
+        return ""
+    flat = str(sql)
+    for added in _PREDICATE_CASTS:
+        flat = flat.replace(added, "")
+    return "".join(ch for ch in flat if ch not in "()" and not ch.isspace())
+
+
+def _predicate_differences(connection: Connection) -> list[tuple[str, str, str]]:
+    """``("modify_index_where", table, index)`` for every index of a model table, present
+    by name in both the models and the connection's schema, whose WHERE clause differs —
+    the comparison ``compare_metadata`` does not make (it reads an index's name, columns and
+    uniqueness only), so a partial index rebuilt as a full one read as matching: revision
+    0018's reservation index, which as a full index would refuse every second event of a
+    trace that shares an arm and a commit (risk 3 of the Wave 3 spec)."""
+    key = f"{connection.dialect.name}_where"
+    reflected = inspect(connection).get_multi_indexes()
+    out: list[tuple[str, str, str]] = []
+    for table in Base.metadata.sorted_tables:
+        found = {str(ix["name"]): ix for ix in reflected.get((None, table.name), [])}
+        for ix in sorted(table.indexes, key=lambda i: str(i.name)):
+            name = str(ix.name)
+            if name not in found:
+                continue  # a missing index is ``compare_metadata``'s ``remove_index``
+            declared = _normal_predicate(ix.dialect_kwargs.get(key))
+            options = found[name].get("dialect_options") or {}
+            if declared != _normal_predicate(options.get(key)):
+                out.append(("modify_index_where", table.name, name))
+    return out
+
+
+def _model_differences(connection: Connection, *, server_defaults: bool = False) -> list[object]:
+    """Every difference between the connection's schema and ``Base.metadata``:
+    ``compare_metadata``'s, then the partial-index predicates it does not compare."""
+    opts = {"compare_server_default": server_defaults}
+    return [
+        *compare_metadata(MigrationContext.configure(connection, opts=opts), Base.metadata),
+        *_predicate_differences(connection),
+    ]
+
+
 def schema_drift(connection: Connection) -> tuple[str, ...]:
     """How the connection's schema differs from ``Base.metadata`` (``()`` when it matches),
-    by the same ``compare_metadata`` call adoption refuses a foreign schema with; at most
-    :data:`DRIFT_SHOWN` entries, the last naming how many more there are."""
+    by the same comparison adoption refuses a foreign schema with (``compare_metadata``
+    plus the partial-index predicates it does not read); at most :data:`DRIFT_SHOWN`
+    entries, the last naming how many more there are."""
     # PostgreSQL reflects server defaults faithfully, so a default dropped out of band is
     # drift there (Q1's review); SQLite's reflection reads a false difference at head, and
     # the DDL parity test (``test_upgrade_head_equals_init_db``) guards migrations instead
-    opts = {"compare_server_default": connection.dialect.name == "postgresql"}
-    diffs = compare_metadata(MigrationContext.configure(connection, opts=opts), Base.metadata)
+    diffs = _model_differences(connection, server_defaults=connection.dialect.name == "postgresql")
     shown = [_describe_difference(d) for d in diffs[:DRIFT_SHOWN]]
     if len(diffs) > DRIFT_SHOWN:
         shown.append(f"and {len(diffs) - DRIFT_SHOWN} more")

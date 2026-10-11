@@ -132,6 +132,10 @@ if TYPE_CHECKING:
 READING_SCHEMA = "crb.reading.v1"
 #: The event a registration is written as (stage ``system``).
 READING_EVENT_ACTION = "reading.registered"
+#: The event that reserves one commit on one arm of a reading (stage ``system``; trace = the
+#: reading id, ``step_id`` = the arm, ``task_id`` = the commit). The store holds at most one
+#: per (reading, arm, commit): revision 0018's partial unique index (P-792).
+READING_RESERVED_ACTION = "reading.reserved"
 #: The prefix of the seeded order's preimage (ADR-0026 item 2).
 SEED_PREFIX = "crb.reading.v1|"
 
@@ -1665,6 +1669,7 @@ __all__ = [
     "POOL_RULE_SINCE",
     "PROVENANCE_FIELDS",
     "READING_EVENT_ACTION",
+    "READING_RESERVED_ACTION",
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
     "REFUSAL_CAMPAIGN_UNSUPPORTED",

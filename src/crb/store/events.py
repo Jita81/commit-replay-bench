@@ -59,7 +59,8 @@ How:          ``DbEventSink.emit`` = one row, one commit; ``emit_many`` = one tr
               ``append_event_checked`` = lock → decide the payload → insert, raising instead
               of dropping (the registered readings of ADR-0026 item 2), with the
               ``task_id`` and ``step_id`` a caller names (a reservation's commit and arm,
-              P-792; ``''`` by default, so the row and its hash are unchanged).
+              P-792; ``''`` by default, so the row and its hash are unchanged), and the
+              reservation index's refusal (revision 0018) raised as ``ReservationExists``.
 Layer:        store — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
               docs/adr/0029-the-audit-trail-is-hash-chained.md
@@ -73,7 +74,7 @@ Works with:   src/crb/observability/events.py (``StepEvent`` / ``Emitter`` — t
               src/crb/server/routes/ledger.py (``/ledger/verify`` serves the walk and head)
 Tested by:    tests/test_store_events.py, tests/test_store_events_chain.py,
               tests/test_store_jobs.py, tests/test_server_routes_runs.py,
-              tests/test_advisory_lock_owners.py
+              tests/test_advisory_lock_owners.py, tests/test_p792_reserved_store.py
 Touch when:   never for a new repository; when ``StepEvent`` gains a field (a migration and
               both mappers change together); when a new out-of-band system action is
               introduced (use ``append_event``, never a raw insert — the ``seq`` cursor must
@@ -97,8 +98,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.event_chain import GENESIS_HASH, EventChainReport, event_row_hash, walk_event_chain
+from crb.core.reading import READING_RESERVED_ACTION
 from crb.observability.events import StepEvent, StepStatus
-from crb.store.models import Event, User
+from crb.store.models import READING_RESERVED_INDEX, Event, User
 
 _LOG = logging.getLogger(__name__)
 
@@ -698,6 +700,40 @@ def events_head(factory: sessionmaker[Session]) -> tuple[int, str]:
     return n, head or ""
 
 
+class ReservationExists(RuntimeError):
+    """The database refused a second ``reading.reserved`` event for one (reading, arm,
+    commit): revision 0018's partial unique index, the backstop behind the reserver's own
+    check under the events lock (P-792, C1 and C19). It names the key it was refused for —
+    the commit is already reserved on that arm of that reading — so a caller reads it as
+    "reserved", never as a write to retry; the transaction was rolled back and wrote
+    nothing."""
+
+    def __init__(self, trace_id: str, step_id: str, task_id: str) -> None:
+        super().__init__(
+            f"reading {trace_id} already holds a reservation of commit {task_id} on arm "
+            f"{step_id!r} ({READING_RESERVED_INDEX})"
+        )
+        self.trace_id = trace_id
+        self.step_id = step_id
+        self.task_id = task_id
+
+
+#: How SQLite reports a violation of the reservation index: by its columns, since it names
+#: no index (PostgreSQL names it in ``diag.constraint_name``). No other unique index of
+#: ``events`` has exactly these columns, and only a reservation event is checked against it.
+_SQLITE_RESERVED_VIOLATION = (
+    "UNIQUE constraint failed: events.trace_id, events.step_id, events.task_id"
+)
+
+
+def _violates_reservation_index(exc: IntegrityError) -> bool:
+    """Whether ``exc`` is the reservation index's refusal and no other constraint's."""
+    name = getattr(getattr(exc.orig, "diag", None), "constraint_name", None)
+    if name is not None:
+        return bool(name == READING_RESERVED_INDEX)
+    return str(exc.orig) == _SQLITE_RESERVED_VIOLATION
+
+
 def append_event_checked(
     factory: sessionmaker[Session],
     *,
@@ -718,7 +754,12 @@ def append_event_checked(
 
     ``task_id`` and ``step_id`` are stored on the row as given (a reading's reservation is
     keyed by its trace, arm and commit, P-792). Both default to the envelope's own ``''``, so
-    a caller that names neither writes, and chains, exactly the row it wrote before."""
+    a caller that names neither writes, and chains, exactly the row it wrote before.
+
+    A ``reading.reserved`` event the database refuses as a second reservation of its
+    (trace, arm, commit) raises :class:`ReservationExists` (revision 0018's index — the
+    backstop when ``build``'s own check missed it); every other ``IntegrityError``, of any
+    action, is re-raised unchanged."""
     with factory() as s:
         lock_event_writes(s)
         payload = build(s)
@@ -744,7 +785,13 @@ def append_event_checked(
             seq=nxt,
         )
         s.add(_to_model(ev))
-        s.commit()
+        try:
+            s.commit()
+        except IntegrityError as exc:
+            if action != READING_RESERVED_ACTION or not _violates_reservation_index(exc):
+                raise
+            s.rollback()
+            raise ReservationExists(trace_id, step_id, task_id) from exc
         return ev
 
 
@@ -759,6 +806,7 @@ __all__ = [
     "EventChainHeadError",
     "EventChainVerifier",
     "LockOrderError",
+    "ReservationExists",
     "append_event",
     "append_event_checked",
     "count_events",
