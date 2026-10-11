@@ -6,7 +6,8 @@
  * What it is:   The inbox's row type, its kinds and their labels (`KIND_LABEL`), and
  *               `decisionsFor` — the cell and item rows for ONE repository, folded in the browser
  *               for the Results page's "waiting on a person" panel: a cell that routes `deliver`
- *               and is not yet signed (an attestation is due); a cell held by its oracle or its
+ *               and whose standard the entry gate does not read as signed (the served cell's
+ *               `signed`, P-411 — an attestation is due); a cell held by its oracle or its
  *               controls (`strengthen`, G-535); a cell the rule sent to a human and why; a cell
  *               that must not ship; a factory item with an unsigned structural gap; an item the
  *               entry gate did not build (no proven standard, or missing context — ADR-0026
@@ -55,7 +56,7 @@ import type { CapabilityCell, FactoryTask, LibraryIndex, PreventionRegister, Sig
 export const STRENGTHEN_REASONS = ['oracle_weak', 'controls_escapes', 'controls_thin'] as const
 
 export type DecisionKind =
-  | 'signoff_due' // a cell routes deliver and no active sign-off exists
+  | 'signoff_due' // a cell routes deliver and the entry gate does not read its standard as signed
   | 'routed_human' // the rule sent a cell to a human (oracle weak, controls, escapes)
   | 'do_not_ship' // false-Q1 in the cell — an instrument defect to investigate
   | 'gap_unsigned' // a factory item is blocked on a structural gap
@@ -139,6 +140,10 @@ function cellKeyOf(c: { capability_class: string; size: string }): string {
   return `${c.capability_class}|${c.size}`
 }
 
+/**
+ * The keys of the active sign-offs in a list — read only for a cell served without the entry
+ * gate's own `signed` (a server from before G-738); a served `signed` always decides (P-411).
+ */
 function activeSignedKeys(signoffs: Signoff[]): Set<string> {
   const keys = new Set<string>()
   for (const s of signoffs) {
@@ -254,7 +259,8 @@ export function decisionsFor(input: { repo: string; cells: CapabilityCell[]; sig
     const code = reason ? { reasonCode: reason } : {}
     if (c.route === 'do_not_ship') {
       out.push({ kind: 'do_not_ship', repo, key: cellKeyOf(c), title: `${label} must not ship — false-Q1 in the cell`, evidence: ev, ...code, act: 'Investigate', href: `/ledger?${q}`, role: 'viewer' })
-    } else if (c.route === 'deliver' && !signed.has(cellKeyOf(c))) {
+    } else if (c.route === 'deliver' && !(typeof c.signed === 'boolean' ? c.signed : signed.has(cellKeyOf(c)))) {
+      // "signed" is the entry gate's reading, served on the cell — never the tier (G-738)
       out.push({ kind: 'signoff_due', repo, key: cellKeyOf(c), title: `${label} clears the bar — attest it or decline`, evidence: ev, ...code, act: 'Attest', href: `/signoff?${cellQ}`, role: 'approver' })
     } else if (held) {
       // G-535: held by its oracle or its controls — one row, the strengthening work on Learn

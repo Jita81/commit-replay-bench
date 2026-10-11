@@ -30,9 +30,14 @@ inbox, so it does not fill with every early cell; pricing and offering a thin ce
 G-565's, and nothing offers it yet). A held cell is
 one row, never two: ``strengthen`` replaces ``routed_human`` for it.
 
-A sign-off that went stale is its own row, ``signoff_stale``, keyed by the sign-off's id and
-carrying the sign-off as served; its cell is then no ``signoff_due`` row as well, so a cell is
-counted once (ADR-0015: the cell is back in the inbox, asking for a re-sign or a revoke).
+A ``deliver`` cell is ``signoff_due`` unless the entry gate reads its proven standard as
+signed: "signed" is the gate's own reading (:func:`crb.factory.standard.cell_signed` over
+the gate's ``standard_for``, on the repository's checks arm and the deployment's posture
+class — the clause that stops an item ``unsigned_cell``), never the map's verification
+tier, which matches sign-offs by another rule (P-411, G-738). A sign-off that went stale is its
+own row, ``signoff_stale``, keyed by the sign-off's id and carrying the sign-off as served; its
+cell is then no ``signoff_due`` row as well, so a cell is counted once (ADR-0015: the cell is
+back in the inbox, asking for a re-sign or a revoke).
 
 Navigation
 ----------
@@ -40,13 +45,16 @@ What it is:   ``decision_rows`` (the inbox's rows for one repository), ``for_vie
               row as one person reads it: the act only for a role that can take it, and an
               entry they sponsored never theirs to sign) and ``record_due`` / ``due_records``
               (the clock: when each row first became due).
-What it does: Derives every inbox kind from the capability cells, the factory tasks as
-              ``GET /factory/{repo}/tasks`` serves them, the prevention register, the library
-              index, the stale sign-offs and the re-measurement plan, and keeps one
+What it does: Derives every inbox kind from the capability cells, the entry gate's reader
+              of each cell's proven standard (whether its sign-off clause would pass), the
+              factory tasks as ``GET /factory/{repo}/tasks`` serves them, the prevention
+              register, the library index, the stale sign-offs and the re-measurement plan,
+              and keeps one
               ``decisions_due`` row per derived row so the age of a decision survives nobody
               looking at it. Never decides anything and never writes to the ledger: a row
               here is a pointer at an act a person must take.
-How:          Pure ``decision_rows`` over ``CapabilityCell`` and served mappings;
+How:          Pure ``decision_rows`` over ``CapabilityCell``, the gate's ``standard_for`` and
+              served mappings;
               ``record_due`` upserts under the caller's session (the caller commits),
               stamping ``first_due`` on arrival (``INSERT … ON CONFLICT DO NOTHING``, so a
               concurrent first stamp is joined — P-357), ``last_seen`` every pass and
@@ -60,7 +68,9 @@ ADRs:         docs/adr/0003-one-routing-rule.md (the routes the cell rows quote,
 Works with:   src/crb/server/routes/decisions.py (reads the inputs and serves it),
               src/crb/server/worker.py (the idle pass that keeps the clock running with nobody
               watching), src/crb/store/models.py (``DecisionDue``), src/crb/core/capability.py
-              (``CapabilityCell`` — the cell rows), src/crb/core/learn.py
+              (``CapabilityCell`` — the cell rows), src/crb/factory/standard.py
+              (``cell_signed`` — the entry gate's one reading of "signed"),
+              src/crb/server/factory_standard.py (``deployment_readers``), src/crb/core/learn.py
               (``STRENGTHEN_REASONS``, ``held_by_oracle``, ``remeasure_plan``),
               ui/src/screens/Decisions/decisions.ts (the labels, the render, and the Results
               page's own fold of the cell and item rows)
@@ -87,6 +97,7 @@ from sqlalchemy.orm import Session
 from crb.core.capability import CapabilityCell
 from crb.core.learn import STRENGTHEN_REASONS, held_by_oracle, hold_reason
 from crb.core.routing import ROUTE_DELIVER, ROUTE_DO_NOT_SHIP, ROUTE_HUMAN
+from crb.factory.standard import NO_READINGS, StandardFor, cell_signed
 from crb.server.factory_state import TaskView
 from crb.store.models import DecisionDue
 
@@ -435,7 +446,10 @@ def _task(t: TaskView | Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _cell_rows(
-    cells: Iterable[CapabilityCell], repo: str, stale_cells: frozenset[str]
+    cells: Iterable[CapabilityCell],
+    repo: str,
+    stale_cells: frozenset[str],
+    standard_for: StandardFor,
 ) -> list[DecisionRow]:
     q = f"repo={_enc(repo)}"
     out: list[DecisionRow] = []
@@ -467,7 +481,12 @@ def _cell_rows(
                     reason_code=code,
                 )
             )
-        elif c.route == ROUTE_DELIVER and not c.earned:
+        elif c.route == ROUTE_DELIVER and not cell_signed(
+            standard_for, c.key.capability_class, c.key.size
+        ):
+            # "signed" is the entry gate's own reading of the cell's proven standard (P-411),
+            # never the map's verification tier: a tier lifted by a sign-off the gate does not
+            # read still asks, and a standard the gate reads as signed asks nobody
             if key in stale_cells:
                 continue  # its stale sign-off is the row: revoke or re-sign (ADR-0015)
             out.append(
@@ -612,17 +631,24 @@ def decision_rows(
     stale: Sequence[Mapping[str, Any]] = (),
     remeasure: Mapping[str, Any] | None = None,
     in_flight: Iterable[tuple[str, str]] = (),
+    standard_for: StandardFor | None = None,
 ) -> list[DecisionRow]:
     """The inbox's rows for one repository, ordered by what blocks what.
 
-    ``cells`` are the (class × size) cells of the repository's SIGNED map — the sign-offs
-    already overlaid, so ``cell.earned`` is "a human has attested this, on this apparatus,
-    with the false-Q1 floor intact". ``tasks`` are the factory items as ``GET
-    /factory/{repo}/tasks`` serves them (a ``TaskView`` is read through its ``to_dict``).
-    ``register`` is the prevention register (``Register.to_dict()``), ``library`` the library
-    index, ``stale`` the stale sign-offs as served, ``remeasure`` the re-measurement plan with
-    ``in_flight`` the ``(label, mode)`` cells whose queued runs have not finished. An
-    unmeasured cell (``n == 0``) is not a decision: nobody is waiting on it.
+    ``cells`` are the (class × size) cells of the repository's map; their routes decide the
+    cell rows. ``standard_for`` is the entry gate's own reader of a cell's proven standard,
+    bound as the next run's worker binds it
+    (:func:`crb.server.factory_standard.deployment_readers`): a ``deliver`` cell is "sign-off
+    due" unless the gate's sign-off clause reads its standard as signed
+    (:func:`crb.factory.standard.cell_signed`) — never by the map's verification tier, a
+    second rule that matches sign-offs differently (P-411). ``None`` is a caller with no
+    store: no cell has a proven standard, so none is signed and every ``deliver`` cell asks.
+    ``tasks`` are the factory items as ``GET /factory/{repo}/tasks`` serves them (a
+    ``TaskView`` is read through its ``to_dict``). ``register`` is the prevention register
+    (``Register.to_dict()``), ``library`` the library index, ``stale`` the stale sign-offs as
+    served, ``remeasure`` the re-measurement plan with ``in_flight`` the ``(label, mode)``
+    cells whose queued runs have not finished. An unmeasured cell (``n == 0``) is not a
+    decision: nobody is waiting on it.
     """
     stale_list = [s for s in stale if s.get("stale") and not s.get("revoked")]
     stale_cells = frozenset(
@@ -633,7 +659,7 @@ def decision_rows(
         for s in stale_list
     )
     out: list[DecisionRow] = [
-        *_cell_rows(cells, repo, stale_cells),
+        *_cell_rows(cells, repo, stale_cells, standard_for or NO_READINGS.standard_for),
         *stale_signoff_rows(stale_list, repo),
         *_item_rows(tasks, repo),
         *prevention_rows(register, repo),

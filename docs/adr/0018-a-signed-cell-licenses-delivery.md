@@ -6,7 +6,7 @@ the Wave 4 integration (GOV-4) before this ADR merged; the decisions below are t
 text, and each superseded draft is quoted under
 [What ADR-0026 supersedes](#what-adr-0026-supersedes). Decision 1's clause is read at the
 delivered change's own cell too, since the Wave 4 attack (DL-119).
-**Date:** 2026-09-23 (amended 2026-09-27, DL-106; 2026-09-28, DL-119)
+**Date:** 2026-09-23 (amended 2026-09-27, DL-106; 2026-09-28, DL-119; 2026-10-10, G-738)
 **Apparatus impact:** none. This changes *which tickets the factory may build and deliver*, not
 what a grade means: no belt, no grader, no routing threshold, no ledger column and no sign-off
 clause moves, so `crb.core.version.APPARATUS_VERSION` stays where it is and `signoff-policy.v3`
@@ -87,8 +87,13 @@ what default and what override?**
    prediction and the ticket feedback all ask that reader, with the same
    `require_signed_cell`. A build's own row never makes its cell look signed, and a stale
    sign-off licenses nothing. The capability map's verification tier (`apply_signoffs`) is a
-   different reader with a different matching rule; it is not what this clause reads, and
-   the decisions inbox still derives "sign-off due" from it (G-738).
+   different reader with a different matching rule; it is not what this clause reads. Since
+   G-738 every other reader of *signed* asks this clause's own predicate,
+   `crb.factory.standard.cell_signed`, over the same binding
+   (`crb.server.factory_standard.deployment_readers`): the decisions inbox's "sign-off due"
+   and the map, which serves it as each cell's `signed` beside the tier (P-411). The map
+   serves `null` for a cell that pools classes or sizes, which the gate never reads, and on
+   an organisation's class-set view, whose cells are keyed by the global parent (G-763).
 3. **The override lifts the sign-off clause and nothing else, for one named run, and is
    evented.** It is granted on a queued or running factory run that delivers, by a **second
    approver**, with `POST /runs/{id}/deliver-override` (GOV-4): the route stamps the
@@ -151,7 +156,9 @@ on 2026-09-23 stands whole:
   `signed_map` … So "signed" here means exactly what the Capability page means by it."
   Superseded (DL-106): *signed* is `Standard.signed` from the `standard_for` reader bound once
   before any build — a sign-off on the standard's arm, class-set version and reading. The
-  map's tier is another reader (G-738).
+  map's tier is another reader. The decisions inbox asks this clause itself over the same
+  binding, and the map serves the clause's reading beside the tier as `signed` (G-738); the
+  Capability page still shows only the tier (G-303).
 - **Decision 3 as drafted — the override queued with the run.** "A run queued with
   `deliver_override` (approver role only; `POST /runs` stamps the approver's identity into
   `params.deliver_override_by`) … It writes a `route.decided` evidence event naming the clause

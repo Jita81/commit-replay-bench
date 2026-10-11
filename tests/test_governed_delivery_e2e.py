@@ -605,7 +605,8 @@ def test_a_leavers_sign_off_stops_licensing_delivery(
     who signed a cell is deactivated, the entry gate reads the cell unsigned (it stops
     ``unsigned_cell`` before any spend); re-activating the account restores it. The chain
     itself is untouched: the attestation stays on the record, naming who made it. (The
-    map's tier and the decisions inbox read sign-offs by another rule — G-738.)"""
+    map's tier reads sign-offs by another rule; the decisions inbox reads the gate's own
+    clause — G-738.)"""
     _proven_and_signed(env)
     assert _readers(env).standard_for(CellRef("bug.fix", "XS")).signed  # type: ignore[union-attr]
     approver = user_id(USERS["approver"])
