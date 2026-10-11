@@ -92,11 +92,41 @@ def test_check_shell_refuses_a_nested_model_call(
     assert guard.check_shell(command).startswith(NESTED)
 
 
-@pytest.mark.parametrize("command", NESTED_COMMANDS[:2] + NESTED_COMMANDS[3:])
+@pytest.mark.parametrize("command", NESTED_COMMANDS)
 def test_the_tripwire_alone_finds_the_plain_forms(command: str) -> None:
-    """The text scan finds every form but the wrapped one (``env claude``), which only the
-    shell parse unwraps; the builder runs both over each Bash command."""
+    """The text scan finds every form the red team named, ``env claude`` and
+    ``cd /work && claude`` included: the claude pattern now matches the CLI at an argument
+    position, not only at a command position, so a model call written to a script the shell
+    parse cannot open (``run.sh``, ``fix.py``) is still caught (F5 widening, P-797)."""
     assert base.nested_model_call_input({"command": command})[0].startswith(NESTED)
+
+
+def test_the_tripwire_finds_a_model_call_at_an_argument_position() -> None:
+    """F5 widening (HON-R1-F5-1): a claude CLI call that is not at a command position —
+    wrapped in ``timeout``, inside a Python ``os.system`` / ``subprocess.run`` string, or in
+    a ``.split()`` list written to a file — is still read as a nested model call. The shell
+    parse cannot open a script FILE, so the written content is the only place to catch it."""
+    for text in (
+        "timeout 600 claude -p 'fix the failing test'",
+        "os.system('claude -p \"fix the bug\"')",
+        'subprocess.run("claude -p hi", shell=True)',
+        "'claude -p fix'.split()",
+    ):
+        assert base.nested_model_call(text).startswith(NESTED), text
+
+
+def test_the_widened_claude_pattern_keeps_its_near_misses() -> None:
+    """The pattern stays case-sensitive and anchored on word boundaries, so a model id, a
+    doc file and a directory named for the model are not read as a model call (the one known
+    new false positive, ``grep claude src``, is documented in P-797, not pinned here)."""
+    for text in (
+        "claude-sonnet-5",
+        "CLAUDE.md",
+        "cat CLAUDE.md",
+        "ls /private/tmp/claude-501/x",
+        "grep -rn 'claude-sonnet-5' .",
+    ):
+        assert base.nested_model_call(text) == "", text
 
 
 @pytest.mark.parametrize("command", CREDENTIAL_COMMANDS)
@@ -122,7 +152,7 @@ def test_the_claude_cli_is_refused_by_argv_and_in_inline_code(
     assert guard.check(["claude", "-p", "x"]).startswith(NESTED)
     assert guard.check(["/usr/local/bin/claude", "-p", "x"]).startswith(NESTED)
     inline = guard.check(["python", "-c", "import os; os.system('claude -p x')"])
-    assert inline.startswith(NESTED) and "inline python code runs 'claude'" in inline
+    assert inline.startswith(NESTED) and "inline python code names the claude CLI" in inline
 
 
 def test_the_tripwire_reads_every_tool_input() -> None:

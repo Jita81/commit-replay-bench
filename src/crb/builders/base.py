@@ -1103,9 +1103,12 @@ _CODE_NET_TOOL = re.compile(
     r"|\bclaude\b(?![./-])"
 )
 #: What the nested-model-call tripwire looks for in a tool input, each with the words its
-#: reason uses. The claude CLI counts at a command position (line start, after a shell
-#: separator or ``$(``) or as a quoted argv word; ``claude-sonnet-5``, ``CLAUDE.md`` and
-#: a directory named ``claude`` do not.
+#: reason uses. The claude CLI counts wherever it is run with a CLI argument or a quote —
+#: at a command position, wrapped in ``timeout``/``env``, inside a Python ``os.system`` or
+#: ``subprocess.run`` string, or in a ``.split()`` list written to a script the shell parse
+#: cannot open (F5, HON-R1-F5-1). It stays case-sensitive and anchored on word boundaries,
+#: so ``claude-sonnet-5``, ``CLAUDE.md`` and a path like ``.../claude-501/`` do not match;
+#: the one honest casualty is a bare ``grep claude src`` (docs/PREVENTION.md P-797).
 _NESTED_MODEL_CALL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("the model endpoint", re.compile(r"api\.anthropic\.com", re.IGNORECASE)),
     ("the Messages API path", re.compile(r"/v1/messages\b")),
@@ -1122,9 +1125,7 @@ _NESTED_MODEL_CALL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "the claude CLI",
-        re.compile(
-            r"(?m)(?:^|[;&|(`]|\$\()\s*(?:\S*/)?claude(?![\w./-])|['\"](?:\S*/)?claude['\"]"
-        ),
+        re.compile(r"(?m)(?<![\w.@/-])(?:\S*/)?claude(?=\s+[-\w'\"]|\s*['\"]|\s*$)"),
     ),
 )
 #: Shell keywords that precede a command in the same segment (``if git log; then``).

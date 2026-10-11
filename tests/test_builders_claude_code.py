@@ -992,6 +992,71 @@ def test_a_written_script_that_calls_a_model_is_a_violation(tmp_path: Path) -> N
     ws.remove()
 
 
+@pytest.mark.parametrize(
+    ("lines_fn", "attempted"),
+    [
+        (
+            lambda: [
+                ev_init(),
+                ev_assistant(
+                    tool_use(
+                        "Write",
+                        file_path="/work/run.sh",
+                        content="#!/bin/sh\ntimeout 600 claude -p 'fix the failing test'\n",
+                    )
+                ),
+                ev_user(),
+                ev_assistant(tool_use("Bash", command="sh run.sh")),
+                ev_user(),
+                ev_result(structured={"done": True, "summary": "ok"}),
+            ],
+            "Write",
+        ),
+        (
+            lambda: [
+                ev_init(),
+                ev_assistant(
+                    tool_use(
+                        "Write",
+                        file_path="/work/fix.py",
+                        content="import os\nos.system('claude -p \"fix the bug\"')\n",
+                    )
+                ),
+                ev_user(),
+                ev_assistant(tool_use("Bash", command="python fix.py")),
+                ev_user(),
+                ev_result(structured={"done": True, "summary": "ok"}),
+            ],
+            "Write",
+        ),
+        (
+            lambda: [
+                ev_init(),
+                ev_assistant(
+                    tool_use("Bash", command="echo 'timeout 9 claude -p hi' > f.sh; sh f.sh")
+                ),
+                ev_user(),
+                ev_result(structured={"done": True, "summary": "ok"}),
+            ],
+            "echo",
+        ),
+    ],
+    ids=["written-sh-then-run", "written-py-then-run", "echo-to-file-then-run"],
+)
+def test_a_model_call_written_to_a_script_and_run_is_a_violation(
+    tmp_path: Path, lines_fn: Any, attempted: str
+) -> None:
+    """HON-R1-F5-1: the shell parse cannot look inside a script FILE, so a ``claude -p``
+    written to ``run.sh``/``fix.py`` (or echoed into a file) and then run through
+    ``sh``/``python`` is caught only by the tripwire reading the write — which now matches
+    ``claude`` at an argument position, not just at a command position (F5 widening)."""
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines_fn()), workdir_alias="/work")
+    nested = [e for e in out.errors if e.startswith("network: nested_model_call:")]
+    assert len(nested) == 1 and "claude CLI" in nested[0]
+    assert f"(attempted: {attempted}" in nested[0] and out.violated
+    ws.remove()
+
+
 def test_wall_clock_timeout_and_missing_result(tmp_path: Path) -> None:
     lines = [ev_init(), ev_assistant(tool_use("Read", file_path="/wt/pkg/calc.py"))]
     _fx, ws, out = _setup(tmp_path, FakeSpawn(lines, timed_out=True, returncode=-9))
