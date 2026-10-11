@@ -350,13 +350,15 @@ def test_runs_of_two_readings_on_one_arm_are_live_together_and_a_loose_one_is_no
 
 
 def test_runs_of_two_readings_naming_one_commit_are_never_live_together_on_one_arm(
-    env: Env,
+    backend_env: Env,
 ) -> None:
     """R1-1: nothing binds a run's ``task_ids`` to its reading's pool, and a reading reads
     another reading's admitted rows on its commits (DL-382), so the key is the commits the
     runs name, not their reading ids. While reading one's run naming commit 1 is live on
     ``S3+L``, reading two's run naming commits 1 and 2 is refused naming it, and so is its
-    run naming none (any commit); its run naming commit 2 alone is admitted beside it."""
+    run naming none (any commit); its run naming commit 2 alone is admitted beside it — on
+    each store, the commits read back from each run's stored ``params_json`` (R6A-V2-2)."""
+    env = backend_env
     env.settings.builder.executor = "docker"
     cid = _register(env)["campaign_id"]
     one = write_reading(env.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
