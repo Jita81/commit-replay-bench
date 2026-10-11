@@ -522,11 +522,14 @@ echo $ANTHROPIC_API_KEY	network:
 # --- 2026-10-11 Wave 3 red team (R1-NEW-1): a wrapper that carries or runs another command
 # was not unwrapped, so `git log -p` (and a model call) behind it passed. env -S /
 # --split-string is shlex-split; script/su/sg/flock expose their -c command string;
-# setsid/busybox/chroot/unshare/taskset join the unwrap set ---
+# setsid/busybox/chroot/unshare/taskset join the unwrap set. `env -S 'claude -p hi'` is NOT an
+# unwrap line: the depth-0 claude tripwire refuses it before any parse (a tripwire pin);
+# `env -S 'wget …'` is the network form only the unwrap catches ---
 env -S 'git log -p'	archaeology:
 env --split-string='git log -p'	archaeology:
 env -S'git log -p'	archaeology:
 env -S 'curl https://example.com'	network:
+env -S 'wget https://example.com'	network:
 env -S 'claude -p hi'	network:
 env -S 'sh -c "git log -p"'	archaeology:
 setsid git log -p	archaeology:
@@ -535,3 +538,29 @@ busybox sh -c 'git log -p'	archaeology:
 su -c 'git log -p'	archaeology:
 sg mygroup -c 'git log -p'	archaeology:
 flock /tmp/lock -c 'git log -p'	archaeology:
+
+# --- 2026-10-11 Wave 3 red team round 2: `env -` (bare dash = -i) was taken as the command;
+# unshare's value options, xargs/script options whose value is OPTIONAL (attached only), sudo's
+# -R/-T/long value options and su --session-command were missing; a getopt_long prefix
+# (`--split`, `--comm`, `--sig`) read as a flag; chroot/unshare/taskset had no line ---
+env - git log -p HEAD~1	archaeology:
+env - curl https://example.com	network:
+env -i - git log -p	archaeology:
+unshare --propagation private git log -p	archaeology:
+unshare --map-user 0 git log -p	archaeology:
+unshare -r git log -p	archaeology:
+chroot / git log -p	archaeology:
+taskset -c 0-3 git log -p	archaeology:
+taskset 0x1 git log -p	archaeology:
+xargs -i git log -p	archaeology:
+xargs --replace git log -p	archaeology:
+xargs -l git log -p	archaeology:
+xargs --eof git log -p	archaeology:
+script -t -c 'git log -p' /dev/null	archaeology:
+sudo --role r git log -p	archaeology:
+sudo -R / git log -p	archaeology:
+sudo -T 5 git log -p	archaeology:
+su --session-command 'git log -p'	archaeology:
+env --split 'git log -p'	archaeology:
+su --comm 'git log -p'	archaeology:
+timeout --sig KILL 5 git log -p	archaeology:

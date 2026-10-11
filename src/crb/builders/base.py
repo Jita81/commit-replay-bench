@@ -49,9 +49,10 @@ How:          Frozen dataclasses with ``__post_init__`` invariants → the guard
               heredoc stripping → substitution hoisting → newline splitting → ``shlex`` →
               per-segment unwrap (wrappers, assignments, keywords; a wrapper that carries a
               command string — ``env -S``, ``script``/``su``/``sg``/``flock`` ``-c`` — is
-              unwound to the command it runs, ``setsid``/``busybox``/``chroot``/``taskset`` to
-              their positional) → per-executable rules (git verbs, package managers,
-              inline-code scan).
+              unwound to the command it runs, ``setsid``/``busybox``/``chroot``/``unshare``/
+              ``taskset`` to their positional; options parse as getopt_long would, an
+              unambiguous ``--prefix`` included, and ``env -`` is ``env -i``) →
+              per-executable rules (git verbs, package managers, inline-code scan).
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0012-builder-in-a-sealed-container.md
@@ -1024,11 +1025,17 @@ _GROUP_RE = re.compile(r"^__GROUP_\d+__$")
 _FUNCDEF_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*__GROUP_\d+__$")
 
 #: Command prefixes that run *another* command: name → (options that take a value,
-#: positionals to skip before the wrapped command — ``timeout DURATION cmd``).
+#: positionals to skip before the wrapped command — ``timeout DURATION cmd``). An option whose
+#: value is OPTIONAL (``xargs -i[R]`` / ``--replace[=R]``, ``-l[N]``, ``--eof[=E]``,
+#: ``script -t[FILE]``) takes it attached only, so it is a flag here: listing it as a value
+#: option swallowed the wrapped command's name (``xargs -i git log`` checked ``log``; R2).
 _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
     "env": (_words("-u --unset -C --chdir -S --split-string"), 0),
     "sudo": (
-        _words("-u --user -g --group -C -D --chdir -h --host -p -r -t -U"),
+        _words(
+            "-u --user -g --group -C --close-from -D --chdir -h --host -p --prompt "
+            "-R --chroot -r --role -t --type -T --command-timeout -U --other-user"
+        ),
         0,
     ),
     "doas": (frozenset({"-u", "-C"}), 0),
@@ -1051,8 +1058,8 @@ _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
     ),
     "xargs": (
         _words(
-            "-I -i -n -L -l -P -d -s -E -a --max-args --max-procs --max-lines --max-chars "
-            "--delimiter --eof --arg-file --replace --process-slot-var"
+            "-I -n -L -P -d -s -E -a --max-args --max-procs --max-chars "
+            "--delimiter --arg-file --process-slot-var"
         ),
         0,
     ),
@@ -1063,7 +1070,13 @@ _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
     "setsid": (frozenset(), 0),
     "busybox": (frozenset(), 0),
     "chroot": (_words("--userspec --groups"), 1),
-    "unshare": (_words("-S --setuid -G --setgid -R --root -w --wd"), 0),
+    "unshare": (
+        _words(
+            "-S --setuid -G --setgid -R --root -w --wd -l --load-interp --propagation "
+            "--setgroups --map-user --map-users --map-group --map-groups --monotonic --boottime"
+        ),
+        0,
+    ),
     "taskset": (frozenset(), 1),
 }
 #: Wrappers whose wrapped command is a STRING carried by ``-c``/``--command`` (or, for
@@ -1074,12 +1087,17 @@ _STRING_WRAPPERS: frozenset[str] = frozenset({"script", "su", "sg", "flock"})
 _ENV_VALUE_OPTS: frozenset[str] = _words("-u --unset -C --chdir -S --split-string")
 _ENV_SPLIT_OPTS: frozenset[str] = _words("-S --split-string")
 _SCRIPT_VALUE_OPTS: frozenset[str] = _words(
-    "-c --command -o --output-limit -t --timing -I --log-in -O --log-out -B --log-io "
+    "-c --command -o --output-limit -I --log-in -O --log-out -B --log-io "
     "-T --log-timing -m --logging-format -E --echo"
 )
-_SU_VALUE_OPTS: frozenset[str] = _words("-c --command -s --shell -g --group -G --supp-group")
+_SU_VALUE_OPTS: frozenset[str] = _words(
+    "-c --command --session-command -s --shell -g --group -G --supp-group "
+    "-w --whitelist-environment"
+)
 _FLOCK_VALUE_OPTS: frozenset[str] = _words("-w --timeout -E --conflict-exit-code -c --command")
 _COMMAND_OPTS: frozenset[str] = _words("-c --command")
+#: ``su --session-command CMD`` runs ``CMD`` as ``-c`` does, without a new session (R2).
+_SU_COMMAND_OPTS: frozenset[str] = _COMMAND_OPTS | {"--session-command"}
 _SHELLS: frozenset[str] = _words("sh bash zsh dash fish ksh")
 #: Environment variables that point git at ANOTHER repository / object store.
 _GIT_ENV_REDIRECT: frozenset[str] = _words(
@@ -1462,13 +1480,28 @@ class _UnparsableCommand(Exception):
     unseen (R1-NEW-1)."""
 
 
+def _long_name(name: str, value_opts: frozenset[str]) -> str:
+    """``name`` resolved to the one long value option it abbreviates, else unchanged.
+
+    getopt_long accepts any unambiguous prefix of a long option, so ``--split``, ``--comm``
+    and ``--sig`` are ``--split-string``, ``--command`` and ``--signal``; read as flags, their
+    value became the wrapped command and the command behind it ran unchecked (R2). A prefix
+    of two value options stays as written: getopt_long refuses it, so nothing runs."""
+    if name in value_opts or len(name) < 3:
+        return name
+    hits = [opt for opt in value_opts if opt.startswith("--") and opt.startswith(name)]
+    return hits[0] if len(hits) == 1 else name
+
+
 def _getopts(
     words: Sequence[str], value_opts: frozenset[str], *, permute: bool
 ) -> tuple[list[tuple[str, str | None]], list[str]]:
     """A small, never-raising option parser: return ``(options, positionals)``.
 
     ``--`` ends the options (the rest are positionals). A ``--name=val`` carries an
-    attached value; a ``--name`` in ``value_opts`` takes the next word. A short cluster
+    attached value; a ``--name`` in ``value_opts`` takes the next word, and so does an
+    unambiguous prefix of one, which getopt_long accepts (``env --split 'git log'`` is
+    ``--split-string``; :func:`_long_name`). A short cluster
     (``-qc``) splits per character, and a character whose ``-x`` is in ``value_opts`` takes
     the attached remainder or the next word. With ``permute=False`` the first positional
     stops option parsing and every later word is a positional (so ``taskset -c 0-3 git log``
@@ -1491,6 +1524,7 @@ def _getopts(
             continue
         if w.startswith("--"):
             name, eq, val = w.partition("=")
+            name = _long_name(name, value_opts)
             if eq:
                 opts.append((name, val))
             elif name in value_opts and i + 1 < n:
@@ -1531,8 +1565,10 @@ def _opt_value(opts: Sequence[tuple[str, str | None]], names: frozenset[str]) ->
 def _rewrap(name: str, args: Sequence[str]) -> list[str]:
     """Re-express the command a string-carrying or command-skipping wrapper runs, so the
     caller checks it instead of the wrapper (R1-NEW-1). ``args`` is what follows the wrapper
-    name. ``env`` shlex-splits its ``-S``/``--split-string`` value and prepends it; ``script``,
-    ``su``, ``sg`` and ``flock`` expose their ``-c``/``--command`` string as ``sh -c <cmd>``;
+    name. ``env`` shlex-splits its ``-S``/``--split-string`` value and prepends it, dropping a
+    bare ``-`` (``env - cmd`` clears the environment and runs ``cmd``); ``script``, ``su``
+    (and its ``--session-command``), ``sg`` and ``flock`` expose their ``-c``/``--command``
+    string as ``sh -c <cmd>``;
     every other wrapper drops its options and the leading ``skip`` positionals. Raises
     :class:`_UnparsableCommand` when ``env``'s split value has an unbalanced quote."""
     if name == "env":
@@ -1544,11 +1580,13 @@ def _rewrap(name: str, args: Sequence[str]) -> list[str]:
                 inline = shlex.split(split)
             except ValueError as exc:
                 raise _UnparsableCommand from exc
+        while pos and pos[0] == "-":  # ``env -`` is ``env -i``, not a command (R2-REG-1)
+            pos = pos[1:]
         return inline + pos
     if name in ("script", "su"):
         value_opts = _SCRIPT_VALUE_OPTS if name == "script" else _SU_VALUE_OPTS
         opts, _pos = _getopts(args, value_opts, permute=True)
-        cmd = _opt_value(opts, _COMMAND_OPTS)
+        cmd = _opt_value(opts, _COMMAND_OPTS if name == "script" else _SU_COMMAND_OPTS)
         return ["sh", "-c", cmd] if cmd is not None else []
     if name == "sg":
         rest = list(args)
