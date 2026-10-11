@@ -82,8 +82,8 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               ``submit_refusals``, ``require_jobs``, ``append_system_event``, ``run_rungs`` —
               how a run is built, refused at submit, queued, how an event is chained, and
               which rungs a live run calls), src/crb/server/campaigns.py (``live_runs``,
-              ``run_arm`` — a campaign's runs are filed by ``POST /runs``, never by this
-              queue, so the plan counts the live ones as in flight, F87-2),
+              ``run_arm``, ``run_commits`` — a campaign's runs are filed by ``POST /runs``,
+              never by this queue, so the plan counts the live ones as in flight, F87-2),
               src/crb/core/campaign.py (``requested_arm`` — the arm a plan request asks for,
               read as a campaign run's is),
               src/crb/store/events.py (``lock_event_writes``), src/crb/store/jobs.py
@@ -140,7 +140,7 @@ from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
 from crb.factory.testfirst import canonical_model
 from crb.server.auth import OperatorDep, ViewerDep
-from crb.server.campaigns import live_runs, run_arm
+from crb.server.campaigns import live_runs, run_arm, run_commits
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_posture_class
@@ -526,8 +526,8 @@ def would_attempt(run: Run, request: Mapping[str, Any]) -> bool:
     pair = (str(request.get("builder") or ""), str(request.get("model") or ""))
     if pair not in {(run.builder or "", run.model or ""), *run_rungs(run)}:
         return False
-    tasks = {str(t) for t in (dict(run.params_json or {}).get("task_ids") or [])}
-    return not tasks or bool(tasks & {str(t) for t in (request.get("task_ids") or [])})
+    named = run_commits(run)
+    return named is None or not named.isdisjoint(str(t) for t in request.get("task_ids") or [])
 
 
 @router.get(

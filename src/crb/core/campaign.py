@@ -29,13 +29,18 @@ attempt the campaign has seen, so a line recomputed from it would always cover i
 the campaign: nothing more is admitted.
 
 **One live run per arm** (F87-2): a run is admitted only while no other run of the campaign on
-the same repository and the same arm it asks for (``requested_arm``) is queued or running —
-of the same reading, or of any when either run names none (it may replay any commit of the
-repository; ``runs_overlap``). Two runs of one arm never attempt a commit at once, and the next
-run on an arm of a reading is admitted only after the last has finished, so that arm's rows
-reach the ledger in the order its runs were admitted — the order a reading that takes each
-commit's first attempt reads them in. Two readings' pools are their own commits, so their runs
-on one arm may be live together.
+the same repository and the same arm it asks for (``requested_arm``) is queued or running that
+could attempt a commit it could (``runs_overlap``) — one of the same reading or either of none,
+else one naming a commit it names or either naming none (a run replays only the commits it
+names, ``task_ids``, and may replay any commit of the repository when it names none). So for
+runs keyed on the same requested arm, two never attempt one commit while both are queued or
+running, and the next run on a commit is admitted only after the last has finished: that
+commit's rows on the arm reach the ledger in the order its runs were admitted — the order a
+reading that takes each commit's first attempt reads them in. Two readings' runs naming
+disjoint commits may be live together. The guarantee is the key's and the run status's, not
+the worker's: docs/PREVENTION.md P-801 names its gaps (the arm a run asks for is not always
+the arm its rows carry; a run without ``campaign_id`` is outside the key; a run abandoned past
+``max_reclaims`` frees its arm while a hung worker may still append a row).
 
 Navigation
 ----------
@@ -49,9 +54,9 @@ What it does: Hashes a campaign into ``cmp_<24 hex>`` and verifies it; folds the
               whether one more run with a cap fits (``Tally.refusal``: ``campaign_ceiling``,
               ``campaign_cost_unknown``, ``campaign_overrun``, or ``None``); keys a run by the
               arm it asks for (``requested_arm``), says whether two runs of one arm could
-              attempt one commit (``runs_overlap``: one reading, or one naming none) and words
-              the refusal of a second live run on one (``arm_in_flight``:
-              ``campaign_arm_in_flight``).
+              attempt one commit (``runs_overlap``: one reading or either of none, else a
+              commit both name or either naming none) and words the refusal of a second live
+              run on one (``arm_in_flight``: ``campaign_arm_in_flight``).
 How:          ``canonical_json`` + ``sha256_text`` over the record's body → ``tally`` takes the
               line and one ``MemberRun`` per run (the server reads them under the events write
               lock) → ``Tally.headroom`` → ``Tally.refusal``.
@@ -115,9 +120,9 @@ REFUSAL_CAP_REQUIRED = "campaign_cap_required"
 #: 422 — an ``S1`` run under a campaign names neither ``task_ids`` nor ``limit``: its author's
 #: headroom is per commit, so its commits must be counted.
 REFUSAL_S1_UNBOUNDED = "campaign_s1_unbounded"
-#: 409 — a run on the same arm of the same reading (or repository) is still queued or running
-#: under the campaign: one live run per (campaign, arm), so no commit is attempted twice at
-#: once (F87-2).
+#: 409 — a run on the same arm that could attempt one of this run's commits (the same reading,
+#: or a commit both name — ``runs_overlap``) is still queued or running under the campaign:
+#: one live run per (campaign, arm) on a commit (F87-2).
 REFUSAL_ARM_IN_FLIGHT = "campaign_arm_in_flight"
 #: The key a factory build is admitted under: its rows name their own test author.
 ARM_FACTORY = "factory"
@@ -229,11 +234,21 @@ def requested_arm(*, kind: str, mode: str, s1: bool, learning: str | None) -> st
     return base if learning == LEARN_OFF else base + MOD_LOOP
 
 
-def runs_overlap(reading_id: str, other_reading_id: str) -> bool:
+def runs_overlap(
+    reading_id: str,
+    other_reading_id: str,
+    *,
+    commits: frozenset[str] | None,
+    other_commits: frozenset[str] | None,
+) -> bool:
     """Whether two runs of one arm on one repository could attempt the same commit: when they
-    are filed under the same reading, or either names none (``""`` — it may replay any commit
-    of the repository). Two readings' pools are their own commits."""
-    return not reading_id or not other_reading_id or reading_id == other_reading_id
+    are filed under the same reading or either under none (``""``); else when either names no
+    commits (``None`` — it may replay any commit of the repository) or the commits they name
+    share one. A run attempts only the commits it names (``task_ids``), and nothing binds
+    those to its reading's pool, so two readings' runs are kept apart by what they name."""
+    if not reading_id or not other_reading_id or reading_id == other_reading_id:
+        return True
+    return commits is None or other_commits is None or not commits.isdisjoint(other_commits)
 
 
 def arm_in_flight(
@@ -241,8 +256,9 @@ def arm_in_flight(
 ) -> CampaignRefused:
     """The refusal of a second live run on one arm (F87-2): naming the run still live on it.
     The admission holds one per (campaign, repository, arm) where the two could attempt the
-    same commit (:func:`runs_overlap`), so a commit is never attempted by two runs of one arm
-    at once — a second attempt the reading could read in place of the first."""
+    same commit (:func:`runs_overlap`), so no two runs keyed on one arm attempt a commit
+    while both are queued or running — a second attempt the reading could read in place of
+    the first."""
     of = f"reading {reading_id} of {repo!r}" if reading_id else repr(repo)
     return CampaignRefused(
         f"campaign arm in flight: run {run_id} on {arm} of {of} is still {status} under this "

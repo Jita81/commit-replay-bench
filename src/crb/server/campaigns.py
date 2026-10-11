@@ -21,8 +21,9 @@ What it does: Keeps a campaign only when its id re-hashes and it sits on its own
               status, rows and author calls into a ``MemberRun``; computes the ``Tally``; serves
               the campaign with its line, spent (author calls apart), held, left and runs; finds
               the admitted runs of a repository still queued or running, and the one live on
-              an arm that could attempt a commit of the same reading (``live_on_arm``, keyed
-              by ``requested_arm`` and ``runs_overlap``).
+              an arm that could attempt a commit the new run could — the same reading, or a
+              commit both name (``live_on_arm``, keyed by ``requested_arm``, ``run_commits``
+              and ``runs_overlap``).
 How:          ``Event`` rows by action and trace → ``Campaign.from_dict`` → ``verify`` →
               ``rows_of_runs`` and ``author.attempt`` events → ``Spend.of_rows`` /
               ``with_authoring`` per run → ``crb.core.campaign.tally``.
@@ -172,18 +173,36 @@ def run_reading(run: Run) -> str:
     return str(dict(run.params_json or {}).get("reading_id") or "")
 
 
+def run_commits(run: Run) -> frozenset[str] | None:
+    """The commits a run names (``params.task_ids``) — the most it attempts, since the worker
+    replays only those it names — or ``None`` when it names none and may replay any commit
+    of its repository."""
+    named = frozenset(str(t) for t in (dict(run.params_json or {}).get("task_ids") or []))
+    return named or None
+
+
 def live_on_arm(
-    session: Session, campaign_id: str, *, repo: str, arm: str, reading_id: str = ""
+    session: Session,
+    campaign_id: str,
+    *,
+    repo: str,
+    arm: str,
+    reading_id: str = "",
+    commits: frozenset[str] | None = None,
 ) -> Run | None:
     """The first run of the campaign on ``repo`` and ``arm`` still queued or running that
-    could attempt a commit a run filed under ``reading_id`` would (``runs_overlap``: the same
-    reading, or either names none), or ``None``: while it is live no such run on that arm is
-    admitted (F87-2)."""
+    could attempt a commit a run filed under ``reading_id`` and naming ``commits`` would
+    (``runs_overlap``: the same reading or either under none, else a commit both name or
+    either naming none — ``None``, the default, is any commit), or ``None``: while it is live
+    no such run on that arm is admitted (F87-2)."""
     return next(
         (
             r
             for r in live_runs(session, repo=repo, campaign_id=campaign_id)
-            if run_arm(r) == arm and runs_overlap(reading_id, run_reading(r))
+            if run_arm(r) == arm
+            and runs_overlap(
+                reading_id, run_reading(r), commits=commits, other_commits=run_commits(r)
+            )
         ),
         None,
     )
@@ -297,5 +316,6 @@ __all__ = [
     "members",
     "releases",
     "run_arm",
+    "run_commits",
     "run_reading",
 ]

@@ -29,7 +29,8 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               run outside; a legacy reading counts it as before). One live run per arm
               (F87-2): a second run on an arm of a repository while the first is queued or
               running is 409 ``campaign_arm_in_flight`` naming the live run, while another
-              arm, repository, campaign or reading is admitted (a run naming no reading
+              arm, repository or campaign is admitted, and another reading's run only when
+              the commits the two name are disjoint (a run naming no reading or no commits
               overlaps every one), the arm admits the next once the live run has finished,
               and two concurrent identical submits start one run.
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
@@ -318,30 +319,61 @@ def test_a_run_on_another_arm_repository_or_campaign_is_admitted(env: Env) -> No
 def test_runs_of_two_readings_on_one_arm_are_live_together_and_a_loose_one_is_not(
     env: Env,
 ) -> None:
-    """Two readings' pools are their own commits: a run of each on ``S3+L`` of alpha is
-    live at once. A second run of either reading on that arm is refused, naming its own
-    reading's live run, and so is a run filed under no reading — it may replay any commit of
-    the repository, so it overlaps both."""
+    """Two readings' runs that name disjoint commits — here each its own reading's — are
+    live at once on ``S3+L`` of alpha. A second run of either reading on that arm is
+    refused, naming its own reading's live run, and so is a run filed under no reading
+    naming no commits — it may replay any commit of the repository, so it overlaps both."""
     env.settings.builder.executor = "docker"
     cid = _register(env)["campaign_id"]
     one = write_reading(env.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
     two = write_reading(env.factory, ["2" * 40], repo=ALPHA, campaign_id=cid)
     filed = {**GOLD, "executor": "docker", "max_cost_usd": 1, "campaign_id": cid}
+    bodies = {
+        reading.reading_id: {**filed, "reading_id": reading.reading_id, "task_ids": [sha]}
+        for reading, sha in ((one, "1" * 40), (two, "2" * 40))
+    }
     live = {}
-    for reading in (one, two):
-        r = env.post("/runs", json={**filed, "reading_id": reading.reading_id})
+    for reading_id, body in bodies.items():
+        r = env.post("/runs", json=body)
         assert r.status_code == 201, r.text
-        live[reading.reading_id] = r.json()["id"]
-    for reading in (one, two):
-        r = env.post("/runs", json={**filed, "reading_id": reading.reading_id})
+        live[reading_id] = r.json()["id"]
+    for reading_id, body in bodies.items():
+        r = env.post("/runs", json=body)
         assert r.status_code == 409 and envelope(r)["code"] == "campaign_arm_in_flight", r.text
-        assert envelope(r)["detail"]["run_id"] == live[reading.reading_id]
-        assert envelope(r)["detail"]["reading_id"] == reading.reading_id
-        assert reading.reading_id in envelope(r)["message"]
+        assert envelope(r)["detail"]["run_id"] == live[reading_id]
+        assert envelope(r)["detail"]["reading_id"] == reading_id
+        assert reading_id in envelope(r)["message"]
     loose = env.post("/runs", json=filed)
     assert loose.status_code == 409 and envelope(loose)["code"] == "campaign_arm_in_flight"
     assert envelope(loose)["detail"]["run_id"] == live[one.reading_id]
     assert len(_admitted(env, cid)) == 2
+
+
+def test_runs_of_two_readings_naming_one_commit_are_never_live_together_on_one_arm(
+    env: Env,
+) -> None:
+    """R1-1: nothing binds a run's ``task_ids`` to its reading's pool, and a reading reads
+    another reading's admitted rows on its commits (DL-382), so the key is the commits the
+    runs name, not their reading ids. While reading one's run naming commit 1 is live on
+    ``S3+L``, reading two's run naming commits 1 and 2 is refused naming it, and so is its
+    run naming none (any commit); its run naming commit 2 alone is admitted beside it."""
+    env.settings.builder.executor = "docker"
+    cid = _register(env)["campaign_id"]
+    one = write_reading(env.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
+    two = write_reading(env.factory, ["2" * 40], repo=ALPHA, campaign_id=cid)
+    filed = {**GOLD, "executor": "docker", "max_cost_usd": 1, "campaign_id": cid}
+    first = env.post("/runs", json={**filed, "reading_id": one.reading_id, "task_ids": SHAS[:1]})
+    assert first.status_code == 201, first.text
+    of_two = {**filed, "reading_id": two.reading_id}
+    for named in (SHAS[:2], None):
+        body = of_two if named is None else {**of_two, "task_ids": named}
+        r = env.post("/runs", json=body)
+        assert r.status_code == 409 and envelope(r)["code"] == "campaign_arm_in_flight", r.text
+        assert envelope(r)["detail"]["run_id"] == first.json()["id"]
+        assert envelope(r)["detail"]["reading_id"] == two.reading_id
+    apart = env.post("/runs", json={**of_two, "task_ids": SHAS[1:2]})
+    assert apart.status_code == 201, apart.text
+    assert [a["run_id"] for a in _admitted(env, cid)] == [first.json()["id"], apart.json()["id"]]
 
 
 @pytest.mark.parametrize("status", ["succeeded", "failed", "cancelled"])
