@@ -172,6 +172,11 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
   await page.setViewportSize({ width: 375, height: 800 })
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Class: Add an operation' })).toBeVisible()
+  // the class's card is one of four sections, each drawn from its own read: measure the page
+  // once all four are there, not when the first answers (P-782)
+  await expect(page.getByRole('table', { name: 'Class-set versions' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Class set ${VERSION}` })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Label a sample' })).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow, 'no sideways scroll at 375 px').toBeLessThanOrEqual(1)
   // the only way to switch version is on screen, not scrolled off inside its table
