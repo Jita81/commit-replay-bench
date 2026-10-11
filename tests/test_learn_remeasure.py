@@ -376,6 +376,26 @@ def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_at_its_one_rung() -
     assert b.est_minutes == pytest.approx(30.0 * 20 * 1 / 60.0)
     (request,) = b.requests
     assert (b.mode, request.kind, request.rungs, b.n_requested) == ("blind", "blind", 1, 20)
+    # R1-5: the served note says the same, never "up to the ladder's rungs" for a blind cell
+    note = _plan(priced, reading, s1_author_model=AUTHOR).to_dict()["note"]
+    assert "the rungs each request's run climbs — one, blind or sighted" in note
+    assert "up to the ladder's rungs" not in note
+
+
+def test_a_request_is_priced_at_the_rungs_its_body_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R1-4 (PW-1): ``RunRequest.rungs`` is read off the body the request sends, never a
+    constant beside it — a body that named a three-rung ladder would be priced at three
+    attempts per commit. No body names one today, so ``["r1"]`` prices one (above)."""
+    reading = register_reading(commits(40), hierarchy=(S1,))
+    priced = [sealed_row(x, arm="A0", cost_usd=0.4, latency_s=30.0) for x in commits(3, "p")]
+    body = learn.RunRequest.to_dict
+    monkeypatch.setattr(
+        learn.RunRequest, "to_dict", lambda self: {**body(self), "ladder": ["r1", "r2", "r3"]}
+    )
+    (b,) = _plan(priced, reading, s1_author_model=AUTHOR).cells
+    (request,) = b.requests
+    assert request.rungs == 3
+    assert b.est_cost_usd == pytest.approx(0.4 * 20 * 3)
 
 
 def test_deterministic_and_rendered() -> None:

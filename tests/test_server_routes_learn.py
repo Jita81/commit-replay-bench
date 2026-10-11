@@ -1108,6 +1108,12 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     (req,) = authored["requests"]
     assert (req["kind"], req["mode"], req["arm"]) == ("blind", "blind", "S1")
     assert req["task_ids"] == pool[:20]
+    # queued, the blind run climbs the one rung the plan priced it at (PW-1: no body names a
+    # ladder, so ``POST /runs`` stores ``["r1"]`` — the pin beside the sighted one above)
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 201, q.text
+    (run,) = [env.get(f"/runs/{rid}").json() for rid in q.json()["run_ids"]]
+    assert (run["kind"], run["mode"], run["ladder"]) == ("blind", "blind", ["r1"])
 
 
 def test_queueing_refuses_a_cell_whose_builder_has_no_credential(

@@ -1603,10 +1603,11 @@ class RunRequest:
 
     @property
     def rungs(self) -> int:
-        """The attempts the run makes at each of its commits. The body names no ladder, so
-        ``POST /runs`` stores its default ``["r1"]``: one rung in either mode, and the ``r1``
-        attempt is the one a reading reads."""
-        return 1
+        """The attempts the run makes at each of its commits, read off the body it sends: the
+        ladder it names, else the default ``["r1"]`` ``POST /runs`` stores for none — one
+        rung in either mode today, and the ``r1`` attempt is the one a reading reads. Read
+        from :meth:`to_dict`, so a body that ever names a ladder is priced at its rungs."""
+        return len(self.to_dict().get("ladder") or ["r1"])
 
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -1821,9 +1822,9 @@ class RemeasurePlan:
                 "no reading at this apparatus (stale or thin) is offered registration, never a "
                 "replay, because rows graded before a reading can never count and would make "
                 "those commits unusable in one. One entry per (cell, mode, context arm) — never "
-                "pooled. Costs are the cell's own mean row cost x the commits requested x up to "
-                "the ladder's rungs for a blind cell (1 sighted) — an estimate, unknown where no "
-                "row recorded a cost."
+                "pooled. Costs are the cell's own mean row cost x the commits requested x the "
+                "rungs each request's run climbs — one, blind or sighted (POST /runs stores the "
+                'default ["r1"]) — an estimate, unknown where no row recorded a cost.'
             ),
         }
 
