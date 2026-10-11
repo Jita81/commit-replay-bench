@@ -322,6 +322,11 @@ The image contains the Claude Code CLI as the npm package's **native binary** (p
 runtime is added. Like sandbox images, it must be present in the host daemon's store
 (`docker load` on an air-gapped host); the worker never pulls.
 
+The shipped sandbox images end as uid 65534, so the builder stage switches to root for its
+`apt-get` and `chmod` and drops back to `65534:65534` at the end. CI's `sandbox-images` job
+builds the Go variant above on the Go sandbox image it has just built, and runs it as uid
+65534 to print the pinned CLI version (P-791).
+
 ### 9.2 Configure the worker
 
 ```

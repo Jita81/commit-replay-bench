@@ -7,7 +7,7 @@ refuses a file without one, a dangling link, or a stale map. Read the
 [ARCHITECTURE.md](ARCHITECTURE.md) for how the layers fit; then use this page to find the
 file. `Touch when` is written for a developer onboarding a client repository.
 
-844 files with a header · 1 exempt (listed at the end).
+845 files with a header · 1 exempt (listed at the end).
 
 ## `deploy` (2 files)
 
@@ -320,7 +320,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`src/crb/store/models.py`](../src/crb/store/models.py) | The SQLAlchemy 2.0 declarative models — the store's schema, one class per table. | [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_store_db.py`](../tests/test_store_db.py), [`tests/test_store_ledger.py`](../tests/test_store_ledger.py), [`tests/test_store_events.py`](../tests/test_store_events.py), [`tests/test_store_reviews.py`](../tests/test_store_reviews.py), [`tests/test_worker.py`](../tests/test_worker.py) | never for a new repository (``repos.config_json`` absorbs any ``RepoConfig`` change); adding a column or table means a new Alembic revision under [`src/crb/store/migrations/versions/`](../src/crb/store/migrations/versions/) plus a ``REVISION_MARKERS`` / ``REVISION_TABLES`` entry in [`src/crb/store/migrate.py`](../src/crb/store/migrate.py), and — for an append-only table — a pinned tuple in that revision; a ``grades`` column also changes the hashed body in [`src/crb/core/ledger.py`](../src/crb/core/ledger.py) and needs an ADR. |
 | [`src/crb/store/qualifications.py`](../src/crb/store/qualifications.py) | The store's qualification ledger — append, the latest record per task and posture, the projected specs a replay grades against, counts by refusal code, fingerprints for cross-posture pooling, and revocation. | [`tests/test_store_qualifications.py`](../tests/test_store_qualifications.py), [`tests/test_store_migrate.py`](../tests/test_store_migrate.py), [`tests/test_worker.py`](../tests/test_worker.py), [`tests/test_provision_quarantine.py`](../tests/test_provision_quarantine.py) | never for a new repository; a gate needs a new reading of the records (add it here, never an UPDATE). |
 
-## `tests` (337 files)
+## `tests` (338 files)
 
 | File | What it is | Tested by | Touch when |
 |---|---|---|---|
@@ -428,6 +428,7 @@ file. `Touch when` is written for a developer onboarding a client repository.
 | [`tests/test_deps_seam.py`](../tests/test_deps_seam.py) | The contract tests for ``crb.core.deps`` and the four call-site contracts the qualification and provisioning streams both code to. | [`tests/test_deps_seam.py`](../tests/test_deps_seam.py) | never for a new repository; the seam's shape changes — both streams code to it, so a change here is a change to ADR-0019's contract. |
 | [`tests/test_doc_duplicates.py`](../tests/test_doc_duplicates.py) | The duplicate-text ratchet for the public documentation. | [`tests/test_doc_duplicates.py`](../tests/test_doc_duplicates.py) | never for a new repository; a page repeats a block on purpose (say why here and exempt the path), or a second generated page is added (skip it as GAP-ANALYSIS is). |
 | [`tests/test_docker_wait.py`](../tests/test_docker_wait.py) | The unit tests of [`tests/docker_wait.py`](../tests/docker_wait.py) (no daemon: ``subprocess.run`` is doubled) and the ratchet over every test module. | [`tests/test_docker_wait.py`](../tests/test_docker_wait.py) | never for a new repository; a test needs another docker listing: add it to [`tests/docker_wait.py`](../tests/docker_wait.py) and teach the ratchet its argv shape. |
+| [`tests/test_dockerfile_builder.py`](../tests/test_dockerfile_builder.py) | The check that the builder stage switches to root before it installs anything and still ends non-root, and that CI lints the builder Dockerfile and builds and runs its Go variant on the Go sandbox image the same job just built. | (this is a test file) | never for a new repository; the builder Dockerfile's stages or users change; the sandbox-images job is restructured or renamed. |
 | [`tests/test_dod_check.py`](../tests/test_dod_check.py) | The test suite for [`scripts/dod_check.py`](../scripts/dod_check.py), on a throwaway repository tree. | (this is a test file) | never for a new repository; a category, level or evidence prefix is added to the standard — add the fixture and the assertion here in the same change. |
 | [`tests/test_e2e_axe_settles.py`](../tests/test_e2e_axe_settles.py) | The ratchet that routes every axe scan in [`ui/e2e`](../ui/e2e) through the settling helper. | (this is a test file) | never for a new repository; a spec needs an axe option the helper does not offer (add it to the helper, never a second construction). |
 | [`tests/test_economics.py`](../tests/test_economics.py) | The economics fold's test suite — the arithmetic on hand-built rows. | [`tests/test_economics.py`](../tests/test_economics.py) | never for a new repository; the interval method changes (pin the new method's textbook value here first), or a new reader of a cost needs a place in ``_COST_ZERO_ALLOWED`` (say why there). |

@@ -7,11 +7,14 @@ down until Paul Glover restarts it (Q-14). Every step in part 5 is marked "not y
 values accepted), Q-14 (the restart and the money), Q-06 (each campaign is approved with a stated
 maximum) and his answer on Wave 3's reviews (decision 5). The source is
 `feedback/2026-10-09-project-room-decisions.md` in the private crb-handbook repository. This
-record was written against `main` at `48c25abd`.
+record was written against `main` at `48c25abd`. The values Paul fixed on 2026-10-11, before
+any data, are at the end of part 1 (DL-375 to DL-381), and part 2 is amended to the campaign
+record the product now keeps (DL-374).
 
 **Claims in this record.** Nothing here is measured on a graded row. A protocol value is the one
 ADR-0026 item 13 fixes. A cost is item 13's projection, or arithmetic on it. The rate of dollars
-to the pound is an assumption. Each is tagged where it stands.
+to the pound is the operator's fixed conversion (DL-379), not a market rate. Each is tagged
+where it stands.
 
 ## 1. The protocol
 
@@ -72,6 +75,35 @@ block moves `A0+L` rows off the reading's checks arm, so that the reading stops 
 **[hypothesis — unchecked in the code]**. Step 6's success condition catches it, because the
 reading must count each run's commits under the arm queued.
 
+**Fixed before any data, 2026-10-11 (CRB Project room).** Paul Glover fixed these in the CRB
+Project room on 2026-10-11, before any reading was registered, any run queued or any Wave 3
+row written, so none was chosen knowing a result:
+
+- **What the result decides (Q-25; DL-376).** In his words: "Continue if any cell delivers, or
+  the loop's paired difference clears its registered smallest effect. Change course if no cell
+  delivers but the loop or the test author moves the rate by more than noise. Stop if nothing
+  moves and the sealed rate sits within noise of the lower bound of the rate taken where the
+  answer was reachable. Whichever it is, the result is published with its rows in the
+  repository." The registered smallest effect is each reading's `smallest_effect` (step 4).
+- **When (Q-19; DL-377).** The decision is taken on Friday 6 November 2026, or when Wave 3
+  reports, if that is sooner.
+- **The open choices (Q-21; DL-378)**, each as recommended above:
+  - (a) the test author is the one the deployment names now, `editblock:gpt-oss-120b` on
+    Cerebras, checked at registration (step 2), and never the builder's own model;
+  - (b) the loop runs at level `config` for the `A0+L` arm only, and the switch is put back
+    after its last run (steps 5 and 10);
+  - (c) the pool is every qualified commit of the cell;
+  - (d) one budget profile, `default`, on every arm but `A0+L`;
+  - (e) the product's remeasure plan sets the run order, so `S1` spends nothing until `S3`
+    delivers.
+- **The rate and what counts (DL-379).** 1.35 dollars to the pound: stage 1, £40, is $54.00,
+  and the ceiling, £80, is $108.00 **[hypothesis — the operator's fixed conversion, not a
+  market rate (DL-379)]**. The rate is stored on the campaign record (part 2). The
+  ledger's `cost_usd` and the `S1` test author's calls count against the £80; Claude Code's own
+  sessions do not. Stage 1's £40 is released; stage 2 is a new decision (DL-381).
+- **The freeze (Q-24; DL-375).** No new feature work until Wave 3 reports, except the pre-run
+  pull request that made this record's checks the product's own.
+
 ## 2. Money
 
 **The ceiling.** Paul Glover approved a hard ceiling of £80 for Wave 3, in two stages (decision
@@ -82,9 +114,11 @@ lists, which this record does not schedule **[aspiration — the ceiling decisio
 is spent yet]**.
 
 **The rate.** The ledger records dollars. This record converts at 1.35 dollars to the pound, the
-fixed rate of the value baseline, which Q-14's own conversion uses too **[hypothesis — an
-assumption, not a market rate: the product has no exchange-rate source, as
-[the value baseline](2026-09-25-value-baseline.md) says under "What this does not say"]**.
+fixed rate of the value baseline, which Q-14's own conversion uses too, and which Paul fixed for
+Wave 3 on 2026-10-11 (DL-379) **[hypothesis — the operator's fixed conversion, not a market
+rate: the product has no exchange-rate source, as [the value
+baseline](2026-09-25-value-baseline.md) says under "What this does not say"]**. The campaign
+record stores it, so the dollar lines below are the product's own.
 
 | figure | pounds | dollars at 1.35 | source |
 |---|---|---|---|
@@ -98,22 +132,47 @@ Stage 1's $54.00 is 61% to 73% of item 13's projected mean, so the protocol is u
 within stage 1 **[hypothesis — $54.00 set against the projected mean of $74 to $89; method:
 division]**.
 
-**Who holds the ceiling.** The product does not enforce the £80 ceiling. It is held by Claude
-Code stopping the campaign. These readings of the code on `main` at `48c25abd` make it so
-(P-775, G-957):
+**Who holds the ceiling: the campaign record.** The product holds it (DL-374, which replaces
+the hand-held ceiling DL-371 described; G-957 is retired and P-775 closed). Wave 3 is one
+campaign, registered once at step 4 with an operator session:
 
-- `POST /runs` takes a `max_cost_usd` per run, in dollars. Nothing sums a campaign's runs
-  (`RunCreateRequest`, `src/crb/server/schemas.py`).
-- That cap is a guard, not a guarantee. It admits an attempt while the run's spend plus a reserve
-  stays within it, and the reserve is the dearest attempt so far, so nothing bounds a first
-  attempt that has no cost cap of its own (`src/crb/server/spend_cap.py`; G-938). A run capped
-  at $0.10 once spent $5.00 on its first attempt (P-261).
-- An `S1` replay's test-author calls are not in its spend. Each is an `author.attempt` event
-  with its `cost_usd` (`src/crb/factory/author.py`). The replay worker admits an attempt on the
-  ledger rows alone (`Spend.of_rows`, `src/crb/server/worker.py`), and `GET /runs/{id}` serves
-  `cost_usd` from the rows. A factory run adds its author's calls; a replay does not.
+```json
+{
+  "name": "wave-3",
+  "ceiling_gbp": 80,
+  "released_gbp": 40,
+  "rate_usd_per_gbp": 1.35,
+  "decision": "DL-379 and DL-381: Wave 3's £80 ceiling at 1.35, stage 1's £40 released"
+}
+```
 
-**The tally.** Claude Code keeps one running total for the campaign, in dollars:
+- `POST /api/v1/campaigns` answers `201` with the record, its `campaign_id` (`cmp_[0-9a-f]{24}`;
+  the ceiling, the release and the rate are hashed into it) and its tally: `ceiling_usd`
+  $108.00 and `line_usd` $54.00. A second campaign of the same name is refused 409
+  `campaign_exists`.
+- Every Wave 3 run is filed under it: its `POST /runs` body carries `campaign_id` and a
+  `max_cost_usd`, and an `S1` run its `task_ids` or a `limit`. Without the cap it is refused 422
+  `campaign_cap_required`; an unbounded `S1` run, 422 `campaign_s1_unbounded`; an unknown
+  campaign, 404 `campaign_unknown`.
+- A run is admitted in the same transaction that queues it, and only while its cap and its
+  headroom fit what is left under the line, by the tally below; otherwise it is refused 409
+  `campaign_ceiling` and nothing is queued.
+- A campaign with a run whose cost is not known is stopped, 409 `campaign_cost_unknown`, and so
+  is one with a run that spent past its cap plus its headroom, 409 `campaign_overrun`: every new
+  run is refused.
+- The run's own cap is still a guard, not a guarantee: it admits an attempt while the run's
+  spend plus the dearest attempt so far stays within it, so nothing bounds a first attempt that
+  has no cost cap of its own (`src/crb/server/spend_cap.py`; G-938, still open). A run capped at
+  $0.10 once spent $5.00 on its first attempt (P-261). The headroom below holds that overshoot.
+- An `S1` replay's test-author calls are now in its spend (`Spend.with_authoring`), so its own
+  cap reads them, and the campaign's tally does too (P-775).
+- The Learn re-measurement queue (`POST /learn/remeasure/queue`) and the free-stage chain file
+  no run under a campaign, so neither is used: a run outside the campaign spends outside its
+  ceiling.
+
+**The tally.** The product keeps one running total for the campaign, in dollars, by this
+rule, and `GET /api/v1/campaigns/{id}` serves it (`spent_usd`, with `authoring_usd` apart,
+`held_usd`, `left_usd`, `stopped`, and the runs):
 
 - **spent** — for every run of the campaign, its `cost_usd` (`GET /runs/{id}`), plus, for an
   `S1` run, the `cost_usd` of each `author.attempt` event in its log (`GET /runs/{id}/events/log`,
@@ -126,8 +185,9 @@ Code stopping the campaign. These readings of the code on `main` at `48c25abd` m
 
 A run is queued only when spent, held, its own cap and its own headroom together stay at or under
 the stage's line: $54.00 in stage 1, and $108.00 for the campaign in all once stage 2 is
-released. Each run's `max_cost_usd` is set to fit. The rule limits how many runs are in flight at
-once; a worker runs one at a time (`Worker.run_forever`, `src/crb/server/worker.py`).
+released. The product refuses any other run, 409 `campaign_ceiling`. Each run's `max_cost_usd`
+is set to fit. The rule limits how many runs are in flight at once; a worker runs one at a time
+(`Worker.run_forever`, `src/crb/server/worker.py`).
 
 **Stage 1 ends** at the first of these:
 
@@ -139,8 +199,9 @@ once; a worker runs one at a time (`Worker.run_forever`, `src/crb/server/worker.
   registration, a run whose spend passes its cap plus its headroom, or spend the tally cannot
   place against a run.
 
-On a stop, Claude Code queues nothing more and cancels the runs that have not started. A running
-run ends at its cap, which was set to fit.
+On a stop, Claude Code queues nothing more and cancels the runs that have not started; the
+product refuses every new run of a stopped campaign whatever is queued. A running run ends at its
+cap, which was set to fit.
 
 **What Claude Code reports at the end of stage 1**, to Paul and as a dated record under
 `docs/reviews/`:
@@ -152,12 +213,16 @@ run ends at its cap, which was set to fit.
 - for each descriptive arm: commits run and clean;
 - what stage 2 would buy: the statement of part 4.
 
-**Stage 2** starts only on Paul's written release, recorded in the decision log. Its line is
-$108.00 for the campaign in all. Nothing is queued while the release is awaited.
+**Stage 2** starts only on Paul's written release, recorded in the decision log: a new decision
+(DL-381). It is then filed as `POST /api/v1/campaigns/{id}/release` with `{"released_gbp": 80,
+"decision": "<the release's decision log id and words>"}`, which raises the line and never
+passes the ceiling (409 `campaign_release_invalid`). Its line is $108.00 for the campaign in
+all. Nothing is queued while the release is awaited.
 
 **Assumptions.** The ceiling is held against the ledger's `cost_usd`, the cost the builder
-reports, not against the provider's bill. Claude Code's own sessions (this one, the campaign's
-and the reviewer's) are not counted against the £80 **[hypothesis — Paul to confirm]**.
+reports, and the `S1` test author's calls, not against the provider's bill. Claude Code's own
+sessions (this one, the campaign's and the reviewer's) are not counted against the £80. Both
+were confirmed by Paul Glover on 2026-10-11 (DL-379).
 
 ## 3. The reviews
 
@@ -290,16 +355,16 @@ and stops and reports at the first step whose success condition fails.
 
 | # | step | who and how | success condition | state |
 |---|---|---|---|---|
-| 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14) | `/health` reads ok and the worker is up | not yet run |
+| 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14). The order and the sealed settings are DEPLOYMENT §1.1's: `source ~/crb-stack/env.sh` before `crb migrate`, the UI rebuilt before `crb doctor`, the worker on `--executor docker`; with both processes stopped across a migration (§6.1) | `crb doctor` has no `fail`; `/health` reads ok once the builder's login is verified, and the worker is up | not yet run |
 | 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos` | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used] | not yet run |
 | 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>` | not yet run |
 | 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here | not yet run |
-| 4 | register the four readings | Claude Code, `POST /api/v1/readings` over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS); no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below | `201` for each, with `reading_id`, the `pool` in seeded order, `pool_sha256` and `pool_rule`; `GET /api/v1/readings?repo=<repo>` lists each, its cell's budget spent at 2.10% of 5%. A refusal (`pool_seen`, `budget_spent`, `pool_not_blind`, `invalid_reading`) stops the campaign before any spend. The ids and pool sizes are added here in an amendment commit | not yet run |
+| 4 | register the four readings, then the campaign | Claude Code, `POST /api/v1/readings` over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS); no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect`. A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Then `POST /api/v1/campaigns` with part 2's body | `201` for each reading, with `reading_id`, the `pool` in seeded order, `pool_sha256` and `pool_rule`; `GET /api/v1/readings?repo=<repo>` lists each, its cell's budget spent at 2.10% of 5%. A refusal (`pool_seen`, `budget_spent`, `pool_not_blind`, `invalid_reading`, which on an unsealed deployment names both executors) stops the campaign before any spend. `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. The reading ids, the pool sizes and the campaign id are added here in an amendment commit | not yet run |
 | 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is recorded here | the Learn page reads `config` for cobra and for click | not yet run |
-| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, `crb_start_run` (`POST /api/v1/runs`). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`), plus `max_cost_usd` and `"budget_profile": "default"`. **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. **`S1`**: its request from the remeasure plan once `S3` delivers, plus `max_cost_usd` and `"budget_profile": "default"` | each run ends `succeeded`, or `failed` with `stopped_code: spend_cap`; its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; `GET /api/v1/readings` counts the run's commits under that arm | not yet run |
-| 7 | keep the tally | Claude Code, after each run: `cost_usd` from `GET /api/v1/runs/{id}`, and for `S1` the `author.attempt` costs from `crb_run_events` | spent and held stay at or under the stage's line; otherwise part 2's stop | not yet run |
+| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only, never with `POST /api/v1/learn/remeasure/queue`, which files no run under a campaign. Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`. **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`. **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"` | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cap_required`, `campaign_s1_unbounded`, `reading_unsealed`); an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`; its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; `GET /api/v1/readings` counts the run's commits under that arm, and `GET /api/v1/campaigns/{id}` lists the run | not yet run |
+| 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is empty, and spent and held stay at or under the stage's line; otherwise part 2's stop | not yet run |
 | 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the record is committed under `docs/reviews/` | not yet run |
-| 9 | stage 2 | Paul releases it in writing; the release is recorded in the decision log; Claude Code resumes step 6 with the line at $108.00 | the release is recorded before any stage-2 run is queued | not yet run |
+| 9 | stage 2 | Paul releases it in writing, a new decision; the release is recorded in the decision log and filed as `POST /api/v1/campaigns/{id}/release` (part 2); Claude Code resumes step 6 with the line at $108.00 | the release is recorded before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
 | 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 5 | not yet run |
 | 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals | not yet run |
 
@@ -320,9 +385,16 @@ The registration body for cobra XS:
   "hierarchy": ["S3", "S1@<author>"],
   "rule": "look.v1",
   "descriptive": [["A0", 16], ["A0+L", 16]],
-  "author_model": "<author>"
+  "author_model": "<author>",
+  "hypothesis": "<what the cell's reading tests, in the operator's words>",
+  "smallest_effect": "<a share of attempts in (0, 1], fixed by Paul before step 4>"
 }
 ```
+
+`hypothesis` (1 to 2,000 characters) and `smallest_effect` are required and hashed into the
+reading's id, so neither can be edited after registration. Both are open: Paul fixes them
+before step 4, and this record proposes no number for the smallest effect. It is the
+"registered smallest effect" Q-25 reads the loop's paired difference against.
 
 The other bodies change only `repo`, `size` and `language`: cobra S (`go`), click XS and click S
 (`python`). `pool`, `since`, `taxonomy`, `posture_class` and `org_class` are left out, so the

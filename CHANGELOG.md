@@ -12,23 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **Wave 3 pre-run: the product holds a campaign's money ceiling** (G-957, P-775, P-790, DL-374;
-  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). `POST /campaigns` registers a
-  ceiling and first release in pounds at the decision's stated rate; `POST /campaigns/{id}/release`
-  raises the line, never past the ceiling; `GET /campaigns/{id}` serves spent, held and left. A
-  build run with `campaign_id` must carry `max_cost_usd` and is admitted, in the transaction that
-  queues it, only while its cap plus headroom fits what is left, else 409 `campaign_ceiling`. An
-  unknown cost or an overrun stops the campaign. An `S1` replay's test-author calls now count in
-  its spend. G-938 stays open; the headroom covers its overshoot.
-
-- **Wave 3 pre-run: a reading states its question, counts tasks and is measured sealed**
-  (P-787 to P-789, DL-372, DL-373; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)).
-  A reading now requires `hypothesis` and `smallest_effect`, hashed into its id; older readings
-  keep theirs. The sign-off floor `thin_cell` counts distinct tasks, not attempts, under the same
-  `signoff-policy.v3`. A replayed reading registers only on a sealed deployment, and a `replay`
-  or `blind` run filed under one (`reading_id`) is refused at submit, 422 `reading_unknown` or 409
-  `reading_unsealed`, unless sandbox and builder both run on docker; the worker checks again at
-  claim.
+- **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
+  ceiling the product holds** (P-787 to P-791, G-957, DL-372 to DL-381;
+  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading requires `hypothesis`
+  and `smallest_effect`, hashed into its id; `thin_cell` counts distinct tasks. A reading
+  registers, and a run under one is admitted, only when sandbox and builder both run on docker.
+  `POST /campaigns` holds a ceiling in pounds at a stated rate: a run filed under it needs
+  `max_cost_usd` and is admitted only while its cap plus headroom fits what is left, else 409
+  `campaign_ceiling`; `S1` author calls count. CI builds and runs the Go builder image, which
+  now builds. The operator's 2026-10-11 decisions are recorded.
 
 - **A development stack signs a browser in on its own machine; production cannot**
   ([#58](https://github.com/Jita81/commit-replay-bench/pull/58)). `CRB_AUTH__DEV_AUTOLOGIN=<username>`

@@ -44,8 +44,9 @@ which receives only the package names and versions the task's lockfiles pin
 The shape every walkthrough, the first factory run (B-1b) and the development stack use:
 one directory, one SQLite file, two processes **[measured — n = 2 processes; method: the
 commands in the block below, which the development stack runs, one serving the API and the
-other the queue; apparatus n/a]**. It is for evaluation — the local executor
-does not isolate test runs and SQLite is not the production store (§2.1) — but it holds
+other the queue; apparatus n/a]**. It is for evaluation — the two processes run on the
+host, not in containers, and SQLite is not the production store (§2.1); the worker runs the
+tests in the docker sandbox, since the local executor does not isolate them — but it holds
 sign-offs and ledger rows like any other, so it deserves a fixed address.
 
 ```
@@ -56,12 +57,52 @@ sign-offs and ledger rows like any other, so it deserves a fixed address.
 └── env.sh / restart.sh      # the environment and the two commands, kept next to the data
 ```
 
+`env.sh` holds the stack's environment, at least:
+
 ```bash
 export CRB_HOME=~/crb-stack/home CRB_ENV=dev CRB_DATABASE_URL="sqlite:///$HOME/crb-stack/crb.db"
-crb migrate && crb doctor                       # every line ok or warn before the first run
-crb serve --host 127.0.0.1 --port 8000 &        # API + UI
-crb worker --home "$CRB_HOME" --executor local  # the queue consumer
 ```
+
+Start it, or restart it after an upgrade, from the checkout it serves, in this order:
+
+```bash
+source ~/crb-stack/env.sh                         # first: without it crb migrate upgrades ./.crb/crb.db
+crb migrate                                       # in the foreground: the store is at head first
+npm --prefix ui ci && npm --prefix ui run build   # the UI the API serves, built from this checkout
+crb doctor                                        # every line ok, warn or skip; a fail stops here
+crb serve --host 127.0.0.1 --port 8000 &          # API + UI
+crb worker --home "$CRB_HOME" --executor docker   # the queue consumer
+```
+
+The order matters. `crb migrate` with no `CRB_DATABASE_URL` and no
+`CRB_HOME` upgrades `./.crb/crb.db` under the current directory, not the stack's store, and
+prints the URL it migrated (`src/crb/store/db.py`, `database_url`). `crb doctor` prints one
+line per check, each `ok`, `warn`, `fail` or `skip`, and exits 1 on any `fail`: fix it and run
+it again before you start anything. Its `build` line fails when the UI bundle the API would
+serve was built from another commit, which is why the UI is rebuilt before it
+(`src/crb/cli/commands/service.py`, `probe_served`). `/health` reads `degraded` until the
+builder's login is verified, once, under Settings → Claude Code login (§9.3).
+
+A sealed Wave 3 stack sets, in `env.sh`, beside the three above:
+
+- `CRB_SANDBOX__EXECUTOR=docker` and `CRB_SANDBOX__IMAGE` — the tests run in the docker
+  sandbox, on a sandbox image in the daemon's store (§2.1);
+- `CRB_BUILDER__EXECUTOR=docker` and `CRB_BUILDER__IMAGE` — the builder runs in its sealed
+  container ([deploy/README.md §9.1](../deploy/README.md) builds the image);
+- `CRB_BUILDER__PROXY_IMAGE` — an image with `python3` for the egress sidecar. It defaults to
+  the builder image, and a builder built on the Go sandbox image has no `python3`; an empty
+  `CRB_PROVISION__PROXY_IMAGE` falls back to it too (§2.1);
+- `CRB_PROVISION__ENABLED=true` — a repository that declares dependencies is otherwise refused
+  `PROVISION_DISABLED` under docker;
+- `CRB_PROVISION__ALLOW_PUBLIC=true` only when `CRB_ENV=prod` and the fetch is to reach a public
+  registry; in `dev` a public registry is not refused, so it is left unset.
+
+`posture.sealed` is true only when the sandbox and the builder both run on docker, and a
+reading registers, and a run filed under one is admitted, only then (DL-373). The API reads
+its posture from these variables, never from the worker's `--executor` flag, so they are set
+in `env.sh` for both processes. A factory build
+is never sealed (§2.1, `CRB_ALLOW_UNSEALED_PROD`), so Wave 3's arms run as `replay` or `blind`
+runs.
 
 **Never put `CRB_HOME`, the database or the secrets directory under `/tmp`, `/private/tmp`,
 `/var/folders` or `$TMPDIR`** (DL-045). macOS treats those paths as temporary storage: the
@@ -146,6 +187,7 @@ server and never appear in logs or `/settings`.
 | `CRB_SANDBOX__EXECUTOR` | api, worker | `docker` (default in `prod`, fail-closed) or `local` (development; the worker's default in `dev`). Read by the API (`/settings`, `/health`) and by the worker (`crb worker`; its short form `CRB_EXECUTOR` is read when this is absent). `local` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` is set with `CRB_ALLOW_UNSEALED_PROD_BY` and `CRB_ALLOW_UNSEALED_PROD_REASON` (below) |
 | `CRB_BUILDER__EXECUTOR` | api, worker | where the builder runs: `docker` — the sealed container of ADR-0012 (an exported checkout that cannot contain the gold commit, one allowlisting egress sidecar) — or `host` (development). Empty means the env's default: `docker` in `prod`, `host` in `dev`. Compose and Helm pass one value to both the API and the worker (empty by default), so `/health` describes the builds the worker runs. `host` in `prod` is **refused** unless `CRB_ALLOW_UNSEALED_PROD=1` is set with `CRB_ALLOW_UNSEALED_PROD_BY` and `CRB_ALLOW_UNSEALED_PROD_REASON` (below). Factory builds are not covered: they always run on the host (below) |
 | `CRB_BUILDER__IMAGE` | worker | the builder image (`deploy/Dockerfile.builder`), in the daemon's store. An explicit `CRB_BUILDER__EXECUTOR=docker` without it fails at start-up; the `prod` default without it fails each build closed (`sandbox unavailable`), never on the host |
+| `CRB_BUILDER__PROXY_IMAGE` | api, worker | the image the builder's egress sidecar runs `python3 /opt/crb/egress_proxy.py` on; it needs `python3`. Empty means the builder image itself, which has `python3` when it is built on the default base (`python:3.12.11-slim-bookworm`) and not when it is built on the Go sandbox image (`deploy/sandbox/Dockerfile.go` adds none): with a Go builder, name an image that has it, such as the default builder image. An empty `CRB_PROVISION__PROXY_IMAGE` falls back to this value (not to the builder image), so it also serves the dependency fetch's proxy; in the daemon's store, like the builder image (§1.1) |
 | `CRB_ALLOW_UNSEALED_PROD` | api, worker | `1` lets `prod` start with the host builder or the local test executor — **for an evaluation you have decided not to count as evidence**. Without it both processes refuse to start and say which setting is unsealed. In `prod` it must name who set it and why (`CRB_ALLOW_UNSEALED_PROD_BY`, `CRB_ALLOW_UNSEALED_PROD_REASON`, below), or neither process starts. With it the API logs a warning, `/health` and `/settings` report `posture.unsealed_prod_override: true`, the Posture page says so to every viewer, and the worker stamps `unsealed_prod_override` into every run's apparatus and every evidence pack (ADR-0023). Without it a `prod` worker also refuses a run that asks for the local executor in its own parameters, and refuses every **factory** run: a factory build hands the builder a host worktree and no container, so it is never sealed (`posture.factory_builds: refused`). With it a factory run builds on the host and its apparatus carries the override (`run_kind: factory`) |
 | `CRB_ALLOW_UNSEALED_PROD_BY` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: the username of the admin who decided to run unsealed (a local username, the identity provider's subject or the account's email). At every start each process checks it names exactly one active admin — otherwise it refuses to start and writes nothing (the worker exits 2) — and writes one `posture.unsealed_override` event on the audit trail whose actor is that admin, with the reason, the process, the host and the posture it admits ([API.md § Event vocabulary](API.md#event-vocabulary); ADR-0023 as amended). The worker stamps the name beside the override (`unsealed_prod_override.acknowledged_by`) on every run that does not run sealed: every run of a worker whose defaults are unsealed, a run that asks for the local executor in its own parameters, and every factory run. Name a person with an admin account: a deployment whose only admin is the bootstrap account names that account |
 | `CRB_ALLOW_UNSEALED_PROD_REASON` | api, worker | with `CRB_ALLOW_UNSEALED_PROD=1` in `prod`, **required**: why, in the admin's words — written into the same event |
@@ -775,7 +817,8 @@ before the upgrade (`kubectl -n crb scale deploy --replicas=0 -l
 `docker compose stop api worker`); `helm upgrade` then starts them on the new release. A
 `helm rollback` across `0013` leaves the previous release refused on every event, since
 the schema is not downgraded: do not roll back across it — restore the pre-upgrade dump
-instead.
+instead. On a single host (§1.1) stop both `crb serve` and `crb worker` before `crb migrate`
+crosses `0013`, then start them on the new checkout ([§6.1](#61-single-host-upgrade-and-restart)).
 
 **Upgrading to revisions `0014` and `0015`** (`invitations`, `decisions_due`): additive.
 On a split-role PostgreSQL store (§3.3) both tables arrive with the default grant alone,
@@ -811,6 +854,21 @@ across restarts, and no carry runs (`tests/test_deploy_evidence_store.py`).
 
 Compose: `docker compose run --rm migrate check` → `run --rm migrate` → `up -d`
 ([deploy/README.md §5](../deploy/README.md#5-upgrade)).
+
+### 6.1 Single-host upgrade and restart
+
+A stack of §1.1 runs from a checkout, so an upgrade is a new checkout and a restart:
+
+1. Back the store and the home up (§5.1), with no run in flight.
+2. Stop both processes, `crb worker` and `crb serve`. Neither may write while the store is
+   migrated: across `0013` every event the old code writes is refused (above).
+3. Update the checkout to the release, then run §1.1's start-up block from its first line:
+   `source ~/crb-stack/env.sh` before `crb migrate`, so the stack's store is the one migrated
+   and not `./.crb/crb.db`; the UI rebuilt before `crb doctor`, whose `build` line fails on a
+   bundle from another commit; any `fail` from `crb doctor` stops the restart until it is
+   fixed.
+4. Verify the builder's login once (Settings → Claude Code login); until then `/health` reads
+   `degraded`.
 
 ## 7. Air-gap posture
 

@@ -913,6 +913,10 @@ jobs:
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: deploy/sandbox/Dockerfile.go
+      - name: hadolint deploy/Dockerfile.builder
+        uses: hadolint/hadolint-action@v3.5.0
+        with:
+          dockerfile: deploy/Dockerfile.builder
       - uses: docker/setup-buildx-action@v4
       - name: Build deploy/sandbox/Dockerfile.python (no push; GHA layer cache)
         uses: docker/build-push-action@v7
@@ -944,6 +948,21 @@ jobs:
           tags: crb-sandbox-go:ci
           cache-from: type=gha,scope=sandbox-go
           cache-to: type=gha,mode=max,ignore-error=true,scope=sandbox-go
+      - name: Build the Go builder (deploy/Dockerfile.builder on the Go sandbox image) and run it as uid 65534
+        # deploy/README.md §9.1's Go builder build, on the image this job just built (P-791):
+        # the Go base ends as USER 65534:65534, so a builder stage that ran apt without
+        # `USER root` failed here. The daemon's own builder (--builder default) is used because
+        # the docker-container builder above cannot see an image loaded into the daemon.
+        run: |
+          set -euo pipefail
+          docker buildx build --builder default --load -f deploy/Dockerfile.builder \
+            --build-arg BASE_IMAGE=crb-sandbox-go:ci -t crb-builder-go:ci .
+          want="$(sed -n 's/^ARG CLAUDE_CODE_VERSION=//p' deploy/Dockerfile.builder)"
+          test -n "$want"
+          test "$(docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci id -u)" = "65534"
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci | grep -F "$want"
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci git --version
+          docker run --rm --network=none --read-only --tmpfs /tmp crb-builder-go:ci go version
       - name: Image facts — default user, size, the toolchain answers under read-only root + no network
         run: |
           set -euo pipefail
