@@ -81,6 +81,9 @@ except ImportError:  # pragma: no cover — rootdir-relative import (pytest defa
 #: DEPLOYMENT §3.3, whose SQL block the split-role tests run as written, so the guide's
 #: grants and the proof cannot drift apart.
 DEPLOYMENT = Path(__file__).resolve().parents[1] / "docs" / "DEPLOYMENT.md"
+#: The source the ratchets read: this checkout's tree. Not an imported package's ``__file__``,
+#: which an editable install of another checkout would point at that checkout's tree.
+SRC_CRB = Path(__file__).resolve().parents[1] / "src" / "crb"
 
 
 def _deployment_grants() -> str:
@@ -2116,12 +2119,10 @@ def test_a_route_that_writes_an_account_or_a_link_takes_the_users_lock_before_it
     through its session, or is one of :data:`VERIFIED_FIRST` and reads the account again
     under it before it writes; and the ratchet finds exactly the routes it found when it
     was written."""
-    import crb.server.routes as routes_pkg
-
     for tests in VERIFIED_FIRST.values():
         for name in tests.values():
             assert callable(globals().get(name)), f"{name}: the race test is gone"
-    root = Path(routes_pkg.__file__).parent
+    root = SRC_CRB / "server" / "routes"
     audits = {
         path.name: audit
         for path in sorted(root.glob("*.py"))
@@ -2236,11 +2237,9 @@ def test_every_write_of_an_account_field_is_under_the_users_lock_ratchet() -> No
     ratchet audits or a step of one, or a command line kept outside the server."""
     import ast
 
-    import crb.server
-    import crb.server.routes as routes_pkg
     from crb.cli.commands import users as cli_users
 
-    direct, reach = _account_field_writers(Path(crb.server.__file__).parents[1])  # src/crb
+    direct, reach = _account_field_writers(SRC_CRB)
     assert direct == {
         "server/auth.py:rotate_session_nonce",
         "server/auth.py:set_account_active",
@@ -2250,7 +2249,7 @@ def test_every_write_of_an_account_field_is_under_the_users_lock_ratchet() -> No
     assert reach.pop("server/auth.py") <= USERS_WRITERS
     # the operator's command line sets a password with nothing else running: a known gap
     assert reach.pop("cli/commands/users.py") == {"_go"}, cli_users.__file__
-    root = Path(routes_pkg.__file__).parent
+    root = SRC_CRB / "server" / "routes"
     for rel, names in reach.items():
         assert rel.startswith("server/routes/"), (rel, names)
         tree = ast.parse((root / Path(rel).name).read_text())
