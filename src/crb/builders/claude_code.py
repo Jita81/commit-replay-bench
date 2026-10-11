@@ -81,7 +81,8 @@ What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude 
               ``crb doctor``, the admin route and the run preflight use.
 What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
               set, deny rules, a minimal child environment and no session persistence;
-              meters turns, tool uses, tokens and reported cost from the stream; applies the
+              meters turns, tool uses, tokens and reported cost from the stream (usage once
+              per ``message.id``, not once per content-block event); applies the
               test-file and shell guards and the nested-model-call tripwire (every tool
               input) post hoc (a hit is a recorded ``tamper:`` / ``archaeology:`` /
               ``network:`` error, never silently dropped); stops early on a nested model
@@ -560,12 +561,13 @@ class StreamStats:
         self.git_guard = git_guard
         self.guard = guard
         self.workdir_alias = workdir_alias.rstrip("/")
-        self.assistant_messages = 0
         self.tool_uses = 0
         self.tool_names: list[str] = []
-        self.tokens_in = 0
-        self.tokens_out = 0
-        self.cached_in = 0
+        #: ``(tokens_in, tokens_out, cached_in)`` of each assistant message, keyed by its
+        #: ``message.id`` (P-798): the CLI streams one event per content block, each repeating
+        #: the whole message's usage, so a message counts once and its last event wins; an
+        #: event with no id is a message of its own
+        self.usage_by_message: dict[str, tuple[int, int, int]] = {}
         self.result: dict[str, Any] | None = None
         self.init: dict[str, Any] = {}
         self.last_text = ""
@@ -610,9 +612,8 @@ class StreamStats:
             if code in CREDENTIAL_REFUSED_STATUSES:
                 self.auth_failed = True
         elif kind == "assistant":
-            self.assistant_messages += 1
             msg = ev.get("message") or {}
-            self._usage(msg.get("usage"))
+            self._usage(msg.get("id"), msg.get("usage"))
             names: list[str] = []
             for block in msg.get("content") or []:
                 if not isinstance(block, dict):
@@ -659,17 +660,24 @@ class StreamStats:
         self.events.append(summary)
         return summary
 
-    def _usage(self, usage: Any) -> None:
-        """Accumulate one message's ``usage`` block."""
+    def _usage(self, msg_id: Any, usage: Any) -> None:
+        """Record one assistant event's ``usage`` block under its ``message.id`` (the last
+        event of a message replaces the earlier ones); an event with no id gets a key of
+        its own, so it is summed as before. A block that is not a mapping records the
+        message with nothing spent, never clearing a usage already seen."""
+        seen = self.usage_by_message
+        key = msg_id if isinstance(msg_id, str) and msg_id else f"\x00{len(seen)}"
         if not isinstance(usage, dict):
+            seen.setdefault(key, (0, 0, 0))
             return
         # cache CREATION is real input (billed at a premium); cache READS are recorded
         # separately so "tokens in" is never a misleading 50 for a 60k-token session.
-        self.tokens_in += int(usage.get("input_tokens", 0) or 0) + int(
-            usage.get("cache_creation_input_tokens", 0) or 0
+        seen[key] = (
+            int(usage.get("input_tokens", 0) or 0)
+            + int(usage.get("cache_creation_input_tokens", 0) or 0),
+            int(usage.get("output_tokens", 0) or 0),
+            int(usage.get("cache_read_input_tokens", 0) or 0),
         )
-        self.tokens_out += int(usage.get("output_tokens", 0) or 0)
-        self.cached_in += int(usage.get("cache_read_input_tokens", 0) or 0)
 
     def host_view(self, text: str) -> str:
         """``text`` with the container alias replaced by the guard's host root (only
@@ -732,7 +740,8 @@ class StreamStats:
     # --- totals ---------------------------------------------------------------
     def totals(self) -> tuple[int, int, int]:
         """``(tokens_in, tokens_out, cached_in)`` — the result event's totals when it has
-        them (authoritative), else the running sums from the per-message usage."""
+        them (authoritative), else the sum over :attr:`usage_by_message`, once per
+        ``message.id``: what a killed, timed-out or crashed run is costed from."""
         r = self.result or {}
         usage = r.get("usage")
         if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
@@ -742,7 +751,8 @@ class StreamStats:
                 int(usage.get("output_tokens", 0) or 0),
                 int(usage.get("cache_read_input_tokens", 0) or 0),
             )
-        return self.tokens_in, self.tokens_out, self.cached_in
+        rows = self.usage_by_message.values()
+        return sum(r[0] for r in rows), sum(r[1] for r in rows), sum(r[2] for r in rows)
 
     def reported_cost(self) -> float | None:
         """The CLI's own ``total_cost_usd`` from the result event, if it gave one."""
@@ -753,12 +763,13 @@ class StreamStats:
         return None
 
     def turns(self) -> int:
-        """``num_turns`` from the result event, else the assistant messages counted."""
+        """``num_turns`` from the result event, else the assistant messages counted (once
+        per ``message.id``, not once per content-block event)."""
         r = self.result or {}
         v = r.get("num_turns")
         if isinstance(v, int) and not isinstance(v, bool) and v > 0:
             return v
-        return self.assistant_messages
+        return len(self.usage_by_message)
 
     def claim(self) -> tuple[bool, str]:
         """``(done, summary)`` from structured output, else the result text, else the

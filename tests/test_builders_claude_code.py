@@ -13,7 +13,8 @@ What it does: Pins that the argv is headless, tool-restricted and uses the skill
               the operator's own login, never forwarded); the token-source precedence (env >
               secrets file > CLI login; an insecure secrets file fails closed), ``verify_login``
               killing at the first 401 retry, ``auth_status`` naming the source; that usage falls
-              back to summed messages and priced cost; that tampering is detected post hoc and
+              back to messages summed once per ``message.id`` (never once per content-block
+              event) and priced cost; that tampering is detected post hoc and
               the grader disqualifies; that archaeology or network in the transcript is a
               violation, and a nested model call (a Bash command or a written file) a
               ``nested_model_call`` one that stops the run and reads as a protocol miss;
@@ -81,25 +82,25 @@ def ev_init(model: str = "claude-opus-5") -> str:
     )
 
 
-def ev_assistant(*blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0) -> str:
+def ev_assistant(
+    *blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0, msg_id: str = ""
+) -> str:
     """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached
-    tokens).
+    tokens); ``msg_id`` sets ``message.id``, which the real CLI repeats on each content-block
+    event of one API message.
     """
-    return json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "content": list(blocks),
-                "usage": {
-                    "input_tokens": tin,
-                    "output_tokens": tout,
-                    "cache_read_input_tokens": cached,
-                },
-            },
-            "session_id": "s1",
-        }
-    )
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": list(blocks),
+        "usage": {
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "cache_read_input_tokens": cached,
+        },
+    }
+    if msg_id:
+        message["id"] = msg_id
+    return json.dumps({"type": "assistant", "message": message, "session_id": "s1"})
 
 
 def text(t: str) -> dict[str, Any]:
@@ -799,6 +800,86 @@ def test_usage_falls_back_to_summed_messages_and_priced_cost(tmp_path: Path) -> 
     expected = (3500 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6  # opus 5 list prices
     assert out.cost_usd == pytest.approx(expected) and out.cost_known
     assert not out.done and out.summary == "no change" and out.stop_reason == base.STOP_DONE
+    ws.remove()
+
+
+def _split(msg_id: str, *blocks: dict[str, Any], **usage: int) -> list[str]:
+    """One API message as the CLI streams it: an ``assistant`` event per content block, each
+    carrying the same ``message.id`` and the message's whole usage."""
+    return [ev_assistant(b, msg_id=msg_id, **usage) for b in blocks]
+
+
+def test_usage_counts_one_message_once_across_its_content_block_events() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    for line in _split(
+        "msg_1",
+        text("Reading"),
+        tool_use("Read", file_path="/wt/a.py"),
+        tool_use("Read", file_path="/wt/b.py"),
+        tin=1000,
+        tout=100,
+        cached=500,
+    ):
+        st.feed(line, keep=False)
+    # three events, one API message: billed once, and one turn (F6)
+    assert st.totals() == (1000, 100, 500) and st.turns() == 1
+    assert st.tool_uses == 2  # the blocks themselves are all still read
+
+
+def test_usage_sums_distinct_messages_and_keeps_each_ones_last_usage() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    lines = [
+        *_split("msg_1", text("a"), tool_use("Read", file_path="/wt/a.py"), tin=1000, tout=100),
+        *_split("msg_2", text("b"), tool_use("Read", file_path="/wt/b.py"), tin=2000, tout=200),
+        # a later event of a message replaces its earlier usage (the last value wins)
+        ev_assistant(text("b, longer"), msg_id="msg_2", tin=2000, tout=250, cached=40),
+    ]
+    for line in lines:
+        st.feed(line, keep=False)
+    assert st.totals() == (3000, 350, 40) and st.turns() == 2
+
+
+def test_a_run_without_a_result_is_costed_once_per_message(tmp_path: Path) -> None:
+    lines = [
+        ev_init(),
+        *_split(
+            "msg_1", text("hi"), tool_use("Read", file_path="/wt/pkg/calc.py"), tin=1000, tout=100
+        ),
+        ev_user(),
+        *_split(
+            "msg_2",
+            text("again"),
+            tool_use("Read", file_path="/wt/pkg/calc.py"),
+            tool_use("Read", file_path="/wt/tests/test_calc.py"),
+            tin=2000,
+            tout=200,
+            cached=500,
+        ),
+    ]
+    # the watchdog kills it: no result event, so the cost is table-priced from the stream
+    _fx, ws, out = _setup(
+        tmp_path, FakeSpawn(lines, timed_out=True, returncode=-9), model="claude-opus-5"
+    )
+    assert out.stop_reason == base.STOP_WALL_CLOCK
+    assert out.tokens_in == 3500 and out.tokens_cached == 500 and out.tokens_out == 300
+    assert out.turns == 2 and out.tool_calls == 3
+    expected = (3500 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6  # opus 5 list prices
+    assert out.cost_usd == pytest.approx(expected) and out.cost_known
+    ws.remove()
+
+
+def test_a_run_with_a_result_still_reports_the_clis_cost_and_totals(tmp_path: Path) -> None:
+    lines = [
+        ev_init(),
+        *_split(
+            "msg_1", text("hi"), tool_use("Read", file_path="/wt/pkg/calc.py"), tin=1000, tout=100
+        ),
+        ev_user(),
+        ev_result(num_turns=1, cost=0.0456, tin=700, tout=90, structured={"done": False}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-opus-5")
+    assert out.cost_usd == pytest.approx(0.0456) and out.cost_known
+    assert out.tokens_in == 700 and out.tokens_out == 90 and out.turns == 1
     ws.remove()
 
 

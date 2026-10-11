@@ -12,17 +12,17 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **Wave 3 pre-run: a reading is fixed before its data, measured sealed, spending under a
-  product-held ceiling** (P-787 to P-791, P-796, P-797, G-957, DL-372 to DL-383, DL-390,
-  DL-391; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading's id hashes
+- **Wave 3 pre-run: a reading fixed before its data, measured sealed, spending under a
+  product-held ceiling** (P-787 to P-791, P-796 to P-798, G-957, DL-372 to DL-383, DL-390,
+  DL-391; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
   `hypothesis`, `smallest_effect` and campaign; `thin_cell` counts distinct tasks.
-  Registration and admission need docker sandbox and builder in the reading's posture class
+  Registration and admission need docker sandbox and builder in the posture class
   (409 `reading_posture_mismatch`). `POST /campaigns` holds a pound ceiling: runs need
   `max_cost_usd`, admitted while cap plus headroom fits (409 `campaign_ceiling`); readings
   count only campaign-admitted runs (409 `campaign_required`); `S1` author calls count;
   overrunning admitted headroom stops the campaign. CI builds and runs the Go builder image;
-  2026-10-11 operator decisions are recorded. Belt 2 needs every gold-passed target test, not
-  exit 0. In-build model calls are `nested_model_call` misses.
+  2026-10-11 operator decisions are recorded. Belt 2 needs the gold's target passes.
+  In-build model calls are `nested_model_call` misses. Claude Code costs messages once.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen
