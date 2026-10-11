@@ -158,8 +158,8 @@ campaign, registered once at step 4 with an operator session:
   headroom fit what is left under the line, by the tally below; otherwise it is refused 409
   `campaign_ceiling` and nothing is queued.
 - A campaign with a run whose cost is not known is stopped, 409 `campaign_cost_unknown`, and so
-  is one with a run that spent past its cap plus its headroom, 409 `campaign_overrun`: every new
-  run is refused.
+  is one with a run that spent past its cap plus the headroom it was admitted with, 409
+  `campaign_overrun`: every new run is refused.
 - The run's own cap is still a guard, not a guarantee: it admits an attempt while the run's
   spend plus the dearest attempt so far stays within it, so nothing bounds a first attempt that
   has no cost cap of its own (`src/crb/server/spend_cap.py`; G-938, still open). A run capped at
@@ -177,8 +177,8 @@ rule, and `GET /api/v1/campaigns/{id}` serves it (`spent_usd`, with `authoring_u
 - **spent** — for every run of the campaign, its `cost_usd` (`GET /runs/{id}`), plus, for an
   `S1` run, the `cost_usd` of each `author.attempt` event in its log (`GET /runs/{id}/events/log`,
   the MCP tool `crb_run_events`);
-- **held** — for every run queued or running, its `max_cost_usd` less what it has spent, plus its
-  headroom;
+- **held** — for every run queued or running, its `max_cost_usd` less what it has spent, plus the
+  larger of the headroom it was admitted with and its headroom now;
 - **headroom** — the dearest single attempt the campaign has seen, or $5.00 before the first
   (P-261); for an `S1` run, plus its commits still to run times the dearest author call seen, or
   $0.15 before the first (item 13's upper assumption).
@@ -196,8 +196,9 @@ is set to fit. The rule limits how many runs are in flight at once; a worker run
   arm has run its fixed count;
 - a stop: a cost the tally cannot know (an event or row with `cost_known: false`, or a run
   refused `spend_cap_unpriced` because a model it would call has no known price), a refused
-  registration, a run whose spend passes its cap plus its headroom, or spend the tally cannot
-  place against a run.
+  registration, a run whose spend passes its cap plus the headroom it was admitted with (never
+  the headroom now, which its own overshooting attempt raises), or spend the tally cannot place
+  against a run.
 
 On a stop, Claude Code queues nothing more and cancels the runs that have not started; the
 product refuses every new run of a stopped campaign whatever is queued. A running run ends at its

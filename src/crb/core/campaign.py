@@ -12,7 +12,8 @@ that approved it, hashed into its id so an edited ceiling no longer verifies.
 
 * **spent** — for every run filed under the campaign, what its ledger rows cost plus each of
   its test author's ``author.attempt`` calls (an ``S1`` replay's author writes no row, P-775);
-* **held** — for every run queued or running, its cap less what it has spent, plus its headroom;
+* **held** — for every run queued or running, its cap less what it has spent, plus the larger
+  of the headroom it was admitted with and its headroom now;
 * **headroom** — the dearest single attempt the campaign has seen, or
   :data:`HEADROOM_FIRST_USD` before the first priced one (a run capped at $0.10 once spent $5.00
   on its first attempt, P-261: a run's cap is a guard until G-938 bounds each call); for an
@@ -22,7 +23,10 @@ that approved it, hashed into its id so an edited ceiling no longer verifies.
 A run is admitted only while spent, held, its own cap and its own headroom together stay at or
 under the **line** — the released pounds at the rate, never more than the ceiling. A cost the
 tally cannot know (a row or an author call with ``cost_known`` false) and a run whose spend
-passed its cap plus its headroom each stop the campaign: nothing more is admitted.
+passed its cap plus the headroom it was ADMITTED with (the ``campaign.admitted`` event's
+``headroom_usd``, never the headroom now: the overshoot that passes it is itself the dearest
+attempt the campaign has seen, so a line recomputed from it would always cover it) each stop
+the campaign: nothing more is admitted.
 
 Navigation
 ----------
@@ -30,7 +34,9 @@ What it is:   The campaign record (``Campaign``: ceiling and released pounds, th
               decision, a content-hashed id) and the pure tally over its runs (``tally``).
 What it does: Hashes a campaign into ``cmp_<24 hex>`` and verifies it; folds the releases into
               the line (never above the ceiling, never lowered); sums each run's rows and author
-              calls; holds each queued or running run's unspent cap plus its headroom; answers
+              calls; holds each queued or running run's unspent cap plus its headroom (the
+              larger of the admitted and the current); stops the campaign on a run whose spend
+              passed its cap plus the headroom it was admitted with; answers
               whether one more run with a cap fits (``Tally.refusal``: ``campaign_ceiling``,
               ``campaign_cost_unknown``, ``campaign_overrun``, or ``None``).
 How:          ``canonical_json`` + ``sha256_text`` over the record's body → ``tally`` takes the
@@ -192,13 +198,17 @@ def planned_commits(task_ids: Sequence[str], limit: int | None) -> int | None:
 @dataclass(frozen=True)
 class MemberRun:
     """One run filed under a campaign, as the store has it now: its admission (cap, arm,
-    commits) and what it has spent — its rows and its test author's calls apart."""
+    commits, the headroom held for it) and what it has spent — its rows and its test author's
+    calls apart."""
 
     run_id: str
     status: str
     cap_usd: float
     s1: bool = False
     commits: int = 0
+    #: The headroom the run was admitted with (the ``campaign.admitted`` event's
+    #: ``headroom_usd``) — the line its overrun is read against, fixed at admission.
+    headroom_usd: float = 0.0
     commits_done: int = 0
     rows_usd: float = 0.0
     dearest_row_usd: float = 0.0
@@ -318,10 +328,12 @@ def tally(line_usd: float, members: Sequence[MemberRun]) -> Tally:
     for m in members:
         if m.active:
             held += max(0.0, m.cap_usd - m.spent_usd)
-            held += base.headroom(s1=m.s1, commits_left=m.commits_left)
-        # A run overran when its spend passed the most it was ever admitted to: its cap plus
-        # the headroom of all its commits (a finished run keeps what its authoring was granted).
-        if m.spent_usd > m.cap_usd + base.headroom(s1=m.s1, commits_left=m.commits) + _EPSILON:
+            held += max(m.headroom_usd, base.headroom(s1=m.s1, commits_left=m.commits_left))
+        # A run overran when its spend passed what it was admitted to: its cap plus the
+        # headroom held for it then (for an S1 run, all its commits' authoring). Never the
+        # headroom now — the overshooting attempt is itself the dearest seen, so a line
+        # recomputed from it would always cover it.
+        if m.spent_usd > m.cap_usd + m.headroom_usd + _EPSILON:
             overrun.append(m.run_id)
     return replace(
         base,

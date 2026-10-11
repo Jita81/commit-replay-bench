@@ -15,8 +15,10 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               409), releases a stage (the line rises to $108.00; a release that lowers it or
               passes the ceiling is 409), serves it to a viewer (404 for an unknown id or a
               record that does not re-hash); admits runs until the line and refuses the next
-              with nothing queued, counts rows and author calls in the tally, stops on a cost
-              not known and on an overrun, refuses a run without a cap, an unbounded ``S1``
+              with nothing queued, counts rows and author calls in the tally, holds an active
+              run's admitted headroom while it is the larger, stops on a cost not known and on
+              an overrun read against the headroom a run was admitted with (a first attempt
+              dearer than the $5.00 held), refuses a run without a cap, an unbounded ``S1``
               run and a non-build kind, and admits no more than the line under concurrent
               submits.
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
@@ -235,10 +237,12 @@ def test_the_tally_counts_each_runs_rows_and_its_s1_authors_calls(env: Env) -> N
     assert view["dearest_attempt_usd"] == 1.25 and view["dearest_author_call_usd"] == 0.12
     run = view["runs"][0]
     assert run["commits_done"] == 1 and run["spent_usd"] == pytest.approx(1.45)
-    # held: cap less spent (10 - 1.45), plus 1.25 and 2 commits left x 0.12
-    assert run["headroom_usd"] == pytest.approx(1.25 + 2 * 0.12)
-    assert view["held_usd"] == pytest.approx(8.55 + 1.49)
-    assert view["left_usd"] == pytest.approx(54.0 - 1.45 - 10.04)
+    # held: cap less spent (10 - 1.45), plus the larger of the $5.45 it was admitted with
+    # and its headroom now (1.25 and 2 commits left x 0.12 = $1.49)
+    assert run["admitted_headroom_usd"] == pytest.approx(5.45)
+    assert run["headroom_usd"] == pytest.approx(5.45)
+    assert view["held_usd"] == pytest.approx(8.55 + 5.45)
+    assert view["left_usd"] == pytest.approx(54.0 - 1.45 - 14.0)
 
 
 def test_a_cost_the_tally_cannot_know_stops_the_campaign(env: Env) -> None:
@@ -261,15 +265,53 @@ def test_a_cost_the_tally_cannot_know_stops_the_campaign(env: Env) -> None:
     assert len(_admitted(env, cid)) == 1
 
 
-def test_a_run_that_overran_its_cap_and_headroom_stops_the_campaign(env: Env) -> None:
+def test_a_run_that_overran_its_cap_and_admitted_headroom_stops_the_campaign(env: Env) -> None:
+    """A $1.00 run admitted with the $5.00 held before any priced attempt may reach $6.00;
+    its one attempt cost $6.01. That attempt is now the campaign's dearest, so the headroom
+    NOW ($6.01) would cover it — the overrun is read against what it was admitted with."""
     cid = _register(env)["campaign_id"]
     rid = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid}).json()["id"]
-    # dearest attempt $2.00 → headroom $2.00; $1.00 cap: $3.00 is the most, $3.50 passes it
-    DbLedger(env.factory).append(_row(rid, "c1", 1.5))
-    DbLedger(env.factory).append(_row(rid, "c2", 2.0))
+    assert _admitted(env, cid)[0]["headroom_usd"] == 5.0
+    DbLedger(env.factory).append(_row(rid, "c1", 6.01))
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["stopped"]["code"] == "campaign_overrun"
+    assert view["stopped"]["run_ids"] == [rid]
     r = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid})
     assert r.status_code == 409 and envelope(r)["code"] == "campaign_overrun"
     assert envelope(r)["detail"]["run_ids"] == [rid]
+
+
+def test_a_first_attempt_dearer_than_the_five_dollars_held_stops_the_campaign(env: Env) -> None:
+    """The overshoot the stop exists for: others spent $48.90 (no attempt dearer than
+    $5.00); a run is admitted at a $0.10 cap plus $5.00 headroom — exactly the $54.00 line —
+    and its first attempt costs $9.00. The campaign has spent $57.90 of $54.00: the view
+    shows the stop and the next run under it is refused ``campaign_overrun``."""
+    cid = _register(env)["campaign_id"]
+    first = env.post("/runs", json={**GOLD, "max_cost_usd": 45, "campaign_id": cid}).json()["id"]
+    for i in range(9):
+        DbLedger(env.factory).append(_row(first, f"a{i}", 5.0))
+    DbLedger(env.factory).append(_row(first, "a9", 3.9))
+    with env.factory() as s:
+        got = s.get(Run, first)
+        assert got is not None
+        got.status = "succeeded"
+        s.commit()
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 0.10, "campaign_id": cid})
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    admitted = _admitted(env, cid)[-1]
+    assert admitted["headroom_usd"] == 5.0 and admitted["left_usd_after"] == pytest.approx(0.0)
+    DbLedger(env.factory).append(_row(rid, "b0", 9.0))
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["spent_usd"] == pytest.approx(57.90)
+    assert view["stopped"] is not None and view["stopped"]["code"] == "campaign_overrun"
+    assert view["stopped"]["run_ids"] == [rid]
+    before = _runs(env)
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 0.01, "campaign_id": cid})
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "campaign_overrun"
+    assert envelope(r)["detail"] == {"campaign_id": cid, "run_ids": [rid]}
+    assert _runs(env) == before and len(_admitted(env, cid)) == 2
 
 
 @pytest.mark.parametrize(

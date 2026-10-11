@@ -7,8 +7,11 @@ What it does: Pins the record (its id is its hash, an edited ceiling no longer v
               line is the released pounds at the stored rate and never above the ceiling), the
               tally (spent counts author calls, only queued or running runs are held, headroom
               is $5.00 then the dearest attempt, an ``S1`` run's commits times $0.15 then the
-              dearest author call), the stops (a cost not known, an overrun) and the ceiling's
-              boundary (admitted at exactly the line, refused a cent over).
+              dearest author call), what an active run holds (the larger of its admitted and its
+              current headroom), the stops (a cost not known; an overrun read against the
+              headroom the run was admitted with, so a first attempt dearer than the $5.00 held
+              stops the campaign) and the ceiling's boundary (admitted at exactly the line,
+              refused a cent over).
 How:          ``Campaign`` and ``MemberRun`` built by hand; no store.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
@@ -185,16 +188,18 @@ def test_a_cost_the_tally_cannot_know_stops_the_campaign() -> None:
         assert refused.detail == {"run_ids": ["r1"]}
 
 
-def test_a_run_that_spent_past_its_cap_and_headroom_stops_the_campaign() -> None:
-    # dearest attempt $2.00 → headroom $2.00: a $5.00 cap may reach $7.00, not $7.01
-    at_edge = MemberRun("r1", "succeeded", 5.0, rows_usd=7.0, dearest_row_usd=2.0)
+def test_a_run_that_spent_past_its_cap_and_admitted_headroom_stops_the_campaign() -> None:
+    # admitted with $2.00 headroom: a $5.00 cap may reach $7.00, not $7.01 — read against
+    # the headroom it was ADMITTED with, though its own last attempt ($3.00) is now dearer
+    at_edge = MemberRun("r1", "succeeded", 5.0, headroom_usd=2.0, rows_usd=7.0, dearest_row_usd=3.0)
     assert tally(54.0, [at_edge]).overrun_runs == ()
     over = dataclasses.replace(at_edge, rows_usd=7.01)
     t = tally(54.0, [over])
     assert t.overrun_runs == ("r1",)
     refused = t.refusal(cap_usd=0.01, s1=False, commits=0)
     assert refused is not None and refused.code == REFUSAL_OVERRUN
-    # a finished S1 run keeps the author headroom of all its commits
+    # a finished S1 run keeps the author headroom of all its commits it was admitted with:
+    # $2.00 + 4 x $0.10
     s1 = MemberRun(
         "s1",
         "succeeded",
@@ -202,10 +207,46 @@ def test_a_run_that_spent_past_its_cap_and_headroom_stops_the_campaign() -> None
         s1=True,
         commits=4,
         commits_done=4,
+        headroom_usd=2.4,
         rows_usd=6.8,
         dearest_row_usd=2.0,
-        authoring_usd=0.4,
-        dearest_author_usd=0.1,
+        authoring_usd=0.6,
+        dearest_author_usd=0.15,
     )
-    # 7.20 spent passes 5 + 2.00 but not 5 + 2.00 + 4 x 0.10
+    # $7.40 spent passes 5 + 2.00 but not 5 + 2.00 + 4 x 0.10; $7.41 passes both
     assert tally(54.0, [s1]).overrun_runs == ()
+    assert tally(54.0, [dataclasses.replace(s1, authoring_usd=0.61)]).overrun_runs == ("s1",)
+
+
+def test_a_first_attempt_dearer_than_the_five_dollars_held_stops_the_campaign() -> None:
+    """The overshoot the stop exists for: a run admitted at $0.10 with the $5.00 held before
+    any priced attempt, whose first attempt costs $9.00. That attempt is now the dearest the
+    campaign has seen — a line recomputed from it ($0.10 + $9.00) would cover it; the line
+    it was admitted to ($0.10 + $5.00) does not."""
+    first = MemberRun(
+        "a",
+        "succeeded",
+        0.10,
+        headroom_usd=HEADROOM_FIRST_USD,
+        rows_usd=9.0,
+        dearest_row_usd=9.0,
+    )
+    t = tally(54.0, [first])
+    assert t.dearest_attempt_usd == 9.0
+    assert t.overrun_runs == ("a",)
+    refused = t.refusal(cap_usd=0.01, s1=False, commits=0)
+    assert refused is not None and refused.code == REFUSAL_OVERRUN
+    assert refused.detail == {"run_ids": ["a"]}
+    # still running, it stops the campaign the same and holds nothing below what it was given
+    running = dataclasses.replace(first, status="running")
+    assert tally(54.0, [running]).overrun_runs == ("a",)
+
+
+def test_an_active_run_holds_the_larger_of_its_admitted_and_its_current_headroom() -> None:
+    # admitted with $5.00 headroom before any priced attempt; the dearest seen since is
+    # $1.25 — the $5.00 stays held (cap $3.00 less $1.25 spent, plus $5.00)
+    running = MemberRun("r1", "running", 3.0, headroom_usd=5.0, rows_usd=1.25, dearest_row_usd=1.25)
+    assert tally(54.0, [running]).held_usd == pytest.approx((3.0 - 1.25) + 5.0)
+    # another run's attempt cost $6.00 since: the headroom now is the larger, and is held
+    dear = MemberRun("r2", "succeeded", 10.0, headroom_usd=5.0, rows_usd=6.0, dearest_row_usd=6.0)
+    assert tally(54.0, [running, dear]).held_usd == pytest.approx((3.0 - 1.25) + 6.0)

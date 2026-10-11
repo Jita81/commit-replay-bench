@@ -141,6 +141,7 @@ def members(session: Session, campaign_id: str) -> list[MemberRun]:
                 cap_usd=float(a.get("cap_usd") or 0.0),
                 s1=bool(a.get("s1")),
                 commits=int(a.get("commits") or 0),
+                headroom_usd=float(a.get("headroom_usd") or 0.0),
                 commits_done=len({r.task_id for r in rows[rid]}),
                 rows_usd=own.spent,
                 dearest_row_usd=own.dearest,
@@ -188,7 +189,12 @@ def campaign_view(session: Session, campaign: Campaign) -> dict[str, Any]:
                 "rows_usd": round(m.rows_usd, 6),
                 "authoring_usd": round(m.authoring_usd, 6),
                 "cost_unknown": m.unknown,
-                "headroom_usd": t.headroom(s1=m.s1, commits_left=m.commits_left),
+                "admitted_headroom_usd": round(m.headroom_usd, 6),
+                "headroom_usd": round(
+                    max(m.headroom_usd, t.headroom(s1=m.s1, commits_left=m.commits_left)), 6
+                )
+                if m.active
+                else 0.0,
             }
             for m in runs
         ],
