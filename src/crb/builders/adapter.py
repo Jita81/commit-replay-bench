@@ -58,8 +58,10 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               mode; the context arm and its provenance on the row; learned lines held out and
               time-ordered, and any line naming a token the commit introduced refused), on arm
               ``S1`` first has the test author write a test in a sealed checkout of the parent and
-              proves it RED (removing it before the grade; an author whose provider refused the
-              call is recorded ``model_error:`` so the ledger reads an outage — P-293), stamps
+              proves it RED under the parent's dependency binding, on a test it defines (removing
+              it before the grade; an author whose provider refused the call is recorded
+              ``model_error:`` so the ledger reads an outage — P-293; a RED naming no test while
+              the env probe is red under that binding is ``harness`` — P-800), stamps
               every attempt with the run's one arm (P-295), runs one ``builder.build`` — on the host
               or against a sealed checkout in a container — writes the redacted transcript to a
               file, maps the outcome to a ``BuildAttempt`` and discards the source edits of any
@@ -85,7 +87,7 @@ Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and call
               errored attempt must not carry a patch), src/crb/server/worker.py (the caller
               that supplies ``container`` from the environment)
 Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py,
-              tests/test_builders_finish_gate.py
+              tests/test_builders_finish_gate.py, tests/test_replay_s1_arm.py (the S1 step)
 Touch when:   never for a new repository (the sighted test command comes from the runner);
               a new builder that must run sealed is added to ``SEALABLE_BUILDERS`` in
               src/crb/builders/container.py; a new attempt error kind must keep its prefix on
@@ -97,6 +99,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 import shlex
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -170,7 +173,7 @@ from crb.core.playbook import taught_before
 from crb.core.prevention import AUTO_OFF, LearningSnapshot
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
-from crb.core.runners.base import BaseRunner
+from crb.core.runners.base import BaseRunner, tail_of
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
@@ -194,6 +197,43 @@ EXTRA_CONTAINER = "container"
 #: An ``S1`` attempt whose test author produced no RED test (ADR-0026 item 1): the row's
 #: failure kind is ``authoring`` — against the arm, never the builder, never ``harness``.
 AUTHORING_PREFIX = "authoring: "
+
+#: ``func TestX(t *testing.T)`` (the parameter may be unnamed): a test an authored Go file
+#: defines. ``TestMain`` takes ``*testing.M`` and is never one.
+_GO_TEST_FUNC = re.compile(r"^func\s+(Test\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?T\s*\)", re.M)
+
+
+def authored_red(
+    runner_name: str, path: str, content: str, failing: frozenset[str], baseline: Sequence[str]
+) -> frozenset[str] | None:
+    """The ids failing at the parent that the ``S1`` author's test at ``path`` defines, less
+    the task's ``baseline`` — the only RED the S1 step accepts (F87-1 part 3). A RED from a
+    test already failing beside it never proves the authored test discriminates anything.
+
+    * ``go``: ``<pkg>::TestX`` for each ``func TestX`` in ``content``, a subtest
+      (``TestX/sub``) counting as its test. The RED scope is the whole package, so an old
+      test that fails there is the reason this rule exists.
+    * ``pytest``: a node id in ``path`` (``path::test_x``, or ``path`` itself for a
+      collection error), read from the root or from a ``rootdir`` nearer the file. The scope
+      is the file already; the rule takes out the baseline of a file the author overwrote.
+
+    ``None`` — this runner's ids name neither the file nor its tests (jest, vitest and mocha
+    report titles, cargo a module path inside one binary, surefire a class name), so any
+    failing id stands, as it always has: no ``S1`` reading runs those runners yet."""
+    if runner_name == "go":
+        names = set(_GO_TEST_FUNC.findall(content))
+        own = {f for f in failing if f.partition("::")[2].split("/", 1)[0] in names}
+    elif runner_name == "pytest":
+
+        def in_file(fid: str) -> bool:
+            f = fid.split("::", 1)[0]
+            return f == path or path.endswith("/" + f) or f.endswith("/" + path)
+
+        own = {f for f in failing if in_file(f)}
+    else:
+        return None
+    return frozenset(own - set(baseline))
+
 
 #: ``shas -> {sha: sortable commit-date key}`` — the time-order rule's reader.
 CommitDatesFn = Callable[[Sequence[str]], Mapping[str, str]]
@@ -709,8 +749,9 @@ def build_fn_for(
         exists for tests.
     deps_for:
         ``task → TaskDeps`` (ADR-0019): when it returns one, the sealed container mounts
-        the task's BUILDER set — the parent's, never the gold's — read-only. ``None`` (the
-        default) mounts nothing.
+        the task's BUILDER set — the parent's, never the gold's — read-only, and the ``S1``
+        step proves its authored test RED under the PARENT binding. ``None`` (the default)
+        mounts and binds nothing.
     budget_for_task:
         ``(task, mode, rung, rung_budget) -> (budget, labels)`` — the calibrated budget
         profile (:func:`crb.core.spend.calibrate`, bound by the worker). The attempt runs
@@ -800,14 +841,22 @@ def build_fn_for(
         emit(on_event, BUILDER_EVENT_PREFIX + "author_test.removed", path=path)
 
     def author_s1(
-        ws: Workspace, task: TaskSpec, rung_label: str, mode: str
+        ws: Workspace,
+        task: TaskSpec,
+        rung_label: str,
+        mode: str,
+        *,
+        deps: TaskDeps | None = None,
     ) -> tuple[str, str] | BuildAttempt:
         """The ``S1`` arm's author step (ADR-0026 items 1 and 7): the configured test author
         writes ONE failing test in a sealed one-commit checkout of the parent — in every
         posture — from the message and the parent's example tests; it must be RED at the
-        parent here. Any failure is an ``authoring:`` attempt, never the builder's: it counts
-        against the arm unless the provider refused the author (``outage``) or the instrument
-        failed (``harness``: rule 4b, DL-360)."""
+        parent here, under the task's PARENT binding (``deps``, ADR-0019), and the RED must
+        be a test it defines (:func:`authored_red`). Any failure is an ``authoring:``
+        attempt, never the builder's: it counts against the arm unless the provider refused
+        the author (``outage``) or the instrument failed (``harness``: rule 4b, DL-360) — a
+        RED that names no test while the runner's env probe is red under the same binding
+        is the instrument's too. That label reports the fault; it never buys a retry."""
         assert s1 is not None
         rung = index.get(rung_label)
         ref = BuilderRef(
@@ -854,26 +903,72 @@ def build_fn_for(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         authored_in[str(ws.root)] = (path, original)
+        # RED under the PARENT's binding, as qualification proves the held-out tests RED
+        # (ADR-0019): unbound, a sealed posture's Go runner reads an empty /tmp/gomod with
+        # the network off, nothing builds, and every authored test is "not RED" (F87-1)
+        parent = deps.parent if deps is not None else None
+        timeout = int(runner.opts.get("timeout", runner.default_timeout))
         try:
             valid = runner.is_valid_oracle(ws.root, path)
-            red = runner.run(executor, ws.root, runner.target_scope([path])) if valid else None
+            red = (
+                runner.run_for(
+                    executor,
+                    ws.root,
+                    runner.target_scope([path]),
+                    authored=task.authored,
+                    deps=parent,
+                )
+                if valid
+                else None
+            )
         except SandboxUnavailable:
             raise
         except Exception as exc:
             remove_authored(ws)
             return fail(f"{AUTHORING_HARNESS_ERROR} {type(exc).__name__}: {exc}")
-        if red is None or red.timed_out or red.green or red.parse_error or not red.failing:
+        if red is None or red.green:
             remove_authored(ws)
-            why = (
-                "defines no test"
-                if red is None
-                else "timed out"
-                if red.timed_out
-                else "passes at the parent"
-                if red.green
-                else "failed without attributable test ids"
-            )
+            why = "defines no test" if red is None else "passes at the parent"
             return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+        if red.env_error or red.timed_out or red.parse_error or not red.failing:
+            # unattributed: nothing names the authored test. Its file comes out FIRST, so the
+            # probe measures the parent's posture and never the author's own imports
+            remove_authored(ws)
+            fault = f"the tree could not be prepared: {red.env_error}" if red.env_error else ""
+            if not fault:
+                try:
+                    with (
+                        runner.deps_bound(parent)
+                        if parent is not None
+                        else contextlib.nullcontext()
+                    ):
+                        probe = runner.probe_environment(executor, ws.root, timeout=timeout)
+                except SandboxUnavailable:
+                    raise
+                except Exception as exc:
+                    fault = f"the env probe raised {type(exc).__name__}: {exc}"
+                else:
+                    if probe is not None and (not probe.ok or probe.env_error):
+                        fault = "the env probe is red under the parent binding: " + tail_of(
+                            probe.combined, 4
+                        )
+            if fault:
+                # The label REPORTS an instrument fault (rule 4b): the tree could not be
+                # copied, or this posture cannot load the parent, so the author was never
+                # judged. It is not a retry and nothing here re-runs: on this branch a
+                # harness row may still be re-run; once a reservation decides the commit
+                # (reserved.v1) a harness row after it is a miss like any other.
+                return fail(f"{AUTHORING_HARNESS_ERROR} {fault}")
+            why = "timed out" if red.timed_out else "failed without attributable test ids"
+            return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+        own = authored_red(runner.name, path, content, red.failing, task.baseline_failing)
+        if own is not None and not own:
+            remove_authored(ws)
+            shown = ", ".join(sorted(red.failing)[:3])
+            return fail(
+                f"the authored test {path!r} is not RED at the parent: no test it defines "
+                f"fails there (failing: {shown})"
+            )
         return path, content
 
     def arm_of(mode: str) -> str:
@@ -1097,7 +1192,9 @@ def build_fn_for(
         )
         s1_test: tuple[str, str] | None = None
         if s1 is not None:
-            authored = author_s1(ws, task, rung_label, mode)
+            authored = author_s1(
+                ws, task, rung_label, mode, deps=deps_for(task) if deps_for is not None else None
+            )
             if isinstance(authored, BuildAttempt):
                 return authored
             s1_test = authored
