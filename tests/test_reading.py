@@ -15,10 +15,13 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               reading reading only rows of runs its campaign admitted, each commit by its
               first admitted attempt, a row of any other run invisible whatever its failure
               kind and a look outside the campaign buying no selection (none when its
-              admissions were not read; a legacy reading as before, DL-382), and registration
-              refused ``reading_exists`` (a reading already registered, before the pool and
-              the budget are read — P-793), ``pool_seen`` and ``budget_spent``, the budget
-              counting each ``reading_id`` once.
+              admissions were not read; a legacy reading as before, DL-382), a descriptive
+              arm counting only the commits observed among its first n on either attempt
+              rule, every commit served with its outcome and row hash, the loop pair and its
+              exact McNemar p (P-794), and registration refused ``reading_exists`` (a reading
+              already registered, before the pool and the budget are read — P-793),
+              ``pool_seen`` and ``budget_spent``, the budget counting each ``reading_id``
+              once.
 How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5)
@@ -34,13 +37,20 @@ from __future__ import annotations
 
 import hashlib
 import random
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
 from crb.core.ledger import FAILURE_OUTAGE, LABEL_FAILURE_KIND, GradeRow
 from crb.core.reading import (
+    ATTEMPT_RULE_LEGACY,
+    ATTEMPT_RULE_RESERVED,
     CELL_ERROR_BUDGET,
+    LABEL_CLAIM,
+    LABEL_RESERVATION,
+    LABEL_TREATMENT,
     LEFT_HARNESS,
     REFUSAL_BUDGET_SPENT,
     REFUSAL_POOL_SEEN,
@@ -51,7 +61,9 @@ from crb.core.reading import (
     STATE_INSUFFICIENT,
     STATE_LOOK_PENDING,
     STATE_UNDECIDED,
+    Reading,
     ReadingRefused,
+    Reservation,
     arm_reading,
     budget_spent,
     canonical_cell_key,
@@ -59,10 +71,14 @@ from crb.core.reading import (
     evaluate,
     first_per_id,
     look_state,
+    loop_pair,
+    mcnemar_p,
     p_deliver,
     seed_of,
     seeded_order,
+    verdict_for,
     with_admissions,
+    with_reservations,
 )
 from fixtures.readings import (
     BEFORE,
@@ -551,3 +567,164 @@ def test_a_look_outside_the_campaign_buys_no_selection(look: dict[str, str]) -> 
     assert all(c.outcome is None for c in got.commits if not truth[c.commit])
     assert (got.look.state, got.look.counted, got.look.clean) == (STATE_LOOK_PENDING, 2, 2)
     assert got.look.state != STATE_DELIVER
+
+
+# --- a descriptive arm's counted commits, and every commit served (F3, P-794) --------------
+
+#: The ``Event.id`` of the registration a reserved.v1 reading is loaded beside.
+_REG_EVENT = 10
+
+
+def _registered(attempt_rule: str, **kw: Any) -> Reading:
+    """``register_reading`` over 40 commits under ``attempt_rule`` (reserved.v1 re-runs
+    nothing and names the budget profile its runs spend on)."""
+    if attempt_rule == ATTEMPT_RULE_RESERVED:
+        kw = {"attempt_rule": attempt_rule, "budget_profile": "default", "max_reruns": 0, **kw}
+    return register_reading(commits(40), **kw)
+
+
+def _first_attempts(
+    reading: Reading, attempts: Mapping[str, Sequence[bool | None]]
+) -> tuple[Reading, list[GradeRow]]:
+    """``reading`` and one first attempt per arm and pool commit, in the seeded order:
+    ``attempts[arm][i]`` is the ``i``-th commit's (``True`` clean, ``False`` a miss, ``None``
+    no attempt yet). Under reserved.v1 each attempt is the row its reservation wrote, with
+    the reservations loaded on the reading; on the legacy rule it is a plain first row."""
+    if not reading.reserved:
+        return reading, [
+            r for arm, outs in attempts.items() for r in rows_for(outs, reading.pool, arm=arm)
+        ]
+    reservations: list[Reservation] = []
+    rows: list[GradeRow] = []
+    for arm, outs in attempts.items():
+        for commit, clean in zip(reading.pool, outs, strict=False):
+            if clean is None:
+                continue
+            res = Reservation(
+                arm=arm,
+                task_id=commit,
+                run_id="run-1",
+                event_id=f"ev-{arm}-{commit[:8]}",
+                event_seq_id=_REG_EVENT + 1 + len(reservations),
+                claim=0,
+                treatment="treat-1",
+                hold_usd=0.5,
+                settled=True,
+            )
+            reservations.append(res)
+            stamp = {LABEL_RESERVATION: res.event_id, LABEL_TREATMENT: res.treatment}
+            labels = {**stamp, LABEL_CLAIM: str(res.claim)}
+            rows.append(sealed_row(commit, clean=clean, arm=arm, run_id=res.run_id, labels=labels))
+    return with_reservations(reading, reservations, _REG_EVENT), rows
+
+
+@pytest.mark.parametrize("attempt_rule", [ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED])
+def test_a_descriptive_arm_with_a_pending_commit_counts_only_its_observed_commits(
+    attempt_rule: str,
+) -> None:
+    """F3 (the Wave 3 red team), P-794: a descriptive arm tallies the commits observed among
+    its first n, so ``counted_commits`` must name exactly those. It named the first
+    ``counted`` commits instead: with the 2nd of 16 pending and the other 15 observed, it named
+    the pending commit and left out the 16th, which the tally counted — so the commits a loop
+    pair is read on were the wrong ones. A commit past the first n is never counted, and a
+    hierarchy arm's counted commits stay its contiguous prefix, up to its first pending one."""
+    reading = _registered(attempt_rule, descriptive=(("A0", 16),))
+    head: list[bool | None] = [True, None, *([True, True, False] * 4), True, True]
+    beyond: list[bool | None] = [True] * 4  # observed, but past the arm's fixed count
+    reading, rows = _first_attempts(reading, {"A0": head + beyond, "S3": [True, None, True]})
+    out = evaluate(reading, rows)
+    a0 = out.arms["A0"]
+    want = tuple(c for i, c in enumerate(reading.pool[:16]) if i != 1)
+    assert a0.descriptive and (a0.look.counted, a0.look.clean, a0.look.misses) == (15, 11, 4)
+    assert a0.counted_commits == want
+    assert reading.pool[1] not in a0.counted_commits and reading.pool[15] in a0.counted_commits
+    served = {a["arm"]: a for a in out.to_dict()["arms"]}
+    assert served["A0"]["counted_commits"] == list(want)
+    assert verdict_for(out, "A0").counted_commits == want
+    # a hierarchy arm reads a contiguous prefix: it stops at its first pending commit
+    assert out.arms["S3"].counted_commits == (reading.pool[0],)
+
+
+def test_arm_to_dict_serves_every_commits_outcome_and_row_hash() -> None:
+    """F3, P-794: ``GET /readings`` serves every commit an arm reads, in the seeded order,
+    with its outcome, why it left, the row that decided it and the reserved rule's reason —
+    so the loop pair (the commits observed in both ``A0`` and ``A0+L``) can be computed from
+    the API. It served the left commits and the counted ones' shas, never an outcome."""
+    reading = register_reading(commits(40), descriptive=(("A0", 16),))
+    p = reading.pool
+    rows = _hashed(
+        [
+            sealed_row(p[0]),
+            sealed_row(p[1], clean=False),
+            sealed_row(p[2], labels={"lint_reason": "disabled_by_config"}),
+            sealed_row(p[0], arm="A0"),
+        ]
+    )
+    out = evaluate(reading, rows)
+    s3 = out.arms["S3"]
+    served = s3.to_dict()["commits"]
+    assert served == [c.to_dict() for c in s3.commits] and len(served) == len(p)
+    assert served[:4] == [
+        {
+            "commit": p[0],
+            "change": f"change-{p[0]}",
+            "outcome": True,
+            "left": "",
+            "row_hash": rows[0].row_hash,
+            "reason": "",
+        },
+        {
+            "commit": p[1],
+            "change": f"change-{p[1]}",
+            "outcome": False,
+            "left": "",
+            "row_hash": rows[1].row_hash,
+            "reason": "",
+        },
+        {
+            "commit": p[2],
+            "change": f"change-{p[2]}",
+            "outcome": None,
+            "left": "lint_disabled",
+            "row_hash": rows[2].row_hash,
+            "reason": "",
+        },
+        {"commit": p[3], "change": p[3], "outcome": None, "left": "", "row_hash": "", "reason": ""},
+    ]
+    a0 = {a["arm"]: a for a in out.to_dict()["arms"]}["A0"]["commits"]
+    assert (a0[0]["outcome"], a0[0]["row_hash"]) == (True, rows[3].row_hash)
+    assert all(c["outcome"] is None and not c["row_hash"] for c in a0[1:])
+    # a reserved.v1 arm serves each commit's reason beside its outcome and reserved row
+    reserved, attempts = _first_attempts(
+        _registered(ATTEMPT_RULE_RESERVED), {"S3": [True, False, None]}
+    )
+    attempts = _hashed(attempts)
+    got = evaluate(reserved, attempts).to_dict()["arms"][0]["commits"]
+    assert [(c["outcome"], c["row_hash"], c["reason"]) for c in got[:3]] == [
+        (True, attempts[0].row_hash, ""),
+        (False, attempts[1].row_hash, "miss"),
+        (None, "", "pending"),
+    ]
+
+
+def test_loop_pair_counts_discordant_pairs_and_its_exact_p() -> None:
+    """F3, P-794: the loop pair is read on the commits observed in BOTH ``A0`` and ``A0+L``
+    among each arm's first 16 — ``b`` clean under ``A0+L`` alone, ``c`` under ``A0`` alone —
+    with the exact two-sided McNemar p, ``min(1, 2·P(X ≤ min(b, c)))`` for ``X ~ Bin(b+c, ½)``.
+    A commit pending on either arm is not a pair, and a commit past the first 16 never is."""
+    reading = register_reading(commits(40), descriptive=(("A0", 16), ("A0+L", 16)))
+    t, f, n = True, False, None
+    a0: list[bool | None] = [t, f, f, n, t, f, t, *([f] * 9), t]
+    a0l: list[bool | None] = [t, t, t, t, f, f, n, *([t] * 9), f]
+    rows = [*rows_for(a0, reading.pool, arm="A0"), *rows_for(a0l, reading.pool, arm="A0+L")]
+    out = evaluate(reading, rows)
+    got = loop_pair(out.arms["A0"], out.arms["A0+L"])
+    p = reading.pool
+    assert got.pairs == (p[0], p[1], p[2], p[4], p[5], *p[7:16])
+    assert (got.b, got.c) == (11, 1)
+    assert got.p == pytest.approx(26 / 4096)  # 2 · (C(12,0) + C(12,1)) / 2^12
+    assert got.to_dict() == {"pairs": list(got.pairs), "b": 11, "c": 1, "p": got.p}
+    # the exact test, by hand: no discordant pair is no evidence; one side alone halves per pair
+    assert mcnemar_p(0, 0) == 1.0 and mcnemar_p(3, 3) == 1.0
+    assert mcnemar_p(5, 0) == pytest.approx(0.0625) and mcnemar_p(0, 6) == pytest.approx(0.03125)
+    assert mcnemar_p(11, 1) == got.p

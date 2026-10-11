@@ -9,7 +9,8 @@ What it does: ``sealed_row`` stamps the posture class ``docker/copy/sealed``, th
               sealed container, rung ``r1``, a context arm, the class-set version and a
               change id, with a ``created`` time after the registration; ``register_reading``
               registers a hierarchy over a pool at a fixed time, under a campaign when one is
-              named; ``commits`` makes shas.
+              named, and under any other ``register`` option given (the reserved.v1 attempt
+              rule); ``commits`` makes shas.
 How:          Thin wrappers over ``tests.fixtures.posture.posture_row`` and
               ``crb.core.reading.register``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -148,9 +149,11 @@ def register_reading(
     repo: str = REPO,
     cell: dict[str, str] | None = None,
     campaign_id: str = "",
+    **kw: Any,
 ) -> Reading:
     """A reading of :data:`CELL` on :data:`REPO`, registered at :data:`REGISTERED_AT` —
-    under ``campaign_id`` when one is named (DL-382)."""
+    under ``campaign_id`` when one is named (DL-382); ``kw`` goes to ``register`` as given
+    (``attempt_rule``, ``budget_profile`` and ``max_reruns`` for a reserved.v1 reading)."""
     return register(
         repo=repo,
         cell=cell or CELL,
@@ -170,6 +173,7 @@ def register_reading(
         budget=budget,
         changes=changes,
         campaign_id=campaign_id,
+        **kw,
     )
 
 

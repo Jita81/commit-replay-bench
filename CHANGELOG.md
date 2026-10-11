@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
-  ceiling the product holds** (P-787 to P-793, G-957, DL-372 to DL-384;
+  ceiling the product holds** (P-787 to P-794, G-957, DL-372 to DL-384;
   [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading hashes `hypothesis`,
   `smallest_effect` and its campaign into its id; `thin_cell` counts distinct tasks. A
   reading registers, and its runs are admitted, only with sandbox and builder on docker, in its

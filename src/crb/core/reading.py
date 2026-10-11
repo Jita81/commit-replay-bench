@@ -33,7 +33,11 @@ qualified commits with its SHA-256. Only rows graded after registration count.
 * **The hierarchy.** Arms are read in the registered order and reading stops at the first
   arm that does not deliver; the standard is the leanest certifying arm in the unbroken chain.
   ``S3`` alone is a ``ceiling``; only the ``S1`` family and ``S2`` certify; ``A0`` and
-  ``A0+L`` are descriptive and spend nothing.
+  ``A0+L`` are descriptive and spend nothing. A descriptive arm tallies the commits observed
+  among its first ``n`` (``ArmReading.limit``) and names exactly those as its counted
+  commits, a pending one never among them (P-794); every arm serves each commit it reads
+  with its outcome and row hash, and :func:`loop_pair` reads the ``A0`` / ``A0+L`` pair on
+  the commits observed in both, with the exact two-sided McNemar p (:func:`mcnemar_p`).
 * **The budget.** One error budget per (repository, cell key, apparatus, class-set version),
   :data:`CELL_ERROR_BUDGET` unless the operator fixed another value; every registration spends
   its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend. A
@@ -80,8 +84,11 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               the cell's budget (``budget_spent``) or outside the arm rules; evaluates each
               arm of a reading over the ledger's rows in the seeded order; stops the
               hierarchy at the first arm that does not deliver; names the standard, a ceiling
-              or no proven standard, and the commits still needed; registers a ceiling's
-              forward reading and enrols its calibration builds. Under ``reserved.v1``
+              or no proven standard, and the commits still needed; names a descriptive arm's
+              counted commits as those observed among its first n (P-794), serves every
+              commit an arm reads and pairs ``A0`` with ``A0+L`` (``loop_pair``, the exact
+              McNemar p); registers a ceiling's forward reading and enrols its calibration
+              builds. Under ``reserved.v1``
               (``attempt_rule``, P-792) reads each enrolled commit by its reservation's row
               alone (``with_reservations``, ``enrolled``, ``_reserved_verdict``; every
               failure a named miss, none a leave; unread reservations read pending) and
@@ -126,6 +133,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import math
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -1315,6 +1323,9 @@ class ArmReading:
     commits: tuple[CommitReading, ...]
     descriptive: bool = False
     stopped_by: str = ""
+    #: A descriptive arm's fixed count ``n``: it tallies the commits observed among its first
+    #: ``limit`` commits in the pool. ``0`` for a hierarchy arm.
+    limit: int = 0
 
     @property
     def state(self) -> str:
@@ -1324,8 +1335,13 @@ class ArmReading:
 
     @property
     def counted_commits(self) -> tuple[str, ...]:
-        """The commits the look read (the prefix), in order."""
+        """The commits the arm counted, in order: a hierarchy arm's look reads the prefix up
+        to its first pending commit; a descriptive arm tallies each commit observed among its
+        first ``limit``, so a pending one is never named and an observed one after it is
+        (P-794)."""
         kept = [c for c in self.commits if not c.left]
+        if self.limit:
+            return tuple(c.commit for c in kept[: self.limit] if c.outcome is not None)
         return tuple(c.commit for c in kept[: self.look.counted])
 
     @property
@@ -1342,6 +1358,8 @@ class ArmReading:
             "look_state": self.look.state,
             "left": [c.to_dict() for c in self.left],
             "counted_commits": list(self.counted_commits),
+            # every commit the arm reads, in the seeded order: what the loop pair is read on
+            "commits": [c.to_dict() for c in self.commits],
         }
 
 
@@ -1570,7 +1588,7 @@ def _reserved_verdict(
 def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: int) -> ArmReading:
     """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
     by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
-    commits as they stand; a descriptive arm tallies its fixed count."""
+    commits as they stand; a descriptive arm tallies its fixed count (``ArmReading.limit``)."""
     reservations = reading.reservations or {}
     events = {res.event_id for res in reservations.values() if res.event_id}
     stamped: dict[str, list[GradeRow]] = {}
@@ -1597,7 +1615,8 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
     outcomes = [c.outcome for c in out]
     n = _descriptive_count(reading, arm, limit)
     if n:
-        return ArmReading(arm, _descriptive_look(outcomes, n), tuple(out), descriptive=True)
+        look = _descriptive_look(outcomes, n)
+        return ArmReading(arm, look, tuple(out), descriptive=True, limit=n)
     look = look_state(outcomes, reading.rule, open_pool=reading.prospective)
     return ArmReading(arm, look, tuple(out))
 
@@ -1611,8 +1630,10 @@ def arm_reading(
     after registration: the first eligible row whose failure kind is not ``harness``. Two
     commits of one change count once (the first in the order). A commit without an observed
     attempt is pending; one the instrument cannot grade leaves the pool with its reason before
-    its outcome is read. ``limit`` caps a descriptive arm at its fixed count. A forward
-    reading's arm is read by ticket (:func:`_arm_forward`).
+    its outcome is read. ``limit`` caps a descriptive arm at its fixed count: the arm keeps it
+    (``ArmReading.limit``) and counts the commits observed among its first ``limit``, a
+    pending one never among them (P-794). A forward reading's arm is read by ticket
+    (:func:`_arm_forward`).
 
     A campaign-named reading reads only rows of runs its campaign admitted (DL-382): a row is
     read when it is in the arm's scope (:func:`_in_scope`) and its run was admitted
@@ -1687,7 +1708,7 @@ def arm_reading(
     if limit:
         kept = kept[:limit]
         descriptive_look = _descriptive_look(kept, limit)
-        return ArmReading(arm, descriptive_look, tuple(out), descriptive=True)
+        return ArmReading(arm, descriptive_look, tuple(out), descriptive=True, limit=limit)
     return ArmReading(arm, look_state(kept, reading.rule), tuple(out))
 
 
@@ -1699,6 +1720,51 @@ def _descriptive_look(outcomes: Sequence[bool | None], limit: int) -> LookState:
     return LookState(
         STATE_DESCRIPTIVE, len(resolved), clean, len(resolved) - clean, limit, pending, None
     )
+
+
+def mcnemar_p(b: int, c: int) -> float:
+    """The exact two-sided McNemar p for ``b`` and ``c`` discordant pairs: under no
+    difference each discordant pair falls either way with chance ½, so
+    ``p = min(1, 2·P(X ≤ min(b, c)))`` for ``X ~ Bin(b + c, ½)`` — ``1.0`` with no discordant
+    pair."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, k) for k in range(min(b, c) + 1))
+    return min(1.0, 2 * tail / (1 << n))
+
+
+@dataclass(frozen=True)
+class LoopPair:
+    """The loop pair of a reading: ``A0`` and ``A0+L`` on the commits observed in both."""
+
+    #: The paired commits, in ``A0``'s order.
+    pairs: tuple[str, ...]
+    #: Pairs clean under ``A0+L`` and a miss under ``A0``.
+    b: int
+    #: Pairs clean under ``A0`` and a miss under ``A0+L``.
+    c: int
+
+    @property
+    def p(self) -> float:
+        return mcnemar_p(self.b, self.c)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"pairs": list(self.pairs), "b": self.b, "c": self.c, "p": self.p}
+
+
+def loop_pair(a0: ArmReading, a0l: ArmReading) -> LoopPair:
+    """``a0`` (``A0``) paired with ``a0l`` (``A0+L``): each commit both arms counted — for a
+    descriptive arm, observed among its first ``n`` (``counted_commits``) — with ``b`` the
+    pairs clean under ``A0+L`` alone and ``c`` those clean under ``A0`` alone. A commit
+    pending or left on either arm is not a pair."""
+    left = {c.commit: c.outcome for c in a0.commits}
+    right = {c.commit: c.outcome for c in a0l.commits}
+    both = set(a0l.counted_commits)
+    pairs = tuple(c for c in a0.counted_commits if c in both)
+    b = sum(1 for c in pairs if right[c] and not left[c])
+    c_ = sum(1 for c in pairs if left[c] and not right[c])
+    return LoopPair(pairs, b, c_)
 
 
 # ---------------------------------------------------------------------------
