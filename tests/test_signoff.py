@@ -589,12 +589,15 @@ def test_a_cell_of_disqualified_rows_only_is_thin_while_its_reading_counts_them(
     """FZ-3 (DL-372): ``thin_cell`` counts ``CellStats.n_tasks``, which leaves a
     disqualified row out; the reading counts that row as the builder's miss. Twelve commits
     whose only rows are disqualified are no evidence of volume — thin at 0 tasks — yet a
-    verdict: the reading reads ``insufficient``. Pins current behaviour."""
+    verdict: the reading reads each as a miss and decides ``insufficient`` at the third (the
+    twelve are disqualified, three are read; R1-7). Pins current behaviour."""
     rows = [_row(clean=False, disqualified=True, task_id=f"{i:016x}") for i in range(12)]
     cell = _cell(rows, controls=PASSED, capability_class="frontend.component.add", size="S")
     assert cell.stats is not None
     assert (cell.stats.n_tasks, cell.stats.disqualified) == (0, 12)
     assert cell.decision is not None and cell.decision.reason_code == "insufficient"
+    (short,) = cell.decision.shortfalls
+    assert (short.code, short.observed) == ("insufficient", 3)
     refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
     thin = refusals[0]
     assert (thin.code, thin.threshold, thin.observed) == ("thin_cell", 10, 0)
