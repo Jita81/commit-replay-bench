@@ -14,13 +14,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **An account or its link is written only under the users lock** (P-785;
   [#85](https://github.com/Jita81/commit-replay-bench/pull/85)). Seven routes read the link or
-  the account without the lock its acceptance holds: a withdrawal stamped a link revoked and
+  account without the lock its acceptance holds: a withdrawal stamped a link revoked and
   accepted, an admin's password set was replaced by the person's, a self-service change or a
   sign-in stored a hash over an admin's reset, and a sign-out everywhere let a password change
-  keep the session it ended. Each now takes the lock before it reads; a password is verified
-  first, so a guess never holds it, then the account is read again under it. The break-glass
-  `crb users set-password` takes it too. Two ratchets fail a route that reads before the lock,
-  or any new writer of a password, nonce or active flag.
+  keep the session it ended. Each now takes the lock before it reads, verifying a password
+  first so a guess never holds it, and rereads the account under it. So does
+  `crb users set-password`. Two ratchets fail a route reading before the lock, or any new
+  writer of a password, nonce or active flag.
 
 - **Every pull-request workflow's jobs are required on `main`**
   ([#72](https://github.com/Jita81/commit-replay-bench/pull/72)). On 2026-10-07 an administrator
