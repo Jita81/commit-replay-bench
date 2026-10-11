@@ -56,7 +56,8 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               the strengthening items carry the same strengths ``/oracle/{repo}`` shows;
               and writes what a named operator accepts — a corpus line, the strengthening
               items, the re-measurement runs — re-deriving each body here so the caller
-              can choose but never compose; a cell whose queued runs are unfinished is
+              can choose but never compose; a cell whose queued runs are unfinished — or
+              that a campaign's live run would attempt one of its commits for (F87-2) — is
               refused and served with those runs, so money is never spent twice (P-182); a
               cell with no request (no commit left it has not graded) is refused with the
               plan's own reason, so nothing is queued that would repeat a commit.
@@ -78,8 +79,13 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               session's CSRF token before it reaches a route), src/crb/server/factory_state.py
               (``FactoryHome.register_backlog`` / ``register_evolution`` — the one
               registration path), src/crb/server/routes/runs.py (``new_run``,
-              ``submit_refusals``, ``require_jobs``, ``append_system_event`` — how a run is
-              built, refused at submit, queued, and how an event is chained),
+              ``submit_refusals``, ``require_jobs``, ``append_system_event``, ``run_rungs`` —
+              how a run is built, refused at submit, queued, how an event is chained, and
+              which rungs a live run calls), src/crb/server/campaigns.py (``live_runs``,
+              ``run_arm`` — a campaign's runs are filed by ``POST /runs``, never by this
+              queue, so the plan counts the live ones as in flight, F87-2),
+              src/crb/core/campaign.py (``requested_arm`` — the arm a plan request asks for,
+              read as a campaign run's is),
               src/crb/store/events.py (``lock_event_writes``), src/crb/store/jobs.py
               (``stage_queued``), src/crb/server/routes/factory.py
               (``_refuse_if_run_active``, ``_next_item_id`` — the backlog write's own
@@ -96,7 +102,7 @@ Touch when:   never for a new repository — its rows and tasks are read as they
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
@@ -107,7 +113,9 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
+from crb.core.campaign import requested_arm
 from crb.core.capability import PROJECTIONS, build_capability_map
+from crb.core.context_arm import BASE_S1, MOD_LOOP
 from crb.core.learn import (
     REASON_PENDING,
     LearnError,
@@ -132,6 +140,7 @@ from crb.factory.backlog import Backlog, BacklogError, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
 from crb.factory.testfirst import canonical_model
 from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.campaigns import live_runs, run_arm
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_posture_class
@@ -152,6 +161,7 @@ from crb.server.routes.runs import (
     append_system_event,
     new_run,
     require_jobs,
+    run_rungs,
     submit_refusals,
     system_trace_id,
 )
@@ -454,11 +464,23 @@ def _learn_step(
     raise exhausted() from None
 
 
-def in_flight_runs(db: Session, repo: str, *, cell: str, mode: str, apparatus: str) -> list[str]:
+def in_flight_runs(
+    db: Session,
+    repo: str,
+    *,
+    cell: str,
+    mode: str,
+    apparatus: str,
+    requests: Sequence[Mapping[str, Any]] = (),
+) -> list[str]:
     """The runs an earlier ``learn.remeasure.queued`` queued for this (cell, mode, apparatus)
-    that have not finished. The plan is derived from graded rows only, so it still holds a
-    cell whose runs are queued or running; this is what keeps the one write that spends
-    money from spending the same estimate twice (a double click, or two operators)."""
+    that have not finished, and — at the running apparatus — the runs a campaign admitted that
+    are still queued or running and would attempt a commit one of the entry's ``requests``
+    asks for (:func:`would_attempt`; F87-2): ``POST /runs`` files a campaign's runs and this
+    queue never does (DL-382), so without them the plan re-requests commits already in
+    flight. The plan is derived from graded rows only, so it still holds a cell whose runs
+    are queued or running; this is what keeps the one write that spends money from spending
+    the same estimate twice (a double click, or two operators)."""
     queued: list[str] = []
     for ev in db.execute(
         select(Event)
@@ -468,13 +490,44 @@ def in_flight_runs(db: Session, repo: str, *, cell: str, mode: str, apparatus: s
         p = dict(ev.payload_json or {})
         if (p.get("cell"), p.get("mode"), p.get("apparatus")) == (cell, mode, apparatus):
             queued.extend(str(x) for x in (p.get("run_ids") or []))
-    if not queued:
-        return []
-    return sorted(
-        db.execute(
-            select(Run.id).where(Run.id.in_(queued), Run.status.not_in(TERMINAL_STATUSES))
-        ).scalars()
+    live = (
+        set(
+            db.execute(
+                select(Run.id).where(Run.id.in_(queued), Run.status.not_in(TERMINAL_STATUSES))
+            ).scalars()
+        )
+        if queued
+        else set()
     )
+    if requests and apparatus == APPARATUS_VERSION:
+        live.update(
+            run.id
+            for run in live_runs(db, repo=repo)
+            if any(would_attempt(run, request) for request in requests)
+        )
+    return sorted(live)
+
+
+def would_attempt(run: Run, request: Mapping[str, Any]) -> bool:
+    """Whether a live run would attempt a commit the plan's ``request`` (a ``POST /runs``
+    body) asks for, on the arm it asks for — counted wide, since counting a run that writes
+    elsewhere only holds a cell back until it finishes: the same mode; the request's arm, or
+    that arm ``+L`` (whose rows carry the bare arm while the repository's loop switch is
+    off); a rung that calls the request's builder and model; and one of its commits, or any
+    of them when the run names none (it replays the pool)."""
+    arm = requested_arm(
+        kind=str(request.get("kind") or ""),
+        mode=str(request.get("mode") or ""),
+        s1=request.get("arm") == BASE_S1,
+        learning=str(request.get("learning") or "") or None,
+    )
+    if run.mode != request.get("mode") or run_arm(run) not in (arm, arm + MOD_LOOP):
+        return False
+    pair = (str(request.get("builder") or ""), str(request.get("model") or ""))
+    if pair not in {(run.builder or "", run.model or ""), *run_rungs(run)}:
+        return False
+    tasks = {str(t) for t in (dict(run.params_json or {}).get("task_ids") or [])}
+    return not tasks or bool(tasks & {str(t) for t in (request.get("task_ids") or [])})
 
 
 @router.get(
@@ -545,7 +598,14 @@ def learn_remeasure(  # noqa: PLR0917 — FastAPI dependencies + query
     # in place of the Queue control. A what-if plan queues nothing, so it has none.
     for c in body["cells"]:
         c["in_flight_run_ids"] = (
-            in_flight_runs(db, repo, cell=str(c["label"]), mode=str(c["mode"]), apparatus=apparatus)
+            in_flight_runs(
+                db,
+                repo,
+                cell=str(c["label"]),
+                mode=str(c["mode"]),
+                apparatus=apparatus,
+                requests=c["requests"],
+            )
             if apparatus == APPARATUS_VERSION
             else []
         )
@@ -1171,7 +1231,12 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
         # waits here and then reads the first one's event, so it is refused
         lock_event_writes(db)
         in_flight = in_flight_runs(
-            db, repo, cell=cell.cell.label, mode=cell.mode, apparatus=body.apparatus
+            db,
+            repo,
+            cell=cell.cell.label,
+            mode=cell.mode,
+            apparatus=body.apparatus,
+            requests=[r.to_dict() for r in cell.requests],
         )
         if in_flight:
             raise ApiError(

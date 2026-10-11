@@ -6,18 +6,23 @@ The campaign's trace is its id (``cmp_<24 hex>``): one ``campaign.registered`` e
 way its own cap reads it (``crb.server.spend_cap.Spend``): the cost of its ledger rows plus
 each ``author.attempt`` event on its trace (P-775) — so the campaign and the run never sum one
 run two ways. Every reader here takes the caller's session, so ``POST /runs`` reads the tally
-under the events write lock it admits the run under, and two submits cannot both take the
-last of the line.
+and the arm's live run under the events write lock it admits the run under: two submits
+cannot both take the last of the line, nor both start one arm.
 
 Navigation
 ----------
 What it is:   The store readers of campaigns: the verified records, the line released, each
               run filed under one with what it has spent, the ids of the runs admitted (a
-              campaign-named reading counts only theirs, DL-382), and the tally and view served.
+              campaign-named reading counts only theirs, DL-382), the admitted runs still live
+              and the arm each asked for (one live run per arm, F87-2), and the tally and view
+              served.
 What it does: Keeps a campaign only when its id re-hashes and it sits on its own trace; folds
               its releases into the line (never above the ceiling); reads each admitted run's
               status, rows and author calls into a ``MemberRun``; computes the ``Tally``; serves
-              the campaign with its line, spent (author calls apart), held, left and runs.
+              the campaign with its line, spent (author calls apart), held, left and runs; finds
+              the admitted runs of a repository still queued or running, and the one live on
+              an arm that could attempt a commit of the same reading (``live_on_arm``, keyed
+              by ``requested_arm`` and ``runs_overlap``).
 How:          ``Event`` rows by action and trace → ``Campaign.from_dict`` → ``verify`` →
               ``rows_of_runs`` and ``author.attempt`` events → ``Spend.of_rows`` /
               ``with_authoring`` per run → ``crb.core.campaign.tally``.
@@ -25,10 +30,13 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's cap is a guard)
 Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
               src/crb/server/routes/campaigns.py (registers, releases and serves campaigns),
-              src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally),
+              src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally and
+              while no run on its arm is live), src/crb/server/routes/learn.py
+              (``in_flight_runs`` counts the live admitted runs beside the Learn queue's),
+              src/crb/store/jobs.py (``ACTIVE_STATUSES``: queued or running),
               src/crb/server/spend_cap.py (``Spend``, ``AUTHOR_ATTEMPT``: a run's own sum),
               src/crb/store/ledger.py (``rows_of_runs``: the rows in the caller's session)
-Tested by:    tests/test_server_campaigns.py
+Tested by:    tests/test_server_campaigns.py, tests/test_server_routes_learn.py
 Touch when:   never for a new repository; a new kind of spend is recorded outside a run's rows
               and author calls (count it here and in ``Spend``), or a campaign's events change.
 """
@@ -48,9 +56,12 @@ from crb.core.campaign import (
     Campaign,
     MemberRun,
     Tally,
+    requested_arm,
+    runs_overlap,
     tally,
 )
 from crb.server.spend_cap import AUTHOR_ATTEMPT, Spend
+from crb.store.jobs import ACTIVE_STATUSES
 from crb.store.ledger import rows_of_runs
 from crb.store.models import Event, Run
 
@@ -113,6 +124,68 @@ def admitted_runs(session: Session, campaign_id: str) -> frozenset[str]:
         rid
         for ev in _events(session, campaign_id, CAMPAIGN_ADMITTED)
         if (rid := str((ev.payload_json or {}).get("run_id") or ""))
+    )
+
+
+def live_runs(session: Session, *, repo: str, campaign_id: str = "") -> list[Run]:
+    """The runs on ``repo`` admitted under ``campaign_id`` (under any campaign when it is
+    ``""``) that are still queued or running, in the order they were admitted: what
+    ``POST /runs`` keeps one of per arm (F87-2), and what the remeasure plan counts as in
+    flight beside the runs the Learn queue filed (``in_flight_runs``)."""
+    query = select(Event).where(Event.action == CAMPAIGN_ADMITTED)
+    if campaign_id:
+        query = query.where(Event.trace_id == campaign_id)
+    ids = list(
+        dict.fromkeys(
+            rid
+            for ev in session.execute(query.order_by(Event.id)).scalars()
+            if (rid := str((ev.payload_json or {}).get("run_id") or ""))
+        )
+    )
+    if not ids:
+        return []
+    live = {
+        r.id: r
+        for r in session.execute(
+            select(Run).where(
+                Run.id.in_(ids), Run.repo == repo, Run.status.in_(sorted(ACTIVE_STATUSES))
+            )
+        ).scalars()
+    }
+    return [live[rid] for rid in ids if rid in live]
+
+
+def run_arm(run: Run) -> str:
+    """The arm a run asked for (``requested_arm`` over its kind, mode and params): the key of
+    the run being admitted and of each live one alike, so the two are read one way."""
+    params = dict(run.params_json or {})
+    return requested_arm(
+        kind=run.kind,
+        mode=run.mode,
+        s1=params.get("arm") == "S1",
+        learning=params.get("learning"),
+    )
+
+
+def run_reading(run: Run) -> str:
+    """The reading a run is filed under (``params.reading_id``), or ``""``."""
+    return str(dict(run.params_json or {}).get("reading_id") or "")
+
+
+def live_on_arm(
+    session: Session, campaign_id: str, *, repo: str, arm: str, reading_id: str = ""
+) -> Run | None:
+    """The first run of the campaign on ``repo`` and ``arm`` still queued or running that
+    could attempt a commit a run filed under ``reading_id`` would (``runs_overlap``: the same
+    reading, or either names none), or ``None``: while it is live no such run on that arm is
+    admitted (F87-2)."""
+    return next(
+        (
+            r
+            for r in live_runs(session, repo=repo, campaign_id=campaign_id)
+            if run_arm(r) == arm and runs_overlap(reading_id, run_reading(r))
+        ),
+        None,
     )
 
 
@@ -218,7 +291,11 @@ __all__ = [
     "campaign_tally",
     "campaign_view",
     "line_gbp",
+    "live_on_arm",
+    "live_runs",
     "load_campaigns",
     "members",
     "releases",
+    "run_arm",
+    "run_reading",
 ]
