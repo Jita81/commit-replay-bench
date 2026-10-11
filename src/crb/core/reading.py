@@ -16,10 +16,10 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   posture (the builder in the sealed container, the tests in the docker sandbox); for ``S2``
   only on factory rows stamped as graded on held-out acceptance tests. Two commits of one
   change (a cherry-pick, a revert and its original — ``labels.change_id``) count once: the
-  first in the seeded order. A reading that names a campaign counts a row only when the run
-  that wrote it was admitted under that campaign (:func:`with_admissions`, DL-382): a commit
-  whose first attempt was made by a run outside the campaign leaves the pool
-  (``unadmitted``), and, read without the campaign's admissions, the reading counts none. A
+  first in the seeded order. A reading that names a campaign reads only rows of runs its
+  campaign admitted (:func:`with_admissions`, DL-382); a row of any other run is invisible to
+  it, whatever its failure kind, a harness failure or an outage included, so a commit is read
+  by its first admitted attempt. Read without the campaign's admissions, it counts none. A
   commit with no observed attempt is ``pending`` and the look waits; a commit the
   instrument cannot grade (no observed attempt after the re-runs the reading allows, gold
   not clean, or belt 5 switched off by configuration) leaves the pool with its reason
@@ -56,10 +56,10 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               list is ``pool_not_blind``); keeps a reading of an organisation's class
               (``org_class``) a cell, a seeded order and a budget of its own; names, from
               birth, the campaign whose ceiling every run of a reading spends from
-              (``campaign_id``, hashed when present — DL-382) and counts only rows of runs
-              admitted under it (``with_admissions``; none when unread; a commit first
-              attempted outside it leaves the pool, ``unadmitted``); refuses a campaign on
-              the factory's cell (``campaign_unsupported_reading``), a registration over
+              (``campaign_id``, hashed when present — DL-382) and reads only rows of runs
+              admitted under it (``with_admissions``; none when unread; a row of any other
+              run is invisible to it); refuses a campaign on the factory's cell
+              (``campaign_unsupported_reading``), a registration over
               commits already graded under its arms at its apparatus (``pool_seen``), beyond
               the cell's budget (``budget_spent``) or outside the arm rules; evaluates each
               arm of a reading over the ledger's rows in the seeded order; stops the
@@ -194,11 +194,6 @@ LEFT_HELD_OUT_ERROR = "held_out_error"
 #: scope. Decided without reading its result, so it leaves the pool rather than holding the
 #: reading open for an attempt that can never come (DL-334, P-694).
 LEFT_NOT_GRADED = "not_graded"
-#: A pool commit of a campaign-named reading whose first attempt was made by a run not
-#: admitted under the reading's campaign (DL-382) — a peek outside the ceiling. Decided
-#: without reading its result, so a later run inside the campaign never turns a peek into a
-#: counted outcome: the commit leaves the pool, and the next commit in the order takes its place.
-LEFT_UNADMITTED = "unadmitted"
 
 # --- registration refusals ---------------------------------------------------------
 REFUSAL_POOL_SEEN = "pool_seen"
@@ -208,10 +203,10 @@ REFUSAL_INVALID = "invalid_reading"
 REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
 #: A forward reading names a reading that does not read ``ceiling`` (DL-334).
 REFUSAL_NOT_A_CEILING = "not_a_ceiling"
-#: A reading names a campaign but counts rows of runs no submit gate can require to be filed
-#: under it (DL-382): a factory cell's rows come from factory runs, which carry no
-#: ``reading_id``, so nothing ties them to the reading — the reading's evidence would rest
-#: on a filing habit. One rule for ``POST /readings`` and ``POST /readings/forward``.
+#: A reading on the factory's cell names a campaign (DL-382): its runs are factory runs,
+#: which carry no ``reading_id``, so nothing ties them to the reading and no submit gate
+#: requires them to be filed under its campaign — the reading's evidence would rest on a
+#: filing habit. One rule for ``POST /readings`` and ``POST /readings/forward``.
 REFUSAL_CAMPAIGN_UNSUPPORTED = "campaign_unsupported_reading"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
@@ -696,13 +691,13 @@ def _validate(
 def campaign_unsupported(process_step: str) -> str:
     """Why a reading on a cell of ``process_step`` may not name a campaign, or ``""`` (DL-382).
 
-    The rule, one for ``POST /readings`` and ``POST /readings/forward``: a reading may name a
-    campaign only when every run it counts is one the submit gate can require to be filed
-    under that campaign — a run that carries the reading's ``reading_id`` (P-789), which only
-    a replay or blind run can. A factory cell's rows come from factory runs, which carry no
-    ``reading_id``: nothing ties such a run to the reading, and no submit gate requires it to
-    be filed under the reading's campaign, so the reading's evidence would rest on a filing
-    habit."""
+    The rule, one for ``POST /readings`` and ``POST /readings/forward``: a reading on the
+    factory's cell may name no campaign. Its runs are factory runs, which carry no
+    ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
+    be filed under its campaign; the reading's evidence would rest on a filing habit. A
+    replay or blind reading may name one, because a run filed under it by ``reading_id`` is
+    held to the campaign (409 ``campaign_required``, P-789) and any row counts only when the
+    campaign admitted its run."""
     if process_step != PROCESS_FACTORY:
         return ""
     return (
@@ -961,12 +956,17 @@ def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading
 def with_admissions(reading: Reading, run_ids: Iterable[str]) -> Reading:
     """``reading`` with the runs admitted under its campaign (``run_ids``: the ``run_id`` of
     each ``campaign.admitted`` event on the campaign's trace) — READ, never registered or
-    hashed, so the id is unchanged. A row of a campaign-named reading counts only when its run
-    is one of them (DL-382): a run posted without the campaign's ``campaign_id`` is queued
-    outside the campaign, its rows never count, and a commit it attempted first leaves the
-    pool (``unadmitted``); a run posted with the ``campaign_id`` is admitted, with or without
-    a ``reading_id``, and its rows count. A reading that names no campaign is returned as it
-    is — it counts its rows by its own rule, whatever run wrote them."""
+    hashed, so the id is unchanged. A campaign-named reading reads only rows of these runs
+    (DL-382); a row of any other run is invisible to it, whatever its failure kind, a harness
+    failure or an outage included. A run posted without the campaign's ``campaign_id`` is
+    queued outside the campaign and the reading never sees its rows. A run posted with the
+    ``campaign_id`` is admitted and spends under the ceiling; without a ``reading_id`` it
+    skips every reading gate (``reading_unknown``, ``reading_unsealed`` and
+    ``reading_posture_mismatch`` at submit, and the worker's claim checks), and its rows count
+    only when graded in the reading's scope: its cell, the sealed posture class, rung ``r1``,
+    after registration. Every Wave 3 body carries ``reading_id``. A reading that names no
+    campaign is returned as it is — it counts its rows by its own rule, whatever run wrote
+    them."""
     if not reading.campaign_id:
         return reading
     return replace(reading, admitted=frozenset(str(r) for r in run_ids if r))
@@ -1052,9 +1052,8 @@ def _in_scope(reading: Reading, arm: str, row: GradeRow) -> bool:
     ``r1`` attempt this deployment graded (never an imported row, whose labels were set
     elsewhere — P-321); it was graded strictly AFTER the registration (whole seconds, so a
     row of the same second does not count); and it was graded in the sealed posture class
-    the reading names — or, for ``S2``, on held-out acceptance tests. Such a row is an
-    attempt at the commit whichever run wrote it: :func:`arm_reading` reads its run's
-    admission after it has chosen the commit's first attempt."""
+    the reading names — or, for ``S2``, on held-out acceptance tests. :func:`arm_reading`
+    reads a row only when it is in scope AND its run was admitted (:func:`_admitted_run`)."""
     if (
         row.imported
         or row.repo != reading.repo
@@ -1094,8 +1093,10 @@ def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
     the reading's repository, apparatus, class-set version and checks arm, graded after the
     registration and never imported. The ticket (``labels.item_id``) is the pool's unit; its
     class, size and language were fixed when it was enrolled, and a builder, model or
-    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`). Under a
-    campaign, a first attempt by a run not admitted under it is never counted (DL-382)."""
+    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`). A
+    forward reading never names a campaign (``campaign_unsupported_reading``, DL-382), so its
+    admission check (:func:`_admitted_run`) is a belt only: it holds if that refusal ever
+    lapses."""
     if (
         not _admitted_run(reading, row)
         or row.imported
@@ -1170,11 +1171,13 @@ def arm_reading(
     its outcome is read. ``limit`` caps a descriptive arm at its fixed count. A forward
     reading's arm is read by ticket (:func:`_arm_forward`).
 
-    Under a campaign (DL-382) the first-attempt rule reads every row in the arm's scope
-    (:func:`_in_scope`), whichever run wrote it; when the commit's first attempt was made by
-    a run not admitted under the reading's campaign — a peek outside the ceiling — the commit
-    leaves the pool (:data:`LEFT_UNADMITTED`), decided without its result, as a forward
-    reading's ticket does. A later admitted run of the same commit never counts. A
+    A campaign-named reading reads only rows of runs its campaign admitted (DL-382): a row is
+    read when it is in the arm's scope (:func:`_in_scope`) and its run was admitted
+    (:func:`_admitted_run`). A row of any other run is invisible to it, whatever its failure
+    kind: it is not a first attempt, not a harness re-run toward ``max_reruns``, not an
+    outage and not ``gold_not_clean``. A commit is read by its first admitted attempt. A look
+    outside the campaign buys no selection: the admitted attempt is an independent draw, a
+    commit with none holds the prefix pending, and no filing makes a commit leave. A
     campaign-named reading whose admissions were never read counts nothing: every commit
     waits."""
     if reading.admissions_unread:
@@ -1184,7 +1187,7 @@ def arm_reading(
     by_commit: dict[str, list[GradeRow]] = {}
     pool = set(reading.pool)
     for r in rows:
-        if r.task_id in pool and _in_scope(reading, arm, r):
+        if r.task_id in pool and _in_scope(reading, arm, r) and _admitted_run(reading, r):
             by_commit.setdefault(r.task_id, []).append(r)
     out: list[CommitReading] = []
     seen_changes: set[str] = set()
@@ -1198,16 +1201,10 @@ def arm_reading(
             continue
         seen_changes.add(change)
         observed = None
-        unadmitted: GradeRow | None = None
         unobserved: list[str] = []
         for r in rs:
             if len(unobserved) > reading.max_reruns:
                 break  # it has left the pool: a later row can never bring it back
-            if r.failure_kind != FAILURE_OUTAGE and not _admitted_run(reading, r):
-                # an attempt by a run outside the campaign: the commit leaves, decided
-                # before its result is read, so no later run can count it (DL-382)
-                unadmitted = r
-                break
             if r.gold_clean is False:
                 unobserved = [LEFT_GOLD] * (reading.max_reruns + 1)
                 break
@@ -1220,9 +1217,7 @@ def arm_reading(
             # the builder's miss, never the instrument's, so it is read, not re-run
             observed = r
             break
-        if unadmitted is not None:
-            out.append(CommitReading(commit, change, None, LEFT_UNADMITTED, unadmitted.row_hash))
-        elif observed is not None:
+        if observed is not None:
             # belt 5 off lets an attempt leave only when belt 5 could have changed it: one
             # that passed every other belt. A miss (a red target, a disqualified build) is
             # the miss it is — erasing it would let switching the linter off help (P-342)
@@ -1581,7 +1576,6 @@ __all__ = [
     "LEFT_HELD_OUT_ERROR",
     "LEFT_NOT_GRADED",
     "LEFT_OTHER_CELL",
-    "LEFT_UNADMITTED",
     "POOL_RULE_ALL",
     "POOL_RULE_CALIBRATION",
     "POOL_RULE_SINCE",

@@ -23,14 +23,15 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               without a cap, an unbounded ``S1`` run, a non-build kind and a run of a
               campaign-named reading filed under no campaign or another one
               (``campaign_required``, DL-382), admits no more than the line under concurrent
-              submits, and shows a campaign-named reading counts a run's rows only when the
-              campaign admitted the run (a run posted without ``campaign_id`` counts none, and
-              a commit it attempted first leaves the pool ``unadmitted`` whatever it read; a
-              legacy reading counts it as before).
+              submits, and shows a campaign-named reading reads a run's rows only when the
+              campaign admitted the run (a run posted without ``campaign_id`` is invisible to
+              it, so each commit is read by its first admitted attempt and none leaves for a
+              run outside; a legacy reading counts it as before).
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
               ``append_event``; four threads through ``admit_under_campaign``; the admissions
-              reader also on the ``backend`` fixture (PostgreSQL when it is configured).
+              reader and ``GET /readings`` under a campaign also on the ``backend`` fixture
+              (PostgreSQL when it is configured).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
 Works with:   src/crb/server/routes/campaigns.py (the routes under test),
@@ -53,9 +54,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from crb.core.campaign import CAMPAIGN_ADMITTED, CAMPAIGN_REGISTERED
+from crb.core.reading import arm_reading
+from crb.server.app import create_app
 from crb.server.campaigns import admitted_runs
 from crb.server.deps import ApiError
 from crb.server.reading_book import load_readings
@@ -67,7 +71,17 @@ from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
 from fixtures.proven import CELL, LATER, write_reading
 from fixtures.readings import sealed_row
-from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env
+from fixtures.server_seed import (
+    ALPHA,
+    Env,
+    add_users,
+    assert_rbac,
+    envelope,
+    login,
+    make_env,
+    make_settings,
+    seed,
+)
 
 try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
     from tests.conftest_store import Backend, backend, pg_schema
@@ -414,10 +428,10 @@ def test_a_run_of_a_reading_that_names_a_campaign_is_filed_under_that_campaign(e
 def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(env: Env) -> None:
     """DL-382, the reading's side: a run of a campaign-named reading's pool commit posted
     WITHOUT the campaign's ``campaign_id`` is queued outside the campaign — no
-    ``campaign.admitted`` event names it — and its sealed row never counts toward the
-    reading, however clean: the commit it attempted first leaves the pool (``unadmitted``),
-    and a later row of an admitted run does not bring it back. A row of a run admitted under
-    the campaign counts; a reading under no campaign counts a loose run's row as before."""
+    ``campaign.admitted`` event names it — and its sealed row is invisible to the reading,
+    however clean: it counts nothing and makes no commit leave, so the commit stays pending
+    until a run admitted under the campaign attempts it, and that row counts. A reading under
+    no campaign counts a loose run's row as before."""
     env.settings.builder.executor = "docker"
     cid = _register(env)["campaign_id"]
     sha, inside, plain = "1" * 40, "3" * 40, "2" * 40
@@ -445,9 +459,7 @@ def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(
     ledger.append(row(loose.json()["id"], plain))
     got = arms()
     assert (got[named.reading_id]["counted"], got[legacy.reading_id]["counted"]) == (0, 1)
-    assert [(c["commit"], c["left"]) for c in got[named.reading_id]["left"]] == [
-        (sha, "unadmitted")
-    ]
+    assert got[named.reading_id]["left"] == []
     served = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
     assert {o["reading_id"]: o["admitted_runs"] for o in served} == {
         named.reading_id: 1,
@@ -457,45 +469,67 @@ def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(
     ledger.append(row(admitted.json()["id"], sha))
     ledger.append(row(admitted.json()["id"], inside))
     got = arms()
-    assert (got[named.reading_id]["counted"], got[legacy.reading_id]["counted"]) == (1, 1)
-    assert got[named.reading_id]["counted_commits"] == [inside]
+    assert (got[named.reading_id]["counted"], got[legacy.reading_id]["counted"]) == (2, 1)
+    assert sorted(got[named.reading_id]["counted_commits"]) == [sha, inside]
+    assert got[named.reading_id]["left"] == []
 
 
-def test_a_peek_outside_the_campaign_makes_its_commit_leave_whatever_it_read(env: Env) -> None:
-    """DL-382, the peek: a miss from a run posted outside the reading's campaign, then a clean
-    row of the same commit from a run the campaign admitted, must not count clean — else a
-    peek outside the ceiling buys a retry inside it. The commit's first attempt was the
-    peek's, so the commit leaves the pool ``unadmitted``, decided without its result: the
-    reading counts neither the miss nor the clean row."""
-    env.settings.builder.executor = "docker"
-    cid = _register(env)["campaign_id"]
-    sha = "1" * 40
-    named = write_reading(env.factory, [sha], repo=ALPHA, campaign_id=cid, hierarchy=("S3",))
-    loose = env.post("/runs", json={**GOLD, "executor": "docker", "task_ids": [sha]})
-    assert loose.status_code == 201, loose.text
-    filed = {**GOLD, "executor": "docker", "task_ids": [sha], "max_cost_usd": 5}
-    admitted = env.post("/runs", json={**filed, "reading_id": named.reading_id, "campaign_id": cid})
-    assert admitted.status_code == 201, admitted.text
-    ledger = DbLedger(env.factory)
-    for run, clean in ((loose, False), (admitted, True)):
-        ledger.append(
-            sealed_row(
-                sha,
-                repo=ALPHA,
-                run_id=run.json()["id"],
-                arm="S3",
-                cell=CELL,
-                created=LATER,
-                clean=clean,
-            )
+def test_a_campaign_reading_reads_each_commit_by_its_first_admitted_attempt(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """DL-382, option (b), through ``GET /readings`` on each store: a campaign-named reading
+    reads only rows of runs its campaign admitted, so each commit is read by its first
+    ADMITTED attempt. A miss from a run posted outside the campaign, then a clean row from an
+    admitted run, counts clean; a clean row outside, then an admitted miss, counts the miss.
+    The look outside buys nothing: no commit leaves the pool, and each commit is decided by
+    the admitted run's row (its own ``row_hash``, read back through ``load_readings``)."""
+    init_db(backend.engine)
+    info = seed(backend.factory)
+    add_users(backend.factory)
+    settings = make_settings(tmp_path)
+    settings.builder.executor = "docker"
+    shas = ["1" * 40, "2" * 40, "3" * 40]
+    with TestClient(create_app(settings, backend.factory)) as client:
+        login(client, "operator")
+        env = Env(client=client, factory=backend.factory, info=info, settings=settings)
+        cid = _register(env)["campaign_id"]
+        named = write_reading(env.factory, shas, repo=ALPHA, campaign_id=cid, hierarchy=("S3",))
+        loose = env.post("/runs", json={**GOLD, "executor": "docker", "task_ids": shas})
+        assert loose.status_code == 201, loose.text
+        filed = {**GOLD, "executor": "docker", "task_ids": shas, "max_cost_usd": 5}
+        admitted = env.post(
+            "/runs", json={**filed, "reading_id": named.reading_id, "campaign_id": cid}
         )
-    (served,) = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
+        assert admitted.status_code == 201, admitted.text
+        # each commit's outside row reads the opposite of its admitted row
+        truth = dict(zip(shas, (True, False, True), strict=True))
+        ledger = DbLedger(env.factory)
+        written = [
+            ledger.append(
+                sealed_row(
+                    sha,
+                    repo=ALPHA,
+                    run_id=run.json()["id"],
+                    arm="S3",
+                    cell=CELL,
+                    created=LATER,
+                    clean=truth[sha] if run is admitted else not truth[sha],
+                )
+            )
+            for sha in shas
+            for run in (loose, admitted)
+        ]
+        (served,) = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
     arm = served["arms"][0]
-    assert served["admitted_runs"] == 1
-    assert (arm["counted"], arm["clean"], arm["misses"]) == (0, 0, 0)
-    assert [(c["commit"], c["left"], c["outcome"]) for c in arm["left"]] == [
-        (sha, "unadmitted", None)
-    ]
+    assert served["admitted_runs"] == 1 and served["admissions_unread"] is False
+    assert (arm["counted"], arm["clean"], arm["misses"]) == (3, 2, 1)
+    assert arm["left"] == []
+    assert len({r.row_hash for r in written}) == len(written)
+    with backend.factory() as s:
+        (reading,) = load_readings(s, ALPHA)
+    decided = {c.commit: c.row_hash for c in arm_reading(reading, "S3", written).commits}
+    aid = admitted.json()["id"]
+    assert decided == {r.task_id: r.row_hash for r in written if r.run_id == aid}
 
 
 def test_load_readings_reads_each_campaigns_admissions_on_each_backend(backend: Backend) -> None:

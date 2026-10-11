@@ -12,7 +12,9 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               graded before registration never counting, a commit the instrument cannot grade
               leaving the pool before its outcome is read, a re-run never replacing a
               commit's first attempt, an imported row never counting, a campaign-named
-              reading counting only rows of runs its campaign admitted (none when its
+              reading reading only rows of runs its campaign admitted, each commit by its
+              first admitted attempt, a row of any other run invisible whatever its failure
+              kind and a look outside the campaign buying no selection (none when its
               admissions were not read; a legacy reading as before, DL-382), and registration
               refused ``pool_seen`` and ``budget_spent``.
 How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
@@ -29,14 +31,15 @@ Touch when:   never for a new repository; a rule, the counting or the budget cha
 from __future__ import annotations
 
 import hashlib
+import random
+from dataclasses import replace
 
 import pytest
 
-from crb.core.ledger import FAILURE_OUTAGE, LABEL_FAILURE_KIND
+from crb.core.ledger import FAILURE_OUTAGE, LABEL_FAILURE_KIND, GradeRow
 from crb.core.reading import (
     CELL_ERROR_BUDGET,
     LEFT_HARNESS,
-    LEFT_UNADMITTED,
     REFUSAL_BUDGET_SPENT,
     REFUSAL_POOL_SEEN,
     RULE_LOOK_V1,
@@ -61,6 +64,7 @@ from fixtures.readings import (
     BEFORE,
     CELL,
     REPO,
+    S1,
     commits,
     register_reading,
     rows_for,
@@ -384,34 +388,118 @@ def test_a_legacy_reading_under_no_campaign_counts_its_rows_as_before() -> None:
     assert legacy["admissions_unread"] is False and legacy["admitted_runs"] is None
 
 
-def test_a_commit_first_attempted_outside_the_campaign_leaves_the_pool_whatever_it_read() -> None:
-    """DL-382, outcome-blind: a commit's first attempt decides it, whichever run made it. When
-    that run was not admitted under the reading's campaign — a peek outside the ceiling — the
-    commit leaves the pool (``unadmitted``) before its result is read, so a later run inside
-    the campaign never turns the peek into a counted outcome: a miss outside then a clean row
-    inside leaves, as a clean row outside then a miss inside does. An outage outside is no
-    attempt, and the next commit in the order takes a leaver's place."""
+def _hashed(rows: list[GradeRow]) -> list[GradeRow]:
+    """``rows`` with a distinct ``row_hash`` each (``sealed_row``'s rows are unchained, so
+    each one's hash is empty): the hash a commit is read by names the row that decided it."""
+    return [
+        replace(r, row_hash=hashlib.sha256(f"row-{i}".encode()).hexdigest())
+        for i, r in enumerate(rows)
+    ]
+
+
+def test_a_campaign_reading_reads_each_commit_by_its_first_admitted_attempt() -> None:
+    """DL-382, option (b): a campaign-named reading reads only rows of runs its campaign
+    admitted, so a commit is read by its first ADMITTED attempt. A miss by a run outside the
+    campaign, then a clean row by an admitted run, counts clean, decided by the admitted row;
+    a clean row outside, then an admitted miss, counts the miss. No commit leaves the pool for
+    a run outside it. A legacy reading reads the same rows by each commit's first attempt."""
     reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
-    first, second, third = reading.pool[:3]
-    outage = {LABEL_FAILURE_KIND: FAILURE_OUTAGE}
-    rows = [
-        sealed_row(first, clean=False, run_id="run-out"),
-        sealed_row(first, clean=True, run_id="run-in"),
-        sealed_row(second, clean=True, run_id="run-out"),
-        sealed_row(second, clean=False, run_id="run-in"),
-        sealed_row(third, clean=False, run_id="run-out", labels=outage),
-        sealed_row(third, clean=True, run_id="run-in"),
-    ]
+    first, second = reading.pool[:2]
+    rows = _hashed(
+        [
+            sealed_row(first, clean=False, run_id="run-out"),
+            sealed_row(first, clean=True, run_id="run-in"),
+            sealed_row(second, clean=True, run_id="run-out"),
+            sealed_row(second, clean=False, run_id="run-in"),
+        ]
+    )
     arm = arm_reading(reading, "S3", rows)
-    assert [c.left for c in arm.commits[:3]] == [LEFT_UNADMITTED, LEFT_UNADMITTED, ""]
-    assert [c.outcome for c in arm.commits[:3]] == [None, None, True]
-    assert [c.row_hash for c in arm.commits[:2]] == [rows[0].row_hash, rows[2].row_hash]
-    assert (arm.look.counted, arm.look.clean, arm.look.misses) == (1, 1, 0)
-    served = evaluate(reading, rows).to_dict()["arms"][0]["left"]
-    assert [(c["commit"], c["left"]) for c in served] == [
-        (first, "unadmitted"),
-        (second, "unadmitted"),
+    assert [(c.outcome, c.left, c.row_hash) for c in arm.commits[:2]] == [
+        (True, "", rows[1].row_hash),
+        (False, "", rows[3].row_hash),
     ]
-    # a legacy reading reads the same rows by its own rule: each commit's first attempt
+    assert (arm.look.counted, arm.look.clean, arm.look.misses) == (2, 1, 1)
+    assert not any(c.left for c in arm.commits)
+    assert evaluate(reading, rows).to_dict()["arms"][0]["left"] == []
     legacy = arm_reading(register_reading(commits(40)), "S3", rows)
-    assert [c.outcome for c in legacy.commits[:3]] == [False, True, True]
+    assert [c.row_hash for c in legacy.commits[:2]] == [rows[0].row_hash, rows[2].row_hash]
+
+
+def test_a_row_of_an_unadmitted_run_is_invisible_whatever_its_failure_kind() -> None:
+    """DL-382: a row of a run the campaign did not admit is not a first attempt, not a
+    harness re-run toward ``max_reruns`` and not an outage — the reading never sees it.
+    Three harness failures outside then an admitted clean row count clean (inside, they
+    would have spent the two re-runs and the commit would have left ``harness``); an
+    admitted harness failure, a miss outside, then an admitted clean row count clean; an
+    outage outside then an admitted miss counts the miss; and a commit whose only rows are
+    outside the campaign is pending."""
+    reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
+    first, second, third, fourth = reading.pool[:4]
+
+    def harness(commit: str, run: str) -> GradeRow:
+        return sealed_row(commit, clean=False, error="harness: sandbox failed", run_id=run)
+
+    outage = {LABEL_FAILURE_KIND: FAILURE_OUTAGE}
+    rows = _hashed(
+        [
+            *(harness(first, "run-out") for _ in range(3)),
+            sealed_row(first, clean=True, run_id="run-in"),
+            harness(second, "run-in"),
+            sealed_row(second, clean=False, run_id="run-out"),
+            sealed_row(second, clean=True, run_id="run-in"),
+            sealed_row(third, clean=False, run_id="run-out", labels=outage),
+            sealed_row(third, clean=False, run_id="run-in"),
+            sealed_row(fourth, clean=False, run_id="run-out"),
+            harness(fourth, "run-out"),
+        ]
+    )
+    arm = arm_reading(reading, "S3", rows)
+    assert [(c.outcome, c.left, c.row_hash) for c in arm.commits[:4]] == [
+        (True, "", rows[3].row_hash),
+        (True, "", rows[6].row_hash),
+        (False, "", rows[8].row_hash),
+        (None, "", ""),
+    ]
+    assert arm.look.state == STATE_LOOK_PENDING and arm.look.counted == 3
+    # the same harness failures by an admitted run spend the re-runs: the commit leaves
+    inside = [harness(first, "run-in") for _ in range(3)]
+    assert arm_reading(reading, "S3", inside).commits[0].left == LEFT_HARNESS
+
+
+@pytest.mark.parametrize(
+    "look",
+    [
+        {"posture_class": "docker/copy/unsealed"},
+        {"trial": "r2"},
+        {"arm": S1},
+        {"created": BEFORE},
+    ],
+    ids=["another-posture-class", "trial-r2", "the-other-arm", "before-registration"],
+)
+def test_a_look_outside_the_campaign_buys_no_selection(look: dict[str, str]) -> None:
+    """DL-382, the round-3 verification's probe B as a regression: a run outside the arm's
+    scope looks at every commit's outcome (another posture class, rung ``r2``, the other arm,
+    before registration); the honest filing then files every in-scope attempt under the
+    campaign, the gamed one files outside it the attempts at the commits the look saw miss.
+    The gamed filing never reads better than the honest one: no commit leaves the pool, each
+    looked-miss commit stays pending, and the arm waits at ``look_pending``, where the rule
+    that let a commit first attempted outside the campaign leave read it ``deliver``."""
+    reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
+    rng = random.Random(7)
+    truth = {c: rng.random() < 0.6 for c in reading.pool}
+    looks = [sealed_row(c, clean=truth[c], run_id="run-peek", **look) for c in reading.pool]
+    honest = [*looks, *(sealed_row(c, clean=truth[c], run_id="run-in") for c in reading.pool)]
+    gamed = [
+        *looks,
+        *(
+            sealed_row(c, clean=truth[c], run_id="run-in" if truth[c] else "run-out")
+            for c in reading.pool
+        ),
+    ]
+    fair = arm_reading(reading, "S3", honest)
+    assert (fair.look.state, fair.look.counted, fair.look.clean) == (STATE_INSUFFICIENT, 17, 14)
+    got = arm_reading(reading, "S3", gamed)
+    assert not any(c.left for c in got.commits)
+    assert all(c.outcome is None for c in got.commits if not truth[c.commit])
+    assert (got.look.state, got.look.counted, got.look.clean) == (STATE_LOOK_PENDING, 2, 2)
+    assert got.look.state != STATE_DELIVER
