@@ -19,7 +19,8 @@ How:          The Go fixture's feat commit through the run's own ``BuildFn`` wit
               and the Python shape.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
-              docs/adr/0012-builder-in-a-sealed-container.md, docs/adr/0024-working-by-construction.md
+              docs/adr/0012-builder-in-a-sealed-container.md,
+              docs/adr/0024-working-by-construction.md
 Works with:   src/crb/builders/adapter.py (under test: ``sighted_test_command``,
               ``session_env_overrides``, the gate's binding), src/crb/builders/container.py
               (``builder_deps_view``: the set as the session mounts it), src/crb/core/finish_gate.py
