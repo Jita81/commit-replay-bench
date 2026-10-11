@@ -953,9 +953,11 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
     409 ``campaign_required`` when the reading names a campaign and the run is not filed
     under that same campaign — a run filed under the reading spends only under the ceiling
     its campaign holds, whatever route queues it (the Learn re-measurement queue included);
-    a run posted without ``reading_id`` is not refused here — with the campaign's
-    ``campaign_id`` it is admitted and its rows count, without it the reading never counts its
-    rows; 409 ``reading_unsealed`` when the run's sandbox executor or the deployment's
+    a run posted without ``reading_id`` passes no reading gate here or at claim — with the
+    campaign's ``campaign_id`` it is admitted and spends under the ceiling, and its rows count
+    only when graded in the reading's scope (its cell, the sealed posture class, rung ``r1``,
+    after registration); without it the reading never sees its rows; every Wave 3 body carries
+    ``reading_id``; 409 ``reading_unsealed`` when the run's sandbox executor or the deployment's
     builder executor is not ``docker`` — a reading is registered only on a sealed deployment; 409
     ``reading_posture_mismatch`` when the posture class the run would be graded in (the
     run's executor with the repository's ``sandbox_tree``, else the deployment's) is not the

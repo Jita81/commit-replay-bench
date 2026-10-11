@@ -615,9 +615,9 @@ def test_a_forward_reading_naming_a_campaign_is_refused_422_with_no_event(env: E
 def test_a_reading_on_the_factorys_cell_naming_a_campaign_is_refused_422_with_no_event(
     env: Env,
 ) -> None:
-    """DL-382, one rule for both routes: a reading may name a campaign only when every run it
-    counts is one the submit gate can require to be filed under it. A reading on the
-    factory's cell counts factory runs, which carry no ``reading_id``, so ``POST /readings``
+    """DL-382, one rule for both routes: a reading on the factory's cell may name no campaign.
+    Its runs are factory runs, which carry no ``reading_id``, so nothing ties them to the
+    reading and no submit gate requires them to be filed under its campaign; ``POST /readings``
     refuses its ``campaign_id`` with the forward route's 422 — same code, same reason —
     before anything is written; without one, the same reading registers."""
     add_tasks(env.factory)

@@ -18,12 +18,13 @@ arm's look state — and each cell's budget spent. ``standard_for`` is the seam 
 entry gate reads (ADR-0026 item 8). ``POST /readings/forward`` (operator) registers the forward
 reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on calibration builds graded
 on a second person's held-out tests, the one reading that can promote the ceiling;
-``load_readings`` enrols its pool. One rule decides which readings may name a campaign
-(DL-382): a reading may name one only when every run it counts is one the submit gate can
-require to be filed under it. A reading on the factory's cell — the forward reading among
-them — counts factory runs, which carry no ``reading_id``, so nothing ties them to the reading
-and no submit gate requires them to be filed under its campaign; both routes refuse its
-``campaign_id`` ``422 campaign_unsupported_reading``.
+``load_readings`` enrols its pool. A reading on the factory's cell — the forward reading among
+them — may name no campaign (DL-382): its runs are factory runs, which carry no
+``reading_id``, so nothing ties them to the reading and no submit gate requires them to be filed
+under its campaign; both routes refuse its ``campaign_id`` ``422 campaign_unsupported_reading``.
+A replay or blind reading may name one, because a run filed under it by ``reading_id`` is held
+to the campaign (409 ``campaign_required``) and any row counts only when the campaign admitted
+its run.
 
 Navigation
 ----------
