@@ -670,9 +670,13 @@ def capability_map(  # noqa: PLR0917 — FastAPI dependencies + query params
     # item of the cell would meet at the sign-off clause, whatever this view's mode, apparatus,
     # posture or checks filters (P-411). On an organisation's class-set view the cells are
     # keyed by the global parent (G-763) while the gate reads the organisation class's own
-    # cell, so the view serves no ``signed`` rather than the global standard's reading.
-    gate = factory_standard.deployment_readers(db, settings, repo)
-    standard_for = gate.standard_for if taxonomy == GLOBAL_CLASS_SET else None
+    # cell, so the view serves no ``signed`` rather than the global standard's reading, and
+    # never binds the gate's readers (the sign-off chain, readings and rows) it would discard.
+    standard_for = (
+        factory_standard.deployment_readers(db, settings, repo).standard_for
+        if taxonomy == GLOBAL_CLASS_SET
+        else None
+    )
     by_route = {route: len(cs) for route, cs in cmap.by_route().items()}
     # total_cells = the grid the projection spans over values SEEN in the rows, so the UI
     # can say "12 of 20 measured" without inventing cells the repo never produces.

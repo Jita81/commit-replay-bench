@@ -21,9 +21,9 @@ What it does: Pins that only measured cells appear at one apparatus (``apparatus
               counts but no event still counts), the thin cell calibrates, the legacy cell is a
               separate apparatus, summaries with and without a profile, projections, the empty
               repo and 404, that a sign-off lifts the tier, that each class × size cell serves
-              the entry gate's own ``signed`` reading beside it (G-738), that a false-Q1 row
-              inserted around the ledger REFUSES the map, that a viewer reads, the per-cell
-              route decisions
+              the entry gate's own ``signed`` reading beside it (G-738) and only the global
+              class set's view binds the gate's readers, that a false-Q1 row inserted around
+              the ledger REFUSES the map, that a viewer reads, the per-cell route decisions
               following the latest verdict, the failure split per repo and run, that
               sighted and blind rows are never pooled, and that every cell and the map carry
               their economics (known counts, t intervals, apparatus) and refuse to pool
@@ -55,7 +55,9 @@ import pytest
 from crb.core.ledger import CELL_FIELDS
 from crb.core.routing import DEFAULT_POLICY
 from crb.core.version import APPARATUS_VERSION
+from crb.factory.standard import Readers
 from crb.observability.events import StepEvent, StepStatus
+from crb.server import factory_standard
 from crb.store.events import last_seq
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Grade, Run
@@ -630,6 +632,30 @@ class TestCapabilityMap:
         org = _cells(env, f"&taxonomy={acme}&posture={SEALED}")
         assert org["bug.fix|S"]["taxonomy"] == acme
         assert all(c["signed"] is None for c in org.values())
+
+    def test_only_the_global_view_binds_the_entry_gates_readers(
+        self, env: Env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P-411: the gate's readers (the sign-off chain, the readings, the ledger rows) are
+        bound only for the global class set, the one view that serves their ``signed``; an
+        organisation's view, which serves ``signed: null``, never loads them."""
+        bound: list[str] = []
+        real = factory_standard.deployment_readers
+
+        def spy(session: Any, settings: Any, repo: str) -> Readers:
+            bound.append(repo)
+            return real(session, settings, repo)
+
+        monkeypatch.setattr(factory_standard, "deployment_readers", spy)
+        acme = "acme/classes@v1"
+        add_tasks(env.factory, 3, prefix="acme", cell=DELIVER_CELL)
+        org_rows = [commit(i, "acme") for i in range(3)]
+        add_rows(env.factory, org_rows, arm="S3", labels={"taxonomy": acme}, cell=DELIVER_CELL)
+        org = _cells(env, f"&taxonomy={acme}&posture={SEALED}")
+        assert org and all(c["signed"] is None for c in org.values())
+        assert bound == []
+        assert _cells(env)["bug.fix|S"]["signed"] is False
+        assert bound == [ALPHA]
 
     def test_false_q1_row_refuses_the_map(self, env: Env) -> None:
         """A false-Q1 row inserted straight through the ORM (bypassing DbLedger) makes the
