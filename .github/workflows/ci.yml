@@ -852,6 +852,11 @@ jobs:
           docker run --rm crb:ci python -c "import os; assert os.path.isfile('/app/ui/dist/index.html'), 'UI missing from image'; print('ui ok')"
           docker run --rm crb:ci sh -c 'command -v docker && command -v git && test -x /usr/local/bin/crb-entrypoint'
           docker run --rm crb:ci python -c "import crb.store.migrate, crb.core, crb.builders; print('imports ok')"
+          # the image's own sh and awk refuse automatic sign-in however the settings would read it (P-784)
+          for spelling in 'CRB_AUTH__DEV_AUTOLOGIN=root' 'crb_auth__dev_autologin=root' 'CRB_AUTH={"dev_autologin":"root"}'; do
+            code=0; docker run --rm -e "$spelling" crb:ci migrate current || code=$?
+            if [ "$code" != 64 ]; then echo "::error::the image did not refuse $spelling (exit $code)"; exit 1; fi
+          done
       - uses: azure/setup-helm@v5
         with:
           version: v3.16.4

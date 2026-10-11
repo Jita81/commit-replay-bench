@@ -145,7 +145,7 @@ test.describe('14 go live', () => {
     const health = (await (await page.request.get('/api/v1/health')).json()) as { status: string; posture: { sealed: boolean } }
     await page.goto('/posture')
     const section = page.getByTestId('posture-go-live')
-    await expect(section.getByTestId('golive-counts')).toContainText('of 15 go-live lines stand')
+    await expect(section.getByTestId('golive-counts')).toContainText('of 16 go-live lines stand')
     await expect(section.getByTestId('golive-ledger-verified')).toContainText('Proven')
     await expect(section.getByRole('img', { name: /^The health check is green: / })).toHaveAccessibleName(health.status === 'ok' ? /Proven$/ : /Unproven$/)
     if (!health.posture.sealed) await expect(section.getByTestId('golive-sealed-posture')).toContainText(/Unproven.*tests run \S+, the builder runs \S+/)

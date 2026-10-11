@@ -1027,8 +1027,8 @@ class TestRunThePlatform:
         # the go-live checklist is read, not named as missing (G-584 closed by ADR-0031)
         assert s["not_captured"] == []
         c = s["counts"]
-        assert c["golive_lines"] == 15
-        assert c["golive_proven"] + c["golive_attested"] + c["golive_unproven"] == 15
+        assert c["golive_lines"] == 16
+        assert c["golive_proven"] + c["golive_attested"] + c["golive_unproven"] == 16
 
     def test_the_account_figures_are_an_admins_only(self, env: Env) -> None:
         # the admin-only user list (GET /users) is refused below admin; the same deployment's account

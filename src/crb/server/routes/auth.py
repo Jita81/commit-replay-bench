@@ -7,10 +7,15 @@ only this browser's cookie, and records it as ``user.sessions_ended``. OIDC stat
 and the PKCE verifier travel in a signed, short-lived, HttpOnly cookie, so the callback
 can only complete a login this browser started. ``next`` is constrained to a same-origin path.
 
+``POST /auth/dev-autologin`` exists for a development stack only (ADR-0027): with
+``CRB_AUTH__DEV_AUTOLOGIN`` naming a local account, a browser on the same machine is signed
+in as it without a password. Anything that is not plainly local — a remote peer, a proxy's
+forwarding header, another host name, a cross-site request — gets the same 404 as "off".
+
 Navigation
 ----------
-What it is:   The ``/auth/*`` route module — local login / logout / me / csrf and the OIDC
-              start + callback pair.
+What it is:   The ``/auth/*`` route module — local login / logout / me / csrf, the OIDC
+              start + callback pair, and the development-only automatic sign-in.
 What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` — the slot is
               reserved before the password is checked, so a concurrent burst cannot
               outrun the limit (AUTH-1) — and answers one indistinct 401 for any
@@ -22,20 +27,28 @@ What it does: Rate-limits local login per ``(username, ip)`` and per ``ip`` — 
               ``user.role_overridden`` — never a demotion of the last active admin, which
               is kept and recorded as ``user.role_override_refused``, AUTH-2) and upserts
               the user; refuses a disabled account and any ``next`` that is not a
-              same-origin path. Every sign-in writes ``user.login`` and every refused local
-              one ``user.login_failed`` (a name that is no account: recorded without the
-              name and logged as unknown, DL-068); every callback failure redirects to
-              ``/login?error=<code>`` from ``OIDC_FAILURE_CODES`` (anything else as
-              ``oidc_failed``).
+              same-origin path. Every password or organisation sign-in writes
+              ``user.login`` and every refused local one ``user.login_failed`` (a name that
+              is no account: recorded without the name and logged as unknown, DL-068);
+              every callback failure redirects to ``/login?error=<code>`` from
+              ``OIDC_FAILURE_CODES`` (anything else as ``oidc_failed``). On a development
+              stack it signs a local browser in as the configured account (an
+              ``auth.dev_autologin`` event and a warning each time) with exactly the session
+              a password sign-in issues, without consulting the login limiter, and answers
+              "off" to anything not plainly local.
 How:          Thin handlers over src/crb/server/auth.py — ``LoginRateLimiter.acquire`` →
               ``authenticate_local`` → ``commit_audited`` (the event with its state change,
-              under the events lock; a lost ``seq`` race is retried) → cookies;
+              under the events lock; a lost ``seq`` race is retried) → ``_issue_session``;
               ``OidcState.fresh`` → provider URL → cookie; callback: cookie →
               ``_complete_oidc`` (``exchange`` → ``map_role`` → ``upsert_oidc_user`` →
               event, all through ``commit_audited``) → cookies → redirect, or
-              ``_back_to_login`` (a race lost on every retry: ``oidc_failed``).
+              ``_back_to_login`` (a race lost on every retry: ``oidc_failed``); automatic
+              sign-in: setting → ``dev_autologin_refusal`` → ``find_local_user`` +
+              ``SignInPaths`` → ``commit_audited`` (``auth.dev_autologin`` +
+              ``record_sign_in``) → ``_issue_session``, the password sign-in's cookies.
 Layer:        server — docs/ARCHITECTURE.md#71-security
-ADRs:         docs/adr/0028-the-moments-flow-needs-are-recorded.md (§8, every sign-in)
+ADRs:         docs/adr/0027-dev-autologin-on-loopback.md,
+              docs/adr/0028-the-moments-flow-needs-are-recorded.md (§8, every sign-in)
 Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server/routes/admin.py
               (``record_user_event`` — the account trail; ``record_sign_in`` — every
               sign-in, ADR-0028 §8), src/crb/server/routes/runs.py
@@ -43,9 +56,10 @@ Works with:   src/crb/server/auth.py (every primitive used here), src/crb/server
               one locked, retrying commit of an event with its change), src/crb/server/app.py
               (``/auth/login`` is CSRF-exempt; the limiter lives on ``app.state``),
               src/crb/server/settings.py (``OidcSettings``, ``local_auth_enabled``),
-              ui/src/api/client.ts (the UI's login and CSRF echo),
+              ui/src/api/client.ts (the UI's login and CSRF echo), ui/src/api/hooks.ts
+              (``useMe`` asks for an automatic sign-in),
               ui/src/screens/Login/LoginPage.tsx (``OIDC_FAILURE_REASONS``), docs/API.md#auth
-Tested by:    tests/test_server_auth.py
+Tested by:    tests/test_server_auth.py, tests/test_server_dev_autologin.py
 Touch when:   never for a new repository; when the IdP's claim layout changes (that is
               ``CRB_OIDC__ROLE_CLAIM`` / ``ROLE_MAP`` configuration, not code); adding a
               login method needs docs/SECURITY.md#34-authentication-and-authorisation--crbserverauth
@@ -79,6 +93,7 @@ from crb.server.auth import (
     authenticate_local,
     clear_auth_cookies,
     credential_version,
+    dev_autologin_refusal,
     find_local_user,
     lock_users_table,
     map_role,
@@ -175,6 +190,19 @@ class CsrfToken(BaseModel):
     token: str
 
 
+def _issue_session(
+    request: Request, response: Response, settings: Settings, user: User
+) -> Principal:
+    """Set the session and its CSRF cookie for ``user`` — the ONE place a sign-in (password
+    or development automatic) turns into cookies, so both carry the same credential version
+    (the session nonce included) and the same session-bound CSRF token."""
+    request.state.user_id = user.id
+    cv = credential_version(user)
+    set_session_cookie(response, settings, user.id, cv)
+    set_csrf_cookie(response, settings, user.id, cv)
+    return Principal.model_validate(user)
+
+
 @router.post(
     "/auth/login",
     response_model=Principal,
@@ -224,12 +252,7 @@ def login(
         record_sign_in(db, user=account, by="local")
 
     commit_audited(db, _signed_in)
-    user = db.get(User, uid) or user
-    request.state.user_id = user.id
-    cv = credential_version(user)
-    set_session_cookie(response, settings, user.id, cv)
-    set_csrf_cookie(response, settings, user.id, cv)
-    return Principal.model_validate(user)
+    return _issue_session(request, response, settings, db.get(User, uid) or user)
 
 
 @router.post(
@@ -287,6 +310,95 @@ def csrf(user: CurrentUser, response: Response, settings: SettingsDep, db: DbDep
         raise ApiError(401, "unauthenticated", "account unknown or disabled")
     return CsrfToken(
         token=set_csrf_cookie(response, settings, account.id, credential_version(account))
+    )
+
+
+# --- automatic sign-in (development stacks only, ADR-0027) --------------------------
+
+#: One answer for "off" and for every request that may not use it, so a request from
+#: another machine (or through a proxy) cannot tell a stack with it switched on from one
+#: without; the log line carries the real reason.
+_AUTOLOGIN_OFF = ("dev_autologin_off", "automatic sign-in is not switched on")
+
+
+@router.post(
+    "/auth/dev-autologin",
+    response_model=Principal,
+    responses={403: _ERR, 404: _ERR},
+    summary="Development stacks only: sign in a browser on this machine without a password",
+)
+def dev_autologin(
+    request: Request,
+    response: Response,
+    settings: SettingsDep,
+    db: DbDep,
+) -> Principal:
+    """Sign the caller in as ``CRB_AUTH__DEV_AUTOLOGIN``'s account — only when the setting is
+    on (the settings refuse it outside ``CRB_ENV=dev`` and on a non-loopback bind) AND
+    :func:`dev_autologin_refusal` finds this request local. The cookies come from
+    :func:`_issue_session`, the one a password sign-in uses — the credential version with the
+    session nonce, the session-bound CSRF token — so the role ladder, sign-out, "sign out
+    everywhere" and a password change end it exactly as they do a typed password's session.
+    It checks no password, so the login limiter is neither consulted nor reset — no slot is
+    acquired (a full bucket does not refuse it, and it adds nothing to one) and none is given
+    to ``succeed`` (the account's own bucket, which a password success clears, stays). It signs
+    in only an account :class:`SignInPaths` admits (a local account while local sign-in is on),
+    and takes no users lock: it changes no role or active flag. Every sign-in appends
+    ``auth.dev_autologin`` on the account's trace and the ``user.signed_in`` event every sign-in
+    writes (ADR-0028 §8, ``by`` = ``dev_autologin``) in one ``commit_audited`` write — the
+    events lock, a lost ``seq`` race retried — and logs one warning line."""
+    username = settings.auth.dev_autologin
+    if not username:
+        raise ApiError(404, *_AUTOLOGIN_OFF)
+    peer = request.client.host if request.client else ""
+    refusal = dev_autologin_refusal(request)
+    if refusal:
+        log.warning("automatic sign-in refused for %s: %s", peer or "unknown", refusal)
+        raise ApiError(404, *_AUTOLOGIN_OFF)
+    paths = SignInPaths.of(settings)
+    user = _autologin_account(find_local_user(db, username), username, paths)
+    uid = user.id
+
+    def _signed_in() -> None:
+        # read again inside the write: deleted or turned off since the check is refused
+        account = _autologin_account(db.get(User, uid), username, paths)
+        account.last_login = _now()
+        record_user_event(db, action="auth.dev_autologin", actor=uid, target=account, client=peer)
+        # every sign-in, this one too: a recovery is timed to the FIRST after a reset
+        # (ADR-0028 §8)
+        record_sign_in(db, user=account, by="dev_autologin")
+
+    commit_audited(db, _signed_in)
+    log.warning(
+        "automatic sign-in: %r signed in from %s without a password "
+        "(CRB_AUTH__DEV_AUTOLOGIN — development only)",
+        username,
+        peer,
+    )
+    return _issue_session(request, response, settings, db.get(User, uid) or user)
+
+
+def _autologin_account(user: User | None, username: str, paths: SignInPaths) -> User:
+    """The configured account, or a 403 ``dev_autologin_unavailable`` (the reason in the
+    log only): it must exist, be active, and be one this deployment's :class:`SignInPaths`
+    admit — the same accounts a password could sign in."""
+    if user is None:
+        why = f"there is no local account {username!r}"
+    elif not user.active:
+        why = f"the account {username!r} is disabled"
+    elif not paths.admits(user):
+        why = f"the account {username!r} cannot sign in here (local sign-in is off)"
+    else:
+        return user
+    log.warning(
+        "automatic sign-in signed nobody in: %s (CRB_AUTH__DEV_AUTOLOGIN; create or "
+        "re-activate the account, or name another)",
+        why,
+    )
+    raise ApiError(
+        403,
+        "dev_autologin_unavailable",
+        "automatic sign-in is on, but its account cannot sign in; the API log says why",
     )
 
 
