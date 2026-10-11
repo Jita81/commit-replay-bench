@@ -142,6 +142,13 @@ describe('actionHelp', () => {
     expect(actionHelp('grade.tamper')).toBe('A test file was changed; the row is disqualified, not counted.')
   })
 
+  it('a run refused at claim names both causes: a dead builder login, or executors that are not docker for a sealed reading (P-789)', () => {
+    const s = actionHelp('run.refused')
+    expect(s).toMatch(/refused it before it started/)
+    expect(s).toMatch(/builder login/)
+    expect(s).toMatch(/not docker for the sealed reading/)
+  })
+
   it('an unknown action gets a generic sentence naming the action, and a builder.* event its family', () => {
     expect(actionHelp('something.new')).toBe('An event the loop emitted as “something.new”; this version of the UI has no sentence for it.')
     expect(actionHelp('builder.tool_result')).toMatch(/builder/)

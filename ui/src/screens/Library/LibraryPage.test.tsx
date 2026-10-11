@@ -111,13 +111,23 @@ describe('LibraryPage', () => {
     await userEvent.type(within(form).getByLabelText(/^Builder/), 'claude_code')
     await userEvent.type(within(form).getByLabelText(/^Model/), 'claude-sonnet-5')
     await userEvent.type(within(form).getByLabelText(/^Provider/), 'anthropic')
+    await userEvent.type(within(form).getByLabelText(/^Hypothesis/), '  A sealed S2 build passes held-out tests at 0.8 or better  ')
+    await userEvent.type(within(form).getByLabelText(/^Smallest effect/), '0.1')
     await userEvent.click(within(form).getByRole('button', { name: 'Register the forward reading' }))
     expect(await within(form).findByTestId('forward-refused-XL')).toHaveTextContent('error budget of 5.00%')
     refuse = false
     await userEvent.click(within(form).getByRole('button', { name: 'Register the forward reading' }))
     await waitFor(() => expect(within(form).getByTestId('forward-registered-XL')).toHaveTextContent('Registered rdg_fwd_new.'))
     const post = calls.filter((c) => c.method === 'POST' && c.path === '/readings/forward').at(-1)
-    expect(JSON.parse(String(post?.init?.body))).toEqual({ repo: 'alpha', promotes: 'r5', builder: 'claude_code', model: 'claude-sonnet-5', provider: 'anthropic' })
+    expect(JSON.parse(String(post?.init?.body))).toEqual({
+      repo: 'alpha',
+      promotes: 'r5',
+      builder: 'claude_code',
+      model: 'claude-sonnet-5',
+      provider: 'anthropic',
+      hypothesis: 'A sealed S2 build passes held-out tests at 0.8 or better',
+      smallest_effect: 0.1,
+    })
     expect(unhinted(container)).toEqual([])
   })
 

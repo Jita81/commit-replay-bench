@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 3 pre-run: a reading states its question, counts tasks and is measured sealed**
+  (P-787 to P-789, DL-372, DL-373; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)).
+  A reading now requires `hypothesis` and `smallest_effect`, hashed into its id; older readings
+  keep theirs. The sign-off floor `thin_cell` counts distinct tasks, not attempts, under the same
+  `signoff-policy.v3`. A replayed reading registers only on a sealed deployment, and a `replay`
+  or `blind` run filed under one (`reading_id`) is refused at submit, 422 `reading_unknown` or 409
+  `reading_unsealed`, unless sandbox and builder both run on docker; the worker checks again at
+  claim.
+
 - **A development stack signs a browser in on its own machine; production cannot**
   ([#58](https://github.com/Jita81/commit-replay-bench/pull/58)). `CRB_AUTH__DEV_AUTOLOGIN=<username>`
   (off by default, ADR-0027, DL-240) signs a browser on the same computer in as one local account.

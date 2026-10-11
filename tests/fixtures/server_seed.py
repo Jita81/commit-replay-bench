@@ -798,12 +798,15 @@ class Env:
 
 
 @contextmanager
-def make_env(tmp_path: Path, *, clone_path: str = "", role: str | None = "admin") -> Iterator[Env]:
-    """Seeded SQLite + users + a running app; logged in as ``role`` (``None`` = anonymous)."""
+def make_env(
+    tmp_path: Path, *, clone_path: str = "", role: str | None = "admin", **settings_overrides: Any
+) -> Iterator[Env]:
+    """Seeded SQLite + users + a running app; logged in as ``role`` (``None`` = anonymous);
+    ``settings_overrides`` reach :func:`make_settings` (``SEALED_SETTINGS``: a sealed one)."""
     factory = make_factory(tmp_path)
     info = seed(factory, clone_path=clone_path)
     add_users(factory)
-    settings = make_settings(tmp_path)
+    settings = make_settings(tmp_path, **settings_overrides)
     with TestClient(create_app(settings, factory)) as client:
         if role is not None:
             login(client, role)

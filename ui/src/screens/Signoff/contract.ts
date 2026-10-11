@@ -298,7 +298,7 @@ export function refusalFamily(code: string): string {
 export const REFUSAL_DISPLAY: Record<string, string> = {
   false_q1: 'false-Q1 in cell — the evidence is untrusted; no policy can override this',
   scope_mismatch: 'the attestation scope does not cover this cell',
-  thin_cell: 'thin cell — not enough evidence (n below the policy minimum)',
+  thin_cell: 'thin cell — not enough distinct tasks (below the policy minimum)',
   controls_unmeasured: 'negative controls never run for this repo',
   controls_failed: 'negative-controls gate FAILED on this repo — an instrument defect',
   controls_escapes: 'a measurement control escaped the oracle (graded clean)',
@@ -332,7 +332,7 @@ const enc = encodeURIComponent
 
 export const REFUSAL_NEXT: Record<string, RefusalNext> = {
   thin_cell: {
-    text: 'An operator queues more attempts on this cell; each graded attempt raises n and narrows the interval.',
+    text: 'An operator queues attempts on more of this cell’s commits; the count is distinct tasks, so another attempt on a commit already graded does not raise it.',
     label: 'Measure more of this repository',
     to: (repo) => `/connect/${enc(repo)}/measure`,
   },

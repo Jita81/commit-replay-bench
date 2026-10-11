@@ -53,6 +53,7 @@ from crb.server.routes import runs as runs_mod
 from crb.server.routes.runs import event_stream, event_to_model
 from crb.store.ledger import DbLedger
 from crb.store.models import Run
+from fixtures.proven import write_reading
 from fixtures.server_seed import (
     ALPHA,
     Env,
@@ -1504,6 +1505,81 @@ def test_replay_submit_accepted_when_qualify_first_is_on(env: Env, jobs: FakeJob
     q = env.post("/runs", json={"repo": ALPHA, "kind": "qualify"})
     assert q.status_code == 201, q.text
     assert jobs.enqueued[-1].kind == "qualify" and jobs.enqueued[-1].builder == ""
+
+
+#: A replay filed under a reading: the run's own sandbox is docker, the rest is the seed's.
+_FILED = {"repo": ALPHA, "kind": "replay", "builder": "b", "model": "m", "executor": "docker"}
+
+
+def test_a_run_filed_under_an_unknown_reading_is_refused_422(env: Env, jobs: FakeJobs) -> None:
+    """P-789: a ``reading_id`` that names no verified reading of the repository is refused at
+    submit — a run filed under a reading nobody registered could only be mistaken for one."""
+    login(env.client, "operator")
+    env.settings.builder.executor = "docker"
+    r = env.post("/runs", json={**_FILED, "reading_id": "rdg_" + "0" * 24})
+    assert r.status_code == 422, r.text
+    err = envelope(r)
+    assert err["code"] == "reading_unknown"
+    assert err["detail"] == {"reading_id": "rdg_" + "0" * 24}
+    assert jobs.enqueued == []
+    # a reading of ANOTHER repository is not this one's
+    other = write_reading(env.factory, [task_id(1)])
+    r = env.post("/runs", json={**_FILED, "repo": "beta", "reading_id": other.reading_id})
+    assert r.status_code == 422 and envelope(r)["code"] == "reading_unknown"
+    # the id's shape is the schema's: anything else is a validation error
+    r = env.post("/runs", json={**_FILED, "reading_id": "rdg_not-hex"})
+    assert r.status_code == 422 and envelope(r)["code"] == "validation_error"
+    assert jobs.enqueued == []
+
+
+def test_a_run_filed_under_a_reading_on_a_host_builder_is_refused_409(
+    env: Env, jobs: FakeJobs
+) -> None:
+    """P-789: a run filed under a reading is refused at submit unless its sandbox executor
+    and the deployment's builder executor are both docker — its rows would be another
+    posture's, never the reading's measurement. The detail names both executors."""
+    login(env.client, "operator")
+    reading = write_reading(env.factory, [task_id(1), task_id(2)])
+    body = {**_FILED, "reading_id": reading.reading_id}
+    # the seed's dev deployment: the builder runs on the host
+    r = env.post("/runs", json=body)
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["code"] == "reading_unsealed"
+    assert err["detail"] == {
+        "reading_id": reading.reading_id,
+        "sandbox_executor": "docker",
+        "builder_executor": "host",
+    }
+    assert "both on docker" in err["message"]
+    env.settings.builder.executor = "docker"
+    # a sealed builder with the run's sandbox on the host: still refused
+    r = env.post("/runs", json={**body, "executor": "local"})
+    assert r.status_code == 409 and envelope(r)["detail"]["sandbox_executor"] == "local"
+    assert jobs.enqueued == []
+    # both on docker: queued, and filed under the reading
+    r = env.post("/runs", json=body)
+    assert r.status_code == 201, r.text
+    assert jobs.enqueued[-1].params_json["reading_id"] == reading.reading_id
+    # a run filed under no reading is stored as before: no key at all
+    assert env.post("/runs", json=_FILED).status_code == 201
+    assert "reading_id" not in jobs.enqueued[-1].params_json
+
+
+@pytest.mark.parametrize("kind", ["mine", "oracle", "controls", "qualify", "factory"])
+def test_reading_id_on_a_build_run_is_refused_422(env: Env, jobs: FakeJobs, kind: str) -> None:
+    """P-789: only a replay or a blind run measures a reading; any other kind naming one is
+    a validation error, before any refusal reads the database."""
+    login(env.client, "operator")
+    reading = write_reading(env.factory, [task_id(1)])
+    body = {"repo": ALPHA, "kind": kind, "reading_id": reading.reading_id}
+    if kind == "factory":
+        body |= {"builder": "b", "model": "m"}
+    r = env.post("/runs", json=body)
+    assert r.status_code == 422, r.text
+    err = envelope(r)
+    assert err["code"] == "validation_error" and "replay and blind runs only" in str(err["detail"])
+    assert jobs.enqueued == []
 
 
 def test_the_suite_never_sees_the_hosts_claude_cli(monkeypatch: pytest.MonkeyPatch) -> None:

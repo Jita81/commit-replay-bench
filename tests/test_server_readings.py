@@ -50,8 +50,8 @@ from fixtures.proven import (
     commit,
     register_via_api,
 )
-from fixtures.readings import SEALED
-from fixtures.server_seed import ALPHA, Env, login, logout, make_env
+from fixtures.readings import HYPOTHESIS, SEALED, SEALED_SETTINGS, SMALLEST_EFFECT
+from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
 
 
 @pytest.fixture(autouse=True)
@@ -63,7 +63,8 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path) as e:
+    # a sealed deployment: a replayed reading registers only there (P-789)
+    with make_env(tmp_path, **SEALED_SETTINGS) as e:
         yield e
 
 
@@ -360,3 +361,151 @@ def test_a_standard_found_on_s3_alone_reads_ceiling_forward_unvalidated(env: Env
     assert cell["standard"]["label"] == "ceiling S3, forward-unvalidated"
     assert cell["standard"]["ceiling"] is True and cell["standard"]["standard"] == "S3"
     assert cell["route"] != "deliver"
+
+
+# --- a reading states its hypothesis and smallest effect before any row (P-787) --------------
+
+
+def _registered_events(env: Env) -> int:
+    from sqlalchemy import func, select
+
+    from crb.core.reading import READING_EVENT_ACTION
+    from crb.store.models import Event
+
+    with env.factory() as s:
+        return int(
+            s.execute(
+                select(func.count()).select_from(Event).where(Event.action == READING_EVENT_ACTION)
+            ).scalar_one()
+        )
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        {"smallest_effect": SMALLEST_EFFECT},  # no hypothesis
+        {"hypothesis": "   ", "smallest_effect": SMALLEST_EFFECT},  # a blank one
+        {"hypothesis": HYPOTHESIS},  # no smallest effect
+        {"hypothesis": HYPOTHESIS, "smallest_effect": 0},
+        {"hypothesis": HYPOTHESIS, "smallest_effect": 1.5},
+    ],
+    ids=["missing", "blank", "missing-effect", "effect-0", "effect-1.5"],
+)
+def test_a_reading_without_its_hypothesis_or_smallest_effect_is_refused_422(
+    env: Env, question: dict[str, Any]
+) -> None:
+    """Wave 3 pre-run (Q-24): a reading says what it tests and the smallest effect that would
+    matter before its first attempt — a registration without either, with a blank hypothesis
+    or with an effect outside (0, 1] is refused 422 and writes no event."""
+    from fixtures.proven import add_tasks as _add
+
+    _add(env.factory)
+    body = {
+        "repo": ALPHA,
+        "cell": CELL,
+        "hierarchy": ["S3", S1],
+        "posture_class": SEALED,
+        "author_model": AUTHOR,
+        **question,
+    }
+    r = env.post("/readings", json=body)
+    assert r.status_code == 422, r.text
+    assert envelope(r)["code"] == "validation_error"
+    assert _registered_events(env) == 0
+
+
+def test_hypothesis_and_smallest_effect_are_stored_and_served(env: Env) -> None:
+    add_tasks(env.factory)
+    r = register_via_api(env, hypothesis=f"  {HYPOTHESIS}  ", smallest_effect=0.05)
+    assert r.status_code == 201, r.text
+    assert (r.json()["hypothesis"], r.json()["smallest_effect"]) == (HYPOTHESIS, 0.05)
+    (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    assert served["reading_id"] == r.json()["reading_id"]
+    assert (served["hypothesis"], served["smallest_effect"]) == (HYPOTHESIS, 0.05)
+
+
+def test_a_legacy_reading_without_the_fields_still_verifies_and_is_served(env: Env) -> None:
+    """A reading registered before P-787 carries neither field: its body omits both, so its
+    id re-hashes as it always did and it is served with an empty hypothesis."""
+    from crb.core.reading import Reading
+    from fixtures.proven import write_reading
+
+    ids = add_tasks(env.factory)
+    legacy = write_reading(env.factory, ids, hierarchy=("S3", S1))
+    assert "hypothesis" not in legacy.body() and "smallest_effect" not in legacy.body()
+    assert Reading.from_dict(legacy.to_dict()).verify()
+    (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    assert served["reading_id"] == legacy.reading_id
+    assert (served["hypothesis"], served["smallest_effect"]) == ("", None)
+
+
+def test_the_hypothesis_is_inside_the_hash(env: Env) -> None:
+    """A stored reading whose hypothesis was edited after registration no longer re-hashes:
+    ``verify`` fails and ``load_readings`` leaves it out — the question cannot move after
+    the answer is read."""
+    from crb.core.reading import READING_EVENT_ACTION, Reading
+    from crb.server.routes.readings import load_readings
+    from crb.store.events import append_event
+
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    edited = {**r.json(), "hypothesis": "the richer arm is no better than the leaner one"}
+    assert not Reading.from_dict(edited).verify()
+    moved = {**r.json(), "smallest_effect": 0.5}
+    assert not Reading.from_dict(moved).verify()
+    with env.factory() as s:
+        assert [x.reading_id for x in load_readings(s, ALPHA)] == [r.json()["reading_id"]]
+    for payload in (edited, moved):
+        append_event(
+            env.factory,
+            trace_id=f"readings:{ALPHA}",
+            stage="system",
+            action=READING_EVENT_ACTION,
+            repo=ALPHA,
+            payload=payload,
+        )
+    with env.factory() as s:
+        kept = load_readings(s, ALPHA)
+    assert [x.reading_id for x in kept] == [r.json()["reading_id"]]
+    assert kept[0].hypothesis == HYPOTHESIS
+
+
+def test_a_forward_reading_without_them_is_refused_422(env: Env) -> None:
+    body = {"repo": ALPHA, "promotes": "rdg_" + "0" * 24, "builder": "b", "model": "m"}
+    for question in ({}, {"hypothesis": HYPOTHESIS}, {"smallest_effect": SMALLEST_EFFECT}):
+        r = env.post("/readings/forward", json={**body, **question})
+        assert r.status_code == 422, r.text
+        assert envelope(r)["code"] == "validation_error"
+    # with both, the request reaches the route: an unknown ceiling is 404
+    r = env.post(
+        "/readings/forward", json={**body, "hypothesis": HYPOTHESIS, "smallest_effect": 0.1}
+    )
+    assert r.status_code == 404, r.text
+    assert _registered_events(env) == 0
+
+
+# --- a replayed reading registers only on a sealed deployment (P-789) -----------------------
+
+
+def test_registering_on_a_host_builder_is_refused(tmp_path: Path) -> None:
+    """The posture class reads the sandbox alone, so a docker sandbox with a host builder
+    still names a sealed class; the deployment itself must be sealed — the builder too."""
+    with make_env(tmp_path, sandbox={"executor": "docker"}) as e:
+        assert e.settings.posture()["builder_executor"] == "host"
+        add_tasks(e.factory)
+        r = register_via_api(e)
+        assert r.status_code == 422, r.text
+        err = envelope(r)
+        assert err["code"] == "invalid_reading"
+        assert "sealed deployment" in err["message"]
+        assert err["detail"] == {"sandbox_executor": "docker", "builder_executor": "host"}
+        assert _registered_events(e) == 0
+
+
+def test_registering_on_a_sealed_deployment_succeeds(env: Env) -> None:
+    assert env.settings.posture()["sealed"] is True
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    assert _registered_events(env) == 1

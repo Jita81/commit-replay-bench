@@ -533,7 +533,7 @@ def test_refusal_thin_cell_names_n_and_n_min() -> None:
     refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
     thin = refusals[0]
     assert thin.code == "thin_cell" and thin.threshold == 10 and thin.observed == 4
-    assert "n=4 < n_min=10" in thin.message and thin.overridable
+    assert "tasks=4 < n_min=10" in thin.message and thin.overridable
     # the route clause fails too (a pool of 4 cannot reach the first look: undecided) and
     # so does the standard-arm clause — all are listed, the route one suffixed
     assert _codes(refusals) == [
@@ -556,6 +556,31 @@ def test_refusal_thin_cell_names_n_and_n_min() -> None:
             repo="todo",
         )
     ) == ["not_standard:undecided"]
+
+
+def test_thin_cell_counts_distinct_tasks_not_attempts() -> None:
+    """P-788 (EVIDENCE-AND-CLAIMS §3): 16 attempts on 4 commits are evidence about 4 commits.
+    ``n`` (attempts) clears ``n_min`` = 10; the distinct tasks do not, so the cell is thin."""
+    rows = [_row(task_id=f"{i % 4:016x}") for i in range(16)]
+    cell = _cell(rows, controls=PASSED, capability_class="frontend.component.add", size="S")
+    assert cell.stats is not None and (cell.stats.n, cell.stats.n_tasks) == (16, 4)
+    refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
+    thin = refusals[0]
+    assert (thin.code, thin.threshold, thin.observed) == ("thin_cell", 10, 4)
+    assert "tasks=4 < n_min=10" in thin.message
+    with pytest.raises(so.SignoffRefused, match="tasks=4") as ei:
+        so.check_signable(_signoff(), cell, controls=PASSED, repo="todo")
+    assert ei.value.code == "thin_cell"
+
+
+def test_thin_cell_admits_n_min_distinct_tasks() -> None:
+    """Ten distinct commits, one attempt each, meet ``n_min`` = 10: no ``thin_cell``."""
+    cell = _cell(
+        _rows(10, 10), controls=PASSED, capability_class="frontend.component.add", size="S"
+    )
+    assert cell.stats is not None and cell.stats.n_tasks == 10
+    refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
+    assert "thin_cell" not in _codes(refusals)
 
 
 def test_refusal_unmeasured_cell_is_thin() -> None:
@@ -1130,7 +1155,7 @@ def test_write_refuses_unmeasured_cell_and_missing_cell(tmp_path: Path) -> None:
 def test_write_refuses_thin_cell_unmeasured_controls_and_no_attestation(tmp_path: Path) -> None:
     led = so.JsonlSignoffLedger(tmp_path / "s.jsonl")
     thin = _cell(_rows(3, 3), controls=PASSED, capability_class="frontend.component.add", size="S")
-    with pytest.raises(so.SignoffRefused, match="n=3 < n_min=10") as ei:
+    with pytest.raises(so.SignoffRefused, match="tasks=3 < n_min=10") as ei:
         led.append(_signoff(), thin, repo="todo", controls=PASSED)
     assert ei.value.code == "thin_cell"
     # a cell routed without a verdict, and none handed in → the policy reads "unmeasured"

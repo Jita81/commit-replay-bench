@@ -847,8 +847,10 @@ READ_CELL = "|".join(PROVEN_CELL.values())
 
 
 def _sealed(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
-    """This deployment grades in the sealed posture the reading counts (docker, copy tree)."""
+    """This deployment grades in the sealed posture the reading counts (docker, copy tree),
+    its builder sealed too: a replayed reading registers only there (P-789)."""
     monkeypatch.setattr(env.settings.sandbox, "executor", "docker")
+    monkeypatch.setattr(env.settings.builder, "executor", "docker")
 
 
 def _add_reading(env: Env, *, graded: int = 0, hierarchy: tuple[str, ...] = ("S3",)) -> Any:
@@ -920,6 +922,10 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
     assert run["status"] == "queued" and run["builder"] == "editblock"
     assert run["task_ids"] == request["task_ids"] and run["mode"] == "sighted"
+    # filed under the reading it measures: the worker re-checks the seal at claim (P-789)
+    with env.factory() as s:
+        stored = s.get(Run, d["run_ids"][0])
+        assert stored is not None and stored.params_json["reading_id"] == reading["reading_id"]
     assert env.get("/runs").json()["total"] == before + 1
     (event,) = _queued_events(env)
     assert event.actor == user_id(USERS["admin"])
@@ -961,7 +967,11 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     and queueing it is refused with nothing queued; an ``S1`` arm is asked for only when the
     deployment's test author is the arm's author."""
     del builder_keys
+    # registered on a sealed deployment (P-789), which then grades on the host
+    _sealed(env, monkeypatch)
     pool = _add_reading(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"))["pool"]
+    monkeypatch.setattr(env.settings.sandbox, "executor", "local")
+    monkeypatch.setattr(env.settings.builder, "executor", "host")
     host = _read_cell(env)
     assert host["requests"] == [] and host["next_act"] == "runs"
     assert "docker/copy/sealed" in host["note"]

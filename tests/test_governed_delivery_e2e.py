@@ -69,7 +69,7 @@ from crb.store.events import DbEventSink
 from crb.store.models import Repo
 from fixtures import pyrepo as pr
 from fixtures.proven import CELL, LATER, add_oracle_and_controls, add_rows, add_tasks
-from fixtures.readings import SEALED
+from fixtures.readings import QUESTION, SEALED, SEALED_SETTINGS
 from fixtures.server_seed import (
     ALPHA,
     BUILDER,
@@ -102,9 +102,9 @@ CAP_USD = 0.25
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path) as e:
-        # the deployment grades in the sealed posture: only sealed rows license (ADR-0025)
-        e.settings.sandbox.executor = "docker"
+    # the deployment grades in the sealed posture: only sealed rows license (ADR-0025), and a
+    # replayed reading registers only on a sealed deployment (P-789)
+    with make_env(tmp_path, **SEALED_SETTINGS) as e:
         yield e
 
 
@@ -128,6 +128,7 @@ def _prove(
             # the pool rule: every qualified commit of the cell authored since this date —
             # this test's own, never the seed's (whose rows a reading may not count)
             "since": AUTHORED,
+            **QUESTION,
         },
     )
     assert r.status_code == 201, r.text

@@ -2568,6 +2568,10 @@ export interface ForwardReadingRequest {
   builder: string
   model: string
   provider: string
+  /** What the reading tests, written before any row is read (1 to 2000 characters; P-787). */
+  hypothesis: string
+  /** The smallest effect that would matter, a share of attempts in (0, 1]. */
+  smallest_effect: number
 }
 
 /** A ceiling's forward reading, as the work type's page serves it. */

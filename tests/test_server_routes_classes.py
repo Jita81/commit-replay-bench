@@ -51,7 +51,7 @@ from crb.store.class_sets import DbClassSets
 from crb.store.models import ClassLabelRow, Event, Grade, Task
 from fixtures.class_sets import add_commits, sha
 from fixtures.proven import AUTHOR, S1
-from fixtures.readings import SEALED
+from fixtures.readings import QUESTION, SEALED, SEALED_SETTINGS
 from fixtures.server_seed import (
     ALPHA,
     BUILDER,
@@ -109,7 +109,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path, role="operator") as e:
+    with make_env(tmp_path, role="operator", **SEALED_SETTINGS) as e:
         add_commits(e.factory)
         yield e
 
@@ -442,6 +442,7 @@ def test_a_reading_of_an_organisation_class_reads_confirmation_commits_only(env:
         "author_model": AUTHOR,
         "taxonomy": V1,
         "org_class": "parser-fix",
+        **QUESTION,
     }
     # unsigned: the version routes nothing, so no reading of its classes is registered
     r = env.post("/readings", json=body)
@@ -516,7 +517,7 @@ def test_a_reading_of_an_organisation_class_sits_on_its_parents_cell_and_counts_
     s_cell = next(x for x in page["sizes"] if x["size"] == "S")
     body = {
         "repo": ALPHA, "cell": CELL, "hierarchy": ["S3", S1], "posture_class": SEALED,
-        "author_model": AUTHOR, "taxonomy": V1, "org_class": "parser-fix",
+        "author_model": AUTHOR, "taxonomy": V1, "org_class": "parser-fix", **QUESTION,
     }  # fmt: skip
     reading = env.post("/readings", json=body)
     assert reading.status_code == 201, reading.text

@@ -55,6 +55,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace as dc_replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -71,6 +72,7 @@ from crb.builders.base import (
     BuildBrief,
     BuildOutcome,
 )
+from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.core.evidence import verify_pack
 from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.ledger import verify_chain
@@ -97,6 +99,7 @@ from crb.store.jobs import (
 from crb.store.library import DbLibraryLedger, new_act
 from crb.store.models import Event, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
+from fixtures.proven import write_reading
 from fixtures.proven_cells import every_cell_proven
 
 # --- a scripted builder ----------------------------------------------------------------
@@ -510,6 +513,75 @@ def test_a_queued_run_whose_login_was_recorded_invalid_is_failed_before_any_buil
     assert [e.payload_json["trigger"] for e in refused] == [bl.TRIGGER_CLAIM]
     assert refused[0].payload_json["run_id"] == run.id
     assert any(e.action == "run.refused" for e in h.events(run.id))
+
+
+def test_a_run_filed_under_a_sealed_reading_is_refused_at_claim_on_a_host_builder(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-789: the submit gate refuses a run filed under a reading unless the sandbox and the
+    builder both run on docker — but the executors that grade the run are the WORKER's. A
+    worker whose builder is on the host (the dev default, ``CRB_BUILDER__EXECUTOR`` unset)
+    fails the run at claim, before any builder is constructed: one ``run.refused`` event
+    naming both executors, no ledger row, nothing spent."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    monkeypatch.setattr(h.worker, "settings", dc_replace(h.settings, executor="docker"))
+    built: list[str] = []
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: built.append("fake") or FakeBuilder(behaviour="gold", **cfg),
+    )
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+    run = h.enqueue("replay", params_json={"reading_id": reading.reading_id})
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith("reading_unsealed: "), done.error
+    assert "'docker'" in done.error and "'host'" in done.error
+    refused = [e for e in h.events(run.id) if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].status == StepStatus.ERROR
+    assert refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "reading_unsealed",
+        "reading_id": reading.reading_id,
+        "sandbox_executor": "docker",
+        "builder_executor": "host",
+    }
+    assert built == []  # no builder was constructed
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []  # no row, $0
+    assert not done.counts_json.get("cost_usd")
+
+
+def test_reading_unsealed_admits_docker_executors(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-789: the claim check admits a run filed under a verified reading when both
+    executors are docker — the worker's own setting or ``CRB_BUILDER__EXECUTOR`` as it
+    stands — and never looks at a run filed under no reading; an id that is no verified
+    reading of the repository, or a run asking for the local sandbox, is refused."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+
+    def check(params: dict[str, Any]) -> str | None:
+        run = h.enqueue("replay", params_json=params)
+        return h.worker._reading_unsealed(run, h.worker._emitter(run))
+
+    sealed = dc_replace(h.settings, executor="docker", builder_executor="docker")
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    assert check({"reading_id": reading.reading_id}) is None
+    assert check({}) is None  # filed under no reading: never this check's business
+    unknown = check({"reading_id": "rdg_" + "0" * 24})
+    assert unknown is not None and "no verified reading" in unknown
+    local = check({"reading_id": reading.reading_id, "executor": "local"})
+    assert local is not None and "'local'" in local
+    # the builder's executor read from the environment the container settings read
+    monkeypatch.setattr(h.worker, "settings", dc_replace(sealed, builder_executor=""))
+    monkeypatch.setenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "DOCKER")
+    assert check({"reading_id": reading.reading_id}) is None
+    monkeypatch.setenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "podman")  # anything else: the host
+    other = check({"reading_id": reading.reading_id})
+    assert other is not None and "'host'" in other
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:

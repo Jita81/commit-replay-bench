@@ -50,6 +50,17 @@ CELL = {
 }
 AUTHOR = "claude-opus-5"
 S1 = f"S1@{AUTHOR}"
+#: What a registration through the API states before its first attempt (P-787): the
+#: hypothesis and the smallest effect that would matter — both required by ``POST /readings``.
+HYPOTHESIS = "the leaner arm delivers what the richer arm does on this cell"
+SMALLEST_EFFECT = 0.1
+QUESTION: dict[str, Any] = {"hypothesis": HYPOTHESIS, "smallest_effect": SMALLEST_EFFECT}
+#: A sealed deployment (P-789): the sandbox and the builder both run on docker — what
+#: ``POST /readings`` needs for a replayed arm. ``make_env(tmp_path, **SEALED_SETTINGS)``.
+SEALED_SETTINGS: dict[str, Any] = {
+    "sandbox": {"executor": "docker"},
+    "builder": {"executor": "docker", "image": "crb-builder:test"},
+}
 
 
 def commits(n: int, prefix: str = "c") -> list[str]:

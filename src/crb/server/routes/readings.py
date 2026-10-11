@@ -41,6 +41,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/store/events.py (``append_event_checked``: the locked event write),
               src/crb/server/routes/capability.py (routes every cell on its reading),
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
+              src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
+              submit gate and the worker read it below this module),
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py
@@ -51,14 +53,13 @@ Touch when:   never for a new repository; the reading's shape or the registratio
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from crb.core.acceptance import HeldOutTests
 from crb.core.capability import ReadingBook
 from crb.core.class_sets import CONFIRMATION, is_org_class_set, refuse_reading_pool
 from crb.core.context_arm import parse_arm
@@ -86,21 +87,20 @@ from crb.core.reading import (
     register,
     register_forward,
     standard_of,
-    with_enrolment,
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
-from crb.server.acceptance import load_held_out
 from crb.server.auth import OperatorDep, ViewerDep
 from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import current_checks_arm
+from crb.server.reading_book import load_readings
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.class_sets import DbClassSets
 from crb.store.events import append_event_checked
 from crb.store.ledger import DbLedger
-from crb.store.models import Event, Repo, Task
+from crb.store.models import Repo, Task
 
 router = APIRouter(tags=["capability"])
 _ERR = {"model": ErrorEnvelope}
@@ -113,27 +113,11 @@ def _trace(repo: str) -> str:
     return TRACE_PREFIX + repo
 
 
-def load_readings(session: Session, repo: str) -> list[Reading]:
-    """The repository's registered readings, in registration order. A record whose id or pool
-    hash does not re-hash licenses nothing and is left out (the verified set is what counts).
-    A forward reading's pool is filled here, once, from the held-out records written after it
-    (``crb.core.reading.with_enrolment``, DL-334) — so every reader of readings, the factory's
-    gate included, reads the same enrolled pool."""
-    out: list[Reading] = []
-    records: list[HeldOutTests] | None = None
-    for ev in session.execute(
-        select(Event)
-        .where(Event.repo == repo, Event.action == READING_EVENT_ACTION)
-        .order_by(Event.id)
-    ).scalars():
-        reading = Reading.from_dict(dict(ev.payload_json or {}))
-        if reading.verify() and reading.repo == repo:
-            if reading.prospective:
-                if records is None:
-                    records = load_held_out(session, repo)
-                reading = with_enrolment(reading, records)
-            out.append(reading)
-    return out
+#: What a reading tests, written before its first attempt (Wave 3 pre-run, Q-24): stripped,
+#: and never blank — a reading registered without its question is refused 422.
+Hypothesis = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+#: The smallest effect that would matter, a share of attempts in (0, 1].
+SmallestEffect = Annotated[float, Field(gt=0, le=1)]
 
 
 def reading_book(session: Session, repo: str, rows: Iterable[GradeRow]) -> ReadingBook:
@@ -229,6 +213,10 @@ class ReadingIn(BaseModel):
     #: organisation's class this reading reads — its pool is the confirmation commits the
     #: version's rule puts in that class (ADR-0026 item 9). Empty for the global vocabulary.
     org_class: str = Field(default="", max_length=64)
+    #: What the reading tests and the smallest effect that would matter (Wave 3 pre-run,
+    #: Q-24): both required and both inside the reading's hash (P-787).
+    hypothesis: Hypothesis
+    smallest_effect: SmallestEffect
 
 
 class ReadingsOut(BaseModel):
@@ -296,6 +284,20 @@ def register_reading(
             f"a replayed arm counts only rows graded in the sealed posture; this reading would "
             f"read {posture!r} (ADR-0026 item 2) — register it on a docker/<tree>/sealed class",
             detail={"posture_class": posture},
+        )
+    deployment = settings.posture()
+    if replayed and not deployment["sealed"]:
+        # the posture class is the sandbox's alone: a host builder under a docker sandbox
+        # still names a sealed class, so the deployment itself must be sealed (P-789)
+        raise ApiError(
+            422,
+            REFUSAL_INVALID,
+            "a replayed reading needs a sealed deployment: the sandbox and the builder must "
+            "both run on docker",
+            detail={
+                "sandbox_executor": deployment["sandbox_executor"],
+                "builder_executor": deployment["builder_executor"],
+            },
         )
     checks = current_checks_arm(factory, body.repo)
     try:
@@ -374,6 +376,8 @@ def register_reading(
             budget=budget,
             pool_rule=pool_rule,
             org_class=body.org_class,
+            hypothesis=body.hypothesis,
+            smallest_effect=body.smallest_effect,
         )
         return reading.to_dict()
 
@@ -404,6 +408,8 @@ class ForwardIn(BaseModel):
     model: str = Field(min_length=1, max_length=128)
     provider: str = Field(default="", max_length=64)
     rule: str = RULE_LOOK_V1
+    hypothesis: Hypothesis
+    smallest_effect: SmallestEffect
 
 
 @router.post(
@@ -440,6 +446,8 @@ def register_forward_reading(
             existing=readings,
             rule=body.rule,
             budget=cell_error_budget(),
+            hypothesis=body.hypothesis,
+            smallest_effect=body.smallest_effect,
         )
         return reading.to_dict()
 

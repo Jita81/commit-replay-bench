@@ -60,7 +60,15 @@ from crb.store.models import Event
 from fixtures.class_sets import add_commits, routing_version, version
 from fixtures.intake import FakeTracker
 from fixtures.posture import posture_result
-from fixtures.readings import CELL, REGISTERED_AT, SEALED, commits, sealed_row
+from fixtures.readings import (
+    CELL,
+    QUESTION,
+    REGISTERED_AT,
+    SEALED,
+    SEALED_SETTINGS,
+    commits,
+    sealed_row,
+)
 from fixtures.server_seed import (
     ALPHA,
     BUILDER,
@@ -90,7 +98,7 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path, role="operator") as e:
+    with make_env(tmp_path, role="operator", **SEALED_SETTINGS) as e:
         add_commits(e.factory)
         yield e
 
@@ -378,7 +386,7 @@ def _a_proven_org_cell(env: Env) -> dict[str, Any]:
     r = env.post(
         "/readings",
         json={"repo": ALPHA, "cell": ORG_CELL, "hierarchy": ["S3"], "posture_class": SEALED,
-              "taxonomy": V1, "org_class": "parser-fix"},
+              "taxonomy": V1, "org_class": "parser-fix", **QUESTION},
     )  # fmt: skip
     assert r.status_code == 201, r.text
     reading = r.json()

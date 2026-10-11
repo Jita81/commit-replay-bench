@@ -86,6 +86,15 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     reg.add_argument("--rule", default=RULE_LOOK_V1, choices=sorted(RULES))
     reg.add_argument("--posture-class", required=True, help="the sealed class the reading counts")
     reg.add_argument("--author-model", default="")
+    reg.add_argument(
+        "--hypothesis", required=True, help="what the reading tests, written before any row"
+    )
+    reg.add_argument(
+        "--smallest-effect",
+        required=True,
+        type=float,
+        help="the smallest effect that would matter: a share of attempts in (0, 1]",
+    )
     reg.add_argument("--checks", default="off")
     reg.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
     reg.add_argument("--readings", default="", help=f"default <workdir>/{READINGS_FILE}")
@@ -140,6 +149,13 @@ def cmd_register(args: argparse.Namespace) -> int:
         "provider": args.provider,
     }
     assert set(cell) == set(CELL_FIELDS)
+    hypothesis = args.hypothesis.strip()
+    if not hypothesis or len(hypothesis) > 2000:
+        raise CliError("--hypothesis must say what the reading tests (1 to 2000 characters)")
+    if not 0 < args.smallest_effect <= 1:
+        raise CliError(
+            f"--smallest-effect must be a share of attempts in (0, 1]; got {args.smallest_effect}"
+        )
     hierarchy = [a.strip() for a in args.hierarchy.split(",") if a.strip()]
     try:
         replayed = [a for a in hierarchy if parse_arm(a).base != BASE_S2]
@@ -189,6 +205,8 @@ def cmd_register(args: argparse.Namespace) -> int:
                 author_model=args.author_model,
                 changes={c: str(tasks[c].labels.get(LABEL_CHANGE_ID, "")) for c in pool},
                 pool_rule=pool_rule,
+                hypothesis=hypothesis,
+                smallest_effect=args.smallest_effect,
             )
         except ReadingRefused as exc:
             raise CliError(f"{exc.code}: {exc}") from exc

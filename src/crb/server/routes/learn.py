@@ -1146,6 +1146,10 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             raise ApiError(
                 422, "validation_error", f"the plan's run body does not validate: {exc}"
             ) from exc
+        if cell.reading_id and validated.kind in ("replay", "blind"):
+            # filed under the reading it measures: the submit gate and the worker refuse
+            # it on a deployment that is not sealed (P-789)
+            validated = validated.model_copy(update={"reading_id": cell.reading_id})
         submit_refusals(db, settings, validated, new_run(validated, actor=operator.id))
         validated_runs.append(validated)
 

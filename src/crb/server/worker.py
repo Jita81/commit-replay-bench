@@ -328,6 +328,7 @@ from crb.server.intake import (
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
+from crb.server.reading_book import load_readings
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -343,6 +344,7 @@ from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
 from crb.server.routes.runs import (
+    READING_UNSEALED_CODE,
     append_system_event,
     credential_refusal,
     new_run,
@@ -1375,6 +1377,8 @@ class Worker:
                 status, error = STATUS_FAILED, refused
             elif (dead := self._dead_login(run, emitter)) is not None:
                 status, error = STATUS_FAILED, dead
+            elif (unsealed := self._reading_unsealed(run, emitter)) is not None:
+                status, error = STATUS_FAILED, unsealed
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1476,6 +1480,51 @@ class Worker:
             code=LOGIN_INVALID_CODE,
             builder=login.builder,
             auth=login.auth,
+        )
+        return error
+
+    def _reading_unsealed(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading
+        (``params.reading_id``) this worker cannot measure sealed — the submit gate's rule
+        (P-789) applied again at claim, because the executors that grade it are this
+        worker's, not the API's: the id is no verified reading of the repository, the run's
+        sandbox executor is not ``docker``, or the builder's is not (``""`` reads
+        ``CRB_BUILDER__EXECUTOR`` as it stands; anything but ``docker`` is the host). ``None``
+        for a run filed under no reading, or one this worker can measure sealed."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        sandbox = run_executor_kind(params, self.settings).strip().lower()
+        builder = (
+            (
+                self.settings.builder_executor
+                or os.environ.get(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "")
+            )
+            .strip()
+            .lower()
+        )
+        builder = "docker" if builder == "docker" else "host"
+        with self.factory() as s:
+            known = reading_id in {r.reading_id for r in load_readings(s, run.repo)}
+        if known and sandbox == "docker" and builder == "docker":
+            return None
+        why = (
+            f"no verified reading {reading_id!r} in {run.repo!r}"
+            if not known
+            else f"the sandbox executor is {sandbox!r} and the builder's is {builder!r}; a "
+            "run filed under a reading is graded with both on docker"
+        )
+        error = f"{READING_UNSEALED_CODE}: {why}"
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=READING_UNSEALED_CODE,
+            reading_id=reading_id,
+            sandbox_executor=sandbox,
+            builder_executor=builder,
         )
         return error
 

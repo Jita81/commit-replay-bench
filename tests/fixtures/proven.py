@@ -40,7 +40,7 @@ from crb.core.version import APPARATUS_VERSION
 from crb.store.events import append_event
 from crb.store.ledger import DbLedger
 from crb.store.models import EvidencePackRow, Task
-from fixtures.readings import SEALED, sealed_row
+from fixtures.readings import HYPOTHESIS, SEALED, SMALLEST_EFFECT, sealed_row
 from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, Env
 
 #: A cell the default seed does not hold (the seed's deliver cell is bug.fix × S).
@@ -114,7 +114,10 @@ def add_tasks(
 
 
 def register_via_api(env: Env, *, hierarchy: Sequence[str] = ("S3", S1), **kw: Any) -> Any:
-    """``POST /readings`` for :data:`CELL` in the sealed posture class."""
+    """``POST /readings`` for :data:`CELL` in the sealed posture class, stating its
+    hypothesis and smallest effect (P-787) unless the caller names them."""
+    kw.setdefault("hypothesis", HYPOTHESIS)
+    kw.setdefault("smallest_effect", SMALLEST_EFFECT)
     body = {
         "repo": ALPHA,
         "cell": CELL,
@@ -179,12 +182,13 @@ def write_reading(
     cell: Mapping[str, str] = CELL,
     hierarchy: Sequence[str] = (S1,),
     changes: Mapping[str, str] | None = None,
+    repo: str = ALPHA,
 ) -> Reading:
-    """Register a reading of ``cell`` on ``alpha`` with the core's rules and write it as the
-    ``reading.registered`` event ``POST /readings`` writes — for a test logged in as a role
-    that may not register one itself (a sign-off test's approver)."""
+    """Register a reading of ``cell`` on ``repo`` (``alpha``) with the core's rules and write it
+    as the ``reading.registered`` event ``POST /readings`` writes — for a test logged in as a
+    role that may not register one itself (a sign-off test's approver), or a worker test."""
     reading = register(
-        repo=ALPHA,
+        repo=repo,
         cell=dict(cell),
         hierarchy=hierarchy,
         pool=list(pool),
@@ -199,10 +203,10 @@ def write_reading(
     )
     append_event(
         factory,
-        trace_id=f"readings:{ALPHA}",
+        trace_id=f"readings:{repo}",
         stage="system",
         action=READING_EVENT_ACTION,
-        repo=ALPHA,
+        repo=repo,
         payload=reading.to_dict(),
     )
     return reading

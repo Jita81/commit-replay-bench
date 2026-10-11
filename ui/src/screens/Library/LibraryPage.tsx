@@ -149,13 +149,23 @@ function ForwardForm({ repo, size, std }: { repo: string; size: string; std: Lib
   const [builder, setBuilder] = useState('')
   const [model, setModel] = useState('')
   const [provider, setProvider] = useState('')
+  const [hypothesis, setHypothesis] = useState('')
+  const [effect, setEffect] = useState('')
   const [done, setDone] = useState('')
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (register.isPending) return
     setDone('')
     register.mutate(
-      { repo, promotes: std.reading_id, builder: builder.trim(), model: model.trim(), provider: provider.trim() },
+      {
+        repo,
+        promotes: std.reading_id,
+        builder: builder.trim(),
+        model: model.trim(),
+        provider: provider.trim(),
+        hypothesis: hypothesis.trim(),
+        smallest_effect: Number(effect),
+      },
       { onSuccess: (r) => setDone(`Registered ${r.reading_id}. It counts the calibration builds whose held-out tests are written from now on.`) },
     )
   }
@@ -169,6 +179,8 @@ function ForwardForm({ repo, size, std }: { repo: string; size: string; std: Lib
       <TextField label="Builder" value={builder} onChange={(e) => setBuilder(e.target.value)} required hint="field.library.forward_builder" description="As the factory run’s ladder names it, for example claude_code." />
       <TextField label="Model" value={model} onChange={(e) => setModel(e.target.value)} required hint="field.library.forward_model" description="For example claude-sonnet-5." />
       <TextField label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)} required hint="field.library.forward_provider" description="The provider the model is served by, for example anthropic." />
+      <TextField label="Hypothesis" value={hypothesis} onChange={(e) => setHypothesis(e.target.value)} required maxLength={2000} hint="field.library.forward_hypothesis" description="What this reading tests, written before any build is read." />
+      <TextField label="Smallest effect" value={effect} onChange={(e) => setEffect(e.target.value)} required type="number" inputMode="decimal" step="any" min="0" max="1" hint="field.library.forward_smallest_effect" description="The smallest effect that would matter, as a share of attempts above 0 and at most 1, for example 0.1." />
       <WarningButton type="submit" pending={register.isPending} hint="button.library.register_forward">
         Register the forward reading
       </WarningButton>

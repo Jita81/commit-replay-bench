@@ -416,6 +416,11 @@ class Reading:
     #: cell key whose ONE error budget it spends from (ADR-0026 item 5) — hashed when present.
     promotes: str = ""
     budget_cell: str = ""
+    #: What the reading tests, and the smallest effect (a share of attempts, in (0, 1]) that
+    #: would matter — written before any row is read (Wave 3 pre-run, Q-24), hashed when
+    #: present so a legacy reading's id never moves and an edited hypothesis fails ``verify``.
+    hypothesis: str = ""
+    smallest_effect: float | None = None
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
@@ -484,6 +489,12 @@ class Reading:
             **({"org_class": self.org_class} if self.org_class else {}),
             **({"promotes": self.promotes} if self.promotes else {}),
             **({"budget_cell": self.budget_cell} if self.budget_cell else {}),
+            **({"hypothesis": self.hypothesis} if self.hypothesis else {}),
+            **(
+                {"smallest_effect": self.smallest_effect}
+                if self.smallest_effect is not None
+                else {}
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -516,6 +527,10 @@ class Reading:
             org_class=str(d.get("org_class", "") or ""),
             promotes=str(d.get("promotes", "") or ""),
             budget_cell=str(d.get("budget_cell", "") or ""),
+            hypothesis=str(d.get("hypothesis", "") or ""),
+            smallest_effect=(
+                None if d.get("smallest_effect") is None else float(d["smallest_effect"])
+            ),
         )
 
     def verify(self) -> bool:
@@ -660,6 +675,8 @@ def register(
     now: str = "",
     pool_rule: str = "",
     org_class: str = "",
+    hypothesis: str = "",
+    smallest_effect: float | None = None,
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -745,6 +762,8 @@ def register(
         actor=actor,
         pool_rule=pool_rule,
         org_class=org_class,
+        hypothesis=hypothesis,
+        smallest_effect=smallest_effect,
     )
 
 
@@ -759,6 +778,8 @@ def register_forward(
     rule: str = RULE_LOOK_V1,
     budget: float | None = None,
     now: str = "",
+    hypothesis: str = "",
+    smallest_effect: float | None = None,
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -827,6 +848,8 @@ def register_forward(
         pool_rule=POOL_RULE_CALIBRATION,
         promotes=base.reading_id,
         budget_cell=base.budget_key[1],
+        hypothesis=hypothesis,
+        smallest_effect=smallest_effect,
     )
 
 
@@ -1157,6 +1180,8 @@ class ReadingOutcome:
             "registered_at": self.reading.registered_at,
             "pool": len(self.reading.pool),
             "pool_sha256": self.reading.pool_sha256,
+            "hypothesis": self.reading.hypothesis,
+            "smallest_effect": self.reading.smallest_effect,
             "arms": [a.to_dict() for a in self.arms.values()],
         }
 

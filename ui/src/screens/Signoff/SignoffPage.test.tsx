@@ -891,7 +891,7 @@ describe('SignoffPage — the second person’s gate says everything before anyo
 
   it('each number-based refusal names the next action and links the screen that changes the number (G-476)', async () => {
     const refusals: SignoffRefusal[] = [
-      { code: 'thin_cell', message: 'n=4 < n_min=10', threshold: 10, observed: 4, overridable: true },
+      { code: 'thin_cell', message: 'tasks=4 < n_min=10', threshold: 10, observed: 4, overridable: true },
       ESCAPE_REFUSALS[0]!,
       ESCAPE_REFUSALS[1]!,
       ESCAPE_REFUSALS[2]!,

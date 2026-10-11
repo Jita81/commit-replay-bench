@@ -547,6 +547,10 @@ export const HINTS = {
     'The model the calibration builds run on. A ticket built by another model leaves the forward reading instead of counting.',
   'field.library.forward_provider':
     'The provider that serves the model, as the factory records it on each row. A ticket built through another provider leaves the forward reading instead of counting.',
+  'field.library.forward_hypothesis':
+    'What this reading tests, in your words, written before any build is read. It is stored with the reading and hashed into its id, so it cannot be changed after the results are in.',
+  'field.library.forward_smallest_effect':
+    'The smallest effect that would matter, as a share of attempts: above 0 and at most 1. It is stored with the reading and hashed into its id, so the effect a result is read against is fixed before the first build.',
   'button.library.register_forward':
     'Register the forward reading now, under your name. It spends from this cell’s one error budget and cannot be withdrawn; it counts only calibration builds whose held-out tests are written after this moment.',
   'col.library.characteristic':
@@ -759,7 +763,7 @@ export const HINTS = {
   'gate.signoff.false_q1':
     'No row in the cell is credited clean against its own belts. This clause cannot be relaxed.',
   'gate.signoff.thin_cell':
-    'The cell has at least the policy’s minimum attempts, with its point and Wilson lower bound shown. A thin cell is refused however good its rate.',
+    'The cell has graded at least the policy’s minimum of distinct tasks — reruns of one commit count once — with its point and Wilson lower bound shown. A thin cell is refused however good its rate.',
   'gate.signoff.controls':
     'The latest controls run passed, with no more escapes than the policy allows and at least the required share constructible; the run and its date are named. Never run is a refusal.',
   'gate.signoff.oracle':

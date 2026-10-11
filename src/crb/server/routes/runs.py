@@ -105,6 +105,7 @@ from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
 from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
+from crb.server.reading_book import load_readings
 from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
@@ -700,6 +701,8 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["learning"] = body.learning
     if body.taxonomy:
         params["taxonomy"] = body.taxonomy
+    if body.reading_id is not None:
+        params["reading_id"] = body.reading_id
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
@@ -915,6 +918,42 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
         return
 
 
+#: The refusals of a run filed under a reading (P-789): the id is no verified reading of
+#: the repository (422 at submit), or the run would not be graded sealed (409 at submit; the
+#: worker's ``run.refused`` code at claim).
+READING_UNKNOWN_CODE = "reading_unknown"
+READING_UNSEALED_CODE = "reading_unsealed"
+
+
+def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
+    """The two refusals of a run filed under a reading (P-789): 422 ``reading_unknown`` when
+    ``body.reading_id`` is not a verified reading of ``body.repo``; 409 ``reading_unsealed``
+    when the run's sandbox executor or the deployment's builder executor is not ``docker`` —
+    a reading is registered only on a sealed deployment, and a run of it graded anywhere
+    else would be another posture's rows, never the reading's measurement."""
+    if body.reading_id not in {r.reading_id for r in load_readings(db, body.repo)}:
+        raise ApiError(
+            422,
+            READING_UNKNOWN_CODE,
+            f"no verified reading {body.reading_id!r} in {body.repo!r}",
+            detail={"reading_id": body.reading_id},
+        )
+    sandbox = deployment_executor(settings, body.executor)
+    builder = str(settings.posture()["builder_executor"])
+    if sandbox != "docker" or builder != "docker":
+        raise ApiError(
+            409,
+            READING_UNSEALED_CODE,
+            f"a run filed under reading {body.reading_id!r} needs the sandbox and the builder "
+            f"both on docker (sandbox {sandbox!r}, builder {builder!r})",
+            detail={
+                "reading_id": body.reading_id,
+                "sandbox_executor": sandbox,
+                "builder_executor": builder,
+            },
+        )
+
+
 def submit_refusals(
     db: Session, settings: Any, body: RunCreateRequest, run: Run, *, login: bool = True
 ) -> None:
@@ -933,6 +972,10 @@ def submit_refusals(
     * 409 ``posture_unqualified`` — the ADR-0019 §3 refusal: ``qualify_first: false`` on a
       build with nothing qualified where it would be graded can only fail
       ``POSTURE_UNQUALIFIED`` on the worker (a database read, so it costs nothing);
+    * 422 ``reading_unknown`` — ``reading_id`` names no verified reading of the repository;
+    * 409 ``reading_unsealed`` — a run filed under a reading whose sandbox executor or the
+      deployment's builder executor is not ``docker``: its rows could never be the reading's
+      sealed measurement (P-789; the worker re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -964,6 +1007,8 @@ def submit_refusals(
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    if body.reading_id is not None:
+        reading_refusal(db, settings, body)
     if not login:
         return
     # last: the only refusal that can cost a verify turn (P-462)

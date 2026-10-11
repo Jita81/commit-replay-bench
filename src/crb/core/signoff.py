@@ -27,7 +27,7 @@ enforced by :func:`check_signable` (the first failing clause, as
 
 * ``false_q1``                       — the cell has a false-Q1 row. Always first,
   never overridable: a human can never make an objectively wrong cell look trusted.
-* ``thin_cell``                      — ``n < n_min`` (default 10).
+* ``thin_cell``                      — distinct tasks ``< n_min`` (default 10).
 * ``controls_unmeasured`` / ``controls_failed`` / ``controls_escapes`` /
   ``controls_thin``                  — the repo's negative-controls gate was never
   run, FAILED, let a measurement control escape, or exercised fewer than
@@ -1047,9 +1047,11 @@ def evaluate_signoff(
         )
 
     out: list[SignoffRefusal] = []
-    n = cell.stats.n if cell.stats is not None else 0
+    # distinct tasks, never attempts: 16 rows on 4 commits are evidence about 4 commits
+    # (EVIDENCE-AND-CLAIMS §3; P-788) — reruns of one commit never make a cell thick
+    n = cell.stats.n_tasks if cell.stats is not None else 0
     if n < policy.n_min:
-        what = "no measured evidence" if cell.stats is None else f"n={n}"
+        what = "no measured evidence" if cell.stats is None else f"tasks={n}"
         out.append(
             SignoffRefusal(
                 REFUSAL_THIN_CELL,

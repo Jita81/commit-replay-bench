@@ -32,6 +32,8 @@ from crb.core.ledger import JsonlLedger
 from crb.core.spec import TaskSpec
 from fixtures.readings import AUTHOR, CELL, REPO, S1, SEALED, commits, sealed_row
 
+HYPOTHESIS = "S1 at the author's tests delivers what S3 does on this cell"
+
 
 def _tasks(wd: Path, shas: list[str]) -> None:
     f = Workdir(wd).task_file(REPO)
@@ -78,6 +80,10 @@ def _argv(wd: Path, *extra: str) -> list[str]:
         f"S3,{S1}",
         "--author-model",
         AUTHOR,
+        "--hypothesis",
+        HYPOTHESIS,
+        "--smallest-effect",
+        "0.1",
         "--posture-class",
         SEALED,
         "--workdir",
@@ -95,6 +101,7 @@ def test_register_appends_a_reading_the_route_reads_and_list_shows_it(
     assert main([*_argv(wd), "--json"]) == 0
     body = json.loads(capsys.readouterr().out)
     assert body["hierarchy"] == ["S3", S1] and len(body["pool"]) == 40
+    assert (body["hypothesis"], body["smallest_effect"]) == (HYPOTHESIS, 0.1)
     assert (wd / "readings.jsonl").is_file()
     assert main(["reading", "list", "--workdir", str(wd), "--json"]) == 0
     listed = json.loads(capsys.readouterr().out)["readings"]
@@ -128,6 +135,33 @@ def test_register_refuses_what_the_rules_forbid(
     JsonlLedger(ledger).append(sealed_row(shas[3], created="2026-09-01T00:00:00+00:00"))
     assert main(_argv(wd)) == 2
     assert "pool_seen" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("flag", "value", "says"),
+    [
+        ("--hypothesis", "   ", "--hypothesis"),
+        ("--smallest-effect", "0", "(0, 1]"),
+        ("--smallest-effect", "1.5", "(0, 1]"),
+    ],
+)
+def test_register_refuses_a_reading_without_its_question_or_a_smallest_effect_outside_0_1(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, value: str, says: str
+) -> None:
+    """P-787 (Wave 3 pre-run, Q-24): the reading's hypothesis and smallest effect are written
+    before any row is read — a blank hypothesis or an effect outside (0, 1] exits 2 and
+    writes nothing."""
+    wd = tmp_path / ".crb"
+    _tasks(wd, commits(40))
+    argv = _argv(wd)
+    argv[argv.index(flag) + 1] = value
+    assert main(argv) == 2
+    assert says in capsys.readouterr().err
+    assert not (wd / "readings.jsonl").exists()
+    missing = _argv(wd)
+    del missing[missing.index("--hypothesis") : missing.index("--hypothesis") + 2]
+    assert main(missing) == 2
+    assert not (wd / "readings.jsonl").exists()
 
 
 def test_two_overlapping_registrations_never_overspend_the_cells_budget(

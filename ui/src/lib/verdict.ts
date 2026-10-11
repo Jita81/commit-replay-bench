@@ -224,7 +224,7 @@ export const ACTION_HELP: Record<string, string> = {
   'run.finish_refused': 'The run could not be marked finished because its state had changed underneath it.',
   'run.credential_refused': 'The worker checked the builder’s credential again when it picked the run up and found it gone, so nothing was built and nothing was spent.',
   'run.finished': 'The run reached its final status with its counts and duration.',
-  'run.refused': 'A worker took the run from the queue and failed it before building anything, because a login it would use was found not to work after it was queued; nothing was spent.',
+  'run.refused': 'A worker took the run from the queue and refused it before it started, so nothing was built or spent: a builder login it would use was found dead after it was queued, or its executors are not docker for the sealed reading it measures.',
   'run.outage_stop': 'The run stopped because the sandbox or a service became unavailable; it can be started again later.',
   'run.escalation_stopped': 'A failed attempt did not climb to the next rung, because earlier retries in the same cell came back clean too rarely to pay; the rule and the yield are on the row.',
   'run.spend_history_unreadable': 'The ledger could not be read when the run started, so the spend rules saw no history: every rung may climb and a calibrated attempt keeps its default caps.',
