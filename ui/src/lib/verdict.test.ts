@@ -20,7 +20,8 @@
  *               docs/API.md (the vocabulary table), tests/test_event_vocabulary.py (the
  *               server-side half of the same ratchet)
  * Tested by:    ui/src/lib/verdict.test.ts
- * Touch when:   a route, band, gate or event action is added on the server.
+ * Touch when:   never for a new repository; a route, band, gate or event action is added on
+ *               the server.
  */
 import { describe, expect, it } from 'vitest'
 import apiDoc from '../../../docs/API.md?raw'

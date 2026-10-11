@@ -83,7 +83,6 @@ ui/src/help/hints-collector.ts
 ui/src/lib/jsonObject.test.ts
 ui/src/lib/jsonObject.ts
 ui/src/lib/theme.ts
-ui/src/lib/verdict.test.ts
 ui/src/screens/Capability/ReasonCode.tsx
 ui/src/screens/Connect/GitHubConnectDialog.tsx
 ui/src/screens/Repos/RepoConfigForm.tsx
