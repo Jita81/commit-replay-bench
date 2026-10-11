@@ -23,6 +23,17 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   calls count; overrunning admitted headroom stops the campaign. CI builds and runs the Go
   builder image; the operator's 2026-10-11 decisions are recorded.
 
+- **Every pull-request workflow's jobs are required on `main`**
+  ([#72](https://github.com/Jita81/commit-replay-bench/pull/72)). On 2026-10-07 an administrator
+  made `fresh-clone` and `commit-subjects` required on `main`, making 18. The branch-protection
+  check compared that list with `ci.yml` alone. It now requires every job of each workflow whose
+  `on:` names `pull_request`, read from `data/branch-protection-2026-10-07/` (P-752). A test that
+  skips on a git result now fails, and suite jobs fetch the whole history (P-753). Gap-analysis
+  totals carry their measured tag. The suite runs in eleven shards: on refreshed weights, nine
+  overran half the timeout (P-740). Docker Hub refused GitHub's runners on 2026-10-09, so every
+  docker job and service pulls through `mirror.gcr.io` (P-783). The daily workflow needs a
+  read-only token to go green (G-930).
+
 - **An admin act and the same person's sign-in no longer deadlock on PostgreSQL** (P-786;
   [#86](https://github.com/Jita81/commit-replay-bench/pull/86)). Setting an account's
   password, role or active flag, or signing its sessions out, wrote the account's row and then
