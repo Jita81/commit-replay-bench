@@ -20,7 +20,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   skips on a git result now fails, and suite jobs fetch the whole history (P-753). Gap-analysis
   totals carry their measured tag. The suite runs in eleven shards: on refreshed weights, nine
   overran half the timeout (P-740). Docker Hub refused GitHub's runners on 2026-10-09, so every
-  job that uses docker pulls through `mirror.gcr.io` (P-783). The daily workflow needs a
+  docker job and service pulls through `mirror.gcr.io` (P-783). The daily workflow needs a
   read-only token to go green (G-930).
 
 - **A development stack signs a browser in on its own machine; production cannot**

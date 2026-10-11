@@ -15,7 +15,10 @@ What it does: Fails when a job in any workflow talks to a docker daemon — a ``
               ``CRB_TEST_REQUIRE_TOOLS`` declares — without the
               ``./.github/actions/docker-hub-mirror`` step before the first of them
               (what runs after a ``systemctl stop`` of docker is exempt until a
-              ``start`` or ``restart`` brings it back); when a ``docker/setup-buildx-action``
+              ``start`` or ``restart`` brings it back); when an image the runner pulls
+              as it sets a job up, before any step can add the mirror — the job's
+              ``container``, a ``services`` image, a ``docker://`` action — names Docker
+              Hub rather than ``mirror.gcr.io/library/…``; when a ``docker/setup-buildx-action``
               step does not give BuildKit the docker.io mirror; and when the composite
               action stops merging into the runner's ``daemon.json``, stops restarting the
               daemon or stops proving that ``docker info`` lists the mirror. Each check is
@@ -52,7 +55,12 @@ MIRROR = "mirror.gcr.io"
 
 # a docker command, not a word in a name (`docker.io`, `docker-compose.yml`, `crb-docker`)
 _DOCKER_COMMAND = re.compile(r"(?<![\w./-])docker\s+(?![.-])[a-z]")
-_DAEMON_SWITCH = re.compile(r"systemctl\s+(stop|start|restart)\s+[^\n]*\bdocker\b")
+# a systemctl verb and the units it names, to the end of that command: in
+# `systemctl start docker && docker pull alpine` the pull is the next command, not a unit
+_DAEMON_SWITCH = re.compile(r"systemctl[ \t]+(stop|start|restart)((?:[ \t]+[\w.@-]+)+)")
+_DOCKER_UNIT = re.compile(r"docker(?:\.\w+)?")
+# the hosts a reference with no registry, or one of these, resolves to
+_DOCKER_HUB = frozenset({"docker.io", "index.docker.io", "registry-1.docker.io"})
 _PULLING_ACTIONS = ("docker/setup-buildx-action@", "docker/build-push-action@")
 
 
@@ -85,6 +93,8 @@ def _first_docker_use(steps: list[dict[str, Any]], *, declared: bool) -> int | N
         run = str(step.get("run", ""))
         at = 0
         for switch in _DAEMON_SWITCH.finditer(run):
+            if not any(_DOCKER_UNIT.fullmatch(u) for u in switch.group(2).split()):
+                continue
             if running and _uses_docker(
                 {**step, "run": run[at : switch.start()]}, declared=declared
             ):
@@ -107,6 +117,47 @@ def job_findings(where: str, text: str) -> list[str]:
         if mirror is None or mirror > first:
             findings.append(f"{where}: job {name!r} uses docker without {MIRROR_STEP} before it")
     return findings
+
+
+def _from_docker_hub(image: str) -> bool:
+    """Whether an image reference resolves to Docker Hub: no registry host before its first
+    ``/`` (``postgres:16-alpine``, ``bitnami/redis``), or Docker Hub's own."""
+    first, slash, _ = image.partition("/")
+    if not slash:
+        return True
+    return first in _DOCKER_HUB or not ("." in first or ":" in first or first == "localhost")
+
+
+def _setup_images(job: dict[str, Any]) -> list[tuple[str, str]]:
+    """The images the runner pulls while it sets a job up, before its first step runs — so
+    before any step can give the daemon a mirror: the job's ``container``, each of its
+    ``services`` and the image of each ``docker://`` action a step uses."""
+    out = []
+    container = job.get("container")
+    if isinstance(container, dict):
+        container = container.get("image")
+    if container:
+        out.append(("container", str(container)))
+    for service, spec in (job.get("services") or {}).items():
+        if isinstance(spec, dict) and spec.get("image"):
+            out.append((f"service {service!r}", str(spec["image"])))
+    for step in _steps(job):
+        uses = str(step.get("uses", ""))
+        if uses.startswith("docker://"):
+            out.append(("action", uses.removeprefix("docker://")))
+    return out
+
+
+def image_findings(where: str, text: str) -> list[str]:
+    """The images a job's runner pulls from Docker Hub before any step runs: no mirror step
+    reaches them, so each must name the mirror itself (``mirror.gcr.io/library/…``)."""
+    return [
+        f"{where}: job {name!r} pulls {image} from Docker Hub as its {what} before any step"
+        f" — name {MIRROR}/library/… instead"
+        for name, job in (yaml.safe_load(text).get("jobs") or {}).items()
+        for what, image in _setup_images(job)
+        if _from_docker_hub(image)
+    ]
 
 
 def buildx_findings(where: str, text: str) -> list[str]:
@@ -147,7 +198,9 @@ def _all(text_of: dict[str, str]) -> list[str]:
     return [
         f
         for where, text in text_of.items()
-        for f in job_findings(where, text) + buildx_findings(where, text)
+        for f in job_findings(where, text)
+        + image_findings(where, text)
+        + buildx_findings(where, text)
     ]
 
 
@@ -162,6 +215,9 @@ def test_every_job_that_uses_docker_pulls_through_the_mirror() -> None:
     jobs = yaml.safe_load(ci)["jobs"]
     for name in ("test-shard", "sandbox-images", "container"):
         assert any(s.get("uses") == MIRROR_STEP for s in _steps(jobs[name])), name
+    assert _setup_images(jobs["test-postgres"]) == [
+        ("service 'postgres'", f"{MIRROR}/library/postgres:16-alpine")
+    ]
 
 
 def test_the_composite_action_merges_restarts_and_proves() -> None:
@@ -261,6 +317,11 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
         "      - run: sudo systemctl stop docker.socket docker.service\n"
         "      - run: sudo systemctl start docker\n"
         "      - run: docker pull python:3.12-slim\n"
+        "  starts-and-pulls:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker\n"
+        "      - run: sudo systemctl start docker && docker pull alpine:3.20\n"
         "  named:\n"
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
@@ -281,7 +342,59 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
         f"probe.yml: job 'pulls-then-stops' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'stops-in-one-step' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'restarts' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'starts-and-pulls' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'builds' uses docker without {MIRROR_STEP} before it",
+    ]
+
+
+def test_the_check_refuses_a_docker_hub_image_pulled_before_the_steps() -> None:
+    # the runner pulls these while it sets the job up: a mirror step comes too late for them
+    ci = _real()["ci.yml"]
+    planted = ci.replace(f"image: {MIRROR}/library/postgres:16-alpine", "image: postgres:16-alpine")
+    assert image_findings("ci.yml", planted) == [
+        "ci.yml: job 'test-postgres' pulls postgres:16-alpine from Docker Hub as its service"
+        f" 'postgres' before any step — name {MIRROR}/library/… instead"
+    ]
+    probe = (
+        "on: pull_request\n"
+        "jobs:\n"
+        "  in-a-container:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    container: python:3.12-slim\n"
+        "    steps:\n"
+        f"      - uses: {MIRROR_STEP}\n"
+        "  in-a-container-spec:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    container:\n"
+        "      image: docker.io/library/node:22\n"
+        "  with-a-service:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    services:\n"
+        "      redis:\n"
+        "        image: bitnami/redis:7.4\n"
+        "  docker-action:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        f"      - uses: {MIRROR_STEP}\n"
+        "      - uses: docker://alpine:3.20\n"
+        "  elsewhere:\n"
+        "    runs-on: ubuntu-latest\n"
+        f"    container: {MIRROR}/library/python:3.12-slim\n"
+        "    services:\n"
+        "      ghcr:\n"
+        "        image: ghcr.io/jita81/probe:1\n"
+        "      local:\n"
+        "        image: localhost:5000/probe\n"
+        "    steps:\n"
+        "      - uses: docker://ghcr.io/jita81/probe:1\n"
+    )
+    hub = f"from Docker Hub as its {{}} before any step — name {MIRROR}/library/… instead"
+    assert image_findings("probe.yml", probe) == [
+        "probe.yml: job 'in-a-container' pulls python:3.12-slim " + hub.format("container"),
+        "probe.yml: job 'in-a-container-spec' pulls docker.io/library/node:22 "
+        + hub.format("container"),
+        "probe.yml: job 'with-a-service' pulls bitnami/redis:7.4 " + hub.format("service 'redis'"),
+        "probe.yml: job 'docker-action' pulls alpine:3.20 " + hub.format("action"),
     ]
 
 

@@ -565,9 +565,12 @@ pull-request workflow under 100 characters.
 Every job that uses docker pulls Docker Hub images through `mirror.gcr.io`, Google's
 pull-through cache, which needs no account: its first docker step is preceded by
 `./.github/actions/docker-hub-mirror`, and each `docker/setup-buildx-action` names the same
-mirror in `buildkitd-config-inline`. GitHub's runners share addresses, so Docker Hub's
-anonymous pull allowance can be spent before a job starts; on a miss the daemon still asks
-Docker Hub (P-783). `tests/test_ci_docker_hub_mirror.py` refuses a job or builder without it.
+mirror in `buildkitd-config-inline`. The runner pulls a job's services, its container and any
+`docker://` action while it sets the job up, before any step, so those images name the mirror
+themselves (`mirror.gcr.io/library/postgres:16-alpine`). GitHub's runners share addresses, so
+Docker Hub's anonymous pull allowance can be spent before a job starts; on a miss the daemon
+still asks Docker Hub (P-783). `tests/test_ci_docker_hub_mirror.py` refuses a job, an image or
+a builder without it.
 
 ## 4. Azure
 

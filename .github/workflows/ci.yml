@@ -773,7 +773,8 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16-alpine
+        # the runner pulls a service before any step, so the mirror is named here (P-783)
+        image: mirror.gcr.io/library/postgres:16-alpine
         env:
           POSTGRES_USER: crb
           POSTGRES_PASSWORD: crb

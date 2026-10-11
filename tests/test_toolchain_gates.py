@@ -266,6 +266,7 @@ def _skips(
                 and n.func.attr in via
                 and _chain(n.func)[1:] in (["self"], ["cls"])
             )
+            or (isinstance(n.func, ast.Attribute) and ".".join(reversed(_chain(n.func))) in via)
         ):
             return True
         if isinstance(n, ast.Raise) and n.exc is not None:
@@ -744,6 +745,43 @@ def git_helpers(tree: ast.Module, extern: Collection[str] = ()) -> set[str]:
     return (helpers & top) | {n for n in tainted if "." not in n}
 
 
+def _skippers(
+    tree: ast.Module,
+    names: tuple[frozenset[str], frozenset[str]],
+    skip_extern: Collection[str] = (),
+) -> set[str]:
+    """The functions of the module, of any depth, that skip, to a fixpoint: one that calls
+    one that skips skips too. ``skip_extern`` is the other test modules' top-level skippers:
+    a name imported from one (``from tests.helpers import shallow``) skips, and so does a
+    call through the module (``helpers.shallow()``, ``tests.helpers.shallow()``)."""
+    seed: set[str] = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and _from_a_test_module(n):
+            for a in n.names:
+                bound = a.asname or a.name
+                if a.name in skip_extern:
+                    seed.add(bound)
+                seed |= {f"{bound}.{s}" for s in skip_extern}
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name.split(".")[0] == "tests" or a.name in _TEST_MODULES:
+                    seed |= {f"{a.asname or a.name}.{s}" for s in skip_extern}
+    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
+    skippers = set(seed)
+    while True:
+        grown = seed | {f.name for f in funcs if _calls_skip(f.body, names, skippers)}
+        if grown == skippers:
+            return skippers
+        skippers = grown
+
+
+def skip_helpers(tree: ast.Module, skip_extern: Collection[str] = ()) -> set[str]:
+    """What another test module can import from this one that skips: its top-level
+    functions that skip, directly or through a skipper of their own or of ``skip_extern``."""
+    top = {s.name for s in tree.body if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef)}
+    return _skippers(tree, _pytest_names(tree), skip_extern) & top
+
+
 def _conditions(mark: ast.Call) -> list[ast.expr]:
     """A ``skipif`` or ``xfail`` mark's conditions — its positional arguments and
     ``condition=`` — and each string among them parsed as the expression pytest evaluates."""
@@ -768,7 +806,9 @@ def _branches(node: ast.AST) -> list[ast.AST]:
     return []
 
 
-def history_skip_findings(source: str, where: str, extern: Collection[str] = ()) -> list[str]:
+def history_skip_findings(
+    source: str, where: str, extern: Collection[str] = (), skip_extern: Collection[str] = ()
+) -> list[str]:
     """Every place a test skips, or passes having proved nothing, on what a ``git`` command
     said (P-753):
 
@@ -780,7 +820,8 @@ def history_skip_findings(source: str, where: str, extern: Collection[str] = ())
 
     A skip is any spelling (``pytest.skip`` or ``xfail`` however imported, ``SkipTest``,
     ``pytest.skip.Exception``, a skip mark applied at run time, or a call to a function of the
-    module that skips). Git is read directly, through a function of any depth that reads it
+    module that skips, or to ``skip_extern``, the skippers of the other test modules, by an
+    imported name or through their module). Git is read directly, through a function of any depth that reads it
     (a method, a fixture the test takes), through a name assigned from one (a tuple unpacked,
     ``self.out``, a ``with … as``), or through ``extern``, the git helpers of the other test
     modules. The suite jobs hold the whole history, so a commit a test cannot read is a clone
@@ -789,13 +830,7 @@ def history_skip_findings(source: str, where: str, extern: Collection[str] = ())
     tree = ast.parse(source)
     helpers, tainted = _git_scope(tree, extern)
     names = _pytest_names(tree)
-    funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)]
-    skippers: set[str] = set()
-    while True:  # a function that calls one that skips skips too
-        grown = {f.name for f in funcs if _calls_skip(f.body, names, skippers)}
-        if grown == skippers:
-            break
-        skippers = grown
+    skippers = _skippers(tree, names, skip_extern)
     scope_of = _enclosing(tree)
     local: dict[ast.AST, set[str]] = {tree: tainted}
 
@@ -850,8 +885,9 @@ def test_no_test_skips_on_what_git_said() -> None:
     """The proof that ``workflow_jobs.json`` is the pull-request workflows at its commit
     skipped on a clone that lacked the commit, so a shallow checkout passed it having proved
     nothing (P-753). The suite jobs hold the whole history: a test that cannot read a commit
-    fails, naming the fetch. A helper or fixture of another test module counts: the scan
-    follows them across modules to a fixpoint."""
+    fails, naming the fetch. A helper or fixture of another test module counts, on either
+    side — one that reads git and one that skips: the scan follows both across modules to a
+    fixpoint."""
     trees = {p: ast.parse(p.read_text(encoding="utf-8")) for p in _test_sources()}
     extern: set[str] = set()
     while True:
@@ -859,11 +895,17 @@ def test_no_test_skips_on_what_git_said() -> None:
         if grown == extern:
             break
         extern = grown
+    skip_extern: set[str] = set()
+    while True:
+        grown = {n for tree in trees.values() for n in skip_helpers(tree, skip_extern)}
+        if grown == skip_extern:
+            break
+        skip_extern = grown
     found = [
         f
         for p in trees
         for f in history_skip_findings(
-            p.read_text(encoding="utf-8"), str(p.relative_to(ROOT)), extern
+            p.read_text(encoding="utf-8"), str(p.relative_to(ROOT)), extern, skip_extern
         )
     ]
     assert found == []
@@ -1053,6 +1095,28 @@ def test_the_history_scan_follows_a_helper_or_fixture_of_another_module() -> Non
     for planted in (taken, imported, sibling, package, on_path, relative):
         assert history_skip_findings(planted, "planted") == [], planted
         assert history_skip_findings(planted, "planted", extern), planted
+    # The skip side crosses modules too: a helper that only skips, imported or called through
+    # its module, by a test that reads git directly.
+    helpers = ast.parse(
+        'def shallow():\n    pytest.skip("a shallow clone")\n'
+        "def deeper():\n    shallow()\n"
+        'class Clone:\n    def shallow_too(self):\n        pytest.skip("not exported")\n'
+    )
+    skip_extern = skip_helpers(helpers)
+    assert skip_extern == {"shallow", "deeper"}
+    on_git = '    r = subprocess.run(["git", "show", "abc"])\n    if r.returncode:\n'
+    for planted in (
+        "from tests.helpers import shallow\ndef test_a():\n" + on_git + "        shallow()\n",
+        "from .helpers import deeper as d\ndef test_a():\n" + on_git + "        d()\n",
+        "from tests import helpers\ndef test_a():\n" + on_git + "        helpers.shallow()\n",
+        "import tests.helpers\ndef test_a():\n" + on_git + "        tests.helpers.shallow()\n",
+        "import tests.helpers as h\ndef test_a():\n" + on_git + "        h.deeper()\n",
+    ):
+        assert history_skip_findings(planted, "planted") == [], planted
+        assert history_skip_findings(planted, "planted", (), skip_extern), planted
+    # the same name from the package under test is not that skipper
+    product = "from crb.core import shallow\ndef test_a():\n" + on_git + "        shallow()\n"
+    assert history_skip_findings(product, "planted", (), skip_extern) == []
     # A name from the package under test is never another module's helper, whatever it is
     # called. The scan read ``from crb.core import lint as lint_mod`` as test_formatting's git
     # helper ``lint``, and refused a test's return on ``lint_mod.LINT_NOT_REQUESTED``.
