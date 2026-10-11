@@ -131,6 +131,25 @@ describe('LibraryPage', () => {
     expect(unhinted(container)).toEqual([])
   })
 
+  it('a smallest effect the field cannot read as a share in (0, 1] is said at the field and nothing is posted (P-273)', async () => {
+    const { calls } = mockApi({ 'GET /auth/me': { ...PRINCIPAL, role: 'operator' }, ...LIBRARY_API, 'POST /readings/forward': () => json({ reading_id: 'rdg_x' }, 201) })
+    renderApp(<LibraryPage />, AT)
+    await screen.findByRole('heading', { name: 'Work type: bug.fix' })
+    const form = screen.getByRole('form', { name: 'Register the forward reading of the XL ceiling' })
+    for (const [label, text] of [['Builder', 'claude_code'], ['Model', 'claude-sonnet-5'], ['Provider', 'anthropic'], ['Hypothesis', 'it reaches the ceiling']] as const) {
+      await userEvent.type(within(form).getByLabelText(new RegExp(`^${label}`)), text)
+    }
+    const effect = within(form).getByLabelText(/^Smallest effect/)
+    expect(effect).not.toHaveAttribute('type', 'number')
+    for (const bad of ['1e', '1.5', '0']) {
+      await userEvent.clear(effect)
+      await userEvent.type(effect, bad)
+      expect(within(form).getByText('Enter a share above 0 and at most 1, for example 0.1.')).toBeInTheDocument()
+      await userEvent.click(within(form).getByRole('button', { name: 'Register the forward reading' }))
+    }
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/readings/forward')).toEqual([])
+  })
+
   it('without the quality table on the build the page names no characteristic as evidenced', async () => {
     const page = { ...WORK_TYPE, quality: { ...WORK_TYPE.quality, served: false, rows: [] } }
     mockApi({ 'GET /auth/me': PRINCIPAL, 'GET /library/alpha': LIBRARY, 'GET /library/alpha/work-types/bug.fix': page })

@@ -153,6 +153,9 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
       posture_class: 'docker/copy/sealed',
       taxonomy: VERSION,
       org_class: 'op-add',
+      // a well-formed registration (a reading states its question first), so the refusal is the class set's
+      hypothesis: 'feature.add XS reaches the ceiling on the sealed posture',
+      smallest_effect: 0.1,
     },
     headers: await csrf(page),
   })
