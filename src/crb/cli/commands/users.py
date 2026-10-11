@@ -21,9 +21,10 @@ What it does: Resolves the same database as ``crb serve`` (and refuses one that 
               creating a stray database; every success line names the database it changed,
               ``list`` prints it as its first line), reads a password from a prompt or
               ``CRB_USERS_PASSWORD_FILE`` (never argv), refuses a taken username before the
-              prompt, applies the change through the auth primitives (last-admin guard under
-              the users lock, ≥ 12 characters, local accounts only) and writes one ``user.*``
-              event with actor ``cli:<os user>`` in the same transaction.
+              prompt, applies the change through the auth primitives (a password set and the
+              last-admin guard under the users lock, ≥ 12 characters, local accounts only)
+              and writes one ``user.*`` event with actor ``cli:<os user>`` in the same
+              transaction.
 How:          Lazy imports of the store and server layers (the base CLI works without the
               ``[server]`` extra); ``ApiError`` from the primitives becomes a ``CliError``
               (exit 2) with the same message the API would give.
@@ -318,12 +319,18 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 def cmd_set_password(args: argparse.Namespace) -> int:
     """Set a local account's password; every session it holds ends."""
-    from crb.server.auth import set_password  # noqa: PLC0415
+    from crb.server.auth import lock_users_table, set_password  # noqa: PLC0415
     from crb.server.routes.admin import record_user_event  # noqa: PLC0415
 
     def _go(db: Session, where: str) -> int:
         user = _local_user(db, args.username)
         password = read_password(confirm=True)
+        # Under the users lock, as every other write of an account field (P-785; CodeRabbit
+        # on #85): before it, only the events lock this reset's event takes ordered it behind
+        # a sign-in's write. Taken after the prompt, never around it — an operator at a
+        # prompt would hold every sign-in — so the account is read again once it is held.
+        lock_users_table(db)
+        db.refresh(user)
         set_password(user, password)
         record_user_event(db, action="user.password_set", actor=actor(), target=user, by="cli")
         print(f"password set for {args.username} in {where}; its sessions have ended")

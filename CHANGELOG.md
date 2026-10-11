@@ -12,6 +12,16 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **An account or its link is written only under the users lock** (P-785;
+  [#85](https://github.com/Jita81/commit-replay-bench/pull/85)). Seven routes read the link or
+  account outside that lock: a withdrawal stamped a link revoked and accepted, an admin's
+  password set was replaced by the person's, a self-service change or a sign-in stored a hash
+  over an admin's reset, and a sign-out everywhere let a password change keep the session it
+  ended. Each now reads, or rereads, under the lock. A sign-in or self-service change verifies
+  the password first, so a guess never holds it; `crb users set-password` locks after its
+  prompt, then rereads. Two ratchets fail a route reading before the lock, or any new writer
+  of a password, nonce or active flag.
+
 - **Every pull-request workflow's jobs are required on `main`**
   ([#72](https://github.com/Jita81/commit-replay-bench/pull/72)). On 2026-10-07 an administrator
   made `fresh-clone` and `commit-subjects` required on `main`, making 18. The branch-protection
