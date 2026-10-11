@@ -50,7 +50,9 @@ What it is:   The reading — registration (``register`` → a ``Reading`` the c
               change, the hierarchy that finds a cell's standard, and the per-cell budget.
 What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a hand-picked
               list is ``pool_not_blind``); keeps a reading of an organisation's class
-              (``org_class``) a cell, a seeded order and a budget of its own; refuses a
+              (``org_class``) a cell, a seeded order and a budget of its own; names, from
+              birth, the campaign whose ceiling every run of a reading spends from
+              (``campaign_id``, hashed when present — DL-382); refuses a
               registration over commits already graded
               under its arms at its apparatus (``pool_seen``), beyond the cell's budget
               (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
@@ -421,6 +423,12 @@ class Reading:
     #: present so a legacy reading's id never moves and an edited hypothesis fails ``verify``.
     hypothesis: str = ""
     smallest_effect: float | None = None
+    #: The campaign whose money ceiling every run of this reading spends from (G-957, DL-382):
+    #: named at registration, never bound later, so no run queued before a binding could
+    #: escape the ceiling. ``POST /runs`` refuses a run of a campaign-named reading that does
+    #: not carry the same campaign. ``""`` for a reading under no campaign — hashed when
+    #: present, so a legacy reading's id never moves and an edited campaign fails ``verify``.
+    campaign_id: str = ""
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
@@ -495,6 +503,7 @@ class Reading:
                 if self.smallest_effect is not None
                 else {}
             ),
+            **({"campaign_id": self.campaign_id} if self.campaign_id else {}),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -531,6 +540,7 @@ class Reading:
             smallest_effect=(
                 None if d.get("smallest_effect") is None else float(d["smallest_effect"])
             ),
+            campaign_id=str(d.get("campaign_id", "") or ""),
         )
 
     def verify(self) -> bool:
@@ -677,6 +687,7 @@ def register(
     org_class: str = "",
     hypothesis: str = "",
     smallest_effect: float | None = None,
+    campaign_id: str = "",
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -764,6 +775,7 @@ def register(
         org_class=org_class,
         hypothesis=hypothesis,
         smallest_effect=smallest_effect,
+        campaign_id=campaign_id,
     )
 
 
@@ -780,6 +792,7 @@ def register_forward(
     now: str = "",
     hypothesis: str = "",
     smallest_effect: float | None = None,
+    campaign_id: str = "",
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -850,6 +863,7 @@ def register_forward(
         budget_cell=base.budget_key[1],
         hypothesis=hypothesis,
         smallest_effect=smallest_effect,
+        campaign_id=campaign_id,
     )
 
 
@@ -1182,6 +1196,7 @@ class ReadingOutcome:
             "pool_sha256": self.reading.pool_sha256,
             "hypothesis": self.reading.hypothesis,
             "smallest_effect": self.reading.smallest_effect,
+            "campaign_id": self.reading.campaign_id,
             "arms": [a.to_dict() for a in self.arms.values()],
         }
 

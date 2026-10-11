@@ -26,10 +26,11 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               rate from the decisions (G-536); that reading the three reports queues no run and
               writes nothing; that a registered reading's top-up is its pending commits, queued
               through the submit gate, and a cell with no registered reading — or one this
-              deployment cannot write rows for — queues nothing (G-565, P-602); that queueing
-              enqueues the PLAN's
-              own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
-              (a cell whose builder has no credential is refused whole — P-160), refuses a
+              deployment cannot write rows for — queues nothing (G-565, P-602), and a reading
+              that names a campaign is refused ``campaign_required`` (DL-382); that queueing
+              enqueues the PLAN's own run bodies, never the caller's, through the submit gate
+              ``POST /runs`` applies (a cell whose builder has no credential is refused whole —
+              P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
               two requests at once, a lost ``seq`` race or a failed insert (P-420), and refuses
               rather than run unlocked when a transaction is already open (P-429), as every
@@ -933,6 +934,44 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     assert event.payload_json["arm"] == "S3"
     assert event.payload_json["reading_id"] == reading["reading_id"]
     assert event.payload_json["apparatus"] == APPARATUS_VERSION
+
+
+def test_a_readings_top_up_under_a_campaign_is_refused_with_nothing_queued(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DL-382: a reading that names a campaign takes only runs filed under that campaign, and
+    this queue files no run under one — so the cell's top-up is refused 409
+    ``campaign_required`` up front, naming the reading and its campaign, with no run queued
+    and no ``learn.remeasure.queued`` event. The same cell of a reading under no campaign is
+    queued as before (the test above)."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    campaign = env.post(
+        "/campaigns",
+        json={
+            "name": "wave-3",
+            "ceiling_gbp": 80,
+            "released_gbp": 40,
+            "rate_usd_per_gbp": 1.35,
+            "decision": "DECISION 8 (2026-10-11): stage 1 £40 yes",
+        },
+    )
+    assert campaign.status_code == 201, campaign.text
+    cid = campaign.json()["campaign_id"]
+    add_proven_tasks(env.factory)
+    r = register_via_api(env, hierarchy=("S3",), campaign_id=cid)
+    assert r.status_code == 201, r.text
+    reading = r.json()
+    add_proven_rows(env.factory, reading["pool"][:12], arm="S3")
+    cell = _read_cell(env)
+    assert cell["reason"] == "look_pending" and cell["requests"]
+    before = env.get("/runs").json()["total"]
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 409, q.text
+    err = envelope(q)
+    assert err["code"] == "campaign_required"
+    assert err["detail"] == {"reading_id": reading["reading_id"], "campaign_id": cid}
+    assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
 
 
 def test_a_cell_with_no_registered_reading_is_offered_registration_and_queues_nothing(

@@ -9,7 +9,7 @@ maximum) and his answer on Wave 3's reviews (decision 5). The source is
 `feedback/2026-10-09-project-room-decisions.md` in the private crb-handbook repository. This
 record was written against `main` at `48c25abd`. The values Paul fixed on 2026-10-11, before
 any data, are at the end of part 1 (DL-375 to DL-381), and part 2 is amended to the campaign
-record the product now keeps (DL-374).
+record the product now keeps (DL-374), which each reading names (DL-382).
 
 **Claims in this record.** Nothing here is measured on a graded row. A protocol value is the one
 ADR-0026 item 13 fixes. A cost is item 13's projection, or arithmetic on it. The rate of dollars
@@ -134,7 +134,7 @@ division]**.
 
 **Who holds the ceiling: the campaign record.** The product holds it (DL-374, which replaces
 the hand-held ceiling DL-371 described; G-957 is retired and P-775 closed). Wave 3 is one
-campaign, registered once at step 4 with an operator session:
+campaign, registered once at step 4, before any reading, with an operator session:
 
 ```json
 {
@@ -154,6 +154,10 @@ campaign, registered once at step 4 with an operator session:
   `max_cost_usd`, and an `S1` run its `task_ids` or a `limit`. Without the cap it is refused 422
   `campaign_cap_required`; an unbounded `S1` run, 422 `campaign_s1_unbounded`; an unknown
   campaign, 404 `campaign_unknown`.
+- Every Wave 3 reading names the campaign: its registration body carries `campaign_id`, hashed
+  into the reading's id, so it cannot be bound later or changed (DL-382). A run of the reading
+  that is not filed under that campaign is refused 409 `campaign_required` and nothing is
+  queued, and the worker refuses at claim a run that no `campaign.admitted` event names.
 - A run is admitted in the same transaction that queues it, and only while its cap and its
   headroom fit what is left under the line, by the tally below; otherwise it is refused 409
   `campaign_ceiling` and nothing is queued.
@@ -166,9 +170,10 @@ campaign, registered once at step 4 with an operator session:
   $0.10 once spent $5.00 on its first attempt (P-261). The headroom below holds that overshoot.
 - An `S1` replay's test-author calls are now in its spend (`Spend.with_authoring`), so its own
   cap reads them, and the campaign's tally does too (P-775).
-- The Learn re-measurement queue (`POST /learn/remeasure/queue`) and the free-stage chain file
-  no run under a campaign, so neither is used: a run outside the campaign spends outside its
-  ceiling.
+- The free-stage chain files no run under a campaign, so it is not used: a run outside the
+  campaign spends outside its ceiling. The Learn re-measurement queue
+  (`POST /learn/remeasure/queue`) files none either, and the product refuses it for a reading
+  that names a campaign, 409 `campaign_required` (DL-382).
 
 **The tally.** The product keeps one running total for the campaign, in dollars, by this
 rule, and `GET /api/v1/campaigns/{id}` serves it (`spent_usd`, with `authoring_usd` apart,
@@ -360,9 +365,9 @@ and stops and reports at the first step whose success condition fails.
 | 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos` | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used] | not yet run |
 | 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>` | not yet run |
 | 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here | not yet run |
-| 4 | register the four readings, then the campaign | Claude Code, `POST /api/v1/readings` over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS); no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect`. A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Then `POST /api/v1/campaigns` with part 2's body | `201` for each reading, with `reading_id`, the `pool` in seeded order, `pool_sha256` and `pool_rule`; `GET /api/v1/readings?repo=<repo>` lists each, its cell's budget spent at 2.10% of 5%. A refusal (`pool_seen`, `budget_spent`, `pool_not_blind`, `invalid_reading`, which on an unsealed deployment names both executors) stops the campaign before any spend. `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. The reading ids, the pool sizes and the campaign id are added here in an amendment commit | not yet run |
+| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373) | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, the `pool` in seeded order, `pool_sha256` and `pool_rule`; `GET /api/v1/readings?repo=<repo>` lists each, its cell's budget spent at 2.10% of 5%. A refusal (`campaign_unknown`, `pool_seen`, `budget_spent`, `pool_not_blind`, `invalid_reading`, which on an unsealed deployment names both executors) stops the campaign before any spend. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | not yet run |
 | 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is recorded here | the Learn page reads `config` for cobra and for click | not yet run |
-| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only, never with `POST /api/v1/learn/remeasure/queue`, which files no run under a campaign. Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`. **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`. **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"` | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cap_required`, `campaign_s1_unbounded`, `reading_unsealed`); an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`; its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; `GET /api/v1/readings` counts the run's commits under that arm, and `GET /api/v1/campaigns/{id}` lists the run | not yet run |
+| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`. **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`. **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"` | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `reading_unsealed`); an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`; its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; `GET /api/v1/readings` counts the run's commits under that arm, and `GET /api/v1/campaigns/{id}` lists the run | not yet run |
 | 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is empty, and spent and held stay at or under the stage's line; otherwise part 2's stop | not yet run |
 | 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the record is committed under `docs/reviews/` | not yet run |
 | 9 | stage 2 | Paul releases it in writing, a new decision; the release is recorded in the decision log and filed as `POST /api/v1/campaigns/{id}/release` (part 2); Claude Code resumes step 6 with the line at $108.00 | the release is recorded before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
@@ -387,6 +392,7 @@ The registration body for cobra XS:
   "rule": "look.v1",
   "descriptive": [["A0", 16], ["A0+L", 16]],
   "author_model": "<author>",
+  "campaign_id": "<the campaign, registered first at step 4>",
   "hypothesis": "<what the cell's reading tests, in the operator's words>",
   "smallest_effect": "<a share of attempts in (0, 1], fixed by Paul before step 4>"
 }
@@ -395,7 +401,9 @@ The registration body for cobra XS:
 `hypothesis` (1 to 2,000 characters) and `smallest_effect` are required and hashed into the
 reading's id, so neither can be edited after registration. Both are open: Paul fixes them
 before step 4, and this record proposes no number for the smallest effect. It is the
-"registered smallest effect" Q-25 reads the loop's paired difference against.
+"registered smallest effect" Q-25 reads the loop's paired difference against. `campaign_id` is
+hashed into the id as well: every run of the reading is filed under that campaign or refused
+(DL-382).
 
 The other bodies change only `repo`, `size` and `language`: cobra S (`go`), click XS and click S
 (`python`). `pool`, `since`, `taxonomy`, `posture_class` and `org_class` are left out, so the

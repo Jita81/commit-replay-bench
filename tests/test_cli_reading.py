@@ -6,8 +6,9 @@ What it is:   CLI tests of ``crb reading``.
 What it does: Registers a reading over the gold-checked tasks of a cell on file, appends it to
               the workdir's ``readings.jsonl`` and lists it; refuses an unsealed posture, a
               pool commit that is not a qualified task of the cell, a pool already graded
-              under an arm of the hierarchy (``pool_seen``) and a registration beyond the
-              cell's budget (``budget_spent``).
+              under an arm of the hierarchy (``pool_seen``), a registration beyond the
+              cell's budget (``budget_spent``) and a ``--campaign`` without its verified
+              record (``campaign_unknown``, DL-382).
 How:          ``crb.cli.main.main`` with ``--workdir`` in ``tmp_path``; tasks written to the
               workdir's task file; rows from ``tests.fixtures.readings``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -28,7 +29,9 @@ import pytest
 
 from crb.cli.commands import Workdir
 from crb.cli.main import main
+from crb.core.campaign import Campaign
 from crb.core.ledger import JsonlLedger
+from crb.core.reading import Reading
 from crb.core.spec import TaskSpec
 from fixtures.readings import AUTHOR, CELL, REPO, S1, SEALED, commits, sealed_row
 
@@ -162,6 +165,47 @@ def test_register_refuses_a_reading_without_its_question_or_a_smallest_effect_ou
     del missing[missing.index("--hypothesis") : missing.index("--hypothesis") + 2]
     assert main(missing) == 2
     assert not (wd / "readings.jsonl").exists()
+
+
+def test_register_names_a_campaign_only_from_its_verified_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DL-382: a reading names its campaign at birth, hashed into its id. A file workdir
+    holds no campaigns, so ``--campaign`` is taken only with ``--campaign-record`` — the
+    record ``GET /api/v1/campaigns/{id}`` serves — and refused ``campaign_unknown`` with
+    nothing written when the record is missing, does not verify or is another campaign's."""
+    wd = tmp_path / ".crb"
+    _tasks(wd, commits(40))
+    campaign = Campaign(
+        name="wave-3",
+        ceiling_gbp=80.0,
+        released_gbp=40.0,
+        rate_usd_per_gbp=1.35,
+        decision="DECISION 8",
+        actor="op",
+        registered_at="2026-10-11T00:00:00Z",
+    )
+    record = tmp_path / "campaign.json"
+    record.write_text(json.dumps({**campaign.to_dict(), "line_usd": 54.0}), encoding="utf-8")
+    forged = tmp_path / "forged.json"
+    forged.write_text(json.dumps({**campaign.to_dict(), "ceiling_gbp": 800}), encoding="utf-8")
+    cid = campaign.campaign_id
+    for extra in (
+        ("--campaign", cid),
+        ("--campaign", cid, "--campaign-record", str(forged)),
+        ("--campaign", "cmp_" + "a" * 24, "--campaign-record", str(record)),
+        ("--campaign", "wave-3", "--campaign-record", str(record)),
+    ):
+        assert main(_argv(wd, *extra)) == 2, extra
+        assert "campaign_unknown" in capsys.readouterr().err
+    assert main(_argv(wd, "--campaign-record", str(record))) == 2
+    capsys.readouterr()
+    assert not (wd / "readings.jsonl").exists()
+    assert main(_argv(wd, "--campaign", cid, "--campaign-record", str(record), "--json")) == 0
+    body = json.loads(capsys.readouterr().out)
+    assert body["campaign_id"] == cid
+    (stored,) = [json.loads(x) for x in (wd / "readings.jsonl").read_text().splitlines()]
+    assert stored["campaign_id"] == cid and Reading.from_dict(stored).verify()
 
 
 def test_two_overlapping_registrations_never_overspend_the_cells_budget(

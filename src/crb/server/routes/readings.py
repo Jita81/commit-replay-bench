@@ -10,7 +10,9 @@ event under the events store's write lock, so two registrations can never both s
 of a cell's budget; it is refused ``409 pool_seen`` when a pool commit already has a graded row
 under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the caller names a
 pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
-``422 invalid_reading`` for a shape the ADR forbids. ``GET /readings`` serves every reading of a
+``422 invalid_reading`` for a shape the ADR forbids, and ``404 campaign_unknown`` when it names
+a ``campaign_id`` no verified campaign has — a reading names its campaign at birth, and every
+run of it is then filed under that campaign (DL-382). ``GET /readings`` serves every reading of a
 repository evaluated over its rows — each arm's look state — and each cell's budget spent.
 ``standard_for`` is the seam the factory's entry gate reads (ADR-0026 item 8). ``POST
 /readings/forward`` (operator) registers the forward reading of a ceiling (DL-334): ``S2`` on the
@@ -27,7 +29,8 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               under an organisation's class set, only the confirmation commits its rule puts in
               the reading's ``org_class``, on that class's parent's cell, and only while the set
               routes (ADR-0026 item 9),
-              refuses an unsealed posture for a replayed arm, reads the rows and the readings
+              refuses an unsealed posture for a replayed arm and a campaign that does not
+              verify (``campaign_unknown``, DL-382), reads the rows and the readings
               already registered under the lock, and writes the event; lists readings with
               every arm's state and the budget per cell; answers a cell's proven standard on
               one checks arm and posture class (or ``None``).
@@ -39,6 +42,7 @@ ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5 and 8's seam),
               docs/adr/0025-routing-v2.md
 Works with:   src/crb/core/reading.py (the rules a registration and a reading follow),
               src/crb/store/events.py (``append_event_checked``: the locked event write),
+              src/crb/server/campaigns.py (``campaign_of``: the campaign a reading names),
               src/crb/server/routes/capability.py (routes every cell on its reading),
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
               src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
@@ -60,6 +64,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.campaign import REFUSAL_UNKNOWN
 from crb.core.capability import ReadingBook
 from crb.core.class_sets import CONFIRMATION, is_org_class_set, refuse_reading_pool
 from crb.core.context_arm import parse_arm
@@ -91,6 +96,7 @@ from crb.core.reading import (
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import OperatorDep, ViewerDep
+from crb.server.campaigns import campaign_of
 from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
@@ -118,6 +124,22 @@ def _trace(repo: str) -> str:
 Hypothesis = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 #: The smallest effect that would matter, a share of attempts in (0, 1].
 SmallestEffect = Annotated[float, Field(gt=0, le=1)]
+#: The campaign every run of the reading spends under (DL-382): named at registration, never
+#: bound later. ``None`` for a reading under no campaign.
+CampaignId = Annotated[str | None, Field(pattern=r"^cmp_[0-9a-f]{24}$")]
+
+
+def _refuse_unknown_campaign(session: Session, campaign_id: str | None) -> None:
+    """404 ``campaign_unknown`` — the code ``POST /runs`` answers — when a registration names
+    a campaign no verified record has: read inside the registration's lock, so nothing is
+    written for a reading whose runs could never be admitted (DL-382)."""
+    if campaign_id is not None and campaign_of(session, campaign_id) is None:
+        raise ApiError(
+            404,
+            REFUSAL_UNKNOWN,
+            f"no verified campaign {campaign_id!r}",
+            detail={"campaign_id": campaign_id},
+        )
 
 
 def reading_book(session: Session, repo: str, rows: Iterable[GradeRow]) -> ReadingBook:
@@ -217,6 +239,9 @@ class ReadingIn(BaseModel):
     #: Q-24): both required and both inside the reading's hash (P-787).
     hypothesis: Hypothesis
     smallest_effect: SmallestEffect
+    #: The campaign every run of this reading spends under (DL-382): it must exist and verify
+    #: (404 ``campaign_unknown``); hashed into the reading's id when given.
+    campaign_id: CampaignId = None
 
 
 class ReadingsOut(BaseModel):
@@ -315,6 +340,7 @@ def register_reading(
         )
 
     def build(s: Session) -> dict[str, Any]:
+        _refuse_unknown_campaign(s, body.campaign_id)
         qualified = _qualified(s, body.repo, body.cell)
         if org:
             # the class the version's rule gave each commit (the label table), and only its
@@ -378,6 +404,7 @@ def register_reading(
             org_class=body.org_class,
             hypothesis=body.hypothesis,
             smallest_effect=body.smallest_effect,
+            campaign_id=body.campaign_id or "",
         )
         return reading.to_dict()
 
@@ -410,6 +437,8 @@ class ForwardIn(BaseModel):
     rule: str = RULE_LOOK_V1
     hypothesis: Hypothesis
     smallest_effect: SmallestEffect
+    #: As on :class:`ReadingIn` (DL-382): the campaign the forward reading's runs spend under.
+    campaign_id: CampaignId = None
 
 
 @router.post(
@@ -428,11 +457,13 @@ def register_forward_reading(
     factory's cell, counted only on calibration builds graded on a second person's held-out
     acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
     ``ceiling`` now, **409** ``budget_spent`` when the ceiling's cell budget cannot cover the
-    rule, **404** for a reading the repository does not have."""
+    rule, **404** for a reading the repository does not have, **404** ``campaign_unknown``
+    for a ``campaign_id`` no verified campaign has (DL-382)."""
     get_repo_or_404(db, body.repo)
     rows = list(DbLedger(factory).rows(repo=body.repo))
 
     def build(s: Session) -> dict[str, Any]:
+        _refuse_unknown_campaign(s, body.campaign_id)
         readings = load_readings(s, body.repo)
         named = next((r for r in readings if r.reading_id == body.promotes), None)
         if named is None:
@@ -448,6 +479,7 @@ def register_forward_reading(
             budget=cell_error_budget(),
             hypothesis=body.hypothesis,
             smallest_effect=body.smallest_effect,
+            campaign_id=body.campaign_id or "",
         )
         return reading.to_dict()
 

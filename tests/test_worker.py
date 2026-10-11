@@ -22,7 +22,9 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               thread, ``run_forever`` processing then stopping and surviving a broken iteration,
               stage routing, the ``--once`` entrypoint and settings from args / env, that a
               run where every attempt errors is ``failed`` not ``succeeded``, the factory run
-              kind, and the ADR-0019 route gate reading the deployment's posture only; that the
+              kind, a run of a reading refused at claim when unsealed (P-789) or, when its
+              reading names a campaign, never admitted under it (DL-382), and the ADR-0019
+              route gate reading the deployment's posture only; that the
               idle loop calls every idle step under its guard and survives each one raising
               (P-354); and that the production path stops an unsigned deliver cell before any
               spend unless the setting turns the clause off (ADR-0018). The unconfirmed-kill
@@ -73,6 +75,7 @@ from crb.builders.base import (
     BuildOutcome,
 )
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
+from crb.core.campaign import CAMPAIGN_ADMITTED
 from crb.core.evidence import verify_pack
 from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.ledger import verify_chain
@@ -87,7 +90,7 @@ from crb.server import worker as worker_mod
 from crb.server import worker_main
 from crb.server.worker import Worker, WorkerSettings, docker_settings_for, stage_for
 from crb.store import init_db, make_engine, make_session_factory
-from crb.store.events import DbEventSink, read_events
+from crb.store.events import DbEventSink, append_event, read_events
 from crb.store.jobs import (
     STATUS_CANCELLED,
     STATUS_FAILED,
@@ -582,6 +585,57 @@ def test_reading_unsealed_admits_docker_executors(
     monkeypatch.setenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "podman")  # anything else: the host
     other = check({"reading_id": reading.reading_id})
     assert other is not None and "'host'" in other
+
+
+def test_a_run_of_a_campaign_named_reading_never_admitted_is_refused_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DL-382: ``POST /runs`` refuses a run of a reading that names a campaign unless it is
+    filed under that campaign — but a run can reach the queue without the gate (inserted
+    directly here). On a sealed worker it fails at claim, before any builder is constructed,
+    with one ``run.refused`` event naming the reading and its campaign; a run the campaign's
+    trace admitted, and a run of a reading under no campaign, pass the check."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    sealed = dc_replace(h.settings, executor="docker", builder_executor="docker")
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    built: list[str] = []
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: built.append("fake") or FakeBuilder(behaviour="gold", **cfg),
+    )
+    cid = "cmp_" + "c" * 24
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME, campaign_id=cid)
+    run = h.enqueue("replay", params_json={"reading_id": reading.reading_id})
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith("campaign_required: "), done.error
+    refused = [e for e in h.events(run.id) if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "campaign_required",
+        "reading_id": reading.reading_id,
+        "campaign_id": cid,
+    }
+    assert built == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+
+    def check(reading_id: str, *, admit: bool = False) -> str | None:
+        queued = h.enqueue("replay", params_json={"reading_id": reading_id})
+        if admit:
+            append_event(
+                h.factory,
+                trace_id=cid,
+                stage="system",
+                action=CAMPAIGN_ADMITTED,
+                payload={"campaign_id": cid, "run_id": queued.id},
+            )
+        return h.worker._campaign_unadmitted(queued, h.worker._emitter(queued))
+
+    assert check(reading.reading_id, admit=True) is None
+    assert check(reading.reading_id) is not None  # another run's admission is not this one's
+    legacy = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+    assert check(legacy.reading_id) is None
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:

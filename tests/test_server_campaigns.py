@@ -19,8 +19,9 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               run's admitted headroom while it is the larger, stops on a cost not known and on
               an overrun read against the headroom a run was admitted with (a first attempt
               dearer than the $5.00 held), refuses a run without a cap, an unbounded ``S1``
-              run and a non-build kind, and admits no more than the line under concurrent
-              submits.
+              run, a non-build kind and a run of a campaign-named reading filed under no
+              campaign or another one (``campaign_required``, DL-382), and admits no more
+              than the line under concurrent submits.
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
               ``append_event``; four threads through ``admit_under_campaign``.
@@ -53,6 +54,7 @@ from crb.server.schemas import RunCreateRequest
 from crb.store.events import append_event
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
+from fixtures.proven import write_reading
 from fixtures.readings import sealed_row
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env
 
@@ -341,6 +343,40 @@ def test_a_run_under_no_verified_campaign_is_refused(env: Env) -> None:
     mine = env.post("/runs", json={"repo": ALPHA, "kind": "mine", "campaign_id": "cmp_" + "a" * 24})
     assert mine.status_code == 422 and "campaign_id applies to build runs only" in mine.text
     assert _runs(env) == before
+
+
+def test_a_run_of_a_reading_that_names_a_campaign_is_filed_under_that_campaign(env: Env) -> None:
+    """DL-382: a reading names its campaign at birth, so every run of it spends under that
+    campaign's ceiling. A run of it filed under no campaign, or under another verified one,
+    is refused 409 ``campaign_required`` naming the reading and its campaign, with nothing
+    queued and no admission written; filed under its own, it is admitted. A reading under no
+    campaign takes runs as before."""
+    env.settings.builder.executor = "docker"
+    cid = _register(env)["campaign_id"]
+    other = _register(env, name="wave-4")["campaign_id"]
+    reading = write_reading(env.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
+    filed = {**GOLD, "executor": "docker", "reading_id": reading.reading_id, "max_cost_usd": 5}
+    before = _runs(env)
+    for body in (filed, {**filed, "campaign_id": other}):
+        r = env.post("/runs", json=body)
+        assert r.status_code == 409, r.text
+        err = envelope(r)
+        assert err["code"] == "campaign_required" and "nothing was queued" in err["message"]
+        assert err["detail"] == {"reading_id": reading.reading_id, "campaign_id": cid}
+    assert _runs(env) == before and _admitted(env, cid) == [] and _admitted(env, other) == []
+    r = env.post("/runs", json={**filed, "campaign_id": cid})
+    assert r.status_code == 201, r.text
+    assert [a["run_id"] for a in _admitted(env, cid)] == [r.json()["id"]]
+    with env.factory() as s:
+        run = s.get(Run, r.json()["id"])
+        assert run is not None
+        assert (run.params_json["reading_id"], run.params_json["campaign_id"]) == (
+            reading.reading_id,
+            cid,
+        )
+    legacy = write_reading(env.factory, ["2" * 40], repo=ALPHA)
+    r = env.post("/runs", json={**filed, "reading_id": legacy.reading_id})
+    assert r.status_code == 201, r.text
 
 
 def test_a_record_that_does_not_rehash_holds_no_ceiling(env: Env) -> None:

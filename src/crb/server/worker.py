@@ -112,7 +112,9 @@ Navigation
 What it is:   The worker process — the only thing that executes a run (the API never does).
 What it does: Polls the job queue, claims one run — re-checking a build run's builder
               credential by presence when it claims it, and failing it before any attempt with
-              the submit check's code when it is gone (P-050) — dispatches by kind (setup,
+              the submit check's code when it is gone (P-050), and a run of a reading this
+              worker cannot grade sealed or, when the reading names a campaign, that no
+              ``campaign.admitted`` event names (P-789, DL-382) — dispatches by kind (setup,
               probe, mine, label, replay, blind, oracle, controls, factory), streams
               StepEvents, writes grade rows through the append-only ledger with the run's
               labels stamped, records the apparatus, and marks the run succeeded / failed /
@@ -212,6 +214,7 @@ from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
+from crb.core.campaign import CAMPAIGN_ADMITTED, REFUSAL_REQUIRED
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
@@ -1379,6 +1382,8 @@ class Worker:
                 status, error = STATUS_FAILED, dead
             elif (unsealed := self._reading_unsealed(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unsealed
+            elif (unadmitted := self._campaign_unadmitted(run, emitter)) is not None:
+                status, error = STATUS_FAILED, unadmitted
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1525,6 +1530,50 @@ class Worker:
             reading_id=reading_id,
             sandbox_executor=sandbox,
             builder_executor=builder,
+        )
+        return error
+
+    def _campaign_unadmitted(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading
+        (``params.reading_id``) that names a campaign, and no ``campaign.admitted`` event on
+        that campaign's trace names this run — the submit gate's ``campaign_required``
+        (DL-382) applied again at claim, so a run that reached the queue by a path that
+        skipped the gate (inserted directly, or queued by a route the gate missed) never
+        spends outside the ceiling its reading spends under. ``None`` for a run under no
+        reading, under a reading that names no campaign, or admitted under its campaign."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+            campaign_id = reading.campaign_id if reading is not None else ""
+            if not campaign_id:
+                return None
+            admitted = any(
+                str((ev.payload_json or {}).get("run_id", "")) == run.id
+                for ev in s.execute(
+                    select(Event).where(
+                        Event.trace_id == campaign_id, Event.action == CAMPAIGN_ADMITTED
+                    )
+                ).scalars()
+            )
+        if admitted:
+            return None
+        error = (
+            f"{REFUSAL_REQUIRED}: reading {reading_id!r} spends under campaign "
+            f"{campaign_id!r}, and no campaign.admitted event of it names this run"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_REQUIRED,
+            reading_id=reading_id,
+            campaign_id=campaign_id,
         )
         return error
 

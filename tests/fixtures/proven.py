@@ -183,10 +183,12 @@ def write_reading(
     hierarchy: Sequence[str] = (S1,),
     changes: Mapping[str, str] | None = None,
     repo: str = ALPHA,
+    campaign_id: str = "",
 ) -> Reading:
     """Register a reading of ``cell`` on ``repo`` (``alpha``) with the core's rules and write it
     as the ``reading.registered`` event ``POST /readings`` writes — for a test logged in as a
-    role that may not register one itself (a sign-off test's approver), or a worker test."""
+    role that may not register one itself (a sign-off test's approver), or a worker test.
+    ``campaign_id`` names the campaign its runs spend under (DL-382; unchecked here)."""
     reading = register(
         repo=repo,
         cell=dict(cell),
@@ -200,6 +202,7 @@ def write_reading(
         rule=RULE_LOOK_V1,
         author_model=AUTHOR if any(a.startswith("S1@") for a in hierarchy) else "",
         changes=dict(changes or {}),
+        campaign_id=campaign_id,
     )
     append_event(
         factory,

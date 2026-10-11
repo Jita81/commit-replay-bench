@@ -91,6 +91,9 @@ REFUSAL_EXISTS = "campaign_exists"
 REFUSAL_RELEASE = "campaign_release_invalid"
 #: 404 — no verified campaign has that id.
 REFUSAL_UNKNOWN = "campaign_unknown"
+#: 409 — a run of a reading that names a campaign is not filed under that campaign: the
+#: reading's runs spend only under the ceiling its campaign holds (DL-382).
+REFUSAL_REQUIRED = "campaign_required"
 #: 422 — a run filed under a campaign names no ``max_cost_usd``: nothing could be held for it.
 REFUSAL_CAP_REQUIRED = "campaign_cap_required"
 #: 422 — an ``S1`` run under a campaign names neither ``task_ids`` nor ``limit``: its author's
@@ -357,6 +360,7 @@ __all__ = [
     "REFUSAL_EXISTS",
     "REFUSAL_OVERRUN",
     "REFUSAL_RELEASE",
+    "REFUSAL_REQUIRED",
     "REFUSAL_S1_UNBOUNDED",
     "REFUSAL_UNKNOWN",
     "Campaign",

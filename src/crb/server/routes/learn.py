@@ -40,7 +40,8 @@ the request body, so a decision cannot be filed under somebody else's name:
 * ``POST /learn/remeasure/queue`` — the plan's own ``POST /runs`` body enqueued for one
   cell whose registered reading waits on its look, through the submit gate ``POST /runs``
   applies (``submit_refusals``) before it is enqueued; refused ``reading_unregistered`` for
-  a cell with no such reading, and never for a what-if plan; event ``learn.remeasure.queued``.
+  a cell with no such reading, ``campaign_required`` for one whose reading names a campaign
+  (DL-382), and never for a what-if plan; event ``learn.remeasure.queued``.
 
 Nothing about *which* decision is right moves into the product: the item bodies and the
 run bodies are re-derived here from the ledger, never taken from the caller, so a write
@@ -1068,7 +1069,10 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     ``builder_credential_missing``** (and every other submit refusal ``POST /runs`` makes)
     when any run of the cell would meet it — checked for every run before any is enqueued,
     through the same :func:`~crb.server.routes.runs.submit_refusals`, so the whole cell is
-    refused with nothing queued; **409 ``remeasure_already_queued``** while any run an earlier
+    refused with nothing queued — among them **409 ``campaign_required``** for a cell whose
+    reading names a campaign: this queue files no run under a campaign, and a run of that
+    reading spends only under its campaign's ceiling (DL-382), so it is queued by hand with
+    ``POST /runs``; **409 ``remeasure_already_queued``** while any run an earlier
     queue of this cell (same mode and apparatus) put on the queue has not finished, naming
     those runs — the plan is derived from graded rows only, so without this a double click
     or a second operator would spend the estimate twice. The guard, the runs and the

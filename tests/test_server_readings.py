@@ -509,3 +509,81 @@ def test_registering_on_a_sealed_deployment_succeeds(env: Env) -> None:
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     assert _registered_events(env) == 1
+
+
+# --- a reading names, from birth, the campaign its runs spend under (DL-382) ----------------
+
+#: The Wave 3 campaign as ``POST /campaigns`` takes it (G-957).
+WAVE3 = {
+    "name": "wave-3",
+    "ceiling_gbp": 80,
+    "released_gbp": 40,
+    "rate_usd_per_gbp": 1.35,
+    "decision": "DECISION 8 (2026-10-11): stage 1 £40 yes",
+}
+
+
+def _campaign(env: Env, **kw: Any) -> str:
+    r = env.post("/campaigns", json={**WAVE3, **kw})
+    assert r.status_code == 201, r.text
+    return str(r.json()["campaign_id"])
+
+
+def test_a_reading_names_its_campaign_inside_its_hash(env: Env) -> None:
+    """A reading is immutable from birth, so the campaign its runs spend under is named at
+    registration and hashed into its id: served back on ``POST`` and ``GET``, and a stored
+    record whose campaign was edited or dropped no longer re-hashes."""
+    from crb.core.reading import Reading
+
+    add_tasks(env.factory)
+    cid = _campaign(env)
+    r = register_via_api(env, campaign_id=cid)
+    assert r.status_code == 201, r.text
+    assert r.json()["campaign_id"] == cid
+    (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    assert (served["reading_id"], served["campaign_id"]) == (r.json()["reading_id"], cid)
+    assert Reading.from_dict(r.json()).verify()
+    moved = {**r.json(), "campaign_id": "cmp_" + "e" * 24}
+    assert not Reading.from_dict(moved).verify()
+    dropped = {k: v for k, v in r.json().items() if k != "campaign_id"}
+    assert not Reading.from_dict(dropped).verify()
+
+
+def test_a_legacy_reading_under_no_campaign_keeps_its_id_and_verifies(env: Env) -> None:
+    from crb.core.reading import Reading
+    from fixtures.proven import write_reading
+
+    ids = add_tasks(env.factory)
+    legacy = write_reading(env.factory, ids, hierarchy=("S3", S1))
+    assert "campaign_id" not in legacy.body() and legacy.campaign_id == ""
+    assert Reading.from_dict(legacy.to_dict()).verify()
+    named = write_reading(env.factory, ids, hierarchy=("S3", S1), campaign_id="cmp_" + "c" * 24)
+    assert named.body()["campaign_id"] == "cmp_" + "c" * 24
+    assert named.reading_id != legacy.reading_id
+    (served, _) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    assert (served["reading_id"], served["campaign_id"]) == (legacy.reading_id, "")
+
+
+def test_a_reading_naming_an_unknown_campaign_is_refused_with_no_event(env: Env) -> None:
+    """``campaign_unknown`` — the code ``POST /runs`` answers for an unknown campaign — before
+    anything is written: a reading whose runs could never be admitted is never registered."""
+    add_tasks(env.factory)
+    unknown = "cmp_" + "a" * 24
+    r = register_via_api(env, campaign_id=unknown)
+    assert r.status_code == 404, r.text
+    err = envelope(r)
+    assert err["code"] == "campaign_unknown" and err["detail"] == {"campaign_id": unknown}
+    bad = register_via_api(env, campaign_id="wave-3")
+    assert bad.status_code == 422 and envelope(bad)["code"] == "validation_error"
+    body = {
+        "repo": ALPHA,
+        "promotes": "rdg_" + "0" * 24,
+        "builder": "b",
+        "model": "m",
+        "hypothesis": HYPOTHESIS,
+        "smallest_effect": SMALLEST_EFFECT,
+    }
+    fwd = env.post("/readings/forward", json={**body, "campaign_id": unknown})
+    assert fwd.status_code == 404, fwd.text
+    assert envelope(fwd)["code"] == "campaign_unknown"
+    assert _registered_events(env) == 0

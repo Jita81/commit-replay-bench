@@ -55,7 +55,8 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
               queued run becomes; the counts shapes per kind), src/crb/server/campaigns.py
               (``campaign_tally``: a run filed under a campaign is admitted under its money
-              ceiling, G-957), src/crb/store/models.py
+              ceiling, G-957; a run of a reading that names a campaign is refused 409
+              ``campaign_required`` unless filed under it, DL-382), src/crb/store/models.py
               (Run, Grade, Event, User — the override's display name resolved at read),
               docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
               factory posture),
@@ -99,6 +100,7 @@ from crb.builders.openai_client import credential_missing as openai_credential_m
 from crb.core.campaign import (
     CAMPAIGN_ADMITTED,
     REFUSAL_CAP_REQUIRED,
+    REFUSAL_REQUIRED,
     REFUSAL_S1_UNBOUNDED,
     REFUSAL_UNKNOWN,
     planned_commits,
@@ -938,17 +940,32 @@ READING_UNSEALED_CODE = "reading_unsealed"
 
 
 def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
-    """The two refusals of a run filed under a reading (P-789): 422 ``reading_unknown`` when
-    ``body.reading_id`` is not a verified reading of ``body.repo``; 409 ``reading_unsealed``
-    when the run's sandbox executor or the deployment's builder executor is not ``docker`` —
-    a reading is registered only on a sealed deployment, and a run of it graded anywhere
-    else would be another posture's rows, never the reading's measurement."""
-    if body.reading_id not in {r.reading_id for r in load_readings(db, body.repo)}:
+    """The refusals of a run filed under a reading (P-789, DL-382): 422 ``reading_unknown``
+    when ``body.reading_id`` is not a verified reading of ``body.repo``; 409
+    ``reading_unsealed`` when the run's sandbox executor or the deployment's builder executor
+    is not ``docker`` — a reading is registered only on a sealed deployment, and a run of it
+    graded anywhere else would be another posture's rows, never the reading's measurement;
+    409 ``campaign_required`` when the reading names a campaign and the run is not filed
+    under that same campaign — a reading's runs spend only under the ceiling its campaign
+    holds, whatever route queues them (the Learn re-measurement queue included)."""
+    reading = next(
+        (r for r in load_readings(db, body.repo) if r.reading_id == body.reading_id), None
+    )
+    if reading is None:
         raise ApiError(
             422,
             READING_UNKNOWN_CODE,
             f"no verified reading {body.reading_id!r} in {body.repo!r}",
             detail={"reading_id": body.reading_id},
+        )
+    if reading.campaign_id and body.campaign_id != reading.campaign_id:
+        raise ApiError(
+            409,
+            REFUSAL_REQUIRED,
+            f"reading {body.reading_id!r} spends under campaign {reading.campaign_id!r}: a run "
+            f"of it is filed under that campaign (campaign_id {reading.campaign_id!r} and a "
+            "max_cost_usd) — nothing was queued",
+            detail={"reading_id": body.reading_id, "campaign_id": reading.campaign_id},
         )
     sandbox = deployment_executor(settings, body.executor)
     builder = str(settings.posture()["builder_executor"])
@@ -1078,6 +1095,9 @@ def submit_refusals(
     * 409 ``reading_unsealed`` — a run filed under a reading whose sandbox executor or the
       deployment's builder executor is not ``docker``: its rows could never be the reading's
       sealed measurement (P-789; the worker re-checks at claim);
+    * 409 ``campaign_required`` — a run of a reading that names a campaign, not filed under
+      that same campaign: the reading's runs spend only under its campaign's ceiling (DL-382;
+      the worker refuses an un-admitted one at claim);
     * 422 ``campaign_cap_required`` / ``campaign_s1_unbounded``, 404 ``campaign_unknown`` —
       a run filed under a campaign without a cap, an ``S1`` one without counted commits, or
       under no verified campaign (G-957; :func:`campaign_refusal` — the campaign's tally is

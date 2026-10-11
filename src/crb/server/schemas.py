@@ -795,7 +795,9 @@ class RunCreateRequest(BaseModel):
     #: of the repository, and 409 ``reading_unsealed`` unless the run's sandbox executor and
     #: the deployment's builder executor are both ``docker``; the worker re-checks at claim
     #: and fails the run (``run.refused``, code ``reading_unsealed``) before any builder call.
-    #: Stored as ``params.reading_id`` only when set.
+    #: A reading that names a campaign takes only runs filed under that same campaign: 409
+    #: ``campaign_required`` otherwise, and at claim for a run no ``campaign.admitted`` event
+    #: names (DL-382). Stored as ``params.reading_id`` only when set.
     reading_id: str | None = Field(default=None, pattern=r"^rdg_[0-9a-f]{24}$")
     #: Build runs only: the campaign this run is filed under (``cmp_<24 hex>``, G-957). The
     #: run must name ``max_cost_usd`` (422 ``campaign_cap_required``) and, on ``arm: S1``,
