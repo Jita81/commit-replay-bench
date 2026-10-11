@@ -121,10 +121,15 @@ apparatus 2.2]**.
    defect or a feature not delivered, two for a public-interface change the task did not ask for
    [measured — n = 13 reviews; method: each review's headline verdict; apparatus 2.0–2.2].
    All thirteen verdicts are Claude's, each made on a review task the operator gave it; none is
-   yet a person's. Ten are the independent decider's (Claude Fable 5.1, a role the operator
-   delegated; [the NHS patch reviews](2026-09-14-nhs-patch-reviews.md)) and three are
-   [the critical-friend review](2026-09-13-critical-friend.md)'s (Claude Opus 5, at the
-   operator's request). Neither reviewer is the builder's model (Sonnet 5).
+   yet a person's [measured — n = 13 verdicts; method: the reviewer each of the two review
+   pages below names; apparatus n/a — read from the pages, not from graded rows]. Ten are the
+   independent decider's (Claude Fable 5.1, a role the operator delegated)
+   [measured — n = 10 reviews; method: the decider named in the header of
+   [the NHS patch reviews](2026-09-14-nhs-patch-reviews.md); apparatus n/a — read from the
+   page], and three are [the critical-friend review](2026-09-13-critical-friend.md)'s
+   (Claude Opus 5, at the operator's request) [measured — n = 3 verdicts, its §3.1–3.3;
+   method: the reviewer that page's own Reviewer line names; apparatus n/a — read from the
+   page]. Neither reviewer is the builder's model (Sonnet 5).
    The deterministic proxy — clean, lint-clean, no interface break — called 153 of 155 clean
    patches working under apparatus 2.2 [measured — n = 155 clean valid rows; method: the
    proxy in `crb.core.value.proxy_working`; apparatus 2.2], so the proxy is optimistic until
