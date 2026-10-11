@@ -24,7 +24,8 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               campaign-named reading filed under no campaign or another one
               (``campaign_required``, DL-382), admits no more than the line under concurrent
               submits, and shows a campaign-named reading counts a run's rows only when the
-              campaign admitted the run (a run posted without ``reading_id`` counts none; a
+              campaign admitted the run (a run posted without ``campaign_id`` counts none, and
+              a commit it attempted first leaves the pool ``unadmitted`` whatever it read; a
               legacy reading counts it as before).
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
@@ -412,26 +413,29 @@ def test_a_run_of_a_reading_that_names_a_campaign_is_filed_under_that_campaign(e
 
 def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(env: Env) -> None:
     """DL-382, the reading's side: a run of a campaign-named reading's pool commit posted
-    WITHOUT its ``reading_id`` is queued outside the campaign — the submit gate has nothing to
-    tie it to, so no ``campaign.admitted`` event names it — and its sealed row never counts
-    toward the reading, however clean. The same row from a run admitted under the campaign
-    counts; a reading under no campaign counts a loose run's row as before."""
+    WITHOUT the campaign's ``campaign_id`` is queued outside the campaign — no
+    ``campaign.admitted`` event names it — and its sealed row never counts toward the
+    reading, however clean: the commit it attempted first leaves the pool (``unadmitted``),
+    and a later row of an admitted run does not bring it back. A row of a run admitted under
+    the campaign counts; a reading under no campaign counts a loose run's row as before."""
     env.settings.builder.executor = "docker"
     cid = _register(env)["campaign_id"]
-    sha, plain = "1" * 40, "2" * 40
-    named = write_reading(env.factory, [sha], repo=ALPHA, campaign_id=cid, hierarchy=("S3",))
+    sha, inside, plain = "1" * 40, "3" * 40, "2" * 40
+    named = write_reading(
+        env.factory, [sha, inside], repo=ALPHA, campaign_id=cid, hierarchy=("S3",)
+    )
     legacy = write_reading(env.factory, [plain], repo=ALPHA, hierarchy=("S3",))
     loose = env.post("/runs", json={**GOLD, "executor": "docker", "task_ids": [sha, plain]})
     assert loose.status_code == 201, loose.text
     assert _admitted(env, cid) == []
-    filed = {**GOLD, "executor": "docker", "task_ids": [sha], "max_cost_usd": 5}
+    filed = {**GOLD, "executor": "docker", "task_ids": [sha, inside], "max_cost_usd": 5}
     admitted = env.post("/runs", json={**filed, "reading_id": named.reading_id, "campaign_id": cid})
     assert admitted.status_code == 201, admitted.text
     assert [a["run_id"] for a in _admitted(env, cid)] == [admitted.json()["id"]]
 
-    def counted() -> dict[str, int]:
+    def arms() -> dict[str, dict[str, Any]]:
         got = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
-        return {o["reading_id"]: o["arms"][0]["counted"] for o in got}
+        return {o["reading_id"]: o["arms"][0] for o in got}
 
     def row(run_id: str, commit: str) -> Any:
         return sealed_row(commit, repo=ALPHA, run_id=run_id, arm="S3", cell=CELL, created=LATER)
@@ -439,7 +443,11 @@ def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(
     ledger = DbLedger(env.factory)
     ledger.append(row(loose.json()["id"], sha))
     ledger.append(row(loose.json()["id"], plain))
-    assert counted() == {named.reading_id: 0, legacy.reading_id: 1}
+    got = arms()
+    assert (got[named.reading_id]["counted"], got[legacy.reading_id]["counted"]) == (0, 1)
+    assert [(c["commit"], c["left"]) for c in got[named.reading_id]["left"]] == [
+        (sha, "unadmitted")
+    ]
     served = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
     assert {o["reading_id"]: o["admitted_runs"] for o in served} == {
         named.reading_id: 1,
@@ -447,7 +455,47 @@ def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(
     }
     assert not any(o["admissions_unread"] for o in served)
     ledger.append(row(admitted.json()["id"], sha))
-    assert counted() == {named.reading_id: 1, legacy.reading_id: 1}
+    ledger.append(row(admitted.json()["id"], inside))
+    got = arms()
+    assert (got[named.reading_id]["counted"], got[legacy.reading_id]["counted"]) == (1, 1)
+    assert got[named.reading_id]["counted_commits"] == [inside]
+
+
+def test_a_peek_outside_the_campaign_makes_its_commit_leave_whatever_it_read(env: Env) -> None:
+    """DL-382, the peek: a miss from a run posted outside the reading's campaign, then a clean
+    row of the same commit from a run the campaign admitted, must not count clean — else a
+    peek outside the ceiling buys a retry inside it. The commit's first attempt was the
+    peek's, so the commit leaves the pool ``unadmitted``, decided without its result: the
+    reading counts neither the miss nor the clean row."""
+    env.settings.builder.executor = "docker"
+    cid = _register(env)["campaign_id"]
+    sha = "1" * 40
+    named = write_reading(env.factory, [sha], repo=ALPHA, campaign_id=cid, hierarchy=("S3",))
+    loose = env.post("/runs", json={**GOLD, "executor": "docker", "task_ids": [sha]})
+    assert loose.status_code == 201, loose.text
+    filed = {**GOLD, "executor": "docker", "task_ids": [sha], "max_cost_usd": 5}
+    admitted = env.post("/runs", json={**filed, "reading_id": named.reading_id, "campaign_id": cid})
+    assert admitted.status_code == 201, admitted.text
+    ledger = DbLedger(env.factory)
+    for run, clean in ((loose, False), (admitted, True)):
+        ledger.append(
+            sealed_row(
+                sha,
+                repo=ALPHA,
+                run_id=run.json()["id"],
+                arm="S3",
+                cell=CELL,
+                created=LATER,
+                clean=clean,
+            )
+        )
+    (served,) = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
+    arm = served["arms"][0]
+    assert served["admitted_runs"] == 1
+    assert (arm["counted"], arm["clean"], arm["misses"]) == (0, 0, 0)
+    assert [(c["commit"], c["left"], c["outcome"]) for c in arm["left"]] == [
+        (sha, "unadmitted", None)
+    ]
 
 
 def test_load_readings_reads_each_campaigns_admissions_on_each_backend(backend: Backend) -> None:

@@ -485,7 +485,7 @@ class ReadingBook:
     ) -> ReadingOutcome | None:
         """The reading that speaks for one full cell at one apparatus, class-set version,
         checks arm and posture class — every scope field the reading counted its rows on
-        (``_counts_for``), so a licence never crosses an arm or a posture (P-319)."""
+        (``_in_scope``), so a licence never crosses an arm or a posture (P-319)."""
         want = canonical_cell_key(cell)
         return latest_outcome(
             o

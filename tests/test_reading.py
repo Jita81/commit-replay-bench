@@ -32,9 +32,11 @@ import hashlib
 
 import pytest
 
+from crb.core.ledger import FAILURE_OUTAGE, LABEL_FAILURE_KIND
 from crb.core.reading import (
     CELL_ERROR_BUDGET,
     LEFT_HARNESS,
+    LEFT_UNADMITTED,
     REFUSAL_BUDGET_SPENT,
     REFUSAL_POOL_SEEN,
     RULE_LOOK_V1,
@@ -343,8 +345,8 @@ CAMPAIGN = "cmp_" + "a" * 24
 def test_a_campaign_readings_row_counts_only_when_its_run_was_admitted_under_the_campaign() -> None:
     """DL-382: a reading that names a campaign counts a row only when the run that wrote it was
     admitted under that campaign (a ``campaign.admitted`` event names it). A sealed row of a
-    run filed outside the campaign — one posted without its ``reading_id`` — never counts; the
-    same row from an admitted run does."""
+    run filed outside the campaign — one posted without the campaign's ``campaign_id`` — never
+    counts; the same row from an admitted run does."""
     reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
     inside = rows_for([True] * 20, reading.pool, run_id="run-in")
     outside = rows_for([True] * 20, reading.pool, run_id="run-out")
@@ -380,3 +382,36 @@ def test_a_legacy_reading_under_no_campaign_counts_its_rows_as_before() -> None:
     assert arm_reading(with_admissions(reading, ()), "S3", rows).look.counted == 20
     legacy = evaluate(reading, rows).to_dict()
     assert legacy["admissions_unread"] is False and legacy["admitted_runs"] is None
+
+
+def test_a_commit_first_attempted_outside_the_campaign_leaves_the_pool_whatever_it_read() -> None:
+    """DL-382, outcome-blind: a commit's first attempt decides it, whichever run made it. When
+    that run was not admitted under the reading's campaign — a peek outside the ceiling — the
+    commit leaves the pool (``unadmitted``) before its result is read, so a later run inside
+    the campaign never turns the peek into a counted outcome: a miss outside then a clean row
+    inside leaves, as a clean row outside then a miss inside does. An outage outside is no
+    attempt, and the next commit in the order takes a leaver's place."""
+    reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
+    first, second, third = reading.pool[:3]
+    outage = {LABEL_FAILURE_KIND: FAILURE_OUTAGE}
+    rows = [
+        sealed_row(first, clean=False, run_id="run-out"),
+        sealed_row(first, clean=True, run_id="run-in"),
+        sealed_row(second, clean=True, run_id="run-out"),
+        sealed_row(second, clean=False, run_id="run-in"),
+        sealed_row(third, clean=False, run_id="run-out", labels=outage),
+        sealed_row(third, clean=True, run_id="run-in"),
+    ]
+    arm = arm_reading(reading, "S3", rows)
+    assert [c.left for c in arm.commits[:3]] == [LEFT_UNADMITTED, LEFT_UNADMITTED, ""]
+    assert [c.outcome for c in arm.commits[:3]] == [None, None, True]
+    assert [c.row_hash for c in arm.commits[:2]] == [rows[0].row_hash, rows[2].row_hash]
+    assert (arm.look.counted, arm.look.clean, arm.look.misses) == (1, 1, 0)
+    served = evaluate(reading, rows).to_dict()["arms"][0]["left"]
+    assert [(c["commit"], c["left"]) for c in served] == [
+        (first, "unadmitted"),
+        (second, "unadmitted"),
+    ]
+    # a legacy reading reads the same rows by its own rule: each commit's first attempt
+    legacy = arm_reading(register_reading(commits(40)), "S3", rows)
+    assert [c.outcome for c in legacy.commits[:3]] == [False, True, True]
