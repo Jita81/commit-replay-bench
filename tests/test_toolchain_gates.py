@@ -777,9 +777,17 @@ def _skippers(
 
 def skip_helpers(tree: ast.Module, skip_extern: Collection[str] = ()) -> set[str]:
     """What another test module can import from this one that skips: its top-level
-    functions that skip, directly or through a skipper of their own or of ``skip_extern``."""
+    functions that skip, directly or through a skipper of their own or of ``skip_extern``,
+    and the skippers of ``skip_extern`` it imports, under any name
+    (``from tests.helpers import shallow as skip_it`` exports ``skip_it``)."""
     top = {s.name for s in tree.body if isinstance(s, ast.FunctionDef | ast.AsyncFunctionDef)}
-    return _skippers(tree, _pytest_names(tree), skip_extern) & top
+    imported = {
+        a.asname or a.name
+        for n in ast.walk(tree)
+        if isinstance(n, ast.ImportFrom) and _from_a_test_module(n)
+        for a in n.names
+    }
+    return _skippers(tree, _pytest_names(tree), skip_extern) & (top | imported)
 
 
 def _conditions(mark: ast.Call) -> list[ast.expr]:
@@ -1114,6 +1122,14 @@ def test_the_history_scan_follows_a_helper_or_fixture_of_another_module() -> Non
     ):
         assert history_skip_findings(planted, "planted") == [], planted
         assert history_skip_findings(planted, "planted", (), skip_extern), planted
+    # a skipper one module imports under another name, a third imports from it in turn
+    reexports = ast.parse("from tests.helpers import shallow as skip_it\n")
+    assert skip_helpers(reexports, skip_extern) == {"skip_it"}
+    third = "from tests.reexports import skip_it\ndef test_a():\n" + on_git + "        skip_it()\n"
+    assert history_skip_findings(third, "planted", (), skip_extern) == []
+    assert history_skip_findings(
+        third, "planted", (), skip_extern | skip_helpers(reexports, skip_extern)
+    )
     # the same name from the package under test is not that skipper
     product = "from crb.core import shallow\ndef test_a():\n" + on_git + "        shallow()\n"
     assert history_skip_findings(product, "planted", (), skip_extern) == []

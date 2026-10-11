@@ -14,11 +14,13 @@ What it does: Fails when a job in any workflow talks to a docker daemon — a ``
               ``docker/build-push-action`` step, or ``docker`` among the tools its
               ``CRB_TEST_REQUIRE_TOOLS`` declares — without the
               ``./.github/actions/docker-hub-mirror`` step before the first of them
-              (what runs after a ``systemctl stop`` of docker is exempt until a
-              ``start`` or ``restart`` brings it back); when an image the runner pulls
+              (what follows a step that certainly stops docker — its script's first
+              command stops the socket with the service — is exempt until a ``start``
+              or ``restart`` brings it back); when an image the runner pulls
               as it sets a job up, before any step can add the mirror — the job's
               ``container``, a ``services`` image, a ``docker://`` action — names Docker
-              Hub rather than ``mirror.gcr.io/library/…``; when a ``docker/setup-buildx-action``
+              Hub, or a registry an expression decides, rather than
+              ``mirror.gcr.io/library/…``; when a ``docker/setup-buildx-action``
               step does not give BuildKit the docker.io mirror; and when the composite
               action stops merging into the runner's ``daemon.json``, stops restarting the
               daemon or stops proving that ``docker info`` lists the mirror. Each check is
@@ -56,8 +58,11 @@ MIRROR = "mirror.gcr.io"
 # a docker command, not a word in a name (`docker.io`, `docker-compose.yml`, `crb-docker`)
 _DOCKER_COMMAND = re.compile(r"(?<![\w./-])docker\s+(?![.-])[a-z]")
 # a systemctl verb and the units it names, to the end of that command: in
-# `systemctl start docker && docker pull alpine` the pull is the next command, not a unit
-_DAEMON_SWITCH = re.compile(r"systemctl[ \t]+(stop|start|restart)((?:[ \t]+[\w.@-]+)+)")
+# `systemctl start docker && docker pull alpine` the pull is the next command, not a unit.
+# A start is read wherever its text is (one that never runs only holds the job to the
+# mirror); a stop only where it certainly runs (`_stops_docker`)
+_DAEMON_START = re.compile(r"systemctl[ \t]+(?:start|restart)((?:[ \t]+[\w.@-]+)+)")
+_DAEMON_STOP = re.compile(r"(?:sudo[ \t]+)?systemctl[ \t]+stop((?:[ \t]+[\w.@-]+)+)")
 _DOCKER_UNIT = re.compile(r"docker(?:\.\w+)?")
 # the hosts a reference with no registry, or one of these, resolves to
 _DOCKER_HUB = frozenset({"docker.io", "index.docker.io", "registry-1.docker.io"})
@@ -85,22 +90,42 @@ def _uses_docker(step: dict[str, Any], *, declared: bool) -> bool:
     return declared and "pytest" in run
 
 
+def _stops_docker(step: dict[str, Any]) -> bool:
+    """Whether a step certainly stops the daemon: it has no ``if`` and no
+    ``continue-on-error``, its script's first command is the ``systemctl stop`` — text
+    elsewhere may be printed (``echo "systemctl stop docker"``), written to a file or never
+    reached — and the stop names ``docker.socket`` with the service, which the socket
+    otherwise starts again at the next docker command."""
+    if "if" in step or step.get("continue-on-error"):
+        return False
+    lines = (line.strip() for line in str(step.get("run", "")).splitlines())
+    stop = _DAEMON_STOP.match(next((s for s in lines if s and not s.startswith("#")), ""))
+    units = set(stop.group(1).split()) if stop else set()
+    return "docker.socket" in units and bool(units & {"docker", "docker.service"})
+
+
 def _first_docker_use(steps: list[dict[str, Any]], *, declared: bool) -> int | None:
-    """The first step that reaches the daemon while it runs: what follows a ``systemctl
-    stop`` of docker, in its step or a later one, is exempt until a ``start`` or ``restart``."""
+    """The first step that reaches the daemon while it runs: what follows a step that
+    certainly stops it (``_stops_docker``), in that step or a later one, is exempt until a
+    ``start`` or ``restart`` of docker."""
     running = True
     for i, step in enumerate(steps):
         run = str(step.get("run", ""))
+        running = running and not _stops_docker(step)
         at = 0
-        for switch in _DAEMON_SWITCH.finditer(run):
-            if not any(_DOCKER_UNIT.fullmatch(u) for u in switch.group(2).split()):
+        if not running:
+            start = next(
+                (
+                    m
+                    for m in _DAEMON_START.finditer(run)
+                    if any(_DOCKER_UNIT.fullmatch(u) for u in m.group(1).split())
+                ),
+                None,
+            )
+            if start is None:
                 continue
-            if running and _uses_docker(
-                {**step, "run": run[at : switch.start()]}, declared=declared
-            ):
-                return i
-            running, at = switch.group(1) != "stop", switch.end()
-        if running and _uses_docker({**step, "run": run[at:]}, declared=declared):
+            running, at = True, start.end()
+        if _uses_docker({**step, "run": run[at:]}, declared=declared):
             return i
     return None
 
@@ -119,11 +144,21 @@ def job_findings(where: str, text: str) -> list[str]:
     return findings
 
 
-def _from_docker_hub(image: str) -> bool:
-    """Whether an image reference resolves to Docker Hub: no registry host before its first
-    ``/`` (``postgres:16-alpine``, ``bitnami/redis``), or Docker Hub's own."""
+def _by_expression(image: str) -> bool:
+    """Whether an expression decides the registry an image reference names: one before its
+    first ``/`` (``${{ vars.REGISTRY }}/library/postgres:16-alpine``), or, with no ``/``, one
+    in place of the name (``${{ matrix.image }}``). It can resolve to Docker Hub when the
+    workflow runs, and its own dots are not a registry host's."""
     first, slash, _ = image.partition("/")
-    if not slash:
+    return "${{" in (first if slash else re.split(r"[:@]", first, maxsplit=1)[0])
+
+
+def _from_docker_hub(image: str) -> bool:
+    """Whether an image reference resolves to Docker Hub, or can: no registry host before its
+    first ``/`` (``postgres:16-alpine``, ``bitnami/redis``), Docker Hub's own, or one an
+    expression decides."""
+    first, slash, _ = image.partition("/")
+    if not slash or _by_expression(image):
         return True
     return first in _DOCKER_HUB or not ("." in first or ":" in first or first == "localhost")
 
@@ -149,11 +184,12 @@ def _setup_images(job: dict[str, Any]) -> list[tuple[str, str]]:
 
 
 def image_findings(where: str, text: str) -> list[str]:
-    """The images a job's runner pulls from Docker Hub before any step runs: no mirror step
+    """The images a job's runner pulls from Docker Hub, or may, before any step runs: no mirror step
     reaches them, so each must name the mirror itself (``mirror.gcr.io/library/…``)."""
     return [
-        f"{where}: job {name!r} pulls {image} from Docker Hub as its {what} before any step"
-        f" — name {MIRROR}/library/… instead"
+        f"{where}: job {name!r} pulls {image} from"
+        f" {'a registry an expression names' if _by_expression(image) else 'Docker Hub'}"
+        f" as its {what} before any step — name {MIRROR}/library/… instead"
         for name, job in (yaml.safe_load(text).get("jobs") or {}).items()
         for what, image in _setup_images(job)
         if _from_docker_hub(image)
@@ -218,6 +254,10 @@ def test_every_job_that_uses_docker_pulls_through_the_mirror() -> None:
     assert _setup_images(jobs["test-postgres"]) == [
         ("service 'postgres'", f"{MIRROR}/library/postgres:16-alpine")
     ]
+    # the jobs that run with no daemon stop it for certain, and need no mirror for it
+    for name in ("fresh-clone-gates", "fresh-clone-shard"):
+        assert any(_stops_docker(s) for s in _steps(jobs[name])), name
+        assert _first_docker_use(_steps(jobs[name]), declared=False) is None, name
 
 
 def test_the_composite_action_merges_restarts_and_proves() -> None:
@@ -320,7 +360,7 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
         "  starts-and-pulls:\n"
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
-        "      - run: sudo systemctl stop docker\n"
+        "      - run: sudo systemctl stop docker.socket docker\n"
         "      - run: sudo systemctl start docker && docker pull alpine:3.20\n"
         "  named:\n"
         "    runs-on: ubuntu-latest\n"
@@ -335,6 +375,31 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
         "      - uses: docker/build-push-action@v7\n"
+        # a stop counts only where it certainly runs: printed, written to a file, behind an
+        # `if`, or of the service alone (docker.socket starts it again), the daemon still runs
+        "  prints-a-stop:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        '      - run: echo "systemctl stop docker" && docker pull alpine:3.20\n'
+        "  writes-a-stop:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          cat > stop.sh <<'EOF'\n"
+        "          sudo systemctl stop docker.socket docker.service\n"
+        "          EOF\n"
+        "      - run: docker pull alpine:3.20\n"
+        "  stops-if:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - if: failure()\n"
+        "        run: sudo systemctl stop docker.socket docker.service\n"
+        "      - run: docker pull alpine:3.20\n"
+        "  stops-the-service:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker.service\n"
+        "      - run: docker pull alpine:3.20\n"
     )
     assert job_findings("probe.yml", planted) == [
         f"probe.yml: job 'probe' uses docker without {MIRROR_STEP} before it",
@@ -344,6 +409,10 @@ def test_the_check_finds_a_new_job_that_pulls() -> None:
         f"probe.yml: job 'restarts' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'starts-and-pulls' uses docker without {MIRROR_STEP} before it",
         f"probe.yml: job 'builds' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'prints-a-stop' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'writes-a-stop' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'stops-if' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'stops-the-service' uses docker without {MIRROR_STEP} before it",
     ]
 
 
@@ -387,6 +456,17 @@ def test_the_check_refuses_a_docker_hub_image_pulled_before_the_steps() -> None:
         "        image: localhost:5000/probe\n"
         "    steps:\n"
         "      - uses: docker://ghcr.io/jita81/probe:1\n"
+        # an expression can name Docker Hub when the workflow runs: its dots are not a host's
+        "  by-expression:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    container: ${{ matrix.image }}\n"
+        "    services:\n"
+        "      postgres:\n"
+        "        image: ${{ vars.REGISTRY }}/library/postgres:16-alpine\n"
+        "      tagged:\n"
+        "        image: postgres:${{ matrix.pg }}\n"
+        "      mirrored:\n"
+        f"        image: {MIRROR}/library/postgres:${{{{ matrix.pg }}}}\n"
     )
     hub = f"from Docker Hub as its {{}} before any step — name {MIRROR}/library/… instead"
     assert image_findings("probe.yml", probe) == [
@@ -395,6 +475,12 @@ def test_the_check_refuses_a_docker_hub_image_pulled_before_the_steps() -> None:
         + hub.format("container"),
         "probe.yml: job 'with-a-service' pulls bitnami/redis:7.4 " + hub.format("service 'redis'"),
         "probe.yml: job 'docker-action' pulls alpine:3.20 " + hub.format("action"),
+        "probe.yml: job 'by-expression' pulls ${{ matrix.image }} "
+        + hub.replace("Docker Hub", "a registry an expression names").format("container"),
+        "probe.yml: job 'by-expression' pulls ${{ vars.REGISTRY }}/library/postgres:16-alpine "
+        + hub.replace("Docker Hub", "a registry an expression names").format("service 'postgres'"),
+        "probe.yml: job 'by-expression' pulls postgres:${{ matrix.pg }} "
+        + hub.format("service 'tagged'"),
     ]
 
 
