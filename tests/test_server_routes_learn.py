@@ -1035,7 +1035,8 @@ def test_a_campaign_run_on_a_cells_commits_holds_the_queue_too(
 ) -> None:
     """The queue's own guard reads the same runs: a reading under no campaign whose pending
     commits a campaign's run is replaying is refused 409 ``remeasure_already_queued`` naming
-    that run, with nothing queued and nothing recorded, and is queued once it finishes."""
+    that run — its message saying a campaign's run counts, not only the runs a queue filed
+    (R1-4) — with nothing queued and nothing recorded, and is queued once it finishes."""
     del builder_keys
     _sealed(env, monkeypatch)
     _add_reading(env)
@@ -1047,6 +1048,7 @@ def test_a_campaign_run_on_a_cells_commits_holds_the_queue_too(
     assert q.status_code == 409, q.text
     assert envelope(q)["code"] == "remeasure_already_queued"
     assert envelope(q)["detail"]["run_ids"] == [rid]
+    assert "admitted by a campaign on one of its commits" in envelope(q)["message"]
     assert env.get("/runs").json()["total"] == total and _queued_events(env) == []
     _finish(env, rid, "succeeded")
     assert _queue(env, cell=READ_CELL).status_code == 201

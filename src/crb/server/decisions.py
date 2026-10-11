@@ -393,8 +393,9 @@ def remeasure_rows(
     remeasure_plan`, as ``GET /learn/remeasure`` serves it): its evidence predates the
     apparatus in force and the current rows do not reach the rule's first look. Only a STALE
     cell is a row: a cell whose ``reason`` is anything but :data:`REMEASURE_STALE` (a missing
-    one reads as stale) is skipped. A cell whose queued runs have not finished (``in_flight``:
-    ``(label, mode)``) asks nobody for anything.
+    one reads as stale) is skipped. A cell whose queued runs — or a campaign's live runs on
+    its commits (F87-2) — have not finished (``in_flight``: ``(label, mode)``) asks nobody
+    for anything.
     The evidence line says the rows needed and the estimate, or that the cost is not known —
     never a zero that reads as free."""
     if not plan:
@@ -621,7 +622,8 @@ def decision_rows(
     /factory/{repo}/tasks`` serves them (a ``TaskView`` is read through its ``to_dict``).
     ``register`` is the prevention register (``Register.to_dict()``), ``library`` the library
     index, ``stale`` the stale sign-offs as served, ``remeasure`` the re-measurement plan with
-    ``in_flight`` the ``(label, mode)`` cells whose queued runs have not finished. An
+    ``in_flight`` the ``(label, mode)`` cells whose queued runs — or a campaign's live runs
+    on their commits — have not finished. An
     unmeasured cell (``n == 0``) is not a decision: nobody is waiting on it.
     """
     stale_list = [s for s in stale if s.get("stale") and not s.get("revoked")]

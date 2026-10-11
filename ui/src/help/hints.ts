@@ -2013,7 +2013,7 @@ export const HINTS = {
   'button.learn.queue_remeasure':
     'Shows what queueing this cell would run and cost before anything is sent.',
   'link.learn.remeasure_in_flight':
-    'The runs already queued for this cell and not yet finished. Queue comes back once they have graded, so the same estimate is never spent twice.',
+    'The runs in flight on this cell’s commits and not yet finished: those an earlier Queue put on the queue, and a campaign’s runs that would attempt one of the commits it asks for. Queue comes back once they have graded, so the same estimate is never spent twice and no commit is requested while a run is still attempting it.',
   'text.learn.remeasure_register':
     'This cell has rows but no registered reading at this apparatus. Rows graded before a reading is registered never count, so nothing is queued here: register a reading of the cell first (crb reading register, or POST /readings).',
   'link.learn.remeasure_by_hand':

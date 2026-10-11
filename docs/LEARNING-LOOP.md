@@ -273,8 +273,10 @@ POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", m
   whole with nothing queued (`builder_credential_missing`). A what-if plan (an `apparatus`
   other than the running one) is refused: its runs would grade under the running apparatus
   and could never clear the plan they were queued from. The response repeats the plan's
-  estimate with `cost_known` honoured, so an unknown cost is never read as zero. While the
-  runs an earlier queue of the same cell put on the queue are unfinished, the cell is refused
+  estimate with `cost_known` honoured, so an unknown cost is never read as zero. While a run
+  is unfinished that an earlier queue of the same cell put on the queue, or that a campaign
+  admitted and would attempt one of the commits the cell asks for (F87-2: a campaign's runs
+  are filed by `POST /runs`, never by this queue), the cell is refused
   (`remeasure_already_queued`): the plan reads graded rows only, so it still holds the cell,
   and the page shows the runs in flight in place of the Queue control.
 

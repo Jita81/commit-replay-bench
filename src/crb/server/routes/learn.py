@@ -594,8 +594,9 @@ def learn_remeasure(  # noqa: PLR0917 — FastAPI dependencies + query
     del viewer
     get_repo_or_404(db, repo)
     body = derive_remeasure(db, factory, repo, apparatus=apparatus, settings=settings).to_dict()
-    # beside each cell, the runs already queued for it and not finished: the page shows them
-    # in place of the Queue control. A what-if plan queues nothing, so it has none.
+    # beside each cell, its runs in flight — those an earlier queue of it filed and those a
+    # campaign admitted on one of its commits, not finished: the page shows them in place of
+    # the Queue control. A what-if plan queues nothing, so it has none.
     for c in body["cells"]:
         c["in_flight_run_ids"] = (
             in_flight_runs(
@@ -1133,16 +1134,18 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
     reading names a campaign: this queue files no run under a campaign, and a run of that
     reading spends only under its campaign's ceiling (DL-382), so it is queued by hand with
     ``POST /runs``; **409 ``remeasure_already_queued``** while any run an earlier
-    queue of this cell (same mode and apparatus) put on the queue has not finished, naming
-    those runs — the plan is derived from graded rows only, so without this a double click
-    or a second operator would spend the estimate twice. The guard, the runs and the
-    ``learn.remeasure.queued`` event that names them are one locked transaction under the
-    events write lock too (EI-1, P-420): two concurrent queues cannot both pass the check,
-    and a failed insert or a lost ``seq`` race leaves no run on the queue that no event
-    names, and a transaction already open when the lock is taken refuses the queue rather
-    than run it unlocked (P-429); **409 ``remeasure_concurrent_write``** when other Learn
-    writes won that race three times, with nothing queued; **503 ``queue_unavailable``**
-    when this server has no queue.
+    queue of this cell (same mode and apparatus) put on the queue has not finished, or a run
+    a campaign admitted that would attempt one of the cell's requests is still queued or
+    running (:func:`in_flight_runs`, F87-2), naming those runs — the plan is derived from
+    graded rows only, so without this a double click or a second operator would spend the
+    estimate twice, and the queue would re-request commits a campaign's run is attempting.
+    The guard, the runs and the ``learn.remeasure.queued`` event that names them are one
+    locked transaction under the events write lock too (EI-1, P-420): two concurrent queues
+    cannot both pass the check, and a failed insert or a lost ``seq`` race leaves no run on
+    the queue that no event names, and a transaction already open when the lock is taken
+    refuses the queue rather than run it unlocked (P-429); **409
+    ``remeasure_concurrent_write``** when other Learn writes won that race three times, with
+    nothing queued; **503 ``queue_unavailable``** when this server has no queue.
     """
     get_repo_or_404(db, repo)
     if body.apparatus != APPARATUS_VERSION:
@@ -1242,8 +1245,9 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             raise ApiError(
                 409,
                 "remeasure_already_queued",
-                f"{len(in_flight)} run(s) queued for {cell.cell.label!r} ({cell.mode}) have "
-                "not finished — nothing was queued; the plan is re-read once they have graded",
+                f"{len(in_flight)} run(s) on {cell.cell.label!r} ({cell.mode}) have not "
+                "finished — queued for it by an earlier queue, or admitted by a campaign on one "
+                "of its commits — nothing was queued; the plan is re-read once they have graded",
                 detail={"run_ids": in_flight},
             )
         runs = []

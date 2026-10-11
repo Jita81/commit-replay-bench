@@ -267,7 +267,7 @@ export interface RemeasureCell {
   requests: Array<Record<string, unknown>>
   /** What to do and why, in words — shown to every role. */
   note: string
-  /** Runs an earlier queue of this cell put on the queue that have not finished: shown in place of Queue. */
+  /** Runs not finished on this cell's commits — an earlier queue's of it, and a campaign's that would attempt one of its requests: shown in place of Queue. */
   in_flight_run_ids: string[]
 }
 
@@ -1053,10 +1053,10 @@ function RemeasureSection({ repo }: { repo: string }) {
                     Queue from Runs
                   </Hint>
                 ) : c.in_flight_run_ids.length ? (
-                  // queued already and not finished: the server refuses a second queue
-                  // (remeasure_already_queued), so the page offers the runs instead
+                  // runs in flight on its commits (a queue's or a campaign's): the server refuses
+                  // a second queue (remeasure_already_queued), so the page offers the runs instead
                   <Hint as={Link} id="link.learn.remeasure_in_flight" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
-                    {c.in_flight_run_ids.length === 1 ? '1 run queued' : `${c.in_flight_run_ids.length} runs queued`}
+                    {c.in_flight_run_ids.length === 1 ? '1 run in flight' : `${c.in_flight_run_ids.length} runs in flight`}
                   </Hint>
                 ) : (
                   <Button size="sm" hint="button.learn.queue_remeasure" onClick={() => setQueueing(c.key)}>
