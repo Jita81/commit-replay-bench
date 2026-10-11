@@ -1188,7 +1188,9 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
     held-out tests are run once, so there is no re-run: an attempt the instrument could not
     observe (``harness``, ``outage``) or whose held-out tests could not be run (``error``)
     leaves the pool with its reason, never a miss; ``fail`` is a miss; ``pass`` on a clean
-    build is clean. A ticket with no attempt yet is pending.
+    build is clean, unless belt 5 was switched off by configuration — then the ticket leaves
+    (``lint_disabled``), as a replayed commit does (P-342), since belt 5 could have changed it.
+    A ticket with no attempt yet is pending.
 
     A forward reading may name no campaign (``campaign_unsupported_reading``, DL-382). If one
     does (a record written by hand), it reads as a replay reading does: only rows of runs its
@@ -1227,6 +1229,11 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
             out.append(CommitReading(item, item, None, LEFT_UNOBSERVED, r.row_hash))
         elif held_out_result(r.labels) == RESULT_ERROR:
             out.append(CommitReading(item, item, None, LEFT_HELD_OUT_ERROR, r.row_hash))
+        elif lint_could_change(r) and held_out_result(r.labels) == RESULT_PASS:
+            # belt 5 off: the replay loop's rule (P-342, P-792 channel C4). It leaves only an
+            # attempt belt 5 could have changed; a factory row's ``clean`` leaves out its
+            # held-out result, so a held-out ``fail`` is the miss it is whatever the linter says
+            out.append(CommitReading(item, item, None, LEFT_LINT_DISABLED, r.row_hash))
         else:
             clean = r.clean and not r.disqualified and held_out_result(r.labels) == RESULT_PASS
             out.append(CommitReading(item, item, clean, "", r.row_hash))
