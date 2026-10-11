@@ -16,11 +16,13 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   posture (the builder in the sealed container, the tests in the docker sandbox); for ``S2``
   only on factory rows stamped as graded on held-out acceptance tests. Two commits of one
   change (a cherry-pick, a revert and its original — ``labels.change_id``) count once: the
-  first in the seeded order. A commit with no observed attempt is ``pending`` and the look
-  waits; a commit the instrument cannot grade (no observed attempt after the re-runs the
-  reading allows, gold not clean, or belt 5 switched off by configuration) leaves the pool with
-  its reason recorded, and the next commit in the order takes its place — an instrument
-  failure is never a miss.
+  first in the seeded order. A reading that names a campaign counts a row only when the run
+  that wrote it was admitted under that campaign (:func:`with_admissions`, DL-382) — and,
+  read without the campaign's admissions, counts none. A commit with no observed attempt is
+  ``pending`` and the look waits; a commit the instrument cannot grade (no observed attempt
+  after the re-runs the reading allows, gold not clean, or belt 5 switched off by
+  configuration) leaves the pool with its reason recorded, and the next commit in the order
+  takes its place — an instrument failure is never a miss.
 * **The look rule** (:data:`RULES`): an arm is read only at its looks. ``look.v1`` delivers at
   20 of the first 20, 29 of the first 30 or 38 of the first 40 clean, reads ``insufficient``
   at its third miss, ``undecided`` when the pool cannot reach the next look, and
@@ -52,7 +54,8 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               list is ``pool_not_blind``); keeps a reading of an organisation's class
               (``org_class``) a cell, a seeded order and a budget of its own; names, from
               birth, the campaign whose ceiling every run of a reading spends from
-              (``campaign_id``, hashed when present — DL-382); refuses a
+              (``campaign_id``, hashed when present — DL-382) and counts only rows of runs
+              admitted under it (``with_admissions``; none when unread); refuses a
               registration over commits already graded
               under its arms at its apparatus (``pool_seen``), beyond the cell's budget
               (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
@@ -425,14 +428,20 @@ class Reading:
     smallest_effect: float | None = None
     #: The campaign whose money ceiling every run of this reading spends from (G-957, DL-382):
     #: named at registration, never bound later, so no run queued before a binding could
-    #: escape the ceiling. ``POST /runs`` refuses a run of a campaign-named reading that does
-    #: not carry the same campaign. ``""`` for a reading under no campaign — hashed when
-    #: present, so a legacy reading's id never moves and an edited campaign fails ``verify``.
+    #: escape the ceiling. ``POST /runs`` refuses a run filed under the reading that does not
+    #: carry the same campaign, and a row counts only when its run was admitted under it
+    #: (``admitted``). ``""`` for a reading under no campaign — hashed when present, so a
+    #: legacy reading's id never moves and an edited campaign fails ``verify``.
     campaign_id: str = ""
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
     enrolled: tuple[tuple[str, str], ...] = field(default=(), compare=False)
+    #: The runs admitted under ``campaign_id`` (a ``campaign.admitted`` event names each) —
+    #: READ from the campaign's trace (:func:`with_admissions`), never registered or hashed.
+    #: A campaign-named reading counts a row only when its ``run_id`` is here; ``None`` means
+    #: the admissions were never read, and then it counts NO row (fail closed, DL-382).
+    admitted: frozenset[str] | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
@@ -457,6 +466,13 @@ class Reading:
         reading, the cell of the ceiling it promotes, so a forward reading spends from the
         same budget as the reading that found the ceiling, never a fresh one."""
         return (self.repo, self.budget_cell or self.cell_key, self.apparatus, self.taxonomy)
+
+    @property
+    def admissions_unread(self) -> bool:
+        """The reading names a campaign and its admissions were never read: it counts no row
+        until they are (:func:`with_admissions`) — a reader that cannot know which runs the
+        campaign admitted counts none of them, never all (DL-382)."""
+        return bool(self.campaign_id) and self.admitted is None
 
     @property
     def prospective(self) -> bool:
@@ -897,6 +913,18 @@ def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading
     return replace(reading, pool=tuple(items), enrolled=tuple(enrolled))
 
 
+def with_admissions(reading: Reading, run_ids: Iterable[str]) -> Reading:
+    """``reading`` with the runs admitted under its campaign (``run_ids``: the ``run_id`` of
+    each ``campaign.admitted`` event on the campaign's trace) — READ, never registered or
+    hashed, so the id is unchanged. A row of a campaign-named reading counts only when its run
+    is one of them (DL-382): a run of a pool commit posted without its ``reading_id`` is queued
+    outside the campaign and its rows never count. A reading that names no campaign is
+    returned as it is — it counts its rows by its own rule, whatever run wrote them."""
+    if not reading.campaign_id:
+        return reading
+    return replace(reading, admitted=frozenset(str(r) for r in run_ids if r))
+
+
 # ---------------------------------------------------------------------------
 # Counting one arm
 # ---------------------------------------------------------------------------
@@ -961,15 +989,26 @@ class ArmReading:
         }
 
 
+def _admitted_run(reading: Reading, row: GradeRow) -> bool:
+    """Was ``row`` written by a run the reading may count — any run for a reading under no
+    campaign; for a campaign-named one, only a run admitted under that campaign (DL-382), and
+    none at all when the admissions were never read (``admissions_unread``)."""
+    if not reading.campaign_id:
+        return True
+    return reading.admitted is not None and row.run_id in reading.admitted
+
+
 def _counts_for(reading: Reading, arm: str, row: GradeRow) -> bool:
     """Is ``row`` one of the rows ``arm`` of ``reading`` may count (before first-attempt)?
     Its repository, cell, apparatus, class-set version, checks arm and context arm are the
     reading's; it is a rung ``r1`` attempt this deployment graded (never an imported row, whose
     labels were set elsewhere — P-321); it was graded strictly AFTER the registration (whole
     seconds, so a row of the same second does not count); and it was graded in the sealed
-    posture class the reading names — or, for ``S2``, on held-out acceptance tests."""
+    posture class the reading names — or, for ``S2``, on held-out acceptance tests; and, for a
+    reading that names a campaign, by a run admitted under it (:func:`_admitted_run`)."""
     if (
-        row.imported
+        not _admitted_run(reading, row)
+        or row.imported
         or row.repo != reading.repo
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
@@ -1007,9 +1046,11 @@ def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
     the reading's repository, apparatus, class-set version and checks arm, graded after the
     registration and never imported. The ticket (``labels.item_id``) is the pool's unit; its
     class, size and language were fixed when it was enrolled, and a builder, model or
-    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`)."""
+    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`). Under a
+    campaign, a first attempt by a run not admitted under it is never counted (DL-382)."""
     if (
-        row.imported
+        not _admitted_run(reading, row)
+        or row.imported
         or row.repo != reading.repo
         or row.process_step != PROCESS_FACTORY
         or row.context_arm != arm
@@ -1079,7 +1120,10 @@ def arm_reading(
     commits of one change count once (the first in the order). A commit without an observed
     attempt is pending; one the instrument cannot grade leaves the pool with its reason before
     its outcome is read. ``limit`` caps a descriptive arm at its fixed count. A forward
-    reading's arm is read by ticket (:func:`_arm_forward`)."""
+    reading's arm is read by ticket (:func:`_arm_forward`). A campaign-named reading whose
+    admissions were never read counts nothing: every commit waits (DL-382)."""
+    if reading.admissions_unread:
+        rows = ()  # fail closed: which runs the campaign admitted is unknown here
     if reading.prospective:
         return _arm_forward(reading, arm, rows)
     by_commit: dict[str, list[GradeRow]] = {}
@@ -1197,6 +1241,14 @@ class ReadingOutcome:
             "hypothesis": self.reading.hypothesis,
             "smallest_effect": self.reading.smallest_effect,
             "campaign_id": self.reading.campaign_id,
+            # the runs the reading may count under its campaign (DL-382): ``None`` when it
+            # names none; ``admissions_unread`` when they were never read (it counts none)
+            "admitted_runs": (
+                len(self.reading.admitted)
+                if self.reading.campaign_id and self.reading.admitted is not None
+                else None
+            ),
+            "admissions_unread": self.reading.admissions_unread,
             "arms": [a.to_dict() for a in self.arms.values()],
         }
 
@@ -1512,5 +1564,6 @@ __all__ = [
     "seeded_order",
     "standard_of",
     "verdict_for",
+    "with_admissions",
     "with_enrolment",
 ]

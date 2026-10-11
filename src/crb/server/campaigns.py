@@ -12,7 +12,8 @@ last of the line.
 Navigation
 ----------
 What it is:   The store readers of campaigns: the verified records, the line released, each
-              run filed under one with what it has spent, and the tally and view served.
+              run filed under one with what it has spent, the ids of the runs admitted (a
+              campaign-named reading counts only theirs, DL-382), and the tally and view served.
 What it does: Keeps a campaign only when its id re-hashes and it sits on its own trace; folds
               its releases into the line (never above the ceiling); reads each admitted run's
               status, rows and author calls into a ``MemberRun``; computes the ``Tally``; serves
@@ -102,6 +103,16 @@ def line_gbp(session: Session, campaign: Campaign) -> float:
     """The pounds released so far (``Campaign.line_gbp`` over the releases)."""
     return campaign.line_gbp(
         float(r.get("released_gbp") or 0.0) for r in releases(session, campaign)
+    )
+
+
+def admitted_runs(session: Session, campaign_id: str) -> frozenset[str]:
+    """The ids of the runs admitted under the campaign — one per ``campaign.admitted`` event on
+    its trace. A reading that names the campaign counts only these runs' rows (DL-382)."""
+    return frozenset(
+        rid
+        for ev in _events(session, campaign_id, CAMPAIGN_ADMITTED)
+        if (rid := str((ev.payload_json or {}).get("run_id") or ""))
     )
 
 
@@ -202,6 +213,7 @@ def campaign_view(session: Session, campaign: Campaign) -> dict[str, Any]:
 
 
 __all__ = [
+    "admitted_runs",
     "campaign_of",
     "campaign_tally",
     "campaign_view",

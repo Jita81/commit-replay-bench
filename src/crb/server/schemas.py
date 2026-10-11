@@ -799,7 +799,9 @@ class RunCreateRequest(BaseModel):
     #: before any builder call.
     #: A reading that names a campaign takes only runs filed under that same campaign: 409
     #: ``campaign_required`` otherwise, and at claim for a run no ``campaign.admitted`` event
-    #: names (DL-382). Stored as ``params.reading_id`` only when set.
+    #: names (DL-382). A run posted without ``reading_id`` is not checked, and such a
+    #: reading never counts its rows unless its campaign admitted it (DL-382). Stored as
+    #: ``params.reading_id`` only when set.
     reading_id: str | None = Field(default=None, pattern=r"^rdg_[0-9a-f]{24}$")
     #: Build runs only: the campaign this run is filed under (``cmp_<24 hex>``, G-957). The
     #: run must name ``max_cost_usd`` (422 ``campaign_cap_required``) and, on ``arm: S1``,

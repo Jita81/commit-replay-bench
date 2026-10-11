@@ -8,7 +8,8 @@ What it is:   Builders for the rows and readings the routing.v2 tests read: a ro
 What it does: ``sealed_row`` stamps the posture class ``docker/copy/sealed``, the builder's
               sealed container, rung ``r1``, a context arm, the class-set version and a
               change id, with a ``created`` time after the registration; ``register_reading``
-              registers a hierarchy over a pool at a fixed time; ``commits`` makes shas.
+              registers a hierarchy over a pool at a fixed time, under a campaign when one is
+              named; ``commits`` makes shas.
 How:          Thin wrappers over ``tests.fixtures.posture.posture_row`` and
               ``crb.core.reading.register``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -146,8 +147,10 @@ def register_reading(
     changes: dict[str, str] | None = None,
     repo: str = REPO,
     cell: dict[str, str] | None = None,
+    campaign_id: str = "",
 ) -> Reading:
-    """A reading of :data:`CELL` on :data:`REPO`, registered at :data:`REGISTERED_AT`."""
+    """A reading of :data:`CELL` on :data:`REPO`, registered at :data:`REGISTERED_AT` —
+    under ``campaign_id`` when one is named (DL-382)."""
     return register(
         repo=repo,
         cell=cell or CELL,
@@ -166,6 +169,7 @@ def register_reading(
         now=now,
         budget=budget,
         changes=changes,
+        campaign_id=campaign_id,
     )
 
 

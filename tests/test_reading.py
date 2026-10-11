@@ -11,8 +11,10 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               for byte; shows a later re-run never changes which commits a look reads, a row
               graded before registration never counting, a commit the instrument cannot grade
               leaving the pool before its outcome is read, a re-run never replacing a
-              commit's first attempt, an imported row never counting, and registration refused
-              ``pool_seen`` and ``budget_spent``.
+              commit's first attempt, an imported row never counting, a campaign-named
+              reading counting only rows of runs its campaign admitted (none when its
+              admissions were not read; a legacy reading as before, DL-382), and registration
+              refused ``pool_seen`` and ``budget_spent``.
 How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5)
@@ -46,10 +48,12 @@ from crb.core.reading import (
     arm_reading,
     canonical_cell_key,
     cell_error_budget,
+    evaluate,
     look_state,
     p_deliver,
     seed_of,
     seeded_order,
+    with_admissions,
 )
 from fixtures.readings import (
     BEFORE,
@@ -328,3 +332,51 @@ def test_an_imported_row_never_counts_toward_a_reading() -> None:
     assert arm_reading(reading, "S3", imported).look.counted == 0
     legacy = rows_for([True] * 20, reading.pool, labels={"source_row_hash": "f" * 64})
     assert arm_reading(reading, "S3", legacy).look.counted == 0
+
+
+# --- a reading under a campaign (DL-382) ---------------------------------------------------
+
+#: A campaign id, as ``POST /campaigns`` mints one.
+CAMPAIGN = "cmp_" + "a" * 24
+
+
+def test_a_campaign_readings_row_counts_only_when_its_run_was_admitted_under_the_campaign() -> None:
+    """DL-382: a reading that names a campaign counts a row only when the run that wrote it was
+    admitted under that campaign (a ``campaign.admitted`` event names it). A sealed row of a
+    run filed outside the campaign — one posted without its ``reading_id`` — never counts; the
+    same row from an admitted run does."""
+    reading = with_admissions(register_reading(commits(40), campaign_id=CAMPAIGN), {"run-in"})
+    inside = rows_for([True] * 20, reading.pool, run_id="run-in")
+    outside = rows_for([True] * 20, reading.pool, run_id="run-out")
+    assert arm_reading(reading, "S3", inside).look.counted == 20
+    assert arm_reading(reading, "S3", outside).look.counted == 0
+    assert evaluate(reading, outside).arms["S3"].look.counted == 0
+    # the admissions are read, never registered: the id and the record do not move
+    assert reading.verify() and "admitted" not in reading.to_dict()
+
+
+def test_a_campaign_reading_read_without_its_admissions_counts_no_row_and_says_so() -> None:
+    """Fail closed: a campaign-named reading evaluated by a reader that never read the
+    campaign's admissions (a file workdir, any caller that did not look) counts NONE of the
+    rows — never all — and its outcome says the admissions were unread."""
+    reading = register_reading(commits(40), campaign_id=CAMPAIGN)
+    rows = rows_for([True] * 20, reading.pool, run_id="run-in")
+    assert reading.admissions_unread
+    assert arm_reading(reading, "S3", rows).look.counted == 0
+    unread = evaluate(reading, rows).to_dict()
+    assert unread["admissions_unread"] is True and unread["admitted_runs"] is None
+    read = evaluate(with_admissions(reading, {"run-in"}), rows).to_dict()
+    assert read["admissions_unread"] is False and read["admitted_runs"] == 1
+    assert read["arms"][0]["counted"] == 20
+
+
+def test_a_legacy_reading_under_no_campaign_counts_its_rows_as_before() -> None:
+    """A reading that names no campaign counts by its own rule, whatever run wrote the row:
+    there is nothing to admit under, so no admissions are needed and none change it."""
+    reading = register_reading(commits(40))
+    rows = rows_for([True] * 20, reading.pool, run_id="any-run")
+    assert not reading.admissions_unread
+    assert arm_reading(reading, "S3", rows).look.counted == 20
+    assert arm_reading(with_admissions(reading, ()), "S3", rows).look.counted == 20
+    legacy = evaluate(reading, rows).to_dict()
+    assert legacy["admissions_unread"] is False and legacy["admitted_runs"] is None

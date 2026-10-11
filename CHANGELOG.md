@@ -19,7 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   reading registers, and its runs are admitted, only with sandbox and builder on docker, in its
   posture class (409 `reading_posture_mismatch`). `POST /campaigns` holds a ceiling in pounds:
   its runs need `max_cost_usd`, admitted while cap plus headroom fits (409 `campaign_ceiling`);
-  a reading's runs must be filed under its campaign (409 `campaign_required`); `S1` author
+  a reading counts only runs its campaign admitted (409 `campaign_required`); `S1` author
   calls count; overrunning admitted headroom stops the campaign. CI builds and runs the Go
   builder image; the operator's 2026-10-11 decisions are recorded.
 

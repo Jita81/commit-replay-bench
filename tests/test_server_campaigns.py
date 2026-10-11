@@ -20,17 +20,22 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               an overrun read against the headroom a run was admitted with (a first attempt
               dearer than the $5.00 held), refuses a run without a cap, an unbounded ``S1``
               run, a non-build kind and a run of a campaign-named reading filed under no
-              campaign or another one (``campaign_required``, DL-382), and admits no more
-              than the line under concurrent submits.
+              campaign or another one (``campaign_required``, DL-382), admits no more than
+              the line under concurrent submits, and shows a campaign-named reading counts
+              a run's rows only when the campaign admitted the run (a run posted without
+              ``reading_id`` counts none; a legacy reading counts it as before).
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
-              ``append_event``; four threads through ``admit_under_campaign``.
+              ``append_event``; four threads through ``admit_under_campaign``; the admissions
+              reader also on the ``backend`` fixture (PostgreSQL when it is configured).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
 Works with:   src/crb/server/routes/campaigns.py (the routes under test),
               src/crb/server/campaigns.py (the store readers and the served view),
               src/crb/server/routes/runs.py (``campaign_refusal``, ``admit_under_campaign``),
               src/crb/core/campaign.py (the tally and its refusal codes),
+              src/crb/server/reading_book.py (``load_readings`` reads the admissions),
+              tests/conftest_store.py (the backends),
               docs/API.md#campaigns-a-campaigns-money-ceiling (the routes documented)
 Tested by:    tests/test_server_campaigns.py
 Touch when:   never for a new repository; a campaign route, its refusals or the admission change.
@@ -48,15 +53,23 @@ import pytest
 from sqlalchemy import select
 
 from crb.core.campaign import CAMPAIGN_ADMITTED, CAMPAIGN_REGISTERED
+from crb.server.campaigns import admitted_runs
 from crb.server.deps import ApiError
+from crb.server.reading_book import load_readings
 from crb.server.routes.runs import admit_under_campaign, new_run
 from crb.server.schemas import RunCreateRequest
+from crb.store.db import init_db
 from crb.store.events import append_event
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Run
-from fixtures.proven import write_reading
+from fixtures.proven import CELL, LATER, write_reading
 from fixtures.readings import sealed_row
 from fixtures.server_seed import ALPHA, Env, assert_rbac, envelope, make_env
+
+try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
+    from tests.conftest_store import Backend, backend, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import Backend, backend, pg_schema  # noqa: F401
 
 WAVE3 = {
     "name": "wave-3",
@@ -377,6 +390,78 @@ def test_a_run_of_a_reading_that_names_a_campaign_is_filed_under_that_campaign(e
     legacy = write_reading(env.factory, ["2" * 40], repo=ALPHA)
     r = env.post("/runs", json={**filed, "reading_id": legacy.reading_id})
     assert r.status_code == 201, r.text
+
+
+def test_a_run_outside_a_readings_campaign_writes_rows_the_reading_never_counts(env: Env) -> None:
+    """DL-382, the reading's side: a run of a campaign-named reading's pool commit posted
+    WITHOUT its ``reading_id`` is queued outside the campaign — the submit gate has nothing to
+    tie it to, so no ``campaign.admitted`` event names it — and its sealed row never counts
+    toward the reading, however clean. The same row from a run admitted under the campaign
+    counts; a reading under no campaign counts a loose run's row as before."""
+    env.settings.builder.executor = "docker"
+    cid = _register(env)["campaign_id"]
+    sha, plain = "1" * 40, "2" * 40
+    named = write_reading(env.factory, [sha], repo=ALPHA, campaign_id=cid, hierarchy=("S3",))
+    legacy = write_reading(env.factory, [plain], repo=ALPHA, hierarchy=("S3",))
+    loose = env.post("/runs", json={**GOLD, "executor": "docker", "task_ids": [sha, plain]})
+    assert loose.status_code == 201, loose.text
+    assert _admitted(env, cid) == []
+    filed = {**GOLD, "executor": "docker", "task_ids": [sha], "max_cost_usd": 5}
+    admitted = env.post("/runs", json={**filed, "reading_id": named.reading_id, "campaign_id": cid})
+    assert admitted.status_code == 201, admitted.text
+    assert [a["run_id"] for a in _admitted(env, cid)] == [admitted.json()["id"]]
+
+    def counted() -> dict[str, int]:
+        got = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
+        return {o["reading_id"]: o["arms"][0]["counted"] for o in got}
+
+    def row(run_id: str, commit: str) -> Any:
+        return sealed_row(commit, repo=ALPHA, run_id=run_id, arm="S3", cell=CELL, created=LATER)
+
+    ledger = DbLedger(env.factory)
+    ledger.append(row(loose.json()["id"], sha))
+    ledger.append(row(loose.json()["id"], plain))
+    assert counted() == {named.reading_id: 0, legacy.reading_id: 1}
+    served = env.get("/readings", params={"repo": ALPHA}).json()["readings"]
+    assert {o["reading_id"]: o["admitted_runs"] for o in served} == {
+        named.reading_id: 1,
+        legacy.reading_id: None,
+    }
+    assert not any(o["admissions_unread"] for o in served)
+    ledger.append(row(admitted.json()["id"], sha))
+    assert counted() == {named.reading_id: 1, legacy.reading_id: 1}
+
+
+def test_load_readings_reads_each_campaigns_admissions_on_each_backend(backend: Backend) -> None:
+    """DL-382 on both stores: ``load_readings`` fills a campaign-named reading with the
+    ``run_id`` of every ``campaign.admitted`` event on ITS campaign's trace — not another
+    campaign's, not another action's — and leaves a reading under no campaign without any
+    (``admitted is None``, so it counts as before)."""
+    init_db(backend.engine)
+    cid, other = "cmp_" + "a" * 24, "cmp_" + "b" * 24
+    named = write_reading(backend.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
+    legacy = write_reading(backend.factory, ["2" * 40], repo=ALPHA)
+    for trace, action, run_id in (
+        (cid, CAMPAIGN_ADMITTED, "run-a"),
+        (cid, CAMPAIGN_ADMITTED, "run-b"),
+        (other, CAMPAIGN_ADMITTED, "run-c"),
+        (cid, CAMPAIGN_REGISTERED, "run-d"),
+    ):
+        stored = append_event(
+            backend.factory,
+            trace_id=trace,
+            stage="system",
+            action=action,
+            payload={"run_id": run_id},
+        )
+        assert stored is not None
+    with backend.factory() as s:
+        assert admitted_runs(s, cid) == {"run-a", "run-b"}
+        got = {r.reading_id: r for r in load_readings(s, ALPHA)}
+    assert got[named.reading_id].admitted == {"run-a", "run-b"}
+    assert not got[named.reading_id].admissions_unread
+    assert got[legacy.reading_id].admitted is None
+    assert not got[legacy.reading_id].admissions_unread
 
 
 def test_a_record_that_does_not_rehash_holds_no_ceiling(env: Env) -> None:

@@ -12,8 +12,9 @@ What it does: Pins that a forward reading registers only on a cell that reads ``
               at rung ``r1``, graded after it, and reads a held-out ``fail`` as a miss and an
               ``error``, another builder or a harness row as leaving the pool; that twenty passes
               promote the ceiling to an ``S2`` standard, while more ``S3`` rows, a pending or an
-              insufficient forward reading never do; and that the ledger's routing first attempts
-              read the same rule (P-690).
+              insufficient forward reading never do; that one under a campaign counts only first
+              attempts its campaign admitted (DL-382); and that the ledger's routing first
+              attempts read the same rule (P-690).
 How:          ``fixtures.readings`` for the ceiling reading and its sealed rows;
               ``register_forward`` and ``with_enrolment`` over ``HeldOutTests`` records;
               factory ``S2`` rows built with ``fixtures.posture.posture_row``.
@@ -29,6 +30,7 @@ Touch when:   never for a new repository; the forward pool rule or the look rule
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -66,6 +68,7 @@ from crb.core.reading import (
     latest_outcome,
     register_forward,
     rule_spend,
+    with_admissions,
     with_enrolment,
 )
 from fixtures.posture import posture_row
@@ -386,3 +389,21 @@ def test_an_enrolled_ticket_whose_first_attempt_was_not_graded_leaves_the_pool()
     waiting = evaluate(fwd, rows[1:5]).arms["S2"]
     assert waiting.commits[0].outcome is None and waiting.commits[0].left == ""
     assert waiting.look.state == STATE_LOOK_PENDING and waiting.look.counted == 0
+
+
+def test_a_forward_reading_under_a_campaign_counts_only_first_attempts_admitted_under_it() -> None:
+    """DL-382, fail closed: a forward reading that names a campaign (a record written by hand —
+    ``POST /readings/forward`` refuses one) counts a ticket's first attempt only when its run
+    was admitted under that campaign. Read without the campaign's admissions every ticket
+    waits — none is counted and none leaves on a guess; read with them, a first attempt from
+    a run outside the campaign decides its ticket uncounted (it leaves, never a later retry)."""
+    _reading, _rows, ceiling = _ceiling()
+    recs = [_record(i) for i in range(3)]
+    named = replace(_forward(ceiling), campaign_id="cmp_" + "a" * 24, reading_id="")
+    fwd = with_enrolment(named, recs)
+    rows = [_s2_row(recs[0], run_id="run-in"), _s2_row(recs[1], run_id="run-out")]
+    unread = evaluate(fwd, rows).arms["S2"]
+    assert unread.look.counted == 0 and [c.left for c in unread.commits] == ["", "", ""]
+    arm = evaluate(with_admissions(fwd, {"run-in"}), rows).arms["S2"]
+    assert arm.look.counted == 1 and arm.commits[0].outcome is True
+    assert arm.commits[1].left == LEFT_NOT_GRADED and arm.commits[2].left == ""

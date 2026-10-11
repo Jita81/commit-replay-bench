@@ -951,8 +951,9 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
     """The refusals of a run filed under a reading (P-789, DL-382, DL-383): 422
     ``reading_unknown`` when ``body.reading_id`` is not a verified reading of ``body.repo``;
     409 ``campaign_required`` when the reading names a campaign and the run is not filed
-    under that same campaign — a reading's runs spend only under the ceiling its campaign
-    holds, whatever route queues them (the Learn re-measurement queue included); 409
+    under that same campaign — a run filed under the reading spends only under the ceiling
+    its campaign holds, whatever route queues it (the Learn re-measurement queue included),
+    and one posted without ``reading_id`` writes rows the reading never counts; 409
     ``reading_unsealed`` when the run's sandbox executor or the deployment's builder executor
     is not ``docker`` — a reading is registered only on a sealed deployment; 409
     ``reading_posture_mismatch`` when the posture class the run would be graded in (the

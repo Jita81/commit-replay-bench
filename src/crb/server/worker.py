@@ -215,7 +215,7 @@ from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.builders.container import UnconfirmedKill
 from crb.builders.labeller import make_labeller
-from crb.core.campaign import CAMPAIGN_ADMITTED, REFUSAL_REQUIRED
+from crb.core.campaign import REFUSAL_REQUIRED
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
@@ -1595,18 +1595,11 @@ class Worker:
             reading = next(
                 (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
             )
-            campaign_id = reading.campaign_id if reading is not None else ""
-            if not campaign_id:
-                return None
-            admitted = any(
-                str((ev.payload_json or {}).get("run_id", "")) == run.id
-                for ev in s.execute(
-                    select(Event).where(
-                        Event.trace_id == campaign_id, Event.action == CAMPAIGN_ADMITTED
-                    )
-                ).scalars()
-            )
-        if admitted:
+        campaign_id = reading.campaign_id if reading is not None else ""
+        if reading is None or not campaign_id:
+            return None
+        # ``load_readings`` read the campaign's admissions into the reading (DL-382)
+        if run.id in (reading.admitted or frozenset()):
             return None
         error = (
             f"{REFUSAL_REQUIRED}: reading {reading_id!r} spends under campaign "

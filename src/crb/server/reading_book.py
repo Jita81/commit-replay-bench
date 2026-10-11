@@ -8,12 +8,16 @@ re-exports it for its existing callers.
 Navigation
 ----------
 What it is:   The one reader of ``reading.registered`` events: the verified readings of a
-              repository, in registration order, a forward reading's pool enrolled.
+              repository, in registration order, a forward reading's pool enrolled and a
+              campaign-named reading's admitted runs read.
 What it does: Reads the repository's reading events; keeps a record only when its id and pool
               hash re-hash and it names this repository; fills a forward reading's pool from the
-              held-out records written after it (``with_enrolment``, DL-334).
+              held-out records written after it (``with_enrolment``, DL-334); fills a reading
+              that names a campaign with the runs admitted under it (``with_admissions``,
+              DL-382), so every server reader counts only those runs' rows.
 How:          ``Event`` rows (``action == reading.registered``) → ``Reading.from_dict`` →
-              ``Reading.verify`` → ``with_enrolment`` over ``load_held_out``.
+              ``Reading.verify`` → ``with_enrolment`` over ``load_held_out`` →
+              ``with_admissions`` over ``admitted_runs`` (one read per campaign).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 2)
 Works with:   src/crb/server/routes/readings.py (registers readings; re-exports this reader),
@@ -21,9 +25,10 @@ Works with:   src/crb/server/routes/readings.py (registers readings; re-exports 
               src/crb/server/worker.py (``_reading_unsealed``, ``_reading_posture_mismatch``:
               the same rules at claim),
               src/crb/core/reading.py (the record, its hash and the enrolment rule),
-              src/crb/server/acceptance.py (``load_held_out``: a forward reading's records)
+              src/crb/server/acceptance.py (``load_held_out``: a forward reading's records),
+              src/crb/server/campaigns.py (``admitted_runs``: the runs a campaign admitted)
 Tested by:    tests/test_server_readings.py, tests/test_server_routes_runs.py,
-              tests/test_worker.py
+              tests/test_worker.py, tests/test_server_campaigns.py
 Touch when:   never for a new repository; a reading's verified set changes (an ADR amending
               ADR-0026 first).
 """
@@ -34,8 +39,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from crb.core.acceptance import HeldOutTests
-from crb.core.reading import READING_EVENT_ACTION, Reading, with_enrolment
+from crb.core.reading import READING_EVENT_ACTION, Reading, with_admissions, with_enrolment
 from crb.server.acceptance import load_held_out
+from crb.server.campaigns import admitted_runs
 from crb.store.models import Event
 
 
@@ -44,9 +50,11 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
     hash does not re-hash licenses nothing and is left out (the verified set is what counts).
     A forward reading's pool is filled here, once, from the held-out records written after it
     (``crb.core.reading.with_enrolment``, DL-334) — so every reader of readings, the factory's
-    gate included, reads the same enrolled pool."""
+    gate included, reads the same enrolled pool. A reading that names a campaign is filled with
+    the runs admitted under it (``with_admissions``, DL-382): it counts only their rows."""
     out: list[Reading] = []
     records: list[HeldOutTests] | None = None
+    admissions: dict[str, frozenset[str]] = {}
     for ev in session.execute(
         select(Event)
         .where(Event.repo == repo, Event.action == READING_EVENT_ACTION)
@@ -58,6 +66,10 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
                 if records is None:
                     records = load_held_out(session, repo)
                 reading = with_enrolment(reading, records)
+            if reading.campaign_id:
+                if reading.campaign_id not in admissions:
+                    admissions[reading.campaign_id] = admitted_runs(session, reading.campaign_id)
+                reading = with_admissions(reading, admissions[reading.campaign_id])
             out.append(reading)
     return out
 

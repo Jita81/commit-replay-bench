@@ -1216,6 +1216,12 @@ export interface ArmReading {
 /** A registered reading evaluated (`crb.core.reading.ReadingOutcome.to_dict`). */
 export interface ReadingOutcome {
   reading_id: string
+  /** The campaign the reading spends under (`cmp_<24 hex>`), `""` for one under none (DL-382). */
+  campaign_id?: string
+  /** How many runs its campaign admitted — only their rows count; `null` under no campaign or unread. */
+  admitted_runs?: number | null
+  /** True only for a campaign-named reading read without its admissions: it then counts no row. */
+  admissions_unread?: boolean
   rule: string
   hierarchy: string[]
   /** `standard`, `ceiling`, `look_pending`, `insufficient`, `undecided`. */
