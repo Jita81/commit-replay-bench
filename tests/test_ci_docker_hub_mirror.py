@@ -1,0 +1,503 @@
+"""Every CI job that talks to a docker daemon pulls Docker Hub images through mirror.gcr.io.
+
+On 2026-10-09 Docker Hub refused GitHub's runners: run 37989331696 lost its docker jobs on
+two attempts to ``429 Too Many Requests`` (the unauthenticated pull rate limit, which a
+runner's shared address spends on whoever ran there before) and to 504s and timeouts from its
+token endpoint, with no incident on its status page. Nothing had routed a pull anywhere else.
+These tests hold every workflow to the mirror (P-783).
+
+Navigation
+----------
+What it is:   The gate on how CI reaches Docker Hub.
+What it does: Fails when a job in any workflow talks to a docker daemon — a ``docker``
+              command in a ``run`` step, a ``docker/setup-buildx-action`` or
+              ``docker/build-push-action`` step, or ``docker`` among the tools its
+              ``CRB_TEST_REQUIRE_TOOLS`` declares — without the
+              ``./.github/actions/docker-hub-mirror`` step before the first of them
+              (what follows a step that certainly stops docker — its script's first
+              command stops the socket with the service — is exempt until a ``start``
+              or ``restart`` brings it back); when an image the runner pulls
+              as it sets a job up, before any step can add the mirror — the job's
+              ``container``, a ``services`` image, a ``docker://`` action — names Docker
+              Hub, or a registry an expression decides, rather than
+              ``mirror.gcr.io/library/…``; when a ``docker/setup-buildx-action``
+              step does not give BuildKit the docker.io mirror; and when the composite
+              action stops merging into the runner's ``daemon.json``, stops restarting the
+              daemon or stops proving that ``docker info`` lists the mirror. Each check is
+              also run on a planted regression so it cannot pass vacuously.
+How:          PyYAML reads the workflows and the composite action, tomllib reads each
+              ``buildkitd-config-inline``; a step's docker use is read from its text.
+Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
+ADRs:         none
+Works with:   .github/actions/docker-hub-mirror/action.yml (the step),
+              .github/workflows/ci.yml and .github/workflows/release.yml (its users),
+              docs/PREVENTION.md (P-783)
+Tested by:    (this is a test file)
+Touch when:   never for a new repository — client repositories are not built here; a job
+              starts using docker; the mirror moves; Docker Hub is reached another way.
+"""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from pathlib import Path
+from typing import Any
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parent.parent
+WORKFLOWS = sorted(
+    p for ext in ("*.yml", "*.yaml") for p in (ROOT / ".github" / "workflows").glob(ext)
+)
+ACTION = ROOT / ".github" / "actions" / "docker-hub-mirror" / "action.yml"
+MIRROR_STEP = "./.github/actions/docker-hub-mirror"
+MIRROR = "mirror.gcr.io"
+
+# a docker command, not a word in a name (`docker.io`, `docker-compose.yml`, `crb-docker`)
+_DOCKER_COMMAND = re.compile(r"(?<![\w./-])docker\s+(?![.-])[a-z]")
+# a systemctl verb and the units it names, to the end of that command: in
+# `systemctl start docker && docker pull alpine` the pull is the next command, not a unit.
+# A start is read wherever its text is (one that never runs only holds the job to the
+# mirror); a stop only where it certainly runs (`_stops_docker`)
+_DAEMON_START = re.compile(r"systemctl[ \t]+(?:start|restart)((?:[ \t]+[\w.@-]+)+)")
+_DAEMON_STOP = re.compile(r"(?:sudo[ \t]+)?systemctl[ \t]+stop((?:[ \t]+[\w.@-]+)+)")
+_DOCKER_UNIT = re.compile(r"docker(?:\.\w+)?")
+# the hosts a reference with no registry, or one of these, resolves to
+_DOCKER_HUB = frozenset({"docker.io", "index.docker.io", "registry-1.docker.io"})
+_PULLING_ACTIONS = ("docker/setup-buildx-action@", "docker/build-push-action@")
+
+
+def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [s for s in job.get("steps") or [] if isinstance(s, dict)]
+
+
+def _requires_docker(job: dict[str, Any]) -> bool:
+    tools = str((job.get("env") or {}).get("CRB_TEST_REQUIRE_TOOLS", ""))
+    return "docker" in tools.split()
+
+
+def _uses_docker(step: dict[str, Any], *, declared: bool) -> bool:
+    uses = str(step.get("uses", ""))
+    run = str(step.get("run", ""))
+    # login-action and metadata-action reach no registry for an image; these two pull
+    if uses.startswith(_PULLING_ACTIONS):
+        return True
+    if _DOCKER_COMMAND.search(run):
+        return True
+    # a job that declares docker runs it from its tests
+    return declared and "pytest" in run
+
+
+def _stops_docker(step: dict[str, Any]) -> bool:
+    """Whether a step certainly stops the daemon: it has no ``if`` and no
+    ``continue-on-error``, its script's first command is the ``systemctl stop`` — text
+    elsewhere may be printed (``echo "systemctl stop docker"``), written to a file or never
+    reached — and the stop names ``docker.socket`` with the service, which the socket
+    otherwise starts again at the next docker command."""
+    if "if" in step or step.get("continue-on-error"):
+        return False
+    lines = (line.strip() for line in str(step.get("run", "")).splitlines())
+    stop = _DAEMON_STOP.match(next((s for s in lines if s and not s.startswith("#")), ""))
+    units = set(stop.group(1).split()) if stop else set()
+    return "docker.socket" in units and bool(units & {"docker", "docker.service"})
+
+
+def _first_docker_use(steps: list[dict[str, Any]], *, declared: bool) -> int | None:
+    """The first step that reaches the daemon while it runs: what follows a step that
+    certainly stops it (``_stops_docker``), in that step or a later one, is exempt until a
+    ``start`` or ``restart`` of docker."""
+    running = True
+    for i, step in enumerate(steps):
+        run = str(step.get("run", ""))
+        running = running and not _stops_docker(step)
+        at = 0
+        if not running:
+            start = next(
+                (
+                    m
+                    for m in _DAEMON_START.finditer(run)
+                    if any(_DOCKER_UNIT.fullmatch(u) for u in m.group(1).split())
+                ),
+                None,
+            )
+            if start is None:
+                continue
+            running, at = True, start.end()
+        if _uses_docker({**step, "run": run[at:]}, declared=declared):
+            return i
+    return None
+
+
+def job_findings(where: str, text: str) -> list[str]:
+    """The jobs of one workflow that reach a docker daemon before the mirror step."""
+    findings = []
+    for name, job in (yaml.safe_load(text).get("jobs") or {}).items():
+        steps = _steps(job)
+        first = _first_docker_use(steps, declared=_requires_docker(job))
+        if first is None:
+            continue
+        mirror = next((i for i, s in enumerate(steps) if s.get("uses") == MIRROR_STEP), None)
+        if mirror is None or mirror > first:
+            findings.append(f"{where}: job {name!r} uses docker without {MIRROR_STEP} before it")
+    return findings
+
+
+def _by_expression(image: str) -> bool:
+    """Whether an expression decides the registry an image reference names: one before its
+    first ``/`` (``${{ vars.REGISTRY }}/library/postgres:16-alpine``), or, with no ``/``, one
+    in place of the name (``${{ matrix.image }}``). It can resolve to Docker Hub when the
+    workflow runs, and its own dots are not a registry host's."""
+    first, slash, _ = image.partition("/")
+    return "${{" in (first if slash else re.split(r"[:@]", first, maxsplit=1)[0])
+
+
+def _from_docker_hub(image: str) -> bool:
+    """Whether an image reference resolves to Docker Hub, or can: no registry host before its
+    first ``/`` (``postgres:16-alpine``, ``bitnami/redis``), Docker Hub's own, or one an
+    expression decides."""
+    first, slash, _ = image.partition("/")
+    if not slash or _by_expression(image):
+        return True
+    return first in _DOCKER_HUB or not ("." in first or ":" in first or first == "localhost")
+
+
+def _setup_images(job: dict[str, Any]) -> list[tuple[str, str]]:
+    """The images the runner pulls while it sets a job up, before its first step runs — so
+    before any step can give the daemon a mirror: the job's ``container``, each of its
+    ``services`` and the image of each ``docker://`` action a step uses."""
+    out = []
+    container = job.get("container")
+    if isinstance(container, dict):
+        container = container.get("image")
+    if container:
+        out.append(("container", str(container)))
+    for service, spec in (job.get("services") or {}).items():
+        if isinstance(spec, dict) and spec.get("image"):
+            out.append((f"service {service!r}", str(spec["image"])))
+    for step in _steps(job):
+        uses = str(step.get("uses", ""))
+        if uses.startswith("docker://"):
+            out.append(("action", uses.removeprefix("docker://")))
+    return out
+
+
+def image_findings(where: str, text: str) -> list[str]:
+    """The images a job's runner pulls from Docker Hub, or may, before any step runs: no mirror step
+    reaches them, so each must name the mirror itself (``mirror.gcr.io/library/…``)."""
+    return [
+        f"{where}: job {name!r} pulls {image} from"
+        f" {'a registry an expression names' if _by_expression(image) else 'Docker Hub'}"
+        f" as its {what} before any step — name {MIRROR}/library/… instead"
+        for name, job in (yaml.safe_load(text).get("jobs") or {}).items()
+        for what, image in _setup_images(job)
+        if _from_docker_hub(image)
+    ]
+
+
+def buildx_findings(where: str, text: str) -> list[str]:
+    """The ``setup-buildx-action`` steps whose BuildKit is not given the docker.io mirror."""
+    findings = []
+    for name, job in (yaml.safe_load(text).get("jobs") or {}).items():
+        for step in _steps(job):
+            if not str(step.get("uses", "")).startswith("docker/setup-buildx-action"):
+                continue
+            config = str((step.get("with") or {}).get("buildkitd-config-inline", ""))
+            try:
+                registries = tomllib.loads(config).get("registry", {})
+            except tomllib.TOMLDecodeError:
+                registries = {}
+            if MIRROR not in registries.get("docker.io", {}).get("mirrors", []):
+                findings.append(f"{where}: job {name!r} builds without BuildKit's docker.io mirror")
+    return findings
+
+
+def action_findings(text: str) -> list[str]:
+    """What the composite action must keep doing: merge, restart, prove."""
+    action = yaml.safe_load(text)
+    run = "\n".join(str(s.get("run", "")) for s in action["runs"]["steps"])
+    findings = []
+    if "https://" + MIRROR not in run:
+        findings.append("the action does not name https://mirror.gcr.io")
+    if not re.search(r'sudo cat "\$cfg"', run) or "jq" not in run:
+        findings.append("the action does not merge into the runner's daemon.json")
+    if not re.search(r"systemctl\s+restart\s+docker", run):
+        findings.append("the action does not restart the daemon")
+    proves = re.search(r"docker info --format '\{\{json \.RegistryConfig\.Mirrors\}\}'", run)
+    if not proves or not re.search(r"\*\)[^\n]*exit 1", run):
+        findings.append("the action does not fail unless docker info lists the mirror")
+    return findings
+
+
+def _all(text_of: dict[str, str]) -> list[str]:
+    return [
+        f
+        for where, text in text_of.items()
+        for f in job_findings(where, text)
+        + image_findings(where, text)
+        + buildx_findings(where, text)
+    ]
+
+
+def _real() -> dict[str, str]:
+    return {w.name: w.read_text("utf-8") for w in WORKFLOWS}
+
+
+def test_every_job_that_uses_docker_pulls_through_the_mirror() -> None:
+    assert _all(_real()) == []
+    # vacuity guard: the jobs this exists for are found and checked
+    ci = _real()["ci.yml"]
+    jobs = yaml.safe_load(ci)["jobs"]
+    for name in ("test-shard", "sandbox-images", "container"):
+        assert any(s.get("uses") == MIRROR_STEP for s in _steps(jobs[name])), name
+    assert _setup_images(jobs["test-postgres"]) == [
+        ("service 'postgres'", f"{MIRROR}/library/postgres:16-alpine")
+    ]
+    # the jobs that run with no daemon stop it for certain, and need no mirror for it
+    for name in ("fresh-clone-gates", "fresh-clone-shard"):
+        assert any(_stops_docker(s) for s in _steps(jobs[name])), name
+        assert _first_docker_use(_steps(jobs[name]), declared=False) is None, name
+
+
+def test_the_composite_action_merges_restarts_and_proves() -> None:
+    assert action_findings(ACTION.read_text("utf-8")) == []
+
+
+def _drop_nth(text: str, line: str, nth: int) -> str:
+    """``text`` without the ``nth`` occurrence of ``line``."""
+    start = -1
+    for _ in range(nth + 1):
+        start = text.index(line, start + 1)
+    return text[:start] + text[start + len(line) :]
+
+
+_MIRROR_LINE = f"      - uses: {MIRROR_STEP} # Docker Hub through mirror.gcr.io (P-783)\n"
+_BUILDX_CONFIG = (
+    "        with:\n"
+    "          # BuildKit in this builder does not read the daemon's registry-mirrors (P-783)\n"
+    "          buildkitd-config-inline: |\n"
+    '            [registry."docker.io"]\n'
+    '              mirrors = ["mirror.gcr.io"]\n'
+)
+
+
+@pytest.mark.parametrize(
+    ("what", "nth", "job"),
+    [
+        ("test shards", 0, "test-shard"),
+        ("container", 1, "container"),
+        ("sandbox images", 2, "sandbox-images"),
+    ],
+)
+def test_the_check_refuses_a_job_without_the_mirror(what: str, nth: int, job: str) -> None:
+    ci = _real()["ci.yml"]
+    planted = _drop_nth(ci, _MIRROR_LINE, nth)
+    found = job_findings("ci.yml", planted)
+    assert found == [f"ci.yml: job {job!r} uses docker without {MIRROR_STEP} before it"], what
+
+
+def test_the_check_refuses_the_mirror_after_the_builder_starts() -> None:
+    # restarting the daemon after setup-buildx-action would stop the builder's container
+    release = _real()["release.yml"]
+    buildx = "      - uses: docker/setup-buildx-action@v4\n" + _BUILDX_CONFIG
+    assert _MIRROR_LINE + buildx in release
+    planted = release.replace(_MIRROR_LINE + buildx, buildx + _MIRROR_LINE)
+    assert job_findings("release.yml", planted) == [
+        f"release.yml: job 'image' uses docker without {MIRROR_STEP} before it"
+    ]
+
+
+@pytest.mark.parametrize("nth", [0, 1])
+def test_the_check_refuses_a_builder_without_the_mirror(nth: int) -> None:
+    ci = _real()["ci.yml"]
+    planted = _drop_nth(ci, _BUILDX_CONFIG, nth)
+    assert len(buildx_findings("ci.yml", planted)) == 1
+
+
+def test_the_check_refuses_a_builder_mirroring_another_registry() -> None:
+    ci = _real()["ci.yml"]
+    planted = ci.replace('[registry."docker.io"]', '[registry."ghcr.io"]', 1)
+    assert len(buildx_findings("ci.yml", planted)) == 1
+
+
+def test_the_check_finds_a_new_job_that_pulls() -> None:
+    planted = (
+        "on: pull_request\n"
+        "jobs:\n"
+        "  probe:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v7\n"
+        "      - run: docker run --rm python:3.12-slim true\n"
+        "  declared:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    env:\n"
+        '      CRB_TEST_REQUIRE_TOOLS: "go docker"\n'
+        "    steps:\n"
+        "      - uses: actions/checkout@v7\n"
+        "      - run: .venv/bin/pytest -q\n"
+        "  stopped:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker.socket docker.service\n"
+        "      - run: if docker info; then exit 1; fi\n"
+        "  pulls-then-stops:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: docker pull python:3.12-slim\n"
+        "      - run: sudo systemctl stop docker.socket docker.service\n"
+        "  stops-in-one-step:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: docker pull python:3.12-slim && sudo systemctl stop docker\n"
+        "  restarts:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker.socket docker.service\n"
+        "      - run: sudo systemctl start docker\n"
+        "      - run: docker pull python:3.12-slim\n"
+        "  starts-and-pulls:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker.socket docker\n"
+        "      - run: sudo systemctl start docker && docker pull alpine:3.20\n"
+        "  named:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: echo docker.io docker-compose.yml crb-docker\n"
+        "  signs:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: docker/login-action@v4\n"
+        "      - uses: docker/metadata-action@v6\n"
+        "  builds:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: docker/build-push-action@v7\n"
+        # a stop counts only where it certainly runs: printed, written to a file, behind an
+        # `if`, or of the service alone (docker.socket starts it again), the daemon still runs
+        "  prints-a-stop:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        '      - run: echo "systemctl stop docker" && docker pull alpine:3.20\n'
+        "  writes-a-stop:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: |\n"
+        "          cat > stop.sh <<'EOF'\n"
+        "          sudo systemctl stop docker.socket docker.service\n"
+        "          EOF\n"
+        "      - run: docker pull alpine:3.20\n"
+        "  stops-if:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - if: failure()\n"
+        "        run: sudo systemctl stop docker.socket docker.service\n"
+        "      - run: docker pull alpine:3.20\n"
+        "  stops-the-service:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - run: sudo systemctl stop docker.service\n"
+        "      - run: docker pull alpine:3.20\n"
+    )
+    assert job_findings("probe.yml", planted) == [
+        f"probe.yml: job 'probe' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'declared' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'pulls-then-stops' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'stops-in-one-step' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'restarts' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'starts-and-pulls' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'builds' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'prints-a-stop' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'writes-a-stop' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'stops-if' uses docker without {MIRROR_STEP} before it",
+        f"probe.yml: job 'stops-the-service' uses docker without {MIRROR_STEP} before it",
+    ]
+
+
+def test_the_check_refuses_a_docker_hub_image_pulled_before_the_steps() -> None:
+    # the runner pulls these while it sets the job up: a mirror step comes too late for them
+    ci = _real()["ci.yml"]
+    planted = ci.replace(f"image: {MIRROR}/library/postgres:16-alpine", "image: postgres:16-alpine")
+    assert image_findings("ci.yml", planted) == [
+        "ci.yml: job 'test-postgres' pulls postgres:16-alpine from Docker Hub as its service"
+        f" 'postgres' before any step — name {MIRROR}/library/… instead"
+    ]
+    probe = (
+        "on: pull_request\n"
+        "jobs:\n"
+        "  in-a-container:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    container: python:3.12-slim\n"
+        "    steps:\n"
+        f"      - uses: {MIRROR_STEP}\n"
+        "  in-a-container-spec:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    container:\n"
+        "      image: docker.io/library/node:22\n"
+        "  with-a-service:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    services:\n"
+        "      redis:\n"
+        "        image: bitnami/redis:7.4\n"
+        "  docker-action:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        f"      - uses: {MIRROR_STEP}\n"
+        "      - uses: docker://alpine:3.20\n"
+        "  elsewhere:\n"
+        "    runs-on: ubuntu-latest\n"
+        f"    container: {MIRROR}/library/python:3.12-slim\n"
+        "    services:\n"
+        "      ghcr:\n"
+        "        image: ghcr.io/jita81/probe:1\n"
+        "      local:\n"
+        "        image: localhost:5000/probe\n"
+        "    steps:\n"
+        "      - uses: docker://ghcr.io/jita81/probe:1\n"
+        # an expression can name Docker Hub when the workflow runs: its dots are not a host's
+        "  by-expression:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    container: ${{ matrix.image }}\n"
+        "    services:\n"
+        "      postgres:\n"
+        "        image: ${{ vars.REGISTRY }}/library/postgres:16-alpine\n"
+        "      tagged:\n"
+        "        image: postgres:${{ matrix.pg }}\n"
+        "      mirrored:\n"
+        f"        image: {MIRROR}/library/postgres:${{{{ matrix.pg }}}}\n"
+    )
+    hub = f"from Docker Hub as its {{}} before any step — name {MIRROR}/library/… instead"
+    assert image_findings("probe.yml", probe) == [
+        "probe.yml: job 'in-a-container' pulls python:3.12-slim " + hub.format("container"),
+        "probe.yml: job 'in-a-container-spec' pulls docker.io/library/node:22 "
+        + hub.format("container"),
+        "probe.yml: job 'with-a-service' pulls bitnami/redis:7.4 " + hub.format("service 'redis'"),
+        "probe.yml: job 'docker-action' pulls alpine:3.20 " + hub.format("action"),
+        "probe.yml: job 'by-expression' pulls ${{ matrix.image }} "
+        + hub.replace("Docker Hub", "a registry an expression names").format("container"),
+        "probe.yml: job 'by-expression' pulls ${{ vars.REGISTRY }}/library/postgres:16-alpine "
+        + hub.replace("Docker Hub", "a registry an expression names").format("service 'postgres'"),
+        "probe.yml: job 'by-expression' pulls postgres:${{ matrix.pg }} "
+        + hub.format("service 'tagged'"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("what", "old", "new"),
+    [
+        ("a clobbered daemon.json", 'current="$(sudo cat "$cfg")"', "current='{}'"),
+        ("no restart", "sudo systemctl restart docker", "true"),
+        ("no proof", "exit 1 ;;", ";;"),
+        (
+            "another mirror",
+            "https://mirror.gcr.io",
+            "https://registry.example.invalid",
+        ),
+    ],
+)
+def test_the_action_check_refuses_a_weakened_action(what: str, old: str, new: str) -> None:
+    text = ACTION.read_text("utf-8")
+    assert old in text, what
+    assert action_findings(text.replace(old, new)) != [], what
