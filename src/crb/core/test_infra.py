@@ -79,6 +79,17 @@ Known residuals (documented, not covered)
   (``getattr(mod, "run" + "test")``), or reaches the run through ``gc`` / another
   object graph, is not matched. Closing that needs the gold witness, which judges
   the honest gold's own run, not the text.
+* The Go forgery scan (F4-GO-TEST2JSON-SPOOF) reads literals and calls too. It does
+  not match event text or the framing byte built at run time (``"--- " + "PASS"``,
+  ``string(rune(22))``), an aliased ``syscall`` import, an assembly (``.s``) source,
+  code that runs only under a test binary (``testing.Testing()``) or a file whose
+  parent already carried the text. Every runtime tell read from the binary's stdout is
+  as forgeable as the events themselves; a tell the binary cannot write (a coverage
+  profile, ``m.Run`` completing) changes how the oracle is built and is left open. A
+  repository that is itself a syscall library or a test-output tool, or a comment that
+  quotes test output, can trip it on an honest edit (1.08% of the non-test Go files in
+  a local module cache match as new files: ``x/sys`` wrappers, and tools or comments
+  that write, parse or quote test output; none in cobra's history).
 * Dependency trees (``node_modules``, ``vendor``, ``.venv``) are git-ignored and are
   the sandbox's responsibility (ADR-0005), not belt 1's.
 
@@ -86,8 +97,9 @@ Navigation
 ----------
 What it is:   Belt 1b's table — which files, per language and runner, are part of the
               oracle's execution environment (``INFRA_RULES``), the section-aware
-              comparison for files that are only partly so, and a text scan for a Python
-              source that patches pytest's own machinery (``framework_tamper``).
+              comparison for files that are only partly so, and a text scan for a source
+              that forges the run: Python patching pytest's own machinery, or Go printing
+              ``go test``'s events and exiting 0 (``framework_tamper``).
 What it does: Answers "is this path test infrastructure?" from a documented pattern table
               in which every rule carries its reason; for ``pyproject.toml``, ``setup.cfg``,
               ``tox.ini``, ``package.json``, ``go.mod``, ``pom.xml`` and ``Cargo.toml``
@@ -95,14 +107,18 @@ What it does: Answers "is this path test infrastructure?" from a documented patt
               mocha, babel, surefire, dev-dependencies, the linters belt 5 reads) rather
               than a version or a runtime dependency; and flags a non-test Python source that
               starts naming ``_pytest`` / ``pluggy`` / ``runtest`` / ``call_and_report`` /
-              a ``pytest_runtest_*`` hook (a forged PASS). Fails closed on anything it cannot
-              parse, anything too large, and any XML with a DOCTYPE.
+              a ``pytest_runtest_*`` hook, or a non-test Go source that starts printing
+              ``go test``'s event lines or exiting past its guard (a forged PASS). Fails
+              closed on anything it cannot parse, anything too large, and any XML with a
+              DOCTYPE.
 How:          ``rules_for`` (language + optional runner narrowing) → ``matching_rule``
               (whole-file rules beat section-aware ones) → ``is_test_infra``;
               ``infra_sections_changed`` projects both sides of the file onto the relevant
               key paths (TOML / JSON), section bodies (INI), directives (go.mod) or
               elements (pom.xml) and compares the projections; ``framework_tamper`` matches a
-              fixed set of pytest-internal names and flags any the after text introduces.
+              fixed set of pytest-internal names (Python) or event-text, framing and exit
+              spellings (Go) and flags any the after text introduces;
+              ``FRAMEWORK_TAMPER_SUFFIX`` names the source files each language's scan reads.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0010-polyglot-negative-controls.md
@@ -791,27 +807,60 @@ _FRAMEWORK_TAMPER_RE = re.compile(
 )
 
 
+#: What a non-test Go source needs to forge ``go test -json``'s events
+#: (F4-GO-TEST2JSON-SPOOF). test2json reads the test binary's stdout, so a line shaped like
+#: the testing package's own (``=== RUN``, ``--- PASS:``), printed from an ``init`` before the
+#: first framed line, or framed by the ``\x16`` byte itself, becomes a real ``run`` /
+#: ``pass`` event; the binary then exits 0 before the target's body runs. Matched: that event
+#: text; a summary line framed by the byte in any Go spelling (or raw); an exit that skips
+#: the testing package's ``os.Exit(0)`` guard (``syscall.Exit``, ``unix.Exit``, a raw
+#: ``SYS_EXIT`` syscall, cgo's ``exit``, a ``//go:linkname`` to an exit or to ``testing``);
+#: and ``paniconexit0``, the flag that turns the guard off. Each is a call or a literal, not a
+#: bare constant: a byte table holding ``\x16``, a syscall table naming ``SYS_EXIT`` and a
+#: ``//go:linkname`` to ``runtime.nanotime`` are everyday Go.
+_GO_FORGERY_RE = re.compile(
+    r"===[ \t]*(?:RUN|PAUSE|CONT|NAME)\b|---[ \t]*(?:PASS|FAIL|SKIP|BENCH)\b"
+    r"|(?:\\x16|\\u0016|\\U00000016|\\026|\x16)(?:PASS|FAIL|ok)\b"
+    r"|\b(?:syscall|unix)\.Exit\b|\b\w*Syscall\w*\([ \t]*(?:\w+\.)?SYS_EXIT\w*|\bC\._?[eE]xit\b"
+    r"|//go:linkname[ \t]+\w+[ \t]+(?:testing\.|internal/testlog\.|\S*[eE]xit\b)"
+    r"|\bpaniconexit0\b"
+)
+
+#: The source suffix each language's tamper scan reads (a ``*_test.go`` is already a rule).
+FRAMEWORK_TAMPER_SUFFIX: dict[str, str] = {_PY: ".py", _GO: ".go"}
+
+
+def _tamper_names(pattern: re.Pattern[str], text: str) -> set[str]:
+    return {re.sub(r"[ \t]+", " ", m) for m in pattern.findall(text)}
+
+
 def framework_tamper(before_text: str, after_text: str, language: str) -> bool:
     """Did a Python source start naming pytest's own machinery (``_pytest``, ``pluggy``,
-    ``runtest``, ``call_and_report``, a ``pytest_runtest_*`` hook) that its parent did not?
+    ``runtest``, ``call_and_report``, a ``pytest_runtest_*`` hook), or a Go source start
+    carrying test-event text, a framed summary line or a guard-skipping exit
+    (:data:`_GO_FORGERY_RE`), that its parent did not?
 
     A non-test source that patches ``_pytest.python.Function.runtest`` to a no-op, or wraps
     ``_pytest.runner.call_and_report``, makes every target test report PASSED without its body
     running — so belt 2's ``target_passed`` check is satisfied by a forged pass. The file is
     not in :data:`INFRA_RULES` (no runner config, not a conftest), so belt 1b never looks at
-    it; this scan does, at grade time, for Python only. It is anchored on the set of distinct
-    names GROWING (``after`` minus ``before``), so a repository whose own code already names
-    these — a pytest plugin under measurement — is not disqualified for keeping them (R1-F4-1).
+    it; this scan does, at grade time. The Go case is the same forgery one layer out: an
+    ``init`` that prints ``=== RUN   TestX`` / ``--- PASS: TestX`` and ``PASS`` and exits 0
+    gives a ``go test -json`` stream no parser can tell from a real pass. It is anchored on the
+    set of distinct names GROWING (``after`` minus ``before``), so a repository whose own code
+    already names these — a pytest plugin, a Go tool that parses test output — is not
+    disqualified for keeping them (R1-F4-1).
     """
-    if _language_value(language) != _PY:
+    lang = _language_value(language)
+    pattern = {_PY: _FRAMEWORK_TAMPER_RE, _GO: _GO_FORGERY_RE}.get(lang)
+    if pattern is None:
         return False
-    before = set(_FRAMEWORK_TAMPER_RE.findall(before_text))
-    after = set(_FRAMEWORK_TAMPER_RE.findall(after_text))
-    return bool(after - before)
+    return bool(_tamper_names(pattern, after_text) - _tamper_names(pattern, before_text))
 
 
 __all__ = [
     "ANY_LANGUAGE",
+    "FRAMEWORK_TAMPER_SUFFIX",
     "INFRA_RULES",
     "MAX_PARSE_BYTES",
     "InfraRule",

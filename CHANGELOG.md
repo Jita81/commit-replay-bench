@@ -17,12 +17,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   DL-391; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
   `hypothesis`, `smallest_effect`, campaign; `thin_cell` counts distinct tasks. Registration,
   admission need docker sandbox, builder in-posture (409 `reading_posture_mismatch`).
-  `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd` within cap plus headroom
+  `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd` within cap+headroom
   (409 `campaign_ceiling`); only campaign-admitted runs count (409 `campaign_required`); `S1`
   author calls count; overruns stop it. CI builds/runs the Go builder image; operator
   decisions recorded. Belt 2 needs gold's target passes, ids relocated per component; belt 1b
-  disqualifies pytest-machinery patches. In-build model calls are `nested_model_call` misses,
-  caught at any argument or wrapper (`env -`, `--prefix`). Claude Code costs messages once.
+  disqualifies pytest-machinery patches, forged Go test events. In-build model calls are
+  `nested_model_call` misses, caught through any wrapper (`env -`, `--prefix`). Claude Code
+  costs messages once.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen

@@ -761,8 +761,9 @@ class TestWholeFileAndNonInfra:
 
 
 class TestFrameworkTamper:
-    """``framework_tamper``: a plain Python source that reaches into pytest's own machinery to
-    forge the run. belt 1b's table lists named infra files; this scan covers any touched source.
+    """``framework_tamper``: a plain Python source that reaches into pytest's own machinery, or
+    a plain Go source that prints ``go test``'s own events, to forge the run. belt 1b's table
+    lists named infra files; this scan covers any touched source.
     """
 
     @pytest.mark.parametrize(
@@ -798,7 +799,87 @@ class TestFrameworkTamper:
             "def sub(a, b):\n    return a + b\n", "def sub(a, b):\n    return a - b\n", "python"
         )
 
-    def test_a_non_python_language_is_never_tamper(self) -> None:
+    def test_pytest_names_are_not_tamper_outside_python(self) -> None:
         after = "import _pytest.python\n_pytest.python.Function.runtest = None\n"
         assert not ti.framework_tamper("", after, "go")
         assert not ti.framework_tamper("", after, "javascript")
+
+    _GO_SUB = "package calc\n\nfunc Sub(a, b int) int { return a - b }\n"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            'fmt.Print("=== RUN   TestSub\\n--- PASS: TestSub (0.00s)\\nPASS\\n")',
+            'fmt.Println("---\tFAIL: TestSub")',
+            'os.Stdout.WriteString("\\x16PASS\\n")',
+            'os.Stdout.WriteString("\\u0016ok\\n")',
+            "os.Stdout.WriteString('\\026PASS')",
+            'os.Stdout.WriteString("\x16PASS")',
+            "syscall.Exit(0)",
+            "unix.Exit(0)",
+            "syscall.Syscall(syscall.SYS_EXIT, 0, 0, 0)",
+            "unix.RawSyscall(unix.SYS_EXIT_GROUP, 0, 0, 0)",
+            "C._exit(0)",
+            "//go:linkname exit runtime.exit",
+            "//go:linkname beforeExit os.runtime_beforeExit",
+            "//go:linkname chatty testing.chatty",
+            'os.Args = append(os.Args, "-test.paniconexit0=false")',
+        ],
+        ids=[
+            "event-text",
+            "event-text-tab",
+            "framed-pass-x",
+            "framed-ok-u",
+            "framed-pass-octal",
+            "framed-pass-raw",
+            "syscall-exit",
+            "unix-exit",
+            "raw-sys-exit",
+            "raw-sys-exit-group",
+            "cgo-exit",
+            "linkname-runtime-exit",
+            "linkname-before-exit",
+            "linkname-testing",
+            "paniconexit0-off",
+        ],
+    )
+    def test_a_go_source_that_can_forge_test_events_is_tamper(self, line: str) -> None:
+        """F4-GO-TEST2JSON-SPOOF: test2json reads the test binary's stdout, so a source that
+        prints the testing package's event lines, or frames them with its byte, and exits 0
+        past the ``os.Exit(0)`` guard forges every target test's pass."""
+        after = self._GO_SUB + f"\nfunc init() {{\n\t{line}\n}}\n"
+        assert ti.framework_tamper(self._GO_SUB, after, "go")
+
+    def test_go_text_already_in_the_parent_is_not_new_tamper(self) -> None:
+        before = self._GO_SUB + 'const report = "--- PASS: %s"\n'
+        assert not ti.framework_tamper(before, before + "var x = 1\n", "go")
+        assert not ti.framework_tamper(before, before.replace("--- PASS", "---  PASS"), "go")
+
+    @pytest.mark.parametrize(
+        "after",
+        [
+            "package calc\n\nfunc Sub(a, b int) int { return a + b }\n",
+            "package calc\n\nvar ops = map[string]func(int, int) int{}\n\n"
+            'func init() { ops["sub"] = Sub }\n',
+            'package calc\n\nimport "os"\n\nfunc Fatal() { os.Exit(1) }\n',
+            'package calc\n\n// PASS and RUN are words; --- is a rule.\nconst sep = "---"\n',
+            'package calc\n\nvar table = "\\x0a\\x16\\x12\\x14"\n',
+            "package calc\n\nconst (\n\tSYS_EXIT       = 1\n\tSYS_EXIT_GROUP = 231\n)\n",
+            'package calc\n\nimport _ "unsafe"\n\n//go:linkname nanotime runtime.nanotime\n'
+            "func nanotime() int64\n",
+        ],
+        ids=[
+            "source-edit",
+            "registering-init",
+            "os-exit",
+            "words-not-events",
+            "byte-table",
+            "syscall-table",
+            "linkname-clock",
+        ],
+    )
+    def test_an_honest_go_edit_is_not_tamper(self, after: str) -> None:
+        assert not ti.framework_tamper(self._GO_SUB, after, "go")
+
+    def test_every_tamper_language_names_its_source_suffix(self) -> None:
+        assert ti.FRAMEWORK_TAMPER_SUFFIX == {"python": ".py", "go": ".go"}

@@ -136,6 +136,11 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
    collection error, is met by a pass inside the file) and, when the RED named none (a build
    failure, a discovery, the factory's red proof), one pass at least. A runner that reports
    no passes (`cargo`, the JVM and node runners) is read by its exit code, as before.
+   A Go runner's passes come from the test binary's own stdout, so belt 1b also
+   disqualifies a touched non-test Go source that newly carries test-event text, a
+   `\x16`-framed summary line or an exit past the `os.Exit(0)` guard
+   (F4-GO-TEST2JSON-SPOOF); a forgery that builds that text at run time is left to the
+   Wave 3 review.
 
 ## Consequences
 

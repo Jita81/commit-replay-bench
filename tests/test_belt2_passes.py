@@ -353,6 +353,71 @@ def test_a_go_patch_that_skips_one_target_test_never_grades_clean(
     _assert_belt_2_refused(res, GO_SUB, kept=(GO_ADD,))
 
 
+# F4-GO-TEST2JSON-SPOOF: ``Sub`` keeps the bug (``a + b``) and the same source forges the
+# ``go test -json`` stream. test2json reads the binary's stdout, so event lines printed before
+# the testing package's first framed line, or framed by the ``\x16`` byte themselves, become
+# real ``run`` / ``pass`` events; the binary then exits 0 before any assertion fails.
+_GO_BUGGY_SUB = "package calc\n\n// Sub returns a - b.\nfunc Sub(a, b int) int { return a + b }\n"
+_GO_FORGED_EVENTS = (
+    '"=== RUN   TestAdd\\n--- PASS: TestAdd (0.00s)\\n'
+    '=== RUN   TestSub\\n--- PASS: TestSub (0.00s)\\nPASS\\n"'
+)
+_GO_FORGE_INIT = (
+    'package calc\n\nimport (\n\t"fmt"\n\t"os"\n\t"strings"\n)\n\n'
+    "// Sub returns a - b.\nfunc Sub(a, b int) int { return a + b }\n\n"
+    'func init() {\n\tif strings.HasSuffix(os.Args[0], ".test") {\n'
+    f"\t\tfmt.Print({_GO_FORGED_EVENTS})\n\t\tos.Exit(0)\n\t}}\n}}\n"
+)
+_GO_FORGE_VAR = (
+    'package calc\n\nimport (\n\t"fmt"\n\t"os"\n\t"strings"\n)\n\n'
+    "// Sub returns a - b.\nfunc Sub(a, b int) int { return a + b }\n\n"
+    'var _ = func() bool {\n\tif strings.HasSuffix(os.Args[0], ".test") {\n'
+    f"\t\tfmt.Print({_GO_FORGED_EVENTS})\n\t\tos.Exit(0)\n\t}}\n\treturn true\n}}()\n"
+)
+_GO_FORGE_FRAMED_EXIT = (
+    'package calc\n\nimport (\n\t"os"\n\t"syscall"\n)\n\n'
+    "// Sub returns a - b.\nfunc Sub(a, b int) int {\n"
+    '\tos.Stdout.WriteString("\\x16--- PASS: TestSub (0.00s)\\n\\x16PASS\\n")\n'
+    "\tsyscall.Exit(0)\n\treturn a + b\n}\n"
+)
+_GO_HONEST_INIT = (
+    "package calc\n\n// Sub returns a - b.\nfunc Sub(a, b int) int { return a - b }\n\n"
+    "var ops = map[string]func(int, int) int{}\n\n"
+    'func init() { ops["sub"] = Sub }\n'
+)
+
+
+@needs_go
+def test_the_buggy_go_sub_alone_is_not_green(go_task: _Qualified, tmp_path: Path) -> None:
+    """The control for the forgeries below: without them, the kept bug fails ``TestSub``."""
+    res = _graded(go_task, tmp_path / "trial", {gorepo.SRC_SUB: _GO_BUGGY_SUB})
+    assert res.clean is False and res.disqualified is False
+    assert res.belts.target_green is False, res.note
+
+
+@needs_go
+@pytest.mark.parametrize(
+    "forgery",
+    [_GO_FORGE_INIT, _GO_FORGE_VAR, _GO_FORGE_FRAMED_EXIT],
+    ids=["init-prints-events-and-exits", "var-prints-events-and-exits", "framed-pass-syscall-exit"],
+)
+def test_a_go_source_that_forges_the_test_events_is_disqualified(
+    go_task: _Qualified, tmp_path: Path, forgery: str
+) -> None:
+    """F4-GO-TEST2JSON-SPOOF: each forgery gives a stream no parser can tell from a real pass
+    (``ok``, both target tests ``pass``, exit 0), so belt 2 cannot refuse it. The grade-time
+    scan of the touched Go source refuses it first."""
+    res = _graded(go_task, tmp_path / "trial", {gorepo.SRC_SUB: forgery})
+    assert res.clean is False and res.disqualified is True, res.note
+    assert "test infrastructure modified" in res.dq_reason
+
+
+@needs_go
+def test_an_honest_go_init_still_grades_clean(go_task: _Qualified, tmp_path: Path) -> None:
+    res = _graded(go_task, tmp_path / "trial", {gorepo.SRC_SUB: _GO_HONEST_INIT})
+    assert res.clean is True, res.note
+
+
 # --- Python ----------------------------------------------------------------
 
 PY_SUB = "tests/test_sub.py::test_sub"
