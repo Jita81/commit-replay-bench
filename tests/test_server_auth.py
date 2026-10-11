@@ -1946,7 +1946,7 @@ def test_an_audited_write_hands_its_outcome_back_by_returning_it() -> None:
         "    return answer(commit_audited(db, write))\n"
     )
     assert _outcomes_collected(memo) == []
-    root = Path("src/crb")
+    root = Path(__file__).parents[1] / "src" / "crb"  # this checkout's tree, not the CWD's
     assert (root / "server/routes/runs.py").is_file()
     found = {
         path.relative_to(root).as_posix(): bad
