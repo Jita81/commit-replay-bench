@@ -1,6 +1,6 @@
 # ADR-0048 — The host posture declares its test environment, and a package that names no failing test never subtracts
 
-**Status:** Proposed (DL-235, DL-236; stream Q2, P-446 to P-455)
+**Status:** Proposed (DL-235, DL-236; stream Q2, P-446 to P-455); decision 7 added by DL-390 (P-796)
 **Date:** 2026-09-27
 **Apparatus impact:** rides apparatus 2.4 (the Wave 2 bump). The host posture's identity gains
 a field, so every host-posture qualification is stale and is measured again for no model money
@@ -8,7 +8,10 @@ a field, so every host-posture qualification is stale and is measured again for 
 without naming a test while every test it names is in the baseline; a Go belt narrower than
 the module while a package outside it no longer builds; and a Go or pytest run whose test
 process stopped before every test reported. A target run whose process ended before its tests
-reported moves from green to not green. No 2.3 row is re-derived.
+reported moves from green to not green. No 2.3 row is re-derived. Decision 7 (DL-390, before
+any Wave 3 row) moves a target run that exits 0 without a pass from a target test the gold
+passed from green to not green; it rides 2.4 too, because ADR-0001 already defines belt 2 as
+the target scope passing.
 
 ## Context
 
@@ -120,6 +123,19 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
    exits with a code other than 0 or 1, prints a stop banner (`KeyboardInterrupt`,
    `pytest.exit`, `stopping after N failures`), or exits 0 with no result line at all
    (`os._exit(0)`).
+7. **A target run is green only when the target tests the gold passed pass (DL-390, P-796).**
+   An exit code of 0 with no failure named is not a pass. A patch that adds a Go file whose
+   `init` sets `-test.run=^$`, or prints `PASS` and calls `os.Exit(0)`, or that skips or
+   xfails its target tests, exits 0 and names no failure, and graded clean. The Go parser
+   now records every `pass` event that names a test and the pytest command asks for the
+   passes (`-rpfE`), as `TestRun.passed`; a test also named failing never counts as passed.
+   Qualification records the target tests the gold passed in both of its runs
+   (`gold["target_passed"]`, hashed into the fingerprint only when present, so an older
+   record hashes as before), and belt 2 requires a pass from each of them. A record from
+   before that field requires a pass for every id its RED named (a file's id, from a
+   collection error, is met by a pass inside the file) and, when the RED named none (a build
+   failure, a discovery, the factory's red proof), one pass at least. A runner that reports
+   no passes (`cargo`, the JVM and node runners) is read by its exit code, as before.
 
 ## Consequences
 
@@ -145,6 +161,12 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
 - The pilot's 17 D6 cobra tasks were not "safe to freeze" under their target-only belt before
   the gate: a patch that broke `./doc`'s build through the root package's API would have
   graded clean. They are qualified again with the gate before any pool is frozen.
+- Decision 7 is as strong as the passes a runner reports. A Go `init` that prints forged
+  `--- PASS:` lines for the target tests is turned into `pass` events by `test2json`, the gold
+  witness's controls still read green by exit code, and `cargo`, the JVM and node runners
+  report no passes yet. A pool qualified before decision 7 is qualified again (no model
+  money) so its records carry the gold's passes: a build-failure RED names no test, so an
+  older record holds a patch only to one pass.
 
 ## Alternatives considered
 

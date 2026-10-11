@@ -10,7 +10,10 @@ the trial to be credited ``clean`` — the four core belts are always evaluated:
    ``build.rs`` … — the table in :mod:`crb.core.test_infra`) was added, edited or
    deleted. The oracle is the test *run*, not the test *files*; the builder cannot
    move the goalposts or the ground they stand on.
-2. ``target_green``     — the previously-RED target tests now pass.
+2. ``target_green``     — the previously-RED target tests now pass: the target run exits
+   0 and, when the runner reports the tests that passed, every target test the gold
+   passed is among them (an exit code with no failure named is not a pass: F4,
+   ADR-0048 decision 7).
 3. ``no_new_failures``  — nothing else in the belt scope broke, relative to the
    baseline captured at the parent with the tests overlaid.
 4. ``source_changed``   — the diff against the parent touches at least one
@@ -96,7 +99,8 @@ Works with:   src/crb/core/workspace.py (the trial tree and its integrity), src/
               (the row a result becomes), src/crb/core/runners/base.py (the test runs),
               src/crb/core/test_infra.py (belt 1's infrastructure table)
 Tested by:    tests/test_grade.py, tests/test_grade_api_belt.py, tests/test_oracle_controls.py,
-              tests/test_runners_node.py, tests/test_lint_status.py, tests/test_grade_post_run.py
+              tests/test_runners_node.py, tests/test_lint_status.py, tests/test_grade_post_run.py,
+              tests/test_belt2_passes.py
 Touch when:   never for a new repository — configure the runner, belt scope and lint in the
               repo config instead (docs/OPERATOR.md); adding a belt or changing what "clean"
               means needs an ADR and an apparatus bump (docs/EVIDENCE-AND-CLAIMS.md).
@@ -502,7 +506,46 @@ def _redacted(run: TestRun | None) -> TestRun | None:
         run.parse_error,
         run.services,  # which service instance the oracle ran against (C15)
         run.env_error,
+        run.passed,
     )
+
+
+#: How many unmet target ids a belt 2 note names before it says how many more.
+_SHOWN_IDS = 5
+
+
+def _met(test_id: str, passed: frozenset[str]) -> bool:
+    """``test_id`` passed, or it names a file (pytest's id for a collection error) and a
+    test inside that file passed."""
+    return test_id in passed or any(p.startswith(test_id + "::") for p in passed)
+
+
+def _target_shortfall(run: TestRun, qualification: Qualification) -> str:
+    """Why a target run that exited 0 still does not hold belt 2, or ``""`` when it does
+    (F4; ADR-0048 decision 7). A runner that reports no passes (``passed is None``) is read
+    by its exit code alone, as before. Otherwise every target test the gold passed in both
+    of its runs (``gold["target_passed"]``) must pass. A record written before that field
+    needs a pass for every id its RED named (a file's id, from a collection error, is met
+    by a pass inside the file) and, when the RED named none, one pass at least."""
+    passed = run.passed
+    if passed is None:
+        return ""
+    gold_passed = qualification.gold.get("target_passed")
+    if gold_passed is not None:
+        missing = sorted(frozenset(str(i) for i in gold_passed) - passed)
+        whose = "the gold passed"
+    else:
+        red_ids = sorted({str(i) for i in qualification.red.get("failing") or ()})
+        if not red_ids and not passed:
+            return "target not green: it exited 0 but no target test passed"
+        missing = [i for i in red_ids if not _met(i, passed)]
+        whose = "red at the parent"
+    if not missing:
+        return ""
+    shown = ", ".join(missing[:_SHOWN_IDS]) + (
+        f" and {len(missing) - _SHOWN_IDS} more" if len(missing) > _SHOWN_IDS else ""
+    )
+    return f"target not green: {len(missing)} target test(s) {whose} did not pass ({shown})"
 
 
 def check_posture(task: TaskSpec, ctx: GradeContext, executor: Executor) -> None:
@@ -874,21 +917,25 @@ def grade(
             return environment(
                 target_run, task.target_tests, allow_failing=None, target_run=target_run
             )
-        belts = Belts(tests_unmodified=True, target_green=target_run.green)
+        # an exit code of 0 is not a pass: the target tests the oracle needs must have
+        # passed too, when the runner reports passes (F4)
+        shortfall = _target_shortfall(target_run, ctx.qualification) if target_run.green else ""
+        target_green = target_run.green and not shortfall
+        belts = Belts(tests_unmodified=True, target_green=target_green)
         _emit(
             on_event,
             "grade.belt",
             task=task.task_id,
             belt="target_green",
-            value=target_run.green,
+            value=target_green,
             rc=target_run.returncode,
             timed_out=target_run.timed_out,
         )
-        if not target_run.green:
+        if not target_green:
             note = (
                 "target timed out"
                 if target_run.timed_out
-                else f"target not green (rc={target_run.returncode})"
+                else shortfall or f"target not green (rc={target_run.returncode})"
             )
             return done(
                 target_run=target_run,

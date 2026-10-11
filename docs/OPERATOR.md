@@ -226,7 +226,10 @@ module with a package that does not build in the posture (one that needs cgo on 
 without it) has its tasks refused at qualification. A run whose test process stopped before
 every test reported (a test that calls `os.Exit`, an interrupted pytest session, a process
 that exits 0 before its tests run) is unattributed: belt 2 reads it as not green and belt 3
-as failed.
+as failed. An exit code of 0 is not a pass either: for a Go or Python repository, belt 2
+needs every target test the gold passed at qualification to pass again, so a patch that
+skips them, or stops the run before they run, is not clean (ADR-0048 decision 7). A pool
+qualified before that rule is qualified again for its records to carry the gold's passes.
 
 Three shapes we met onboarding NHS repositories, as worked examples — each is what the
 form saves, shown as the stored `runner_opts` / layout it produces:

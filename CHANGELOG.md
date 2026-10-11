@@ -13,15 +13,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
-  ceiling the product holds** (P-787 to P-791, G-957, DL-372 to DL-383;
-  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading states `hypothesis`,
-  `smallest_effect` and its campaign, hashed into its id; `thin_cell` counts distinct tasks. A
-  reading registers, and its runs are admitted, only with sandbox and builder on docker, in its
-  posture class (409 `reading_posture_mismatch`). `POST /campaigns` holds a ceiling in pounds:
-  its runs need `max_cost_usd`, admitted while cap plus headroom fits (409 `campaign_ceiling`);
-  a reading counts only runs its campaign admitted (409 `campaign_required`); `S1` author
-  calls count; overrunning admitted headroom stops the campaign. CI builds and runs the Go
-  builder image; the operator's 2026-10-11 decisions are recorded.
+  ceiling the product holds** (P-787 to P-791, P-796, G-957, DL-372 to DL-383, DL-390;
+  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading's id hashes its
+  stated `hypothesis`, `smallest_effect` and campaign; `thin_cell` counts distinct tasks.
+  Registration and admission need docker sandbox and builder in the reading's posture class
+  (409 `reading_posture_mismatch`). `POST /campaigns` holds a pound ceiling: runs need
+  `max_cost_usd`, admitted while cap plus headroom fits (409 `campaign_ceiling`); a reading
+  counts only campaign-admitted runs (409 `campaign_required`); `S1` author calls count;
+  overrunning admitted headroom stops the campaign. CI builds and runs the Go builder image;
+  2026-10-11 operator decisions are recorded. Belt 2 needs every gold-passed target test, not
+  exit 0 alone.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen

@@ -10,19 +10,21 @@ Navigation
 What it is:   The Go runner — ``GoRunner`` over ``go test -json``.
 What it does: Maps test files to their packages (Go addresses packages, not files), runs
               ``go test -json`` with build caching disabled and the toolchain pinned to the
-              host's, parses the event stream into ``<package>::<Test>`` ids (a package that
-              fails naming no test, a test that started and never finished, a package that
-              passed without its binary's ``PASS`` are unattributed, never dropped), builds
-              the whole module after a narrower belt (the module build gate), declares the
-              tools a test may run on the host with ``GOENV=off`` (ADR-0048), warms the module
-              cache in setup and detects ``gofmt`` for belt 5.
+              host's, parses the event stream into the failing and the passing
+              ``<package>::<Test>`` ids (a package that fails naming no test, a test that
+              started and never finished, a package that passed without its binary's ``PASS``
+              are unattributed, never dropped), builds the whole module after a narrower belt
+              (the module build gate), declares the tools a test may run on the host with
+              ``GOENV=off`` (ADR-0048), warms the module cache in setup and detects ``gofmt``
+              for belt 5.
 How:          ``target_scope``: directory of each test file → ``./pkg``. ``command``: env
               (``-count=1``, ``GOTOOLCHAIN=local``, ``CGO_ENABLED``; the caches under ``/tmp``
               and ``Command.exec_tmp`` under docker, because ``go test`` execs the binaries it
               builds there) → ``go test -json``. ``parse``: one JSON event per line;
-              ``Action == "fail"`` with a ``Test`` name; a package's own ``fail`` beside named
-              ones, a ``run`` with no terminal event and a package ``pass`` with no ``PASS``
-              line are a ``parse_error``. ``gate_run``: ``-run ^$ -vet=off ./...``.
+              ``Action == "fail"`` (or ``"pass"``) with a ``Test`` name; a package's own
+              ``fail`` beside named ones, a ``run`` with no terminal event and a package
+              ``pass`` with no ``PASS`` line are a ``parse_error``. ``gate_run``:
+              ``-run ^$ -vet=off ./...``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0011-repo-lint-belt.md, docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0048-the-host-posture-declares-its-environment.md
@@ -33,7 +35,8 @@ Works with:   src/crb/core/runners/base.py (the contract), src/crb/core/lint.py 
               image this command runs in)
 Tested by:    tests/test_runners_go.py, tests/test_runners_parsers.py, tests/test_runners_setup.py,
               tests/test_sandbox_images_docker.py, tests/test_runners_go_baseline.py,
-              tests/test_runners_toolenv.py, tests/test_runners_early_exit.py
+              tests/test_runners_toolenv.py, tests/test_runners_early_exit.py,
+              tests/test_belt2_passes.py
 Touch when:   a Go repository needs cgo, a pinned ``go`` binary, a module cache path or a host
               tool its tests run — set ``runner_opts`` (``cgo``, ``go``, ``gofmt``,
               ``gomodcache``, ``tools``; docs/OPERATOR.md);
@@ -267,9 +270,11 @@ class GoRunner(BaseRunner):
         return self.bind_deps(cmd, executor)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
-        """``<Package>::<Test>`` for every ``fail`` event that names a test. Three shapes are
-        UNATTRIBUTED (a ``parse_error``), so none can hide behind ids the baseline subtracts
-        or read as green (pilot finding D6, stream Q2's verifiers; ADR-0048):
+        """``<Package>::<Test>`` for every ``fail`` event that names a test, and for every
+        ``pass`` one (``TestRun.passed``: belt 2 requires them, F4; a test also named failing
+        never counts as passed). Three shapes are UNATTRIBUTED (a ``parse_error``), so none
+        can hide behind ids the baseline subtracts or read as green (pilot finding D6,
+        stream Q2's verifiers; ADR-0048):
 
         * a package whose ``fail`` names no test of its own (a build or vet failure, a crash
           outside a test) beside named failures — with nothing named, the base's fail-closed
@@ -282,6 +287,7 @@ class GoRunner(BaseRunner):
         * a package that ``pass``-ed without its binary's own ``PASS`` line: the binary ended
           before its tests reported (an ``init`` that calls ``os.Exit(0)``)."""
         failing: set[str] = set()
+        passed: set[str] = set()
         failed_pkgs: set[str] = set()
         named_pkgs: set[str] = set()
         started: dict[tuple[str, str], None] = {}
@@ -305,6 +311,8 @@ class GoRunner(BaseRunner):
                 if action == "fail":
                     failing.add(f"{pkg}::{test}")
                     named_pkgs.add(pkg)
+                elif action == "pass":
+                    passed.add(f"{pkg}::{test}")
                 continue
             if action == "output" and ev.get("Output") in ("PASS\n", "FAIL\n"):
                 summarized.add(pkg)
@@ -348,4 +356,5 @@ class GoRunner(BaseRunner):
             tail_of(result.combined),
             duration_s=result.duration_s,
             parse_error=parse_error,
+            passed=frozenset(passed - failing),
         )

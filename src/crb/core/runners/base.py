@@ -46,6 +46,8 @@ What it is:   The runner contract (``TestRunner`` protocol, ``BaseRunner`` plumb
               records every language runner returns: ``TestRun``, ``SetupStep``, ``SetupResult``.
 What it does: Resolves target and belt scopes from the repo config; runs one scope through an
               executor and fails closed when a non-zero exit carries no attributable test id;
+              carries the ids of the tests that passed when the runner reports them (belt 2
+              requires them: ``TestRun.passed``, ADR-0048 decision 7);
               runs the one network-permitted setup phase on the host (refused under docker) and
               keeps its redacted record; starts and stamps the oracle's services; on the host,
               runs every test command in the runner's declared environment (ADR-0048); runs a
@@ -68,7 +70,7 @@ Works with:   src/crb/core/runners/pytest_runner.py (the reference subclass),
               src/crb/core/lint.py (belt 5 plans), src/crb/core/spec.py (``RepoConfig.belt_scope``
               and ``runner_opts``), src/crb/core/runners/__init__.py (the registry)
 Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_services.py,
-              tests/test_runners_toolenv.py
+              tests/test_runners_toolenv.py, tests/test_belt2_passes.py
 Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``runner_opts`` and
               ``lint`` in the repo config instead (docs/OPERATOR.md); adding a language means a
               new subclass registered in src/crb/core/runners/__init__.py; changing ``TestRun``
@@ -149,9 +151,16 @@ class TestRun:
     #: verdict about the code: no failing id is attributed, the grader records an
     #: environment failure and the qualifier refuses ``QUAL_TREE_COPY_FAILED``.
     env_error: str = ""
+    #: The ids of the tests that PASSED (never one that also failed), or ``None`` when this
+    #: runner does not report passes. Belt 2 requires a pass for each target test the
+    #: oracle needs, so an exit code of 0 with no failure named is never enough on its own
+    #: (F4; ADR-0048 decision 7). Not part of :meth:`to_dict`: packs stay byte-identical.
+    passed: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "services", tuple(self.services))
+        if self.passed is not None:
+            object.__setattr__(self, "passed", frozenset(self.passed))
 
     @property
     def green(self) -> bool:
@@ -643,6 +652,7 @@ class BaseRunner:
             result.duration_s,
             parse_error,
             records,
+            passed=run.passed,
         )
 
     def run_for(
@@ -955,3 +965,26 @@ _FAIL_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M)
 def parse_pytest_failures(text: str) -> frozenset[str]:
     """The pytest ``-rfE`` short-summary parser. Shared so every pytest path is identical."""
     return frozenset(m.split(" ")[0] for m in _FAIL_LINE.findall(text))
+
+
+#: One ``-rp`` short-summary line: ``PASSED tests/x.py::test_a``. The id is read as the
+#: failure parser reads it (up to the first space), so the two sets compare.
+_PASS_LINE = re.compile(r"^PASSED\s+(\S+)", re.M)
+
+
+def parse_pytest_passes(text: str) -> frozenset[str]:
+    """The ids the ``-rp`` short summary names PASSED (belt 2's requirement, F4)."""
+    return frozenset(_PASS_LINE.findall(text))
+
+
+_PASS_SUMMARY_LINE = re.compile(r"^PASSED\s+\S+[^\n]*(?:\n|\Z)", re.M)
+#: The short-summary banner with no failure or error under it (an all-pass run's, once its
+#: PASSED lines are gone).
+_BARE_SUMMARY_BANNER = re.compile(r"^=+ short test summary info =+\n(?!(?:FAILED|ERROR)\s)", re.M)
+
+
+def without_pytest_passes(text: str) -> str:
+    """``text`` without the ``-rp`` summary's PASSED lines, or its banner when nothing else is
+    under it: the tail an operator or a builder reads stays what ``-rfE`` printed, so a
+    suite's passes never crowd its failures' tracebacks out of the last lines."""
+    return _BARE_SUMMARY_BANNER.sub("", _PASS_SUMMARY_LINE.sub("", text))
