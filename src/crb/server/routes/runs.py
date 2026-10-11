@@ -952,10 +952,11 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
     ``reading_unknown`` when ``body.reading_id`` is not a verified reading of ``body.repo``;
     409 ``campaign_required`` when the reading names a campaign and the run is not filed
     under that same campaign — a run filed under the reading spends only under the ceiling
-    its campaign holds, whatever route queues it (the Learn re-measurement queue included),
-    and one posted without ``reading_id`` writes rows the reading never counts; 409
-    ``reading_unsealed`` when the run's sandbox executor or the deployment's builder executor
-    is not ``docker`` — a reading is registered only on a sealed deployment; 409
+    its campaign holds, whatever route queues it (the Learn re-measurement queue included);
+    a run posted without ``reading_id`` is not refused here — with the campaign's
+    ``campaign_id`` it is admitted and its rows count, without it the reading never counts its
+    rows; 409 ``reading_unsealed`` when the run's sandbox executor or the deployment's
+    builder executor is not ``docker`` — a reading is registered only on a sealed deployment; 409
     ``reading_posture_mismatch`` when the posture class the run would be graded in (the
     run's executor with the repository's ``sandbox_tree``, else the deployment's) is not the
     one the reading counts — its tree changed since the registration, or the reading named
