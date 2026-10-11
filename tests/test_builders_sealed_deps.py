@@ -8,15 +8,17 @@ What it is:   The suite for F87-1b: the commands a brief carries and the finish 
 What it does: Pins that the brief's test command, its harness command and the S1 arm's
               authored-test command name the set the session mounted (``GOMODCACHE`` is the
               session's ``/deps/gomod``, never the Go runner's own ``/tmp/gomod``; Python's
-              ``PYTHONPATH`` reaches ``/deps/site``); that with no session the command is
+              ``PYTHONPATH`` reaches ``/deps/site``; a node set bound at
+              ``/work/node_modules`` is named where the session moves it, and a local
+              executor's host paths never reach the brief); that with no session the command is
               byte-for-byte what it was; that a command that would still point the toolchain
               elsewhere, or a set that is not the builder's, stops the run before the builder
               is paid; and that the finish gate measures its parent baseline and re-runs its
               declared commands under that same set, measured apart from an unsealed rung.
 How:          The Go fixture's feat commit through the run's own ``BuildFn`` with a fake
               container session (no daemon) and a docker-named executor that records every
-              command and runs none; ``sighted_test_command`` called directly for the guard
-              and the Python shape.
+              command and runs none; ``sighted_test_command`` called directly for the guard,
+              the Python shape and the node and local-executor views.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0012-builder-in-a-sealed-container.md,
@@ -25,9 +27,10 @@ Works with:   src/crb/builders/adapter.py (under test: ``sighted_test_command``,
               ``session_env_overrides``, the gate's binding), src/crb/builders/container.py
               (``builder_deps_view``: the set as the session mounts it), src/crb/core/finish_gate.py
               (``command_baseline`` / ``verify`` under a binding), src/crb/core/deps.py (the
-              bindings), tests/test_replay_s1_arm.py (the Go fixture's sealed bindings and the
-              recording executor this suite reuses), tests/test_ratchet_sealed_deps.py (the
-              ratchet that keeps every such call bound)
+              bindings), src/crb/provision/node.py (where a node set mounts,
+              ``/work/node_modules``), tests/test_replay_s1_arm.py (the Go fixture's sealed
+              bindings and the recording executor this suite reuses),
+              tests/test_ratchet_sealed_deps.py (the ratchet that keeps every such call bound)
 Tested by:    tests/test_builders_sealed_deps.py
 Touch when:   never for a new repository; the session's dependency view, the brief's commands
               or the finish gate's binding change.
@@ -48,14 +51,23 @@ from crb.builders.base import Budget, BuildOutcome, EscalationLadder, Rung
 from crb.builders.brief import S1Arm
 from crb.builders.container import BuilderContainerSettings, builder_deps_view
 from crb.core.checks import RepoChecks, resolve
-from crb.core.deps import SCHEME_PY, BundleMount, DepsBinding, TaskDeps, register_store_root
+from crb.core.deps import (
+    SCHEME_NODE,
+    SCHEME_PY,
+    BundleMount,
+    DepsBinding,
+    TaskDeps,
+    register_store_root,
+)
 from crb.core.execution import Command, ExecResult, SandboxUnavailable
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED
+from crb.core.runners import get_runner
 from crb.core.runners.go_runner import GoRunner
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import Language, RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
+from crb.provision import node as pnode
 from crb.provision import python as ppy
 from test_replay_s1_arm import (
     GO_AUTHORED,
@@ -280,6 +292,58 @@ def test_the_python_brief_command_reads_the_session_site(tmp_path: Path) -> None
     bound = _assigned(adapter.sighted_test_command(runner, ex, root, ("tests/t.py",), deps=builder))
     assert ppy.INSIDE in bound["PYTHONPATH"].split(":"), bound
     assert bound["PATH"] == view["PATH"] and bound["PYTHONNOUSERSITE"] == "1", bound
+
+
+class _Local(_Docker):
+    """The same recording executor, named ``local``: a runner binds a set's host paths."""
+
+    name = "local"
+
+
+def test_the_brief_command_names_the_set_where_the_session_mounts_it(tmp_path: Path) -> None:
+    """R6A-V2-1: every case above mounts its set where the session does (``/deps/gomod``,
+    ``/deps/site``) under a docker executor, so the binding's env and the session's view
+    were one and nothing showed the view is laid over the rendered command. A node set
+    mounts at ``/work/node_modules``, which the sealed checkout owns, so the session mounts
+    it at ``/deps/node_modules`` (:func:`builder_deps_view`) and the brief must say so: the
+    binding's own ``/work/node_modules`` under docker, or the host store path under a local
+    executor, would point the builder away from its set and stop the run at the guard. A
+    Go set under a local executor is the same: the session's ``/deps/gomod``, never the
+    host's cache."""
+    store = register_store_root(tmp_path / "store")
+    key = "dep_" + "d" * 64
+    host = store / "node" / key / "node_modules"
+    host.mkdir(parents=True)
+    node = DepsBinding(
+        role="builder",
+        lang="javascript",
+        scheme=SCHEME_NODE,
+        key=key,
+        digest="sha256:" + "d" * 64,
+        mounts=(BundleMount(host, pnode.INSIDE, key),),
+        env={"NODE_PATH": pnode.INSIDE, "PATH": f"{pnode.INSIDE}/.bin:{pnode.IMAGE_PATH}"},
+        local_env={"NODE_PATH": str(host)},
+    )
+    view = builder_deps_view(node)[1]
+    assert view["NODE_PATH"] == "/deps/node_modules" != node.env["NODE_PATH"], view
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "package.json").write_text('{"name": "x", "scripts": {"test": "jest"}}')
+    for name in ("jest", "vitest", "mocha"):
+        runner = get_runner(RepoConfig(name="x", language=Language.JAVASCRIPT, runner=name))
+        for ex in (_Docker(ExecResult(0, "", "")), _Local(ExecResult(0, "", ""))):
+            cmd = adapter.sighted_test_command(runner, ex, root, ("a.test.js",), deps=node)
+            env = _assigned(cmd)
+            assert env["NODE_PATH"] == "/deps/node_modules", (name, ex.name, cmd)
+            assert env["PATH"] == view["PATH"], (name, ex.name, cmd)
+            assert pnode.INSIDE not in cmd and str(host) not in cmd, (name, ex.name, cmd)
+    go = _sealed_go_deps(tmp_path / "go").builder
+    root, _ = gorepo.build(tmp_path / "gorepo")
+    local = adapter.sighted_test_command(
+        GoRunner(gorepo.config()), _Local(ExecResult(0, "", "")), root, ("./calc",), deps=go
+    )
+    assert _assigned(local)["GOMODCACHE"] == "/deps/gomod", local
+    assert go.local_env["GOMODCACHE"] not in local, local
 
 
 def test_the_finish_gate_runs_under_the_session_set(tmp_path: Path) -> None:
