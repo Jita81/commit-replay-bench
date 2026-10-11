@@ -115,7 +115,10 @@ from crb.server.auth import (
     is_local_account,
     lock_users_table,
     rate_limited_error,
+    read_session_claims,
+    refuse_an_ended_session,
     rotate_session_nonce,
+    session_token_of,
     set_account_active,
     set_csrf_cookie,
     set_password,
@@ -322,7 +325,10 @@ def _username(user: User) -> str:
 
 
 def _get_user(db: Session, user_id: str) -> User:
-    user = db.get(User, user_id)
+    # Read from the database, never from the session's identity map: the routes call this
+    # under the users lock, and a copy of the row the session still held from before the
+    # lock would be answered without a read (docs/PREVENTION.md P-785).
+    user = db.get(User, user_id, populate_existing=True)
     if user is None:
         raise ApiError(404, "not_found", f"no user {user_id!r}")
     return user
@@ -520,9 +526,18 @@ def change_own_password(  # noqa: PLR0917 — FastAPI injects each dependency by
         slot = limiter.acquire(username, ip)
     except LoginRateLimited as exc:
         raise rate_limited_error(exc, "too many failed attempts; try again later") from None
+    # verified before the lock, as the login verifies: argon2 is slow, and under the lock
+    # every guess would hold the users lock (on SQLite, the database's write lock)
     if not verify_password(user.password_hash, body.current_password):
         raise ApiError(401, "invalid_credentials", "current password is incorrect")
     limiter.succeed(slot)
+    # Under the lock an admin's act on this account holds: a change that had verified the
+    # old password went on to replace an admin's reset with its own (found widening #85's
+    # ratchet, 2026-10-10; docs/PREVENTION.md P-785). The row is read again, and a session
+    # that a reset, a sign-out everywhere or a disable ended in between writes nothing.
+    lock_users_table(db)
+    _, cv = read_session_claims(settings, session_token_of(request, settings))
+    user = refuse_an_ended_session(_get_user(db, me.id), cv)
     set_password(user, body.new_password)
     record_user_event(db, action="user.password_set", actor=me.id, target=user, by="self")
     db.commit()
@@ -548,6 +563,10 @@ def set_user_password(  # noqa: PLR0917 — FastAPI injects each dependency by n
 ) -> UserOut:
     """Set a local account's password. Every session the account holds ends on its next
     request; when the admin sets their own, this response re-issues their cookie."""
+    # Under the lock an acceptance of the account's link holds: one that had read the link
+    # as pending went on to replace this password with the person's and stamp the withdrawn
+    # link accepted (CodeRabbit on #81, 2026-10-10; docs/PREVENTION.md P-785).
+    lock_users_table(db)
     user = _get_user(db, user_id)
     set_password(user, body.password)
     record_user_event(db, action="user.password_set", actor=admin.id, target=user, by="admin")
@@ -574,6 +593,10 @@ def revoke_user_sessions(
     change). The account can sign in again at once; to keep it out, deactivate it as well.
     Recorded as ``user.sessions_revoked``. When an admin signs themself out everywhere,
     this response clears their cookies too."""
+    # Under the lock a self-service password change holds: one that had found its session
+    # current went on to set a fresh cookie for it after this rotation committed, and the
+    # session signed out everywhere stayed signed in (P-785).
+    lock_users_table(db)
     user = _get_user(db, user_id)
     rotate_session_nonce(user)
     record_user_event(db, action="user.sessions_revoked", actor=admin.id, target=user)
@@ -597,6 +620,10 @@ def set_active(
     when it would leave no active admin, or none who can sign in. Idempotent. The
     idempotency and last-admin decisions are ``set_user_active``'s, taken under the users
     lock on a re-read row — the ``user`` loaded here is only the handle."""
+    # Activating withdraws the account's link, so the lock comes before any read, as in every
+    # route that withdraws or spends a link (docs/PREVENTION.md P-785); ``set_user_active``
+    # takes it again, which re-enters it, and still re-reads the row.
+    lock_users_table(db)
     user = _get_user(db, user_id)
     if not set_user_active(db, user, body.active, sign_in=SignInPaths.of(settings)):
         db.rollback()  # nothing to write: release the users lock now, not at teardown
@@ -715,9 +742,8 @@ def _stored(
     event (EI-8). A file cannot join the transaction, so a crash, or a commit that fails
     after the write, can still leave the change unrecorded; a lost ``seq`` race writes the
     same value again, which is safe."""
-    out: dict[str, Any] = {}
 
-    def write() -> None:
+    def write() -> Any:
         try:
             fp = secrets.fingerprint_of(secret, token)
         except ValueError as exc:
@@ -727,14 +753,13 @@ def _stored(
         )
         db.flush()
         try:
-            out["status"] = secrets.set(secret, token, set_by=set_by)
+            return secrets.set(secret, token, set_by=set_by)
         except ValueError as exc:
             raise ApiError(422, "invalid_token", str(exc)) from None
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
 
-    commit_audited(db, write)
-    return _status_out(out["status"])
+    return _status_out(commit_audited(db, write))
 
 
 def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatusOut:
@@ -745,25 +770,24 @@ def _removed(db: Session, actor: str, secrets: Any, secret: str) -> SecretStatus
     :func:`_stored` stores (P-440, P-443). A lost ``seq`` race runs ``write`` again and the
     removal is safe to repeat, but a run after the file went finds nothing, so whether the
     secret existed is read on the first run only."""
-    out: dict[str, Any] = {}
+    first_run: dict[str, bool] = {}  # kept across runs on purpose; the status is returned
 
-    def write() -> None:
+    def write() -> Any:
         try:
-            if "existed" not in out:
-                out["existed"] = bool(secrets.status(secret).present)
+            if "existed" not in first_run:
+                first_run["existed"] = bool(secrets.status(secret).present)
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
         _record_secret_change(
-            db, removed=True, actor=actor, secret=secret, existed=out["existed"], via="api"
+            db, removed=True, actor=actor, secret=secret, existed=first_run["existed"], via="api"
         )
         db.flush()
         try:
-            out["status"] = secrets.delete(secret)
+            return secrets.delete(secret)
         except SecretsInsecure as exc:
             raise ApiError(409, "secrets_insecure", str(exc)) from None
 
-    commit_audited(db, write)
-    return _status_out(out["status"])
+    return _status_out(commit_audited(db, write))
 
 
 def _record_login_stored(db: Session, broker: Any, st: Any, observer: str) -> None:
