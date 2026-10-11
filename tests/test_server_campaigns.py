@@ -15,15 +15,17 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               409), releases a stage (the line rises to $108.00; a release that lowers it or
               passes the ceiling is 409), serves it to a viewer (404 for an unknown id or a
               record that does not re-hash); admits runs until the line and refuses the next
-              with nothing queued, counts rows and author calls in the tally, holds an active
-              run's admitted headroom while it is the larger, stops on a cost not known and on
-              an overrun read against the headroom a run was admitted with (a first attempt
-              dearer than the $5.00 held), refuses a run without a cap, an unbounded ``S1``
-              run, a non-build kind and a run of a campaign-named reading filed under no
-              campaign or another one (``campaign_required``, DL-382), admits no more than
-              the line under concurrent submits, and shows a campaign-named reading counts
-              a run's rows only when the campaign admitted the run (a run posted without
-              ``reading_id`` counts none; a legacy reading counts it as before).
+              with nothing queued, counts rows and author calls in the tally, holds an
+              active run's admitted headroom while it is the larger and none for a finished
+              one (its ``headroom_usd`` 0.00, its ``admitted_headroom_usd`` kept), stops on
+              a cost not known and on an overrun read against the headroom a run was
+              admitted with (a first attempt dearer than the $5.00 held), refuses a run
+              without a cap, an unbounded ``S1`` run, a non-build kind and a run of a
+              campaign-named reading filed under no campaign or another one
+              (``campaign_required``, DL-382), admits no more than the line under concurrent
+              submits, and shows a campaign-named reading counts a run's rows only when the
+              campaign admitted the run (a run posted without ``reading_id`` counts none; a
+              legacy reading counts it as before).
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
               ``append_event``; four threads through ``admit_under_campaign``; the admissions
@@ -228,7 +230,9 @@ def test_runs_are_admitted_until_the_line_and_the_next_is_refused_with_nothing_q
 
 def test_the_tally_counts_each_runs_rows_and_its_s1_authors_calls(env: Env) -> None:
     """P-775's hole closed at the campaign: an S1 replay's author writes no ledger row,
-    so its calls are read from its ``author.attempt`` events and counted as spend."""
+    so its calls are read from its ``author.attempt`` events and counted as spend. Once the
+    run finishes the view holds nothing for it — ``headroom_usd`` reads 0.00 — while
+    ``admitted_headroom_usd`` keeps the figure it was admitted with."""
     cid = _register(env)["campaign_id"]
     r = env.post("/runs", json={**S1, "max_cost_usd": 10, "task_ids": SHAS, "campaign_id": cid})
     assert r.status_code == 201, r.text
@@ -258,6 +262,20 @@ def test_the_tally_counts_each_runs_rows_and_its_s1_authors_calls(env: Env) -> N
     assert run["headroom_usd"] == pytest.approx(5.45)
     assert view["held_usd"] == pytest.approx(8.55 + 5.45)
     assert view["left_usd"] == pytest.approx(54.0 - 1.45 - 14.0)
+    # once it has finished the run holds nothing: its headroom now reads $0.00 while the
+    # $5.45 it was admitted with stays on the record the overrun stop reads against
+    with env.factory() as s:
+        got = s.get(Run, rid)
+        assert got is not None
+        got.status = "succeeded"
+        s.commit()
+    done = env.get(f"/campaigns/{cid}").json()
+    run = done["runs"][0]
+    assert run["status"] == "succeeded"
+    assert run["headroom_usd"] == 0.0
+    assert run["admitted_headroom_usd"] == pytest.approx(5.45)
+    assert done["held_usd"] == 0.0
+    assert done["left_usd"] == pytest.approx(54.0 - 1.45)
 
 
 def test_a_cost_the_tally_cannot_know_stops_the_campaign(env: Env) -> None:
