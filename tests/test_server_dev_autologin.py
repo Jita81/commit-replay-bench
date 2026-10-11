@@ -376,6 +376,35 @@ class TestWhoIsSignedIn:
                 assert SESSION_COOKIE not in c.cookies
         assert "'vera'" in caplog.text and "disabled" in caplog.text
 
+    def test_an_account_disabled_after_the_check_is_refused_inside_the_write(
+        self, app: Any, local: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # the check reads the account before the events lock; the write reads it again as it
+        # committed, so a disable that lands in between holds. A re-read answered from the
+        # session's identity map is the check's own copy: it signed the disabled account in,
+        # stamped its last sign-in and wrote both events (P-785)
+        from crb.server.routes import auth as routes_auth
+
+        def disabled_meanwhile(db: Any, username: str) -> User | None:
+            user = find_local_user(db, username)
+            assert user is not None
+            with app.state.session_factory() as admin:
+                row = admin.get(User, user.id)
+                assert row is not None
+                row.active = False
+                admin.commit()
+            return user
+
+        before = _account(app, "root").last_login
+        monkeypatch.setattr(routes_auth, "find_local_user", disabled_meanwhile)
+        r = local.post(AUTOLOGIN)
+        assert r.status_code == 403 and err(r)["code"] == "dev_autologin_unavailable"
+        assert SESSION_COOKIE not in local.cookies
+        assert _autologin_events(app) == []
+        with app.state.session_factory() as db:
+            assert db.execute(select(Event).where(Event.action == "user.signed_in")).first() is None
+        assert _account(app, "root").last_login == before
+
     def test_an_account_no_sign_in_path_admits_signs_nobody_in(
         self, app: Any, local: TestClient, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -550,6 +579,26 @@ class TestTheSessionIsThePasswordSession:
             assert c.post(AUTOLOGIN).status_code == 200
             uid, cv = read_session_claims(app.state.settings, c.cookies[SESSION_COOKIE])
         assert (uid, cv) == (root.id, credential_version(root))
+
+    def test_sessions_ended_after_the_check_give_the_version_as_committed(
+        self, app: Any, local: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # a sign out everywhere between the check and the write: the session carries the nonce
+        # the write read as committed, so it works. One built from the check's copy names the
+        # old nonce, and the next request finds it ended (P-785)
+        from crb.server.routes import auth as routes_auth
+
+        def ended_meanwhile(db: Any, username: str) -> User | None:
+            user = find_local_user(db, username)
+            assert user is not None
+            _set_nonce(app, username, "b" * 32)
+            return user
+
+        monkeypatch.setattr(routes_auth, "find_local_user", ended_meanwhile)
+        assert local.post(AUTOLOGIN).status_code == 200
+        _, cv = read_session_claims(app.state.settings, local.cookies[SESSION_COOKIE])
+        assert cv == credential_version(_account(app, "root"))
+        assert local.get(f"{API_PREFIX}/auth/me").status_code == 200
 
     def test_its_csrf_token_validates_only_for_that_session(self, tmp_path: Path) -> None:
         app = create_app(make_settings(tmp_path, auth={"dev_autologin": "vera"}))
