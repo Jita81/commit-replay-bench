@@ -14,17 +14,24 @@ What it does: Pins that ``run_task`` disqualifies a worktree whose builder commi
               pointer, environment, prompt; assessment 2026-09-25 B1), that the run's events map
               the opaque name back to the task and each pack names the worktree its row graded,
               and that no worktree destination in the source tree is built from a commit sha.
+              Pins the P-792 reservation before a task's first build: a reserver's skip builds
+              nothing and writes no row (the re-execution after a kill is not a second draw,
+              C1), its halt stops the run before ``build.start`` (a cancel or a lost claim, C2
+              and C13), it is asked at ``r1`` only, a skipped task is not counted, what it
+              raises is never a row, and a run with no reserver is what it was before.
 How:          A ``RunSpec`` over ``pyrepo`` with a ``BuildAttempt`` that performs the edit; the
               ledger row is read back and the chain verified. The leakage cases drive the real
               ``claude_code`` adapter with a recording spawn (tests/fixtures/leakage.py) and scan
               what it was handed with the fixture's real sha; the source ratchet reads
-              ``src/crb`` line by line.
+              ``src/crb`` line by line. The reservation cases inject a fake reserver (an
+              in-memory book of reserved commits) and an ``on_event`` that kills the run.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md
 Works with:   src/crb/core/run.py (under test), src/crb/core/workspace.py
               (``enforce_integrity``, ``opaque_dest``), tests/fixtures/leakage.py (the sha
               scan), tests/test_builders_adapter.py (the full ``run`` end to end),
-              tests/test_grade.py (the same findings at the grader)
+              tests/test_grade.py (the same findings at the grader), src/crb/core/reading.py
+              (the reserve skip and halt codes and the reservation labels)
 Tested by:    tests/test_run.py
 Touch when:   never for a new repository; a new integrity violation is added to the workspace
               (mirror the case here so the run path and the CLI stay in step); a new place creates a
@@ -37,6 +44,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +55,15 @@ from crb.builders.base import Budget
 from crb.core.evidence import BuilderRef
 from crb.core.execution import LocalExecutor
 from crb.core.ledger import JsonlLedger, verify_chain
+from crb.core.reading import (
+    HALT_CANCEL_REQUESTED,
+    HALT_RUN_NOT_OWNED,
+    LABEL_CLAIM,
+    LABEL_RESERVATION,
+    LABEL_TREATMENT,
+    RESERVE_HALTS,
+    SKIP_COMMIT_RESERVED,
+)
 from crb.core.run import BuildAttempt, RunSpec, run_task
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
@@ -1094,3 +1111,374 @@ def test_an_admit_hook_halts_the_run_before_the_attempt_it_refuses(
     closed = replace(spec, admit=lambda task, rung_index: "closed")
     summary = run(closed, pyrepo.repo, [feat_task], build_fn)
     assert (summary.stopped_reason, summary.tasks, summary.rows, builds) == ("closed", 0, 0, [])
+
+
+# --- P-792 reserved.v1: a task's first attempt is reserved before its build (Wave 3) -----
+
+
+class _Killed(BaseException):
+    """The worker dying mid-attempt (a kill, an OOM, a power cut): nothing in the run catches it."""
+
+
+def _builder(builds: list[str], *, gold: Callable[[str], bool]) -> Any:
+    """A build callable that records each rung it is asked for and lands the gold where
+    ``gold(rung)`` says so (else it edits nothing: the target stays red)."""
+
+    def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
+        builds.append(rung)
+        if gold(rung):
+            pr.apply_gold(ws)
+        return _attempt()
+
+    return build_fn
+
+
+def _recording(events: list[tuple[str, dict[str, Any]]]) -> Callable[[str, Any], None]:
+    return lambda a, p: events.append((a, dict(p)))
+
+
+def test_reserve_skip_builds_nothing_and_writes_no_row(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """P-792 C1 (enumeration probe ``test_zz_enum_kill_probe.py::
+    test_kill_after_peek_before_append_is_a_free_reroll``): a worker killed after its operator
+    saw ``target_green=False``, before the row was written, left nothing behind — so the
+    re-execution after the reclaim drew a fresh attempt at the same commit: a free re-roll.
+    The first attempt is now reserved before its build; the re-execution's reserver finds that
+    reservation and skips the commit — no build, no ``build.start``, no row — and the worktree
+    it prepared is discarded. A skip is not a halt: the run ends on its own, counting no task."""
+    from dataclasses import replace
+
+    from crb.core.run import ReserveResult, run
+
+    book: list[str] = []  # the store's one reservation per (reading, arm, commit), in memory
+    asked: list[str] = []
+
+    def reserve(task: TaskSpec) -> ReserveResult:
+        asked.append(task.task_id)
+        if task.task_id in book:
+            return ReserveResult("skip", SKIP_COMMIT_RESERVED)
+        book.append(task.task_id)
+        return ReserveResult("ok")
+
+    def peek_then_kill(action: str, payload: Any) -> None:
+        peeked = action == "grade.belt" and payload.get("belt") == "target_green"
+        if peeked and payload.get("value") is False:
+            raise _Killed("the operator saw target_green=False and killed the worker")
+
+    builds: list[str] = []
+    lands: dict[str, bool] = {"gold": False}
+    build_fn = _builder(builds, gold=lambda rung: lands["gold"])
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), reserve=reserve)
+    with pytest.raises(_Killed):
+        run(spec, pyrepo.repo, [feat_task], build_fn, on_event=peek_then_kill)
+    assert builds == ["r1"] and list(spec.ledger.rows()) == []  # killed before its row
+    # the reclaimed run executes again; this time the builder would land the gold
+    lands["gold"] = True
+    events: list[tuple[str, dict[str, Any]]] = []
+    summary = run(spec, pyrepo.repo, [feat_task], build_fn, on_event=_recording(events))
+    assert builds == ["r1"], "the re-execution built again: the kill bought a second draw"
+    assert list(spec.ledger.rows()) == []
+    actions = [a for a, _ in events]
+    assert "build.start" not in actions and "ledger.append" not in actions
+    assert [p for a, p in events if a == "run.task_skipped"] == [
+        {"task": feat_task.task_id, "reason": SKIP_COMMIT_RESERVED}
+    ]
+    assert asked == [feat_task.task_id, feat_task.task_id]
+    (prep,) = [p for a, p in events if a == "prep.start"]
+    assert not (spec.scratch / prep["worktree"]).exists()
+    assert (summary.tasks, summary.rows, summary.clean, summary.stopped_reason) == (0, 0, 0, "")
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    assert (outcome.skipped, outcome.attempts, outcome.rows, outcome.halted) == (
+        SKIP_COMMIT_RESERVED,
+        0,
+        (),
+        "",
+    )
+    assert builds == ["r1"]
+
+
+@pytest.mark.parametrize("reason", RESERVE_HALTS)
+def test_reserve_halt_stops_the_run_before_build_start(
+    reason: str,
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """P-792 C2 and C13: a cancel asked, or a claim no longer the run's own (a dead login, a
+    reclaim), noticed by the reserver halts the run before its build: nothing is built, no row
+    is written and the commit stays pending for an honest run. The halt carries the reserver's
+    ``detail`` (on a treatment mismatch, both projections), is the run's stop reason, and the
+    next task is never reached. The worktree made for the attempt is discarded."""
+    from dataclasses import replace
+
+    from crb.core.run import ReserveResult, run
+
+    detail = {"pinned": {"deployment_fp": "a" * 12}, "now": {"deployment_fp": "b" * 12}}
+    asked: list[str] = []
+
+    def reserve(task: TaskSpec) -> ReserveResult:
+        asked.append(task.task_id)
+        return ReserveResult("halt", reason, detail)
+
+    builds: list[str] = []
+    build_fn = _builder(builds, gold=lambda rung: True)
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), reserve=reserve)
+    events: list[tuple[str, dict[str, Any]]] = []
+    summary = run(spec, pyrepo.repo, [feat_task, feat_task], build_fn, on_event=_recording(events))
+    assert builds == [] and asked == [feat_task.task_id]
+    actions = [a for a, _ in events]
+    for never in ("build.start", "build.done", "ledger.append", "run.task_skipped"):
+        assert never not in actions, never
+    assert [p for a, p in events if a == "run.halted"] == [
+        {"task": feat_task.task_id, "trial": "r1", "reason": reason, "detail": detail}
+    ]
+    assert (summary.stopped_reason, summary.tasks, summary.rows) == (reason, 0, 0)
+    assert list(spec.ledger.rows()) == []
+    (prep,) = [p for a, p in events if a == "prep.start"]  # the second task was never reached
+    assert not (spec.scratch / prep["worktree"]).exists()
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    assert (outcome.halted, outcome.attempts, outcome.skipped, builds) == (reason, 0, "", [])
+
+
+def test_reserve_is_called_only_at_r1(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """The reservation is the commit's FIRST attempt (reserved.v1 reads ``r1`` only): a task
+    whose ``r1`` misses climbs to ``r2`` without asking again — a second ask would find its own
+    reservation and refuse the rung the ladder is owed."""
+    from dataclasses import replace
+
+    from crb.core.run import ReserveResult, run
+
+    calls: list[str] = []
+
+    def reserve(task: TaskSpec) -> ReserveResult:
+        calls.append(task.task_id)
+        if len(calls) == 1:
+            return ReserveResult("ok")
+        return ReserveResult("halt", HALT_RUN_NOT_OWNED)  # what a second ask would meet
+
+    builds: list[str] = []
+    build_fn = _builder(builds, gold=lambda rung: rung == "r2")
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), reserve=reserve)
+    outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+    assert calls == [feat_task.task_id]
+    assert builds == ["r1", "r2"]
+    assert [r.trial for r in outcome.rows] == ["r1", "r2"] and outcome.clean
+    assert (outcome.halted, outcome.skipped) == ("", "")
+    calls.clear()
+    builds.clear()
+    summary = run(spec, pyrepo.repo, [feat_task], build_fn)
+    assert calls == [feat_task.task_id] and builds == ["r1", "r2"]
+    assert (summary.stopped_reason, summary.tasks, summary.rows, summary.clean) == ("", 1, 2, 1)
+
+
+def test_a_skipped_task_does_not_count_toward_limit(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """A skipped commit was not attempted, so it is not one of the run's tasks: the core has no
+    limit of its own (the worker slices ``limit`` before the run), and what it reports against
+    one is ``RunSummary.tasks`` — the run's ``counts.tasks``. The run carries on past a skip to
+    its next task, which is attempted and counted."""
+    from dataclasses import replace
+
+    from crb.core.run import ReserveResult, run
+
+    answers = iter([ReserveResult("skip", SKIP_COMMIT_RESERVED), ReserveResult("ok")])
+    builds: list[str] = []
+    build_fn = _builder(builds, gold=lambda rung: True)
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), reserve=lambda task: next(answers))
+    events: list[tuple[str, dict[str, Any]]] = []
+    summary = run(spec, pyrepo.repo, [feat_task, feat_task], build_fn, on_event=_recording(events))
+    assert builds == ["r1"]
+    assert (summary.tasks, summary.rows, summary.clean, summary.first_pass_clean) == (1, 1, 1, 1)
+    assert summary.stopped_reason == ""
+    (done,) = [p for a, p in events if a == "run.done"]
+    assert done["tasks"] == 1
+    assert [a for a, _ in events].count("run.task_skipped") == 1
+
+
+def test_a_raising_reserver_writes_no_row(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """A reservation that could not be written is not an attempt and never a row: what the
+    reserver raises propagates out of the run (the worker fails it) instead of being recorded
+    as a builder failure and graded — a row with no reservation behind it would be read as a
+    fresh first attempt. The worktree is discarded on the way out."""
+    from dataclasses import replace
+
+    from crb.core.run import run
+
+    def reserve(task: TaskSpec) -> Any:
+        raise RuntimeError("events store unavailable")
+
+    builds: list[str] = []
+    build_fn = _builder(builds, gold=lambda rung: True)
+    spec = replace(_spec(pyrepo, runner, executor, tmp_path), reserve=reserve)
+    events: list[tuple[str, dict[str, Any]]] = []
+    with pytest.raises(RuntimeError, match="events store unavailable"):
+        run_task(spec, pyrepo.repo, feat_task, build_fn, on_event=_recording(events))
+    with pytest.raises(RuntimeError, match="events store unavailable"):
+        run(spec, pyrepo.repo, [feat_task], build_fn, on_event=_recording(events))
+    assert builds == [] and list(spec.ledger.rows()) == []
+    actions = [a for a, _ in events]
+    assert "build.start" not in actions and "ledger.append" not in actions
+    preps = [p["worktree"] for a, p in events if a == "prep.start"]
+    assert len(preps) == 2 and not any((spec.scratch / name).exists() for name in preps)
+
+
+#: ``core/run.py``'s own events for a two-rung run whose ``r1`` misses and ``r2`` lands the
+#: gold, as they were before the reservation existed (action, sorted payload keys).
+_RUN_EVENTS_TODAY: list[tuple[str, list[str]]] = [
+    ("run.start", ["ladder", "mode", "repo", "run_id"]),
+    ("prep.start", ["rung", "task", "trial", "worktree"]),
+    ("build.start", ["mode", "rung", "task", "trial"]),
+    (
+        "build.done",
+        [
+            "builder",
+            "cost_usd",
+            "error",
+            "latency_s",
+            "model",
+            "rung",
+            "task",
+            "tokens_in",
+            "tokens_out",
+            "trial",
+            "turns",
+        ],
+    ),
+    ("ledger.append", ["clean", "disqualified", "pack", "row_hash", "task", "trial"]),
+    ("prep.start", ["rung", "task", "trial", "worktree"]),
+    ("build.start", ["mode", "rung", "task", "trial"]),
+    (
+        "build.done",
+        [
+            "builder",
+            "cost_usd",
+            "error",
+            "latency_s",
+            "model",
+            "rung",
+            "task",
+            "tokens_in",
+            "tokens_out",
+            "trial",
+            "turns",
+        ],
+    ),
+    ("ledger.append", ["clean", "disqualified", "pack", "row_hash", "task", "trial"]),
+    (
+        "run.done",
+        [
+            "clean",
+            "disqualified",
+            "duration_s",
+            "errors",
+            "first_pass_clean",
+            "rows",
+            "run_id",
+            "stopped_reason",
+            "tasks",
+        ],
+    ),
+]
+#: What differs between two identical runs: wall clock, the random worktree name and the
+#: hashes that commit to it, each row's own id, and the qualification each spec's witnessed
+#: context mints afresh.
+_VOLATILE = frozenset(
+    {
+        "worktree",
+        "latency_s",
+        "duration_s",
+        "pack",
+        "row_hash",
+        "row_id",
+        "created",
+        "prev_hash",
+        "evidence_pack_hash",
+        "qualification_id",
+    }
+)
+
+
+def test_no_reserver_is_byte_identical_to_today(
+    pyrepo: pr.PyRepo,
+    feat_task: TaskSpec,
+    runner: PytestRunner,
+    executor: LocalExecutor,
+    tmp_path: Path,
+) -> None:
+    """Every run not under a reserved.v1 reading has no reserver, and one whose reserver says
+    ``ok`` must not be told apart from it: the same events in the same order with the same
+    payloads, rows that carry no reservation, treatment or claim label (the worker stamps those,
+    not the core), and an outcome neither skipped nor halted. ``core/run.py``'s own events are
+    pinned to what they were before the reservation existed."""
+    from dataclasses import replace
+
+    from crb.core.run import ReserveResult, run
+
+    def norm(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: "<v>" if k in _VOLATILE else norm(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [norm(v) for v in value]
+        return value
+
+    def once(where: str, reserve: Any) -> tuple[list[Any], list[Any], Any, Any]:
+        spec = replace(_spec(pyrepo, runner, executor, tmp_path / where), reserve=reserve)
+        build_fn = _builder([], gold=lambda rung: rung == "r2")
+        events: list[tuple[str, dict[str, Any]]] = []
+        outcome = run_task(spec, pyrepo.repo, feat_task, build_fn)
+        summary = run(spec, pyrepo.repo, [feat_task], build_fn, on_event=_recording(events))
+        rows = [r.to_dict() for r in spec.ledger.rows()]
+        return events, rows, outcome, summary
+
+    ev_none, rows_none, out_none, sum_none = once("none", None)
+    ev_ok, rows_ok, out_ok, sum_ok = once("ok", lambda task: ReserveResult("ok"))
+    own = ("run.", "prep.", "build.", "ledger.")
+    assert [(a, sorted(p)) for a, p in ev_none if a.startswith(own)] == _RUN_EVENTS_TODAY
+    assert [(a, norm(p)) for a, p in ev_ok] == [(a, norm(p)) for a, p in ev_none]
+    assert len(rows_none) == 4 and norm(rows_ok) == norm(rows_none)
+    for row in rows_ok:
+        assert not {LABEL_RESERVATION, LABEL_TREATMENT, LABEL_CLAIM} & set(row["labels"])
+    for out in (out_none, out_ok):
+        assert (out.skipped, out.halted, out.attempts, out.clean) == ("", "", 2, True)
+    assert sum_ok.to_dict() | {"duration_s": 0} == sum_none.to_dict() | {"duration_s": 0}
+
+
+def test_a_reserve_result_names_why_it_skips_or_halts() -> None:
+    """A skip or a halt without a reason would pass or stop silently, and a status the run
+    does not know would be read as ``ok``: each is refused where it is made. ``detail`` is
+    copied, so the reserver cannot change the halt event after the fact."""
+    from crb.core.run import ReserveResult
+
+    for status in ("skip", "halt"):
+        with pytest.raises(ValueError, match="reason"):
+            ReserveResult(status)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="status"):
+        ReserveResult("reserved", "x")  # type: ignore[arg-type]
+    source = {"pinned": "a"}
+    res = ReserveResult("halt", HALT_CANCEL_REQUESTED, source)
+    source["pinned"] = "b"
+    assert res.detail == {"pinned": "a"} and ReserveResult("ok").detail == {}
