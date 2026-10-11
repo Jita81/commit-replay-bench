@@ -1,4 +1,6 @@
-# Branch protection requires exactly the jobs ci.yml runs (scripts/check_branch_protection.py).
+# Branch protection requires exactly the jobs of every pull-request workflow
+# (scripts/check_branch_protection.py): each file under .github/workflows whose `on:` names
+# pull_request — today ci.yml and commit-subjects.yml.
 #
 # Why its own workflow: the required-check list is a repository setting, and reading it needs
 # a token with Administration: read, which a workflow's own GITHUB_TOKEN can never be given.
@@ -6,11 +8,12 @@
 # (docs/DEPLOYMENT.md §3.4). Without it this run FAILS: a comparison that passes because it
 # read nothing would be exactly the unchecked claim it exists to stop.
 #
-# When: daily, on demand, and on every push to main that changes ci.yml (a renamed or added
-# job stops gating the moment it lands, until the setting names it). It is not a pull-request
-# check: a pull request cannot change the setting, and secrets do not reach fork pull
-# requests. tests/test_check_branch_protection.py pins this file's shape and compares the
-# last saved reading with ci.yml offline on every pull request.
+# When: daily, on demand, and on every push to main that changes a workflow (a renamed or
+# added job, or a new pull-request workflow, stops gating the moment it lands, until the
+# setting names it). It is not a pull-request check: a pull request cannot change the setting,
+# and secrets do not reach fork pull requests. tests/test_check_branch_protection.py pins this
+# file's shape and compares the last saved reading with the workflows offline on every pull
+# request.
 
 name: branch-protection
 
@@ -20,14 +23,14 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [".github/workflows/ci.yml", ".github/workflows/branch-protection.yml"]
+    paths: [".github/workflows/**"]
 
 permissions:
   contents: read
 
 jobs:
   branch-protection:
-    name: branch-protection (the required checks are exactly ci.yml's jobs)
+    name: branch-protection (the required checks are exactly the pull-request workflows' jobs)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -45,5 +48,5 @@ jobs:
             echo "::error::BRANCH_PROTECTION_TOKEN is not set: add a fine-grained token with Administration: read (docs/DEPLOYMENT.md §3.4)"
             exit 1
           }
-      - name: Required checks match ci.yml's jobs, and the setting is strict
+      - name: Required checks match the pull-request workflows' jobs, and the setting is strict
         run: python scripts/check_branch_protection.py --repo "${{ github.repository }}" --branch main
