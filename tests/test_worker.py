@@ -587,6 +587,66 @@ def test_reading_unsealed_admits_docker_executors(
     assert other is not None and "'host'" in other
 
 
+def test_a_run_of_a_reading_is_refused_at_claim_when_this_worker_grades_another_class(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DL-383: the submit gate compares the API's posture class with the reading's, but the
+    class a run is graded in is the WORKER's — its ``CRB_SANDBOX__TREE`` for a repository with
+    no tree of its own. A sealed worker on the ``readonly`` tree would grade a run of a
+    ``docker/copy/sealed`` reading ``docker/readonly/sealed``, every row of it refused by the
+    reading; it fails the run at claim, before any builder is constructed, with one
+    ``run.refused`` event naming both classes, no ledger row, nothing spent."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    sealed = dc_replace(
+        h.settings, executor="docker", builder_executor="docker", sandbox_tree="readonly"
+    )
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    built: list[str] = []
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: built.append("fake") or FakeBuilder(behaviour="gold", **cfg),
+    )
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+    run = h.enqueue("replay", params_json={"reading_id": reading.reading_id})
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith("reading_posture_mismatch: "), done.error
+    refused = [e for e in h.events(run.id) if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].status == StepStatus.ERROR
+    assert refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "reading_posture_mismatch",
+        "reading_id": reading.reading_id,
+        "reading_posture_class": "docker/copy/sealed",
+        "run_posture_class": "docker/readonly/sealed",
+    }
+    assert built == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert not done.counts_json.get("cost_usd")
+
+    def check(params: dict[str, Any]) -> str | None:
+        queued = h.enqueue("replay", params_json=params)
+        return h.worker._reading_posture_mismatch(queued, h.worker._emitter(queued))
+
+    assert check({}) is None  # filed under no reading: never this check's business
+    # the worker on the reading's tree; and the run's own executor, not the worker's default
+    monkeypatch.setattr(h.worker, "settings", dc_replace(sealed, sandbox_tree="copy"))
+    assert check({"reading_id": reading.reading_id}) is None
+    monkeypatch.setattr(
+        h.worker, "settings", dc_replace(sealed, executor="local", sandbox_tree="copy")
+    )
+    assert check({"reading_id": reading.reading_id, "executor": "docker"}) is None
+    # the repository's own tree wins over the worker's, whichever way it points
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    with h.factory() as s:
+        repo = s.get(Repo, pr.REPO_NAME)
+        assert repo is not None
+        repo.config_json = {**dict(repo.config_json or {}), "sandbox_tree": "copy"}
+        s.commit()
+    assert check({"reading_id": reading.reading_id}) is None
+
+
 def test_a_run_of_a_campaign_named_reading_never_admitted_is_refused_at_claim(
     h: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:

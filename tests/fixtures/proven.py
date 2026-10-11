@@ -184,11 +184,13 @@ def write_reading(
     changes: Mapping[str, str] | None = None,
     repo: str = ALPHA,
     campaign_id: str = "",
+    posture_class: str = SEALED,
 ) -> Reading:
     """Register a reading of ``cell`` on ``repo`` (``alpha``) with the core's rules and write it
     as the ``reading.registered`` event ``POST /readings`` writes — for a test logged in as a
     role that may not register one itself (a sign-off test's approver), or a worker test.
-    ``campaign_id`` names the campaign its runs spend under (DL-382; unchecked here)."""
+    ``campaign_id`` names the campaign its runs spend under (DL-382; unchecked here);
+    ``posture_class`` the class it counts, as ``POST /readings`` takes an explicit one."""
     reading = register(
         repo=repo,
         cell=dict(cell),
@@ -196,7 +198,7 @@ def write_reading(
         pool=list(pool),
         apparatus=APPARATUS_VERSION,
         taxonomy=GLOBAL_CLASS_SET,
-        posture_class=SEALED,
+        posture_class=posture_class,
         checks_arm="off",
         actor="op-seed",
         rule=RULE_LOOK_V1,

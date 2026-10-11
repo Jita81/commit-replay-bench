@@ -13,15 +13,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
-  ceiling the product holds** (P-787 to P-791, G-957, DL-372 to DL-382;
+  ceiling the product holds** (P-787 to P-791, G-957, DL-372 to DL-383;
   [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading states `hypothesis`,
   `smallest_effect` and its campaign, hashed into its id; `thin_cell` counts distinct tasks. A
-  reading registers, and its runs are admitted, only with sandbox and builder on docker.
-  `POST /campaigns` holds a ceiling in pounds: a run under it needs `max_cost_usd`, admitted
-  only while cap plus headroom fits (409 `campaign_ceiling`); a reading's runs must be filed
-  under its campaign (409 `campaign_required`); `S1` author calls count; a run overrunning its
-  admitted headroom stops the campaign. CI builds and runs the Go builder image; the
-  operator's 2026-10-11 decisions are recorded.
+  reading registers, and its runs are admitted, only with sandbox and builder on docker, in its
+  posture class (409 `reading_posture_mismatch`). `POST /campaigns` holds a ceiling in pounds:
+  its runs need `max_cost_usd`, admitted while cap plus headroom fits (409 `campaign_ceiling`);
+  a reading's runs must be filed under its campaign (409 `campaign_required`); `S1` author
+  calls count; overrunning admitted headroom stops the campaign. CI builds and runs the Go
+  builder image; the operator's 2026-10-11 decisions are recorded.
 
 - **An admin act and the same person's sign-in no longer deadlock on PostgreSQL** (P-786;
   [#86](https://github.com/Jita81/commit-replay-bench/pull/86)). Setting an account's

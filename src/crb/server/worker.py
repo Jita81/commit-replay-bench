@@ -113,8 +113,9 @@ What it is:   The worker process — the only thing that executes a run (the API
 What it does: Polls the job queue, claims one run — re-checking a build run's builder
               credential by presence when it claims it, and failing it before any attempt with
               the submit check's code when it is gone (P-050), and a run of a reading this
-              worker cannot grade sealed or, when the reading names a campaign, that no
-              ``campaign.admitted`` event names (P-789, DL-382) — dispatches by kind (setup,
+              worker cannot grade sealed, would grade in a posture class the reading does not
+              count, or, when the reading names a campaign, that no ``campaign.admitted``
+              event names (P-789, DL-382, DL-383) — dispatches by kind (setup,
               probe, mine, label, replay, blind, oracle, controls, factory), streams
               StepEvents, writes grade rows through the append-only ledger with the run's
               labels stamped, records the apparatus, and marks the run succeeded / failed /
@@ -347,6 +348,7 @@ from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
 from crb.server.routes.runs import (
+    READING_POSTURE_MISMATCH_CODE,
     READING_UNSEALED_CODE,
     append_system_event,
     credential_refusal,
@@ -1382,6 +1384,8 @@ class Worker:
                 status, error = STATUS_FAILED, dead
             elif (unsealed := self._reading_unsealed(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unsealed
+            elif (moved := self._reading_posture_mismatch(run, emitter)) is not None:
+                status, error = STATUS_FAILED, moved
             elif (unadmitted := self._campaign_unadmitted(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unadmitted
             else:
@@ -1530,6 +1534,48 @@ class Worker:
             reading_id=reading_id,
             sandbox_executor=sandbox,
             builder_executor=builder,
+        )
+        return error
+
+    def _reading_posture_mismatch(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading
+        (``params.reading_id``) that counts rows of a posture class other than the one this
+        worker would grade it in — the submit gate's ``reading_posture_mismatch`` (DL-383)
+        applied again at claim, because the class is this worker's: its executor for the run
+        with the repository's ``sandbox_tree``, else this worker's ``CRB_SANDBOX__TREE``
+        (:meth:`_deployment_posture_class`). A run graded in another class spends and every
+        row it writes is refused by the reading. ``None`` for a run filed under no reading,
+        under one this repository has no verified record of (:meth:`_reading_unsealed`
+        refuses it), or one this worker grades in the reading's class."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+        if reading is None:
+            return None
+        graded = self._deployment_posture_class(
+            run.repo, run_executor_kind(params, self.settings).strip().lower()
+        )
+        if graded == reading.posture_class:
+            return None
+        error = (
+            f"{READING_POSTURE_MISMATCH_CODE}: reading {reading_id!r} counts rows graded in "
+            f"{reading.posture_class!r} and this worker would grade the run in {graded!r}; "
+            "nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=READING_POSTURE_MISMATCH_CODE,
+            reading_id=reading_id,
+            reading_posture_class=reading.posture_class,
+            run_posture_class=graded,
         )
         return error
 
@@ -1979,10 +2025,11 @@ class Worker:
             actor=ctx.run.actor,
         )
 
-    def _deployment_posture_class(self, repo: str = "") -> str:
+    def _deployment_posture_class(self, repo: str = "", executor: str = "") -> str:
         """This worker's posture class for ``repo`` from its settings and the repository's
         own ``sandbox_tree`` (the map's reading when no run has measured one) —
-        :func:`crb.core.posture.expected_posture_class`, the rule the API uses too."""
+        :func:`crb.core.posture.expected_posture_class`, the rule the API uses too.
+        ``executor`` is a run's own kind (:func:`run_executor_kind`), else the worker's."""
         tree = ""
         if repo:
             with self.factory() as s:
@@ -1995,7 +2042,9 @@ class Worker:
                 else self.settings.sandbox_tree
             )
         return expected_posture_class(
-            self.settings.executor, tree=tree, provisioning=self.settings.provision.enabled
+            executor or self.settings.executor,
+            tree=tree,
+            provisioning=self.settings.provision.enabled,
         )
 
     def _stamp(self, ctx: RunContext, **extra: Any) -> None:

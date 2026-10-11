@@ -52,7 +52,7 @@ from crb.server.app import API_PREFIX
 from crb.server.routes import runs as runs_mod
 from crb.server.routes.runs import event_stream, event_to_model
 from crb.store.ledger import DbLedger
-from crb.store.models import Run
+from crb.store.models import Repo, Run
 from fixtures.proven import write_reading
 from fixtures.server_seed import (
     ALPHA,
@@ -1564,6 +1564,71 @@ def test_a_run_filed_under_a_reading_on_a_host_builder_is_refused_409(
     # a run filed under no reading is stored as before: no key at all
     assert env.post("/runs", json=_FILED).status_code == 201
     assert "reading_id" not in jobs.enqueued[-1].params_json
+
+
+def _set_sandbox_tree(env: Env, tree: str) -> None:
+    """The repository's own ``sandbox_tree`` (``PUT /repos/{name}``'s field), set in place."""
+    with env.factory() as s:
+        repo = s.get(Repo, ALPHA)
+        assert repo is not None
+        repo.config_json = {**dict(repo.config_json or {}), "sandbox_tree": tree}
+        s.commit()
+
+
+def test_a_run_of_a_reading_whose_repository_tree_moved_is_refused_409(
+    env: Env, jobs: FakeJobs
+) -> None:
+    """DL-383: a reading counts a row only when the row was graded in the reading's posture
+    class. A reading registered as ``docker/copy/sealed`` whose repository's ``sandbox_tree``
+    later became ``readonly`` would have every row of a run graded ``docker/readonly/sealed``
+    — sandbox and builder both on docker, so ``reading_unsealed`` passes it, and the reading
+    would count none of what it spent. Refused at submit, naming both classes."""
+    login(env.client, "operator")
+    env.settings.builder.executor = "docker"
+    reading = write_reading(env.factory, [task_id(1), task_id(2)])
+    assert reading.posture_class == "docker/copy/sealed"
+    body = {**_FILED, "reading_id": reading.reading_id}
+    _set_sandbox_tree(env, "readonly")
+    r = env.post("/runs", json=body)
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["code"] == "reading_posture_mismatch"
+    assert err["detail"] == {
+        "reading_id": reading.reading_id,
+        "reading_posture_class": "docker/copy/sealed",
+        "run_posture_class": "docker/readonly/sealed",
+    }
+    assert "nothing was queued" in err["message"]
+    assert jobs.enqueued == []
+    # the tree put back: the run is graded in the reading's class and queued
+    _set_sandbox_tree(env, "copy")
+    r = env.post("/runs", json=body)
+    assert r.status_code == 201, r.text
+    assert jobs.enqueued[-1].params_json["reading_id"] == reading.reading_id
+
+
+def test_a_run_of_a_reading_registered_in_another_class_is_refused_409(
+    env: Env, jobs: FakeJobs
+) -> None:
+    """DL-383: ``POST /readings`` takes an explicit ``posture_class``; a reading that names a
+    class the deployment does not grade this repository in can count no row of a run filed
+    under it. With no tree of its own the repository is graded in the deployment's
+    (``CRB_SANDBOX__TREE``), so the run is refused until the two agree."""
+    login(env.client, "operator")
+    env.settings.builder.executor = "docker"
+    reading = write_reading(env.factory, [task_id(1)], posture_class="docker/readonly/sealed")
+    body = {**_FILED, "reading_id": reading.reading_id}
+    r = env.post("/runs", json=body)
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["code"] == "reading_posture_mismatch"
+    assert err["detail"]["reading_posture_class"] == "docker/readonly/sealed"
+    assert err["detail"]["run_posture_class"] == "docker/copy/sealed"
+    assert jobs.enqueued == []
+    # the deployment grading in the reading's tree: queued
+    env.settings.sandbox.tree = "readonly"
+    r = env.post("/runs", json=body)
+    assert r.status_code == 201, r.text
 
 
 @pytest.mark.parametrize("kind", ["mine", "oracle", "controls", "qualify", "factory"])

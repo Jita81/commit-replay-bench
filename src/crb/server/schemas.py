@@ -792,9 +792,11 @@ class RunCreateRequest(BaseModel):
     test_author: str | None = Field(default=None, max_length=200)
     #: ``replay`` and ``blind`` runs only: the registered reading this run is filed under
     #: (``rdg_<24 hex>``). Refused 422 ``reading_unknown`` unless it is a verified reading
-    #: of the repository, and 409 ``reading_unsealed`` unless the run's sandbox executor and
-    #: the deployment's builder executor are both ``docker``; the worker re-checks at claim
-    #: and fails the run (``run.refused``, code ``reading_unsealed``) before any builder call.
+    #: of the repository, 409 ``reading_unsealed`` unless the run's sandbox executor and
+    #: the deployment's builder executor are both ``docker``, and 409
+    #: ``reading_posture_mismatch`` unless the run would be graded in the reading's posture
+    #: class (DL-383); the worker re-checks both at claim and fails the run (``run.refused``)
+    #: before any builder call.
     #: A reading that names a campaign takes only runs filed under that same campaign: 409
     #: ``campaign_required`` otherwise, and at claim for a run no ``campaign.admitted`` event
     #: names (DL-382). Stored as ``params.reading_id`` only when set.

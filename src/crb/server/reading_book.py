@@ -18,7 +18,8 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 2)
 Works with:   src/crb/server/routes/readings.py (registers readings; re-exports this reader),
               src/crb/server/routes/runs.py (``reading_refusal``: a run filed under a reading),
-              src/crb/server/worker.py (``_reading_unsealed``: the same rule at claim),
+              src/crb/server/worker.py (``_reading_unsealed``, ``_reading_posture_mismatch``:
+              the same rules at claim),
               src/crb/core/reading.py (the record, its hash and the enrolment rule),
               src/crb/server/acceptance.py (``load_held_out``: a forward reading's records)
 Tested by:    tests/test_server_readings.py, tests/test_server_routes_runs.py,

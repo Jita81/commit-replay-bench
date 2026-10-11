@@ -33,8 +33,9 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
               presence only) a run whose builder auth has no credential, and (422
               ``builder_provider_mismatch``) one whose OpenAI-compatible rung or test author
-              names a provider the configured endpoint is not — through
-              ``submit_refusals``, the one gate every route that queues a run calls; serves
+              names a provider the configured endpoint is not, and (409) a run filed under a
+              reading that would not be graded sealed in the reading's posture class —
+              through ``submit_refusals``, the one gate every route that queues a run calls; serves
               run views with counts re-derived from the ledger when the worker wrote none; streams
               events as SSE with resume-by-seq; cancellation is a flag the worker honours;
               lifting the sign-off clause for one run is refused at enqueue and granted only
@@ -116,7 +117,12 @@ from crb.server.campaigns import campaign_of, campaign_tally
 from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
-from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
+from crb.server.posture_view import (
+    deployment_executor,
+    deployment_image,
+    deployment_posture_class,
+    refuse_unqualified,
+)
 from crb.server.reading_book import load_readings
 from crb.server.schemas import (
     BUILD_KINDS,
@@ -933,21 +939,27 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
 
 
 #: The refusals of a run filed under a reading (P-789): the id is no verified reading of
-#: the repository (422 at submit), or the run would not be graded sealed (409 at submit; the
-#: worker's ``run.refused`` code at claim).
+#: the repository (422 at submit), the run would not be graded sealed, or it would be graded
+#: in a posture class other than the one the reading counts (409 at submit; the worker's
+#: ``run.refused`` code at claim).
 READING_UNKNOWN_CODE = "reading_unknown"
 READING_UNSEALED_CODE = "reading_unsealed"
+READING_POSTURE_MISMATCH_CODE = "reading_posture_mismatch"
 
 
 def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
-    """The refusals of a run filed under a reading (P-789, DL-382): 422 ``reading_unknown``
-    when ``body.reading_id`` is not a verified reading of ``body.repo``; 409
-    ``reading_unsealed`` when the run's sandbox executor or the deployment's builder executor
-    is not ``docker`` — a reading is registered only on a sealed deployment, and a run of it
-    graded anywhere else would be another posture's rows, never the reading's measurement;
+    """The refusals of a run filed under a reading (P-789, DL-382, DL-383): 422
+    ``reading_unknown`` when ``body.reading_id`` is not a verified reading of ``body.repo``;
     409 ``campaign_required`` when the reading names a campaign and the run is not filed
     under that same campaign — a reading's runs spend only under the ceiling its campaign
-    holds, whatever route queues them (the Learn re-measurement queue included)."""
+    holds, whatever route queues them (the Learn re-measurement queue included); 409
+    ``reading_unsealed`` when the run's sandbox executor or the deployment's builder executor
+    is not ``docker`` — a reading is registered only on a sealed deployment; 409
+    ``reading_posture_mismatch`` when the posture class the run would be graded in (the
+    run's executor with the repository's ``sandbox_tree``, else the deployment's) is not the
+    one the reading counts — its tree changed since the registration, or the reading named
+    another class. A run graded anywhere but the reading's class would be another posture's
+    rows, every one of them spent and none of them the reading's measurement."""
     reading = next(
         (r for r in load_readings(db, body.repo) if r.reading_id == body.reading_id), None
     )
@@ -979,6 +991,20 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
                 "reading_id": body.reading_id,
                 "sandbox_executor": sandbox,
                 "builder_executor": builder,
+            },
+        )
+    graded = deployment_posture_class(settings, db.get(Repo, body.repo), body.executor)
+    if graded != reading.posture_class:
+        raise ApiError(
+            409,
+            READING_POSTURE_MISMATCH_CODE,
+            f"reading {body.reading_id!r} counts rows graded in {reading.posture_class!r}; "
+            f"this run would be graded in {graded!r} (the repository's sandbox_tree, else the "
+            "deployment's), so none of its rows could count — nothing was queued",
+            detail={
+                "reading_id": body.reading_id,
+                "reading_posture_class": reading.posture_class,
+                "run_posture_class": graded,
             },
         )
 
@@ -1095,6 +1121,10 @@ def submit_refusals(
     * 409 ``reading_unsealed`` — a run filed under a reading whose sandbox executor or the
       deployment's builder executor is not ``docker``: its rows could never be the reading's
       sealed measurement (P-789; the worker re-checks at claim);
+    * 409 ``reading_posture_mismatch`` — a run filed under a reading that would be graded in
+      a posture class other than the one the reading counts (the repository's
+      ``sandbox_tree`` moved, or the reading named another class): every row it spent on
+      would be refused by the reading (DL-383; the worker re-checks at claim with its tree);
     * 409 ``campaign_required`` — a run of a reading that names a campaign, not filed under
       that same campaign: the reading's runs spend only under its campaign's ceiling (DL-382;
       the worker refuses an un-admitted one at claim);
