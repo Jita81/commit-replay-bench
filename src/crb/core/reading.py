@@ -56,6 +56,7 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               birth, the campaign whose ceiling every run of a reading spends from
               (``campaign_id``, hashed when present — DL-382) and counts only rows of runs
               admitted under it (``with_admissions``; none when unread); refuses a
+              campaign on the factory's cell (``campaign_unsupported_reading``), a
               registration over commits already graded
               under its arms at its apparatus (``pool_seen``), beyond the cell's budget
               (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
@@ -200,12 +201,18 @@ REFUSAL_INVALID = "invalid_reading"
 REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
 #: A forward reading names a reading that does not read ``ceiling`` (DL-334).
 REFUSAL_NOT_A_CEILING = "not_a_ceiling"
+#: A reading names a campaign but counts rows of runs no submit gate can require to be filed
+#: under it (DL-382): a factory cell's rows come from factory runs, which carry no
+#: ``reading_id``, so nothing ties them to the reading — the reading's evidence would rest
+#: on a filing habit. One rule for ``POST /readings`` and ``POST /readings/forward``.
+REFUSAL_CAMPAIGN_UNSUPPORTED = "campaign_unsupported_reading"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
     REFUSAL_INVALID,
     REFUSAL_POOL_NOT_BLIND,
     REFUSAL_NOT_A_CEILING,
+    REFUSAL_CAMPAIGN_UNSUPPORTED,
 )
 
 # --- the pool rule (DL-097) --------------------------------------------------------------
@@ -679,6 +686,26 @@ def _validate(
     return ""
 
 
+def campaign_unsupported(process_step: str) -> str:
+    """Why a reading on a cell of ``process_step`` may not name a campaign, or ``""`` (DL-382).
+
+    The rule, one for ``POST /readings`` and ``POST /readings/forward``: a reading may name a
+    campaign only when every run it counts is one the submit gate can require to be filed
+    under that campaign — a run that carries the reading's ``reading_id`` (P-789), which only
+    a replay or blind run can. A factory cell's rows come from factory runs, which carry no
+    ``reading_id``: nothing ties such a run to the reading, and no submit gate requires it to
+    be filed under the reading's campaign, so the reading's evidence would rest on a filing
+    habit."""
+    if process_step != PROCESS_FACTORY:
+        return ""
+    return (
+        "a reading on the factory's cell names no campaign: it counts factory runs, which "
+        "carry no reading_id, so nothing ties them to the reading and no submit gate requires "
+        "them to be filed under its campaign — its evidence would rest on a filing habit; "
+        "register it without campaign_id (DL-382)"
+    )
+
+
 def register(
     *,
     repo: str,
@@ -711,8 +738,10 @@ def register(
     has a graded row under an arm of the hierarchy at this apparatus, whatever class-set version
     graded it;
     ``budget_spent`` when the cell's spend plus this rule's P(deliver | 0.80) would exceed
-    the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules. The
-    caller writes the returned reading as a ``reading.registered`` event before any attempt.
+    the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules;
+    ``campaign_unsupported_reading`` when it names a campaign that could not hold every run it
+    counts (:func:`campaign_unsupported`). The caller writes the returned reading as a
+    ``reading.registered`` event before any attempt.
     """
     cell_d = {str(k): str(v) for k, v in cell.items()}
     hier = tuple(str(a).strip() for a in hierarchy)
@@ -730,6 +759,14 @@ def register(
         why = str(exc)
     if why:
         raise ReadingRefused(why, code=REFUSAL_INVALID)
+    step = cell_d.get("process_step", "")
+    unsupported = campaign_unsupported(step) if campaign_id else ""
+    if unsupported:
+        raise ReadingRefused(
+            unsupported,
+            code=REFUSAL_CAMPAIGN_UNSUPPORTED,
+            detail={"campaign_id": campaign_id, "process_step": step},
+        )
     authors = {parse_arm(a).author for a in hier if parse_arm(a).author}
     author = author_model or (next(iter(authors)) if authors else "")
     key = reading_cell_key(cell_d, org_class)
@@ -820,8 +857,9 @@ def register_forward(
     the CEILING's cell budget (``budget_spent`` when that cannot cover it). Its pool is the
     rule :data:`POOL_RULE_CALIBRATION`: the calibration builds whose held-out tests are
     written after it — no ticket is chosen by a person, and none exists yet. It names no
-    campaign (DL-382): its builds are factory runs, which carry no ``reading_id``, so nothing
-    could file them under one — ``POST /readings/forward`` refuses a ``campaign_id``."""
+    campaign (DL-382, :func:`campaign_unsupported`): its builds are factory runs, which carry
+    no ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
+    be filed under its campaign — ``POST /readings/forward`` refuses a ``campaign_id``."""
     if ceiling.state != OUTCOME_CEILING:
         raise ReadingRefused(
             f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
@@ -1524,6 +1562,7 @@ __all__ = [
     "READING_EVENT_ACTION",
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
+    "REFUSAL_CAMPAIGN_UNSUPPORTED",
     "REFUSAL_NOT_A_CEILING",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
@@ -1546,6 +1585,7 @@ __all__ = [
     "Standard",
     "arm_reading",
     "budget_spent",
+    "campaign_unsupported",
     "canonical_cell_key",
     "cell_error_budget",
     "evaluate",

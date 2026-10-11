@@ -15,8 +15,9 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               the checks arm and posture class it counted on (P-319), a pool picked on
               outcomes refused ``pool_not_blind`` and a date cut accepted (P-320), imported
               rows never counted (P-321), an S3-only standard read as a ceiling, a reading
-              naming an unknown campaign refused ``campaign_unknown`` and a forward reading
-              naming any campaign refused ``forward_campaign_unsupported`` (DL-382).
+              naming an unknown campaign refused ``campaign_unknown``, and a reading on the
+              factory's cell — the forward reading included — naming any campaign refused
+              ``campaign_unsupported_reading`` by both routes (DL-382).
 How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
               controls report; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -580,12 +581,17 @@ def test_a_reading_naming_an_unknown_campaign_is_refused_with_no_event(env: Env)
     assert _registered_events(env) == 0
 
 
+#: The refusal both routes answer for a reading on the factory's cell that names a campaign.
+UNSUPPORTED = "campaign_unsupported_reading"
+
+
 def test_a_forward_reading_naming_a_campaign_is_refused_422_with_no_event(env: Env) -> None:
     """DL-382: a forward reading counts calibration builds — factory runs, which carry no
-    ``reading_id``, so no submit gate ties them to the reading and nothing would file them
-    under its campaign. Naming a campaign, known or not, is refused 422
-    ``forward_campaign_unsupported`` before anything is read or written; without one, the same
-    body is answered on its merits (here, 404 for a reading the repository does not have)."""
+    ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
+    be filed under its campaign. Naming a campaign, known or not, is refused 422
+    ``campaign_unsupported_reading`` before anything is read or written; without one, the
+    same body is answered on its merits (here, 404 for a reading the repository does not
+    have)."""
     add_tasks(env.factory)
     body = {
         "repo": ALPHA,
@@ -599,8 +605,33 @@ def test_a_forward_reading_naming_a_campaign_is_refused_422_with_no_event(env: E
         fwd = env.post("/readings/forward", json={**body, "campaign_id": cid})
         assert fwd.status_code == 422, fwd.text
         err = envelope(fwd)
-        assert err["code"] == "forward_campaign_unsupported", err
-        assert err["detail"] == {"campaign_id": cid}
+        assert err["code"] == UNSUPPORTED, err
+        assert err["detail"] == {"campaign_id": cid, "process_step": "factory"}
     assert _registered_events(env) == 0
     plain = env.post("/readings/forward", json=body)
     assert plain.status_code == 404 and envelope(plain)["code"] == "not_found", plain.text
+
+
+def test_a_reading_on_the_factorys_cell_naming_a_campaign_is_refused_422_with_no_event(
+    env: Env,
+) -> None:
+    """DL-382, one rule for both routes: a reading may name a campaign only when every run it
+    counts is one the submit gate can require to be filed under it. A reading on the
+    factory's cell counts factory runs, which carry no ``reading_id``, so ``POST /readings``
+    refuses its ``campaign_id`` with the forward route's 422 — same code, same reason —
+    before anything is written; without one, the same reading registers."""
+    add_tasks(env.factory)
+    cid = _campaign(env)
+    fcell = {**CELL, "process_step": "factory"}
+    r = register_via_api(env, hierarchy=("S2",), cell=fcell, campaign_id=cid)
+    assert r.status_code == 422, r.text
+    err = envelope(r)
+    assert err["code"] == UNSUPPORTED, err
+    assert err["detail"] == {"campaign_id": cid, "process_step": "factory"}
+    assert _registered_events(env) == 0
+    fwd = {"repo": ALPHA, "promotes": "rdg_" + "0" * 24, "builder": "b", "model": "m"}
+    fwd |= {"hypothesis": HYPOTHESIS, "smallest_effect": SMALLEST_EFFECT, "campaign_id": cid}
+    assert envelope(env.post("/readings/forward", json=fwd))["message"] == err["message"]
+    plain = register_via_api(env, hierarchy=("S2",), cell=fcell)
+    assert plain.status_code == 201, plain.text
+    assert _registered_events(env) == 1

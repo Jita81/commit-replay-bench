@@ -18,9 +18,12 @@ arm's look state — and each cell's budget spent. ``standard_for`` is the seam 
 entry gate reads (ADR-0026 item 8). ``POST /readings/forward`` (operator) registers the forward
 reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on calibration builds graded
 on a second person's held-out tests, the one reading that can promote the ceiling;
-``load_readings`` enrols its pool. A forward reading names no campaign: its runs are factory
-runs, which carry no ``reading_id``, so nothing could file them under one — ``campaign_id`` is
-refused ``422 forward_campaign_unsupported`` (DL-382).
+``load_readings`` enrols its pool. One rule decides which readings may name a campaign
+(DL-382): a reading may name one only when every run it counts is one the submit gate can
+require to be filed under it. A reading on the factory's cell — the forward reading among
+them — counts factory runs, which carry no ``reading_id``, so nothing ties them to the reading
+and no submit gate requires them to be filed under its campaign; both routes refuse its
+``campaign_id`` ``422 campaign_unsupported_reading``.
 
 Navigation
 ----------
@@ -33,11 +36,12 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               the reading's ``org_class``, on that class's parent's cell, and only while the set
               routes (ADR-0026 item 9),
               refuses an unsealed posture for a replayed arm, a campaign that does not
-              verify (``campaign_unknown``, DL-382) and any campaign on a forward reading
-              (``forward_campaign_unsupported``), reads the rows and the readings
-              already registered under the lock, and writes the event; lists readings with
-              every arm's state and the budget per cell; answers a cell's proven standard on
-              one checks arm and posture class (or ``None``).
+              verify (``campaign_unknown``, DL-382) and any campaign on a reading of the
+              factory's cell, the forward reading included (``campaign_unsupported_reading``),
+              reads the rows and the readings already registered under the lock, and writes
+              the event; lists readings with every arm's state and the budget per cell;
+              answers a cell's proven standard on one checks arm and posture class (or
+              ``None``).
 How:          ``append_event_checked`` (lock → ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
               counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``standard_of``.
@@ -76,11 +80,13 @@ from crb.core.evidence import utc_now_iso
 from crb.core.ledger import (
     CELL_FIELDS,
     LABEL_CHANGE_ID,
+    PROCESS_FACTORY,
     GradeRow,
     is_sealed_class,
 )
 from crb.core.reading import (
     READING_EVENT_ACTION,
+    REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_INVALID,
     REFUSAL_NOT_A_CEILING,
     REFUSAL_POOL_NOT_BLIND,
@@ -89,6 +95,7 @@ from crb.core.reading import (
     ReadingRefused,
     Standard,
     budget_spent,
+    campaign_unsupported,
     cell_error_budget,
     evaluate,
     pool_by_rule,
@@ -131,10 +138,6 @@ SmallestEffect = Annotated[float, Field(gt=0, le=1)]
 #: The campaign every run of the reading spends under (DL-382): named at registration, never
 #: bound later. ``None`` for a reading under no campaign.
 CampaignId = Annotated[str | None, Field(pattern=r"^cmp_[0-9a-f]{24}$")]
-#: ``POST /readings/forward`` with a ``campaign_id`` (DL-382): a forward reading's runs are
-#: factory calibration builds, which carry no ``reading_id``, so no gate could file them under
-#: the campaign — a campaign it named would hold none of its spend.
-REFUSAL_FORWARD_CAMPAIGN = "forward_campaign_unsupported"
 
 
 def _refuse_unknown_campaign(session: Session, campaign_id: str | None) -> None:
@@ -282,7 +285,8 @@ def _change_of(task: Task) -> str:
 
 
 def _refuse(exc: ReadingRefused) -> ApiError:
-    code = 422 if exc.code in (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND) else 409
+    shape = (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND, REFUSAL_CAMPAIGN_UNSUPPORTED)
+    code = 422 if exc.code in shape else 409
     if exc.code == REFUSAL_NOT_A_CEILING:
         code = 409
     return ApiError(code, exc.code, str(exc), detail=dict(exc.detail))
@@ -445,7 +449,7 @@ class ForwardIn(BaseModel):
     rule: str = RULE_LOOK_V1
     hypothesis: Hypothesis
     smallest_effect: SmallestEffect
-    #: Refused when given (422 ``forward_campaign_unsupported``, DL-382): kept on the model so
+    #: Refused when given (422 ``campaign_unsupported_reading``, DL-382): kept on the model so
     #: a body that names a campaign is refused by name, never registered without it.
     campaign_id: CampaignId = None
 
@@ -467,17 +471,16 @@ def register_forward_reading(
     acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
     ``ceiling`` now, **409** ``budget_spent`` when the ceiling's cell budget cannot cover the
     rule, **404** for a reading the repository does not have, **422**
-    ``forward_campaign_unsupported`` for any ``campaign_id`` — before anything is read or
-    written: its calibration builds are factory runs, which carry no ``reading_id``, so no
-    submit gate could hold them to the campaign (DL-382)."""
+    ``campaign_unsupported_reading`` for any ``campaign_id`` — before anything is read or
+    written: its calibration builds are factory runs, which carry no ``reading_id``, so
+    nothing ties them to the reading and no submit gate requires them to be filed under its
+    campaign (DL-382, :func:`crb.core.reading.campaign_unsupported`)."""
     if body.campaign_id is not None:
         raise ApiError(
             422,
-            REFUSAL_FORWARD_CAMPAIGN,
-            "a forward reading names no campaign: its calibration builds are factory runs, "
-            "which carry no reading_id, so nothing would file them under the campaign — "
-            "register it without campaign_id (DL-382)",
-            detail={"campaign_id": body.campaign_id},
+            REFUSAL_CAMPAIGN_UNSUPPORTED,
+            campaign_unsupported(PROCESS_FACTORY),
+            detail={"campaign_id": body.campaign_id, "process_step": PROCESS_FACTORY},
         )
     get_repo_or_404(db, body.repo)
     rows = list(DbLedger(factory).rows(repo=body.repo))
