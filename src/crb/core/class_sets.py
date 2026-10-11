@@ -11,7 +11,7 @@ Four rules keep such a set honest:
 
 * **Held out by commit.** Before any class is proposed, each repository's replayable commits
   are split by ``sha256("crb.split.v1|" + repo + "|" + commit)`` into a **derivation set**
-  (:data:`DERIVATION_SHARE`, one third — an ADR-0026 [operator] value) and a **confirmation
+  (:data:`DERIVATION_SHARE`, one third — fixed by the operator, DL-371) and a **confirmation
   set** (two thirds). Proposing and labelling read derivation commits only (a class's example
   commits, :func:`examples_of`, are derivation commits set aside from the labelled sample); a
   version licenses only on confirmation commits, through a reading registered after it was
@@ -113,13 +113,13 @@ CLASS_SET_SCHEMA = "crb.class_set.v1"
 # --- the split (ADR-0026 item 9) ---------------------------------------------------------
 #: The preimage prefix of the per-commit split.
 SPLIT_SEED = "crb.split.v1"
-#: The derivation set's share of each repository's replayable commits — an ADR-0026
-#: [operator] value (`one third`), used as proposed until the operator fixes it.
+#: The derivation set's share of each repository's replayable commits — ADR-0026 item 9's
+#: `one third`, which the operator fixed as proposed on 2026-10-09 (DL-371).
 DERIVATION_SHARE = 1 / 3
 DERIVATION = "derivation"
 CONFIRMATION = "confirmation"
 
-# --- the validity report's thresholds (ADR-0026 item 9, [operator]) ----------------------
+# --- the validity report's thresholds (ADR-0026 item 9, fixed by the operator, DL-371) ----
 COVERAGE_MIN = 0.90
 KAPPA_MIN = 0.6
 SAMPLE_MIN = 50

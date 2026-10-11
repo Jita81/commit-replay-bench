@@ -1,7 +1,8 @@
 # ADR-0026 — The context standard: pre-registered context arms, a look rule with one error budget per cell, a leak guard, an entry gate, class sets held out by commit, and a library that reaches a brief only when measured
 
-**Status:** Proposed (DL-086; the values marked **[operator]** are proposals the operator fixes
-before stream R builds them; DL-087 records the library's scope)
+**Status:** Accepted (DL-371, 2026-10-09: Paul Glover, the operator, accepted this record and
+fixed each value it left to him as proposed — see Operator values; proposed under DL-086;
+DL-087 records the library's scope)
 **Date:** 2026-09-27
 **Apparatus impact:** none of its own. It rides ADR-0025's bump to **2.4**: every row of 2.4 or
 later stamps its context arm (`labels.context_arm`) and its class-set version
@@ -183,8 +184,8 @@ rule makes them prospective (item 10).
    every commit from 10 to 40 **[measured — n = 40 draws per path, exact enumeration, no
    sampling; method: the same dynamic programme applied to routing.v2's fixed bar at each
    reading schedule; apparatus n/a]**. The look rule replaces ADR-0025's `min_tasks` 10
-   and its fixed point and Wilson bars (item 6). The first look at 20 is the operator's decision
-   **[operator]**.
+   and its fixed point and Wilson bars (item 6). The first look at 20 is fixed by the operator
+   (DL-371).
 
 4. **The standard is found by a fixed-sequence hierarchy, richest arm first.** A reading's
    hierarchy is read in its registered order and stops at the **first arm that does not
@@ -209,9 +210,10 @@ rule makes them prospective (item 10).
      and the loop's paired reading (item 13), and spend no budget.
 
 5. **One error budget per cell, across every arm and every phase.** A cell — repository ×
-   cell key × apparatus × class-set version — has one budget, **5% [operator; 2.5% is the
-   stricter choice]**. Every reading registered on the cell spends its rule's P(deliver | 0.80),
-   computed exactly in code by the item 3 programme; a registration that would overspend is
+   cell key × apparatus × class-set version — has one budget, **5%**, fixed by the operator
+   (DL-371). The stricter choice, 2.5%, was offered and not taken. Every reading registered on
+   the cell spends its rule's P(deliver | 0.80), computed exactly in code by the item 3
+   programme; a registration that would overspend is
    refused `budget_spent`, and the cell then reads "no proven standard at this apparatus and
    class-set version" for any arm not already decided. Descriptive arms spend nothing. The rules a
    reading may register are pre-registered here:
@@ -323,11 +325,12 @@ rule makes them prospective (item 10).
      points-to-churn agreement has passed (item 9's validity report). Until then readiness reads
      the cell the points name and the next larger size's cell and applies the more demanding of
      the two — a cell with no proven standard is the most demanding, so either one lacking a
-     standard stops the ticket **[operator: or refuse every pointed ticket `size_unknown` until
-     the agreement passes]**. An `L` ticket reads the L and XL cells; XL routes `granularize`,
-     so until the agreement passes every ticket pointed L stops, routed `granularize`, with the
-     reason named. A ticket with no points is `unsized` and routes `human` (ADR-0025
-     item 12). After the build, ADR-0025's `size_exceeds_licence` check stands.
+     standard stops the ticket. The operator fixed this rule (DL-371); the alternative offered —
+     refuse every pointed ticket `size_unknown` until the agreement passes — was not taken. An
+     `L` ticket reads the L and XL cells; XL routes `granularize`, so until the agreement passes
+     every ticket pointed L stops, routed `granularize`, with the reason named. A ticket with no
+     points is `unsized` and routes `human` (ADR-0025 item 12). After the build, ADR-0025's
+     `size_exceeds_licence` check stands.
 
 9. **Class sets: one rule at replay and intake, held out by commit, versioned, never pooled.**
    - **The stamp.** Every row of 2.4 or later stamps `labels.taxonomy`: `global/classes@v1` for
@@ -343,7 +346,8 @@ rule makes them prospective (item 10).
      counts and churn leave the rule; they stay diagnostics and ADR-0025's post-build size check.
    - **Held out by commit.** Before any class of a new version is proposed, each repository's
      replayable commits are split by `sha256("crb.split.v1|" + repo + "|" + commit)` into a
-     **derivation set** and a **confirmation set** — one third and two thirds **[operator]** —
+     **derivation set** and a **confirmation set** — one third and two thirds, fixed by the
+     operator (DL-371) —
      and the split is recorded. Proposing, merging, splitting and the separation test (which does
      read replay outcomes) use derivation commits only. A version **licenses only on
      confirmation commits**, through a reading registered after it was signed; a commit that
@@ -354,15 +358,15 @@ rule makes them prospective (item 10).
      new class set licenses only at the next apparatus or on commits made since that
      measurement.
    - **The validity report** runs before a version may route (its costs are $0 except model
-     relabelling), with thresholds **[operator]**: coverage — at least 90% of replayable commits
-     fall in a named class; agreement — Cohen's κ at least 0.6 against a person-labelled sample of
-     at least 50 derivation commits, at least 5 per class; stability — a model rule repeats its
-     own labels at least 90% of the time; ticket consistency — where at least 20 commits link a
-     ticket, the rule gives the same class from the ticket and from the message at least 80% of
-     the time; **size agreement** — on at least 20 linked tickets that carry points, the tier the
-     points name equals the churn tier of the merged change at least 80% of the time and names a
-     smaller tier at most 10% of the time; measurability — at least 20 confirmation commits in
-     each class × size cell the version routes.
+     relabelling), with thresholds the operator fixed as written here (DL-371): coverage — at least
+     90% of replayable commits fall in a named class; agreement — Cohen's κ at least 0.6 against a
+     person-labelled sample of at least 50 derivation commits, at least 5 per class; stability — a
+     model rule repeats its own labels at least 90% of the time; ticket consistency — where at least
+     20 commits link a ticket, the rule gives the same class from the ticket and from the message at
+     least 80% of the time; **size agreement** — on at least 20 linked tickets that carry points,
+     the tier the points name equals the churn tier of the merged change at least 80% of the time
+     and names a smaller tier at most 10% of the time; measurability — at least 20 confirmation
+     commits in each class × size cell the version routes.
    - **Two people.** A version routes nothing until its report passes and an approver other than
      its sponsor has signed it (item 10's rule). A using team proposes version N+1 as work-type
      entries; the class set becomes a DL-044 registry seam instead of a code edit. A person's
@@ -513,8 +517,8 @@ rule makes them prospective (item 10).
   the repository's creation in 2013]**, so its later looks may never be reached; prospective
   readings on slow repositories take years (item 10).
 - A new class-set version licenses only on its confirmation share of each cell's commits (two
-  thirds, proposed — item 9), and each arm × builder × model needs 20 to 40 commits of its own:
-  arms must stay few and pre-registered.
+  thirds, fixed by the operator — item 9), and each arm × builder × model needs 20 to 40
+  commits of its own: arms must stay few and pre-registered.
 - Every reading needs a registration act, and the budget refuses a reading it cannot cover.
 
 **What we must never do.**
@@ -597,16 +601,17 @@ rule makes them prospective (item 10).
 
 ## Operator values
 
-The values marked **[operator]** above are proposals until the operator fixes them. Each is one
-row here. A criterion or gap line of the definition of done that states one carries
-`ADR-0026 [operator]` and follows the operator's choice; `scripts/dod_check.py` refuses one that
-does not, refuses a marker this table does not register, and refuses the marker once this ADR
+These values were proposals until the operator fixed them. Paul Glover, the operator, fixed each
+one on 2026-10-09 as proposed (DL-371), and any later tightening needs a recorded decision. The
+table stays as the record of what he fixed, one row per value, with the alternative that was
+offered and not taken. A criterion or gap line of the definition of done states the value
+plainly; `scripts/dod_check.py` refuses the old proposal marker on such a line now that this ADR
 is accepted (docs/PREVENTION.md P-237).
 
-| item | the proposal | the words a criterion states it in |
-|---|---|---|
-| 3 | the first look at 20 | `of the first 20` |
-| 5 | one error budget per cell of 5% (2.5% is the stricter choice) | `budget of 5%` |
-| 8 | until the points-to-churn agreement passes, the more demanding of the named size's cell and the next larger one (or refuse every pointed ticket `size_unknown`) | `the more demanding` |
-| 9 | a derivation set of one third and a confirmation set of two thirds | `one third` · `two thirds` |
-| 9 | the validity report's thresholds | `twenty confirmation` · `20 confirmation` · `at least 90%` · `κ at least` |
+| item | the value the operator fixed (DL-371) | the alternative not taken | the words a criterion states it in |
+|---|---|---|---|
+| 3 | the first look at 20 (`look.v1`) | none was offered | `of the first 20` |
+| 5 | one error budget per cell of 5% | 2.5%, the stricter choice | `budget of 5%` |
+| 8 | until the points-to-churn agreement passes, the more demanding of the named size's cell and the next larger one | refuse every pointed ticket `size_unknown` until the agreement passes | `the more demanding` |
+| 9 | a derivation set of one third and a confirmation set of two thirds | none was offered | `one third` · `two thirds` |
+| 9 | the validity report's thresholds, as item 9 writes them | none was offered | `twenty confirmation` · `20 confirmation` · `at least 90%` · `κ at least` |

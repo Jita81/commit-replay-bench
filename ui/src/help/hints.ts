@@ -657,7 +657,7 @@ export const HINTS = {
   'col.classes.words':
     'What the result means, in words, with the counts behind it.',
   'col.classes.threshold':
-    'The bar the check must clear. The values are proposals the operator fixes; the page shows the ones in force.',
+    'The bar the check must clear. The values are the ones the operator fixed (ADR-0026 item 9); the page shows the ones in force.',
   'col.classes.repo':
     'A repository whose commits this version describes.',
   'col.classes.derivation':
