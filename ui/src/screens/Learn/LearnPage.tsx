@@ -939,7 +939,7 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
                 </>
               )}
               <dt className="font-semibold">Estimated spend</dt>
-              <dd className="m-0">{cell.cost_known ? `${fmtUsd(cell.est_cost_usd)}${cell.mode === 'blind' ? ' (up to 3 attempts per commit on the blind ladder)' : ''}` : 'not known — no row of this cell recorded a cost'}</dd>
+              <dd className="m-0">{cell.cost_known ? `${fmtUsd(cell.est_cost_usd)}${cell.mode === 'blind' ? ' (one attempt per commit: the run climbs one rung)' : ''}` : 'not known — no row of this cell recorded a cost'}</dd>
             </dl>
             {queue.isError && <ErrorState error={queue.error} />}
           </>
@@ -1133,7 +1133,7 @@ function RemeasureSection({ repo }: { repo: string }) {
           hint="stat.learn.remeasure_cost"
           value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'}
           n={p.summary.cost_known_cells}
-          apparatus="each cell’s own mean row cost × the commits requested (× up to 3 attempts each for a blind cell)"
+          apparatus="each cell’s own mean row cost × the commits requested (one attempt each, blind or sighted)"
           footer={
             <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
               Queue runs

@@ -923,6 +923,8 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
     assert run["status"] == "queued" and run["builder"] == "editblock"
     assert run["task_ids"] == request["task_ids"] and run["mode"] == "sighted"
+    # the one rung the plan priced it at (PW-1: ``RunRequest.rungs``)
+    assert run["ladder"] == ["r1"]
     # filed under the reading it measures: the worker re-checks the seal at claim (P-789)
     with env.factory() as s:
         stored = s.get(Run, d["run_ids"][0])

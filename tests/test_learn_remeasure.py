@@ -16,7 +16,8 @@ What it does: Shows a cell with rows and no reading offered ``register`` with no
               ``undecided`` reading named in ``cannot_clear`` with its reason; the arms a replay
               cannot write (``S2``, ``+L``, another test author, another posture) offered no
               request; gold-clean and relabelled commits left out; valid ``POST /runs`` bodies;
-              unknown cost; determinism; and the CLI rendering.
+              unknown cost, and a blind top-up priced at the one rung its run climbs;
+              determinism; and the CLI rendering.
 How:          Sealed 2.4 rows and readings from ``tests.fixtures.readings``; rows of an older
               apparatus from ``tests.fixtures.posture``; no model, no docker, no store.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -327,6 +328,21 @@ def test_a_decided_reading_is_named_with_its_reason_and_offered_nothing() -> Non
     (u,) = _plan(rows_for([True] * 15, small.pool), small).cannot_clear
     assert (u.state, u.next_act) == (STATE_UNDECIDED, "mine")
     assert "pool" in u.reason and "labelled" in u.reason
+    assert "pool ended before the look at 20 (15 read)" in u.reason
+
+
+def test_an_undecided_reading_with_commits_to_run_is_not_said_to_have_ended() -> None:
+    """FZ-1's sibling: a pool of 15 with three commits unrun cannot reach the look at 20, but
+    it has not ended — those three may still read it insufficient."""
+    small = register_reading(commits(15, "small"), hierarchy=("S3",))
+    (u,) = _plan(rows_for([True] * 12, small.pool), small).cannot_clear
+    assert (u.state, u.next_act) == (STATE_UNDECIDED, "mine") and "ended" not in u.reason
+    assert "cannot reach the look at 20 (12 read, 3 still to run, 5 short)" in u.reason
+    assert "may still read insufficient as those run" in u.reason and "labelled" in u.reason
+    # one commit unrun and no miss read: look.v1's last look allows two, so it stays undecided
+    held = _plan(rows_for([True] * 14, small.pool), small).cannot_clear[0]
+    assert "(14 read, 1 still to run, 5 short): it never delivers:" in held.reason
+    assert "insufficient" not in held.reason
 
 
 # --- bodies, cost, determinism -----------------------------------------------------------
@@ -347,14 +363,19 @@ def test_requests_are_valid_post_runs_bodies() -> None:
                 assert req.kind in ("replay", "blind") and req.task_ids == list(r.task_ids)
 
 
-def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_per_rung() -> None:
+def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_at_its_one_rung() -> None:
+    """PW-1: an S1 top-up's run climbs the ladder ``POST /runs`` stores for a body that names
+    none — ``["r1"]``, one rung — so it is priced at one attempt per commit, never three."""
     reading = register_reading(commits(40), hierarchy=(S1,))
     (c,) = _plan([], reading, s1_author_model=AUTHOR).cells
     assert not c.cost_known and c.est_cost_usd == 0.0
     assert "?" in learn.render_remeasure(_plan([], reading, s1_author_model=AUTHOR))
-    priced = [sealed_row(x, arm="A0", cost_usd=0.4) for x in commits(3, "priced")]
+    priced = [sealed_row(x, arm="A0", cost_usd=0.4, latency_s=30.0) for x in commits(3, "p")]
     (b,) = _plan(priced, reading, s1_author_model=AUTHOR).cells
-    assert b.cost_known and b.est_cost_usd == pytest.approx(0.4 * 20 * 3)
+    assert b.cost_known and b.est_cost_usd == pytest.approx(0.4 * 20 * 1)
+    assert b.est_minutes == pytest.approx(30.0 * 20 * 1 / 60.0)
+    (request,) = b.requests
+    assert (b.mode, request.kind, request.rungs, b.n_requested) == ("blind", "blind", 1, 20)
 
 
 def test_deterministic_and_rendered() -> None:

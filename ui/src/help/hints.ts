@@ -1895,13 +1895,13 @@ export const HINTS = {
   'stat.learn.needed':
     'Commits the registered readings still need before their next looks, summed over the readings waiting on a look (routing.v2). A cell with no registered reading is not counted here: it needs a reading registered first.',
   'stat.learn.remeasure_cost':
-    'Each cell’s own mean row cost times the commits its runs ask for, times up to 3 attempts per commit for a blind cell (the ladder’s rungs), summed over the cells with a known cost. A dash means no cost is known.',
+    'Each cell’s own mean row cost times the commits its runs ask for, one attempt per commit blind or sighted (a queued run climbs one rung), summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
     'The cell: its process step, class, size, language, builder, model and provider, then the mode and the context arm it is about. Two arms are never pooled.',
   'col.learn_remeasure.counts':
     'Rows on older apparatus versions (named); the distinct commits read so far (by the registered reading, or, with none, the commits with a first attempt); and how many more commits are needed, with the reason and what to do next under it.',
   'col.learn_remeasure.cost':
-    'The cell’s mean row cost times the commits its runs ask for (times up to 3 for a blind cell). It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
+    'The cell’s mean row cost times the commits its runs ask for (one attempt each, blind or sighted). It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
   'col.learn_remeasure.runs':
     'How many run requests the plan lists to close the gap.',
   'link.learn.oracle':
