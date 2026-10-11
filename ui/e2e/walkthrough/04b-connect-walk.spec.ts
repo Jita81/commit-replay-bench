@@ -134,8 +134,9 @@ test.describe('04b the walk through its own doors', () => {
   test('Configuration → Save → Run probe now → back on the walk stage 2 reads Done with the new run', async ({ page }) => {
     test.setTimeout(6 * MIN)
     await page.goto(`/connect/${NAME}`)
-    const before = await page.getByTestId('stage-probe').getByRole('link', { name: 'open run' }).getAttribute('href')
-    expect(before).toMatch(/\/runs\/[0-9a-f]{32}$/)
+    const door = page.getByTestId('stage-probe').getByRole('link', { name: 'open run' })
+    await expect(door).toHaveAttribute('href', /\/runs\/[0-9a-f]{32}$/)
+    const before = (await door.getAttribute('href'))!
     // the walk's Configuration door, then a real change: the belt scope to the tests directory
     await page.getByRole('link', { name: 'Configuration' }).click()
     await page.waitForURL(new RegExp(`/repos/${NAME}$`))
@@ -152,9 +153,8 @@ test.describe('04b the walk through its own doors', () => {
     // back on the walk: stage 2 reads Done, and its door is the NEW run's
     await page.goto(`/connect/${NAME}`)
     await expect(stagePill(page, 'probe')).toHaveAttribute('aria-label', 'Toolchain probed: Done')
-    const after = await page.getByTestId('stage-probe').getByRole('link', { name: 'open run' }).getAttribute('href')
-    expect(after).toMatch(/\/runs\/[0-9a-f]{32}$/)
-    expect(after, 'the walk reads the re-probe, not the first probe').not.toBe(before)
+    await expect(door, 'the walk reads the re-probe, not the first probe').not.toHaveAttribute('href', before)
+    await expect(door).toHaveAttribute('href', /\/runs\/[0-9a-f]{32}$/)
   })
 
   test('presses Run on stages 3, 4 and 5 of the walk, watches each, and reads the amber controls line before /oracle', async ({ page }) => {
