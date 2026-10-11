@@ -808,7 +808,6 @@ def register_forward(
     now: str = "",
     hypothesis: str = "",
     smallest_effect: float | None = None,
-    campaign_id: str = "",
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -820,7 +819,9 @@ def register_forward(
     factory's gate reads the two in one scope, and it spends its rule's P(deliver | 0.80) from
     the CEILING's cell budget (``budget_spent`` when that cannot cover it). Its pool is the
     rule :data:`POOL_RULE_CALIBRATION`: the calibration builds whose held-out tests are
-    written after it — no ticket is chosen by a person, and none exists yet."""
+    written after it — no ticket is chosen by a person, and none exists yet. It names no
+    campaign (DL-382): its builds are factory runs, which carry no ``reading_id``, so nothing
+    could file them under one — ``POST /readings/forward`` refuses a ``campaign_id``."""
     if ceiling.state != OUTCOME_CEILING:
         raise ReadingRefused(
             f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
@@ -879,7 +880,6 @@ def register_forward(
         budget_cell=base.budget_key[1],
         hypothesis=hypothesis,
         smallest_effect=smallest_effect,
-        campaign_id=campaign_id,
     )
 
 

@@ -11,13 +11,16 @@ of a cell's budget; it is refused ``409 pool_seen`` when a pool commit already h
 under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the caller names a
 pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
 ``422 invalid_reading`` for a shape the ADR forbids, and ``404 campaign_unknown`` when it names
-a ``campaign_id`` no verified campaign has — a reading names its campaign at birth, and every
-run of it is then filed under that campaign (DL-382). ``GET /readings`` serves every reading of a
-repository evaluated over its rows — each arm's look state — and each cell's budget spent.
-``standard_for`` is the seam the factory's entry gate reads (ADR-0026 item 8). ``POST
-/readings/forward`` (operator) registers the forward reading of a ceiling (DL-334): ``S2`` on the
-factory's cell, counted on calibration builds graded on a second person's held-out tests, the
-one reading that can promote the ceiling; ``load_readings`` enrols its pool.
+a ``campaign_id`` no verified campaign has — a reading names its campaign at birth, a run filed
+under it is then filed under that campaign, and it counts only runs the campaign admitted
+(DL-382). ``GET /readings`` serves every reading of a repository evaluated over its rows — each
+arm's look state — and each cell's budget spent. ``standard_for`` is the seam the factory's
+entry gate reads (ADR-0026 item 8). ``POST /readings/forward`` (operator) registers the forward
+reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on calibration builds graded
+on a second person's held-out tests, the one reading that can promote the ceiling;
+``load_readings`` enrols its pool. A forward reading names no campaign: its runs are factory
+runs, which carry no ``reading_id``, so nothing could file them under one — ``campaign_id`` is
+refused ``422 forward_campaign_unsupported`` (DL-382).
 
 Navigation
 ----------
@@ -29,8 +32,9 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               under an organisation's class set, only the confirmation commits its rule puts in
               the reading's ``org_class``, on that class's parent's cell, and only while the set
               routes (ADR-0026 item 9),
-              refuses an unsealed posture for a replayed arm and a campaign that does not
-              verify (``campaign_unknown``, DL-382), reads the rows and the readings
+              refuses an unsealed posture for a replayed arm, a campaign that does not
+              verify (``campaign_unknown``, DL-382) and any campaign on a forward reading
+              (``forward_campaign_unsupported``), reads the rows and the readings
               already registered under the lock, and writes the event; lists readings with
               every arm's state and the budget per cell; answers a cell's proven standard on
               one checks arm and posture class (or ``None``).
@@ -127,6 +131,10 @@ SmallestEffect = Annotated[float, Field(gt=0, le=1)]
 #: The campaign every run of the reading spends under (DL-382): named at registration, never
 #: bound later. ``None`` for a reading under no campaign.
 CampaignId = Annotated[str | None, Field(pattern=r"^cmp_[0-9a-f]{24}$")]
+#: ``POST /readings/forward`` with a ``campaign_id`` (DL-382): a forward reading's runs are
+#: factory calibration builds, which carry no ``reading_id``, so no gate could file them under
+#: the campaign — a campaign it named would hold none of its spend.
+REFUSAL_FORWARD_CAMPAIGN = "forward_campaign_unsupported"
 
 
 def _refuse_unknown_campaign(session: Session, campaign_id: str | None) -> None:
@@ -437,7 +445,8 @@ class ForwardIn(BaseModel):
     rule: str = RULE_LOOK_V1
     hypothesis: Hypothesis
     smallest_effect: SmallestEffect
-    #: As on :class:`ReadingIn` (DL-382): the campaign the forward reading's runs spend under.
+    #: Refused when given (422 ``forward_campaign_unsupported``, DL-382): kept on the model so
+    #: a body that names a campaign is refused by name, never registered without it.
     campaign_id: CampaignId = None
 
 
@@ -457,13 +466,23 @@ def register_forward_reading(
     factory's cell, counted only on calibration builds graded on a second person's held-out
     acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
     ``ceiling`` now, **409** ``budget_spent`` when the ceiling's cell budget cannot cover the
-    rule, **404** for a reading the repository does not have, **404** ``campaign_unknown``
-    for a ``campaign_id`` no verified campaign has (DL-382)."""
+    rule, **404** for a reading the repository does not have, **422**
+    ``forward_campaign_unsupported`` for any ``campaign_id`` — before anything is read or
+    written: its calibration builds are factory runs, which carry no ``reading_id``, so no
+    submit gate could hold them to the campaign (DL-382)."""
+    if body.campaign_id is not None:
+        raise ApiError(
+            422,
+            REFUSAL_FORWARD_CAMPAIGN,
+            "a forward reading names no campaign: its calibration builds are factory runs, "
+            "which carry no reading_id, so nothing would file them under the campaign — "
+            "register it without campaign_id (DL-382)",
+            detail={"campaign_id": body.campaign_id},
+        )
     get_repo_or_404(db, body.repo)
     rows = list(DbLedger(factory).rows(repo=body.repo))
 
     def build(s: Session) -> dict[str, Any]:
-        _refuse_unknown_campaign(s, body.campaign_id)
         readings = load_readings(s, body.repo)
         named = next((r for r in readings if r.reading_id == body.promotes), None)
         if named is None:
@@ -479,7 +498,6 @@ def register_forward_reading(
             budget=cell_error_budget(),
             hypothesis=body.hypothesis,
             smallest_effect=body.smallest_effect,
-            campaign_id=body.campaign_id or "",
         )
         return reading.to_dict()
 
