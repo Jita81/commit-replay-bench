@@ -15,7 +15,9 @@ What it does: Pins that the argv is headless, tool-restricted and uses the skill
               killing at the first 401 retry, ``auth_status`` naming the source; that usage falls
               back to summed messages and priced cost; that tampering is detected post hoc and
               the grader disqualifies; that archaeology or network in the transcript is a
-              violation; wall-clock timeout, missing result, max turns, auth failure and a
+              violation, and a nested model call (a Bash command or a written file) a
+              ``nested_model_call`` one that stops the run and reads as a protocol miss;
+              wall-clock timeout, missing result, max turns, auth failure and a
               missing binary as recorded outcomes. The ``live`` cases spend real tokens.
 How:          ``FakeSpawn`` replays canned stream-json lines and optionally edits the worktree
               like the real CLI; a throwaway ``CRB_HOME`` for the secrets cases;
@@ -305,6 +307,7 @@ def test_argv_is_headless_restricted_and_uses_skill_model_ids(tmp_path: Path) ->
     )
     deny = argv[argv.index("--disallowedTools") + 1]
     assert "Bash(git log:*)" in deny and "WebFetch" in deny and "Bash(curl:*)" in deny
+    assert "Bash(claude:*)" in deny.split(",") and "Bash(/usr/local/bin/claude:*)" in deny
     sysprompt = argv[argv.index("--append-system-prompt") + 1]
     assert (
         "NEVER modify" in sysprompt
@@ -857,6 +860,54 @@ def test_archaeology_and_network_in_transcript_are_violations(tmp_path: Path) ->
     assert len(arch) == 2 and len(net) == 1 and out.violated
     assert out.extra["refused"] and "git log" in out.extra["refused"][0]
     assert out.done  # the claim stands as a claim; the orchestrator DQs on `violated`
+    ws.remove()
+
+
+def test_a_nested_model_call_is_a_violation_and_stops_the_run(tmp_path: Path) -> None:
+    """F5: an agent that runs the claude CLI inside its build is disqualified with reason
+    ``nested_model_call``; the stream is killed at that event (the next tool use is never
+    read, so no misleading "no result" error is added), and the row reads as a protocol
+    miss: not harness, not an outage, so it is read and never re-run."""
+    from crb.builders.adapter import attempt_error
+    from crb.core.ledger import FAILURE_PROTOCOL, derive_failure_kind
+
+    lines = [
+        ev_init(),
+        ev_assistant(tool_use("Bash", command="python -m pytest -q")),
+        ev_user(),
+        ev_assistant(tool_use("Bash", command='claude -p "fix the failing test"')),
+        ev_user(),
+        ev_assistant(tool_use("Bash", command="python -m pytest -q")),
+        ev_user(),
+        ev_result(structured={"done": True, "summary": "ok"}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines, side_effect=_fix_calc))
+    nested = [e for e in out.errors if e.startswith("network: nested_model_call:")]
+    assert len(nested) == 1 and "(attempted: claude -p" in nested[0] and out.violated
+    assert out.tool_calls == 2 and not out.done  # stopped at the nested call
+    assert not any(e.startswith("model_error") for e in out.errors)
+    error = attempt_error(out)
+    assert error.startswith("protocol violation: network: nested_model_call:")
+    kind = derive_failure_kind(clean=False, disqualified=False, builder_error=error)
+    assert kind == FAILURE_PROTOCOL
+    ws.remove()
+
+
+def test_a_written_script_that_calls_a_model_is_a_violation(tmp_path: Path) -> None:
+    """The tripwire reads every tool input, not only Bash: a file written to call the SDK
+    is caught at the write, before anything runs it."""
+    lines = [
+        ev_init(),
+        ev_assistant(
+            tool_use("Write", file_path="/work/solve.py", content="import anthropic\nprint(1)\n")
+        ),
+        ev_user(),
+        ev_result(structured={"done": True, "summary": "ok"}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), workdir_alias="/work")
+    nested = [e for e in out.errors if e.startswith("network: nested_model_call:")]
+    assert len(nested) == 1 and "anthropic SDK" in nested[0]
+    assert "(attempted: Write: import anthropic" in nested[0] and out.violated
     ws.remove()
 
 

@@ -20,7 +20,8 @@ short-cut the grade:
 * :class:`TestFileGuard` and :class:`GitArchaeologyGuard` are the shared
   input-mistake-proofing every adapter applies: a write to a protected test path,
   a path outside the worktree, a ``.git/`` write, a ``git log``/``show``/…
-  to recover the real patch, or a network fetch is refused *before* it happens
+  to recover the real patch, a network fetch, or a model called from inside the
+  build (:func:`nested_model_call`) is refused *before* it happens
   (tool loops) or flagged after the fact (subprocess agents). The grader's belts
   remain the authority — these guards only stop honest mistakes early and turn
   dishonest ones into recorded protocol violations.
@@ -36,12 +37,15 @@ What it is:   The builder contract — ``BuildBrief`` (what a builder is told), 
 What it does: Makes the short-cuts non-constructible: a blind brief cannot carry test paths,
               a budget cannot be unbounded, an outcome cannot carry a verdict; refuses a test
               write, a ``.git`` write, a path outside the worktree, git history, the shared
-              stash, the network and package installs before they happen (tool loops) or
-              records them after the fact (subprocess agents). The belts stay the authority.
+              stash, the network, package installs and a model called from inside the build
+              (``nested_model_call``: the endpoint, the SDK, a credential variable's name,
+              the claude CLI) before they happen (tool loops) or records them after the fact
+              (subprocess agents). The belts stay the authority.
               ``model_error_text`` writes every builder's model-call error, and a refused or
               absent credential in the ledger's own words (outage, cause auth).
 How:          Frozen dataclasses with ``__post_init__`` invariants → the guards: path
               normalisation + symlink resolution for ``TestFileGuard``; for the shell guard,
+              the nested-model-call text scan over the whole command →
               heredoc stripping → substitution hoisting → newline splitting → ``shlex`` →
               per-segment unwrap (wrappers, assignments, keywords) → per-executable rules
               (git verbs, package managers, inline-code scan).
@@ -56,7 +60,8 @@ Works with:   src/crb/builders/adapter.py (turns a ``Builder`` into the core's `
               src/crb/core/grade.py (the verdict this module never produces),
               tests/fixtures/shell_corpus.txt (the honest-shell corpus the guard must pass)
 Tested by:    tests/test_builders_base.py, tests/test_builders_guard_corpus.py,
-              tests/test_ledger_classification.py (``model_error_text``)
+              tests/test_ledger_classification.py (``model_error_text``),
+              tests/test_nested_model_call.py (the nested-model-call tripwire)
 Touch when:   never for a new repository; a guard false positive on honest shell is fixed
               here AND added as a corpus line (tests/fixtures/shell_corpus.txt) first; a new
               stop reason or outcome field changes ``BuilderRef`` in src/crb/core/evidence.py
@@ -903,12 +908,25 @@ _CONFIG_WRITE: frozenset[str] = _words(
 
 #: Executables that reach the network, leave the sandbox, or open a browser. The
 #: real belt is the sandbox's ``--network=none``; this guard refuses the obvious
-#: ones early so an honest mistake is a one-line refusal, not a lost build.
+#: ones early so an honest mistake is a one-line refusal, not a lost build. The
+#: sealed builder container is not ``--network=none``: its one allowed host is the
+#: model endpoint, so ``claude`` (a :data:`MODEL_CLIS` entry) is refused as a
+#: :data:`NESTED_MODEL_CALL`, not as a plain fetch.
 NETWORK_TOOLS: frozenset[str] = _words(
     "curl wget wget2 ssh scp sftp rsync nc ncat netcat socat telnet ftp http https xh httpie aria2c "
     "gh glab hub dig nslookup host ping traceroute mtr nmap whois lynx w3m links elinks xdg-open "
-    "open docker podman nerdctl kubectl helm aws gcloud az rclone s3cmd gsutil uvx n pacman"
+    "open docker podman nerdctl kubectl helm aws gcloud az rclone s3cmd gsutil uvx n pacman claude"
 )
+
+#: The reason an attempt that calls a model from inside its own build is disqualified
+#: (F5, the Wave 3 red team): the call is spend the run never meters and help the arm
+#: was never registered with. It is recorded as ``network: nested_model_call: …`` so the
+#: existing protocol path carries it: the attempt reads as a miss, never as harness.
+NESTED_MODEL_CALL = "nested_model_call"
+#: Model CLIs. Running one inside the build is a nested model call.
+MODEL_CLIS: frozenset[str] = frozenset({"claude"})
+#: The credential variables a nested call would read. Matched by NAME, never by value.
+MODEL_CREDENTIAL_ENV: tuple[str, ...] = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 
 #: Package / toolchain managers → the sub-commands that install, fetch or mutate
 #: the provisioned environment. Anything else they do (``list``, ``show``, ``run``,
@@ -1082,6 +1100,32 @@ _CODE_GIT_DIFF_REV = re.compile(
 _CODE_GIT_DIR = re.compile(r"(^|[^\w.])\.git(/|['\"])")
 _CODE_NET_TOOL = re.compile(
     r"\b(curl|wget|ssh|scp|sftp|rsync|ncat|netcat|telnet|aria2c)\b|\bgh\s+(pr|api|repo|issue)\b"
+    r"|\bclaude\b(?![./-])"
+)
+#: What the nested-model-call tripwire looks for in a tool input, each with the words its
+#: reason uses. The claude CLI counts at a command position (line start, after a shell
+#: separator or ``$(``) or as a quoted argv word; ``claude-sonnet-5``, ``CLAUDE.md`` and
+#: a directory named ``claude`` do not.
+_NESTED_MODEL_CALL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("the model endpoint", re.compile(r"api\.anthropic\.com", re.IGNORECASE)),
+    ("the Messages API path", re.compile(r"/v1/messages\b")),
+    (
+        "the anthropic SDK",
+        re.compile(
+            r"\bimport\s+anthropic\b|\bfrom\s+anthropic(\.\w+)*\s+import\b"
+            r"|@anthropic-ai/sdk\b|\banthropic-sdk-"
+        ),
+    ),
+    (
+        "a model credential variable",
+        re.compile(r"\b(" + "|".join(MODEL_CREDENTIAL_ENV) + r")\b"),
+    ),
+    (
+        "the claude CLI",
+        re.compile(
+            r"(?m)(?:^|[;&|(`]|\$\()\s*(?:\S*/)?claude(?![\w./-])|['\"](?:\S*/)?claude['\"]"
+        ),
+    ),
 )
 #: Shell keywords that precede a command in the same segment (``if git log; then``).
 _KEYWORDS: frozenset[str] = _words("! if then else elif fi do done while until coproc")
@@ -1627,8 +1671,11 @@ def _inline_code(exe: str, args: Sequence[str], stdin: str | None) -> list[str]:
 
 
 def _scan_code(code: str, exe: str) -> str:
-    """Refuse inline code that shells out to git history, reads ``.git`` or calls a
-    network tool. Text scan, not a parse — see :data:`_CODE_GIT_HISTORY`."""
+    """Refuse inline code that calls a model, shells out to git history, reads ``.git``
+    or calls a network tool. Text scan, not a parse — see :data:`_CODE_GIT_HISTORY`."""
+    what, _ = _nested_hit(code)
+    if what:
+        return _nested_reason(f"inline {exe} code names {what}")
     m = _CODE_GIT_NETWORK.search(code)
     if m:
         return f"network: inline {exe} code runs 'git {m.group(1)}' (no network access)"
@@ -1641,8 +1688,66 @@ def _scan_code(code: str, exe: str) -> str:
         return f"archaeology: inline {exe} code reads '.git'"
     m = _CODE_NET_TOOL.search(code)
     if m:
-        return f"network: inline {exe} code runs '{m.group(0).split()[0]}' (no network access)"
+        tool = m.group(0).split()[0]
+        if tool in MODEL_CLIS:
+            return _nested_reason(f"inline {exe} code runs '{tool}'")
+        return f"network: inline {exe} code runs '{tool}' (no network access)"
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Nested-model-call tripwire (F5)
+# ---------------------------------------------------------------------------
+
+
+def _nested_reason(what: str) -> str:
+    """The recorded reason for a nested model call: ``network:``-prefixed so the protocol
+    path (``BuildOutcome.violated`` → ``protocol violation:`` → a miss) carries it."""
+    return f"network: {NESTED_MODEL_CALL}: {what} (no model calls from inside the build)"
+
+
+def _nested_hit(text: str) -> tuple[str, int]:
+    """``(what, offset)`` of the first tripwire pattern ``text`` matches, else ``("", -1)``."""
+    for what, rx in _NESTED_MODEL_CALL_PATTERNS:
+        m = rx.search(text)
+        if m:
+            return what, m.start()
+    return "", -1
+
+
+def nested_model_call(text: str) -> str:
+    """The reason ``text`` reaches for a model from inside the build, else ``""``.
+
+    Matches the model endpoint (``api.anthropic.com``), the Messages API path, an import
+    of the anthropic SDK, the NAME of a model credential variable
+    (:data:`MODEL_CREDENTIAL_ENV`; values are never looked at) and the claude CLI run as a
+    command. A text scan over what the builder asked to run or write: a call that is
+    encoded or reached indirectly passes it (docs/PREVENTION.md P-797).
+    """
+    what, _ = _nested_hit(text)
+    return _nested_reason(f"names {what}") if what else ""
+
+
+def nested_model_call_input(tool_input: Any) -> tuple[str, str]:
+    """``(reason, excerpt)`` for the first string anywhere in a tool call's input that
+    :func:`nested_model_call` matches — a Bash command, an Edit's new text, a written
+    file's content, a search pattern — else ``("", "")``. Walks dicts and lists with an
+    explicit stack, so no nesting depth hides a string. The excerpt is the text around the
+    match, whitespace collapsed; a caller caps it and the outcome redacts it."""
+    stack: list[Any] = [tool_input]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, str):
+            what, at = _nested_hit(value)
+            if what:
+                return _nested_reason(f"names {what}"), " ".join(
+                    value[max(0, at - 40) : at + 80].split()
+                )
+        elif isinstance(value, Mapping):
+            stack.extend(reversed(list(value.values())))
+        elif isinstance(value, (list, tuple)):
+            stack.extend(reversed(value))
+    return "", ""
 
 
 def _chdir(here: Path | None, target: str) -> Path | None:
@@ -1672,7 +1777,9 @@ class GitArchaeologyGuard:
     ``sh -c``, function bodies, ``alias`` values) are unwrapped to the command that
     actually runs. Returns ``""`` when allowed, else a reason prefixed
     ``archaeology:`` (history / other revisions / the shared stash stack / ``.git``
-    / cannot be parsed safely) or ``network:`` (fetch / install / registry / cloud).
+    / cannot be parsed safely) or ``network:`` (fetch / install / registry / cloud,
+    and ``network: nested_model_call:`` for a model called from inside the build —
+    :func:`nested_model_call` runs over the whole command before the parse).
 
     ``cwd`` (constructor or per call) is the worktree the command runs in. With it
     the guard can *verify* instead of guess: ``npx <bin>`` is honest when
@@ -1723,7 +1830,10 @@ class GitArchaeologyGuard:
     builder a clone that does not *contain* the gold commit (the P5
     builder-in-container item). Without a cwd, ``git diff <branch-not-in-the-known-
     list>`` passes. None of these can mint a false pass (the belts still hold); they
-    could contaminate a measurement by recovering the gold patch.
+    could contaminate a measurement by recovering the gold patch. The sealed builder
+    container is not ``--network=none``: its one allowed host is the model endpoint, so
+    a nested model call is reachable there; the text tripwire catches the plain forms
+    and an encoded or indirect call needs an API-aware proxy (P-797).
 
     History (false positives this guard has refused on honest builds, each now a
     corpus line in ``tests/fixtures/shell_corpus.txt``):
@@ -1775,6 +1885,12 @@ class GitArchaeologyGuard:
         """Parse and check a shell command line (see the class docstring)."""
         if _depth > 4:
             return "archaeology: command substitution nested too deep to check"
+        if _depth == 0:
+            # the whole text, here-document bodies included: a script written to disk
+            # that calls a model is caught before the shell parse looks at segments
+            nested = nested_model_call(command)
+            if nested:
+                return nested
         here = self._here(cwd)
         stripped = _strip_heredocs(command)
         if stripped is None:
@@ -1924,6 +2040,8 @@ class GitArchaeologyGuard:
                     if r:
                         return r
             return ""
+        if exe in MODEL_CLIS:
+            return _nested_reason(f"'{exe}' runs a model")
         if exe in NETWORK_TOOLS:
             return f"network: '{exe}' is not allowed (no network access)"
         if exe == "git" or exe.startswith("git-"):
@@ -2420,6 +2538,9 @@ __all__ = [
     "CREDENTIAL_REFUSED_STATUSES",
     "DEFAULT_RULES",
     "GIT_ALLOWED",
+    "MODEL_CLIS",
+    "MODEL_CREDENTIAL_ENV",
+    "NESTED_MODEL_CALL",
     "NETWORK_TOOLS",
     "STOP_DONE",
     "STOP_MAX_COST",
@@ -2444,4 +2565,6 @@ __all__ = [
     "emit",
     "http_status_of",
     "model_error_text",
+    "nested_model_call",
+    "nested_model_call_input",
 ]

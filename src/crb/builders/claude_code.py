@@ -4,8 +4,8 @@ Runs ``claude -p`` (headless) in the worktree with ``--output-format stream-json
 and parses the event stream for turns, tool uses, usage and cost. The tool set
 is restricted (``--tools`` + ``--allowedTools``) and pre-approved under
 ``--permission-mode dontAsk`` so nothing can prompt, with deny rules for git
-archaeology and network fetches (``--disallowedTools``). ``--bare`` (default)
-makes authentication strictly ``ANTHROPIC_API_KEY`` (never the operator's
+archaeology, network fetches and the claude CLI itself (``--disallowedTools``).
+``--bare`` (default) makes authentication strictly ``ANTHROPIC_API_KEY`` (never the operator's
 keychain or OAuth profile), skips the target repo's ``CLAUDE.md`` (a
 prompt-injection vector) and hooks, and — as the CLI's simple mode — exposes
 exactly ``Read/Edit/Bash`` (:data:`BARE_TOOLS`); ``bare=False`` restores the
@@ -60,7 +60,10 @@ output. The same :class:`TestFileGuard` is applied **post hoc** (diff the
 worktree: a protected test changed → ``errors += tamper:``; the grader DQs
 anyway) and every Bash command seen in the transcript is checked by
 :class:`GitArchaeologyGuard` (a violation is recorded fail-closed even if the
-CLI's deny rule refused it).
+CLI's deny rule refused it). Every string in every tool call's input also goes
+through the nested-model-call tripwire (:func:`~crb.builders.base.nested_model_call_input`):
+a hit is a ``network: nested_model_call:`` violation — the attempt reads as a miss,
+never as harness — and the run is stopped there, since that spend is unmetered.
 
 Model ids come from the ``claude-api`` skill (never guessed): ``claude-sonnet-5``
 (default — the census's measured path), ``claude-opus-5``, ``claude-haiku-4-5``,
@@ -79,16 +82,19 @@ What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude 
 What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
               set, deny rules, a minimal child environment and no session persistence;
               meters turns, tool uses, tokens and reported cost from the stream; applies the
-              test-file and shell guards post hoc (a hit is a recorded ``tamper:`` /
-              ``archaeology:`` / ``network:`` error, never silently dropped); stops early on
-              an authentication failure the CLI would otherwise retry for minutes.
+              test-file and shell guards and the nested-model-call tripwire (every tool
+              input) post hoc (a hit is a recorded ``tamper:`` / ``archaeology:`` /
+              ``network:`` error, never silently dropped); stops early on a nested model
+              call and on an authentication failure the CLI would otherwise retry for
+              minutes.
               ``verify_login`` proves a login works in either auth mode (one no-tool Haiku
               turn) and ``login_resolution`` names where a build would take it without a
               model call — the run preflight's two inputs (pilot D1).
 How:          ``argv`` (prompt + flags) → ``env`` (``api_key``: key required and forwarded;
               ``cli``: the operator's login via env / secrets file / keychain) → ``spawn`` →
-              ``StreamStats.feed`` per line (usage, tool uses, bash commands through the
-              guard, container-path translation) → ``finish``: tamper scan → outcome.
+              ``StreamStats.feed`` per line (usage, tool uses, every tool input through the
+              tripwire, bash commands through the guard, container-path translation) →
+              ``finish``: tamper scan → outcome.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0012-builder-in-a-sealed-container.md
@@ -100,7 +106,8 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guard
               src/crb/server/routes/admin.py (the verify-login route),
               src/crb/server/builder_login.py (the run preflight and the verification cache)
 Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py,
-              tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py
+              tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py,
+              tests/test_nested_model_call.py (the deny rules and credential names)
 Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
               per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
               event shape is a change to ``argv``/``StreamStats.feed`` with a canned-stream
@@ -129,6 +136,7 @@ from typing import Any, Protocol
 
 from crb.builders.base import (
     CREDENTIAL_REFUSED_STATUSES,
+    NESTED_MODEL_CALL,
     STOP_DONE,
     STOP_MAX_COST,
     STOP_MAX_TURNS,
@@ -141,6 +149,7 @@ from crb.builders.base import (
     GitArchaeologyGuard,
     TestFileGuard,
     emit,
+    nested_model_call_input,
 )
 from crb.builders.budget import CostMeter, price_for
 from crb.core.execution import (
@@ -268,7 +277,14 @@ DENY_RULES: tuple[str, ...] = (
     "Bash(go get:*)",
     "Bash(cargo add:*)",
     "Bash(gh:*)",
+    # a model call from inside the build (F5): the CLI by name and at its image path;
+    # the transcript tripwire (``nested_model_call``) is the belt for every other form
+    "Bash(claude:*)",
+    "Bash(/usr/local/bin/claude:*)",
 )
+
+#: How a nested-model-call reason starts (``crb.builders.base.nested_model_call``).
+_NESTED_PREFIX = f"network: {NESTED_MODEL_CALL}:"
 
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -561,6 +577,8 @@ class StreamStats:
         self.parse_errors = 0
         self.api_retries: list[int] = []
         self.auth_failed = False
+        #: the first nested-model-call reason seen (F5); ``build`` stops the run on it
+        self.nested_model_call = ""
 
     def feed(self, line: str, *, keep: bool) -> dict[str, Any] | None:
         """Consume one stream-json line; returns a small summary event (or ``None`` for a
@@ -662,12 +680,13 @@ class StreamStats:
         return re.sub(rf"{re.escape(self.workdir_alias)}(?=/|$|[\s'\"`;&|)])", root, text)
 
     def _inspect_tool_use(self, name: str, inp: Any, summary: dict[str, Any] | None) -> None:
-        """Run the guards over a tool call as the CLI reports it: Bash commands through the
-        shell guard (recorded as a violation even when the CLI's deny rule refused them),
-        file-writing tools through the path guard; paths translated from the container
-        alias first."""
+        """Run the guards over a tool call as the CLI reports it: every string in the input
+        through the nested-model-call tripwire, Bash commands through the shell guard
+        (recorded as a violation even when the CLI's deny rule refused them), file-writing
+        tools through the path guard; paths translated from the container alias first."""
         if not isinstance(inp, dict):
             return
+        nested, excerpt = nested_model_call_input(inp)
         if name == "Bash":
             cmd = str(inp.get("command", "") or "")
             self.bash_commands.append(cmd)
@@ -676,7 +695,16 @@ class StreamStats:
             reason = self.git_guard.check_shell(self.host_view(cmd))
             if reason:
                 self.violations.append(f"{reason} (attempted: {cmd[:120]})")
-        elif name in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:
+                if reason.startswith(_NESTED_PREFIX):
+                    # the shell guard runs the same tripwire: recorded once, with the command
+                    self.nested_model_call = self.nested_model_call or reason
+                    return
+        if nested:
+            # any tool, any field: a written script or an edit that calls a model counts
+            # as much as running one (the attempt is what the rules forbid)
+            self.nested_model_call = self.nested_model_call or nested
+            self.violations.append(f"{nested} (attempted: {name}: {excerpt[:120]})")
+        if name in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:
             path = str(inp.get("file_path", "") or inp.get("path", "") or "")
             self.write_paths.append(path)
             if summary is not None:
@@ -1015,6 +1043,11 @@ class ClaudeCodeBuilder:
                     )
                     handle.kill()
                     break
+                if stats.nested_model_call:
+                    # a model called from inside the build is spend the run never meters:
+                    # stop at the first sight of it; the recorded violation decides the row
+                    handle.kill()
+                    break
                 if stats.tool_uses > budget.max_tool_calls * 2 and not over_cap:
                     # the CLI has no tool-call cap; --max-turns bounds it, this is the belt
                     over_cap = True
@@ -1029,13 +1062,15 @@ class ClaudeCodeBuilder:
 
         timed_out = bool(handle.timed_out)
         rc = handle.returncode
+        # stopped on purpose: the kill, not the CLI, ended the stream
+        stopped = stats.auth_failed or bool(stats.nested_model_call)
         if timed_out:
             errors.append(f"wall_clock: killed after {budget.wall_clock_s}s")
-        elif rc not in (0, None) and stats.result is None and not stats.auth_failed:
+        elif rc not in (0, None) and stats.result is None and not stopped:
             errors.append(
                 f"model_error: claude exited rc={rc}: {redact_and_cap(handle.stderr_tail, max_chars=500)}"
             )
-        if stats.result is None and not timed_out and not stats.auth_failed:
+        if stats.result is None and not timed_out and not stopped:
             errors.append("model_error: no result event in stream")
         elif stats.result is not None and stats.result.get("is_error"):
             said = redact_and_cap(

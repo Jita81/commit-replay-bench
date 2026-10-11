@@ -222,6 +222,18 @@ On a stop, Claude Code queues nothing more and cancels the runs that have not st
 product refuses every new run of a stopped campaign whatever is queued. A running run ends at its
 cap, which was set to fit.
 
+**Not a stop: a model called from inside a build.** An attempt disqualified `nested_model_call`
+is reported, and counts as a miss. The builder's container can reach one host, the model
+endpoint, so a builder could call a second model whose spend its `cost_usd` never shows. The
+product now refuses the claude CLI by name, and every tool input the builder emits passes a
+tripwire: the endpoint `api.anthropic.com`, the path `/v1/messages`, the claude CLI run as a
+command, an import of the anthropic SDK, or the name (never the value) of a model credential
+variable. A hit is recorded as `network: nested_model_call: …` and the build is stopped there;
+the row's kind is `protocol`, so the commit is read as missed and never re-run (F5, P-797, DL-391).
+**Known gap:** the tripwire reads text. A call that is encoded or reached indirectly passes it,
+and its spend would go unmetered: the tally holds the builder's reported cost only. Closing it
+needs a proxy on the container's one allowed host that understands the API.
+
 **What Claude Code reports at the end of stage 1**, to Paul and as a dated record under
 `docs/reviews/`:
 
@@ -230,6 +242,7 @@ cap, which was set to fit.
 - for each reading arm: commits counted, clean and missed, and its state (`deliver`,
   `insufficient`, `look_pending` with the commits still needed, or `undecided`);
 - for each descriptive arm: commits run and clean;
+- every attempt disqualified `nested_model_call`, by run and commit (each counted as a miss above);
 - what stage 2 would buy: the statement of part 4.
 
 **Stage 2** starts only on Paul's written release, recorded in the decision log: a new decision
