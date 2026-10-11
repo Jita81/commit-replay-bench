@@ -230,6 +230,10 @@ tripwire: the endpoint `api.anthropic.com`, the path `/v1/messages`, the claude 
 command, an import of the anthropic SDK, or the name (never the value) of a model credential
 variable. A hit is recorded as `network: nested_model_call: …` and the build is stopped there;
 the row's kind is `protocol`, so the commit is read as missed and never re-run (F5, P-797, DL-391).
+Round-1 red-teaming widened the guard: it now catches the CLI at any argument position (behind
+`timeout`, inside an `os.system`/`subprocess.run` string, or written to a script and run) and
+unwraps `env -S` and other command wrappers, a written script caught by the tripwire reading the
+write (R1-F5-1, HON-R1-F5-1, R1-NEW-1).
 **Known gap:** the tripwire reads text. A call that is encoded or reached indirectly passes it,
 and its spend would go unmetered: the tally holds the builder's reported cost only. Closing it
 needs a proxy on the container's one allowed host that understands the API.
