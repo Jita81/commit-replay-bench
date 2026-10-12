@@ -84,12 +84,14 @@ def _row(
     repo: str = "todo",
     task_id: str = "0123456789abcdef",
     oracle_strength: float | None = ORACLE,
+    disqualified: bool = False,
 ) -> GradeRow:
     return posture_row(
         repo=repo,
         task_id=task_id,
         clean=clean,
-        tests_unmodified=True,
+        disqualified=disqualified,
+        tests_unmodified=not disqualified,
         target_green=clean,
         no_new_failures=True,
         source_changed=True,
@@ -581,6 +583,25 @@ def test_thin_cell_admits_n_min_distinct_tasks() -> None:
     assert cell.stats is not None and cell.stats.n_tasks == 10
     refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
     assert "thin_cell" not in _codes(refusals)
+
+
+def test_a_cell_of_disqualified_rows_only_is_thin_while_its_reading_counts_them() -> None:
+    """FZ-3 (DL-372): ``thin_cell`` counts ``CellStats.n_tasks``, which leaves a
+    disqualified row out; the reading counts that row as the builder's miss. Twelve commits
+    whose only rows are disqualified are no evidence of volume — thin at 0 tasks — yet a
+    verdict: the reading reads each as a miss and decides ``insufficient`` at the third (the
+    twelve are disqualified, three are read; R1-7). Pins current behaviour."""
+    rows = [_row(clean=False, disqualified=True, task_id=f"{i:016x}") for i in range(12)]
+    cell = _cell(rows, controls=PASSED, capability_class="frontend.component.add", size="S")
+    assert cell.stats is not None
+    assert (cell.stats.n_tasks, cell.stats.disqualified) == (0, 12)
+    assert cell.decision is not None and cell.decision.reason_code == "insufficient"
+    (short,) = cell.decision.shortfalls
+    assert (short.code, short.observed) == ("insufficient", 3)
+    refusals = so.evaluate_signoff(_signoff(), cell, controls=PASSED, repo="todo")
+    thin = refusals[0]
+    assert (thin.code, thin.threshold, thin.observed) == ("thin_cell", 10, 0)
+    assert "tasks=0 < n_min=10" in thin.message
 
 
 def test_refusal_unmeasured_cell_is_thin() -> None:

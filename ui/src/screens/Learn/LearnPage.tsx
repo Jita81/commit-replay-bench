@@ -267,7 +267,7 @@ export interface RemeasureCell {
   requests: Array<Record<string, unknown>>
   /** What to do and why, in words — shown to every role. */
   note: string
-  /** Runs an earlier queue of this cell put on the queue that have not finished: shown in place of Queue. */
+  /** Runs not finished on this cell's commits — an earlier queue's of it, and a campaign's that would attempt one of its requests: shown in place of Queue. */
   in_flight_run_ids: string[]
 }
 
@@ -939,7 +939,7 @@ function QueueDialog({ repo, cell, onClose }: { repo: string; cell: RemeasureCel
                 </>
               )}
               <dt className="font-semibold">Estimated spend</dt>
-              <dd className="m-0">{cell.cost_known ? `${fmtUsd(cell.est_cost_usd)}${cell.mode === 'blind' ? ' (up to 3 attempts per commit on the blind ladder)' : ''}` : 'not known — no row of this cell recorded a cost'}</dd>
+              <dd className="m-0">{cell.cost_known ? `${fmtUsd(cell.est_cost_usd)}${cell.mode === 'blind' ? ' (one attempt per commit: the run climbs one rung)' : ''}` : 'not known — no row of this cell recorded a cost'}</dd>
             </dl>
             {queue.isError && <ErrorState error={queue.error} />}
           </>
@@ -1053,10 +1053,10 @@ function RemeasureSection({ repo }: { repo: string }) {
                     Queue from Runs
                   </Hint>
                 ) : c.in_flight_run_ids.length ? (
-                  // queued already and not finished: the server refuses a second queue
-                  // (remeasure_already_queued), so the page offers the runs instead
+                  // runs in flight on its commits (a queue's or a campaign's): the server refuses
+                  // a second queue (remeasure_already_queued), so the page offers the runs instead
                   <Hint as={Link} id="link.learn.remeasure_in_flight" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
-                    {c.in_flight_run_ids.length === 1 ? '1 run queued' : `${c.in_flight_run_ids.length} runs queued`}
+                    {c.in_flight_run_ids.length === 1 ? '1 run in flight' : `${c.in_flight_run_ids.length} runs in flight`}
                   </Hint>
                 ) : (
                   <Button size="sm" hint="button.learn.queue_remeasure" onClick={() => setQueueing(c.key)}>
@@ -1133,7 +1133,7 @@ function RemeasureSection({ repo }: { repo: string }) {
           hint="stat.learn.remeasure_cost"
           value={p.summary.cost_known_cells ? fmtUsd(p.summary.est_cost_usd_total) : '—'}
           n={p.summary.cost_known_cells}
-          apparatus="each cell’s own mean row cost × the commits requested (× up to 3 attempts each for a blind cell)"
+          apparatus="each cell’s own mean row cost × the commits requested (one attempt each, blind or sighted)"
           footer={
             <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
               Queue runs

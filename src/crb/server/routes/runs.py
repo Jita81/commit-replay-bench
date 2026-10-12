@@ -56,9 +56,12 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
               queued run becomes; the counts shapes per kind), src/crb/server/campaigns.py
               (``campaign_tally``: a run filed under a campaign is admitted under its money
-              ceiling, G-957; a run of a reading that names a campaign is refused 409
-              ``campaign_required`` unless filed under it, DL-382), src/crb/store/models.py
-              (Run, Grade, Event, User — the override's display name resolved at read),
+              ceiling, G-957; ``live_on_arm``: refused 409 ``campaign_arm_in_flight`` while
+              the campaign has a run queued or running on the same arm of the same reading,
+              or naming a commit this run names, F87-2; a run of a reading that names a
+              campaign is refused 409 ``campaign_required`` unless filed under it, DL-382),
+              src/crb/store/models.py (Run, Grade, Event, User — the override's display name
+              resolved at read),
               docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
               factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
@@ -104,6 +107,7 @@ from crb.core.campaign import (
     REFUSAL_REQUIRED,
     REFUSAL_S1_UNBOUNDED,
     REFUSAL_UNKNOWN,
+    arm_in_flight,
     planned_commits,
 )
 from crb.core.evidence import sha256_text
@@ -113,7 +117,14 @@ from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.builder_login import login_refusal
-from crb.server.campaigns import campaign_of, campaign_tally
+from crb.server.campaigns import (
+    campaign_of,
+    campaign_tally,
+    live_on_arm,
+    run_arm,
+    run_commits,
+    run_reading,
+)
 from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
@@ -1062,12 +1073,18 @@ def admit_under_campaign(
     run's cap plus its headroom still fits under the released line, the run is staged and
     its ``campaign.admitted`` event written in ONE transaction. Refused 409
     ``campaign_ceiling`` (it would pass the line), ``campaign_cost_unknown`` or
-    ``campaign_overrun`` (the campaign is stopped) — before anything is queued or spent; two
-    submits cannot both take the last of the line."""
+    ``campaign_overrun`` (the campaign is stopped), then ``campaign_arm_in_flight`` while a run
+    of the campaign on the same repository and the same requested arm is queued or running,
+    filed under the same reading or either under none, or naming a commit this run names or
+    either naming none (F87-2: one live run per arm, the live one named) — before anything
+    is queued or spent; two submits cannot both take the last of the line, nor both start
+    one arm on one commit."""
     campaign_id = str(body.campaign_id)
     s1 = body.arm is not None
     commits = planned_commits(list(body.task_ids), body.limit) or 0
     cap = float(body.max_cost_usd or 0.0)
+    # keyed by the reader that keys every stored run, so the two sides never differ
+    arm, reading_id, named = run_arm(run), run_reading(run), run_commits(run)
 
     def build(s: Session) -> dict[str, Any]:
         submit_refusals(s, settings, body, run, login=False)
@@ -1082,6 +1099,22 @@ def admit_under_campaign(
                 refused.code,
                 str(refused),
                 detail={"campaign_id": campaign_id, **refused.detail},
+            )
+        # read under the same lock as the tally: a second submit on the arm waits for this one
+        # to commit, then finds its run live and is refused (F87-2)
+        live = live_on_arm(
+            s, campaign_id, repo=body.repo, arm=arm, reading_id=reading_id, commits=named
+        )
+        if live is not None:
+            busy = arm_in_flight(
+                arm=arm,
+                repo=body.repo,
+                reading_id=reading_id,
+                run_id=live.id,
+                status=live.status,
+            )
+            raise ApiError(
+                409, busy.code, str(busy), detail={"campaign_id": campaign_id, **busy.detail}
             )
         headroom = now.headroom(s1=s1, commits_left=commits)
         staged = stage_queued(s, run)

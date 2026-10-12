@@ -7,15 +7,17 @@ What it is:   The unit suite for the finish gate's core: checklist lines, the or
 What it does: Pins that the checklist is numbered, capped and made of operating facts; that a
               line naming a held-out test path is refused; that ``verify`` fails on a real
               ``gofmt`` rejection of a changed file, passes once it is formatted, records a
-              declared command already red at the parent as ``pre_existing`` (never gating) and
-              a command that cannot run as an error (never gating).
+              declared command already red at the parent as ``pre_existing`` (never gating), a
+              command that cannot run as an error (never gating), and that the declared
+              commands run under the dependency binding given, at the parent and after.
 How:          The Go fixture repository with the Go runner's own belt-5 plan; declared commands
               as small shell commands in the worktree; ``LocalExecutor``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/finish_gate.py (under test), src/crb/core/checks.py
               (``CheckCommand``), src/crb/core/lint.py (the plan), tests/fixtures/langs/gorepo.py
-              (the Go repository the checks run in)
+              (the Go repository the checks run in), src/crb/core/deps.py (``DepsBinding`` —
+              the set a declared command runs under)
 Tested by:    tests/test_finish_gate.py
 Touch when:   never for a new repository; the checklist's content or the gating rule changes.
 """
@@ -28,6 +30,7 @@ import pytest
 
 from crb.core import finish_gate as fg
 from crb.core.checks import CheckCommand
+from crb.core.deps import SCHEME_GO, DepsBinding
 from crb.core.execution import LocalExecutor
 from crb.core.lint import LintPlan, LintTool
 from crb.core.runners import get_runner
@@ -75,13 +78,13 @@ def test_verify_gates_on_a_real_gofmt_rejection_and_passes_once_formatted(tmp_pa
     (root / gorepo.SRC_ADD).write_text(
         "package calc\n\nfunc Add(a,b int) int {return a+b}\n", encoding="utf-8"
     )
-    run = fg.verify(plan, (), ex, root, [gorepo.SRC_ADD])
+    run = fg.verify(plan, (), ex, root, [gorepo.SRC_ADD], deps=None)
     assert not run.passed and run.failing == ("lint",)
     assert run.label() == "fail:lint" and "[gofmt]" in run.findings()
     (root / gorepo.SRC_ADD).write_text(
         "package calc\n\nfunc Add(a, b int) int { return a + b }\n", encoding="utf-8"
     )
-    assert fg.verify(plan, (), ex, root, [gorepo.SRC_ADD]).label() == "pass"
+    assert fg.verify(plan, (), ex, root, [gorepo.SRC_ADD], deps=None).label() == "pass"
 
 
 def test_a_command_red_at_the_parent_never_gates_and_one_that_cannot_run_never_gates(
@@ -93,13 +96,37 @@ def test_a_command_red_at_the_parent_never_gates_and_one_that_cannot_run_never_g
     now_red = CheckCommand("style", ("sh", "-c", "test ! -f marker"))
     missing = CheckCommand("ghost", ("/nonexistent/tool",))
     baseline = {"legacy": False, "style": True, "ghost": None}
-    run = fg.verify(None, (red_before, now_red, missing), ex, tmp_path, [], baseline=baseline)
+    run = fg.verify(
+        None, (red_before, now_red, missing), ex, tmp_path, [], baseline=baseline, deps=None
+    )
     by = {r.name: r for r in run.results}
     assert by["legacy"].pre_existing and not by["legacy"].gates
     assert by["style"].gates and run.failing == ("style",)
     assert by["ghost"].ok is None and by["ghost"].error and not by["ghost"].gates
     assert run.label() == "fail:style;pre:legacy;err:ghost"
-    assert fg.command_baseline((red_before, now_red), ex, tmp_path) == {
+    assert fg.command_baseline((red_before, now_red), ex, tmp_path, deps=None) == {
         "legacy": False,
         "style": False,
     }
+
+
+def test_the_declared_commands_run_under_the_binding_given(tmp_path: Path) -> None:
+    """F87-1 (P-800): the baseline and the re-run see the set they are given. A command that
+    reads only the binding's environment is red unbound and green bound, at the parent and
+    after the build alike, so the same binding on both sides compares like with like."""
+    ex = LocalExecutor()
+    reads_set = CheckCommand("vet", ("sh", "-c", 'test "$CRB_DEPS_SET" = bound'))
+    binding = DepsBinding(
+        role="builder",
+        lang="go",
+        scheme=SCHEME_GO,
+        key="dep_" + "b" * 64,
+        env={"CRB_DEPS_SET": "container"},
+        local_env={"CRB_DEPS_SET": "bound"},
+    )
+    assert fg.command_baseline((reads_set,), ex, tmp_path, deps=None) == {"vet": False}
+    assert fg.command_baseline((reads_set,), ex, tmp_path, deps=binding) == {"vet": True}
+    bound = fg.verify(None, (reads_set,), ex, tmp_path, [], baseline={"vet": True}, deps=binding)
+    assert bound.passed and bound.label() == "pass"
+    unbound = fg.verify(None, (reads_set,), ex, tmp_path, [], baseline={"vet": True}, deps=None)
+    assert unbound.failing == ("vet",)

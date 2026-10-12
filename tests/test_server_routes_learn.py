@@ -923,6 +923,8 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
     assert run["status"] == "queued" and run["builder"] == "editblock"
     assert run["task_ids"] == request["task_ids"] and run["mode"] == "sighted"
+    # the one rung the plan priced it at (PW-1: ``RunRequest.rungs``)
+    assert run["ladder"] == ["r1"]
     # filed under the reading it measures: the worker re-checks the seal at claim (P-789)
     with env.factory() as s:
         stored = s.get(Run, d["run_ids"][0])
@@ -972,6 +974,84 @@ def test_a_readings_top_up_under_a_campaign_is_refused_with_nothing_queued(
     assert err["code"] == "campaign_required"
     assert err["detail"] == {"reading_id": reading["reading_id"], "campaign_id": cid}
     assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
+
+
+#: A campaign the Learn tests file a run under (the Wave 3 record's shape).
+WAVE3 = {
+    "name": "wave-3",
+    "ceiling_gbp": 80,
+    "released_gbp": 40,
+    "rate_usd_per_gbp": 1.35,
+    "decision": "DECISION 8 (2026-10-11): stage 1 £40 yes",
+}
+
+
+def _post_campaign_run(env: Env, cid: str, request: dict[str, Any], **extra: Any) -> str:
+    """The plan's ``request`` posted to ``POST /runs`` under campaign ``cid``, as the
+    registration's step 6 does: its body, a cap and the campaign. Returns the run id."""
+    body = {k: v for k, v in request.items() if k != "note"}
+    r = env.post("/runs", json={**body, "max_cost_usd": 5, "campaign_id": cid, **extra})
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+def _finish(env: Env, run_id: str, status: str = "failed") -> None:
+    with env.factory() as s:
+        run = s.get(Run, run_id)
+        assert run is not None
+        run.status = status
+        s.commit()
+
+
+def test_a_campaigns_live_run_is_in_flight_so_the_plan_holds_its_commits(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F87-2: a campaign-named reading's runs are filed by ``POST /runs`` (this queue refuses
+    them, DL-382), so the plan counts a run the campaign admitted as in flight beside the
+    cell while it is queued or running: the commits it would attempt are not re-requested
+    as if nobody were on them, and the inbox asks nobody to queue them. A live run that
+    writes elsewhere (another mode) is not counted; once the run finishes, nothing is."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    cid = env.post("/campaigns", json=WAVE3).json()["campaign_id"]
+    add_proven_tasks(env.factory)
+    r = register_via_api(env, hierarchy=("S3",), campaign_id=cid)
+    assert r.status_code == 201, r.text
+    reading = r.json()
+    cell = _read_cell(env)
+    assert cell["in_flight_run_ids"] == []
+    (request,) = cell["requests"]
+    rid = _post_campaign_run(env, cid, request, reading_id=reading["reading_id"])
+    assert _read_cell(env)["in_flight_run_ids"] == [rid]
+    # a blind run on the same commits writes A0 rows, never this sighted S3 entry
+    _post_campaign_run(env, cid, {**request, "kind": "blind", "mode": "blind"})
+    assert _read_cell(env)["in_flight_run_ids"] == [rid]
+    _finish(env, rid)
+    assert _read_cell(env)["in_flight_run_ids"] == []
+
+
+def test_a_campaign_run_on_a_cells_commits_holds_the_queue_too(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The queue's own guard reads the same runs: a reading under no campaign whose pending
+    commits a campaign's run is replaying is refused 409 ``remeasure_already_queued`` naming
+    that run — its message saying a campaign's run counts, not only the runs a queue filed
+    (R1-4) — with nothing queued and nothing recorded, and is queued once it finishes."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    _add_reading(env)
+    cid = env.post("/campaigns", json=WAVE3).json()["campaign_id"]
+    (request,) = _read_cell(env)["requests"]
+    rid = _post_campaign_run(env, cid, request)
+    total = env.get("/runs").json()["total"]
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 409, q.text
+    assert envelope(q)["code"] == "remeasure_already_queued"
+    assert envelope(q)["detail"]["run_ids"] == [rid]
+    assert "admitted by a campaign on one of its commits" in envelope(q)["message"]
+    assert env.get("/runs").json()["total"] == total and _queued_events(env) == []
+    _finish(env, rid, "succeeded")
+    assert _queue(env, cell=READ_CELL).status_code == 201
 
 
 def test_a_cell_with_no_registered_reading_is_offered_registration_and_queues_nothing(
@@ -1028,6 +1108,12 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     (req,) = authored["requests"]
     assert (req["kind"], req["mode"], req["arm"]) == ("blind", "blind", "S1")
     assert req["task_ids"] == pool[:20]
+    # queued, the blind run climbs the one rung the plan priced it at (PW-1: no body names a
+    # ladder, so ``POST /runs`` stores ``["r1"]`` — the pin beside the sighted one above)
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 201, q.text
+    (run,) = [env.get(f"/runs/{rid}").json() for rid in q.json()["run_ids"]]
+    assert (run["kind"], run["mode"], run["ladder"]) == ("blind", "blind", ["r1"])
 
 
 def test_queueing_refuses_a_cell_whose_builder_has_no_credential(

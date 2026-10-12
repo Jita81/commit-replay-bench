@@ -28,6 +28,20 @@ passed its cap plus the headroom it was ADMITTED with (the ``campaign.admitted``
 attempt the campaign has seen, so a line recomputed from it would always cover it) each stop
 the campaign: nothing more is admitted.
 
+**One live run per arm** (F87-2): a run is admitted only while no other run of the campaign on
+the same repository and the same arm it asks for (``requested_arm``) is queued or running that
+could attempt a commit it could (``runs_overlap``) — one of the same reading or either of none,
+else one naming a commit it names or either naming none (a run replays only the commits it
+names, ``task_ids``, and may replay any commit of the repository when it names none). So for
+runs keyed on the same requested arm, two never attempt one commit while both are queued or
+running, and the next run on a commit is admitted only after the last has finished: that
+commit's rows on the arm reach the ledger in the order its runs were admitted — the order a
+reading that takes each commit's first attempt reads them in. Two readings' runs naming
+disjoint commits may be live together. The guarantee is the key's and the run status's, not
+the worker's: docs/PREVENTION.md P-801 names its gaps (the arm a run asks for is not always
+the arm its rows carry; a run without ``campaign_id`` is outside the key; a run abandoned past
+``max_reclaims`` frees its arm while a hung worker may still append a row).
+
 Navigation
 ----------
 What it is:   The campaign record (``Campaign``: ceiling and released pounds, the rate, the
@@ -38,7 +52,11 @@ What it does: Hashes a campaign into ``cmp_<24 hex>`` and verifies it; folds the
               larger of the admitted and the current); stops the campaign on a run whose spend
               passed its cap plus the headroom it was admitted with; answers
               whether one more run with a cap fits (``Tally.refusal``: ``campaign_ceiling``,
-              ``campaign_cost_unknown``, ``campaign_overrun``, or ``None``).
+              ``campaign_cost_unknown``, ``campaign_overrun``, or ``None``); keys a run by the
+              arm it asks for (``requested_arm``), says whether two runs of one arm could
+              attempt one commit (``runs_overlap``: one reading or either of none, else a
+              commit both name or either naming none) and words the refusal of a second live
+              run on one (``arm_in_flight``: ``campaign_arm_in_flight``).
 How:          ``canonical_json`` + ``sha256_text`` over the record's body → ``tally`` takes the
               line and one ``MemberRun`` per run (the server reads them under the events write
               lock) → ``Tally.headroom`` → ``Tally.refusal``.
@@ -48,7 +66,9 @@ Works with:   src/crb/server/campaigns.py (reads the record, the releases and ea
               from the store), src/crb/server/routes/campaigns.py (registers, releases, serves),
               src/crb/server/routes/runs.py (``POST /runs`` admits a run under a campaign),
               src/crb/server/spend_cap.py (``Spend``: the rule a run's own cap sums by),
-              src/crb/core/evidence.py (``canonical_json``, ``sha256_text``)
+              src/crb/core/evidence.py (``canonical_json``, ``sha256_text``),
+              src/crb/core/context_arm.py (``REPLAY_MODE``, ``LEARN_OFF``, ``MOD_LOOP``: the
+              arm vocabulary a run's admission key is spelled in)
 Tested by:    tests/test_campaign.py, tests/test_server_campaigns.py
 Touch when:   never for a new repository; the registration's tally or stop rule changes (a
               decision first, then this module's refusals and
@@ -61,6 +81,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from crb.core.context_arm import BASE_A0, BASE_S1, BASE_S3, LEARN_OFF, MOD_LOOP, REPLAY_MODE
 from crb.core.evidence import canonical_json, sha256_text
 
 CAMPAIGN_SCHEMA = "crb.campaign.v1"
@@ -99,6 +120,12 @@ REFUSAL_CAP_REQUIRED = "campaign_cap_required"
 #: 422 — an ``S1`` run under a campaign names neither ``task_ids`` nor ``limit``: its author's
 #: headroom is per commit, so its commits must be counted.
 REFUSAL_S1_UNBOUNDED = "campaign_s1_unbounded"
+#: 409 — a run on the same arm that could attempt one of this run's commits (the same reading,
+#: or a commit both name — ``runs_overlap``) is still queued or running under the campaign:
+#: one live run per (campaign, arm) on a commit (F87-2).
+REFUSAL_ARM_IN_FLIGHT = "campaign_arm_in_flight"
+#: The key a factory build is admitted under: its rows name their own test author.
+ARM_FACTORY = "factory"
 
 #: The run statuses whose unspent cap is held.
 _ACTIVE = frozenset({"queued", "running"})
@@ -187,6 +214,65 @@ class Campaign:
         """The pounds released so far: the most any release named, never above the ceiling
         and never below the registration's own release."""
         return min(self.ceiling_gbp, max([self.released_gbp, *releases]))
+
+
+def requested_arm(*, kind: str, mode: str, s1: bool, learning: str | None) -> str:
+    """The arm a run filed under a campaign asks for — the key it is admitted under, one live
+    run per key on a repository (F87-2): ``S1`` for the blind ``S1`` replay, else ``A0`` for a
+    blind replay and ``S3`` for a sighted one (:data:`~crb.core.context_arm.REPLAY_MODE`), and
+    :data:`ARM_FACTORY` for a factory build; then ``+L`` unless the run opts out of the loop
+    (``learning: off``). It is what the run ASKS for, not a row's arm: whether ``+L`` reaches a
+    row is the repository's switch when the run starts, and an ``S1`` row names its author."""
+    if kind == ARM_FACTORY:
+        base = ARM_FACTORY
+    elif s1:
+        base = BASE_S1
+    elif mode == REPLAY_MODE[BASE_A0]:
+        base = BASE_A0
+    else:
+        base = BASE_S3
+    return base if learning == LEARN_OFF else base + MOD_LOOP
+
+
+def runs_overlap(
+    reading_id: str,
+    other_reading_id: str,
+    *,
+    commits: frozenset[str] | None,
+    other_commits: frozenset[str] | None,
+) -> bool:
+    """Whether two runs of one arm on one repository could attempt the same commit: when they
+    are filed under the same reading or either under none (``""``); else when either names no
+    commits (``None`` — it may replay any commit of the repository) or the commits they name
+    share one. A run attempts only the commits it names (``task_ids``), and nothing binds
+    those to its reading's pool, so two readings' runs are kept apart by what they name."""
+    if not reading_id or not other_reading_id or reading_id == other_reading_id:
+        return True
+    return commits is None or other_commits is None or not commits.isdisjoint(other_commits)
+
+
+def arm_in_flight(
+    *, arm: str, repo: str, reading_id: str, run_id: str, status: str
+) -> CampaignRefused:
+    """The refusal of a second live run on one arm (F87-2): naming the run still live on it.
+    The admission holds one per (campaign, repository, arm) where the two could attempt the
+    same commit (:func:`runs_overlap`), so no two runs keyed on one arm attempt a commit
+    while both are queued or running — a second attempt the reading could read in place of
+    the first."""
+    of = f"reading {reading_id} of {repo!r}" if reading_id else repr(repo)
+    return CampaignRefused(
+        f"campaign arm in flight: run {run_id} on {arm} of {of} is still {status} under this "
+        "campaign — one live run per arm; post the next once it has finished — nothing was "
+        "queued",
+        code=REFUSAL_ARM_IN_FLIGHT,
+        detail={
+            "run_id": run_id,
+            "status": status,
+            "repo": repo,
+            "reading_id": reading_id,
+            "arm": arm,
+        },
+    )
 
 
 def planned_commits(task_ids: Sequence[str], limit: int | None) -> int | None:
@@ -347,6 +433,7 @@ def tally(line_usd: float, members: Sequence[MemberRun]) -> Tally:
 
 
 __all__ = [
+    "ARM_FACTORY",
     "AUTHOR_CALL_FIRST_USD",
     "CAMPAIGN_ADMITTED",
     "CAMPAIGN_ID_PREFIX",
@@ -354,6 +441,7 @@ __all__ = [
     "CAMPAIGN_RELEASED",
     "CAMPAIGN_SCHEMA",
     "HEADROOM_FIRST_USD",
+    "REFUSAL_ARM_IN_FLIGHT",
     "REFUSAL_CAP_REQUIRED",
     "REFUSAL_CEILING",
     "REFUSAL_COST_UNKNOWN",
@@ -367,6 +455,9 @@ __all__ = [
     "CampaignRefused",
     "MemberRun",
     "Tally",
+    "arm_in_flight",
     "planned_commits",
+    "requested_arm",
+    "runs_overlap",
     "tally",
 ]

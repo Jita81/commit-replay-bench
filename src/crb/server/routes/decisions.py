@@ -52,7 +52,8 @@ Works with:   src/crb/server/decisions.py (the derivation and the clock; its ``s
               src/crb/server/routes/capability.py (``signed_map`` — the one reading),
               src/crb/server/routes/factory.py (``tasks_for`` — the items as served),
               src/crb/server/routes/library.py (``library_index`` — the entries),
-              src/crb/server/routes/learn.py (``derive_remeasure`` — the stale cells),
+              src/crb/server/routes/learn.py (``derive_remeasure`` — the stale cells;
+              ``in_flight_runs`` — the cells whose queued or campaign runs are live),
               src/crb/server/worker.py (the idle pass that keeps the clock running),
               ui/src/screens/Decisions/useDecisionCount.ts (reads both modes),
               docs/API.md#capability-routing-forecast-sign-off (the routes' contract)
@@ -292,7 +293,8 @@ def _remeasure(
     posture_class: str | None = None,
 ) -> tuple[dict[str, Any], set[tuple[str, str]]]:
     """``GET /learn/remeasure``'s plan against the apparatus in force, and the cells whose
-    queued runs have not finished (they ask nobody for anything). ``posture_class`` is the
+    queued runs — or a campaign's live runs on their commits (F87-2) — have not finished
+    (they ask nobody for anything). ``posture_class`` is the
     worker's own (its settings carry no ``sandbox``); the API passes none."""
     plan = derive_remeasure(
         db,
@@ -306,7 +308,12 @@ def _remeasure(
         (str(c["label"]), str(c["mode"]))
         for c in plan["cells"]
         if in_flight_runs(
-            db, repo, cell=str(c["label"]), mode=str(c["mode"]), apparatus=APPARATUS_VERSION
+            db,
+            repo,
+            cell=str(c["label"]),
+            mode=str(c["mode"]),
+            apparatus=APPARATUS_VERSION,
+            requests=c["requests"],
         )
     }
     return plan, busy

@@ -151,6 +151,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONPATH=/tmp/crb/wt-5b1f /tmp/crb/
 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONPATH=/tmp/crb/wt-5b1f /tmp/crb/envs/click/venv/bin/python -m pytest -q --no-header -rfE -p no:cacheprovider -p no:randomly -o addopts= --continue-on-collection-errors tests/test_termui.py tests/test_utils.py 2>&1 | tail -40
 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONPATH=/tmp/crb/wt-5b1f:/tmp/crb/wt-5b1f/src /tmp/crb/envs/click/venv/bin/python -m pytest -q --no-header -rfE -p no:cacheprovider -p no:randomly -o addopts= --continue-on-collection-errors tests/test_termui.py -k pager
 PYTHONPATH=/work /usr/local/bin/python -m pytest -q --no-header -rfE -p no:cacheprovider -p no:randomly -o addopts= --continue-on-collection-errors tests/test_basic.py
+PATH=/deps/site/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 PYTHONNOUSERSITE=1 PYTHONPATH=/work:/deps/site /usr/local/bin/python -m pytest -q --no-header -rfE -p no:cacheprovider -p no:randomly -o addopts= --continue-on-collection-errors tests/test_basic.py
 PYTHONPATH=$(pwd)/src python -m pytest tests/test_termui.py -k pager -q 2>&1 | tail -40
 PYTHONPATH=$(pwd) python3 -m pytest tests/test_termui.py::test_pager -q -x
 PYTHONPATH=. .venv/bin/python -m pytest tests/ -q -x --no-header
@@ -214,6 +215,7 @@ env -u PYTHONPATH python -m pytest -q tests/test_basic.py
 CGO_ENABLED=0 GOFLAGS='-count=1 -mod=mod' GOTOOLCHAIN=local /opt/homebrew/bin/go test -json ./...
 CGO_ENABLED=0 GOFLAGS='-count=1 -mod=mod' GOTOOLCHAIN=local /opt/homebrew/bin/go test -json ./ ./doc
 CGO_ENABLED=0 GOCACHE=/tmp/gocache GOFLAGS='-count=1 -mod=mod' GOMODCACHE=/tmp/gomod GOTOOLCHAIN=local go test -json ./...
+CGO_ENABLED=0 GOCACHE=/tmp/gocache GOENV=off GOFLAGS='-count=1 -mod=mod' GOMODCACHE=/deps/gomod GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOVCS='*:off' GOWORK=off go test -json ./...
 CGO_ENABLED=0 GOFLAGS='-count=1 -mod=mod' GOTOOLCHAIN=local go test -json ./... 2>&1 | tail -40
 GOFLAGS=-mod=mod go test ./... -run TestSetHelpFunc -v
 GOFLAGS=-mod=mod go test -run 'TestFlagsInHelp|TestContext' -count=1 ./
