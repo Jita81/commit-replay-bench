@@ -154,7 +154,10 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``
               → ``_unit_reserver``: one ``reading.reserved`` event under the events lock, or
               a skip, or a halt before ``build.start`` — the run not owned, a cancel asked, a
-              treatment that is not the pinned one, the pins read by ``treatment_pins``); for
+              treatment that is not the pinned one, the pins read by ``treatment_pins``, or a
+              resolved checks arm that is not the one the reading froze,
+              ``reading_checks_arm_mismatch``, since a row on another checks arm is out of
+              the reading's scope); for
               a factory run filed under a reserved.v1 forward reading, each ticket's first
               ``S2`` build the same way, keyed on its item id (``_factory_reserver``, the
               loop's ``FactorySpec.reserve``; anything but ``ok`` is ``build.not_reserved``
@@ -201,7 +204,8 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
               projections and their ratchets; the reserver, the stamped row and the guard,
               C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7; the
-              factory reservation, C8 and C16),
+              factory reservation, C8 and C16; the checks-arm halt and the team's own
+              ``format_step`` keeping ``A0+L`` on the reading's arm),
               tests/test_p792_pool.py (the claim's ``pool_drift`` refusal)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
@@ -210,7 +214,9 @@ Touch when:   never for a new repository — repository behaviour lives in the r
               added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``); a
               ``BuilderContainerSettings`` field or another input an attempt runs under is
               added (a named field of ``deployment_projection``; a ``RepoConfig`` field is
-              pinned unless named in ``REPO_CONFIG_UNPINNED`` — the ratchets fail first).
+              pinned unless named in ``REPO_CONFIG_UNPINNED`` — the ratchets fail first); a
+              run kind reserves under a reading (pass the arm its checks resolved as
+              ``checks_arm``, so ``_unit_reserver`` holds it to the reading's frozen one).
 Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
               stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
 
@@ -315,6 +321,7 @@ from crb.core.reading import (
     ATTEMPT_RULE_RESERVED,
     HALT_ARM_UNKNOWN,
     HALT_CANCEL_REQUESTED,
+    HALT_CHECKS_ARM_MISMATCH,
     HALT_RUN_NOT_OWNED,
     HALT_TREATMENT_MISMATCH,
     LABEL_CLAIM,
@@ -2987,6 +2994,7 @@ class Worker:
         reading_id: str,
         *,
         arm: str,
+        checks_arm: str,
         deployment: Mapping[str, Any],
         arm_body_for: Callable[[TaskSpec], Mapping[str, Any]],
         hold_usd: float | None,
@@ -2996,7 +3004,13 @@ class Worker:
         ``reading_id`` (P-792): :meth:`_unit_reserver` keyed on the task's commit, with the
         task's spec and ``arm_body_for(task)`` — a calibrated r1 budget is per task."""
         unit = self._unit_reserver(
-            ctx, reading_id, arm=arm, deployment=deployment, hold_usd=hold_usd, ledger=ledger
+            ctx,
+            reading_id,
+            arm=arm,
+            checks_arm=checks_arm,
+            deployment=deployment,
+            hold_usd=hold_usd,
+            ledger=ledger,
         )
         return lambda task: unit(task.task_id, task.to_dict(), arm_body_for(task))
 
@@ -3006,6 +3020,7 @@ class Worker:
         reading_id: str,
         *,
         arm: str,
+        checks_arm: str,
         deployment: Mapping[str, Any],
         hold_usd: float | None,
         ledger: _RunLedger,
@@ -3019,10 +3034,15 @@ class Worker:
 
         Under the lock it re-reads the reading and its reservations, then: a reading not
         registered reserved.v1 here, or an arm it does not read, halts ``reading_arm_unknown``;
-        a unit the arm does not enrol is skipped; a run no longer ``running`` on this worker
-        under the claim it was claimed with halts ``run_not_owned``, one asked to cancel halts
-        ``cancel_requested``; a unit this arm already reserved is skipped (the database's
-        index is the backstop, :class:`ReservationExists`). The first reservation of the
+        a run whose resolved checks arm (``checks_arm``, ADR-0024 — the team's ``checks``
+        block over the loop's overlay, under the run's own switches) differs from the one the
+        reading froze halts ``reading_checks_arm_mismatch`` with both (``{frozen, run}``),
+        since the reading reads a row on another checks arm as out of its scope and the
+        attempt could never count; a unit the arm does not enrol is skipped; a run no longer
+        ``running`` on this worker under the claim it was claimed with halts
+        ``run_not_owned``, one asked to cancel halts ``cancel_requested``; a unit this arm
+        already reserved is skipped (the database's index is the backstop,
+        :class:`ReservationExists`). The first reservation of the
         campaign on this repository (of the reading, without one) pins the deployment half,
         and the reading's first on this arm pins the arm half; an attempt whose half differs
         halts ``reading_treatment_mismatch`` with both fingerprints (trust on first use, C3-C5,
@@ -3063,6 +3083,8 @@ class Worker:
                         reading_id=reading_id,
                         why=f"the reading does not read arm {arm[:80]!r}",
                     )
+                if checks_arm != reading.checks_arm:
+                    raise halt(HALT_CHECKS_ARM_MISMATCH, frozen=reading.checks_arm, run=checks_arm)
                 if unit not in enrolled(reading, arm):
                     raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_TASK_NOT_ENROLLED))
                 now = s.execute(
@@ -3187,13 +3209,15 @@ class Worker:
         container: BuilderContainerSettings | None,
         preflight: Preflight | None,
         s1_author: TestAuthor | None,
+        checks_arm: str,
         ledger: _RunLedger,
     ) -> Callable[[TaskSpec], ReserveResult]:
         """:meth:`_reserver` for a replay run under ``reading``, its treatment projected from
-        what the run's r1 attempt runs under: the deployment half once (the run's ladder,
-        budget, overrides, container, executor, timeout, pre-flight, escalation policy,
-        posture and repository configuration — shared by every arm, so the S1 author is the
-        arm's), the arm half per task (:func:`arm_projection`, with the r1 budget calibration
+        what the run's r1 attempt runs under (``checks_arm`` is the arm the run's checks
+        resolved, which the reservation holds to the reading's frozen one): the deployment
+        half once (the run's ladder, budget, overrides, container, executor, timeout,
+        pre-flight, escalation policy, posture and repository configuration — shared by
+        every arm, so the S1 author is the arm's), the arm half per task (:func:`arm_projection`, with the r1 budget calibration
         gives that task, and the S1 author's label on the S1 arm). The hold is the r1 rung's
         cost cap (``None`` when the rung has none)."""
         p = ctx.params
@@ -3236,6 +3260,7 @@ class Worker:
             ctx,
             reading.reading_id,
             arm=arm,
+            checks_arm=checks_arm,
             deployment=deployment,
             arm_body_for=arm_body_for,
             hold_usd=base.max_cost_usd or None,
@@ -3249,12 +3274,14 @@ class Worker:
         *,
         ladder: EscalationLadder,
         budget: Budget,
+        checks_arm: str,
         ledger: _RunLedger,
     ) -> Callable[[BacklogItem, str], None]:
         """``FactorySpec.reserve`` for a factory run filed under the reserved.v1 forward
         ``reading`` (P-792 C8): :meth:`_unit_reserver` keyed on the ticket's item id, called
-        by the build just before an item's first standard-arm attempt (trial ``r1``). The
-        deployment half is projected as a replay's (the run's ladder, budget, overrides,
+        by the build just before an item's first standard-arm attempt (trial ``r1``), held to
+        the reading's frozen checks arm by ``checks_arm``, the arm the run's checks resolved.
+        The deployment half is projected as a replay's (the run's ladder, budget, overrides,
         executor, timeout, escalation policy, posture and repository configuration; no
         container and no pre-flight — factory builders run on the host); the arm half is
         ``S2`` with no loop overlay and the reading's ``budget_profile`` over the r1 rung's
@@ -3287,6 +3314,7 @@ class Worker:
             ctx,
             reading.reading_id,
             arm=BASE_S2,
+            checks_arm=checks_arm,
             deployment=deployment,
             hold_usd=r1_budget.max_cost_usd or None,
             ledger=ledger,
@@ -3507,6 +3535,7 @@ class Worker:
                     container=container,
                     preflight=preflight,
                     s1_author=s1_author,
+                    checks_arm=checks.arm,
                     ledger=run_ledger,
                 ),
             )
@@ -4267,7 +4296,12 @@ class Worker:
             keep_patches=self.settings.store_patches,
             # P-792 C8 — the reservation for an item's first build; never blocks it
             reserve=self._factory_reserver(
-                ctx, reading, ladder=ladder, budget=budget, ledger=run_ledger
+                ctx,
+                reading,
+                ladder=ladder,
+                budget=budget,
+                checks_arm=checks.arm,
+                ledger=run_ledger,
             )
             if reading is not None and reading.prospective
             else None,

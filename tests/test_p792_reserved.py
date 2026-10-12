@@ -112,7 +112,13 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               whose lint is off refused 409 ``lint_disabled`` at submit and ``run.refused`` at
               claim (nothing reserved, the commit pending), and lint switched off after the
               first reservation refused, then switched on as another config halting the next
-              ``reading_treatment_mismatch`` on the repository pin. The factory: C8 (the
+              ``reading_treatment_mismatch`` on the repository pin. The checks arm (RT2B-1,
+              round 6): with the loop's ``format_step`` switch in force, an ``A0+L`` run whose
+              checks resolve ``fmt`` against a reading frozen ``off`` halting
+              ``reading_checks_arm_mismatch`` (``{frozen, run}``) before any reservation or
+              build, the commit pending; and, pinned beside it, the team's own
+              ``checks.format_step`` keeping ``A0+L`` on the reading's arm (it reserves and
+              builds). The factory: C8 (the
               legacy ``_forward_attempt`` golden and its variants; an off-cell factory run
               refused at submit and at claim, nothing reserved), C16 (a grading exception
               after the reservation is a miss), the hook never blocking delivery (a store
@@ -229,12 +235,19 @@ from crb.core.ledger import (
 )
 from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.mine import change_identity
-from crb.core.prevention import AUTO_CONTEXT, K_SECTION, LearningSnapshot, empty_snapshot
+from crb.core.prevention import (
+    AUTO_CONFIG,
+    AUTO_CONTEXT,
+    K_SECTION,
+    LearningSnapshot,
+    empty_snapshot,
+)
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     ATTEMPT_RULE_RESERVED,
     DEFAULT_MAX_RERUNS,
     HALT_CANCEL_REQUESTED,
+    HALT_CHECKS_ARM_MISMATCH,
     HALT_RUN_NOT_OWNED,
     HALT_TREATMENT_MISMATCH,
     LABEL_CLAIM,
@@ -3092,6 +3105,7 @@ def test_p792_concurrent_reserve_one_wins(
                 worker.RunContext(run=run, emitter=emitter, config=config, git=git),
                 reading.reading_id,
                 arm="A0",
+                checks_arm=reading.checks_arm,
                 deployment={"d": 1},
                 arm_body_for=lambda t: {"a": 1},
                 hold_usd=None,
@@ -3916,6 +3930,94 @@ def test_p792_a0l_on_a0s_misses_alone_is_refused_at_claim(
     assert rig.verdicts(reading, "A0+L") == {head: (True, ""), miss: (True, "")}
     pair = _w_loop_pair(rig, reading)
     assert (pair.pairs, pair.pending, pair.b, pair.c) == ((head, miss), (), 1, 0)
+
+
+def _w_format_step_in_force(rig: _WRig) -> None:
+    """Throw the repository's learning switch to config and put the loop's ``format_step``
+    switch (``checks.format_step = true``) in force — the ``applied`` record the core tick
+    writes for one gofmt-only first attempt with the switch at config."""
+    from crb.core.prevention import PreventionRecord
+    from crb.server.prevention_state import EventsPreventionStore
+
+    def rec(kind: str, payload: dict[str, Any], actor: str, i: int) -> PreventionRecord:
+        return PreventionRecord(
+            kind,
+            pr.REPO_NAME,
+            payload,
+            actor=actor,
+            on_behalf_of="op-1",
+            reason="the loop's formatter switch",
+            created=f"2026-10-12T00:00:{i:02d}+00:00",
+        )
+
+    applied = {
+        "change_id": "fmt-1",
+        "lever_id": "format_step",
+        "family": "config",
+        "level": "construction",
+        "targets": ["format:gofmt"],
+        "stratum": {"mode": "blind"},
+        "key": "2.2|fake|m0|crb.prevention.sig.v1",
+        "what": {"section": "checks", "key": "format_step", "value": True},
+        "before": {"format:gofmt": {"k0": 1, "n0": 1, "decisive_n": 3}},
+    }
+    with rig.h.factory() as s:
+        store = EventsPreventionStore(s, pr.REPO_NAME)
+        store.append(rec("switched", {"auto_apply": AUTO_CONFIG}, "op-1", 0))
+        store.append(rec("applied", applied, "loop", 1))
+        s.commit()
+
+
+def test_reserver_halts_when_the_runs_checks_arm_differs_from_the_readings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """RT2B-1 (round 6): a reading freezes its checks arm (``off`` here), and the scope rule
+    reads a reserved row on another checks arm as out of the reading's scope — so with the
+    loop's ``format_step`` switch in force and the team's ``checks`` block silent on it, an
+    ``A0+L`` run (the loop on, its body free of ``learning``) resolves ``fmt`` and reserved a
+    commit its row could never count for, burning the attempt. It now halts
+    ``reading_checks_arm_mismatch`` (``{frozen, run}``) before the reservation and before
+    ``build.start``, and the commit stays pending."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register(hierarchy=("S3",), descriptive=(("A0", 2), ("A0+L", 2)))
+    assert reading.checks_arm == "off"
+    _w_format_step_in_force(rig)
+    head, _ = reading.pool
+    rig.state["b"] = "gold"
+    run = _w_a0l(rig, reading, head)
+    done = rig.h.run_one()
+    assert done.status == STATUS_FAILED and done.error == HALT_CHECKS_ARM_MISMATCH, done.error
+    (halted,) = rig.payloads(run.id, "run.halted")
+    assert (halted["reason"], halted["detail"]) == (
+        HALT_CHECKS_ARM_MISMATCH,
+        {"frozen": "off", "run": "fmt"},
+    ), halted
+    assert "build.start" not in rig.actions(run.id)
+    assert rig.reservations(reading) == [] and rig.rows(run.id) == []
+    assert rig.verdicts(reading, "A0+L")[head] == (None, "pending")
+
+
+def test_a_team_set_format_step_keeps_a0l_on_the_readings_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """The pin beside RT2B-1: the team's own ``checks.format_step`` wins over the loop's
+    switch (``config_section`` merges the repository's block over the overlay), so with the
+    same ``format_step`` change on the chain and the team's block setting it ``false``, the
+    change is not in force, an ``A0+L`` run resolves the reading's ``off`` arm, and it
+    reserves and builds."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register(hierarchy=("S3",), descriptive=(("A0", 2), ("A0+L", 2)))
+    _w_format_step_in_force(rig)
+    rig.edit_config(checks={"format_step": False})
+    head, _ = reading.pool
+    rig.state["b"] = "gold"
+    run = _w_a0l(rig, reading, head)
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, rig.actions(run.id)[-6:]
+    assert rig.payloads(run.id, "run.halted") == []
+    assert "build.start" in rig.actions(run.id)
+    assert [(e.step_id, e.task_id) for e in rig.reservations(reading)] == [("A0+L", head)]
+    assert rig.verdicts(reading, "A0+L")[head] == (True, "")
 
 
 # --- the factory: a reserved.v1 forward reading reserves each ticket's first build (C8, C16) --

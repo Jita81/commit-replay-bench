@@ -252,14 +252,18 @@ SKIP_COMMIT_RESERVED = "commit_reserved"
 SKIP_TASK_NOT_ENROLLED = "task_not_enrolled"
 RESERVE_SKIPS: tuple[str, ...] = (SKIP_COMMIT_RESERVED, SKIP_TASK_NOT_ENROLLED)
 #: Why a run halts before reserving: its treatment is not the one the reading pinned, its
-#: arm is not one the reading reads, its claim is no longer its own, or a cancel was asked.
+#: arm is not one the reading reads, its resolved checks arm is not the one the reading
+#: froze (a row on another checks arm is out of the reading's scope, so the attempt could
+#: never count), its claim is no longer its own, or a cancel was asked.
 HALT_TREATMENT_MISMATCH = "reading_treatment_mismatch"
 HALT_ARM_UNKNOWN = "reading_arm_unknown"
+HALT_CHECKS_ARM_MISMATCH = "reading_checks_arm_mismatch"
 HALT_RUN_NOT_OWNED = "run_not_owned"
 HALT_CANCEL_REQUESTED = "cancel_requested"
 RESERVE_HALTS: tuple[str, ...] = (
     HALT_TREATMENT_MISMATCH,
     HALT_ARM_UNKNOWN,
+    HALT_CHECKS_ARM_MISMATCH,
     HALT_RUN_NOT_OWNED,
     HALT_CANCEL_REQUESTED,
 )
@@ -2677,6 +2681,7 @@ __all__ = [
     "CELL_ERROR_BUDGET",
     "HALT_ARM_UNKNOWN",
     "HALT_CANCEL_REQUESTED",
+    "HALT_CHECKS_ARM_MISMATCH",
     "HALT_RUN_NOT_OWNED",
     "HALT_TREATMENT_MISMATCH",
     "LABEL_CLAIM",
