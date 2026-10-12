@@ -82,9 +82,14 @@ RECORD = Path(__file__).resolve().parents[1] / "docs/reviews/2026-10-09-wave-3-r
 #: Choice (a), step 2: the test author the deployment names, ``editblock:gpt-oss-120b`` on
 #: Cerebras — ``CRB_FACTORY__TEST_AUTHOR`` on the stack.
 TEST_AUTHOR = "editblock:gpt-oss-120b:cerebras"
-#: Paul's words and number, fixed before step 4 (the record proposes none): stand-ins.
-HYPOTHESIS = "the sealed S1 arm delivers on this cell what the S3 ceiling does"
-SMALLEST_EFFECT = 0.1
+#: Paul's form and number, fixed on 2026-10-12 (decision 10, Q-34): one hypothesis per cell,
+#: naming the cell's repository and size, and one smallest effect on all four readings.
+HYPOTHESIS_FORM = (
+    "With the arm's treatment, the builder's blind patches on {repo} {size} commits pass the "
+    "repository's own tests more often than A0's."
+)
+HYPOTHESIS = HYPOTHESIS_FORM.format(repo="cobra", size="XS")
+SMALLEST_EFFECT = 0.2
 #: Qualified ``bug.fix`` commits per cell: above the first look (20), as step 3 requires.
 POOL = 24
 #: A run's ``max_cost_usd`` in this rehearsal ("each run's max_cost_usd is set to fit").
@@ -143,16 +148,14 @@ def registration_bodies(campaign_id: str, author: str) -> dict[tuple[str, str], 
         _json_block("hierarchy"),
         {
             '"<the campaign, registered first at step 4>"': json.dumps(campaign_id),
-            "\"<what the cell's reading tests, in the operator's words>\"": json.dumps(HYPOTHESIS),
-            '"<a share of attempts in (0, 1], fixed by Paul before step 4>"': json.dumps(
-                SMALLEST_EFFECT
-            ),
             "<author>": author,
         },
     )
+    assert cobra_xs["hypothesis"] == HYPOTHESIS
+    assert cobra_xs["smallest_effect"] == SMALLEST_EFFECT
     sentence = (
-        "The other bodies change only `repo`, `size` and `language`: cobra S (`go`), click XS "
-        "and click S (`python`)."
+        "The other bodies change only `repo`, `size`, `language` and the repository and size the "
+        "`hypothesis` names: cobra S (`go`), click XS and click S (`python`)."
     )
     assert sentence in _flat()
     out = {("cobra", "XS"): cobra_xs}
@@ -165,6 +168,7 @@ def registration_bodies(campaign_id: str, author: str) -> dict[tuple[str, str], 
             **cobra_xs,
             "repo": repo,
             "cell": {**cobra_xs["cell"], "size": size, "language": language},
+            "hypothesis": HYPOTHESIS_FORM.format(repo=repo, size=size),
         }
     return out
 

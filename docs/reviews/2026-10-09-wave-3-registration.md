@@ -148,8 +148,31 @@ any run queued or any Wave 3 row written. The source is
   it up and funds it. Part 5's "The builder's account" is the check before the reading runs.
   The `S1` test author runs on Cerebras (choice (a)).
 
-**How Q-25 is read (amended before step 4, 2026-10-11; DL-384, and decision 9's DL-401 and
-DL-402).** The Wave 3 pre-run red team
+**Decision 10, fixed before any data, 2026-10-12 (in chat with Claude Code).** Paul Glover
+answered the handbook's Q-31, Q-32 and Q-34 yes, each as recommended, before any reading was
+registered, any run queued or any Wave 3 row written: "Q-31 to Q-34 yes as you recommend, round
+6 is the last". Q-33, the same answer, sets Claude Code's own token budget and is not part of
+this record.
+
+- **The formatter lever is out of Wave 3's +L treatment (Q-31; DL-410).** Before step 4,
+  cobra's and click's repo config set `checks.format_step: false`. A reading pools one checks
+  arm, frozen when it is registered (ADR-0024), so it cannot measure a lever that moves that
+  arm. With the key set, a `format:*` rejection makes the loop fall back to `finish_gate`, which
+  keeps the arm. Part 5's steps check it.
+- **When no branch of Q-25 fires, Wave 3 concludes Change course (Q-32; DL-411).** The
+  rule is in "How Q-25 is read", below.
+- **What the readings register (Q-34; DL-412).** All four readings register
+  `smallest_effect` 0.2, and each its own `hypothesis`, in one form that names the cell's
+  repository and size (step 4's body, part 5). The reachable rate Q-25's Stop compares against
+  is the value baseline's blind rate for the cell's size, taken in the host posture: 56.5% at
+  XS (13 of 23 attempts) and 23.3% at S (7 of 30), part 4's prior **[hypothesis — a prior
+  measured at apparatus 2.2 in the host posture, not at 2.4 in the sealed posture; method: the
+  value baseline's headline table]**.
+- **Round 6 is the last review round before the pre-run pull request merges (DL-413).**
+  What it leaves is in this record's known gaps and the pull request's "What is not covered".
+
+**How Q-25 is read (amended before step 4, 2026-10-11 and 2026-10-12; DL-384, decision 9's
+DL-401 and DL-402, and decision 10's DL-411 and DL-412).** The Wave 3 pre-run red team
 found that Q-25's Continue and Stop could be met or missed by a choice an analyst makes after
 the data is in. These fix the statistics first, for 16 commits in each of four cells, so 64
 pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is observed yet]**:
@@ -167,11 +190,11 @@ pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is ob
   difference is at least the registered smallest effect. Continue's second clause holds when
   it clears. A difference in either direction is reported; only a positive one clears. Each
   cell's own paired difference is reported beside it, and is descriptive.
-- **One smallest effect, which no code reads.** All four readings carry one `smallest_effect`,
-  the registered smallest effect, and Paul fixes it before step 4. The product stores
+- **One smallest effect, which no code reads.** All four readings carry one `smallest_effect`, the
+  registered smallest effect, 0.2, which Paul fixed on 2026-10-12 (Q-34; DL-412). The product stores
   `smallest_effect` in each reading and hashes it into the reading's id, but no code reads it.
-  Claude Code computes the test and the comparison from the pairs when the loop pair is read,
-  and the report shows the computation.
+  Claude Code computes the test and the comparison from the pairs when the loop pair is read, and
+  the report shows the computation.
 - **What the test can find.** The smallest difference it finds 80% of the time is 22–32 points
   after stage 1 (about 38 pairs) and 18–25 points after stage 2 (about 64 pairs). A loop effect
   smaller than about 20 points will usually be missed, so a loop that does not clear has not
@@ -185,18 +208,26 @@ pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is ob
   `A0+L` tally is interim: the stage-1 report labels it "interim, not tested", and nothing
   rests on the difference, the stage-2 release included.
 - **Noise.** Every Wilson interval this record serves or reports is descriptive (fixed-n, not
-  adjusted for the sequential look): the Wilson 95% interval of clean over counted, taken as
-  if the count had been fixed in advance. That includes the `ci_low` and `ci_high` that
-  `GET /api/v1/readings` serves on each arm (`crb.core.reading`); `look.v1` decides a reading,
-  never an interval. Q-25's "noise" is defined against that fixed-n rate. A rate moves by more
-  than noise when it lies outside the fixed-n Wilson 95% interval of the rate it is compared
-  with, in the same cell: the loop's `A0+L` rate against `A0`'s, the test author's
-  `S1@<author>` rate against `A0`'s. The sealed rate, each cell's `A0` rate, sits within noise
-  of the lower bound of the rate taken where the answer was reachable when that bound, the
-  lower end of that rate's fixed-n Wilson 95% interval, lies inside the sealed rate's own.
-  Which rate that is stays as Paul's words name it; this record recommends the value
-  baseline's blind rate for the cell's size, taken in the host posture where the target commit
-  stays in the object store (part 4's prior), and Paul confirms it before step 4.
+  adjusted for the sequential look): the Wilson 95% interval of clean over counted, taken as if the
+  count had been fixed in advance. That includes the `ci_low` and `ci_high` that `GET
+  /api/v1/readings` serves on each arm (`crb.core.reading`); `look.v1` decides a reading, never an
+  interval. Q-25's "noise" is defined against that fixed-n rate. A rate moves by more than noise
+  when it lies outside the fixed-n Wilson 95% interval of the rate it is compared with, in the same
+  cell: the loop's `A0+L` rate against `A0`'s, the test author's `S1@<author>` rate against `A0`'s.
+  For Stop the comparison is one-sided (Q-32; DL-411): the sealed rate, each cell's `A0` rate, has
+  reached the rate taken where the answer was reachable when that rate's lower bound, the lower end
+  of its fixed-n Wilson 95% interval, is at or below the upper end of the sealed rate's own, so a
+  sealed rate above the reachable rate has reached it. The rate taken where the answer was reachable
+  is the value baseline's blind rate for the cell's size, taken in the host posture where the target
+  commit stays in the object store: 56.5% at XS (13 of 23) and 23.3% at S (7 of 30), part 4's tagged
+  prior. Paul confirmed it on 2026-10-12 (Q-34; DL-412).
+- **When no branch fires, and how the cells combine (Q-32; DL-411).** The branches are
+  read in the order Continue, Change course, Stop. Continue and Change course hold if any cell
+  meets them. Stop needs every completed cell to meet its test: nothing moves in it, and the
+  sealed rate has reached the reachable rate, one-sided, as under "Noise". If `S1` never ran in
+  a cell because `S3` did not deliver, its clause reads "did not move", and the record says
+  `S1` was not run. When no branch fires, Wave 3 concludes Change course, and the record says
+  which branch fired and whether it was the default.
 - **Order.** Within each cell, `A0` runs before `A0+L`: a cell's `A0+L` run is queued only
   after its `A0` run has ended, which narrows choice (e) and leaves `A0` queued beside `S3`
   from the start. Each run records the levers in force: its apparatus stamp's `extra.learning`
@@ -634,24 +665,24 @@ The registration body for cobra XS:
   "descriptive": [["A0", 16], ["A0+L", 16]],
   "author_model": "<author>",
   "campaign_id": "<the campaign, registered first at step 4>",
-  "hypothesis": "<what the cell's reading tests, in the operator's words>",
-  "smallest_effect": "<a share of attempts in (0, 1], fixed by Paul before step 4>"
+  "hypothesis": "With the arm's treatment, the builder's blind patches on cobra XS commits pass the repository's own tests more often than A0's.",
+  "smallest_effect": 0.2
 }
 ```
 
 `hypothesis` (1 to 2,000 characters) and `smallest_effect` are required and hashed into the
-reading's id, so neither can be edited after registration. Both are open: Paul fixes them
-before step 4 (handbook Q-34), and this record proposes no number for the smallest effect. All
-four readings carry the same `smallest_effect` (Q-28, DL-402). It is the "registered smallest
-effect": the loop clears when the pooled test gives p < 0.05 and the pooled paired difference is
-at least that large (part 1, "How Q-25 is read"). The product stores it, and no code reads it
-**[aspiration — ADR-0026 item 13's design: one reading per cell, four in all; none is
-registered yet]**.
-`campaign_id` is hashed into the id as well: every run filed under the reading is filed under
-that campaign or refused, and the reading counts only rows of runs the campaign admitted
-(DL-382).
+reading's id, so neither can be edited after registration. Paul fixed both on 2026-10-12 (Q-34;
+DL-412): one `smallest_effect`, 0.2, on all four readings, and one `hypothesis` per cell, in the
+form above with the cell's repository and size. That all four carry the same `smallest_effect` is
+Q-28's rule (DL-402). It is the "registered smallest effect": the loop clears when the pooled test
+gives p < 0.05 and the pooled paired difference is at least that large (part 1, "How Q-25 is read").
+The product stores it, and no code reads it **[aspiration — ADR-0026 item 13's design: one reading
+per cell, four in all; none is registered yet]**. `campaign_id` is hashed into the id as well: every
+run filed under the reading is filed under that campaign or refused, and the reading counts only
+rows of runs the campaign admitted (DL-382).
 
-The other bodies change only `repo`, `size` and `language`: cobra S (`go`), click XS and click S
-(`python`). `pool`, `since`, `taxonomy`, `posture_class` and `org_class` are left out, so the
-pool is every qualified commit of the cell (choice (c)), the class set is the global vocabulary,
-and the posture class is the deployment's own, which must be sealed.
+The other bodies change only `repo`, `size`, `language` and the repository and size the `hypothesis`
+names: cobra S (`go`), click XS and click S (`python`). `pool`, `since`, `taxonomy`, `posture_class`
+and `org_class` are left out, so the pool is every qualified commit of the cell (choice (c)), the
+class set is the global vocabulary, and the posture class is the deployment's own, which must be
+sealed.

@@ -13,14 +13,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a product-held ceiling**
-  (P-787 to P-793, P-800 to P-806, G-957, DL-372 to DL-384, DL-390 to DL-392, DL-400 to DL-405;
-  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash `hypothesis`,
-  `smallest_effect` and campaign; a retry is 409 `reading_exists`; `thin_cell` counts tasks.
-  Registration and admission need docker and the reading's posture (409 `reading_posture_mismatch`).
-  `POST /campaigns` holds a pound ceiling (409 `campaign_ceiling`); a reading counts only admitted
-  runs; `S1` author calls count. Grading disqualifies forged Go test events and pytest-machinery
-  patches; in-build model calls are `nested_model_call` misses. An authored RED is read under the
-  parent's dependencies. CI builds the Go builder image. Decisions 8 and 9 are recorded.
+  (P-787 to P-793, P-800 to P-806, G-957, DL-372 to DL-384, DL-390 to DL-392, DL-400 to DL-405,
+  DL-410 to DL-413; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
+  `hypothesis`, `smallest_effect` and campaign; a retry is 409 `reading_exists`; `thin_cell` counts
+  tasks. Registration and admission need docker and the reading's posture (409
+  `reading_posture_mismatch`). `POST /campaigns` holds a pound ceiling (409 `campaign_ceiling`); a
+  reading counts only admitted runs; `S1` author calls count. Grading disqualifies forged Go test
+  events and pytest-machinery patches; in-build model calls are `nested_model_call` misses. An
+  authored RED is read under the parent's dependencies. CI builds the Go builder image. Decisions 8,
+  9 and 10 are recorded.
 
 - **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
   [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off
