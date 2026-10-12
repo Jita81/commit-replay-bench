@@ -179,7 +179,7 @@ from crb.core.acceptance import (
     HeldOutTests,
     held_out_labels,
 )
-from crb.core.campaign import CAMPAIGN_ADMITTED
+from crb.core.campaign import CAMPAIGN_ADMITTED, tally
 from crb.core.evidence import canonical_json
 from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.ledger import (
@@ -239,6 +239,7 @@ from crb.core.spend import (
     PROFILE_DEFAULT,
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.server import campaigns as campaigns_mod
 from crb.server import worker
 from crb.server.app import create_app
 from crb.server.reading_book import load_readings
@@ -2541,6 +2542,111 @@ def test_p792_c15_settled_reservation_without_a_row_is_a_miss(
     }
 
 
+def test_p792_tally_charges_unrowed_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """C1's spend (F8, C19's tally half): a run killed after its reservation and before
+    ``build.done`` leaves the reservation and no row. While its claim is live the attempt is
+    in flight — held under the run's cap and headroom, never charged; once the run is
+    reclaimed past that claim the attempt is settled, and the tally charges it at its
+    reservation's hold and stops the campaign ``unplaced_spend`` (before, it charged nothing
+    and admitted the next run). The reclaimed run skips the commit and ends, and the attempt
+    is still charged once. A settled reservation whose hold is ``None`` (an r1 rung with no
+    cost cap) is a cost the tally cannot know: ``campaign_cost_unknown``."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register()
+    hold: dict[str, float | None] = {"usd": 0.4}
+    real = rig.h.worker._reserver
+    monkeypatch.setattr(
+        rig.h.worker,
+        "_reserver",
+        lambda *a, **kw: real(*a, **{**kw, "hold_usd": hold["usd"]}),
+    )
+
+    def killed(ws: Any, brief: Any) -> None:
+        raise _WKilled
+
+    def admitted(*tasks: str) -> Run:
+        # filed as POST /runs admits it: a $1.00 cap and the $5.00 held before a priced attempt
+        run = rig.enqueue(reading, *tasks, admit=False)
+        append_event(
+            rig.h.factory,
+            trace_id=_W_CID,
+            stage="system",
+            action=CAMPAIGN_ADMITTED,
+            payload={
+                "campaign_id": _W_CID,
+                "run_id": run.id,
+                "cap_usd": 1.0,
+                "s1": False,
+                "commits": 1,
+                "headroom_usd": 5.0,
+            },
+        )
+        return run
+
+    def tallied() -> tuple[list[Any], list[Any]]:
+        with rig.h.factory() as s:
+            ms = campaigns_mod.members(s, _W_CID)
+            return campaigns_mod.unplaced_attempts(s, [m.run_id for m in ms]), ms
+
+    monkeypatch.setattr(FakeBuilder, "hook", killed)
+    run = admitted()
+    with pytest.raises(_WKilled):
+        rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    assert rig.status(run.id) == STATUS_RUNNING
+    assert "build.done" not in rig.actions(run.id) and rig.rows(run.id) == []
+    # in flight: the live claim's run holds its cap and headroom, and nothing is charged
+    unplaced, ms = tallied()
+    assert unplaced == [] and ms[0].spent_usd == 0.0
+    live = tally(54.0, ms)
+    assert live.held_usd == pytest.approx(1.0 + 5.0)
+    assert live.refusal(cap_usd=1.0, s1=False, commits=0) is None
+
+    assert [r.id for r in rig.h.queue.reclaim_stale(0.0)] == [run.id]
+    want = campaigns_mod.UnplacedAttempt(
+        run_id=run.id,
+        task_id=rig.first,
+        trial="r1",
+        rung="",
+        cost_usd=0.4,
+        reservation_event_id=res.event_id,
+        reading_id=reading.reading_id,
+    )
+    unplaced, ms = tallied()
+    assert unplaced == [want]
+    assert ms[0].unrowed_usd == pytest.approx(0.4) and ms[0].spent_usd == pytest.approx(0.4)
+    stop = tally(54.0, ms).refusal(cap_usd=1.0, s1=False, commits=0)
+    assert stop is not None and stop.code == "unplaced_spend"
+    assert stop.detail == {"run_ids": [run.id]}
+
+    # the reclaimed run skips the reserved commit and ends: the attempt is charged once
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    assert rig.h.run_one().id == run.id
+    assert rig.skips(run.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.status(run.id) not in (STATUS_QUEUED, STATUS_RUNNING)
+    unplaced, ms = tallied()
+    assert unplaced == [want] and ms[0].spent_usd == pytest.approx(0.4)
+
+    # a reservation held at None: settled, its cost unknown — the unknown cost stops first
+    hold["usd"] = None
+    monkeypatch.setattr(FakeBuilder, "hook", killed)
+    second = admitted(rig.second)
+    with pytest.raises(_WKilled):
+        rig.h.run_one()
+    assert [r.id for r in rig.h.queue.reclaim_stale(0.0)] == [second.id]
+    unplaced, ms = tallied()
+    assert [(u.run_id, u.task_id, u.cost_usd) for u in unplaced] == [
+        (run.id, rig.first, 0.4),
+        (second.id, rig.second, None),
+    ]
+    assert ms[1].unknown == 1 and ms[1].unrowed_usd == 0.0
+    stop = tally(54.0, ms).refusal(cap_usd=1.0, s1=False, commits=0)
+    assert stop is not None and stop.code == "campaign_cost_unknown"
+    assert stop.detail == {"run_ids": [second.id]}
+
+
 def test_p792_s3_and_a0_share_commits_without_collision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2839,6 +2945,54 @@ def test_p792_a_legacy_reading_is_served_open_on_this_rule(
             rig.enqueue(legacy)
             rig.h.run_one()
     assert rig.reservations(legacy) == []
+
+
+def test_p792_settled_unrowed_is_served_per_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """``GET /readings`` serves ``settled_unrowed`` per arm of a reserved.v1 reading: its
+    reservations among the campaign's unplaced attempts (F8) — the same count the tally
+    charges, never a second one. The grade that raised after ``build.done`` (a lost sandbox)
+    is the worker's own path: its run failed with no row, its reservation is settled, and the
+    attempt is charged at the cost the worker's ``build.done`` wrote. A reservation with its
+    row counts nothing; a legacy reading serves null."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    legacy = rig.register(legacy=True)
+    reading = rig.register()
+    served = _w_served(rig, tmp_path / "api")
+    assert served[reading.reading_id]["settled_unrowed"] == {"S3": 0, "A0": 0}
+    assert served[legacy.reading_id]["settled_unrowed"] is None
+
+    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.state.update(exec="lost"))
+    lost = rig.enqueue(reading)
+    assert rig.h.run_one().status == STATUS_FAILED
+    assert "build.done" in rig.actions(lost.id) and rig.rows(lost.id) == []
+    (a0,) = rig.reservations(reading)
+    want = campaigns_mod.UnplacedAttempt(
+        run_id=lost.id,
+        task_id=rig.first,
+        trial="r1",
+        # the rung label the worker resolved trial r1 to, as its build.done names it
+        rung=f"{_W_CELL['builder']}:{_W_CELL['model']}",
+        cost_usd=0.01,
+        reservation_event_id=a0.event_id,
+        reading_id=reading.reading_id,
+    )
+    with rig.h.factory() as s:
+        assert campaigns_mod.unplaced_attempts(s, [lost.id]) == [want]
+
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    rig.state["exec"] = ""
+    rowed = rig.enqueue(reading, kind="replay")
+    rig.h.run_one()
+    assert len(rig.rows(rowed.id)) == 1
+    with rig.h.factory() as s:
+        assert campaigns_mod.unplaced_attempts(s, [lost.id, rowed.id]) == [want]
+    served = _w_served(rig, tmp_path / "api")
+    after = served[reading.reading_id]
+    assert after["reserved"] == {"S3": 1, "A0": 1}
+    assert after["settled_unrowed"] == {"S3": 0, "A0": 1}
+    assert served[legacy.reading_id]["settled_unrowed"] is None
 
 
 # --- the submit gate (POST /runs): 422 reading_run_fields and 409 reading_required --------

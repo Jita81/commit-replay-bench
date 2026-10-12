@@ -1179,13 +1179,13 @@ def admit_under_campaign(
 ) -> Run:
     """Queue ``run`` under its campaign only while the campaign holds it (G-957): under the
     events write lock, every submit refusal again but the login check (which ran before the
-    lock, P-729), then the campaign's tally — its runs' rows and test-author calls spent,
-    the unspent cap and headroom of every run still queued or running held — and, when this
-    run's cap plus its headroom still fits under the released line, the run is staged and
-    its ``campaign.admitted`` event written in ONE transaction. Refused 409
-    ``campaign_ceiling`` (it would pass the line), ``campaign_cost_unknown`` or
-    ``campaign_overrun`` (the campaign is stopped) — before anything is queued or spent; two
-    submits cannot both take the last of the line."""
+    lock, P-729), then the campaign's tally — its runs' rows, test-author calls and settled
+    attempts with no row spent, the unspent cap and headroom of every run still queued or
+    running held — and, when this run's cap plus its headroom still fits under the released
+    line, the run is staged and its ``campaign.admitted`` event written in ONE transaction.
+    Refused 409 ``campaign_ceiling`` (it would pass the line), ``campaign_cost_unknown``,
+    ``campaign_overrun`` or ``unplaced_spend`` (the campaign is stopped) — before anything is
+    queued or spent; two submits cannot both take the last of the line."""
     campaign_id = str(body.campaign_id)
     s1 = body.arm is not None
     commits = planned_commits(list(body.task_ids), body.limit) or 0

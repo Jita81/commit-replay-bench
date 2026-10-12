@@ -224,7 +224,8 @@ campaign, registered once at step 4, before any reading, with an operator sessio
   `campaign_ceiling` and nothing is queued.
 - A campaign with a run whose cost is not known is stopped, 409 `campaign_cost_unknown`, and so
   is one with a run that spent past its cap plus the headroom it was admitted with, 409
-  `campaign_overrun`: every new run is refused.
+  `campaign_overrun`, and one with an attempt that spent and ended with no row, 409
+  `unplaced_spend`: every new run is refused.
 - The run's own cap is still a guard, not a guarantee: it admits an attempt while the run's
   spend plus the dearest attempt so far stays within it, so nothing bounds a first attempt that
   has no cost cap of its own (`src/crb/server/spend_cap.py`; G-938, still open). A run capped at
@@ -265,7 +266,13 @@ is set to fit. The rule limits how many runs are in flight at once; a worker run
   registration, a run whose spend passes its cap plus the headroom it was admitted with (never
   the headroom now, which its own overshooting attempt raises),
   a row of an admitted run graded unsealed in the reading's posture class (`scope_fault`), which leaves its arm undecided,
-  or spend the tally cannot place against a run.
+  or spend the tally cannot place against a run, `unplaced_spend`. An attempt with no row once
+  its run has ended or been reclaimed is charged at its `build.done` cost, else at its
+  reservation's hold, and the campaign stops (`crb.server.campaigns.unplaced_attempts`, F8);
+  `GET /readings` serves the same attempts per arm as `settled_unrowed`. What the operator does
+  then follows K4's rules below **[hypothesis — method: code reading of the tally; reproduced by
+  `test_a_grade_that_raises_after_build_done_is_charged_and_stops_unplaced_spend` and
+  `test_p792_tally_charges_unrowed_reservation`]**.
 
 On a stop, Claude Code queues nothing more and cancels the runs that have not started; the
 product refuses every new run of a stopped campaign whatever is queued. A running run ends at its

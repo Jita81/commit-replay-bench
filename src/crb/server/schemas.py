@@ -812,8 +812,9 @@ class RunCreateRequest(BaseModel):
     #: run must name ``max_cost_usd`` (422 ``campaign_cap_required``) and, on ``arm: S1``,
     #: ``task_ids`` or ``limit`` (422 ``campaign_s1_unbounded``); it is refused 404
     #: ``campaign_unknown`` unless the campaign verifies, and 409 ``campaign_ceiling`` /
-    #: ``campaign_cost_unknown`` / ``campaign_overrun`` when the campaign's tally cannot hold
-    #: it — read and decided under the events write lock, before anything is queued; 409
+    #: ``campaign_cost_unknown`` / ``campaign_overrun`` / ``unplaced_spend`` when the
+    #: campaign's tally cannot hold it — read and decided under the events write lock, before
+    #: anything is queued; 409
     #: ``reading_required`` when it names no ``reading_id`` and the campaign holds a
     #: reserved.v1 reading on the repository (P-792). Stored as ``params.campaign_id`` only
     #: when set.

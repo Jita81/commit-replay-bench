@@ -11,7 +11,10 @@ that approved it, hashed into its id so an edited ceiling no longer verifies.
 "The tally"), kept by the product instead of by hand:
 
 * **spent** — for every run filed under the campaign, what its ledger rows cost plus each of
-  its test author's ``author.attempt`` calls (an ``S1`` replay's author writes no row, P-775);
+  its test author's ``author.attempt`` calls (an ``S1`` replay's author writes no row, P-775),
+  plus each **unplaced** attempt: one built or reserved with no row of its run for its
+  (commit, trial) once the attempt is settled — charged at its ``build.done`` cost, else at
+  its reservation's hold (F8, ``crb.server.campaigns.unplaced_attempts``);
 * **held** — for every run queued or running, its cap less what it has spent, plus the larger
   of the headroom it was admitted with and its headroom now;
 * **headroom** — the dearest single attempt the campaign has seen, or
@@ -26,7 +29,11 @@ tally cannot know (a row or an author call with ``cost_known`` false) and a run 
 passed its cap plus the headroom it was ADMITTED with (the ``campaign.admitted`` event's
 ``headroom_usd``, never the headroom now: the overshoot that passes it is itself the dearest
 attempt the campaign has seen, so a line recomputed from it would always cover it) each stop
-the campaign: nothing more is admitted.
+the campaign: nothing more is admitted. So does any unplaced attempt (``unplaced_spend``): the
+registration stops on spend the tally cannot place against a run, so a lost sandbox, a kill or
+a grade that raised costs its commit and stops the campaign until the operator has read why
+(K4). The stops are read in that order — a cost not known, an overrun, unplaced spend — and
+only then the line (``campaign_ceiling``).
 
 Navigation
 ----------
@@ -34,22 +41,24 @@ What it is:   The campaign record (``Campaign``: ceiling and released pounds, th
               decision, a content-hashed id) and the pure tally over its runs (``tally``).
 What it does: Hashes a campaign into ``cmp_<24 hex>`` and verifies it; folds the releases into
               the line (never above the ceiling, never lowered); sums each run's rows and author
-              calls; holds each queued or running run's unspent cap plus its headroom (the
-              larger of the admitted and the current); stops the campaign on a run whose spend
-              passed its cap plus the headroom it was admitted with; answers
-              whether one more run with a cap fits (``Tally.refusal``: ``campaign_ceiling``,
-              ``campaign_cost_unknown``, ``campaign_overrun``, or ``None``).
+              calls and its unplaced attempts; holds each queued or running run's unspent cap
+              plus its headroom (the larger of the admitted and the current); stops the
+              campaign on a run whose spend passed its cap plus the headroom it was admitted
+              with, and on a run with an unplaced attempt; answers whether one more run with a
+              cap fits (``Tally.refusal``: ``campaign_cost_unknown``, ``campaign_overrun``,
+              ``unplaced_spend``, ``campaign_ceiling``, or ``None``).
 How:          ``canonical_json`` + ``sha256_text`` over the record's body → ``tally`` takes the
               line and one ``MemberRun`` per run (the server reads them under the events write
               lock) → ``Tally.headroom`` → ``Tally.refusal``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's spend cap is a guard)
 Works with:   src/crb/server/campaigns.py (reads the record, the releases and each run's spend
-              from the store), src/crb/server/routes/campaigns.py (registers, releases, serves),
+              from the store, its unplaced attempts with it),
+              src/crb/server/routes/campaigns.py (registers, releases, serves),
               src/crb/server/routes/runs.py (``POST /runs`` admits a run under a campaign),
               src/crb/server/spend_cap.py (``Spend``: the rule a run's own cap sums by),
               src/crb/core/evidence.py (``canonical_json``, ``sha256_text``)
-Tested by:    tests/test_campaign.py, tests/test_server_campaigns.py
+Tested by:    tests/test_campaign.py, tests/test_server_campaigns.py, tests/test_p792_reserved.py
 Touch when:   never for a new repository; the registration's tally or stop rule changes (a
               decision first, then this module's refusals and
               docs/API.md#campaigns-a-campaigns-money-ceiling).
@@ -85,6 +94,9 @@ REFUSAL_CEILING = "campaign_ceiling"
 REFUSAL_COST_UNKNOWN = "campaign_cost_unknown"
 #: 409 — a run of the campaign spent past its cap plus its headroom: the campaign is stopped.
 REFUSAL_OVERRUN = "campaign_overrun"
+#: 409 — a run of the campaign has an attempt that spent with no row to place it against (its
+#: run ended or was reclaimed first): the attempt is charged and the campaign is stopped (F8).
+REFUSAL_UNPLACED = "unplaced_spend"
 #: 409 — a campaign of that name is registered already.
 REFUSAL_EXISTS = "campaign_exists"
 #: 409 — a release that does not raise the line, or would pass the ceiling.
@@ -201,8 +213,8 @@ def planned_commits(task_ids: Sequence[str], limit: int | None) -> int | None:
 @dataclass(frozen=True)
 class MemberRun:
     """One run filed under a campaign, as the store has it now: its admission (cap, arm,
-    commits, the headroom held for it) and what it has spent — its rows and its test author's
-    calls apart."""
+    commits, the headroom held for it) and what it has spent — its rows, its test author's
+    calls and its unplaced attempts apart."""
 
     run_id: str
     status: str
@@ -219,10 +231,16 @@ class MemberRun:
     authoring_usd: float = 0.0
     dearest_author_usd: float = 0.0
     authors_unknown: int = 0
+    #: The run's unplaced attempts (``crb.server.campaigns.unplaced_attempts``): settled with
+    #: no row of the run for their commit and trial — their known costs, how many there are,
+    #: and how many have a cost the tally cannot know.
+    unrowed_usd: float = 0.0
+    unrowed: int = 0
+    unrowed_unknown: int = 0
 
     @property
     def spent_usd(self) -> float:
-        return self.rows_usd + self.authoring_usd
+        return self.rows_usd + self.authoring_usd + self.unrowed_usd
 
     @property
     def active(self) -> bool:
@@ -230,7 +248,7 @@ class MemberRun:
 
     @property
     def unknown(self) -> int:
-        return self.rows_unknown + self.authors_unknown
+        return self.rows_unknown + self.authors_unknown + self.unrowed_unknown
 
     @property
     def commits_left(self) -> int:
@@ -242,7 +260,7 @@ class MemberRun:
 class Tally:
     """A campaign's money now: the line, what its runs spent (author calls apart), what is
     held for the runs still to finish, the dearest attempt and author call seen, and the runs
-    that stop it."""
+    that stop it (a cost not known, an overrun, an unplaced attempt)."""
 
     line_usd: float
     spent_usd: float
@@ -252,6 +270,13 @@ class Tally:
     dearest_author_usd: float | None
     unknown_runs: tuple[str, ...] = ()
     overrun_runs: tuple[str, ...] = ()
+    unplaced_runs: tuple[str, ...] = ()
+
+    @property
+    def stopped(self) -> bool:
+        """Whether the campaign is stopped: any run with a cost not known, an overrun or an
+        unplaced attempt. A stopped campaign admits nothing."""
+        return bool(self.unknown_runs or self.overrun_runs or self.unplaced_runs)
 
     @property
     def left_usd(self) -> float:
@@ -270,7 +295,8 @@ class Tally:
 
     def refusal(self, *, cap_usd: float, s1: bool, commits: int) -> CampaignRefused | None:
         """Why one more run with ``cap_usd`` (and, for ``S1``, ``commits`` commits) may not
-        be admitted, or ``None``: a stopped campaign first, then the line."""
+        be admitted, or ``None``: a stopped campaign first — a cost not known, then an
+        overrun, then unplaced spend — then the line."""
         if self.unknown_runs:
             return CampaignRefused(
                 f"campaign stopped: {len(self.unknown_runs)} run(s) spent a cost the tally "
@@ -284,6 +310,14 @@ class Tally:
                 "their headroom — nothing more is admitted; nothing was queued",
                 code=REFUSAL_OVERRUN,
                 detail={"run_ids": list(self.overrun_runs)},
+            )
+        if self.unplaced_runs:
+            return CampaignRefused(
+                f"campaign stopped: {len(self.unplaced_runs)} run(s) spent on an attempt that "
+                "ended with no row (its run ended or was reclaimed first) — the attempt is "
+                "charged and nothing more is admitted; nothing was queued",
+                code=REFUSAL_UNPLACED,
+                detail={"run_ids": list(self.unplaced_runs)},
             )
         headroom = self.headroom(s1=s1, commits_left=commits)
         need = cap_usd + headroom
@@ -315,7 +349,9 @@ class Tally:
 
 
 def tally(line_usd: float, members: Sequence[MemberRun]) -> Tally:
-    """The campaign's tally over its runs (the registration's rule; see the module)."""
+    """The campaign's tally over its runs (the registration's rule; see the module). The
+    dearest attempt is read from rows alone: an unplaced attempt stops the campaign, and a
+    stopped campaign admits no run whose headroom it would set."""
     attempts = [m.dearest_row_usd for m in members if m.dearest_row_usd > 0]
     calls = [m.dearest_author_usd for m in members if m.dearest_author_usd > 0]
     base = Tally(
@@ -343,6 +379,7 @@ def tally(line_usd: float, members: Sequence[MemberRun]) -> Tally:
         held_usd=held,
         unknown_runs=tuple(m.run_id for m in members if m.unknown),
         overrun_runs=tuple(overrun),
+        unplaced_runs=tuple(m.run_id for m in members if m.unrowed),
     )
 
 
@@ -363,6 +400,7 @@ __all__ = [
     "REFUSAL_REQUIRED",
     "REFUSAL_S1_UNBOUNDED",
     "REFUSAL_UNKNOWN",
+    "REFUSAL_UNPLACED",
     "Campaign",
     "CampaignRefused",
     "MemberRun",

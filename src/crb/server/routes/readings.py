@@ -19,8 +19,9 @@ verified campaign has — a reading names its campaign at birth, a run filed und
 filed under that campaign, and it counts only runs the campaign admitted (DL-382). ``GET
 /readings`` serves every reading of a repository evaluated over its rows — each arm's look
 state, the attempt rule it reads under and, for a reserved.v1 reading, the treatment its
-attempts are pinned to and the commits each arm has reserved (P-792) and how its pool moved
-since registration (``pool_drift``; a drifted reading reads ``undecided`` — P-797) — and each
+attempts are pinned to, the commits each arm has reserved (P-792), how many of those settled
+with no row (``settled_unrowed``, F8) and how its pool moved since registration
+(``pool_drift``; a drifted reading reads ``undecided`` — P-797) — and each
 cell's budget spent. A reserved.v1 pool is read from qualification records, never from the
 task's mined ``gold_clean``: the cell's commits whose record in force in the latest posture of
 the reading's posture class is ``qualified``, pinned by record id (P-797). ``standard_for`` is
@@ -58,8 +59,9 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               the repository's ``lint_digest``); lists readings
               with every arm's state and the budget per cell, each with its attempt rule (a
               legacy one ``first_observed.v0``, ``p792: "open on this rule"``), its treatment
-              pins, its reserved commits per arm and its pool drift (``served_reading``,
-              P-792, P-797: a drifted reading reads ``undecided``);
+              pins, its reserved commits per arm, how many of them settled with no row
+              (``settled_unrowed``) and its pool drift (``served_reading``, P-792, P-797: a
+              drifted reading reads ``undecided``);
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
 How:          ``append_event_checked`` (lock → ``_qualified`` or ``_qualified_reserved`` →
@@ -74,7 +76,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/store/events.py and src/crb/store/qualifications.py
               (``append_event_checked``: the locked event write; ``latest_posture_of_class``
               and ``qualified_specs``: a reserved.v1 pool),
-              src/crb/server/campaigns.py (``campaign_of``: the campaign a reading names),
+              src/crb/server/campaigns.py (``campaign_of``: the campaign a reading names;
+              ``unplaced_attempts``: the reservations served as ``settled_unrowed``),
               src/crb/server/routes/capability.py (routes every cell on its reading),
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
               src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
@@ -147,7 +150,7 @@ from crb.core.reading import (
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.server.auth import OperatorDep, ViewerDep
-from crb.server.campaigns import campaign_of
+from crb.server.campaigns import campaign_of, unplaced_attempts
 from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
@@ -700,7 +703,10 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
     {body, digest, event_id}}}`` from the campaign's first reservation on the repository and
     each arm's first (:func:`~crb.server.reading_book.treatment_pins`, the rule the worker
     halts a moved treatment by), ``null`` before any — ``reserved``, the commits each arm
-    has reserved of those it enrols, and ``pool_drift``, how its pool moved since registration
+    has reserved of those it enrols, ``settled_unrowed``, how many of those reservations are
+    unplaced attempts — settled with no row, so the tally charges them and the campaign stops
+    on ``unplaced_spend`` (:func:`~crb.server.campaigns.unplaced_attempts`, F8) — and
+    ``pool_drift``, how its pool moved since registration
     (:func:`~crb.server.reading_book.pool_drift`, P-797): a drifted reading reads
     ``undecided`` with no standard, whatever its rows say, until the pool is restored. A legacy
     reading has none of them (``null``)."""
@@ -712,12 +718,18 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
             p792=P792_OPEN,
             pinned_treatment=None,
             reserved=None,
+            settled_unrowed=None,
             pool_drift=None,
         )
         return out
     deployment, arms = treatment_pins(session, reading)
     pinned = {a: _pin(ev, "arm") for a, ev in arms.items() if a in reading.arms}
     reservations = reading.reservations or {}
+    unplaced = {
+        a.reservation_event_id
+        for a in unplaced_attempts(session, {res.run_id for res in reservations.values()})
+        if a.reservation_event_id
+    }
     out.update(
         attempt_rule=reading.attempt_rule,
         pinned_treatment=(
@@ -730,6 +742,14 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
         ),
         reserved={
             arm: sum(1 for c in enrolled(reading, arm) if (arm, c) in reservations)
+            for arm in reading.arms
+        },
+        settled_unrowed={
+            arm: sum(
+                1
+                for c in enrolled(reading, arm)
+                if (arm, c) in reservations and reservations[(arm, c)].event_id in unplaced
+            )
             for arm in reading.arms
         },
     )

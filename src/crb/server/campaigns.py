@@ -5,26 +5,38 @@ The campaign's trace is its id (``cmp_<24 hex>``): one ``campaign.registered`` e
 ``POST /runs`` queued under it, in the same transaction as the run. A run's spend is read the
 way its own cap reads it (``crb.server.spend_cap.Spend``): the cost of its ledger rows plus
 each ``author.attempt`` event on its trace (P-775) — so the campaign and the run never sum one
-run two ways. Every reader here takes the caller's session, so ``POST /runs`` reads the tally
-under the events write lock it admits the run under, and two submits cannot both take the
-last of the line.
+run two ways — plus each of its **unplaced** attempts (F8): an attempt built (its
+``build.done``) or reserved (its ``reading.reserved``) with no row of the run for its commit
+and trial once the attempt is settled, charged at its ``build.done`` cost, else at its
+reservation's hold. One reader (``unplaced_attempts``) feeds both the tally and a reading's
+``settled_unrowed`` count, so the two never disagree. Every reader here takes the caller's
+session, so ``POST /runs`` reads the tally under the events write lock it admits the run
+under, and two submits cannot both take the last of the line.
 
 Navigation
 ----------
 What it is:   The store readers of campaigns: the verified records, the line released, each
               run filed under one with what it has spent, the ids of the runs admitted (a
               campaign-named reading counts only theirs, DL-382), the tally and view served,
-              and a reserved.v1 reading's reservations with their runs' state (P-792).
+              a reserved.v1 reading's reservations with their runs' state (P-792), and the
+              attempts that spent with no row to place them against (``UnplacedAttempt``, F8).
 What it does: Keeps a campaign only when its id re-hashes and it sits on its own trace; folds
               its releases into the line (never above the ceiling); reads each admitted run's
-              status, rows and author calls into a ``MemberRun``; computes the ``Tally``; serves
-              the campaign with its line, spent (author calls apart), held, left and runs;
-              reads each first ``reading.reserved`` as a ``Reservation``, settled once its run
-              is terminal, missing or reclaimed past the claim it reserved under.
+              status, rows, author calls and unplaced attempts into a ``MemberRun``; computes
+              the ``Tally``; serves the campaign with its line, spent (author calls apart,
+              and each run's unplaced spend), held, left, its stop and its runs; reads each first
+              ``reading.reserved`` as a ``Reservation``, settled once its run is terminal,
+              missing or reclaimed past the claim it reserved under; lists each settled
+              attempt with no row of its run for its commit and trial, at its ``build.done``
+              cost, else its reservation's hold, else unknown — never one still in flight,
+              which its run's cap and headroom hold.
 How:          ``Event`` rows by action and trace → ``Campaign.from_dict`` → ``verify`` →
-              ``rows_of_runs`` and ``author.attempt`` events → ``Spend.of_rows`` /
-              ``with_authoring`` per run → ``crb.core.campaign.tally``; ``reading.reserved``
-              events → their runs (one read) → ``Reservation`` (``reservations_of``).
+              ``rows_of_runs``, ``author.attempt`` events and ``unplaced_attempts`` →
+              ``Spend.of_rows`` / ``with_authoring`` per run → ``crb.core.campaign.tally``;
+              ``reading.reserved`` events → their runs (one read) → ``Reservation``
+              (``reservations_of``); a ``build`` stage ``build.done`` per attempt less the
+              rows of its (run, commit, trial), plus each settled reservation with neither →
+              ``UnplacedAttempt`` (``unplaced_attempts``).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's cap is a guard)
 Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
@@ -32,16 +44,20 @@ Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
               src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally),
               src/crb/server/spend_cap.py (``Spend``, ``AUTHOR_ATTEMPT``: a run's own sum),
               src/crb/store/ledger.py (``rows_of_runs``: the rows in the caller's session),
-              src/crb/server/reading_book.py (``load_readings`` fills a reading's reservations)
+              src/crb/server/reading_book.py (``load_readings`` fills a reading's reservations),
+              src/crb/core/run.py (writes the ``build.done`` an attempt is read by),
+              src/crb/server/routes/readings.py (``served_reading``: ``settled_unrowed``)
 Tested by:    tests/test_server_campaigns.py, tests/test_p792_reserved.py
-Touch when:   never for a new repository; a new kind of spend is recorded outside a run's rows
-              and author calls (count it here and in ``Spend``), or a campaign's events change.
+Touch when:   never for a new repository; a new kind of spend is recorded outside a run's rows,
+              author calls and attempts (count it here and in ``Spend``), ``build.done`` or a
+              reservation changes shape, or a campaign's events change.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -56,7 +72,7 @@ from crb.core.campaign import (
     Tally,
     tally,
 )
-from crb.core.reading import READING_RESERVED_ACTION, Reservation
+from crb.core.reading import READING_RESERVED_ACTION, RUNG_R1, Reservation
 from crb.server.spend_cap import AUTHOR_ATTEMPT, Spend
 from crb.store.jobs import ACTIVE_STATUSES, RECLAIMS_KEY
 from crb.store.ledger import rows_of_runs
@@ -135,8 +151,9 @@ def _claim_of(value: Any) -> int:
         return -1
 
 
-def _hold_of(value: Any) -> float | None:
-    """A reservation's ``hold_usd`` as written, or ``None`` when it is not a number."""
+def _usd_of(value: Any) -> float | None:
+    """A dollar figure as written (a reservation's ``hold_usd``, an attempt's ``cost_usd``),
+    or ``None`` when it is not a number."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return float(value)
@@ -185,16 +202,138 @@ def reservations_of(session: Session, reading_ids: Iterable[str]) -> list[Reserv
                 event_seq_id=int(ev.id),
                 claim=claim,
                 treatment=str(payload.get("treatment") or ""),
-                hold_usd=_hold_of(payload.get("hold_usd")),
+                hold_usd=_usd_of(payload.get("hold_usd")),
                 settled=settled,
             )
         )
     return out
 
 
+#: The ``build.done`` an attempt is read by: core/run.py's, after the builder and before
+#: ``grade()``, routed to the ``build`` stage with the commit as its ``task_id``. A builder's
+#: own (``builder.build.done``) and the factory's (stage ``factory``, keyed by its item, whose
+#: row names the oracle's commit) are not attempts here.
+_BUILD_DONE = "build.done"
+_BUILD_STAGE = "build"
+
+
+@dataclass(frozen=True)
+class UnplacedAttempt:
+    """One attempt of a campaign's run that spent with no row of its run to place it against
+    (F8): built (a ``build.done``) or reserved (a ``reading.reserved``) for ``task_id`` at
+    ``trial``, with no row of ``run_id`` for that commit and trial, and settled — its run has
+    ended, or its reservation's claim is below the run's ``reclaims``. ``cost_usd`` is the
+    ``build.done`` cost when it is known, else the reservation's hold, else ``None`` (a cost
+    the tally cannot know). ``rung`` is the ``build.done``'s rung (empty for a reservation
+    never built); ``reservation_event_id`` and ``reading_id`` name the reservation, when the
+    attempt was reserved."""
+
+    run_id: str
+    task_id: str
+    trial: str
+    rung: str
+    cost_usd: float | None
+    reservation_event_id: str = ""
+    reading_id: str = ""
+
+
+def _attempt_cost(ev: Event) -> float | None:
+    """A ``build.done``'s cost: the event's cost column, else its payload's ``cost_usd`` —
+    ``None`` when the payload says ``cost_known`` false or no number is there."""
+    payload = dict(ev.payload_json or {})
+    if payload.get("cost_known") is False:
+        return None
+    return _usd_of(ev.cost_usd if ev.cost_usd is not None else payload.get("cost_usd"))
+
+
+def unplaced_attempts(session: Session, run_ids: Iterable[str]) -> list[UnplacedAttempt]:
+    """The runs' attempts that spent with no row to place them against, settled (F8).
+
+    Per (run, commit, trial), each ``build.done`` beyond the rows the run wrote there is one
+    attempt — the earliest first, since a re-run after a reclaim builds the commit again and
+    writes its row last. It is counted once settled: its run is no longer queued or running
+    (or is missing), or, at ``r1`` under a reservation, the run was reclaimed past the claim
+    that reserved it. Then each settled reservation of these runs with neither a
+    ``build.done`` nor a row at ``r1`` — killed between its reservation and its build's end —
+    is one more, at its hold. An attempt still in flight is not here: its run's cap and
+    headroom hold it, so it is never both held and charged. One read each of the runs, their
+    ``build.done`` events, their rows and their readings' reservations."""
+    ids = sorted({str(r) for r in run_ids if r})
+    if not ids:
+        return []
+    runs = {r.id: r for r in session.execute(select(Run).where(Run.id.in_(ids))).scalars()}
+    built: dict[tuple[str, str, str], list[Event]] = defaultdict(list)
+    for ev in session.execute(
+        select(Event)
+        .where(
+            Event.trace_id.in_(ids),
+            Event.action == _BUILD_DONE,
+            Event.stage == _BUILD_STAGE,
+            Event.task_id != "",
+        )
+        .order_by(Event.id)
+    ).scalars():
+        trial = str(dict(ev.payload_json or {}).get("trial") or "")
+        built[(ev.trace_id, ev.task_id, trial)].append(ev)
+    rowed: dict[tuple[str, str, str], int] = defaultdict(int)
+    for row in rows_of_runs(session, ids):
+        rowed[(row.run_id, row.task_id, row.trial)] += 1
+    reading_of = {
+        rid: str((run.params_json or {}).get("reading_id") or "") for rid, run in runs.items()
+    }
+    reserved = {
+        (res.run_id, res.task_id): res
+        for res in reservations_of(session, reading_of.values())
+        if res.run_id in runs
+    }
+
+    def ended(run_id: str) -> bool:
+        run = runs.get(run_id)
+        return run is None or run.status not in ACTIVE_STATUSES
+
+    out: list[UnplacedAttempt] = []
+    for (run_id, task_id, trial), events in built.items():
+        res = reserved.get((run_id, task_id)) if trial == RUNG_R1 else None
+        extra = len(events) - rowed[(run_id, task_id, trial)]
+        if extra <= 0 or not (ended(run_id) or (res is not None and res.settled)):
+            continue
+        for ev in events[:extra]:
+            payload = dict(ev.payload_json or {})
+            out.append(
+                UnplacedAttempt(
+                    run_id=run_id,
+                    task_id=task_id,
+                    trial=trial,
+                    rung=str(payload.get("rung") or ""),
+                    cost_usd=_attempt_cost(ev),
+                    reservation_event_id=res.event_id if res is not None else "",
+                    reading_id=reading_of.get(run_id, "") if res is not None else "",
+                )
+            )
+    for (run_id, task_id), res in reserved.items():
+        if (
+            res.settled
+            and (run_id, task_id, RUNG_R1) not in built
+            and not rowed[(run_id, task_id, RUNG_R1)]
+        ):
+            out.append(
+                UnplacedAttempt(
+                    run_id=run_id,
+                    task_id=task_id,
+                    trial=RUNG_R1,
+                    rung="",
+                    cost_usd=res.hold_usd,
+                    reservation_event_id=res.event_id,
+                    reading_id=reading_of.get(run_id, ""),
+                )
+            )
+    return out
+
+
 def members(session: Session, campaign_id: str) -> list[MemberRun]:
     """Each run admitted under the campaign, with what it has spent now: its rows and its
-    test author's calls, as its own cap counts them (``Spend``)."""
+    test author's calls, as its own cap counts them (``Spend``), and its unplaced attempts
+    (``unplaced_attempts``: their known costs, how many, how many with a cost not known)."""
     admitted = [
         dict(ev.payload_json or {}) for ev in _events(session, campaign_id, CAMPAIGN_ADMITTED)
     ]
@@ -214,6 +353,9 @@ def members(session: Session, campaign_id: str) -> list[MemberRun]:
         payload = dict(ev.payload_json or {})
         cost = ev.cost_usd if ev.cost_usd is not None else payload.get("cost_usd")
         calls[ev.trace_id].append({**payload, "action": ev.action, "cost_usd": cost})
+    unplaced: dict[str, list[UnplacedAttempt]] = defaultdict(list)
+    for attempt in unplaced_attempts(session, ids):
+        unplaced[attempt.run_id].append(attempt)
     out: list[MemberRun] = []
     for a in admitted:
         rid = str(a.get("run_id", ""))
@@ -221,6 +363,7 @@ def members(session: Session, campaign_id: str) -> list[MemberRun]:
             continue
         own = Spend.of_rows(rows[rid])
         total = own.with_authoring(calls[rid])
+        lost = unplaced[rid]
         out.append(
             MemberRun(
                 run_id=rid,
@@ -236,6 +379,9 @@ def members(session: Session, campaign_id: str) -> list[MemberRun]:
                 authoring_usd=total.spent - own.spent,
                 dearest_author_usd=total.dearest_authoring,
                 authors_unknown=total.unknown - own.unknown,
+                unrowed_usd=sum(a.cost_usd for a in lost if a.cost_usd is not None),
+                unrowed=len(lost),
+                unrowed_unknown=sum(1 for a in lost if a.cost_usd is None),
             )
         )
     return out
@@ -248,13 +394,12 @@ def campaign_tally(session: Session, campaign: Campaign) -> Tally:
 
 def campaign_view(session: Session, campaign: Campaign) -> dict[str, Any]:
     """The campaign as ``GET /campaigns/{id}`` serves it: the record, the line in pounds and
-    dollars, the tally, whether it is stopped and why, and each run with its spend."""
+    dollars, the tally, whether it is stopped and why (``Tally.refusal``'s order: a cost not
+    known, an overrun, unplaced spend), and each run with its spend."""
     runs = members(session, campaign.campaign_id)
     released = line_gbp(session, campaign)
     t = tally(campaign.usd(released), runs)
-    stop = (
-        t.refusal(cap_usd=0.0, s1=False, commits=0) if (t.unknown_runs or t.overrun_runs) else None
-    )
+    stop = t.refusal(cap_usd=0.0, s1=False, commits=0) if t.stopped else None
     return {
         **campaign.to_dict(),
         "ceiling_usd": campaign.usd(campaign.ceiling_gbp),
@@ -275,6 +420,7 @@ def campaign_view(session: Session, campaign: Campaign) -> dict[str, Any]:
                 "spent_usd": round(m.spent_usd, 6),
                 "rows_usd": round(m.rows_usd, 6),
                 "authoring_usd": round(m.authoring_usd, 6),
+                "unrowed_usd": round(m.unrowed_usd, 6),
                 "cost_unknown": m.unknown,
                 "admitted_headroom_usd": round(m.headroom_usd, 6),
                 "headroom_usd": round(
@@ -289,6 +435,7 @@ def campaign_view(session: Session, campaign: Campaign) -> dict[str, Any]:
 
 
 __all__ = [
+    "UnplacedAttempt",
     "admitted_runs",
     "campaign_of",
     "campaign_tally",
@@ -298,4 +445,5 @@ __all__ = [
     "members",
     "releases",
     "reservations_of",
+    "unplaced_attempts",
 ]

@@ -1249,6 +1249,8 @@ export interface ReadingOutcome {
   pinned_treatment?: PinnedTreatment | null
   /** The commits each arm has reserved of those it enrols; `null` for a legacy reading (GET /readings, P-792). */
   reserved?: Record<string, number> | null
+  /** Of those reservations, how many settled with no row: charged by the campaign's tally, which then stops on `unplaced_spend`; `null` for a legacy reading (GET /readings, F8). */
+  settled_unrowed?: Record<string, number> | null
 }
 
 /** One half of a reserved.v1 reading's treatment pin, as its reservation stored it (P-792). */

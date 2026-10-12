@@ -137,12 +137,13 @@ def _runs(env: Env) -> set[str]:
         return {r.id for r in s.execute(select(Run)).scalars()}
 
 
-def _row(run_id: str, commit: str, cost: float, *, known: bool = True) -> Any:
+def _row(run_id: str, commit: str, cost: float, *, known: bool = True, trial: str = "r1") -> Any:
     return sealed_row(
         commit,
         repo=ALPHA,
         run_id=run_id,
         cost_usd=cost,
+        trial=trial,
         labels={"cost_known": "true" if known else "false"},
     )
 
@@ -360,6 +361,119 @@ def test_a_first_attempt_dearer_than_the_five_dollars_held_stops_the_campaign(en
     assert envelope(r)["code"] == "campaign_overrun"
     assert envelope(r)["detail"] == {"campaign_id": cid, "run_ids": [rid]}
     assert _runs(env) == before and len(_admitted(env, cid)) == 2
+
+
+def _build_done(
+    env: Env, run_id: str, commit: str, cost: float, *, trial: str = "r1", known: bool = True
+) -> None:
+    """A ``build.done`` on the run's trace, as core/run.py emits one after the builder and
+    before ``grade()``: the attempt was built and priced, whatever grading does next."""
+    append_event(
+        env.factory,
+        trace_id=run_id,
+        stage="build",
+        action="build.done",
+        task_id=commit,
+        payload={"trial": trial, "rung": trial, "cost_usd": cost, "cost_known": known},
+    )
+
+
+def _settle(env: Env, run_id: str, status: str) -> None:
+    with env.factory() as s:
+        got = s.get(Run, run_id)
+        assert got is not None
+        got.status = status
+        s.commit()
+
+
+def test_a_grade_that_raises_after_build_done_is_charged_and_stops_unplaced_spend(
+    backend_env: Env,
+) -> None:
+    """F8 (the Wave 3 red team on c5b9e5ec, by code reading): a grade that raised after
+    ``build.done`` — a lost sandbox — failed the run with no row, so the tally left the
+    attempt's $0.42 out and the campaign ran on (``stopped`` null). Now the attempt is charged
+    at its ``build.done`` cost once its run has ended, and the campaign stops
+    ``unplaced_spend``: the next run under it is refused with nothing queued. A cost the tally
+    cannot know still stops it first, ``campaign_cost_unknown``."""
+    env = backend_env
+    cid = _register(env)["campaign_id"]
+    rid = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid}).json()["id"]
+    _build_done(env, rid, "c1", 0.42)
+    _settle(env, rid, "failed")
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["spent_usd"] == pytest.approx(0.42)
+    assert view["left_usd"] == pytest.approx(54.0 - 0.42)
+    (run,) = view["runs"]
+    assert run["unrowed_usd"] == pytest.approx(0.42) and run["rows_usd"] == 0.0
+    assert run["spent_usd"] == pytest.approx(0.42)
+    stopped = view["stopped"]
+    assert stopped is not None
+    assert (stopped["code"], stopped["run_ids"]) == ("unplaced_spend", [rid])
+    assert "no row" in stopped["message"]
+    before = _runs(env)
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid})
+    assert r.status_code == 409, r.text
+    assert envelope(r)["code"] == "unplaced_spend"
+    assert envelope(r)["detail"] == {"campaign_id": cid, "run_ids": [rid]}
+    assert _runs(env) == before and len(_admitted(env, cid)) == 1
+    # an unplaced attempt whose cost was not known: the unknown cost is the first stop
+    _build_done(env, rid, "c2", 0.0, known=False)
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["stopped"]["code"] == "campaign_cost_unknown"
+    assert view["runs"][0]["cost_unknown"] == 1
+    assert view["spent_usd"] == pytest.approx(0.42)
+
+
+def test_an_in_flight_attempt_is_held_not_charged(backend_env: Env) -> None:
+    """An attempt built and still grading — its run running, no row yet — is in flight: the
+    tally holds the run's cap and headroom for it and charges nothing, so the attempt is never
+    both held and spent, and the campaign admits the next run. Once its run ends with no row
+    the attempt is charged and the campaign stops ``unplaced_spend``."""
+    env = backend_env
+    cid = _register(env)["campaign_id"]
+    rid = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid}).json()["id"]
+    _settle(env, rid, "running")
+    _build_done(env, rid, "c1", 0.42)
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["spent_usd"] == 0.0 and view["held_usd"] == pytest.approx(1.0 + 5.0)
+    assert view["runs"][0]["unrowed_usd"] == 0.0
+    assert view["stopped"] is None
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid})
+    assert r.status_code == 201, r.text
+    _settle(env, rid, "cancelled")
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["spent_usd"] == pytest.approx(0.42)
+    assert view["runs"][0]["unrowed_usd"] == pytest.approx(0.42)
+    assert view["stopped"]["code"] == "unplaced_spend"
+    assert view["stopped"]["run_ids"] == [rid]
+
+
+def test_a_rowed_attempt_is_not_counted_twice(backend_env: Env) -> None:
+    """An attempt with its row is spent once, by the row: its ``build.done`` adds nothing and
+    the campaign runs on. A run reclaimed after a kill builds a commit again — two
+    ``build.done`` events of one trial and one row — and only the earlier, row-less attempt
+    is charged, at its own cost."""
+    env = backend_env
+    cid = _register(env)["campaign_id"]
+    rid = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid}).json()["id"]
+    _build_done(env, rid, "c1", 0.42)
+    DbLedger(env.factory).append(_row(rid, "c1", 0.42))
+    _build_done(env, rid, "c1", 0.20, trial="r2")
+    DbLedger(env.factory).append(_row(rid, "c1", 0.20, trial="r2"))
+    _settle(env, rid, "succeeded")
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["spent_usd"] == pytest.approx(0.62)
+    (run,) = view["runs"]
+    assert run["rows_usd"] == pytest.approx(0.62) and run["unrowed_usd"] == 0.0
+    assert view["stopped"] is None
+    # c2 built twice under one trial (the first claim killed mid-grade), one row
+    _build_done(env, rid, "c2", 0.30)
+    _build_done(env, rid, "c2", 0.25)
+    DbLedger(env.factory).append(_row(rid, "c2", 0.25))
+    view = env.get(f"/campaigns/{cid}").json()
+    assert view["spent_usd"] == pytest.approx(0.62 + 0.25 + 0.30)
+    assert view["runs"][0]["unrowed_usd"] == pytest.approx(0.30)
+    assert view["stopped"]["code"] == "unplaced_spend"
 
 
 @pytest.mark.parametrize(
