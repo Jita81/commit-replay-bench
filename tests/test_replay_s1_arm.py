@@ -739,6 +739,54 @@ def test_s1_red_counts_each_top_level_go_test_the_author_defines(
     assert _Idle.calls == 0
 
 
+#: An authored Go file whose one live test passes: a ``"/*"`` it logs opens no comment, and
+#: an earlier draft kept in a block comment and a raw string names an old failing fuzz
+#: target, example and test at column 0.
+GO_DRAFT_SRC = (
+    'package calc\n\nimport "testing"\n\n'
+    'func TestNewAdds(t *testing.T) {\n\tt.Log("/*")\n\tif Add(2, 2) != 4 {\n'
+    '\t\tt.Fatal("want 4")\n\t}\n}\n\n'
+    "/*\nAn earlier draft:\n\nfunc FuzzOld(f *testing.F) {}\n\nfunc ExampleAdd() {}\n*/\n\n"
+    "var draft = `\nfunc TestRawOld(t *testing.T) {}\n`\n"
+)
+
+
+def test_s1_red_reads_a_go_test_only_from_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6A-LASTFIX-R1-1: the Go rule matched ``^func`` over the file's raw text, so a draft
+    kept in a block comment or a raw string "declared" ``FuzzOld``, ``ExampleAdd`` and
+    ``TestRawOld``; an old test failing under one of those names in the package became the
+    authored test's RED while the authored test itself passed. A test counts only from the
+    file's code, each comment and string literal blanked first."""
+    pkg = gorepo.CALC_PKG
+    old = frozenset(
+        f"{pkg}::{name}" for name in ("FuzzOld/seed#0", "FuzzOld", "ExampleAdd", "TestRawOld")
+    )
+    assert adapter.authored_red("go", GO_AUTHORED, GO_DRAFT_SRC, old, ()) == frozenset()
+    # the live test still counts: the "/*" it logs is a string, not a comment's start
+    mine = old | {f"{pkg}::TestNewAdds"}
+    assert adapter.authored_red("go", GO_AUTHORED, GO_DRAFT_SRC, mine, ()) == {
+        f"{pkg}::TestNewAdds"
+    }
+    # through the BuildFn: the old failures are no RED, and the builder never runs
+    drafts = ExecResult(
+        1,
+        _go_events(
+            ("run", "TestNewAdds"),
+            ("pass", "TestNewAdds"),
+            ("run", "FuzzOld"),
+            ("run", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, _Docker(drafts), src=GO_DRAFT_SRC)
+    assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
+    assert _Idle.calls == 0
+
+
 def test_s1_unattributed_red_with_red_env_probe_is_harness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

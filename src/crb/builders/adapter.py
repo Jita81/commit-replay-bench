@@ -220,6 +220,19 @@ _GO_TEST_FUNCS = (
     re.compile(r"^func\s+(Fuzz\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?F\s*\)", re.M),
     re.compile(r"^func\s+(Example\w*)\s*\(\s*\)", re.M),
 )
+#: A Go comment or string literal (interpreted, raw or rune), matched left to right so a
+#: ``"/*"`` opens no comment: :func:`authored_red` blanks each one before it reads a func,
+#: so a draft kept in a block comment or a raw string declares no test.
+_GO_NOT_CODE = re.compile(
+    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|`[^`]*`|'(?:\\.|[^'\\\n])*'", re.S
+)
+
+
+def _go_code(src: str) -> str:
+    """``src`` with each comment and string literal blanked to spaces, its newlines kept so a
+    ``^func`` still matches only at the start of a real line."""
+    return _GO_NOT_CODE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), src)
+
 
 #: What a Go RED is counted by, as the ``S1`` refusal states it (:func:`authored_red`).
 GO_RED_RULE = (
@@ -237,15 +250,17 @@ def authored_red(
 
     * ``go``: ``<pkg>::<name>`` for each top-level test func in ``content`` —
       ``func TestX(t *testing.T)``, ``func FuzzX(f *testing.F)`` or ``func ExampleX()`` — a
-      subtest (``TestX/sub``, ``FuzzX/seed#0``) counting as its test. The RED scope is the
-      whole package, so an old test that fails there is the reason this rule exists. A
-      testify suite method (``func (s *S) TestY()``) counts only under a runner the file
-      defines, by that runner's name; one that a runner in another file runs is refused
-      (:data:`GO_RED_RULE`, the arm's ``authoring`` miss): its id's second segment is any
-      subtest's name, which an old test's ``t.Run("TestY", …)`` or another suite's method
-      carries too, so it cannot attribute a RED to this file — and a method on another
-      file's suite is a reference to another test file, which the author is told never to
-      make. A limit that only ever refuses, never admits (P-800).
+      subtest (``TestX/sub``, ``FuzzX/seed#0``) counting as its test — read from the file's
+      code alone: a draft in a block comment or a raw string declares nothing
+      (R6A-LASTFIX-R1-1). The RED scope is the whole package, so an old test that fails
+      there is the reason this rule exists. A testify suite method (``func (s *S) TestY()``)
+      counts only under a runner the file defines, by that runner's name; one that a runner
+      in another file runs is refused (:data:`GO_RED_RULE`, the arm's ``authoring`` miss):
+      its id's second segment is any subtest's name, which an old test's
+      ``t.Run("TestY", …)`` or another suite's method carries too, so it cannot attribute a
+      RED to this file — and a method on another file's suite is a reference to another
+      test file, which the author is told never to make. A limit that only ever refuses,
+      never admits (P-800).
     * ``pytest``: a node id in ``path`` (``path::test_x``, or ``path`` itself for a
       collection error), read from the root or from a ``rootdir`` nearer the file. The scope
       is the file already; the rule takes out the baseline of a file the author overwrote.
@@ -254,7 +269,8 @@ def authored_red(
     report titles, cargo a module path inside one binary, surefire a class name), so any
     failing id stands, as it always has: no ``S1`` reading runs those runners yet."""
     if runner_name == "go":
-        names = {name for pattern in _GO_TEST_FUNCS for name in pattern.findall(content)}
+        code = _go_code(content)
+        names = {name for pattern in _GO_TEST_FUNCS for name in pattern.findall(code)}
         own = {f for f in failing if f.partition("::")[2].split("/", 1)[0] in names}
     elif runner_name == "pytest":
 
