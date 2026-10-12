@@ -39,7 +39,9 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               reading does not register, and (409 ``reading_required``) a campaign run naming
               no reading while its campaign holds a reserved.v1 one on the repository (P-792),
               and (409 ``lint_disabled``) a run of a reading while the repository's lint is
-              off (P-796) — through ``submit_refusals``, the one gate every route that queues
+              off (P-796), and (409 ``pool_drift``) a run of a reserved.v1 reading whose pool
+              moved since registration (P-797) — through ``submit_refusals``, the one gate
+              every route that queues
               a run calls; serves run views with counts re-derived from the ledger when the
               worker wrote none; streams events as SSE with resume-by-seq; cancellation is
               a flag the worker honours; lifting the sign-off clause for one run is refused
@@ -70,7 +72,8 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py,
-              tests/test_p792_reserved.py (the reserved.v1 submit refusals)
+              tests/test_p792_reserved.py (the reserved.v1 submit refusals),
+              tests/test_p792_pool.py (``pool_drift``)
 Touch when:   never for a new repository; a run parameter is added (schema field →
               ``params`` here → the worker reads it → docs/API.md → the UI type); a field
               is added to ``RunOut`` (the UI type first); a run kind is added (decide in
@@ -120,6 +123,7 @@ from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     ATTEMPT_RULE_RESERVED,
     REFUSAL_LINT_DISABLED,
+    REFUSAL_POOL_DRIFT,
     REFUSAL_READING_REQUIRED,
     REFUSAL_RUN_FIELDS,
     Reading,
@@ -141,7 +145,7 @@ from crb.server.posture_view import (
     deployment_posture_class,
     refuse_unqualified,
 )
-from crb.server.reading_book import load_readings, repo_lint
+from crb.server.reading_book import load_readings, pool_drift, repo_lint
 from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
@@ -1063,6 +1067,27 @@ def reading_lint_refusal(db: Session, reading: Reading) -> None:
     )
 
 
+def reading_pool_drift_refusal(db: Session, reading: Reading) -> None:
+    """P-797 at submit: 409 ``pool_drift`` when a run names the reserved.v1 ``reading`` and
+    its pool moved since registration (:func:`~crb.server.reading_book.pool_drift`): a pool
+    commit's live class or size is no longer the cell's, or a record the pool was pinned to is
+    missing or not qualified — the reading would count commits it did not register, so nothing
+    is queued and nothing reserved (the worker re-checks at claim,
+    ``Worker._reading_pool_drift``). ``detail`` is ``{reading_id, drift}``, ``drift`` the
+    ``{task_id, field, registered, now}`` rows. A legacy reading is never refused by it."""
+    drift = pool_drift(db, reading) if reading.reserved else []
+    if not drift:
+        return
+    raise ApiError(
+        409,
+        REFUSAL_POOL_DRIFT,
+        f"a run of {ATTEMPT_RULE_RESERVED} reading {reading.reading_id!r}: its pool moved since "
+        f"registration ({len(drift)} drift row(s)) — restore the task or register a new reading; "
+        "nothing was queued",
+        detail={"reading_id": reading.reading_id, "drift": drift},
+    )
+
+
 def reading_run_fields_refusal(reading: Reading, run: Run) -> None:
     """P-792 channels C3, C5, C7 and C17 at submit: 422 ``reading_run_fields`` when ``run``,
     filed under the reserved.v1 ``reading``, sets a field the reading does not register — the
@@ -1250,6 +1275,10 @@ def submit_refusals(
     * 409 ``lint_disabled`` — a run filed under a reading of either rule on a repository whose
       lint the operator switched off: nothing a reading counts is built while belt 5 is off
       (P-796; :func:`reading_lint_refusal`; the worker re-checks at claim);
+    * 409 ``pool_drift`` — a run filed under a reserved.v1 reading whose pool moved since
+      registration: a pool task relabelled out of the cell, or a pinned qualification record
+      missing or not qualified (P-797; :func:`reading_pool_drift_refusal`; the worker
+      re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -1286,6 +1315,7 @@ def submit_refusals(
         reading = reading_refusal(db, settings, body)
         reading_lint_refusal(db, reading)
         reading_run_fields_refusal(reading, run)
+        reading_pool_drift_refusal(db, reading)
     if not login:
         return
     # last: the only refusal that can cost a verify turn (P-462)

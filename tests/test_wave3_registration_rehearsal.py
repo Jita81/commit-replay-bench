@@ -31,12 +31,13 @@ What it does: Step 4: logs in as an operator, registers the record's campaign (2
               (``campaign_cost_unknown``, ``campaign_overrun``) in ``stopped``. Step 9: files
               the stage-2 release (the line $108.00) and resumes step 6 under it.
 How:          ``make_env`` on the sealed settings with the record's test author; the
-              repositories ``cobra`` and ``click`` and their qualified tasks written to the
-              store; every request through the in-process ``TestClient`` on the record's own
-              paths. No worker runs: a finished run is the worker's status and rows written to
-              the store. The claude_code and editblock credential checks are stubbed to
-              "present" — the stack's credential is the operator's, and the rehearsal never sets
-              or reads a key. A disagreement found here is fixed in the record or the
+              repositories ``cobra`` and ``click``, their qualified tasks and each task's
+              qualification record (``qualify_pool``) written to the store; every request
+              through the in-process ``TestClient`` on the record's own paths. No worker runs:
+              a finished run is the worker's status and rows written to the store. The
+              claude_code and editblock credential checks are stubbed to "present" — the
+              stack's credential is the operator's, and the rehearsal never sets or reads a
+              key. A disagreement found here is fixed in the record or the
               product before the run; a strict ``xfail`` marks one left open, its reason
               ``DOC-WRONG``, ``PRODUCT-WRONG`` or ``AMBIGUOUS``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -70,11 +71,12 @@ from sqlalchemy import func, select
 from crb.core.reading import READING_EVENT_ACTION, reading_cell_key, seeded_order
 from crb.core.spec import TaskSpec
 from crb.server.app import API_PREFIX
+from crb.server.posture_view import deployment_posture_class
 from crb.server.routes import runs as runs_routes
 from crb.server.routes.learn import deployment_author_model
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Repo, Run, Task
-from fixtures.readings import SEALED_SETTINGS, sealed_row
+from fixtures.readings import SEALED_SETTINGS, qualify_pool, sealed_row
 from fixtures.server_seed import Env, envelope, login, make_env
 
 RECORD = Path(__file__).resolve().parents[1] / "docs/reviews/2026-10-09-wave-3-registration.md"
@@ -263,7 +265,9 @@ def _commit(repo: str, size: str, i: int) -> str:
 
 def add_repos_and_tasks(env: Env) -> None:
     """Step 1's repositories and step 3's outcome: ``POOL`` qualified ``bug.fix`` commits per
-    cell, each its own change, in the repository's language."""
+    cell, each its own change, in the repository's language — each with a ``qualified``
+    record in one posture of the deployment's posture class for the repository, which a
+    reserved.v1 pool is read from and pinned to (P-797)."""
     with env.factory() as s:
         for repo, (language, runner) in REPOS.items():
             s.add(
@@ -313,6 +317,15 @@ def add_repos_and_tasks(env: Env) -> None:
                         )
                     )
         s.commit()
+        repos = {repo: s.get(Repo, repo) for repo in REPOS}
+    for repo, row in repos.items():
+        qualify_pool(
+            env.factory,
+            repo,
+            [_commit(repo, size, i) for size in ("XS", "S") for i in range(POOL)],
+            posture_class=deployment_posture_class(env.settings, row),
+            posture_id="pst_" + hashlib.sha256(f"wave3-{repo}".encode()).hexdigest()[:24],
+        )
 
 
 @pytest.fixture(autouse=True)

@@ -10,15 +10,19 @@ What it does: ``sealed_row`` stamps the posture class ``docker/copy/sealed``, th
               change id, with a ``created`` time after the registration; ``register_reading``
               registers a hierarchy over a pool at a fixed time, under a campaign when one is
               named, and under any other ``register`` option given (the reserved.v1 attempt
-              rule); ``commits`` makes shas.
-How:          Thin wrappers over ``tests.fixtures.posture.posture_row`` and
-              ``crb.core.reading.register``.
+              rule); ``commits`` makes shas; ``qualify_pool`` writes one qualification record
+              per task in a posture through the store's writer — what a reserved.v1 pool is
+              read from and pinned to (P-797).
+How:          Thin wrappers over ``tests.fixtures.posture.posture_row``,
+              ``crb.core.reading.register`` and ``crb.store.qualifications.append``.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md, docs/adr/0025-routing-v2.md
 Works with:   src/crb/core/reading.py (``register`` — the readings built here),
               src/crb/core/ledger.py (the sealed 2.4 rows the ledger admits),
-              tests/fixtures/posture.py (``posture_row`` — the labels a 2.4 row carries)
-Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_signoff_v5.py
+              tests/fixtures/posture.py (``posture_row`` — the labels a 2.4 row carries),
+              src/crb/store/qualifications.py (``append`` — the records ``qualify_pool`` writes)
+Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_signoff_v5.py,
+              tests/test_server_readings.py, tests/test_p792_pool.py
 Touch when:   never for a new repository; the sealed posture's labels or the reading's shape change.
 """
 
@@ -28,12 +32,16 @@ import hashlib
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from sqlalchemy.orm import Session, sessionmaker
+
 from crb.core.capability import ReadingBook
 from crb.core.context_arm import REPLAY_MODE, parse_arm
 from crb.core.ledger import GradeRow
+from crb.core.qualify import STATE_QUALIFIED, Qualification
 from crb.core.reading import RULE_LOOK_V1, Reading, register
 from crb.core.routing import ControlsVerdict
 from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.store import qualifications as store_q
 from fixtures.posture import posture_row
 
 REPO = "cobra"
@@ -63,6 +71,51 @@ SEALED_SETTINGS: dict[str, Any] = {
     "sandbox": {"executor": "docker"},
     "builder": {"executor": "docker", "image": "crb-builder:test"},
 }
+
+
+#: The posture ``qualify_pool`` records a pool in unless a test names another.
+POSTURE_ID = "pst_" + "f" * 24
+
+
+def qualify_pool(
+    factory: sessionmaker[Session],
+    repo: str,
+    task_ids: Iterable[str],
+    *,
+    posture_class: str = SEALED,
+    posture_id: str = POSTURE_ID,
+    state: str = STATE_QUALIFIED,
+    code: str = "",
+    salt: str = "",
+) -> dict[str, str]:
+    """Write one qualification record per task of ``repo`` in ``posture_id`` (a
+    ``posture_class`` posture) through the store's writer, and return task id → record id:
+    what a reserved.v1 registration reads its pool from and pins it to (P-797). A record of
+    another ``state`` names its refusal ``code``. Record ids are stable for the arguments (two
+    stores qualified alike pin alike); ``salt`` tells a second record of the same task apart."""
+    out: dict[str, str] = {}
+    with factory() as s:
+        for task_id in task_ids:
+            key = "\0".join((repo, task_id, posture_id, state, code, salt))
+            q = store_q.append(
+                s,
+                Qualification(
+                    qualification_id=hashlib.sha256(key.encode()).hexdigest()[:32],
+                    repo=repo,
+                    task_id=task_id,
+                    posture_id=posture_id,
+                    posture={
+                        "posture_class": posture_class,
+                        "executor": "docker",
+                        "image_ref": "crb-sandbox:fixture",
+                    },
+                    state=state,
+                    code=code,
+                    gold={"clean": True, "lint": None},
+                ),
+            )
+            out[task_id] = q.qualification_id
+    return out
 
 
 def commits(n: int, prefix: str = "c") -> list[str]:

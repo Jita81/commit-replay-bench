@@ -119,7 +119,10 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               a field the reading does not register (``_reading_run_fields`` over
               ``reading_run_refusal``: ``builder_config``, ``timeout``, another budget profile
               or ladder; P-792 C3, C5, C7), or a run of a reading of either rule while the
-              repository's lint is switched off (``_reading_lint_disabled``, P-796) —
+              repository's lint is switched off (``_reading_lint_disabled``, P-796), or a run
+              of a reserved.v1 reading whose pool moved since registration
+              (``_reading_pool_drift`` over ``pool_drift``; at build, a live posture other than
+              the one the pool was qualified in — P-797) —
               dispatches by kind (setup, probe, mine, label, replay, blind, oracle, controls,
               factory), streams
               StepEvents, writes grade rows through the append-only ledger with the run's
@@ -190,7 +193,8 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
               projections and their ratchets; the reserver, the stamped row and the guard,
-              C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7)
+              C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7),
+              tests/test_p792_pool.py (the claim's ``pool_drift`` refusal)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
@@ -309,6 +313,7 @@ from crb.core.reading import (
     LABEL_RESERVATION,
     LABEL_TREATMENT,
     REFUSAL_LINT_DISABLED,
+    REFUSAL_POOL_DRIFT,
     SKIP_COMMIT_RESERVED,
     SKIP_TASK_NOT_ENROLLED,
     Reading,
@@ -387,7 +392,7 @@ from crb.server.intake import (
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
-from crb.server.reading_book import load_readings, repo_lint, treatment_pins
+from crb.server.reading_book import load_readings, pool_drift, repo_lint, treatment_pins
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -1642,6 +1647,8 @@ class Worker:
                 status, error = STATUS_FAILED, lint_off
             elif (unregistered := self._reading_run_fields(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unregistered
+            elif (drifted := self._reading_pool_drift(run, emitter)) is not None:
+                status, error = STATUS_FAILED, drifted
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1964,6 +1971,40 @@ class Worker:
             fields=fields,
             reasons=dict(detail.get("reasons") or {}),
             arm=str(detail.get("arm") or ""),
+        )
+        return error
+
+    def _reading_pool_drift(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reserved.v1
+        reading (``params.reading_id``) whose pool moved since registration (P-797,
+        :func:`~crb.server.reading_book.pool_drift` — the rule ``POST /runs`` refuses 409
+        ``pool_drift`` by): a pool commit relabelled out of the cell, or a pinned qualification
+        record missing or not qualified, after submit or on a run that skipped ``POST /runs``.
+        Refused before the reservation, so every commit stays pending (a stall, never a skip).
+        ``None`` for a run under no reading, under one this repository has no verified record
+        of (:meth:`_reading_unsealed` refuses it), under a legacy reading, or with no drift."""
+        reading_id = str(dict(run.params_json or {}).get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+            drift = pool_drift(s, reading) if reading is not None and reading.reserved else []
+        if not drift:
+            return None
+        error = (
+            f"{REFUSAL_POOL_DRIFT}: a run of {ATTEMPT_RULE_RESERVED} reading {reading_id!r}: its "
+            f"pool moved since registration ({len(drift)} drift row(s)); nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_POOL_DRIFT,
+            reading_id=reading_id,
+            drift=drift,
         )
         return error
 
@@ -3173,6 +3214,37 @@ class Worker:
         executor = self._executor(ctx)
         # ADR-0019: nothing is built for a task not qualified in the posture that grades it
         gate = self._posture_gate(ctx, runner, executor)
+        reading = self._reserved_reading(run.repo, str(p.get("reading_id") or ""))
+        if (
+            reading is not None
+            and reading.pins_pool
+            and reading.pool_posture_id != gate.posture.posture_id
+        ):
+            # P-797: a reserved.v1 pool was qualified in one posture; graded in another, its
+            # records no longer say the commits are proven where they are graded. Refused
+            # before anything is qualified or reserved, so every commit stays pending.
+            moved = (
+                f"{REFUSAL_POOL_DRIFT}: reserved.v1 reading {reading.reading_id!r} pinned its "
+                f"pool to posture {reading.pool_posture_id!r}; this run would grade in "
+                f"{gate.posture.posture_id!r}; nothing was built"
+            )
+            ctx.emit(
+                "system",
+                "run.refused",
+                status=StepStatus.ERROR,
+                error=moved,
+                code=REFUSAL_POOL_DRIFT,
+                reading_id=reading.reading_id,
+                drift=[
+                    {
+                        "task_id": "",
+                        "field": "pool_posture_id",
+                        "registered": reading.pool_posture_id,
+                        "now": gate.posture.posture_id,
+                    }
+                ],
+            )
+            return STATUS_FAILED, dict(ctx.counts), moved
         decision = gate.prepare(
             tasks,
             qualify_first=bool(p.get("qualify_first", True)),
@@ -3312,7 +3384,6 @@ class Worker:
             if self.settings.builder_executor
             else None
         )
-        reading = self._reserved_reading(run.repo, str(p.get("reading_id") or ""))
         if reading is not None:
             # P-792: under a reserved.v1 reading each task's r1 is reserved before its build
             spec = dataclass_replace(

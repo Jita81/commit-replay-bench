@@ -62,7 +62,7 @@ from fixtures.proven import (
     commit,
     register_via_api,
 )
-from fixtures.readings import HYPOTHESIS, SEALED, SEALED_SETTINGS, SMALLEST_EFFECT
+from fixtures.readings import HYPOTHESIS, SEALED, SEALED_SETTINGS, SMALLEST_EFFECT, qualify_pool
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
 
 try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
@@ -949,7 +949,7 @@ def test_a_reserved_reading_id_hashes_the_lint_config(
         (tmp_path / name).mkdir()
         with make_env(tmp_path / name, **SEALED_SETTINGS) as store:
             _set_lint(store, lint)
-            add_tasks(store.factory)
+            qualify_pool(store.factory, ALPHA, add_tasks(store.factory))
             legacy = register_via_api(store)
             reserved = register_via_api(store, attempt_rule="reserved.v1")
             assert (legacy.status_code, reserved.status_code) == (201, 201), reserved.text

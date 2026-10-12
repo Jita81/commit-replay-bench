@@ -63,8 +63,14 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   switched off, a disqualification, a treatment other than the one reserved, or a settled
   reservation with no row is a miss named by its reason (``CommitReading.reason``); fail
   closed. A run of such a reading carries only :data:`RESERVED_RUN_PARAMS` on the reading's
-  own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``). The legacy rule
-  (``first_observed.v0``) is the loop above, unchanged.
+  own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``). Its pool is pinned
+  to qualification records (P-797): the body carries ``pool_posture_id`` and
+  ``pool_qualifications`` (task id → the qualification id in force when it froze), both hashed
+  into ``pool_sha256`` (:func:`reserved_pool_digest`) and the ``reading_id``; the server reads
+  the pins back on every look, submit and claim (``pool_drift``, :data:`REFUSAL_POOL_DRIFT`).
+  Its ``pool_seen`` refuses a commit (or another commit of its change) with any replay row at
+  apparatus 2.4 or later, under any arm or author. The legacy rule (``first_observed.v0``) is
+  the loop above, unchanged.
 
 Navigation
 ----------
@@ -100,7 +106,10 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               ``undecided``, never pending, never re-rolled — P-795) and
               refuses a run that could steer a reserved attempt (``reading_run_refusal``:
               the param whitelist, the default pool, executor, timeout and ladder, the
-              reading's cell and arms, the loop off on the reading's budget profile).
+              reading's cell and arms, the loop off on the reading's budget profile); pins
+              a reserved pool to its posture and qualification ids (``pool_posture_id``,
+              ``pool_qualifications``, ``reserved_pool_digest`` — P-797) and widens its
+              ``pool_seen`` to any replay row at apparatus 2.4 or later.
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
               taking each commit's first observed ``r1`` attempt this deployment graded after
               registration on the reading's checks arm (never an imported row) — or, under
@@ -124,7 +133,8 @@ Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
               src/crb/cli/commands/reading.py (``crb reading register``)
 Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py,
               tests/test_forward_reading.py, tests/test_forward_reading_e2e.py,
-              tests/test_p792_reserved.py (reserved.v1 and the legacy goldens)
+              tests/test_p792_reserved.py (reserved.v1 and the legacy goldens),
+              tests/test_p792_pool.py (the pinned pool, pool_drift, the widened pool_seen)
 Touch when:   never for a new repository; a rule is added (a row in ``RULES`` with its exact
               P(deliver | 0.80) — an ADR amending ADR-0026 item 5 first); the counting rule changes
               (an apparatus bump); the operator fixes another budget
@@ -169,7 +179,9 @@ from crb.core.ledger import (
     FAILURE_HARNESS,
     FAILURE_OUTAGE,
     PROCESS_FACTORY,
+    PROCESS_REPLAY,
     lint_could_change,
+    parse_apparatus_version,
 )
 from crb.core.lint import LINT_DISABLED_BY_CONFIG, lint_disabled
 from crb.core.stats import Interval, wilson_interval
@@ -333,8 +345,32 @@ REFUSAL_CODES: tuple[str, ...] = (
 REFUSAL_RUN_FIELDS = "reading_run_fields"
 #: A run that must name its reading and does not (409, at submit).
 REFUSAL_READING_REQUIRED = "reading_required"
+#: A run of a reserved.v1 reading whose pool moved since registration (P-797,
+#: :data:`POOL_DRIFT_FIELDS`): a pool commit's live class or size is no longer the cell's, a
+#: pinned qualification record is missing or not qualified, or the posture the run would grade
+#: in is not the one the pool was qualified in — 409 at submit, ``run.refused`` at claim and
+#: before admission, ``undecided`` on ``GET /readings``. Nothing is reserved, so every commit
+#: stays pending: a stall, never a skip.
+REFUSAL_POOL_DRIFT = "pool_drift"
 #: The refusals of a RUN of a reading, beside the registration refusals above.
-RUN_REFUSAL_CODES: tuple[str, ...] = (REFUSAL_RUN_FIELDS, REFUSAL_READING_REQUIRED)
+RUN_REFUSAL_CODES: tuple[str, ...] = (
+    REFUSAL_RUN_FIELDS,
+    REFUSAL_READING_REQUIRED,
+    REFUSAL_POOL_DRIFT,
+)
+#: What a pool drift names (``{task_id, field, registered, now}`` rows): the cell's class or
+#: size on the live task, the pinned qualification record, or the posture it was pinned in.
+POOL_DRIFT_FIELDS: tuple[str, ...] = (
+    "capability_class",
+    "size",
+    "task",
+    "qualification",
+    "pool_posture_id",
+)
+#: The first apparatus whose replay rows make a commit seen for a reserved.v1 reading (P-797):
+#: any such row, under any arm or test author, refuses ``pool_seen`` — a legacy reading reads
+#: only its own hierarchy's arms at its own apparatus.
+POOL_SEEN_FROM: tuple[int, int] = (2, 4)
 #: The fields of a reading's body that say who registered it and when, not what it reads:
 #: a retried registration differs from the first only in these (P-793).
 PROVENANCE_FIELDS: tuple[str, ...] = ("registered_at", "actor")
@@ -600,6 +636,15 @@ class Reading:
     #: only when present, so a legacy reading's id never moves and a reserved.v1 reading names
     #: the belt 5 its commits are graded under.
     lint_digest: str = ""
+    #: A reserved.v1 reading's pool pinned to the qualification records that admitted it
+    #: (P-797): the posture the pool was qualified in and, per pool commit, the id of its
+    #: record in force there at registration. Hashed into ``pool_sha256``
+    #: (:func:`reserved_pool_digest`) and the id only with the attempt rule and never on a
+    #: forward reading, whose pool is enrolled later (:attr:`pins_pool`) — so a legacy
+    #: reading's id never moves; the server reads the pool's drift from them
+    #: (``crb.server.reading_book.pool_drift``).
+    pool_posture_id: str = ""
+    pool_qualifications: Mapping[str, str] = field(default_factory=dict)
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
@@ -624,6 +669,14 @@ class Reading:
         if not self.attempt_rule:
             object.__setattr__(self, "budget_profile", "")
             object.__setattr__(self, "lint_digest", "")
+        object.__setattr__(
+            self,
+            "pool_qualifications",
+            {str(c): str(q) for c, q in dict(self.pool_qualifications).items()},
+        )
+        if not self.pins_pool:
+            object.__setattr__(self, "pool_posture_id", "")
+            object.__setattr__(self, "pool_qualifications", {})
         if self.reservations is not None:
             object.__setattr__(self, "reservations", dict(self.reservations))
         object.__setattr__(self, "hierarchy", tuple(self.hierarchy))
@@ -658,6 +711,12 @@ class Reading:
     def reserved(self) -> bool:
         """The reading counts reserved attempts (:data:`ATTEMPT_RULE_RESERVED`)."""
         return self.attempt_rule == ATTEMPT_RULE_RESERVED
+
+    @property
+    def pins_pool(self) -> bool:
+        """The pool is pinned to its qualification records (P-797): a reserved.v1 reading of
+        a pool frozen at registration — never a legacy one, never a forward one."""
+        return _pins_pool(self.attempt_rule, self.pool_rule)
 
     @property
     def reservations_unread(self) -> bool:
@@ -717,6 +776,14 @@ class Reading:
                 else {}
             ),
             **({"lint_digest": self.lint_digest} if self.attempt_rule and self.lint_digest else {}),
+            **(
+                {
+                    "pool_posture_id": self.pool_posture_id,
+                    "pool_qualifications": dict(sorted(self.pool_qualifications.items())),
+                }
+                if self.pins_pool
+                else {}
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -757,12 +824,25 @@ class Reading:
             attempt_rule=str(d.get("attempt_rule", "") or ""),
             budget_profile=str(d.get("budget_profile", "") or ""),
             lint_digest=str(d.get("lint_digest", "") or ""),
+            pool_posture_id=str(d.get("pool_posture_id", "") or ""),
+            pool_qualifications={
+                str(c): str(q) for c, q in dict(d.get("pool_qualifications") or {}).items()
+            },
         )
 
+    def pool_hash(self) -> str:
+        """The pool hash the body gives: :func:`pool_digest` of the pool, or — a pinned pool
+        (:attr:`pins_pool`, P-797) — :func:`reserved_pool_digest` of the pool, the posture it
+        was qualified in and each commit's qualification record."""
+        if self.pins_pool:
+            return reserved_pool_digest(self.pool, self.pool_posture_id, self.pool_qualifications)
+        return pool_digest(self.pool)
+
     def verify(self) -> bool:
-        """The stored id and pool hash are the ones its body gives."""
+        """The stored id and pool hash are the ones its body gives (:meth:`pool_hash`: the
+        pool alone, or a pinned pool with its posture and records)."""
         fresh = replace(self, reading_id="")
-        return fresh.reading_id == self.reading_id and self.pool_sha256 == pool_digest(self.pool)
+        return fresh.reading_id == self.reading_id and self.pool_sha256 == self.pool_hash()
 
 
 def pool_by_rule(authored: Mapping[str, str], *, since: str = "") -> tuple[list[str], str]:
@@ -800,6 +880,36 @@ def refuse_unless_blind(given: Sequence[str], pool: Sequence[str], rule: str) ->
 def pool_digest(pool: Sequence[str]) -> str:
     """SHA-256 of the frozen pool as canonical JSON, in the seeded order."""
     return sha256_text(canonical_json(list(pool)))
+
+
+def reserved_pool_digest(
+    pool: Sequence[str], posture_id: str, qualifications: Mapping[str, str]
+) -> str:
+    """SHA-256 of a reserved.v1 reading's pinned pool (P-797) as canonical JSON: the pool in
+    the seeded order, the posture it was qualified in and each commit's qualification record —
+    so a reading whose pins were edited no longer re-hashes."""
+    return sha256_text(
+        canonical_json(
+            {
+                "pool": list(pool),
+                "pool_posture_id": posture_id,
+                "pool_qualifications": dict(sorted(qualifications.items())),
+            }
+        )
+    )
+
+
+def _pins_pool(attempt_rule: str, pool_rule: str) -> bool:
+    """A reading under ``attempt_rule`` and ``pool_rule`` pins its pool to qualification
+    records (P-797): reserved.v1 on a pool frozen at registration."""
+    return attempt_rule == ATTEMPT_RULE_RESERVED and pool_rule != POOL_RULE_CALIBRATION
+
+
+def _seen_by_reserved(row: GradeRow) -> bool:
+    """A row that makes its commit seen for a reserved.v1 registration (P-797): a replay row
+    at apparatus :data:`POOL_SEEN_FROM` or later, under any arm or test author."""
+    version = parse_apparatus_version(row.apparatus_version)
+    return row.process_step == PROCESS_REPLAY and version is not None and version >= POOL_SEEN_FROM
 
 
 def cell_error_budget(env: Mapping[str, str] | None = None) -> float:
@@ -1028,6 +1138,8 @@ def register(
     attempt_rule: str = "",
     budget_profile: str = "",
     lint_digest: str = "",
+    pool_posture_id: str = "",
+    pool_qualifications: Mapping[str, str] | None = None,
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -1036,7 +1148,8 @@ def register(
     retried request is answered before any rule reads the pool or the budget;
     ``pool_seen`` when any pool commit — or another commit of the same change — already
     has a graded row under an arm of the hierarchy at this apparatus, whatever class-set version
-    graded it;
+    graded it (under ``reserved.v1``: any replay row at apparatus :data:`POOL_SEEN_FROM` or
+    later, under any arm or test author — P-797);
     ``budget_spent`` when the cell's spend plus this rule's P(deliver | 0.80) would exceed
     the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules;
     ``campaign_unsupported_reading`` when it names a campaign on the factory's cell
@@ -1044,7 +1157,11 @@ def register(
     :data:`ATTEMPT_RULE_RESERVED` needs ``max_reruns`` 0 and a ``budget_profile``
     (``invalid_reading`` otherwise, as is an unknown rule; :func:`_attempt_rule_of`), and
     hashes ``lint_digest`` (:func:`lint_config_digest` of the repository's lint, P-796) — the
-    caller refuses a repository whose lint is disabled first (:func:`lint_refusal`). The
+    caller refuses a repository whose lint is disabled first (:func:`lint_refusal`). A
+    reserved.v1 pool is pinned to the qualification records that admitted it (P-797):
+    ``pool_posture_id`` and ``pool_qualifications`` (commit → record id, kept for pool
+    commits only) are hashed into ``pool_sha256`` (:func:`reserved_pool_digest`) and the id;
+    pins that name no posture or leave a pool commit out are ``invalid_reading``. The
     caller writes the returned reading as a ``reading.registered`` event before any attempt.
     """
     cell_d = {str(k): str(v) for k, v in cell.items()}
@@ -1078,6 +1195,19 @@ def register(
     author = author_model or (next(iter(authors)) if authors else "")
     key = reading_cell_key(cell_d, org_class)
     ordered = seeded_order(repo, key, pool)
+    pinned = _pins_pool(attempt, pool_rule)
+    pins = {
+        str(c): str(q) for c, q in (pool_qualifications or {}).items() if c in set(ordered) and q
+    }
+    if pinned and (pool_posture_id or pins):
+        unpinned = [c for c in ordered if c not in pins]
+        if not pool_posture_id or unpinned:
+            raise ReadingRefused(
+                "a reserved.v1 pool is pinned to the qualification records that admitted it: "
+                "name the posture it was qualified in and one record for every pool commit",
+                code=REFUSAL_INVALID,
+                detail={"pool_posture_id": pool_posture_id, "unpinned": unpinned[:20]},
+            )
     cap = cell_error_budget() if budget is None else budget
     spend = rule_spend(rule)
     reading = Reading(
@@ -1094,7 +1224,9 @@ def register(
         budget=cap,
         author_model=author,
         pool=tuple(ordered),
-        pool_sha256=pool_digest(ordered),
+        pool_sha256=(
+            reserved_pool_digest(ordered, pool_posture_id, pins) if pinned else pool_digest(ordered)
+        ),
         changes={c: v for c, v in (changes or {}).items() if c in set(ordered)},
         max_reruns=max_reruns,
         registered_at=now or utc_now_iso(),
@@ -1107,6 +1239,8 @@ def register(
         attempt_rule=attempt,
         budget_profile=profile,
         lint_digest=lint_digest,
+        pool_posture_id=pool_posture_id,
+        pool_qualifications=pins,
     )
     prior = list(existing)
     _refuse_twin(reading, prior)
@@ -1118,16 +1252,24 @@ def register(
             r.task_id
             for r in rows
             if r.repo == repo
-            and r.apparatus_version == apparatus
-            and r.context_arm in arms
+            and (
+                _seen_by_reserved(r)
+                if reading.reserved
+                else r.apparatus_version == apparatus and r.context_arm in arms
+            )
             and (r.task_id in pool_set or (r.change_id and r.change_id in pool_changes))
         }
     )
     if seen:
+        where = (
+            f"a replay row at apparatus {'.'.join(map(str, POOL_SEEN_FROM))} or later, under "
+            "any arm or test author"
+            if reading.reserved
+            else f"a graded row under an arm of this reading at apparatus {apparatus}"
+        )
         raise ReadingRefused(
-            f"{len(seen)} pool commit(s) already have a graded row under an arm of this reading "
-            f"at apparatus {apparatus} — a reading counts only commits it has not seen "
-            "(ADR-0026 item 2); register a pool of commits no arm has graded",
+            f"{len(seen)} pool commit(s) already have {where} — a reading counts only commits "
+            "it has not seen (ADR-0026 item 2); register a pool of commits no arm has graded",
             code=REFUSAL_POOL_SEEN,
             detail={"commits": seen[:20], "n": len(seen)},
         )
@@ -2378,9 +2520,11 @@ __all__ = [
     "LEFT_HELD_OUT_ERROR",
     "LEFT_NOT_GRADED",
     "LEFT_OTHER_CELL",
+    "POOL_DRIFT_FIELDS",
     "POOL_RULE_ALL",
     "POOL_RULE_CALIBRATION",
     "POOL_RULE_SINCE",
+    "POOL_SEEN_FROM",
     "PROVENANCE_FIELDS",
     "READING_EVENT_ACTION",
     "READING_RESERVED_ACTION",
@@ -2390,6 +2534,7 @@ __all__ = [
     "REFUSAL_EXISTS",
     "REFUSAL_LINT_DISABLED",
     "REFUSAL_NOT_A_CEILING",
+    "REFUSAL_POOL_DRIFT",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
     "REFUSAL_READING_REQUIRED",
@@ -2442,6 +2587,7 @@ __all__ = [
     "register_forward",
     "registered_twin",
     "registration_content",
+    "reserved_pool_digest",
     "rule_spend",
     "seed_of",
     "seeded_order",

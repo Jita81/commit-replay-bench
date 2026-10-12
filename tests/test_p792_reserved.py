@@ -245,6 +245,7 @@ from crb.server.reading_book import load_readings
 from crb.server.routes import runs as runs_routes
 from crb.server.routes.learn import deployment_author_model
 from crb.server.schemas import RunCreateRequest
+from crb.store import qualifications as store_q
 from crb.store.db import init_db
 from crb.store.events import append_event
 from crb.store.jobs import (
@@ -252,6 +253,7 @@ from crb.store.jobs import (
     STATUS_FAILED,
     STATUS_QUEUED,
     STATUS_RUNNING,
+    STATUS_SUCCEEDED,
     JobQueue,
     claim_guard,
 )
@@ -1863,7 +1865,10 @@ class _WRig:
         descriptive: tuple[tuple[str, int], ...] = (("A0", 2),),
     ) -> Reading:
         """Register a reading of both commits on the campaign (reserved.v1 unless
-        ``legacy``), five minutes ago, and store its ``reading.registered`` event."""
+        ``legacy``), five minutes ago, and store its ``reading.registered`` event. A reserved.v1
+        pool is pinned to the records a ``qualify`` run wrote in the rig's live posture, as
+        ``POST /readings`` pins it (P-797)."""
+        pins = {} if legacy else self.qualify()
         reading = register(
             repo=pr.REPO_NAME,
             cell=_W_CELL,
@@ -1886,6 +1891,7 @@ class _WRig:
                     "attempt_rule": ATTEMPT_RULE_RESERVED,
                     "max_reruns": 0,
                     "budget_profile": PROFILE_DEFAULT,
+                    **pins,
                 }
             ),
         )
@@ -1898,6 +1904,25 @@ class _WRig:
             payload=reading.to_dict(),
         )
         return reading
+
+    def qualify(self) -> dict[str, Any]:
+        """Qualify both commits in the rig's live posture (a ``qualify`` run) and return the
+        pins a reserved.v1 registration takes: ``pool_posture_id`` and
+        ``pool_qualifications`` (commit → the record in force there)."""
+        run = self.h.enqueue("qualify", params_json={"task_ids": [self.first, self.second]})
+        self.h.run_one()
+        done = self.h.queue.get(run.id)
+        assert done is not None and done.status == STATUS_SUCCEEDED, done
+        posture_id = str(dict(done.counts_json or {})["posture_id"])
+        with self.h.factory() as s:
+            records = store_q.latest_by_task(s, pr.REPO_NAME, posture_id)
+        assert all(records[c].is_qualified for c in (self.first, self.second)), records
+        return {
+            "pool_posture_id": posture_id,
+            "pool_qualifications": {
+                c: records[c].qualification_id for c in (self.first, self.second)
+            },
+        }
 
     def enqueue(
         self,
@@ -2695,11 +2720,11 @@ def test_p792_post_readings_opts_in_to_reserved(tmp_path: Path) -> None:
     ``max_reruns`` 0 and the budget profile (``default`` unless named), and a reserved.v1
     body asking for reruns is refused 422 and writes nothing."""
     from fixtures.proven import add_tasks, register_via_api
-    from fixtures.readings import SEALED_SETTINGS
-    from fixtures.server_seed import envelope, make_env
+    from fixtures.readings import SEALED_SETTINGS, qualify_pool
+    from fixtures.server_seed import ALPHA, envelope, make_env
 
     with make_env(tmp_path, **SEALED_SETTINGS) as env:
-        add_tasks(env.factory)
+        qualify_pool(env.factory, ALPHA, add_tasks(env.factory))
         legacy = register_via_api(env)
         assert legacy.status_code == 201, legacy.text
         got = legacy.json()

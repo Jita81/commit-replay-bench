@@ -6,25 +6,29 @@ rule, the share of the cell's error budget it spends, the test author's model an
 pool of qualified commits with its SHA-256 — frozen by RULE (every qualified commit of the cell,
 or every one authored since a date), never by a hand-picked list (DL-097). ``POST /readings``
 (operator; CSRF-bound like every cookie-authenticated write) writes one ``reading.registered``
-event under the events store's write lock, so two registrations can never both spend the last
-of a cell's budget; it is refused ``409 reading_exists`` when the reading is already
-registered (a retried request, under any second or actor, names it in ``detail.reading_id``
-and writes nothing — P-793), ``409 lint_disabled`` while the repository's lint is switched off
-(P-796), ``409 pool_seen`` when a pool commit already has a graded row
-under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the caller names a
-pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
-``422 invalid_reading`` for a shape the ADR forbids, and ``404 campaign_unknown`` when it names
-a ``campaign_id`` no verified campaign has — a reading names its campaign at birth, a run filed
-under it is then filed under that campaign, and it counts only runs the campaign admitted
-(DL-382). ``GET /readings`` serves every reading of a repository evaluated over its rows — each
-arm's look state, the attempt rule it reads under and, for a reserved.v1 reading, the treatment
-its attempts are pinned to and the commits each arm has reserved (P-792) — and each cell's
-budget spent. ``standard_for`` is the seam the factory's
-entry gate reads (ADR-0026 item 8). ``POST /readings/forward`` (operator) registers the forward
-reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on calibration builds graded
-on a second person's held-out tests, the one reading that can promote the ceiling;
-``load_readings`` enrols its pool. A reading on the factory's cell — the forward reading among
-them — may name no campaign (DL-382): its runs are factory runs, which carry no
+event under the events store's write lock, so two registrations can never both spend the last of
+a cell's budget; it is refused ``409 reading_exists`` when the reading is already registered (a
+retried request, under any second or actor, names it in ``detail.reading_id`` and writes nothing
+— P-793), ``409 lint_disabled`` while the repository's lint is switched off (P-796), ``409
+pool_seen`` when a pool commit already has a graded row under an arm of the hierarchy at this
+apparatus (a reserved.v1 reading: any replay row at apparatus 2.4 or later, under any arm or
+test author — P-797), ``422 pool_not_blind`` when the caller names a pool the rule does not
+give, ``409 budget_spent`` when the budget cannot cover the rule, and ``422 invalid_reading``
+for a shape the ADR forbids, and ``404 campaign_unknown`` when it names a ``campaign_id`` no
+verified campaign has — a reading names its campaign at birth, a run filed under it is then
+filed under that campaign, and it counts only runs the campaign admitted (DL-382). ``GET
+/readings`` serves every reading of a repository evaluated over its rows — each arm's look
+state, the attempt rule it reads under and, for a reserved.v1 reading, the treatment its
+attempts are pinned to and the commits each arm has reserved (P-792) and how its pool moved
+since registration (``pool_drift``; a drifted reading reads ``undecided`` — P-797) — and each
+cell's budget spent. A reserved.v1 pool is read from qualification records, never from the
+task's mined ``gold_clean``: the cell's commits whose record in force in the latest posture of
+the reading's posture class is ``qualified``, pinned by record id (P-797). ``standard_for`` is
+the seam the factory's entry gate reads (ADR-0026 item 8). ``POST /readings/forward`` (operator)
+registers the forward reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on
+calibration builds graded on a second person's held-out tests, the one reading that can promote
+the ceiling; ``load_readings`` enrols its pool. A reading on the factory's cell — the forward
+reading among them — may name no campaign (DL-382): its runs are factory runs, which carry no
 ``reading_id``, so nothing ties them to the reading and no submit gate requires them to be filed
 under its campaign; both routes refuse its ``campaign_id`` ``422 campaign_unsupported_reading``.
 A replay or blind reading may name one, because a run filed under it by ``reading_id`` is held
@@ -37,7 +41,10 @@ What it is:   The readings route module and the store readers the capability map
               write path and the factory share (``load_readings``, ``reading_book``,
               ``standard_for``).
 What it does: Registers a reading (operator): freezes the pool by rule from the repository's
-              qualified tasks (``pool_by_rule``; a list the rule does not give is refused) —
+              qualified tasks (``pool_by_rule``; a list the rule does not give is refused;
+              a reserved.v1 pool from the qualification records in force in the latest
+              posture of its class, pinned as ``pool_posture_id`` and ``pool_qualifications``
+              — ``_qualified_reserved``, P-797) —
               under an organisation's class set, only the confirmation commits its rule puts in
               the reading's ``org_class``, on that class's parent's cell, and only while the set
               routes (ADR-0026 item 9),
@@ -51,29 +58,35 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               the repository's ``lint_digest``); lists readings
               with every arm's state and the budget per cell, each with its attempt rule (a
               legacy one ``first_observed.v0``, ``p792: "open on this rule"``), its treatment
-              pins and its reserved commits per arm (``served_reading``, P-792);
+              pins, its reserved commits per arm and its pool drift (``served_reading``,
+              P-792, P-797: a drifted reading reads ``undecided``);
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
-How:          ``append_event_checked`` (lock → ``crb.core.reading.register`` → insert) →
+How:          ``append_event_checked`` (lock → ``_qualified`` or ``_qualified_reserved`` →
+              ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
               counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``served_reading``
-              (``treatment_pins``) → ``standard_of``.
+              (``treatment_pins``, ``pool_drift``) → ``standard_of``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5 and 8's seam),
               docs/adr/0025-routing-v2.md
 Works with:   src/crb/core/reading.py (the rules a registration and a reading follow),
-              src/crb/store/events.py (``append_event_checked``: the locked event write),
+              src/crb/store/events.py and src/crb/store/qualifications.py
+              (``append_event_checked``: the locked event write; ``latest_posture_of_class``
+              and ``qualified_specs``: a reserved.v1 pool),
               src/crb/server/campaigns.py (``campaign_of``: the campaign a reading names),
               src/crb/server/routes/capability.py (routes every cell on its reading),
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
               src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
               submit gate and the worker read it below this module; ``treatment_pins``, the
               pins the worker halts a moved treatment by and ``GET /readings`` serves;
-              ``repo_lint``, the lint a registration refuses or hashes),
+              ``repo_lint``, the lint a registration refuses or hashes; ``pool_drift``, the
+              drift a reserved.v1 reading is served ``undecided`` on),
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py,
-              tests/test_p792_reserved.py (the attempt rule, the pins and the reserved counts)
+              tests/test_p792_reserved.py (the attempt rule, the pins and the reserved counts),
+              tests/test_p792_pool.py (the pool pinned to its qualification records)
 Touch when:   never for a new repository; the reading's shape or the registration's refusals change
               (an ADR amending ADR-0026 first); never for a new repository.
 """
@@ -103,7 +116,9 @@ from crb.core.ledger import (
 from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
+    ATTEMPT_RULE_RESERVED,
     DEFAULT_MAX_RERUNS,
+    OUTCOME_UNDECIDED,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_INVALID,
@@ -137,8 +152,9 @@ from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import current_checks_arm
-from crb.server.reading_book import load_readings, repo_lint, treatment_pins
+from crb.server.reading_book import load_readings, pool_drift, repo_lint, treatment_pins
 from crb.server.routes.repos import get_repo_or_404
+from crb.store import qualifications as store_q
 from crb.store.class_sets import DbClassSets
 from crb.store.events import append_event_checked
 from crb.store.ledger import DbLedger
@@ -257,7 +273,8 @@ class ReadingIn(BaseModel):
     """A registration: the full cell, the hierarchy (richest first) and the pool RULE — every
     qualified task of the cell's class, size and language, or every one authored at or after
     ``since`` (DL-097). ``pool``, when given, must be that rule's own pool: a hand-picked list
-    is refused ``pool_not_blind``."""
+    is refused ``pool_not_blind``. Under ``reserved.v1`` a task is qualified when its record in
+    force in the latest posture of the reading's posture class is ``qualified`` (P-797)."""
 
     repo: str = Field(min_length=1, max_length=64)
     cell: dict[str, str]
@@ -295,7 +312,8 @@ class ReadingsOut(BaseModel):
     """``GET /readings``: every reading of ``repo`` evaluated over its rows (each arm's look
     state), with the attempt rule it reads under (``attempt_rule``; a legacy reading also
     ``p792: "open on this rule"``), its treatment pins (``pinned_treatment``) and its reserved
-    commits per arm (``reserved``) — :func:`served_reading` — and each cell's budget spent."""
+    commits per arm (``reserved``) and its pool drift (``pool_drift``, P-797; a drifted
+    reading reads ``undecided``) — :func:`served_reading` — and each cell's budget spent."""
 
     repo: str
     readings: list[dict[str, Any]]
@@ -318,6 +336,37 @@ def _qualified(session: Session, repo: str, cell: Mapping[str, str]) -> dict[str
         for t in session.execute(q).scalars()
         if not lang or not t.language or t.language == lang
     }
+
+
+def _qualified_reserved(
+    session: Session, repo: str, cell: Mapping[str, str], posture_class: str
+) -> tuple[dict[str, Task], str, dict[str, str]]:
+    """A reserved.v1 reading's qualified tasks (P-797): the cell's commits whose record in
+    force in the latest posture recorded for ``posture_class`` is ``qualified`` — its projected
+    spec and its task row both of the cell's class and size, of its language when both name
+    one — with that posture and each commit's record id (``pool_posture_id``,
+    ``pool_qualifications``). The mined ``gold_clean`` admits nothing: a commit no record
+    qualified, or one whose record in force is unqualified or revoked, is not in the pool."""
+    posture_id = store_q.latest_posture_of_class(session, repo, posture_class)
+    if not posture_id:
+        return {}, "", {}
+    klass, size = cell.get("capability_class", ""), cell.get("size", "")
+    lang = cell.get("language", "")
+    specs = [
+        spec
+        for spec in store_q.qualified_specs(session, repo, posture_id)
+        if spec.capability_class == klass
+        and spec.size == size
+        and (not lang or not spec.language or spec.language == lang)
+    ]
+    if not specs:
+        return {}, posture_id, {}
+    rows = session.execute(
+        select(Task).where(Task.repo == repo, Task.task_id.in_([sp.task_id for sp in specs]))
+    ).scalars()
+    tasks = {t.task_id: t for t in rows if t.capability_class == klass and t.size == size}
+    pins = {sp.task_id: sp.qualification_ref for sp in specs if sp.task_id in tasks}
+    return tasks, posture_id, pins
 
 
 def _change_of(task: Task) -> str:
@@ -412,7 +461,11 @@ def register_reading(
     def build(s: Session) -> dict[str, Any]:
         lint = _refuse_lint_disabled(s, body.repo)
         _refuse_unknown_campaign(s, body.campaign_id)
-        qualified = _qualified(s, body.repo, body.cell)
+        pool_posture_id, pins = "", dict[str, str]()
+        if body.attempt_rule == ATTEMPT_RULE_RESERVED:
+            qualified, pool_posture_id, pins = _qualified_reserved(s, body.repo, body.cell, posture)
+        else:
+            qualified = _qualified(s, body.repo, body.cell)
         if org:
             # the class the version's rule gave each commit (the label table), and only its
             # confirmation commits: a commit that derived the class never licenses it
@@ -449,10 +502,17 @@ def register_reading(
         )
         refuse_unless_blind(list(dict.fromkeys(body.pool)), pool, pool_rule)
         if not pool:
+            why = (
+                "a reserved.v1 pool freezes only commits whose qualification record in force "
+                f"in the latest {posture} posture is qualified (P-797)"
+                if body.attempt_rule == ATTEMPT_RULE_RESERVED
+                else "a pool freezes qualified commits only"
+            )
             raise ReadingRefused(
                 f"no qualified task of this cell's class, size and language under {pool_rule}"
-                " — a pool freezes qualified commits only",
+                f" — {why}",
                 code=REFUSAL_INVALID,
+                detail={"pool_posture_id": pool_posture_id} if pool_posture_id else {},
             )
         reading = register(
             repo=body.repo,
@@ -484,6 +544,8 @@ def register_reading(
             ),
             budget_profile=body.budget_profile if body.attempt_rule else "",
             lint_digest=lint_config_digest(lint),
+            pool_posture_id=pool_posture_id,
+            pool_qualifications={c: pins[c] for c in pool if c in pins},
         )
         return reading.to_dict()
 
@@ -637,8 +699,11 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
     to — ``pinned_treatment``: ``{deployment: {body, digest, event_id} | null, arms: {arm:
     {body, digest, event_id}}}`` from the campaign's first reservation on the repository and
     each arm's first (:func:`~crb.server.reading_book.treatment_pins`, the rule the worker
-    halts a moved treatment by), ``null`` before any — and ``reserved``, the commits each arm
-    has reserved of those it enrols. A legacy reading has neither (``null``)."""
+    halts a moved treatment by), ``null`` before any — ``reserved``, the commits each arm
+    has reserved of those it enrols, and ``pool_drift``, how its pool moved since registration
+    (:func:`~crb.server.reading_book.pool_drift`, P-797): a drifted reading reads
+    ``undecided`` with no standard, whatever its rows say, until the pool is restored. A legacy
+    reading has none of them (``null``)."""
     reading = outcome.reading
     out = outcome.to_dict()
     if not reading.reserved:
@@ -647,6 +712,7 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
             p792=P792_OPEN,
             pinned_treatment=None,
             reserved=None,
+            pool_drift=None,
         )
         return out
     deployment, arms = treatment_pins(session, reading)
@@ -667,6 +733,10 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
             for arm in reading.arms
         },
     )
+    drift = pool_drift(session, reading)
+    out["pool_drift"] = drift
+    if drift:
+        out.update(state=OUTCOME_UNDECIDED, standard=None, ceiling=False)
     return out
 
 
