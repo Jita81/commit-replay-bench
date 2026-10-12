@@ -726,6 +726,29 @@ def test_step6_meets_the_refusals_the_record_lists_with_nothing_queued(wave3: Wa
     assert _runs(w.env) == before and _admitted_runs(w) == {0}
 
 
+def test_step6_refuses_an_a0l_body_on_a_subset_or_in_another_order(wave3: Wave3) -> None:
+    """NEW-1 (round 5): ``POST /runs`` admitted an ``A0+L`` body whose ``task_ids`` were any
+    subset of the cell's first 16, in any order — with ``A0``'s outcomes served, ``A0+L`` could
+    be filed on ``A0``'s misses alone, and the loop pair read without ``A0``'s clean commits.
+    Step 6 now words the rule and the product refuses the body 422 ``reading_run_fields`` on
+    ``task_ids`` with nothing queued; the record's own body is admitted."""
+    w = wave3
+    key = ("cobra", "XS")
+    a0 = _a0(w, key, cap=1.0)
+    assert w.send("POST", "/api/v1/runs", json=a0).status_code == 201
+    first = a0["task_ids"]
+    before = _runs(w.env)
+    for tasks in ([first[9], first[4], first[1]], first[::-1], first[1:]):
+        body = {**a0l_body(a0), "task_ids": tasks}
+        err = _refused(w.send("POST", "/api/v1/runs", json=body), 422, "reading_run_fields")
+        assert (err["detail"]["fields"], err["detail"]["arm"]) == (["task_ids"], "A0+L"), err
+        assert "seeded order" in err["detail"]["reasons"]["task_ids"]
+    assert _runs(w.env) == before and _admitted_runs(w) == {1}
+    assert "`A0+L` files its `task_ids` in the seeded order" in _flat()
+    r = w.send("POST", "/api/v1/runs", json=a0l_body(a0))
+    assert r.status_code == 201, r.text
+
+
 def test_step6_a_body_without_reading_id_and_one_with_neither(wave3: Wave3) -> None:
     """Part 2: a run posted with the campaign's ``campaign_id`` but no ``reading_id`` is
     refused 409 ``reading_required`` — the campaign holds reserved.v1 readings on that

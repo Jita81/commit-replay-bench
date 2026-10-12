@@ -261,6 +261,7 @@ from crb.core.reading import (
     arm_reading,
     enrolled,
     evaluate,
+    loop_pair,
     reading_run_refusal,
     register,
     register_forward,
@@ -1334,6 +1335,7 @@ def test_p792_reading_run_refusal_whitelist(
     reading = _reserved_reading(
         commits(3, prefix="w"), descriptive=(("A0", 2), ("A0+L", 2)), campaign_id="camp-w"
     )
+    params = {**params, "task_ids": [reading.pool[0]]}  # A0+L files in the seeded order
     fields = {**_S3_RUN, **_CELL_RUN, **run}
     code, detail = reading_run_refusal(reading, params=params, **fields)
     if refused:
@@ -1379,6 +1381,7 @@ def test_p792_reading_run_refusal_names_the_whitelist() -> None:
     for name, run, params, arm, refused in _RUN_TABLE:
         if refused:
             continue
+        params = {**params, "task_ids": [reading.pool[0]]}  # A0+L files in the seeded order
         fields = {**_S3_RUN, **_CELL_RUN, **run}
         assert arm in reading.arms, name
         assert reading_run_refusal(reading, params=params, **fields) == ("", {}), name
@@ -1391,6 +1394,67 @@ def test_p792_reading_run_refusal_names_the_whitelist() -> None:
         assert arm not in without.arms, name
         code, detail = reading_run_refusal(without, params=params, **fields)
         assert (code, detail["fields"], detail["arm"]) == (REFUSAL_RUN_FIELDS, ["arm"], arm), name
+
+
+def test_p792_a_loop_arm_files_its_enrolled_commits_in_the_seeded_order() -> None:
+    """NEW-1 (round 5): nothing compared a run's ``task_ids`` with the arm's enrolled commits,
+    so with ``A0``'s outcomes in hand ``A0+L`` could be filed on ``A0``'s misses alone, or in an
+    order of the operator's choosing, and the loop learns from each attempt it makes. A run of
+    a loop arm (``A0+L``) now names its commits, each one the arm enrols, and those it has not
+    reserved are, in order, the first of its enrolled commits it has not reserved — the whole
+    list, any prefix of it, or a re-file of it after some are reserved (those are skipped).
+    Anything else is refused ``task_ids``, at submit and at claim alike. ``A0``, which runs with
+    the loop off, and a hierarchy arm are not held to it: a commit pending on ``A0`` is read
+    against the loop by the pair (``loop_pair``), and a look waits at its first pending one."""
+    pool = commits(20, prefix="w")
+    reading = _reserved_reading(pool, descriptive=(("A0", 16), ("A0+L", 16)))
+    order = list(enrolled(reading, "A0+L"))
+    assert len(order) == 16 and order == list(reading.pool[:16])
+    loop = {**_A0_RUN, **_CELL_RUN}
+    base = {k: v for k, v in _NO_LOOP_KEYS.items() if k != "task_ids"}
+
+    def refusal(r: Reading, tasks: list[str], **over: Any) -> tuple[str, dict[str, Any]]:
+        return reading_run_refusal(r, params={**base, "task_ids": tasks, **over}, **loop)
+
+    for ok in (order, order[:3], order[:1]):
+        assert refusal(reading, ok) == ("", {}), ok
+    assert refusal(reading, order, limit=4) == ("", {})  # a limit keeps a prefix
+    refused = {
+        "a0_misses_only": [order[1], order[4], order[9]],
+        "reversed": order[::-1],
+        "a skipped head": order[1:],
+        "swapped": [order[1], order[0], *order[2:]],
+        "past_n": [*order, reading.pool[16]],
+        "a stranger": [*order[:2], "f" * 40],
+        "twice": [order[0], order[0]],
+        "none, by limit": [],
+    }
+    for name, tasks in refused.items():
+        code, detail = refusal(reading, tasks, limit=16)
+        assert (code, detail["fields"], detail["arm"]) == (
+            REFUSAL_RUN_FIELDS,
+            ["task_ids"],
+            "A0+L",
+        ), name
+        assert "seeded order" in detail["reasons"]["task_ids"], name
+    # after the first five are reserved: re-filing the whole list, or the rest of it, is the
+    # seeded order still; starting past the sixth is not
+    held = _read(
+        reading,
+        [_res("A0+L", c, seq=REG_EVENT + 1 + i) for i, c in enumerate(order[:5])],
+    )
+    for ok in (order, order[5:], order[5:7], order[:5], [*order[:5][::-1], *order[5:]]):
+        assert refusal(held, ok) == ("", {}), ok
+    assert refusal(held, order[6:])[0] == REFUSAL_RUN_FIELDS
+    # A0's reservations do not move A0+L's order
+    a0_held = _read(
+        reading, [_res("A0", c, seq=REG_EVENT + 1 + i) for i, c in enumerate(order[:5])]
+    )
+    assert refusal(a0_held, order[5:])[0] == REFUSAL_RUN_FIELDS
+    # A0 and a hierarchy arm are not held to the order
+    a0 = {**_RUN_OK, "task_ids": [order[9], order[4], order[1]]}
+    assert reading_run_refusal(reading, params=a0, **{**_A0_RUN, **_CELL_RUN}) == ("", {})
+    assert reading_run_refusal(reading, params=a0, **{**_S3_RUN, **_CELL_RUN}) == ("", {})
 
 
 # --- the reserved rule is strictly more conservative than the legacy one ------------------
@@ -3700,6 +3764,104 @@ def test_p792_toggling_lint_after_the_first_reservation_halts_the_next(
     assert "build.start" not in rig.actions(on.id)
     assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
     assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}
+
+
+def _w_loop_on(rig: _WRig) -> None:
+    """Throw the repository's learning switch to context, as ``PUT /learn/switch`` does."""
+    from crb.core.prevention import PreventionRecord
+    from crb.server.prevention_state import EventsPreventionStore
+
+    with rig.h.factory() as s:
+        EventsPreventionStore(s, pr.REPO_NAME).append(
+            PreventionRecord(
+                "switched",
+                pr.REPO_NAME,
+                {"auto_apply": AUTO_CONTEXT},
+                actor="op-1",
+                on_behalf_of="op-1",
+                reason="the loop on for A0+L",
+                created="2026-10-12T00:00:00+00:00",
+            )
+        )
+        s.commit()
+
+
+def _w_a0l(rig: _WRig, reading: Reading, *tasks: str) -> Run:
+    """``A0+L`` of ``tasks`` as the record files it — the ``A0`` body with no ``learning`` and
+    no ``budget_profile`` — admitted under the campaign."""
+    run = rig.enqueue(reading, *tasks, admit=False)
+    with rig.h.factory() as s:
+        stored = s.get(Run, run.id)
+        assert stored is not None
+        stored.params_json = {
+            k: v
+            for k, v in dict(stored.params_json or {}).items()
+            if k not in ("learning", "budget_profile")
+        }
+        s.commit()
+    append_event(
+        rig.h.factory,
+        trace_id=_W_CID,
+        stage="system",
+        action=CAMPAIGN_ADMITTED,
+        payload={"campaign_id": _W_CID, "run_id": run.id},
+    )
+    return run
+
+
+def _w_loop_pair(rig: _WRig, reading: Reading) -> Any:
+    """``A0`` and ``A0+L`` of ``reading`` as the server reads them, paired."""
+    with rig.h.factory() as s:
+        loaded = next(
+            r for r in load_readings(s, pr.REPO_NAME) if r.reading_id == reading.reading_id
+        )
+    rows = list(rig.h.worker.ledger.rows())
+    return loop_pair(arm_reading(loaded, "A0", rows), arm_reading(loaded, "A0+L", rows))
+
+
+def test_p792_a0l_on_a0s_misses_alone_is_refused_at_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """NEW-1 (round 5), reproducing the probe end to end: with ``A0`` clean on the first
+    commit of the seeded order and a miss on the second, an ``A0+L`` run filed on ``A0``'s miss
+    alone reserved it, built it clean, and the loop pair read ``b`` 1, ``c`` 0 — ``A0``'s clean
+    commit never a pair. The claim now refuses it (``run.refused`` ``reading_run_fields`` on
+    ``task_ids``, before any reservation or build), and while ``A0+L`` is pending the pair
+    names both commits pending and reads them against the loop (``c`` 1). The record's body —
+    both commits, in the seeded order — is claimed, and the pair reads complete."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register(hierarchy=("S3",), descriptive=(("A0", 2), ("A0+L", 2)))
+    _w_loop_on(rig)  # A0 runs carry learning: off, so they stay A0
+    head, miss = reading.pool
+    for commit, how in ((head, "gold"), (miss, "noop")):
+        rig.state["b"] = how
+        rig.enqueue(reading, commit)
+        rig.h.run_one()
+    assert rig.verdicts(reading, "A0") == {head: (True, ""), miss: (False, "miss")}
+
+    rig.state["b"] = "gold"
+    for tasks in ([miss], [miss, head]):
+        run = _w_a0l(rig, reading, *tasks)
+        done = rig.h.run_one()
+        assert done.status == STATUS_FAILED, (tasks, done.status)
+        (refused,) = rig.payloads(run.id, "run.refused")
+        assert (refused["code"], refused["fields"], refused["arm"]) == (
+            REFUSAL_RUN_FIELDS,
+            ["task_ids"],
+            "A0+L",
+        ), refused
+        assert "build.start" not in rig.actions(run.id)
+        assert [e.step_id for e in rig.reservations(reading)] == ["A0", "A0"]
+    pair = _w_loop_pair(rig, reading)
+    assert pair.pairs == (head, miss) and pair.pending == (head, miss)
+    assert (pair.b, pair.c, pair.complete) == (0, 1, False)
+
+    run = _w_a0l(rig, reading, head, miss)
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, rig.actions(run.id)[-6:]
+    assert rig.verdicts(reading, "A0+L") == {head: (True, ""), miss: (True, "")}
+    pair = _w_loop_pair(rig, reading)
+    assert (pair.pairs, pair.pending, pair.b, pair.c) == ((head, miss), (), 1, 0)
 
 
 # --- the factory: a reserved.v1 forward reading reserves each ticket's first build (C8, C16) --

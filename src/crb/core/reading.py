@@ -37,7 +37,9 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   among its first ``n`` (``ArmReading.limit``) and names exactly those as its counted
   commits, a pending one never among them (P-794); every arm serves each commit it reads
   with its outcome and row hash, and :func:`loop_pair` reads the ``A0`` / ``A0+L`` pair on
-  the commits observed in both, with the exact two-sided McNemar p (:func:`mcnemar_p`).
+  every commit in both windows, a pending one read against the loop and named (NEW-1), with
+  the exact two-sided McNemar p (:func:`mcnemar_p`). A run of ``A0+L`` on a reserved.v1
+  reading files its ``task_ids`` in the seeded order, so no run chooses the paired commits.
 * **The budget.** One error budget per (repository, cell key, apparatus, class-set version),
   :data:`CELL_ERROR_BUDGET` unless the operator fixed another value; every registration spends
   its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend. A
@@ -99,7 +101,8 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               or no proven standard, and the commits still needed; names a descriptive arm's
               counted commits as those observed among its first n (P-794), serves every
               commit an arm reads and pairs ``A0`` with ``A0+L`` (``loop_pair``, the exact
-              McNemar p); registers a ceiling's forward reading and enrols its calibration
+              McNemar p, a commit pending on either arm read against the loop and named in
+              ``pending`` — NEW-1); registers a ceiling's forward reading and enrols its calibration
               builds. Under ``reserved.v1``
               (``attempt_rule``, P-792) reads each enrolled commit by its reservation's row
               alone (``with_reservations``, ``enrolled``, ``_reserved_verdict``; every
@@ -109,8 +112,9 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               ``undecided``, never pending, never re-rolled — P-795) and
               refuses a run that could steer a reserved attempt (``reading_run_refusal``:
               the param whitelist, the default pool, executor, timeout and ladder, the
-              reading's cell and arms, the loop off on the reading's budget profile; a
-              forward reading's sighted factory runs on ``S2`` alone — C8); pins
+              reading's cell and arms, the loop off on the reading's budget profile, an
+              ``A0+L`` run's ``task_ids`` its unreserved enrolled commits in the seeded
+              order — NEW-1; a forward reading's sighted factory runs on ``S2`` alone — C8); pins
               a reserved pool to its posture and qualification ids (``pool_posture_id``,
               ``pool_qualifications``, ``reserved_pool_digest`` — P-797), widens its
               ``pool_seen`` to any replay row at apparatus 2.4 or later, and names the unit a
@@ -2034,35 +2038,60 @@ def mcnemar_p(b: int, c: int) -> float:
 
 @dataclass(frozen=True)
 class LoopPair:
-    """The loop pair of a reading: ``A0`` and ``A0+L`` on the commits observed in both."""
+    """The loop pair of a reading: ``A0`` and ``A0+L`` on every commit both arms read, each
+    commit still pending on either arm read against the loop."""
 
-    #: The paired commits, in ``A0``'s order.
+    #: The paired commits — each commit both arms read among their first ``n`` — in ``A0``'s
+    #: order.
     pairs: tuple[str, ...]
-    #: Pairs clean under ``A0+L`` and a miss under ``A0``.
+    #: Pairs clean under ``A0+L`` and a miss under ``A0``; a pending pair is never one.
     b: int
-    #: Pairs clean under ``A0`` and a miss under ``A0+L``.
+    #: Pairs clean under ``A0`` and a miss under ``A0+L``, a pending ``A0`` attempt read clean
+    #: and a pending ``A0+L`` attempt a miss.
     c: int
+    #: The pairs not yet observed on both arms, in ``A0``'s order, each read against the loop
+    #: (NEW-1): the pair is complete only when this is empty.
+    pending: tuple[str, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        return not self.pending
 
     @property
     def p(self) -> float:
         return mcnemar_p(self.b, self.c)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"pairs": list(self.pairs), "b": self.b, "c": self.c, "p": self.p}
+        return {
+            "pairs": list(self.pairs),
+            "pending": list(self.pending),
+            "complete": self.complete,
+            "b": self.b,
+            "c": self.c,
+            "p": self.p,
+        }
+
+
+def _pair_window(arm: ArmReading) -> list[CommitReading]:
+    """The commits ``arm`` reads for the loop pair: a descriptive arm's first ``limit`` kept
+    commits, observed or pending; a hierarchy arm's counted prefix."""
+    kept = [c for c in arm.commits if not c.left]
+    return kept[: arm.limit] if arm.limit else kept[: arm.look.counted]
 
 
 def loop_pair(a0: ArmReading, a0l: ArmReading) -> LoopPair:
-    """``a0`` (``A0``) paired with ``a0l`` (``A0+L``): each commit both arms counted — for a
-    descriptive arm, observed among its first ``n`` (``counted_commits``) — with ``b`` the
-    pairs clean under ``A0+L`` alone and ``c`` those clean under ``A0`` alone. A commit
-    pending or left on either arm is not a pair."""
-    left = {c.commit: c.outcome for c in a0.commits}
-    right = {c.commit: c.outcome for c in a0l.commits}
-    both = set(a0l.counted_commits)
-    pairs = tuple(c for c in a0.counted_commits if c in both)
-    b = sum(1 for c in pairs if right[c] and not left[c])
-    c_ = sum(1 for c in pairs if left[c] and not right[c])
-    return LoopPair(pairs, b, c_)
+    """``a0`` (``A0``) paired with ``a0l`` (``A0+L``) on each commit both arms read — for a
+    descriptive arm, among its first ``n`` — with ``b`` the pairs clean under ``A0+L`` alone
+    and ``c`` those clean under ``A0`` alone. A commit left on either arm is not a pair. One
+    still pending on either arm fails closed (NEW-1): read clean under ``A0`` and a miss under
+    ``A0+L`` and named in ``pending``, so no gap, subset or early stop can raise ``b`` or
+    lower ``c``. (Read as no pair, ``A0+L`` filed on ``A0``'s misses alone read ``c`` 0.)"""
+    right = {c.commit: c.outcome for c in _pair_window(a0l)}
+    read = [(c.commit, c.outcome, right[c.commit]) for c in _pair_window(a0) if c.commit in right]
+    pending = tuple(commit for commit, lo, ro in read if lo is None or ro is None)
+    b = sum(1 for _, lo, ro in read if ro is True and lo is False)
+    c_ = sum(1 for _, lo, ro in read if lo is not False and ro is not True)
+    return LoopPair(tuple(commit for commit, _, _ in read), b, c_, pending)
 
 
 # ---------------------------------------------------------------------------
@@ -2493,6 +2522,28 @@ def _run_shape_reasons(
     return reasons
 
 
+def _loop_order_reason(reading: Reading, arm: str, params: Mapping[str, Any]) -> str:
+    """Why a run of the loop arm ``arm`` of the reserved.v1 ``reading`` may not file its
+    ``task_ids`` — ``""`` when it may (NEW-1, round 5). The loop learns from each attempt, so
+    the order is part of the arm's treatment: the run names its commits, each one ``arm``
+    enrols, and those it has not reserved are, in order, the first of its enrolled commits it
+    has not reserved — the whole list, a prefix of it, or a re-file of it (a reserved commit is
+    skipped, ``commit_reserved``). A subset chosen after another arm's outcomes, or another
+    order, is refused, so no run picks the commits the loop pair is read on."""
+    tasks = [str(t) for t in params.get("task_ids") or []]
+    order = enrolled(reading, arm)
+    reserved = {c for (a, c) in (reading.reservations or {}) if a == arm}
+    todo = [c for c in order if c not in reserved]
+    rest = [t for t in tasks if t not in reserved]
+    if tasks and set(tasks) <= set(order) and rest == todo[: len(rest)]:
+        return ""
+    return (
+        f"a run of the loop arm {arm} files its task_ids in the seeded order: its enrolled "
+        f"commits, those it has not reserved first to last ({len(todo)} of {len(order)} "
+        "left), so no run chooses the commits the loop pair is read on"
+    )
+
+
 def _refused(reasons: Mapping[str, str], arm: str) -> tuple[str, dict[str, Any]]:
     if not reasons:
         return "", {}
@@ -2523,7 +2574,11 @@ def reading_run_refusal(
       with ``arm: S1`` the reading's ``S1@<author>`` (a ``test_author``, when named, names that
       author); with neither ``learning`` nor ``budget_profile`` the arm is its ``+L`` twin;
     * on a non-loop arm, runs with the loop off (``learning: off``) on the reading's budget
-      profile (C7), so no run spends on another profile.
+      profile (C7), so no run spends on another profile;
+    * on the loop arm (``A0+L``), files ``task_ids`` in the seeded order: every id enrolled on
+      the arm, and those it has not reserved the first of its unreserved enrolled commits, in
+      order (:func:`_loop_order_reason`, NEW-1), so no run chooses the commits the loop pair
+      is read on.
 
     A reserved.v1 FORWARD reading (``prospective``) reads factory runs alone (C8): a sighted
     ``factory`` run on the reading's cell and the one ladder, carrying only the
@@ -2592,6 +2647,10 @@ def reading_run_refusal(
             arm = ""
         if arm not in reading.arms:
             reasons["arm"] = f"the run's arm {arm!r} is not one the reading reads"
+        elif loop:
+            why = _loop_order_reason(reading, arm, params)
+            if why:
+                reasons["task_ids"] = why
     return _refused(reasons, arm)
 
 

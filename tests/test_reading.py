@@ -724,10 +724,11 @@ def test_arm_to_dict_serves_every_commits_outcome_and_row_hash() -> None:
 
 
 def test_loop_pair_counts_discordant_pairs_and_its_exact_p() -> None:
-    """F3, P-794: the loop pair is read on the commits observed in BOTH ``A0`` and ``A0+L``
-    among each arm's first 16 — ``b`` clean under ``A0+L`` alone, ``c`` under ``A0`` alone —
-    with the exact two-sided McNemar p, ``min(1, 2·P(X ≤ min(b, c)))`` for ``X ~ Bin(b+c, ½)``.
-    A commit pending on either arm is not a pair, and a commit past the first 16 never is."""
+    """F3, P-794: the loop pair is read on the commits both ``A0`` and ``A0+L`` read among
+    each arm's first 16 — ``b`` clean under ``A0+L`` alone, ``c`` under ``A0`` alone — with the
+    exact two-sided McNemar p, ``min(1, 2·P(X ≤ min(b, c)))`` for ``X ~ Bin(b+c, ½)``. A commit
+    past the first 16 never is a pair; one pending on either arm is read against the loop
+    (NEW-1: it was left out, ``c`` 1 here)."""
     reading = register_reading(commits(40), descriptive=(("A0", 16), ("A0+L", 16)))
     t, f, n = True, False, None
     a0: list[bool | None] = [t, f, f, n, t, f, t, *([f] * 9), t]
@@ -736,14 +737,70 @@ def test_loop_pair_counts_discordant_pairs_and_its_exact_p() -> None:
     out = evaluate(reading, rows)
     got = loop_pair(out.arms["A0"], out.arms["A0+L"])
     p = reading.pool
-    assert got.pairs == (p[0], p[1], p[2], p[4], p[5], *p[7:16])
-    assert (got.b, got.c) == (11, 1)
-    assert got.p == pytest.approx(26 / 4096)  # 2 · (C(12,0) + C(12,1)) / 2^12
-    assert got.to_dict() == {"pairs": list(got.pairs), "b": 11, "c": 1, "p": got.p}
+    assert got.pairs == p[:16] and got.pending == (p[3], p[6])
+    # p[3] (A0 pending, A0+L clean) reads concordant; p[6] (A0 clean, A0+L pending) reads c
+    assert (got.b, got.c) == (11, 2)
+    assert got.p == pytest.approx(184 / 8192)  # 2 · (C(13,0) + C(13,1) + C(13,2)) / 2^13
+    assert got.to_dict() == {
+        "pairs": list(p[:16]),
+        "pending": [p[3], p[6]],
+        "complete": False,
+        "b": 11,
+        "c": 2,
+        "p": got.p,
+    }
     # the exact test, by hand: no discordant pair is no evidence; one side alone halves per pair
     assert mcnemar_p(0, 0) == 1.0 and mcnemar_p(3, 3) == 1.0
     assert mcnemar_p(5, 0) == pytest.approx(0.0625) and mcnemar_p(0, 6) == pytest.approx(0.03125)
-    assert mcnemar_p(11, 1) == got.p
+    assert mcnemar_p(11, 2) == got.p
+
+
+@pytest.mark.parametrize("attempt_rule", [ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED])
+def test_loop_pair_reads_a_commit_pending_on_either_arm_against_the_loop(
+    attempt_rule: str,
+) -> None:
+    """NEW-1 (round 5), P-792: the pair was read on the commits observed in BOTH arms, so a
+    commit left pending on one arm was simply not a pair. With ``A0``'s outcomes in hand, an
+    ``A0+L`` filed on ``A0``'s misses alone left ``A0``'s clean commits pending on ``A0+L``,
+    and ``c`` (clean under ``A0`` alone) was 0 by construction. Each commit both arms read
+    among their first ``n`` is now a pair, and one still pending on either arm is read
+    against the loop — a pending ``A0`` attempt as clean, a pending ``A0+L`` attempt as a
+    miss — and named in ``pending``, so a gap or an early stop can only lower ``b`` and raise
+    ``c``; the pair is ``complete`` only when no pair is pending."""
+    reading = _registered(attempt_rule, descriptive=(("A0", 2), ("A0+L", 2)))
+    p = reading.pool
+    # the probe: A0 clean then a miss; A0+L filed on A0's miss alone, which it fixed
+    reading_1, rows = _first_attempts(reading, {"A0": [True, False], "A0+L": [None, True]})
+    out = evaluate(reading_1, rows)
+    got = loop_pair(out.arms["A0"], out.arms["A0+L"])
+    assert got.pairs == (p[0], p[1]) and got.pending == (p[0],)
+    assert (got.b, got.c) == (1, 1) and not got.complete
+    assert got.to_dict() == {
+        "pairs": [p[0], p[1]],
+        "pending": [p[0]],
+        "complete": False,
+        "b": 1,
+        "c": 1,
+        "p": 1.0,
+    }
+    # every way a pair can be pending: the side still pending reads against the loop
+    reading_4 = _registered(attempt_rule, descriptive=(("A0", 4), ("A0+L", 4)))
+    q = reading_4.pool
+    t, f, n = True, False, None
+    reading_4, rows = _first_attempts(reading_4, {"A0": [t, f, n, n], "A0+L": [n, n, t, f]})
+    out = evaluate(reading_4, rows)
+    got = loop_pair(out.arms["A0"], out.arms["A0+L"])
+    assert got.pairs == q[:4] and got.pending == q[:4]
+    # t/–: c; f/–: concordant (a miss each); –/t: concordant (clean each); –/f: c
+    assert (got.b, got.c) == (0, 2)
+    # complete: both arms observed on every pair, and the pair is read as it was observed
+    done, rows = _first_attempts(
+        _registered(attempt_rule, descriptive=(("A0", 4), ("A0+L", 4))),
+        {"A0": [t, f, f, t], "A0+L": [t, t, t, f]},
+    )
+    out = evaluate(done, rows)
+    got = loop_pair(out.arms["A0"], out.arms["A0+L"])
+    assert got.complete and got.pending == () and (got.b, got.c) == (2, 1)
 
 
 # --- a sealed run's row the reading cannot read (P-795) -------------------------------------
