@@ -1612,6 +1612,14 @@ class RunRequest:
     #: for a legacy reading, whose runs keep the deployment's (``RunCreateRequest.budget_profile``)
     budget_profile: str = ""
 
+    @property
+    def rungs(self) -> int:
+        """The attempts the run makes at each of its commits, read off the body it sends: the
+        ladder it names, else the default ``["r1"]`` ``POST /runs`` stores for none — one
+        rung in either mode today, and the ``r1`` attempt is the one a reading reads. Read
+        from :meth:`to_dict`, so a body that ever names a ladder is priced at its rungs."""
+        return len(self.to_dict().get("ladder") or ["r1"])
+
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
             "repo": self.repo,
@@ -1828,9 +1836,9 @@ class RemeasurePlan:
                 "no reading at this apparatus (stale or thin) is offered registration, never a "
                 "replay, because rows graded before a reading can never count and would make "
                 "those commits unusable in one. One entry per (cell, mode, context arm) — never "
-                "pooled. Costs are the cell's own mean row cost x the commits requested x up to "
-                "the ladder's rungs for a blind cell (1 sighted) — an estimate, unknown where no "
-                "row recorded a cost."
+                "pooled. Costs are the cell's own mean row cost x the commits requested x the "
+                "rungs each request's run climbs — one, blind or sighted (POST /runs stores the "
+                'default ["r1"]) — an estimate, unknown where no row recorded a cost.'
             ),
         }
 
@@ -1898,7 +1906,6 @@ def remeasure_plan(
     policy: RoutingPolicy = DEFAULT_POLICY,
     task_labels: Mapping[str, tuple[str, str]] | None = None,
     gold_clean_tasks: Iterable[str] | None = None,
-    blind_rungs: int = 3,
     s1_author_model: str = "",
     deployment_posture: str | None = None,
 ) -> RemeasurePlan:
@@ -1928,8 +1935,9 @@ def remeasure_plan(
       ``register`` and no request: rows graded before a reading is registered never count, and
       a commit graded under an arm can no longer enter that arm's reading (``pool_seen``).
 
-    Cost is the cell's own mean over rows of that mode that recorded one × the commits
-    requested × ``blind_rungs`` for a blind request. Pure; deterministic; queues nothing.
+    Cost is the cell's own mean over rows of that mode that recorded one × each request's
+    commits × the rungs its run climbs (:attr:`RunRequest.rungs` — one, blind or sighted).
+    Pure; deterministic; queues nothing.
     """
     rs = list(rows)
     cur = _version_key(current_apparatus)
@@ -1996,11 +2004,25 @@ def remeasure_plan(
                 )
                 act = ROUTING_NEXT_NEW_READING
             else:
+                # the pool holds fewer commits than its next look: it never delivers, but
+                # while some are unrun their first attempts may still read it insufficient
+                kept = [c for c in blocking.commits if not c.left]
+                to_run = sum(1 for c in kept if c.outcome is None)
+                can_miss = sum(1 for c in kept[look.counted :] if c.outcome is not True)
+                looks = rule_looks(reading.rule)
+                fails = look.misses + can_miss > looks[max(looks)]
+                pool = (
+                    f"its reading's pool cannot reach the look at {look.next_look} ("
+                    f"{verdict.counted} read, {to_run} still to run, {look.needed} short): it "
+                    "never delivers"
+                    + (", and it may still read insufficient as those run" if fails else "")
+                    if to_run
+                    else f"its reading's pool ended before the look at {look.next_look} ("
+                    f"{verdict.counted} read)"
+                )
                 why = (
-                    f"its reading's pool ended before the look at {look.next_look} ("
-                    f"{verdict.counted} read): {MINE_MORE} — new commits count here only in a "
-                    f"new reading, once they are labelled {cell.capability_class} · "
-                    f"{cell.size} and qualified"
+                    f"{pool}: {MINE_MORE} — new commits count here only in a new reading, once "
+                    f"they are labelled {cell.capability_class} · {cell.size} and qualified"
                 )
                 act = ROUTING_NEXT_MINE
             beyond.append(
@@ -2046,6 +2068,7 @@ def remeasure_plan(
                 ),
             )
         n_requested = sum(r.limit for r in requests)
+        attempts = sum(r.limit * r.rungs for r in requests)
         notes: list[str] = []
         if blocker:
             notes.append(blocker)
@@ -2061,7 +2084,6 @@ def remeasure_plan(
             )
         costs, lats = costs_of(repo, cell.label, mode)
         cost_mean, lat_mean = mean(costs), mean(lats)
-        per = blind_rungs if mode == "blind" else 1
         cell_rows = [r for r in rs if r.repo == repo and r.cell.label == cell.label]
         stale_here = [r for r in cell_rows if _version_key(r.apparatus_version) < cur]
         plan.append(
@@ -2077,8 +2099,8 @@ def remeasure_plan(
                 relabelled=tuple(sorted(relabelled)),
                 cost_usd_mean=cost_mean,
                 latency_s_mean=lat_mean,
-                est_cost_usd=cost_mean * n_requested * per,
-                est_minutes=lat_mean * n_requested * per / 60.0,
+                est_cost_usd=cost_mean * attempts,
+                est_minutes=lat_mean * attempts / 60.0,
                 cost_known=bool(costs),
                 repos=(repo,),
                 requests=requests,

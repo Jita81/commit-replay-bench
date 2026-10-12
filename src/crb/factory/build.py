@@ -689,8 +689,10 @@ def build_item(
             config=config,
             facts=facts,
             arm=arm_id,
-            test_command=sighted_test_command(runner, executor, ws.root, scope),
-            harness_command=sighted_test_command(runner, executor, ws.root, ()),
+            # the factory's builder runs on the host (``builder.build`` below), in no sealed
+            # session: there is no session set to render the commands under
+            test_command=sighted_test_command(runner, executor, ws.root, scope, deps=None),
+            harness_command=sighted_test_command(runner, executor, ws.root, (), deps=None),
             learned=learned,
             author=author_stamp,
             root=str(ws.root),

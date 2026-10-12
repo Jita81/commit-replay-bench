@@ -26,12 +26,20 @@ What it does: Registers a campaign (201; its line $54.00 at 1.35; a name registe
               submits, and shows a campaign-named reading reads a run's rows only when the
               campaign admitted the run (a run posted without ``campaign_id`` is invisible to
               it, so each commit is read by its first admitted attempt and none leaves for a
-              run outside; a legacy reading counts it as before).
+              run outside; a legacy reading counts it as before). One live run per arm
+              (F87-2): a second run on an arm of a repository while the first is queued or
+              running is 409 ``campaign_arm_in_flight`` naming the live run, while another
+              arm, repository or campaign is admitted, and another reading's run only when
+              the commits the two name are disjoint (a run naming no reading or no commits
+              overlaps every one), the arm admits the next once the live run has finished,
+              and two concurrent identical submits start one run.
 How:          ``make_env`` over the seed; ``fixture_gold`` rungs (no credential, priced
               without a table); rows through ``DbLedger`` and author calls through
-              ``append_event``; four threads through ``admit_under_campaign`` and the admissions
-              reader and ``GET /readings`` under a campaign also on the ``backend`` fixture
-              (PostgreSQL when it is configured; CI's ``test-postgres`` job runs this file).
+              ``append_event``; a run finished by setting its status; threads through
+              ``admit_under_campaign`` (four distinct arms for the line, two identical bodies
+              for the arm) and the admissions reader and ``GET /readings`` under a campaign
+              also on the ``backend`` fixture (PostgreSQL when it is configured; CI's
+              ``test-postgres`` job runs this file).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md
 Works with:   src/crb/server/routes/campaigns.py (the routes under test),
@@ -42,7 +50,8 @@ Works with:   src/crb/server/routes/campaigns.py (the routes under test),
               tests/conftest_store.py (the backends),
               docs/API.md#campaigns-a-campaigns-money-ceiling (the routes documented)
 Tested by:    tests/test_server_campaigns.py
-Touch when:   never for a new repository; a campaign route, its refusals or the admission change.
+Touch when:   never for a new repository; a campaign route, its refusals, the admission or the
+              arm key change.
 """
 
 from __future__ import annotations
@@ -73,6 +82,7 @@ from fixtures.proven import CELL, LATER, write_reading
 from fixtures.readings import sealed_row
 from fixtures.server_seed import (
     ALPHA,
+    BETA,
     Env,
     add_users,
     assert_rbac,
@@ -209,11 +219,13 @@ def test_runs_are_admitted_until_the_line_and_the_next_is_refused_with_nothing_q
     env: Env,
 ) -> None:
     """$54.00 line, nothing priced yet (headroom $5.00): a $20 run holds $25, a second
-    $25 — $50 held, $4 left — so a third run capped at $0.01 would pass the line."""
+    $25 — $50 held, $4 left — so a third run capped at $0.01 would pass the line. The two
+    are on two arms (``S3+L`` and ``S3``): one arm admits one live run (F87-2), and the
+    line is read first, so the third is refused for the money whichever arm it asks for."""
     cid = _register(env)["campaign_id"]
     ids = []
-    for _ in range(2):
-        r = env.post("/runs", json={**GOLD, "max_cost_usd": 20, "campaign_id": cid})
+    for arm in ({}, {"learning": "off"}):
+        r = env.post("/runs", json={**GOLD, **arm, "max_cost_usd": 20, "campaign_id": cid})
         assert r.status_code == 201, r.text
         assert r.json()["status"] == "queued"
         ids.append(r.json()["id"])
@@ -242,6 +254,147 @@ def test_runs_are_admitted_until_the_line_and_the_next_is_refused_with_nothing_q
         s.commit()
     r = env.post("/runs", json={**GOLD, "max_cost_usd": 20, "campaign_id": cid})
     assert r.status_code == 201, r.text
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_a_second_run_on_a_live_arm_is_refused_naming_the_live_one(env: Env, status: str) -> None:
+    """F87-2: one live run per (campaign, arm). While a run of the campaign on ``S3+L`` of
+    the repository is queued or running, a second identical one is refused 409
+    ``campaign_arm_in_flight`` — the live run named — with nothing queued and nothing
+    admitted, so no commit is attempted by two runs of one arm at once."""
+    cid = _register(env)["campaign_id"]
+    first = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid})
+    assert first.status_code == 201, first.text
+    rid = first.json()["id"]
+    with env.factory() as s:
+        got = s.get(Run, rid)
+        assert got is not None
+        got.status = status
+        s.commit()
+    before = _runs(env)
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid})
+    assert r.status_code == 409, r.text
+    err = envelope(r)
+    assert err["code"] == "campaign_arm_in_flight"
+    assert rid in err["message"] and "nothing was queued" in err["message"]
+    assert err["detail"] == {
+        "campaign_id": cid,
+        "run_id": rid,
+        "status": status,
+        "repo": ALPHA,
+        "reading_id": "",
+        "arm": "S3+L",
+    }
+    assert _runs(env) == before
+    assert [a["run_id"] for a in _admitted(env, cid)] == [rid]
+
+
+def test_a_run_on_another_arm_repository_or_campaign_is_admitted(env: Env) -> None:
+    """The key is (campaign, repository, requested arm): while ``S3+L`` of alpha is live
+    under the campaign, ``S3`` (learning off), ``A0+L``, ``A0`` and ``S1`` of alpha are
+    each admitted, as are ``S3+L`` of beta and ``S3+L`` of alpha under another campaign."""
+    cid = _register(env)["campaign_id"]
+    other = _register(env, name="wave-4")["campaign_id"]
+    arms = [
+        {**GOLD},
+        {**GOLD, "learning": "off"},
+        {**GOLD, "kind": "blind"},
+        {**GOLD, "kind": "blind", "learning": "off"},
+        {**S1, "task_ids": SHAS},
+        {**GOLD, "repo": BETA},
+    ]
+    ids = []
+    for body in arms:
+        r = env.post("/runs", json={**body, "max_cost_usd": 1, "campaign_id": cid})
+        assert r.status_code == 201, (body, r.text)
+        ids.append(r.json()["id"])
+    assert [a["run_id"] for a in _admitted(env, cid)] == ids
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": other})
+    assert r.status_code == 201, r.text
+    # and the arms really are live: each refuses a second of itself
+    for body in arms:
+        r = env.post("/runs", json={**body, "max_cost_usd": 1, "campaign_id": cid})
+        assert r.status_code == 409 and envelope(r)["code"] == "campaign_arm_in_flight", body
+
+
+def test_runs_of_two_readings_on_one_arm_are_live_together_and_a_loose_one_is_not(
+    env: Env,
+) -> None:
+    """Two readings' runs that name disjoint commits — here each its own reading's — are
+    live at once on ``S3+L`` of alpha. A second run of either reading on that arm is
+    refused, naming its own reading's live run, and so is a run filed under no reading
+    naming no commits — it may replay any commit of the repository, so it overlaps both."""
+    env.settings.builder.executor = "docker"
+    cid = _register(env)["campaign_id"]
+    one = write_reading(env.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
+    two = write_reading(env.factory, ["2" * 40], repo=ALPHA, campaign_id=cid)
+    filed = {**GOLD, "executor": "docker", "max_cost_usd": 1, "campaign_id": cid}
+    bodies = {
+        reading.reading_id: {**filed, "reading_id": reading.reading_id, "task_ids": [sha]}
+        for reading, sha in ((one, "1" * 40), (two, "2" * 40))
+    }
+    live = {}
+    for reading_id, body in bodies.items():
+        r = env.post("/runs", json=body)
+        assert r.status_code == 201, r.text
+        live[reading_id] = r.json()["id"]
+    for reading_id, body in bodies.items():
+        r = env.post("/runs", json=body)
+        assert r.status_code == 409 and envelope(r)["code"] == "campaign_arm_in_flight", r.text
+        assert envelope(r)["detail"]["run_id"] == live[reading_id]
+        assert envelope(r)["detail"]["reading_id"] == reading_id
+        assert reading_id in envelope(r)["message"]
+    loose = env.post("/runs", json=filed)
+    assert loose.status_code == 409 and envelope(loose)["code"] == "campaign_arm_in_flight"
+    assert envelope(loose)["detail"]["run_id"] == live[one.reading_id]
+    assert len(_admitted(env, cid)) == 2
+
+
+def test_runs_of_two_readings_naming_one_commit_are_never_live_together_on_one_arm(
+    backend_env: Env,
+) -> None:
+    """R1-1: nothing binds a run's ``task_ids`` to its reading's pool, and a reading reads
+    another reading's admitted rows on its commits (DL-382), so the key is the commits the
+    runs name, not their reading ids. While reading one's run naming commit 1 is live on
+    ``S3+L``, reading two's run naming commits 1 and 2 is refused naming it, and so is its
+    run naming none (any commit); its run naming commit 2 alone is admitted beside it — on
+    each store, the commits read back from each run's stored ``params_json`` (R6A-V2-2)."""
+    env = backend_env
+    env.settings.builder.executor = "docker"
+    cid = _register(env)["campaign_id"]
+    one = write_reading(env.factory, ["1" * 40], repo=ALPHA, campaign_id=cid)
+    two = write_reading(env.factory, ["2" * 40], repo=ALPHA, campaign_id=cid)
+    filed = {**GOLD, "executor": "docker", "max_cost_usd": 1, "campaign_id": cid}
+    first = env.post("/runs", json={**filed, "reading_id": one.reading_id, "task_ids": SHAS[:1]})
+    assert first.status_code == 201, first.text
+    of_two = {**filed, "reading_id": two.reading_id}
+    for named in (SHAS[:2], None):
+        body = of_two if named is None else {**of_two, "task_ids": named}
+        r = env.post("/runs", json=body)
+        assert r.status_code == 409 and envelope(r)["code"] == "campaign_arm_in_flight", r.text
+        assert envelope(r)["detail"]["run_id"] == first.json()["id"]
+        assert envelope(r)["detail"]["reading_id"] == two.reading_id
+    apart = env.post("/runs", json={**of_two, "task_ids": SHAS[1:2]})
+    assert apart.status_code == 201, apart.text
+    assert [a["run_id"] for a in _admitted(env, cid)] == [first.json()["id"], apart.json()["id"]]
+
+
+@pytest.mark.parametrize("status", ["succeeded", "failed", "cancelled"])
+def test_once_the_live_run_has_finished_its_arm_admits_the_next(env: Env, status: str) -> None:
+    """The arm is free again once its run is terminal: refused while the run is live, the
+    next run on it is admitted once that run has finished, whichever way it finished."""
+    cid = _register(env)["campaign_id"]
+    rid = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid}).json()["id"]
+    busy = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid})
+    assert busy.status_code == 409 and envelope(busy)["code"] == "campaign_arm_in_flight"
+    with env.factory() as s:
+        got = s.get(Run, rid)
+        assert got is not None
+        got.status = status
+        s.commit()
+    r = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid})
+    assert r.status_code == 201, r.text
+    assert [a["run_id"] for a in _admitted(env, cid)] == [rid, r.json()["id"]]
 
 
 def test_the_tally_counts_each_runs_rows_and_its_s1_authors_calls(env: Env) -> None:
@@ -723,18 +876,15 @@ def backend_env(backend: Backend, tmp_path: Path) -> Iterator[Env]:
         yield Env(client=client, factory=backend.factory, info=info, settings=settings)
 
 
-def test_concurrent_submits_never_both_take_the_last_of_the_line(backend_env: Env) -> None:
-    """The tally is read and the run staged under the events write lock: four $20 runs
-    racing for a $54.00 line ($25 held each) admit exactly two, on each store — SQLite's
-    ``BEGIN IMMEDIATE`` and PostgreSQL's transaction-scoped advisory lock alike (P-790)."""
-    env = backend_env
-    cid = _register(env)["campaign_id"]
-    body = RunCreateRequest.model_validate({**GOLD, "max_cost_usd": 20, "campaign_id": cid})
-    barrier = threading.Barrier(4)
+def _race(env: Env, bodies: list[dict[str, Any]]) -> list[str]:
+    """Each body through ``admit_under_campaign`` on its own thread, all released at once;
+    the outcomes (``admitted`` or the refusal code), sorted."""
+    barrier = threading.Barrier(len(bodies))
     outcomes: list[str] = []
     lock = threading.Lock()
 
-    def submit() -> None:
+    def submit(raw: dict[str, Any]) -> None:
+        body = RunCreateRequest.model_validate(raw)
         run = new_run(body, actor="op")
         barrier.wait()
         try:
@@ -745,11 +895,42 @@ def test_concurrent_submits_never_both_take_the_last_of_the_line(backend_env: En
         with lock:
             outcomes.append(got)
 
-    threads = [threading.Thread(target=submit) for _ in range(4)]
+    threads = [threading.Thread(target=submit, args=(b,)) for b in bodies]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=60)
-    assert sorted(outcomes) == ["admitted", "admitted", "campaign_ceiling", "campaign_ceiling"]
+    return sorted(outcomes)
+
+
+def test_concurrent_submits_never_both_take_the_last_of_the_line(backend_env: Env) -> None:
+    """The tally is read and the run staged under the events write lock: four $20 runs on
+    four arms racing for a $54.00 line ($25 held each) admit exactly two, on each store —
+    SQLite's ``BEGIN IMMEDIATE`` and PostgreSQL's transaction-scoped advisory lock alike
+    (P-790)."""
+    env = backend_env
+    cid = _register(env)["campaign_id"]
+    arms: list[dict[str, Any]] = [
+        {},
+        {"learning": "off"},
+        {"kind": "blind"},
+        {"kind": "blind", "learning": "off"},
+    ]
+    outcomes = _race(env, [{**GOLD, **a, "max_cost_usd": 20, "campaign_id": cid} for a in arms])
+    assert outcomes == ["admitted", "admitted", "campaign_ceiling", "campaign_ceiling"]
     assert len(_admitted(env, cid)) == 2
     assert env.get(f"/campaigns/{cid}").json()["held_usd"] == 50.0
+
+
+def test_concurrent_submits_never_both_start_one_arm(backend_env: Env) -> None:
+    """F87-2 under the same lock: two identical $5 runs racing for one arm — the line
+    holds both — admit exactly one; the other waits for it to commit, finds it queued and is
+    refused ``campaign_arm_in_flight``, on each store."""
+    env = backend_env
+    cid = _register(env)["campaign_id"]
+    body = {**GOLD, "max_cost_usd": 5, "campaign_id": cid}
+    before = _runs(env)
+    assert _race(env, [body, body]) == ["admitted", "campaign_arm_in_flight"]
+    admitted = _admitted(env, cid)
+    assert len(admitted) == 1
+    assert _runs(env) - before == {admitted[0]["run_id"]}

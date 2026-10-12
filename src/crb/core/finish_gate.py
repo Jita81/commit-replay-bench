@@ -27,6 +27,12 @@ untouched parent is recorded ``pre_existing`` and does not gate; a check that ca
 recorded as an error and does not gate either (the grade's own belts still judge). The gate
 never decides ``clean``.
 
+The declared commands run under the dependency binding they are given — the sealed
+session's set, so the baseline and the re-run see the modules the builder built against.
+Unbound, a sealed posture's ``go vet ./...`` reads an empty module cache with the network
+off, is red at every parent and so never gates (F87-1, docs/PREVENTION.md P-800). ``deps``
+is a required keyword: a caller says ``None`` (no sealed session) or passes the set.
+
 Navigation
 ----------
 What it is:   The finish gate's core: the checklist (``checklist``), the leak guard
@@ -39,15 +45,19 @@ What it does: Turns the repository's belt-5 plan and declared check commands int
               already red at the parent and which could not run; renders the repair findings.
 How:          ``checklist(plan, commands, test_command)`` → the brief's ``finish_checks``;
               ``command_baseline`` before the build; after it ``verify`` = ``run_plan`` +
-              one ``Command`` per declared check → ``GateRun.passed`` / ``label`` /
-              ``findings``.
+              one ``Command`` per declared check, each through ``with_deps`` under the
+              binding given (``deps``) → ``GateRun.passed`` / ``label`` / ``findings``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0024-working-by-construction.md
 Works with:   src/crb/core/checks.py (the ``finish_gate`` switch and declared commands),
               src/crb/core/lint.py (the plan the gate re-runs), src/crb/builders/adapter.py
               (brief → build → verify → repair), src/crb/builders/base.py (``finish_checks`` /
-              ``gate_note`` on the brief), src/crb/core/execution.py (Command / Executor)
-Tested by:    tests/test_finish_gate.py, tests/test_builders_finish_gate.py
+              ``gate_note`` on the brief), src/crb/core/execution.py (Command / Executor),
+              src/crb/core/runners/base.py (``with_deps`` — how a binding's env and mounts
+              reach a command), src/crb/core/deps.py (``DepsBinding`` — the set the declared
+              commands run under)
+Tested by:    tests/test_finish_gate.py, tests/test_builders_finish_gate.py,
+              tests/test_builders_sealed_deps.py, tests/test_ratchet_sealed_deps.py
 Touch when:   onboarding a repository — declare its extra checks under ``checks.commands``
               (docs/OPERATOR.md), never here; changing what a builder is told is an
               opt-in arm and needs the row label and an A/B before it is a default.
@@ -63,9 +73,11 @@ from pathlib import Path
 from typing import Any
 
 from crb.core.checks import CheckCommand
+from crb.core.deps import DepsBinding
 from crb.core.execution import Command, Executor
 from crb.core.lint import LintPlan, run_plan
 from crb.core.redact import redact_and_cap
+from crb.core.runners.base import with_deps
 
 #: The most lines the checklist carries (a checklist, never an essay).
 MAX_CHECKLIST_LINES = 8
@@ -237,9 +249,15 @@ class GateRun:
         }
 
 
-def _run_command(c: CheckCommand, executor: Executor, root: Path) -> GateResult:
+def _run_command(
+    c: CheckCommand, executor: Executor, root: Path, *, deps: DepsBinding | None
+) -> GateResult:
+    """One declared command in the worktree under ``deps`` (:func:`with_deps`: the set's
+    environment and, under docker, its read-only mounts). Unbound under the sealed posture
+    ``go vet`` resolved no module with the network off, so it was red at the parent on
+    every commit and the gate never gated (F87-1)."""
     try:
-        res = executor.run(Command(c.argv, root, timeout=c.timeout))
+        res = executor.run(with_deps(Command(c.argv, root, timeout=c.timeout), deps, executor.name))
     except OSError as exc:
         return GateResult(c.name, KIND_COMMAND, None, error=f"{type(exc).__name__}: {exc}")
     if res.returncode in (126, 127):
@@ -249,12 +267,17 @@ def _run_command(c: CheckCommand, executor: Executor, root: Path) -> GateResult:
 
 
 def command_baseline(
-    commands: Sequence[CheckCommand], executor: Executor, root: Path
+    commands: Sequence[CheckCommand],
+    executor: Executor,
+    root: Path,
+    *,
+    deps: DepsBinding | None,
 ) -> dict[str, bool | None]:
     """Each declared command's verdict on the untouched worktree (before the build), so
     a command that is already red is recorded ``pre_existing`` and never blamed on the
-    builder."""
-    return {c.name: _run_command(c, executor, Path(root)).ok for c in commands}
+    builder. ``deps`` is the binding :func:`verify` will run under (``None``: unbound), so
+    the baseline and the re-run compare like with like."""
+    return {c.name: _run_command(c, executor, Path(root), deps=deps).ok for c in commands}
 
 
 def verify(
@@ -265,9 +288,11 @@ def verify(
     changed: Sequence[str],
     *,
     baseline: Mapping[str, bool | None] | None = None,
+    deps: DepsBinding | None,
 ) -> GateRun:
     """Re-run the gate after the build: the plan over ``changed`` (the changed non-test
-    files), then every declared command in the worktree."""
+    files), then every declared command in the worktree under ``deps`` — the binding the
+    baseline was measured under."""
     started = time.monotonic()
     root = Path(root)
     results: list[GateResult] = []
@@ -288,7 +313,7 @@ def verify(
             )
     base = dict(baseline or {})
     for c in commands:
-        r = _run_command(c, executor, root)
+        r = _run_command(c, executor, root, deps=deps)
         if r.ok is False and base.get(c.name) is False:
             r = GateResult(r.name, r.kind, r.ok, True, r.detail, r.error)
         results.append(r)

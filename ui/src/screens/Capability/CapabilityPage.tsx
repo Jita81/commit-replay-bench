@@ -309,7 +309,7 @@ function CellDetail({ cell, repo, onClose }: { cell: CapabilityCell; repo: strin
 const ARM_STATE_TEXT: Record<string, string> = {
   deliver: 'delivers',
   insufficient: 'insufficient — never read again',
-  undecided: 'undecided — the pool ended before a look',
+  undecided: 'undecided — the pool cannot reach its next look',
   look_pending: 'waiting for its next look',
   descriptive: 'descriptive — never a licence',
   stopped: 'not read — a richer arm did not deliver',

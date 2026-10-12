@@ -58,6 +58,18 @@ const FAKE_SETUP_TOKEN = 'sk-ant-oat01-' + 'W'.repeat(72) + '-E2E0'
 //: The second person 08 signs off as; this spec is where their password is set from the screen.
 const APPROVER = 'walk-approver'
 
+/**
+ * `<main>`'s text once every card on it has drawn — no query still loading, and the GitHub App
+ * card (which has no loading state of its own) answered or failed — so a sweep for something
+ * that looks like a key reads the whole page, not the first render (P-782).
+ */
+async function mainText(page: Page): Promise<string> {
+  const main = page.locator('main')
+  await expect(main.getByTestId('loading')).toHaveCount(0)
+  await expect(main.getByTestId('github-app-status').or(main.getByTestId('error-state')).first()).toBeVisible()
+  return (await main.textContent()) ?? ''
+}
+
 async function axeClean(page: Page, where: string): Promise<void> {
   const violations = await axeViolations(page)
   expect(violations, `${where}: ${JSON.stringify(violations, null, 2)}`).toEqual([])
@@ -82,12 +94,12 @@ test.describe('07 settings + accessibility', () => {
     const builders = page.getByTestId('settings-builders')
     await expect(builders).toBeVisible()
     const pills = builders.getByRole('img', { name: /: (configured|not configured)$/ })
-    expect(await pills.count()).toBeGreaterThanOrEqual(1)
+    await expect(pills.first(), 'the builders card reports at least one builder').toBeVisible()
     for (const name of ['anthropic', 'openai', 'cerebras', 'claude_code_cli']) {
       await expect(builders.getByRole('img', { name: new RegExp(`^${name}: (configured|not configured)$`) }), `builder ${name}`).toBeVisible()
     }
     // never a value: nothing that looks like a key
-    const text = (await page.locator('main').textContent()) ?? ''
+    const text = await mainText(page)
     expect(text).not.toMatch(/sk-ant-|sk-[A-Za-z0-9]{20,}|csk-/)
     // the footer carries the same apparatus + policy as the settings
     const apparatus = (await page.getByTestId('settings-apparatus').textContent())?.trim()
@@ -123,7 +135,7 @@ test.describe('07 settings + accessibility', () => {
     await expect(status).toContainText('…E2E0')
     await expect(page.getByTestId('claude-login-provenance')).toContainText(`set by ${env.user}`)
     await expect(field).toHaveValue('')
-    let text = (await page.locator('main').textContent()) ?? ''
+    let text = await mainText(page)
     expect(text).not.toContain(FAKE_SETUP_TOKEN)
     expect(text).not.toContain('W'.repeat(20))
     expect(text).not.toMatch(/sk-ant-|sk-[A-Za-z0-9]{20,}|csk-/)
@@ -146,7 +158,7 @@ test.describe('07 settings + accessibility', () => {
     await page.getByTestId('claude-login-remove-confirm').getByRole('button', { name: 'Yes, remove it' }).click()
     await expect(status).toHaveAttribute('data-present', 'false')
     await expect(page.getByTestId('claude-login-verify')).toBeDisabled()
-    text = (await page.locator('main').textContent()) ?? ''
+    text = await mainText(page)
     expect(text).not.toMatch(/sk-ant-|sk-[A-Za-z0-9]{20,}|csk-/)
   })
 
@@ -184,7 +196,7 @@ test.describe('07 settings + accessibility', () => {
     await dialog.getByTestId('set-password-again').fill(pass)
     await dialog.getByTestId('set-password-submit').click()
     await expect(page.getByTestId('set-password-done')).toContainText(`Password set for ${APPROVER}. Every session that account held has ended`)
-    expect((await page.locator('main').textContent()) ?? '').not.toContain(pass)
+    expect(await mainText(page)).not.toContain(pass)
     await dialog.getByRole('button', { name: 'Close', exact: true }).click()
 
     // The persona's own browser walks the journey end to end, in its own context so the admin's
@@ -235,7 +247,11 @@ test.describe('07 settings + accessibility', () => {
       await expect(toggle).toBeChecked()
     } finally {
       // 08 and 11 sign in as this account: a failure above must not leave it deactivated and
-      // turn one broken assertion into three broken specs (it did, before the toggle was fixed)
+      // turn one broken assertion into three broken specs (it did, before the toggle was fixed).
+      // Read the toggle from a fresh load: one read while a toggle is in flight reads the page
+      // before the server answered (P-782)
+      await page.goto('/settings')
+      await expect(toggle).toBeAttached()
       if (!(await toggle.isChecked())) await toggle.check()
     }
 
@@ -283,6 +299,14 @@ test.describe('07 settings + accessibility', () => {
     const grades = page.getByRole('table', { name: 'Grade rows for this task' })
     await expect(grades.locator('tbody tr').first()).toBeVisible()
     await expect(grades.getByTestId('row-unreviewed').or(grades.getByTestId('row-review')).first()).toBeVisible()
+    // the Review cell reads "not reviewed" until the reviews query answers, then a reviewed row's
+    // verdict takes its place: check and measure the answered page, not the first render (P-782)
+    // — as many verdicts as the API holds standing reviews for the page's rows
+    const [, , taskRepo = '', taskId = ''] = new URL(page.url()).pathname.split('/').map(decodeURIComponent)
+    const detail = (await (await page.request.get(`${env.baseUrl}/api/v1/tasks/${encodeURIComponent(taskRepo)}/${encodeURIComponent(taskId)}`)).json()) as { grades: Array<{ row_hash: string }> }
+    const reviews = (await (await page.request.get(`${env.baseUrl}/api/v1/reviews?repo=${encodeURIComponent(taskRepo)}&task_id=${encodeURIComponent(taskId)}&limit=200`)).json()) as { items: Array<{ grade_row_hash: string }> }
+    const reviewed = new Set(reviews.items.map((r) => r.grade_row_hash))
+    await expect(grades.getByTestId('row-review')).toHaveCount(detail.grades.filter((g) => reviewed.has(g.row_hash)).length)
     await axeClean(page, '/tasks/<graded>')
     // the same page at phone width: the document does not scroll sideways, the grade table's
     // region sits inside the viewport, and the table fits that region — no sideways scroll even

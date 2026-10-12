@@ -815,11 +815,12 @@ class RunCreateRequest(BaseModel):
     #: ``task_ids`` or ``limit`` (422 ``campaign_s1_unbounded``); it is refused 404
     #: ``campaign_unknown`` unless the campaign verifies, and 409 ``campaign_ceiling`` /
     #: ``campaign_cost_unknown`` / ``campaign_overrun`` / ``unplaced_spend`` when the
-    #: campaign's tally cannot hold it — read and decided under the events write lock, before
-    #: anything is queued; 409
-    #: ``reading_required`` when it names no ``reading_id`` and the campaign holds a
-    #: reserved.v1 reading on the repository (P-792). Stored as ``params.campaign_id`` only
-    #: when set.
+    #: campaign's tally cannot hold it, then 409 ``campaign_arm_in_flight`` while a run the
+    #: campaign admitted on the same repository and requested arm, that could attempt one of
+    #: its commits, is queued or running (F87-2) — read and decided under the events write
+    #: lock, before anything is queued; 409 ``reading_required`` when it names no
+    #: ``reading_id`` and the campaign holds a reserved.v1 reading on the repository (P-792).
+    #: Stored as ``params.campaign_id`` only when set.
     campaign_id: str | None = Field(default=None, pattern=r"^cmp_[0-9a-f]{24}$")
 
     @field_validator("kind")

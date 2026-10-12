@@ -401,7 +401,7 @@ describe('LearnPage', () => {
     await screen.findByText(/Queued 2 runs/)
     await userEvent.click(screen.getByRole('button', { name: 'Close' }))
     const remeasure = within(document.getElementById('remeasure')!)
-    const inFlight = await remeasure.findByRole('link', { name: '2 runs queued' })
+    const inFlight = await remeasure.findByRole('link', { name: '2 runs in flight' })
     expect(inFlight).toHaveAttribute('href', '/runs?repo=alpha')
     expect(remeasure.queryByRole('button', { name: 'Queue runs' })).toBeNull()
   })

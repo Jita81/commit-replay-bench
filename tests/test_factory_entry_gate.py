@@ -17,7 +17,8 @@ What it does: Pins, on the real loop over the fixture repository, that an item i
               size rule (the more demanding of two cells until the points-to-churn agreement
               passes; ``L`` stops ``granularize``; no points is ``unsized`` and goes to a
               person); the sign-off clause and the override that lifts only it — for every
-              other stop the pure gate makes, the override changes nothing; and the licence
+              other stop the pure gate makes, the override changes nothing; that the clause
+              is ``standard_signed``, the one reading of "signed" (P-411); and the licence
               keyed on the building rung's builder and model, before the build
               (``not_licensed``, $0) and on the measured size after it
               (``size_exceeds_licence``), a line shaped like a diff header included (P-294).
@@ -58,7 +59,9 @@ from crb.factory.standard import (
     CellRef,
     Readers,
     Standard,
+    cell_signed,
     decide_entry,
+    standard_signed,
 )
 from crb.intake.draft import size_for
 from fixtures import pyrepo as pr
@@ -735,6 +738,36 @@ def test_a_factory_s2_row_is_not_a_routing_first_attempt_without_held_out_accept
     assert not counts_as_s2_first_attempt({**held, "context_arm": "S1@t1"})
     assert not counts_as_s2_first_attempt({"context_arm": ARM_S2})
     assert not counts_as_s2_first_attempt({"context_arm": ARM_S2, LABEL_ACCEPTANCE: "held_out"})
+
+
+def test_the_gates_sign_off_clause_is_the_one_reading_of_signed() -> None:
+    """P-411 (G-738): ``standard_signed`` / ``cell_signed`` is the gate's own sign-off clause,
+    and the reading every other reader of "signed" calls — the decisions inbox, the task
+    preview, the worker's lookup, the map's ``signed``. An item stops ``unsigned_cell``
+    exactly when ``cell_signed`` reads its cell unsigned, and enters exactly when it reads it
+    signed; no proven standard, or only an ``S3`` ceiling, is never signed."""
+    for signed in (False, True):
+        std = Standard("S1@t1", signed=signed)
+
+        def reader(c: CellRef, std: Standard = std) -> Standard:
+            return std
+
+        entry = decide_entry(
+            capability_class="bug.fix",
+            size="XS",
+            standard_for=reader,
+            agreement_passed=False,
+            missing_slots=(),
+            person_test=False,
+            require_signed_cell=True,
+        )
+        assert cell_signed(reader, "bug.fix", "XS") is signed
+        assert entry.enters is signed
+        assert (entry.code == STOP_UNSIGNED_CELL) is not signed
+    assert not standard_signed(None)
+    assert not standard_signed(Standard("S3", signed=True))
+    assert standard_signed(Standard(ARM_S2, signed=True))
+    assert not standard_signed(Standard(ARM_S2))
 
 
 def test_an_unsigned_estimate_cell_is_not_hidden_by_a_signed_larger_cell() -> None:

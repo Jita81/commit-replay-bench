@@ -19,8 +19,9 @@
  *               its numbers — κ, the sample, coverage — and fails on too small a sample. The
  *               `walk-approver` persona signs it and hears the result where focus lands; it
  *               still routes nothing, because its report fails (the route line never naming the
- *               points check), and a reading of its class and a run stamped with it are both refused
- *               `class_set_not_routing`. The class's page reads in plain words: what the work
+ *               points check), and a reading of its class is refused. On this host-graded stack the
+ *               refusal is the unsealed deployment's (422, P-789); the class set's own 409
+ *               `class_set_not_routing` is pinned in tests/test_server_routes_classes.py. The class's page reads in plain words: what the work
  *               is, the rule, example commits, what a ticket carries and "No proven standard"
  *               per size. Walked at 375 px without sideways scroll, the versions table's Open
  *               button on screen.
@@ -144,7 +145,10 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
   await expect(signed).toContainText(failing)
   await expect(signed).toBeFocused()
 
-  // routing nothing: no reading of its classes, no run stamped with it
+  // routing nothing: no reading of its classes. The walkthrough grades on the host, so its
+  // deployment is not sealed, and a replayed reading is refused for that first (422, P-789)
+  // before the class set is read. tests/test_server_routes_classes.py pins the class set's own
+  // 409 class_set_not_routing on a sealed deployment.
   const reading = await page.request.post(`${env.baseUrl}/api/v1/readings`, {
     data: {
       repo,
@@ -159,8 +163,10 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
     },
     headers: await csrf(page),
   })
-  expect(reading.status()).toBe(409)
-  expect(((await reading.json()) as { error: { code: string } }).error.code).toBe('class_set_not_routing')
+  expect(reading.status()).toBe(422)
+  const refused = ((await reading.json()) as { error: { code: string; message: string } }).error
+  expect(refused.code).toBe('invalid_reading')
+  expect(refused.message).toContain('sealed deployment')
 
   // the class's page, in plain words
   await page.getByRole('row').filter({ hasText: 'op-add' }).getByRole('button', { name: 'Read its page' }).click()
@@ -175,6 +181,11 @@ test('a sponsor proposes a class set, a person labels a sample, a second person 
   await page.setViewportSize({ width: 375, height: 800 })
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Class: Add an operation' })).toBeVisible()
+  // the class's card is one of four sections, each drawn from its own read: measure the page
+  // once all four are there, not when the first answers (P-782)
+  await expect(page.getByRole('table', { name: 'Class-set versions' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: `Class set ${VERSION}` })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Label a sample' })).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow, 'no sideways scroll at 375 px').toBeLessThanOrEqual(1)
   // the only way to switch version is on screen, not scrolled off inside its table

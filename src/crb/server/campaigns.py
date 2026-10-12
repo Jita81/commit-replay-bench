@@ -10,16 +10,19 @@ run two ways — plus each of its **unplaced** attempts (F8): an attempt built (
 and trial once the attempt is settled, charged at its ``build.done`` cost, else at its
 reservation's hold. One reader (``unplaced_attempts``) feeds both the tally and a reading's
 ``settled_unrowed`` count, so the two never disagree. Every reader here takes the caller's
-session, so ``POST /runs`` reads the tally under the events write lock it admits the run
-under, and two submits cannot both take the last of the line.
+session, so ``POST /runs`` reads the tally and the arm's live run under the events write lock
+it admits the run under: two submits cannot both take the last of the line, nor both start
+one arm.
 
 Navigation
 ----------
 What it is:   The store readers of campaigns: the verified records, the line released, each
               run filed under one with what it has spent, the ids of the runs admitted (a
-              campaign-named reading counts only theirs, DL-382), the tally and view served,
-              a reserved.v1 reading's reservations with their runs' state (P-792), and the
-              attempts that spent with no row to place them against (``UnplacedAttempt``, F8).
+              campaign-named reading counts only theirs, DL-382), the admitted runs still live
+              and the arm each asked for (one live run per arm, F87-2), the tally and view
+              served, a reserved.v1 reading's reservations with their runs' state (P-792), and
+              the attempts that spent with no row to place them against (``UnplacedAttempt``,
+              F8).
 What it does: Keeps a campaign only when its id re-hashes and it sits on its own trace; folds
               its releases into the line (never above the ceiling); reads each admitted run's
               status, rows, author calls and unplaced attempts into a ``MemberRun``; computes
@@ -30,7 +33,10 @@ What it does: Keeps a campaign only when its id re-hashes and it sits on its own
               attempt with no row of its run for its commit and trial (a factory row placed
               by its ticket, ``reservation_unit``), at its ``build.done`` cost, else its
               reservation's hold, else unknown — never one still in flight, which its run's
-              cap and headroom hold.
+              cap and headroom hold; finds the admitted runs of a repository still queued or
+              running, and the one live on an arm that could attempt a commit the new run
+              could — the same reading, or a commit both name (``live_on_arm``, keyed by
+              ``requested_arm``, ``run_commits`` and ``runs_overlap``).
 How:          ``Event`` rows by action and trace → ``Campaign.from_dict`` → ``verify`` →
               ``rows_of_runs``, ``author.attempt`` events and ``unplaced_attempts`` →
               ``Spend.of_rows`` / ``with_authoring`` per run → ``crb.core.campaign.tally``;
@@ -42,13 +48,17 @@ Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's cap is a guard)
 Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
               src/crb/server/routes/campaigns.py (registers, releases and serves campaigns),
-              src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally),
+              src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally and
+              while no run on its arm is live), src/crb/server/routes/learn.py
+              (``in_flight_runs`` counts the live admitted runs beside the Learn queue's),
+              src/crb/store/jobs.py (``ACTIVE_STATUSES``: queued or running),
               src/crb/server/spend_cap.py (``Spend``, ``AUTHOR_ATTEMPT``: a run's own sum),
               src/crb/store/ledger.py (``rows_of_runs``: the rows in the caller's session),
               src/crb/server/reading_book.py (``load_readings`` fills a reading's reservations),
               src/crb/core/run.py (writes the ``build.done`` an attempt is read by),
               src/crb/server/routes/readings.py (``served_reading``: ``settled_unrowed``)
-Tested by:    tests/test_server_campaigns.py, tests/test_p792_reserved.py
+Tested by:    tests/test_server_campaigns.py, tests/test_p792_reserved.py,
+              tests/test_server_routes_learn.py
 Touch when:   never for a new repository; a new kind of spend is recorded outside a run's rows,
               author calls and attempts (count it here and in ``Spend``), ``build.done`` or a
               reservation changes shape, or a campaign's events change.
@@ -71,6 +81,8 @@ from crb.core.campaign import (
     Campaign,
     MemberRun,
     Tally,
+    requested_arm,
+    runs_overlap,
     tally,
 )
 from crb.core.reading import READING_RESERVED_ACTION, RUNG_R1, Reservation, reservation_unit
@@ -335,6 +347,86 @@ def unplaced_attempts(session: Session, run_ids: Iterable[str]) -> list[Unplaced
     return out
 
 
+def live_runs(session: Session, *, repo: str, campaign_id: str = "") -> list[Run]:
+    """The runs on ``repo`` admitted under ``campaign_id`` (under any campaign when it is
+    ``""``) that are still queued or running, in the order they were admitted: what
+    ``POST /runs`` keeps one of per arm (F87-2), and what the remeasure plan counts as in
+    flight beside the runs the Learn queue filed (``in_flight_runs``)."""
+    query = select(Event).where(Event.action == CAMPAIGN_ADMITTED)
+    if campaign_id:
+        query = query.where(Event.trace_id == campaign_id)
+    ids = list(
+        dict.fromkeys(
+            rid
+            for ev in session.execute(query.order_by(Event.id)).scalars()
+            if (rid := str((ev.payload_json or {}).get("run_id") or ""))
+        )
+    )
+    if not ids:
+        return []
+    live = {
+        r.id: r
+        for r in session.execute(
+            select(Run).where(
+                Run.id.in_(ids), Run.repo == repo, Run.status.in_(sorted(ACTIVE_STATUSES))
+            )
+        ).scalars()
+    }
+    return [live[rid] for rid in ids if rid in live]
+
+
+def run_arm(run: Run) -> str:
+    """The arm a run asked for (``requested_arm`` over its kind, mode and params): the key of
+    the run being admitted and of each live one alike, so the two are read one way."""
+    params = dict(run.params_json or {})
+    return requested_arm(
+        kind=run.kind,
+        mode=run.mode,
+        s1=params.get("arm") == "S1",
+        learning=params.get("learning"),
+    )
+
+
+def run_reading(run: Run) -> str:
+    """The reading a run is filed under (``params.reading_id``), or ``""``."""
+    return str(dict(run.params_json or {}).get("reading_id") or "")
+
+
+def run_commits(run: Run) -> frozenset[str] | None:
+    """The commits a run names (``params.task_ids``) — the most it attempts, since the worker
+    replays only those it names — or ``None`` when it names none and may replay any commit
+    of its repository."""
+    named = frozenset(str(t) for t in (dict(run.params_json or {}).get("task_ids") or []))
+    return named or None
+
+
+def live_on_arm(
+    session: Session,
+    campaign_id: str,
+    *,
+    repo: str,
+    arm: str,
+    reading_id: str = "",
+    commits: frozenset[str] | None = None,
+) -> Run | None:
+    """The first run of the campaign on ``repo`` and ``arm`` still queued or running that
+    could attempt a commit a run filed under ``reading_id`` and naming ``commits`` would
+    (``runs_overlap``: the same reading or either under none, else a commit both name or
+    either naming none — ``None``, the default, is any commit), or ``None``: while it is live
+    no such run on that arm is admitted (F87-2)."""
+    return next(
+        (
+            r
+            for r in live_runs(session, repo=repo, campaign_id=campaign_id)
+            if run_arm(r) == arm
+            and runs_overlap(
+                reading_id, run_reading(r), commits=commits, other_commits=run_commits(r)
+            )
+        ),
+        None,
+    )
+
+
 def members(session: Session, campaign_id: str) -> list[MemberRun]:
     """Each run admitted under the campaign, with what it has spent now: its rows and its
     test author's calls, as its own cap counts them (``Spend``), and its unplaced attempts
@@ -446,9 +538,14 @@ __all__ = [
     "campaign_tally",
     "campaign_view",
     "line_gbp",
+    "live_on_arm",
+    "live_runs",
     "load_campaigns",
     "members",
     "releases",
     "reservations_of",
+    "run_arm",
+    "run_commits",
+    "run_reading",
     "unplaced_attempts",
 ]

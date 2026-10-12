@@ -585,7 +585,7 @@ def test_transcript_written_to_file_never_inlined(
 
 def test_sighted_test_command_is_best_effort(harness: dict[str, Any], tmp_path: Path) -> None:
     cmd = adapter.sighted_test_command(
-        harness["runner"], harness["executor"], tmp_path, ("tests/test_x.py",)
+        harness["runner"], harness["executor"], tmp_path, ("tests/test_x.py",), deps=None
     )
     assert "-m pytest" in cmd and cmd.endswith("tests/test_x.py")
 
@@ -595,7 +595,7 @@ def test_sighted_test_command_is_best_effort(harness: dict[str, Any], tmp_path: 
 
     assert (
         adapter.sighted_test_command(
-            Broken(harness["config"]), harness["executor"], tmp_path, ("t",)
+            Broken(harness["config"]), harness["executor"], tmp_path, ("t",), deps=None
         )
         == ""
     )
@@ -629,6 +629,7 @@ def test_sighted_test_command_brings_the_services_up_and_exports_their_env(
         tmp_path,
         ("tests/test_x.py",),
         authored="2025-01-02T03:04:05+00:00",
+        deps=None,
     )
     assert calls == [(tmp_path, "2025-01-02T03:04:05+00:00")]
     assert "MESH_SANDBOX_URL=https://localhost:8701" in cmd and "MESH_CA=/certs/ca.pem" in cmd
@@ -642,7 +643,7 @@ def test_sighted_test_command_brings_the_services_up_and_exports_their_env(
     # brief with a half-environment: best effort yields ""
     assert (
         adapter.sighted_test_command(
-            ServiceDown(harness["config"]), harness["executor"], tmp_path, ("t",)
+            ServiceDown(harness["config"]), harness["executor"], tmp_path, ("t",), deps=None
         )
         == ""
     )

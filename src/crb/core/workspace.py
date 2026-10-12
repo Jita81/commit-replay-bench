@@ -765,8 +765,16 @@ class Workspace:
         return (not offending, offending)
 
     def parent_text(self, rel: str) -> str | None:
-        """``rel``'s content at the parent commit, or ``None`` if it did not exist."""
-        return self.repo.show_file(self.parent, rel)
+        """``rel``'s content at the parent commit, or ``None`` if it did not exist.
+
+        Read as :meth:`read` reads the worktree (undecodable bytes replaced, never raised;
+        newlines universal), so belt 1b can set a touched binary file beside its parent
+        (REDFIX-REGRESS-HONESTY-R1-1)."""
+        blob = self.repo.show_blob(self.parent, rel)
+        if blob is None:
+            return None
+        text = blob.decode("utf-8", errors="replace")
+        return text.replace("\r\n", "\n").replace("\r", "\n")
 
     def parent_tree(self) -> dict[str, TreeEntry]:
         """Every path in the parent commit's tree (``git ls-tree -r -l``), keyed by
