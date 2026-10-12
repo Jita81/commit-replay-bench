@@ -718,7 +718,10 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     ``ladder_json`` keeps the ladder as declared (labels as written, object rungs as
     ``{builder, model, provider?, budget?}`` with only the budget fields that were set);
     ``params.budget`` keeps only the run-level caps the request set — the worker overlays
-    them on the builder's defaults, and a rung's own budget on top of those."""
+    them on the builder's defaults, and a rung's own budget on top of those. A blind run on
+    the ``S1`` arm keeps ``params.arm`` and its test author here, so every path that builds
+    a run from a request stores the arm it asked for: the Learn queue's ``S1`` run once
+    stored none and would have graded ``A0``."""
     builder, model, provider = body.builder, body.model, body.provider
     if body.kind in BUILD_KINDS and not builder:
         first = next(e for e in body.ladder if isinstance(e, LadderRung))
@@ -764,6 +767,11 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["reading_id"] = body.reading_id
     if body.campaign_id is not None:
         params["campaign_id"] = body.campaign_id
+    if body.arm is not None:
+        # set before the refusals: the credential check names the S1 test author's builder
+        params["arm"] = body.arm
+        if body.test_author is not None:
+            params["test_author"] = body.test_author.strip()
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
@@ -1444,13 +1452,6 @@ def create_run(
     refuse_class_set(db, body)
     api = require_jobs()
     run = new_run(body, actor=operator.id)
-    if s1:
-        # set before the refusals: the credential check names the S1 test author's builder
-        run.params_json = {
-            **dict(run.params_json or {}),
-            "arm": body.arm,
-            **({"test_author": body.test_author.strip()} if body.test_author is not None else {}),
-        }
     submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the

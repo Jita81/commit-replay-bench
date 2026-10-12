@@ -1118,6 +1118,10 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     assert q.status_code == 201, q.text
     (run,) = [env.get(f"/runs/{rid}").json() for rid in q.json()["run_ids"]]
     assert (run["kind"], run["mode"], run["ladder"]) == ("blind", "blind", ["r1"])
+    # stored on the arm the plan asked for, so it grades S1@<author> and never A0
+    with env.factory() as s:
+        stored = s.get(Run, run["id"])
+        assert stored is not None and (stored.params_json or {}).get("arm") == "S1"
 
 
 def test_queueing_refuses_a_cell_whose_builder_has_no_credential(
