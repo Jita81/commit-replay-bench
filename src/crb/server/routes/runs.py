@@ -1350,7 +1350,10 @@ def get_run(run_id: str, viewer: ViewerDep, db: DbDep) -> RunOut:
 )
 def cancel_run(run_id: str, operator: OperatorDep, db: DbDep, factory: SessionFactoryDep) -> RunOut:
     """A queued run is cancelled outright, a running one is flagged; either way the
-    queue writes ``run.cancel_requested`` naming THIS operator (J-TEL-7)."""
+    queue writes ``run.cancel_requested`` naming THIS operator (J-TEL-7). On a run filed
+    under a reserved.v1 reading, a cancel after a reservation costs that commit: the attempt
+    it stops is the commit's one attempt, a miss no later run re-rolls (P-792); a cancel
+    before the reservation halts the run with the commit still pending."""
     run = _get_run(db, run_id)
     if run.status in TERMINAL_STATUSES:
         raise ApiError(

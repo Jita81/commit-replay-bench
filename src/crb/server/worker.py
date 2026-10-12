@@ -138,9 +138,16 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               holds, once per finished run, and never a kind that spends model money.
               Projects a reserved attempt's treatment for a reading's pin, as plain JSON with
               no secret (``deployment_projection``, ``arm_projection``, ``repo_config_digest``
-              under ``REPO_CONFIG_UNPINNED``, ``fingerprint``, ``treatment_digest``; P-792,
-              no caller yet): A0 and A0+L share the deployment, the loop's overlay and the
-              budget profile are a non-loop arm's.
+              under ``REPO_CONFIG_UNPINNED``, ``fingerprint``, ``treatment_digest``; P-792):
+              A0 and A0+L share the deployment, the loop's overlay and the budget profile are
+              a non-loop arm's. For a replay or blind run filed under a reserved.v1 reading,
+              reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``:
+              one ``reading.reserved`` event under the events lock, or a skip, or a halt
+              before ``build.start`` — the run not owned, a cancel asked, a treatment that is
+              not the pinned one), stamps the reserved row with the reservation, treatment
+              and claim, and appends it under ``claim_guard``; a row whose claim was
+              reclaimed or settled is refused (``AttemptSettled``) and the run's finish is
+              not written (``run.finish_refused``).
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -174,7 +181,8 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
-              projections and their ratchets)
+              projections and their ratchets; the reserver, the stamped row and the guard,
+              C1-C15 end to end)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
@@ -218,6 +226,7 @@ from crb.builders.adapter import (
     container_settings_from_env,
     ladder_labels,
     loop_on,
+    run_arm_for,
     rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
@@ -281,14 +290,37 @@ from crb.core.patches import PatchStore
 from crb.core.posture import expected_posture_class
 from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.qualify import Qualification
+from crb.core.reading import (
+    HALT_ARM_UNKNOWN,
+    HALT_CANCEL_REQUESTED,
+    HALT_RUN_NOT_OWNED,
+    HALT_TREATMENT_MISMATCH,
+    LABEL_CLAIM,
+    LABEL_RESERVATION,
+    LABEL_TREATMENT,
+    READING_RESERVED_ACTION,
+    SKIP_COMMIT_RESERVED,
+    SKIP_TASK_NOT_ENROLLED,
+    Reading,
+    enrolled,
+)
 from crb.core.redact import redact, redact_and_cap
 from crb.core.routing import ROUTE_DELIVER
-from crb.core.run import BuildAttempt, RunSpec, RunSummary
+from crb.core.run import (
+    RESERVE_HALT,
+    RESERVE_OK,
+    RESERVE_SKIP,
+    BuildAttempt,
+    ReserveResult,
+    RunSpec,
+    RunSummary,
+)
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, UNCLASSIFIED, RepoConfig, TaskSpec
+from crb.core.spend import resolve_policy
 from crb.core.stats import mean
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION, __version__
@@ -386,7 +418,13 @@ from crb.server.spend_cap import (
 )
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
-from crb.store.events import DbEventSink, events_of_action, last_seq
+from crb.store.events import (
+    DbEventSink,
+    ReservationExists,
+    append_event_checked,
+    events_of_action,
+    last_seq,
+)
 from crb.store.jobs import (
     ACTIVE_STATUSES,
     KIND_BLIND,
@@ -399,15 +437,18 @@ from crb.store.jobs import (
     KIND_QUALIFY,
     KIND_REPLAY,
     KIND_SETUP,
+    RECLAIMS_KEY,
     STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_QUEUED,
+    STATUS_RUNNING,
     STATUS_SUCCEEDED,
     JobQueue,
     StaleClaim,
+    claim_guard,
     stage_queued,
 )
-from crb.store.ledger import DbLedger
+from crb.store.ledger import AttemptSettled, DbLedger
 from crb.store.library import DbLibraryLedger
 from crb.store.models import Event, EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
@@ -875,6 +916,16 @@ class RunContext:
         self.emitter.emit(stage, action, **payload)
 
 
+class _ReserveRefused(Exception):
+    """A ``reading.reserved`` build that refused before anything was written: it carries the
+    skip or halt :meth:`Worker._reserver` answers, raised out of the locked transaction so the
+    event is never inserted (P-792)."""
+
+    def __init__(self, result: ReserveResult) -> None:
+        super().__init__(result.reason)
+        self.result = result
+
+
 class _RunLedger:
     """``RunSpec.ledger`` for a DB run: mirror the pack, record metrics, append.
 
@@ -885,6 +936,12 @@ class _RunLedger:
     not clean, ``harness``, the reason in ``error`` — never clean (EI-3, 2026-09-27: it
     used to emit the event and append the clean row anyway). A forged body is never
     stored: the table is content-addressed and first write wins.
+
+    A reserved.v1 attempt (P-792) is named in ``reserved`` by its ``(task_id, trial)`` once
+    :meth:`Worker._reserver` wrote its ``reading.reserved`` event: its row is stamped with the
+    reservation, the treatment and the claim, and appended under :func:`claim_guard`, so a row
+    written after its run was reclaimed or settled raises :class:`AttemptSettled` and is never
+    stored (C1, C11). Every other row is appended exactly as before.
     """
 
     def __init__(
@@ -896,6 +953,7 @@ class _RunLedger:
         runner_name: str,
         *,
         trial_labels: Mapping[str, Mapping[str, str]] | None = None,
+        worker_id: str = "",
     ) -> None:
         self._ledger = ledger
         self._factory = factory
@@ -903,20 +961,27 @@ class _RunLedger:
         self._ctx = ctx
         self._runner_name = runner_name
         self._trial_labels = {k: dict(v) for k, v in (trial_labels or {}).items()}
+        self._worker_id = worker_id or ctx.run.worker_id
+        #: ``(task_id, trial) → {reservation, treatment, claim}`` for each reserved attempt
+        self.reserved: dict[tuple[str, str], dict[str, str]] = {}
 
     def _stamp(self, row: GradeRow) -> GradeRow:
         """Add the run-declared labels for this row's trial (``budget_tier``,
-        ``rung_index`` — see :func:`trial_labels_for`) BEFORE the row is chained, so the
+        ``rung_index`` — see :func:`trial_labels_for`) and, for a reserved attempt, its
+        reservation, treatment and claim (``reserved``) BEFORE the row is chained, so the
         hash commits to them. Only labels change: the verdict fields are copied verbatim
         and :class:`GradeRow` re-runs its invariants on the copy, so a stamp can never
-        turn a red row clean. A trial the ladder does not know is left untouched."""
+        turn a red row clean. A trial the ladder does not know, of an attempt not reserved,
+        is left untouched."""
         extra = self._trial_labels.get(row.trial)
-        if not extra:
+        reserved = self.reserved.get((row.task_id, row.trial))
+        if not extra and not reserved:
             return row
-        labels = {**row.labels, **extra}
-        if LABEL_BUDGET_PROFILE in row.labels and LABEL_BUDGET_TIER in row.labels:
+        labels = {**row.labels, **(extra or {})}
+        if extra and LABEL_BUDGET_PROFILE in row.labels and LABEL_BUDGET_TIER in row.labels:
             # a calibrated attempt ran under its own caps: its tier is the record
             labels[LABEL_BUDGET_TIER] = row.labels[LABEL_BUDGET_TIER]
+        labels.update(reserved or {})
         return GradeRow(**{**row.fields(), "labels": labels})
 
     def _pack_body(self, pack_hash: str) -> dict[str, Any] | None:
@@ -999,11 +1064,19 @@ class _RunLedger:
         )
 
     def append(self, row: GradeRow) -> GradeRow:
+        reserved = self.reserved.get((row.task_id, row.trial))
         row = self._stamp(row)
         body, why = self._kept_pack(row) if row.evidence_pack_hash else (None, "")
         if row.clean and body is None:
-            row = self._demoted(row, why)
-        chained = self._ledger.append(row)
+            row = self._demoted(row, why)  # keeps the labels: a demoted reserved row decides
+        if reserved is None:
+            chained = self._ledger.append(row)
+        else:
+            # the claim the reservation named, checked under the grades lock (P-792 C1)
+            chained = self._ledger.append(
+                row,
+                guard=claim_guard(self._ctx.run.id, self._worker_id, int(reserved[LABEL_CLAIM])),
+            )
         grade = dict(body.get("grade") or {}) if body else {}
         metrics.record_grade(
             repo=row.repo,
@@ -1560,6 +1633,14 @@ class Worker:
                 config, git = self._load_repo(run.repo, emitter, kind=run.kind)
                 ctx = RunContext(run=run, emitter=emitter, config=config, git=git)
                 status, counts, error = handler(ctx)
+        except AttemptSettled as exc:
+            # P-792: a reserved attempt's row reached the ledger after its run was reclaimed
+            # or settled — the row was not written, and this claim's record is not ours to
+            # write either (the reservation already costs the commit). ``finally`` still
+            # stops the heartbeat; ``queue.finish`` below is never reached.
+            _LOG.warning("run %s attempt settled: %s", run.id[:8], exc)
+            emitter.emit("system", "run.finish_refused", status=StepStatus.ERROR, error=str(exc))
+            return
         except SandboxUnavailable as exc:
             status = STATUS_FAILED
             error = redact_and_cap(f"sandbox unavailable: {exc}", max_chars=1000)
@@ -2729,6 +2810,263 @@ class Worker:
         """The run-level budget: the builder's defaults overlaid with ``params.budget``."""
         return Budget.from_dict(dict(ctx.params.get("budget") or {}))
 
+    def _reserver(
+        self,
+        ctx: RunContext,
+        reading_id: str,
+        *,
+        arm: str,
+        deployment: Mapping[str, Any],
+        arm_body_for: Callable[[TaskSpec], Mapping[str, Any]],
+        hold_usd: float | None,
+        ledger: _RunLedger,
+    ) -> Callable[[TaskSpec], ReserveResult]:
+        """``RunSpec.reserve`` for a run filed under the reserved.v1 reading ``reading_id``
+        (P-792): before a task's ``r1`` build, one ``reading.reserved`` event on the reading's
+        trace (``step_id`` the arm, ``task_id`` the commit), its payload decided under the
+        events lock — or a skip or a halt that writes nothing.
+
+        Under the lock it re-reads the reading and its reservations, then: a reading not
+        registered reserved.v1 here, or an arm it does not read, halts ``reading_arm_unknown``;
+        a commit the arm does not enrol is skipped; a run no longer ``running`` on this worker
+        under the claim it was claimed with halts ``run_not_owned``, one asked to cancel halts
+        ``cancel_requested``; a commit this arm already reserved is skipped (the database's
+        index is the backstop, :class:`ReservationExists`). The first reservation of the
+        campaign on this repository (of the reading, without one) pins the deployment half,
+        and the reading's first on this arm pins the arm half; an attempt whose half differs
+        halts ``reading_treatment_mismatch`` with both fingerprints (trust on first use, C3-C5,
+        C11). On ``ok`` the attempt's row is named in ``ledger.reserved`` — stamped with the
+        reservation, the treatment and the claim, and appended under :func:`claim_guard`.
+
+        ``arm_body_for`` gives each task's arm half: a calibrated r1 budget is per task. No
+        row lock is taken here: the run's row is read plainly, and the guard on the row's
+        append is the one that decides whether the attempt still counts."""
+        run = ctx.run
+        claim = int((run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0)
+        deployment_body = dict(deployment)
+        deployment_fp = fingerprint(deployment_body)
+
+        def halt(reason: str, **detail: Any) -> _ReserveRefused:
+            return _ReserveRefused(ReserveResult(RESERVE_HALT, reason, detail))
+
+        def reserve(task: TaskSpec) -> ReserveResult:
+            arm_body = dict(arm_body_for(task))
+            arm_fp = fingerprint(arm_body)
+            treatment = treatment_digest(deployment_fp, arm_fp)
+
+            def build(s: Session) -> dict[str, Any]:
+                reading = next(
+                    (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+                )
+                if reading is None or not reading.reserved:
+                    raise halt(
+                        HALT_ARM_UNKNOWN,
+                        reading_id=reading_id,
+                        why=f"no reserved.v1 reading {reading_id!r} is registered on {run.repo}",
+                    )
+                if arm not in reading.arms or len(arm) > 64:
+                    raise halt(
+                        HALT_ARM_UNKNOWN,
+                        reading_id=reading_id,
+                        why=f"the reading does not read arm {arm[:80]!r}",
+                    )
+                if task.task_id not in enrolled(reading, arm):
+                    raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_TASK_NOT_ENROLLED))
+                now = s.execute(
+                    select(Run).where(Run.id == run.id).execution_options(populate_existing=True)
+                ).scalar_one_or_none()
+                reclaims = int((now.counts_json or {}).get(RECLAIMS_KEY, 0) or 0) if now else -1
+                if (
+                    now is None
+                    or now.status != STATUS_RUNNING
+                    or now.worker_id != self.worker_id
+                    or reclaims != claim
+                ):
+                    raise halt(
+                        HALT_RUN_NOT_OWNED,
+                        run_id=run.id,
+                        status=now.status if now else "",
+                        owner=now.worker_id if now else "",
+                        claim=claim,
+                        at_claim=reclaims,
+                    )
+                if now.cancel_requested:
+                    raise halt(HALT_CANCEL_REQUESTED, run_id=run.id)
+                if (arm, task.task_id) in (reading.reservations or {}):
+                    raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_COMMIT_RESERVED))
+                pinned_by = ""
+                for half, ev in self._treatment_pins(s, reading, arm):
+                    body = dict(ev.payload_json or {})
+                    pinned = str(body.get(f"{half}_fp") or "")
+                    ours = deployment_fp if half == "deployment" else arm_fp
+                    if pinned != ours:
+                        theirs = dict((body.get("treatment_body") or {}).get(half) or {})
+                        mine = deployment_body if half == "deployment" else arm_body
+                        raise halt(
+                            HALT_TREATMENT_MISMATCH,
+                            half=half,
+                            pinned=pinned,
+                            ours=ours,
+                            pinned_by=ev.event_id,
+                            fields=sorted(
+                                k for k in {*theirs, *mine} if theirs.get(k) != mine.get(k)
+                            ),
+                        )
+                    if half == "deployment":
+                        pinned_by = ev.event_id
+                return {
+                    "v": 1,
+                    "reading_id": reading.reading_id,
+                    "campaign_id": reading.campaign_id,
+                    "run_id": run.id,
+                    "arm": arm,
+                    "trial": "r1",
+                    "worker_id": self.worker_id,
+                    "claim": claim,
+                    "task_spec_sha256": sha256_text(canonical_json(task.to_dict())),
+                    "hold_usd": hold_usd,
+                    "deployment_fp": deployment_fp,
+                    "arm_fp": arm_fp,
+                    "treatment": treatment,
+                    "treatment_body": {"deployment": deployment_body, "arm": arm_body},
+                    "pinned_by": pinned_by or "self",
+                }
+
+            try:
+                ev = append_event_checked(
+                    self.factory,
+                    trace_id=reading_id,
+                    stage="system",
+                    action="reading.reserved",
+                    task_id=task.task_id,
+                    step_id=arm,
+                    repo=run.repo,
+                    actor=self.worker_id,
+                    build=build,
+                )
+            except _ReserveRefused as refused:
+                return refused.result
+            except ReservationExists:  # the index's backstop: another writer reserved first
+                return ReserveResult(RESERVE_SKIP, SKIP_COMMIT_RESERVED)
+            ledger.reserved[(task.task_id, "r1")] = {
+                LABEL_RESERVATION: ev.event_id,
+                LABEL_TREATMENT: treatment,
+                LABEL_CLAIM: str(claim),
+            }
+            return ReserveResult(RESERVE_OK)
+
+        return reserve
+
+    @staticmethod
+    def _treatment_pins(s: Session, reading: Reading, arm: str) -> list[tuple[str, Event]]:
+        """The reservations that pin a reserved attempt's treatment (P-792, trust on first
+        use): ``("deployment", e)`` for the first ``reading.reserved`` event on the reading's
+        repository under its campaign (under the reading itself when it names none), and
+        ``("arm", e)`` for the reading's first on ``arm``. Either is absent before its first
+        reservation."""
+        deployment: Event | None = None
+        arm_pin: Event | None = None
+        for ev in s.execute(
+            select(Event)
+            .where(Event.action == READING_RESERVED_ACTION, Event.repo == reading.repo)
+            .order_by(Event.id)
+        ).scalars():
+            same_campaign = str((ev.payload_json or {}).get("campaign_id") or "") == (
+                reading.campaign_id
+            )
+            if (
+                deployment is None
+                and same_campaign
+                and (reading.campaign_id or ev.trace_id == reading.reading_id)
+            ):
+                deployment = ev
+            if arm_pin is None and ev.trace_id == reading.reading_id and ev.step_id == arm:
+                arm_pin = ev
+            if deployment is not None and arm_pin is not None:
+                break
+        return [
+            (half, ev)
+            for half, ev in (("deployment", deployment), ("arm", arm_pin))
+            if ev is not None
+        ]
+
+    def _reserved_reading(self, repo: str, reading_id: str) -> Reading | None:
+        """The reserved.v1 reading a run is filed under (``params.reading_id``), or ``None``
+        for a run filed under none, or under a reading that counts the first observation."""
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next((r for r in load_readings(s, repo) if r.reading_id == reading_id), None)
+        return reading if reading is not None and reading.reserved else None
+
+    def _replay_reserver(
+        self,
+        ctx: RunContext,
+        reading: Reading,
+        *,
+        mode: str,
+        ladder: EscalationLadder,
+        budget: Budget,
+        learning: LearningSnapshot,
+        spend: SpendHooks,
+        container: BuilderContainerSettings | None,
+        preflight: Preflight | None,
+        s1_author: TestAuthor | None,
+        ledger: _RunLedger,
+    ) -> Callable[[TaskSpec], ReserveResult]:
+        """:meth:`_reserver` for a replay run under ``reading``, its treatment projected from
+        what the run's r1 attempt runs under: the deployment half once (the run's ladder,
+        budget, overrides, container, executor, timeout, pre-flight, escalation policy,
+        posture and repository configuration — shared by every arm, so the S1 author is the
+        arm's), the arm half per task (:func:`arm_projection`, with the r1 budget calibration
+        gives that task, and the S1 author's label on the S1 arm). The hold is the r1 rung's
+        cost cap (``None`` when the rung has none)."""
+        p = ctx.params
+        kind = run_executor_kind(p, self.settings).strip().lower()
+        r1 = ladder.rungs[0]
+        base = budget_for_rung(r1, budget)
+        arm = run_arm_for(
+            mode,
+            learning=learning,
+            s1_author_model=(canonical_model(s1_author.model) or s1_author.model)
+            if s1_author is not None
+            else None,
+        )
+        deployment = deployment_projection(
+            ladder=ladder,
+            budget=budget,
+            builder_overrides=dict(p.get("builder_config") or {}),
+            container=container,
+            executor=kind,
+            timeout=ctx.timeout,
+            preflight=preflight,
+            escalation=resolve_policy(p, ctx.config.spend).escalation,
+            posture_class=self._deployment_posture_class(ctx.run.repo, kind),
+            config=ctx.config,
+            s1_author="",
+        )
+
+        def arm_body_for(task: TaskSpec) -> Mapping[str, Any]:
+            r1_budget = (
+                spend.budget_for_task(task, mode, r1, base)[0]
+                if spend.budget_for_task is not None
+                else base
+            )
+            body = arm_projection(arm, learning, spend.policy.budget_profile, r1_budget)
+            if s1_author is not None:
+                body["s1_author"] = author_label(s1_author)
+            return body
+
+        return self._reserver(
+            ctx,
+            reading.reading_id,
+            arm=arm,
+            deployment=deployment,
+            arm_body_for=arm_body_for,
+            hold_usd=base.max_cost_usd or None,
+            ledger=ledger,
+        )
+
     def _run_replay(self, ctx: RunContext, *, mode: str) -> tuple[str, dict[str, Any], str]:
         run = ctx.run
         p = ctx.params
@@ -2776,6 +3114,7 @@ class Worker:
             ctx,
             runner.name,
             trial_labels=rungs,
+            worker_id=self.worker_id,
         )
         # belt-5 pre-flight (adapter.Preflight): OFF unless the run asks; a run with it on is
         # a different arm (builder '<name>+preflight') and the apparatus stamp says so
@@ -2879,6 +3218,32 @@ class Worker:
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
         s1_author = self._s1_author(ctx, ladder, mode)
+        # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023): read once, so
+        # the builder runs in the container a reserved attempt's treatment names
+        container = container_settings_from_env(
+            {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
+            if self.settings.builder_executor
+            else None
+        )
+        reading = self._reserved_reading(run.repo, str(p.get("reading_id") or ""))
+        if reading is not None:
+            # P-792: under a reserved.v1 reading each task's r1 is reserved before its build
+            spec = dataclass_replace(
+                spec,
+                reserve=self._replay_reserver(
+                    ctx,
+                    reading,
+                    mode=mode,
+                    ladder=ladder,
+                    budget=budget,
+                    learning=learning,
+                    spend=spend,
+                    container=container,
+                    preflight=preflight,
+                    s1_author=s1_author,
+                    ledger=run_ledger,
+                ),
+            )
         build_fn = build_fn_for(
             ladder,
             budget=budget,
@@ -2893,12 +3258,7 @@ class Worker:
                 else None
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
-            # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023)
-            container=container_settings_from_env(
-                {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
-                if self.settings.builder_executor
-                else None
-            ),
+            container=container,
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
             # ADR-0019 (amends ADR-0012): a sealed builder reads the task's PARENT set
@@ -3003,7 +3363,8 @@ class Worker:
             counts["stopped_reason"] = reason
             ctx.emit("system", "run.environment_stop", status=StepStatus.ERROR, reason=reason)
             return STATUS_FAILED, counts, reason
-        if summary.stopped_reason == "cancelled":
+        # a cancel the reserver read before a reservation is a cancel, not a failure
+        if summary.stopped_reason in ("cancelled", HALT_CANCEL_REQUESTED):
             return STATUS_CANCELLED, counts, ""
         if summary.stopped_reason:
             return STATUS_FAILED, counts, summary.stopped_reason

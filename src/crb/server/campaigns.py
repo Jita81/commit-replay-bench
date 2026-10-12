@@ -13,22 +13,27 @@ Navigation
 ----------
 What it is:   The store readers of campaigns: the verified records, the line released, each
               run filed under one with what it has spent, the ids of the runs admitted (a
-              campaign-named reading counts only theirs, DL-382), and the tally and view served.
+              campaign-named reading counts only theirs, DL-382), the tally and view served,
+              and a reserved.v1 reading's reservations with their runs' state (P-792).
 What it does: Keeps a campaign only when its id re-hashes and it sits on its own trace; folds
               its releases into the line (never above the ceiling); reads each admitted run's
               status, rows and author calls into a ``MemberRun``; computes the ``Tally``; serves
-              the campaign with its line, spent (author calls apart), held, left and runs.
+              the campaign with its line, spent (author calls apart), held, left and runs;
+              reads each first ``reading.reserved`` as a ``Reservation``, settled once its run
+              is terminal, missing or reclaimed past the claim it reserved under.
 How:          ``Event`` rows by action and trace → ``Campaign.from_dict`` → ``verify`` →
               ``rows_of_runs`` and ``author.attempt`` events → ``Spend.of_rows`` /
-              ``with_authoring`` per run → ``crb.core.campaign.tally``.
+              ``with_authoring`` per run → ``crb.core.campaign.tally``; ``reading.reserved``
+              events → their runs (one read) → ``Reservation`` (``reservations_of``).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's cap is a guard)
 Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
               src/crb/server/routes/campaigns.py (registers, releases and serves campaigns),
               src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally),
               src/crb/server/spend_cap.py (``Spend``, ``AUTHOR_ATTEMPT``: a run's own sum),
-              src/crb/store/ledger.py (``rows_of_runs``: the rows in the caller's session)
-Tested by:    tests/test_server_campaigns.py
+              src/crb/store/ledger.py (``rows_of_runs``: the rows in the caller's session),
+              src/crb/server/reading_book.py (``load_readings`` fills a reading's reservations)
+Tested by:    tests/test_server_campaigns.py, tests/test_p792_reserved.py
 Touch when:   never for a new repository; a new kind of spend is recorded outside a run's rows
               and author calls (count it here and in ``Spend``), or a campaign's events change.
 """
@@ -36,6 +41,7 @@ Touch when:   never for a new repository; a new kind of spend is recorded outsid
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import select
@@ -50,7 +56,9 @@ from crb.core.campaign import (
     Tally,
     tally,
 )
+from crb.core.reading import READING_RESERVED_ACTION, Reservation
 from crb.server.spend_cap import AUTHOR_ATTEMPT, Spend
+from crb.store.jobs import ACTIVE_STATUSES, RECLAIMS_KEY
 from crb.store.ledger import rows_of_runs
 from crb.store.models import Event, Run
 
@@ -114,6 +122,74 @@ def admitted_runs(session: Session, campaign_id: str) -> frozenset[str]:
         for ev in _events(session, campaign_id, CAMPAIGN_ADMITTED)
         if (rid := str((ev.payload_json or {}).get("run_id") or ""))
     )
+
+
+def _claim_of(value: Any) -> int:
+    """A reservation's ``claim`` as written, or -1 when it is not a whole number — which no
+    run's ``reclaims`` count ever equals, so such a reservation reads settled."""
+    if isinstance(value, bool):
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
+def _hold_of(value: Any) -> float | None:
+    """A reservation's ``hold_usd`` as written, or ``None`` when it is not a number."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def reservations_of(session: Session, reading_ids: Iterable[str]) -> list[Reservation]:
+    """The ``reading.reserved`` events of the readings named, the first per ``(reading, arm,
+    commit)`` by ``Event.id``, each with whether its run is settled: missing, no longer queued
+    or running, or reclaimed past the claim it reserved under (P-792). A settled
+    reservation with no row is a miss, never pending, so a run that died after reserving
+    costs its commit. One read of the events and one of their runs, whatever the count."""
+    ids = sorted({str(r) for r in reading_ids if r})
+    if not ids:
+        return []
+    first: dict[tuple[str, str, str], Event] = {}
+    for ev in session.execute(
+        select(Event)
+        .where(Event.action == READING_RESERVED_ACTION, Event.trace_id.in_(ids))
+        .order_by(Event.id)
+    ).scalars():
+        first.setdefault((ev.trace_id, ev.step_id, ev.task_id), ev)
+    payloads = {key: dict(ev.payload_json or {}) for key, ev in first.items()}
+    run_ids = sorted({str(p.get("run_id") or "") for p in payloads.values()} - {""})
+    runs = (
+        {r.id: r for r in session.execute(select(Run).where(Run.id.in_(run_ids))).scalars()}
+        if run_ids
+        else {}
+    )
+    out: list[Reservation] = []
+    for key, ev in first.items():
+        payload = payloads[key]
+        run_id = str(payload.get("run_id") or "")
+        claim = _claim_of(payload.get("claim"))
+        run = runs.get(run_id)
+        settled = (
+            run is None
+            or run.status not in ACTIVE_STATUSES
+            or int((run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0) > claim
+        )
+        out.append(
+            Reservation(
+                arm=ev.step_id,
+                task_id=ev.task_id,
+                run_id=run_id,
+                event_id=ev.event_id,
+                event_seq_id=int(ev.id),
+                claim=claim,
+                treatment=str(payload.get("treatment") or ""),
+                hold_usd=_hold_of(payload.get("hold_usd")),
+                settled=settled,
+            )
+        )
+    return out
 
 
 def members(session: Session, campaign_id: str) -> list[MemberRun]:
@@ -221,4 +297,5 @@ __all__ = [
     "load_campaigns",
     "members",
     "releases",
+    "reservations_of",
 ]

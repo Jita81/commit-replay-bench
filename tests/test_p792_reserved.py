@@ -13,8 +13,8 @@ Code builder appends to its argv after the rung's own ``--model`` and ``--max-tu
 both when they are set, so a row cannot describe the rung's model while the argv ran another.
 Parts (a) and (b), the refusals at submit and at claim, are added to the same test later.
 
-The reserved.v1 attempt rule (core, no callers yet): a reading registered under it reads each
-enrolled commit by the one row its reservation wrote. C4 (a lint-off row is a miss, never a
+The reserved.v1 attempt rule (core): a reading registered under it reads each enrolled
+commit by the one row its reservation wrote. C4 (a lint-off row is a miss, never a
 hit or a leave), C6 (whatever the reserved attempt's exit — a cancel or kill included — later
 rows never change its verdict), C15 (a settled reservation without a row is a miss), C19 (an
 arm counts only its own reservation's row) and C7 (a non-loop run spends on the reading's
@@ -22,11 +22,20 @@ budget profile, refused otherwise) each have a test here, beside the goldens tha
 legacy (``first_observed.v0``) reading as it read before and the property that the reserved
 rule's hits are a subset of the legacy rule's.
 
-The treatment pin's projections (worker helpers, no caller yet): a reservation pins a
-``deployment_fp`` per campaign and repository and an ``arm_fp`` per arm, and a later mismatch
-halts the run. C3 (``extra_args``), C4 (lint off), C5 (``timeout``), C7 (the budget profile)
-and C11 (a ``RepoConfig`` edit) each move a fingerprint; the ratchets list ``RepoConfig``'s and
+The treatment pin's projections (worker helpers): a reservation pins a ``deployment_fp``
+per campaign and repository and an ``arm_fp`` per arm, and a later mismatch halts the run.
+C3 (``extra_args``), C4 (lint off), C5 (``timeout``), C7 (the budget profile) and C11 (a
+``RepoConfig`` edit) each move a fingerprint; the ratchets list ``RepoConfig``'s and
 ``BuilderContainerSettings``' own fields, so a new field is pinned or named unpinned.
+
+The worker (fail closed): a replay or blind run filed under a reserved.v1 reading reserves
+each commit before its r1 build, so whatever the attempt does after — a kill (C1), a cancel
+(C2), a gold control that timed out (C5), a clock rolled back (C9), a lost sandbox or a full
+disk (C10), a demoted row (C12), an outage (C13) or no row at all (C15) — is that commit's one
+attempt, and a later run skips it; a configuration edit after the first reservation halts the
+next run before its build (C5, C11), and only a refusal before the reservation (a credential
+gone at claim, C13) leaves the commit pending. Each of these failed on the code before the
+worker reserved; the legacy reading's run, which never reserves, is green on both by design.
 
 Navigation
 ----------
@@ -49,14 +58,24 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               the same look or earlier. The projections: every pinned ``RepoConfig`` field and
               every container field and deployment input moves its fingerprint, A0 and A0+L
               share ``deployment_fp``, a calibrated profile moves only ``arm_fp``, and no
-              secret reaches a projection (a credential-shaped input is refused).
+              secret reaches a projection (a credential-shaped input is refused). The worker:
+              C1 (SQLite and PostgreSQL), C2, C5(b, c), C9-C13 and C15 end to end, S3 and A0
+              reserving one commit apart, a reservation only at r1 and before every outcome
+              event, two claims racing for one commit (one wins, on both backends), a settled
+              claim's row refused up to ``execute``, a legacy reading's run never reserving,
+              and ``POST /readings`` registering reserved.v1 only when asked.
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
               readings, ``Reservation`` values and chained rows in memory (the reading
               fixture's ``sealed_row`` and the forward suite's ``S2`` row shape) and call the
-              pure core; no store, no server. The projection tests call the worker's pure
-              helpers on in-memory ``RepoConfig``, ladder and container values.
+              pure core, with no store. The projection tests call the worker's pure helpers on
+              in-memory ``RepoConfig``, ladder and container values. The worker tests use a
+              store and a worker: ``test_worker``'s ``Harness`` (SQLite, or the ``backend``
+              fixture's database) over the pyrepo fixture with a second commit, the fake
+              builder and a local sandbox on the run's cancel token (``_WExec``), every row
+              relabelled as a sealed worker writes it; ``_w_peek`` acts the moment belt 2
+              reads red. The ``POST /readings`` test runs the app on a seeded SQLite store.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0026-the-context-standard.md
@@ -68,7 +87,11 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               rows the reading tests build on), src/crb/server/worker.py
               (``deployment_projection``, ``arm_projection``, ``repo_config_digest``, under
               test), docs/PREVENTION.md (P-792, the row these tests close; P-795, the golden's
-              one deliberate move)
+              one deliberate move), tests/test_worker.py (``Harness``, ``FakeBuilder``),
+              src/crb/server/reading_book.py and src/crb/server/campaigns.py
+              (``load_readings`` filling ``reservations_of``), src/crb/store/jobs.py
+              (``claim_guard``, ``reclaim_stale``), src/crb/server/routes/readings.py (the
+              opt-in fields)
 Tested by:    tests/test_p792_reserved.py
 Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
               failing first), or a builder gains a constructor option that shapes its argv
@@ -86,14 +109,20 @@ import copy
 import dataclasses
 import inspect
 import json
-from collections.abc import Sequence
+import threading
+import types
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from sqlalchemy import select
 
+import crb.builders as builders_pkg
+import crb.builders.adapter as adapter_mod
 from crb.builders import base
 from crb.builders import claude_code as cc
 from crb.builders.adapter import Preflight
@@ -106,22 +135,34 @@ from crb.core.acceptance import (
     HeldOutTests,
     held_out_labels,
 )
+from crb.core.campaign import CAMPAIGN_ADMITTED
 from crb.core.evidence import canonical_json
+from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.ledger import (
     FAILURE_OUTAGE,
     GENESIS_HASH,
+    LABEL_BUILDER_EXECUTOR,
     LABEL_FAILURE_KIND,
+    LABEL_POSTURE_CLASS,
     GradeRow,
     lint_could_change,
 )
 from crb.core.lint import LINT_DISABLED_BY_CONFIG
+from crb.core.mine import change_identity
 from crb.core.prevention import AUTO_CONTEXT, K_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     ATTEMPT_RULE_RESERVED,
+    DEFAULT_MAX_RERUNS,
+    HALT_TREATMENT_MISMATCH,
+    LABEL_CLAIM,
+    LABEL_RESERVATION,
+    LABEL_TREATMENT,
     LEFT_LINT_DISABLED,
     OUTCOME_CEILING,
     POOL_RULE_ALL,
+    READING_EVENT_ACTION,
+    READING_RESERVED_ACTION,
     REASON_SCOPE_FAULT,
     REFUSAL_INVALID,
     REFUSAL_RUN_FIELDS,
@@ -130,6 +171,7 @@ from crb.core.reading import (
     RULE_LOOK_V1,
     RULE_LOOK_V1_STRICT,
     RULES,
+    SKIP_COMMIT_RESERVED,
     STATE_DELIVER,
     Reading,
     ReadingRefused,
@@ -153,6 +195,18 @@ from crb.core.spend import (
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.server import worker
+from crb.server.reading_book import load_readings
+from crb.store.events import append_event
+from crb.store.jobs import (
+    STATUS_FAILED,
+    STATUS_QUEUED,
+    STATUS_RUNNING,
+    JobQueue,
+    claim_guard,
+)
+from crb.store.ledger import AttemptSettled
+from crb.store.models import Event, Repo, Run
+from fixtures import pyrepo as pr
 from fixtures.builders_repo import make_fixture
 from fixtures.posture import posture_row
 from fixtures.readings import (
@@ -170,6 +224,12 @@ from fixtures.readings import (
     rows_for,
     sealed_row,
 )
+from test_worker import FakeBuilder, Harness
+
+try:  # tests/ is a package only if the conftest owner made it one
+    from tests.conftest_store import Backend, backend, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import Backend, backend, pg_schema  # noqa: F401
 
 #: What a default Claude Code builder's stamp held before the override keys existed, in its
 #: key order: a stamp with neither override set must stay byte-identical to this.
@@ -1635,3 +1695,867 @@ def test_p792_projection_holds_no_secret() -> None:
     with pytest.raises(ValueError) as exc:
         _deployment(ladder=_ladder(auth_token=_FAKE_KEY))
     assert _FAKE_KEY not in str(exc.value)
+
+
+# --- the worker: a reserved.v1 reading's run reserves each commit before its r1 build ------
+
+#: The campaign every worker test's reading names; each run it files is admitted on its trace.
+_W_CID = "cmp_" + "w" * 24
+#: The cell the fake builder's rows are written in (rung ``fake:m@p``, the fixture's task).
+_W_CELL = {
+    "process_step": "replay",
+    "capability_class": "bug.fix",
+    "size": "XS",
+    "language": "python",
+    "builder": "fake",
+    "model": "m",
+    "provider": "p",
+}
+
+
+class _WKilled(BaseException):
+    """The host killing the worker mid-grade (C1): not an ``Exception``, so neither the grader
+    nor the worker records anything — the run is left ``running`` with its reservation."""
+
+
+class _WExec(LocalExecutor):
+    """The run's sandbox: a local executor on the run's cancel token, which the rig's ``exec``
+    state switches to lose the sandbox (``lost``), time a command out (``timeout``) or fail
+    one on a full disk (``disk``). A command started once the run is asked to cancel is
+    killed at once (rc 130), as a sealed worker's gold container is: the fixture's commands
+    finish inside the local executor's one-second cancel poll, the sealed witness does not."""
+
+    def __init__(self, state: dict[str, Any], cancel: Callable[[], bool]) -> None:
+        super().__init__(cancel=cancel)
+        self._state = state
+        self._cancel_token = cancel
+
+    def run(self, cmd: Command) -> ExecResult:
+        if self._cancel_token():
+            return ExecResult(130, "", "", cancelled=True)
+        how = self._state.get("exec")
+        if how == "lost":
+            raise SandboxUnavailable("the sandbox went away")
+        if how == "timeout":
+            return ExecResult(124, "", "", timed_out=True)
+        if how == "disk":
+            raise OSError(28, "No space left on device")
+        return super().run(cmd)
+
+
+@dataclasses.dataclass
+class _WRig:
+    """One worker over the fixture repository with two enrolled commits (``first``, the
+    fixture's ``feat: add subtract``, and ``second``, ``feat: add multiply``), the fake
+    builder switched by ``state`` (``b``, or ``by_model`` per rung model) and the run's
+    sandbox by ``state["exec"]``; every row is written in the sealed posture the reading
+    names, as a sealed worker writes it."""
+
+    h: Harness
+    first: str
+    second: str
+    state: dict[str, Any]
+    posture: str
+
+    def register(
+        self,
+        *,
+        legacy: bool = False,
+        hierarchy: tuple[str, ...] = ("S3",),
+        descriptive: tuple[tuple[str, int], ...] = (("A0", 2),),
+    ) -> Reading:
+        """Register a reading of both commits on the campaign (reserved.v1 unless
+        ``legacy``), five minutes ago, and store its ``reading.registered`` event."""
+        reading = register(
+            repo=pr.REPO_NAME,
+            cell=_W_CELL,
+            hierarchy=hierarchy,
+            descriptive=descriptive,
+            pool=[self.first, self.second],
+            apparatus=worker.APPARATUS_VERSION,
+            taxonomy=GLOBAL_CLASS_SET,
+            posture_class=self.posture,
+            checks_arm="off",
+            actor="op-1",
+            hypothesis=HYPOTHESIS,
+            smallest_effect=SMALLEST_EFFECT,
+            campaign_id=_W_CID,
+            now=(datetime.now(UTC) - timedelta(minutes=5)).isoformat(timespec="seconds"),
+            **(
+                {}
+                if legacy
+                else {
+                    "attempt_rule": ATTEMPT_RULE_RESERVED,
+                    "max_reruns": 0,
+                    "budget_profile": PROFILE_DEFAULT,
+                }
+            ),
+        )
+        append_event(
+            self.h.factory,
+            trace_id=f"readings:{pr.REPO_NAME}",
+            stage="system",
+            action=READING_EVENT_ACTION,
+            repo=pr.REPO_NAME,
+            payload=reading.to_dict(),
+        )
+        return reading
+
+    def enqueue(
+        self,
+        reading: Reading | None,
+        *tasks: str,
+        kind: str = "blind",
+        admit: bool = True,
+        **fields: Any,
+    ) -> Run:
+        """Enqueue a run of ``tasks`` (``first`` by default) filed under ``reading`` (none
+        when ``None``), admitted under the campaign unless ``admit`` is false."""
+        params: dict[str, Any] = {"task_ids": list(tasks or (self.first,))}
+        if reading is not None:
+            params["reading_id"] = reading.reading_id
+        run = self.h.enqueue(kind, params_json=params, **fields)
+        if admit:
+            append_event(
+                self.h.factory,
+                trace_id=_W_CID,
+                stage="system",
+                action=CAMPAIGN_ADMITTED,
+                payload={"campaign_id": _W_CID, "run_id": run.id},
+            )
+        return run
+
+    def reservations(self, reading: Reading) -> list[Event]:
+        """The reading's ``reading.reserved`` events, in ``Event.id`` order."""
+        with self.h.factory() as s:
+            return list(
+                s.execute(
+                    select(Event)
+                    .where(
+                        Event.action == READING_RESERVED_ACTION,
+                        Event.trace_id == reading.reading_id,
+                    )
+                    .order_by(Event.id)
+                ).scalars()
+            )
+
+    def verdicts(self, reading: Reading, arm: str) -> dict[str, tuple[bool | None, str]]:
+        """Each enrolled commit of ``arm`` as the server reads it: the reading as
+        ``load_readings`` fills it, over every row in the ledger."""
+        with self.h.factory() as s:
+            loaded = next(
+                r for r in load_readings(s, pr.REPO_NAME) if r.reading_id == reading.reading_id
+            )
+        rows = list(self.h.worker.ledger.rows())
+        return {c.commit: (c.outcome, c.reason) for c in arm_reading(loaded, arm, rows).commits}
+
+    def actions(self, run_id: str) -> list[str]:
+        return [e.action for e in self.h.events(run_id)]
+
+    def payloads(self, run_id: str, action: str) -> list[dict[str, Any]]:
+        return [dict(e.payload or {}) for e in self.h.events(run_id) if e.action == action]
+
+    def skips(self, run_id: str) -> list[tuple[str, str]]:
+        """The run's ``run.task_skipped`` events as ``(task, reason)``."""
+        return [
+            (e.task_id, dict(e.payload or {}).get("reason", ""))
+            for e in self.h.events(run_id)
+            if e.action == "run.task_skipped"
+        ]
+
+    def rows(self, run_id: str) -> list[GradeRow]:
+        return list(self.h.worker.ledger.rows(run_id=run_id))
+
+    def status(self, run_id: str) -> str:
+        run = self.h.queue.get(run_id)
+        assert run is not None
+        return run.status
+
+    def edit_config(self, **changes: Any) -> None:
+        """Edit the repository's stored ``RepoConfig`` (what the next claim loads)."""
+        with self.h.factory() as s:
+            repo = s.get(Repo, pr.REPO_NAME)
+            assert repo is not None
+            repo.config_json = {**dict(repo.config_json or {}), **changes}
+            s.commit()
+
+
+def _w_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | None = None) -> _WRig:
+    """The worker rig on SQLite, or on ``store``'s database when one is given."""
+    pyrepo = pr.build(tmp_path / "pyrepo")
+    p = pyrepo.path
+    (p / pr.SRC).write_text(
+        pr.SRC_FEAT + "\n\ndef multiply(a: int, b: int) -> int:\n    return a * b\n",
+        encoding="utf-8",
+    )
+    (p / pr.TEST_MULTIPLY).write_text(pr.TEST_MULTIPLY_SRC, encoding="utf-8")
+    pr.git(p, "add", "-A")
+    pr.git(p, "commit", "-q", "-m", "feat: add multiply")
+    second = pr.git(p, "rev-parse", "HEAD")
+    h = Harness(tmp_path, pyrepo)
+    if store is not None:
+        h.url = store.url
+        h.settings = dataclasses.replace(h.settings, database_url=store.url)
+        h.worker = worker.Worker(h.settings, engine=store.engine)
+        h.factory = h.worker.factory
+        h.queue = JobQueue(h.factory)
+    h.add_repo()
+    h.add_task(pyrepo.feat_task())
+    h.add_task(
+        pyrepo.feat_task(
+            task_id=second,
+            subject="feat: add multiply",
+            authored=pyrepo.repo.author_date(second),
+            test_files=(pr.TEST_MULTIPLY,),
+            target_tests=(pr.TEST_MULTIPLY,),
+            baseline_failing=(pr.TEST_MULTIPLY,),
+            labels={"change_id": change_identity(pyrepo.repo, second)},
+        )
+    )
+    state: dict[str, Any] = {"b": "gold", "by_model": {}, "exec": "", "created": ""}
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: FakeBuilder(
+            **{**cfg, "behaviour": state["by_model"].get(cfg.get("model"), state["b"])}
+        ),
+    )
+    monkeypatch.setattr(FakeBuilder, "briefs", [])
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    w = h.worker
+    # a sealed worker: both executors docker (P-789), the sandbox a local one on the cancel token
+    monkeypatch.setattr(
+        w, "settings", dataclasses.replace(w.settings, executor="docker", builder_executor="docker")
+    )
+    monkeypatch.setattr(w, "_executor", lambda ctx: _WExec(state, cancel=lambda: w._cancelled(ctx)))
+    monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
+    posture = w._deployment_posture_class(pr.REPO_NAME, "docker")
+    append = w.ledger.append
+
+    def sealed_append(row: GradeRow, *, guard: Any = None) -> GradeRow:
+        # the local sandbox and the host-run fake builder label a row unsealed: relabel it as
+        # the sealed worker it stands in for writes it (and, for C9, at a chosen ``created``)
+        labels = {**row.labels, LABEL_POSTURE_CLASS: posture, LABEL_BUILDER_EXECUTOR: "docker"}
+        fields = {**row.fields(), "labels": labels}
+        if state["created"]:
+            fields["created"] = state["created"]
+        return append(GradeRow(**fields), guard=guard)
+
+    monkeypatch.setattr(w.ledger, "append", sealed_append)
+    return _WRig(h, pyrepo.feat_sha, second, state, posture)
+
+
+def _w_peek(rig: _WRig, monkeypatch: pytest.MonkeyPatch, at: Callable[[Run], None]) -> None:
+    """Call ``at(run)`` once per build, as soon as grading has emitted belt 2 red — the
+    moment the enumeration's operator peeked at the outcome before it was recorded."""
+    real = rig.h.worker._emitter
+
+    def emitter(run: Run) -> Any:
+        e = real(run)
+        on_event = e.on_event
+        built = [False]
+
+        def staged(stage: str, *a: Any, **kw: Any) -> Callable[[str, dict[str, Any]], Any]:
+            cb = on_event(stage, *a, **kw)
+
+            def call(action: str, payload: dict[str, Any]) -> Any:
+                out = cb(action, payload)
+                if action == "build.start":
+                    built[0] = True
+                elif (
+                    built[0]
+                    and action == "grade.belt"
+                    and payload.get("belt") == "target_green"
+                    and payload.get("value") is False
+                ):
+                    built[0] = False
+                    at(run)
+                return out
+
+            return call
+
+        e.on_event = staged
+        return e
+
+    monkeypatch.setattr(rig.h.worker, "_emitter", emitter)
+
+
+def _w_event_ids(rig: _WRig, run_id: str) -> dict[str, list[int]]:
+    """``Event.id`` of each of a run's events, by action."""
+    out: dict[str, list[int]] = {}
+    with rig.h.factory() as s:
+        for ev in s.execute(select(Event).where(Event.trace_id == run_id)).scalars():
+            out.setdefault(ev.action, []).append(int(ev.id))
+    return out
+
+
+def _w_row_count(rig: _WRig) -> int:
+    return len(list(rig.h.worker.ledger.rows()))
+
+
+def test_p792_c1_kill_after_peek_costs_the_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """C1, measured: reproduces the enumeration's kill probe (tests/test_zz_enum_kill_probe.py),
+    which killed the worker as soon as belt 2 read red, before the row was written; the run was
+    reclaimed and re-run with a clean builder, and the commit read a hit. Now the kill leaves
+    the reservation: the reclaimed run skips the commit without building it, the commit reads
+    a miss (``unobserved``) once its claim is settled, and a late append by the killed claim is
+    refused under the grades lock."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    rig.state["b"] = "noop"
+
+    def kill(_: Run) -> None:
+        raise _WKilled
+
+    _w_peek(rig, monkeypatch, kill)
+    with pytest.raises(_WKilled):
+        rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    assert (res.step_id, res.task_id) == ("A0", rig.first)
+    assert rig.status(run.id) == STATUS_RUNNING
+    assert rig.rows(run.id) == []
+    # the killed claim is still running: the commit waits for it
+    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
+
+    assert [r.id for r in rig.h.queue.reclaim_stale(0.0)] == [run.id]
+    rig.state["b"] = "gold"
+    again = rig.h.run_one()
+    assert again.id == run.id
+    assert rig.skips(run.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert len(FakeBuilder.briefs) == 1  # the killed attempt's build; the re-run built nothing
+    assert rig.rows(run.id) == []
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
+    assert len(rig.reservations(reading)) == 1
+
+    # the killed claim's row, had it reached the ledger late, is refused and never stored
+    before = _w_row_count(rig)
+    late = sealed_row(
+        rig.first,
+        clean=False,
+        arm="A0",
+        repo=pr.REPO_NAME,
+        labels={LABEL_RESERVATION: res.event_id, LABEL_CLAIM: "0"},
+    )
+    with pytest.raises(AttemptSettled):
+        rig.h.worker.ledger.append(late, guard=claim_guard(run.id, "w-test", 0))
+    assert _w_row_count(rig) == before
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
+
+
+def test_p792_c2_cancel_during_witness_is_a_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C2, measured in round 4: a cancel asked as soon as belt 2 read red reached the gold
+    witness, which the run's cancel token stopped; the row was a harness failure, which the
+    legacy rule passes over, so a second run re-rolled the commit and it read a hit. Now the
+    harness row is the reserved attempt's and decides the commit: a miss (``harness``), and
+    the second run skips the commit without building it."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    rig.state["b"] = "noop"
+    _w_peek(rig, monkeypatch, lambda r: rig.h.queue.request_cancel(r.id, actor="op-1"))
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(run.id)
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert row.failure_kind == "harness"
+    assert row.labels["env_code"] == "GOLD_CONTROL_RED"
+    (control,) = rig.payloads(run.id, "grade.control")
+    assert (control["green"], control["rc"]) == (False, 130)
+    assert rig.status(run.id) not in (STATUS_QUEUED, STATUS_RUNNING)
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
+
+    rig.state["b"] = "gold"
+    second = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(second.id)
+    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
+
+
+def test_p792_c5_timeout_refused_and_gold_red_is_a_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C5, measured in round 4: a gold control that timed out (blame ``GOLD_CONTROL_RED``)
+    wrote a harness row the legacy rule passes over, and a later clean row of another run
+    decided the commit; and a ``RepoConfig`` edit moved what later attempts ran under while
+    the reading read on. (b) Now the timed-out control's row is the reserved attempt's: a
+    miss, which a later clean row never changes. (c) A ``runner_opts`` edit after the first
+    reservation halts the next run ``reading_treatment_mismatch`` before ``build.start``,
+    naming the field that moved. Part (a), ``POST /runs`` refusing a reading's run its own
+    ``timeout``, lands with the route's check (step 10)."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    # (b) the reserved attempt's gold control times out
+    run = rig.enqueue(reading)
+    rig.state["b"] = "noop"
+    _w_peek(rig, monkeypatch, lambda _: rig.state.update(exec="timeout"))
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(run.id)
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert row.labels["env_code"] == "GOLD_CONTROL_RED"
+    assert "gold control red" in row.error
+    miss = rig.verdicts(reading, "A0")[rig.first]
+    assert miss == (False, "harness")
+    # a later clean row of another admitted run, under no reading, changes nothing
+    rig.state.update(b="gold", exec="")
+    other = rig.enqueue(None)
+    rig.h.run_one()
+    (clean,) = rig.rows(other.id)
+    assert clean.clean and LABEL_RESERVATION not in clean.labels
+    assert rig.verdicts(reading, "A0")[rig.first] == miss
+
+    # (c) the repository's runner options move after the first reservation
+    cfg = rig.h.pyrepo.config.to_dict()
+    rig.edit_config(runner_opts={**dict(cfg.get("runner_opts") or {}), "p792_edit": "1"})
+    rig.state["b"] = "multiply"
+    moved = rig.enqueue(reading, rig.second)
+    done = rig.h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error == HALT_TREATMENT_MISMATCH
+    (halted,) = rig.payloads(moved.id, "run.halted")
+    assert halted["reason"] == HALT_TREATMENT_MISMATCH
+    detail = halted["detail"]
+    assert detail["half"] == "deployment"
+    assert detail["pinned"] == dict(res.payload_json)["deployment_fp"]
+    assert detail["ours"] != detail["pinned"]
+    assert detail["pinned_by"] == res.event_id
+    assert detail["fields"] == ["repo_config"]
+    assert "build.start" not in rig.actions(moved.id)
+    assert rig.rows(moved.id) == []
+    assert len(rig.reservations(reading)) == 1
+    assert rig.verdicts(reading, "A0")[rig.second] == (None, "pending")
+
+
+def test_p792_c9_reservation_before_registration_is_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C9, from enumeration.md by code reading (no probe ran): a row whose ``created`` does
+    not fall after the registration — a worker clock rolled back — was out of the reading's
+    scope, so the legacy rule passed over it and a later attempt decided the commit. Now the
+    reserved attempt's row decides it even so: a miss (``out_of_scope``), and a second run
+    skips the commit."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    rig.state["created"] = reading.registered_at  # the worker's clock reads the registration
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(run.id)
+    assert row.clean and row.created == reading.registered_at
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "out_of_scope")
+
+    rig.state["created"] = ""
+    second = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(second.id)
+    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "out_of_scope")
+
+
+def test_p792_c10_sandbox_loss_after_reserve_is_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C10, from enumeration.md by code reading (no probe ran): a sandbox lost after the
+    build stopped the run with no row, and a host-side failure inside grading wrote a harness
+    row; the legacy rule read the commit pending, or passed over the harness row, so a later
+    attempt decided it. Now both are the reserved attempt's: the lost sandbox reads
+    ``unobserved`` once the run has failed, and a second run skips the commit; a full disk
+    under the grader is a ``harness`` miss."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.state.update(exec="lost"))
+    done = rig.h.run_one()
+    assert done.status == STATUS_FAILED
+    assert done.error.startswith("sandbox unavailable")
+    assert rig.rows(run.id) == []
+    (res,) = rig.reservations(reading)
+    assert res.task_id == rig.first
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
+
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    rig.state["exec"] = ""
+    again = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(again.id)
+    assert rig.skips(again.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
+
+    # the second commit's grader fails on the host: a harness row, the reserved attempt's
+    rig.state["b"] = "multiply"
+    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.state.update(exec="disk"))
+    disk = rig.enqueue(reading, rig.second)
+    rig.h.run_one()
+    (row,) = rig.rows(disk.id)
+    assert row.failure_kind == "harness"
+    assert row.labels[LABEL_RESERVATION] == rig.reservations(reading)[1].event_id
+    assert rig.verdicts(reading, "A0")[rig.second] == (False, "harness")
+
+
+def test_p792_c11_inflight_attempt_uses_claim_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C11, measured: the reading side re-confirmed by tests/test_zz_enum_fwd_lint_probe.py — a
+    ``RepoConfig`` edit changed what later attempts were graded under while the reading read
+    on. Now an attempt in flight when the configuration is edited is graded on the claim's
+    snapshot and decides its commit on the treatment it reserved (a hit), and the next run,
+    which loads the edit, halts ``reading_treatment_mismatch`` before ``build.start``."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    cfg = rig.h.pyrepo.config.to_dict()
+    edit = {**dict(cfg.get("runner_opts") or {}), "p792_edit": "1"}
+    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.edit_config(runner_opts=edit))
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(run.id)
+    assert row.clean
+    assert row.labels[LABEL_TREATMENT] == dict(res.payload_json)["treatment"]
+    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
+
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    rig.state["b"] = "multiply"
+    later = rig.enqueue(reading, rig.second)
+    done = rig.h.run_one()
+    assert done.error == HALT_TREATMENT_MISMATCH
+    (halted,) = rig.payloads(later.id, "run.halted")
+    assert halted["detail"]["fields"] == ["repo_config"]
+    assert "build.start" not in rig.actions(later.id)
+    assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}
+
+
+def test_p792_c12_demoted_row_is_miss(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """C12, from enumeration.md by code reading (no probe ran): a clean row whose evidence
+    pack could not be kept is demoted to a harness failure, which the legacy rule passed
+    over, so a later attempt decided the commit. Now the demoted row keeps its reservation
+    and decides the commit: a miss (``harness``), and a second run skips it."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    kept = worker._RunLedger._kept_pack
+    monkeypatch.setattr(
+        worker._RunLedger, "_kept_pack", lambda self, row: (None, "the pack store refused it")
+    )
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(run.id)
+    assert not row.clean and row.failure_kind == "harness"
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
+
+    monkeypatch.setattr(worker._RunLedger, "_kept_pack", kept)
+    second = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(second.id)
+    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
+
+
+def test_p792_c13_credential_gone_before_reserve_stays_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C13, from enumeration.md by code reading (no probe ran): a provider outage row was an
+    outage the legacy rule passed over, so a later attempt decided the commit. Now a refusal
+    before the reservation — the claim's credential check — writes nothing and leaves the
+    commit pending, while an outage after it is the reserved attempt's miss (``outage``),
+    and the next run skips the commit."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    gone = "credential_missing: ANTHROPIC_API_KEY is unset"
+    real = rig.h.worker._credential_gone
+    monkeypatch.setattr(rig.h.worker, "_credential_gone", lambda run: gone)
+    refused = rig.enqueue(reading)
+    done = rig.h.run_one()
+    assert (done.status, done.error) == (STATUS_FAILED, gone)
+    assert "build.start" not in rig.actions(refused.id)
+    assert rig.reservations(reading) == []
+    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
+
+    monkeypatch.setattr(rig.h.worker, "_credential_gone", real)
+    rig.state["b"] = "outage"
+    run = rig.enqueue(reading)
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(run.id)
+    assert row.failure_kind == "outage" and row.labels[LABEL_RESERVATION] == res.event_id
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "outage")
+
+    rig.state["b"] = "gold"
+    third = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(third.id)
+    assert rig.skips(third.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "outage")
+
+
+def test_p792_c15_settled_reservation_without_a_row_is_a_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C15, from enumeration.md by code reading (no probe ran), and its mechanism measured
+    here: on the replay path a discard that fails after the builder raised grades the edits
+    as they are and writes a clean row naming the builder's error in its ``builder_error``
+    label (the ledger refuses only a clean row with an ``error``), not no row as the
+    enumeration read; that row is the reserved attempt's and decides the commit, and a later
+    run skips the commit rather than re-rolling it. What C15's fix needs is that an attempt
+    which ends with no row — here the ledger refusing the write — reads a miss
+    (``unobserved``) once its run has failed, never pending for a later attempt to decide."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+
+    def applied_then_raised(ws: Any, brief: Any) -> None:
+        pr.apply_gold(ws)
+        raise RuntimeError("the builder fell over after editing")
+
+    def undiscardable(*_: Any, **__: Any) -> list[str]:
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(FakeBuilder, "hook", applied_then_raised)
+    monkeypatch.setattr(adapter_mod, "discard_source_edits", undiscardable)
+    raised = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "builder.discard.error" in rig.actions(raised.id)
+    (res,) = rig.reservations(reading)
+    (row,) = rig.rows(raised.id)
+    assert row.clean and not row.error
+    assert row.labels["builder_error"].startswith("builder raised RuntimeError")
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
+
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    reroll = rig.enqueue(reading)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(reroll.id)
+    assert rig.skips(reroll.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+
+    # the second commit's row never reaches the ledger: a settled reservation with no row
+    append = rig.h.worker.ledger.append
+
+    def refused(row: GradeRow, *, guard: Any = None) -> GradeRow:
+        if row.task_id == rig.second:
+            raise OSError(28, "No space left on device")
+        return append(row, guard=guard)
+
+    monkeypatch.setattr(rig.h.worker.ledger, "append", refused)
+    rig.state["b"] = "multiply"
+    lost = rig.enqueue(reading, rig.second)
+    done = rig.h.run_one()
+    assert done.status == STATUS_FAILED
+    assert rig.rows(lost.id) == []
+    assert [e.task_id for e in rig.reservations(reading)] == [rig.first, rig.second]
+    assert rig.verdicts(reading, "A0")[rig.second] == (False, "unobserved")
+
+    monkeypatch.setattr(rig.h.worker.ledger, "append", append)
+    again = rig.enqueue(reading, rig.second)
+    rig.h.run_one()
+    assert "build.start" not in rig.actions(again.id)
+    assert rig.skips(again.id) == [(rig.second, SKIP_COMMIT_RESERVED)]
+    assert rig.verdicts(reading, "A0") == {
+        rig.first: (True, ""),
+        rig.second: (False, "unobserved"),
+    }
+
+
+def test_p792_s3_and_a0_share_commits_without_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reservation is per (reading, arm, commit): a sighted replay (S3) and a blind run
+    (A0) of the same commit each reserve it on their own arm, neither skips, and each arm's
+    commit is decided by its own reservation's row."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    sighted = rig.enqueue(reading, kind="replay")
+    rig.h.run_one()
+    blind = rig.enqueue(reading, kind="blind")
+    rig.h.run_one()
+    s3, a0 = rig.reservations(reading)
+    assert [(e.step_id, e.task_id) for e in (s3, a0)] == [("S3", rig.first), ("A0", rig.first)]
+    assert rig.skips(sighted.id) == [] and rig.skips(blind.id) == []
+    ((s3_row,), (a0_row,)) = rig.rows(sighted.id), rig.rows(blind.id)
+    assert s3_row.labels[LABEL_RESERVATION] == s3.event_id
+    assert a0_row.labels[LABEL_RESERVATION] == a0.event_id
+    assert rig.verdicts(reading, "S3")[rig.first] == (True, "")
+    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
+    # the arms share the deployment half: the blind run's reservation is pinned by the S3 one
+    assert dict(a0.payload_json)["pinned_by"] == s3.event_id
+    assert dict(a0.payload_json)["deployment_fp"] == dict(s3.payload_json)["deployment_fp"]
+
+
+def test_p792_reserve_only_at_r1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reserved run reserves before its r1 build only: a two-rung run whose r1 misses climbs
+    to r2 without a second reservation and is not halted; the r2 row carries no reservation,
+    so it never decides the commit — the r1 miss does."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    rig.state["by_model"] = {"m": "noop", "m2": "gold"}
+    run = rig.enqueue(reading, ladder_json=["fake:m@p", "fake:m2@p"])
+    rig.h.run_one()
+    assert "run.halted" not in rig.actions(run.id)
+    (res,) = rig.reservations(reading)
+    r1, r2 = rig.rows(run.id)
+    assert (r1.trial, r1.clean, r2.trial, r2.clean) == ("r1", False, "r2", True)
+    assert r1.labels[LABEL_RESERVATION] == res.event_id
+    assert LABEL_RESERVATION not in r2.labels
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "miss")
+
+
+def test_p792_reservation_precedes_outcome_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C6's companion: the reservation is written before anything the attempt shows — its
+    ``Event.id`` is below the task's ``build.start`` and every ``grade.*`` event of the run,
+    so no outcome can be seen before the commit is spent."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    ids = _w_event_ids(rig, run.id)
+    outcome = [i for action, got in ids.items() if action.startswith("grade.") for i in got]
+    assert ids["build.start"] and outcome
+    assert int(res.id) < min([*ids["build.start"], *outcome])
+
+
+def test_p792_concurrent_reserve_one_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """Two runs of the reading, claimed at once, race to reserve the same (reading, arm,
+    commit) from two threads: one reservation is written and the other run skips the commit
+    — the events lock decides, on SQLite and on PostgreSQL."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register()
+    for _ in range(2):
+        rig.enqueue(reading)
+    w = rig.h.worker
+    task = rig.h.pyrepo.feat_task()
+    reservers = []
+    for _ in range(2):
+        run = rig.h.queue.claim_next(w.worker_id)
+        assert run is not None
+        emitter = w._emitter(run)
+        config, git = w._load_repo(run.repo, emitter, kind=run.kind)
+        reservers.append(
+            w._reserver(
+                worker.RunContext(run=run, emitter=emitter, config=config, git=git),
+                reading.reading_id,
+                arm="A0",
+                deployment={"d": 1},
+                arm_body_for=lambda t: {"a": 1},
+                hold_usd=None,
+                ledger=types.SimpleNamespace(reserved={}),  # type: ignore[arg-type]
+            )
+        )
+    gate = threading.Barrier(2)
+    got: list[Any] = [None, None]
+
+    def race(i: int) -> None:
+        gate.wait()
+        got[i] = reservers[i](task)
+
+    threads = [threading.Thread(target=race, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert sorted((r.status, r.reason) for r in got) == [
+        ("ok", ""),
+        ("skip", SKIP_COMMIT_RESERVED),
+    ]
+    assert len(rig.reservations(reading)) == 1
+
+
+def test_p792_attempt_settled_reaches_execute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reserved attempt whose run is reclaimed mid-build reaches the ledger as a claim that
+    is no longer its own: the append raises ``AttemptSettled``, the worker writes neither the
+    row nor the run's finish (``run.finish_refused``; the reclaimed run stays queued for its
+    new claim), and the new claim skips the commit, which reads ``unobserved``."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    finished: list[tuple[Any, ...]] = []
+    finish = rig.h.worker.queue.finish
+
+    def spy(*a: Any, **kw: Any) -> Any:
+        finished.append(a)
+        return finish(*a, **kw)
+
+    monkeypatch.setattr(rig.h.worker.queue, "finish", spy)
+    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.h.queue.reclaim_stale(0.0))
+    rig.h.run_one()
+    assert "run.finish_refused" in rig.actions(run.id)
+    assert finished == []
+    assert rig.rows(run.id) == []
+    assert rig.status(run.id) == STATUS_QUEUED
+    (res,) = rig.reservations(reading)
+
+    monkeypatch.setattr(FakeBuilder, "hook", None)
+    again = rig.h.run_one()
+    assert again.id == run.id
+    assert rig.skips(run.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.rows(run.id) == []
+    assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
+    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
+
+
+def test_p792_a_legacy_readings_run_never_reserves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run filed under a legacy (``first_observed.v0``) reading reserves nothing: no
+    ``reading.reserved`` event, no reservation label on its row, and a second run builds the
+    commit again, as it always did. Green before the change by design — it pins that the
+    worker's reserver is wired only for a reserved.v1 reading."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register(legacy=True)
+    first = rig.enqueue(reading)
+    rig.h.run_one()
+    second = rig.enqueue(reading)
+    rig.h.run_one()
+    assert rig.reservations(reading) == []
+    rows = [*rig.rows(first.id), *rig.rows(second.id)]
+    assert len(rows) == 2 and all(LABEL_RESERVATION not in r.labels for r in rows)
+    assert "build.start" in rig.actions(second.id)
+    assert rig.skips(first.id) == rig.skips(second.id) == []
+    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
+
+
+def test_p792_post_readings_opts_in_to_reserved(tmp_path: Path) -> None:
+    """``POST /readings`` registers a reserved.v1 reading only when asked: a body naming no
+    rule is registered under the legacy rule as before, ``attempt_rule: reserved.v1`` stores
+    ``max_reruns`` 0 and the budget profile (``default`` unless named), and a reserved.v1
+    body asking for reruns is refused 422 and writes nothing."""
+    from fixtures.proven import add_tasks, register_via_api
+    from fixtures.readings import SEALED_SETTINGS
+    from fixtures.server_seed import envelope, make_env
+
+    with make_env(tmp_path, **SEALED_SETTINGS) as env:
+        add_tasks(env.factory)
+        legacy = register_via_api(env)
+        assert legacy.status_code == 201, legacy.text
+        got = legacy.json()
+        assert got.get("attempt_rule", "") in ("", ATTEMPT_RULE_LEGACY)
+        assert got["max_reruns"] == DEFAULT_MAX_RERUNS
+        reserved = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED)
+        assert reserved.status_code == 201, reserved.text
+        body = reserved.json()
+        assert body["attempt_rule"] == ATTEMPT_RULE_RESERVED
+        assert (body["max_reruns"], body["budget_profile"]) == (0, PROFILE_DEFAULT)
+        assert body["reading_id"] != got["reading_id"]
+        with env.factory() as s:
+            before = len(list(s.execute(select(Event).where(Event.action == READING_EVENT_ACTION))))
+        refused = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED, max_reruns=1)
+        assert refused.status_code == 422, refused.text
+        err = envelope(refused)
+        assert err["code"] == REFUSAL_INVALID
+        assert err["detail"] == {"max_reruns": 1, "budget_profile": PROFILE_DEFAULT}
+        with env.factory() as s:
+            after = len(list(s.execute(select(Event).where(Event.action == READING_EVENT_ACTION))))
+        assert after == before

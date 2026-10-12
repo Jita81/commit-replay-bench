@@ -42,7 +42,9 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               verify (``campaign_unknown``, DL-382) and any campaign on a reading of the
               factory's cell, the forward reading included (``campaign_unsupported_reading``),
               reads the rows and the readings already registered under the lock, refuses a
-              reading already registered (``reading_exists``, P-793), and writes the event; lists readings with every arm's state and the budget per cell;
+              reading already registered (``reading_exists``, P-793), and writes the event
+              (a reserved.v1 reading only when asked: ``attempt_rule``, P-792); lists readings
+              with every arm's state and the budget per cell;
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
 How:          ``append_event_checked`` (lock → ``crb.core.reading.register`` → insert) →
@@ -68,7 +70,7 @@ Touch when:   never for a new repository; the reading's shape or the registratio
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, Field, StringConstraints
@@ -88,6 +90,7 @@ from crb.core.ledger import (
     is_sealed_class,
 )
 from crb.core.reading import (
+    DEFAULT_MAX_RERUNS,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_INVALID,
@@ -259,6 +262,15 @@ class ReadingIn(BaseModel):
     #: The campaign every run of this reading spends under (DL-382): it must exist and verify
     #: (404 ``campaign_unknown``); hashed into the reading's id when given.
     campaign_id: CampaignId = None
+    #: How a commit is read (P-792), opt-in: ``""`` the legacy first-observed rule, or
+    #: ``reserved.v1`` — only the attempt a run reserves for a commit before its build decides
+    #: it, so a cancel, kill or harness failure after the reservation is that commit's miss.
+    #: ``max_reruns`` defaults to 2 under the legacy rule and 0 under reserved.v1 (the only
+    #: value it accepts); ``budget_profile`` is the profile every run of a reserved.v1 reading
+    #: spends on, ignored under the legacy rule. Both hashed only with the rule.
+    attempt_rule: Literal["", "reserved.v1"] = ""
+    max_reruns: int | None = Field(default=None, ge=0)
+    budget_profile: str = Field(default="default", max_length=64)
 
 
 class ReadingsOut(BaseModel):
@@ -423,6 +435,13 @@ def register_reading(
             hypothesis=body.hypothesis,
             smallest_effect=body.smallest_effect,
             campaign_id=body.campaign_id or "",
+            attempt_rule=body.attempt_rule,
+            max_reruns=(
+                body.max_reruns
+                if body.max_reruns is not None
+                else (0 if body.attempt_rule else DEFAULT_MAX_RERUNS)
+            ),
+            budget_profile=body.budget_profile if body.attempt_rule else "",
         )
         return reading.to_dict()
 

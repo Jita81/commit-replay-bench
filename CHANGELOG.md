@@ -15,14 +15,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
   ceiling the product holds** (P-787 to P-795, G-957, DL-372 to DL-384;
   [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading's id hashes
-  `hypothesis`, `smallest_effect` and its campaign; `thin_cell` counts distinct tasks. A
-  reading and its runs need sandbox and builder on docker, in its posture class (409
+  `hypothesis`, `smallest_effect` and campaign; `thin_cell` counts distinct tasks. A reading
+  and its runs need sandbox and builder on docker, in its posture class (409
   `reading_posture_mismatch`); a retry is 409 `reading_exists`. Replay rows record their
-  executor; an unsealed one is a `scope_fault` (arm undecided). `POST /campaigns` holds a
-  ceiling in pounds: runs need `max_cost_usd` and fit cap plus headroom (409
-  `campaign_ceiling`); a reading counts only admitted runs (409 `campaign_required`); `S1`
-  author calls count; an overrun stops the campaign. CI runs the Go builder image;
-  2026-10-11's decisions recorded.
+  executor (unsealed: `scope_fault`). `reserved.v1` readings score one attempt per commit,
+  reserved before build. `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd`
+  within cap plus headroom (409 `campaign_ceiling`); a reading counts only admitted runs (409
+  `campaign_required`); `S1` author calls count; overruns stop it. CI runs the Go builder
+  image; 2026-10-11's decisions recorded.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen
