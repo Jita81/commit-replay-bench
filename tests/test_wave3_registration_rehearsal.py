@@ -19,22 +19,30 @@ What it does: Step 4: logs in as an operator, registers the record's campaign (2
               record names (``campaign_unknown``, ``pool_not_blind``, ``pool_seen``,
               ``budget_spent``, ``invalid_reading`` naming both executors on a host builder and
               the posture class with the sandbox off docker); a retried registration is
-              refused 409 ``reading_exists`` naming the first reading, which lists once.
+              refused 409 ``reading_exists`` naming the first reading, which lists once; every
+              reading registers under ``reserved.v1`` (``max_reruns`` 0, the ``default``
+              budget profile, its pool pinned to its qualification records) — a bare body as
+              the product's default, the record's body as written — and a body asking for the
+              legacy rule or re-runs is refused 422 (P-792, DL-385).
               Step 6: queues ``S3`` from the remeasure plan, ``A0`` and ``A0+L`` from the
               record's bodies, each admitted under the campaign (``admitted_runs`` rising on
               every reading of it), then ``S1`` from the plan once ``S3`` delivers; meets 409
               ``campaign_ceiling``, ``campaign_required`` (also from the Learn queue),
               ``reading_posture_mismatch``, ``reading_unsealed`` and the other refusals the
-              record lists, each with nothing queued; checks part 2's bodies without
-              ``reading_id`` or with neither id, and that a reading counts only rows of runs
-              its campaign admitted. Step 7: reads the tally, and part 2's stop
+              record lists, each with nothing queued; refuses part 2's body without
+              ``reading_id`` 409 ``reading_required`` and queues one with neither id outside
+              the campaign; checks that a reading counts only rows of runs its campaign
+              admitted, each counted row reserved before its build and labelled with its
+              ``reservation`` and ``treatment``, the treatment pinned once the repository's
+              first run reserved (``pinned_treatment``). Step 7: reads the tally, and part 2's stop
               (``campaign_cost_unknown``, ``campaign_overrun``) in ``stopped``. Step 9: files
               the stage-2 release (the line $108.00) and resumes step 6 under it.
 How:          ``make_env`` on the sealed settings with the record's test author; the
               repositories ``cobra`` and ``click``, their qualified tasks and each task's
               qualification record (``qualify_pool``) written to the store; every request
               through the in-process ``TestClient`` on the record's own paths. No worker runs:
-              a finished run is the worker's status and rows written to the store. The
+              a finished run is the worker's status, its reservations (``reserve_for``, the
+              worker's ``reading.reserved`` event) and its rows written to the store. The
               claude_code and editblock credential checks are stubbed to "present" — the
               stack's credential is the operator's, and the rehearsal never sets or reads a
               key. A disagreement found here is fixed in the record or the
@@ -47,7 +55,8 @@ Works with:   docs/reviews/2026-10-09-wave-3-registration.md (the record rehears
               src/crb/server/routes/readings.py (the registration and ``GET /readings``),
               src/crb/server/routes/runs.py (``submit_refusals``, ``admit_under_campaign``),
               src/crb/server/routes/learn.py (the remeasure plan and its queue),
-              tests/test_server_campaigns.py, tests/test_server_readings.py (the route suites)
+              tests/test_server_campaigns.py (the campaign routes' own suite),
+              tests/test_server_readings.py (the readings routes' own suite)
 Tested by:    this file
 Touch when:   never for a new repository; when the Wave 3 registration record changes a
               request, a body or a success condition of steps 4, 6, 7 or 9, or the product
@@ -68,6 +77,7 @@ from typing import Any
 import pytest
 from sqlalchemy import func, select
 
+from crb.core.ledger import GradeRow
 from crb.core.reading import READING_EVENT_ACTION, reading_cell_key, seeded_order
 from crb.core.spec import TaskSpec
 from crb.server.app import API_PREFIX
@@ -76,7 +86,7 @@ from crb.server.routes import runs as runs_routes
 from crb.server.routes.learn import deployment_author_model
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Repo, Run, Task
-from fixtures.readings import SEALED_SETTINGS, qualify_pool, sealed_row
+from fixtures.readings import SEALED_SETTINGS, qualify_pool, reserve_for, sealed_row
 from fixtures.server_seed import Env, envelope, login, make_env
 
 RECORD = Path(__file__).resolve().parents[1] / "docs/reviews/2026-10-09-wave-3-registration.md"
@@ -478,6 +488,53 @@ def test_step4_registers_the_campaign_then_the_four_readings(stack: Wave3) -> No
         assert spent == ["2.10%", "2.10%"] and {b["budget"] for b in served["budgets"]} == {0.05}
 
 
+#: Item 2's run fields: what every registration through ``POST /readings`` reads under.
+RESERVED_FIELDS = {"attempt_rule": "reserved.v1", "max_reruns": 0, "budget_profile": "default"}
+
+
+def test_step4_every_reading_registers_under_reserved_v1(stack: Wave3) -> None:
+    """Item 2's attempt rule (P-792): ``POST /readings`` registers every reading reserved.v1
+    — a body that names no attempt rule as the product's default, and the record's body as
+    written (part 5 names the three fields) — with ``max_reruns`` 0 on the ``default``
+    budget profile, its pool pinned to the qualification records of the repository's
+    posture. A body asking for the legacy rule or for re-runs is refused 422 with nothing
+    registered: the legacy rule is no longer registered here."""
+    w = stack
+    cid = w.send("POST", "/api/v1/campaigns", json=campaign_body()).json()["campaign_id"]
+    bodies = registration_bodies(cid, deployment_author_model(w.env.settings))
+    bare = {k: v for k, v in bodies[("cobra", "XS")].items() if k not in RESERVED_FIELDS}
+    posture = "pst_" + hashlib.sha256(b"wave3-cobra").hexdigest()[:24]
+
+    def reserved_v1(body: dict[str, Any]) -> None:
+        r = w.send("POST", "/api/v1/readings", json=body)
+        assert r.status_code == 201, r.text
+        reading = r.json()
+        assert {k: reading.get(k) for k in RESERVED_FIELDS} == RESERVED_FIELDS, reading
+        assert reading["pool_posture_id"] == posture, reading
+        assert sorted(reading["pool_qualifications"]) == sorted(reading["pool"]), reading
+
+    reserved_v1(bare)
+    record = bodies[("cobra", "S")]
+    assert {k: record.get(k) for k in RESERVED_FIELDS} == RESERVED_FIELDS, record
+    reserved_v1(record)
+    served = _served_readings(w, "cobra")
+    assert {o["attempt_rule"] for o in served.values()} == {"reserved.v1"}, served
+    asked = {
+        **bodies[("click", "XS")],
+        "hypothesis": HYPOTHESIS + ", on the legacy rule",
+    }
+    for change in (
+        {"attempt_rule": ""},
+        {"attempt_rule": "first_observed.v0"},
+        {"max_reruns": 2},
+        {"max_reruns": None},
+    ):
+        _refused(
+            w.send("POST", "/api/v1/readings", json={**asked, **change}), 422, "validation_error"
+        )
+    assert _registered(w.env) == 2
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -671,20 +728,28 @@ def test_step6_meets_the_refusals_the_record_lists_with_nothing_queued(wave3: Wa
 
 def test_step6_a_body_without_reading_id_and_one_with_neither(wave3: Wave3) -> None:
     """Part 2: a run posted with the campaign's ``campaign_id`` but no ``reading_id`` is
-    admitted under the campaign; a run of a pool commit posted with neither is queued outside
-    it — not listed, not admitted, under its own cap."""
+    refused 409 ``reading_required`` — the campaign holds reserved.v1 readings on that
+    repository (P-792 C19), so a run under it names its reading — with nothing queued; a run
+    of a pool commit posted with neither is queued outside it — not listed, not admitted,
+    under its own cap."""
     w = wave3
-    a0 = _a0(w, ("cobra", "XS"))
+    key = ("cobra", "XS")
+    a0 = _a0(w, key)
     no_reading = {k: v for k, v in a0.items() if k != "reading_id"}
-    r = w.send("POST", "/api/v1/runs", json=no_reading)
-    assert r.status_code == 201, r.text
-    assert _admitted_runs(w) == {1}
+    before = _runs(w.env)
+    err = _refused(w.send("POST", "/api/v1/runs", json=no_reading), 409, "reading_required")
+    held = sorted(w.readings[("cobra", size)]["reading_id"] for size in ("XS", "S"))
+    assert err["detail"] == {"campaign_id": w.cid, "reading_ids": held}, err
+    assert _runs(w.env) == before and _admitted_runs(w) == {0}
+    assert "is refused 409 `reading_required` when the campaign holds a reserved.v1 reading" in (
+        _flat()
+    )
     neither = {k: v for k, v in no_reading.items() if k != "campaign_id"}
     outside = w.send("POST", "/api/v1/runs", json=neither)
     assert outside.status_code == 201, outside.text
     view = w.send("GET", f"/api/v1/campaigns/{w.cid}").json()
-    assert [x["run_id"] for x in view["runs"]] == [r.json()["id"]]
-    assert _admitted_runs(w) == {1}
+    assert view["runs"] == []
+    assert _admitted_runs(w) == {0}
 
 
 def _grade(
@@ -695,12 +760,28 @@ def _grade(
     *,
     cost_usd: float = 0.25,
     cost_known: str = "true",
+    reserved: bool = True,
 ) -> None:
-    """The worker's rows: each commit graded clean under ``S3`` by ``run_id``, in the
-    reading's posture, at ``cost_usd`` an attempt (default $0.25)."""
+    """The worker's attempts: each commit reserved on ``S3`` of the cell's reserved.v1
+    reading for ``run_id`` before its build (``reserve_for``, the worker's
+    ``reading.reserved``, P-792), then graded clean under ``S3`` by ``run_id`` in the
+    reading's posture at ``cost_usd`` an attempt (default $0.25), its row labelled with the
+    reservation, the treatment and the claim. ``reserved=False``: rows no reservation names
+    — a run's the campaign never admitted, which the worker would never reserve."""
     reading = w.readings[key]
     ledger = DbLedger(w.env.factory)
     for commit in commits:
+        labels = {"cost_known": cost_known}
+        if reserved:
+            labels |= reserve_for(
+                w.env.factory,
+                reading_id=reading["reading_id"],
+                arm="S3",
+                task_id=commit,
+                run_id=run_id,
+                repo=key[0],
+                campaign_id=w.cid,
+            )
         ledger.append(
             sealed_row(
                 commit,
@@ -711,9 +792,18 @@ def _grade(
                 created="2099-01-01T00:00:00+00:00",
                 posture_class=reading["posture_class"],
                 cost_usd=cost_usd,
-                labels={"cost_known": cost_known},
+                labels=labels,
             )
         )
+
+
+def _settle(w: Wave3, run_id: str) -> None:
+    """The worker's last word on ``run_id``: ``succeeded``."""
+    with w.env.factory() as s:
+        run = s.get(Run, run_id)
+        assert run is not None
+        run.status = "succeeded"
+        s.commit()
 
 
 def _counted(w: Wave3, key: tuple[str, str], arm: str) -> list[str]:
@@ -725,32 +815,68 @@ def _counted(w: Wave3, key: tuple[str, str], arm: str) -> list[str]:
 
 def _deliver_s3(w: Wave3, key: tuple[str, str]) -> str:
     """Queue the cell's ``S3`` run and play the worker: every commit the plan asked for
-    graded clean, the run ``succeeded``."""
+    reserved and graded clean, the run ``succeeded``."""
     body = _s3_body(w, key)
     r = w.send("POST", "/api/v1/runs", json=body)
     assert r.status_code == 201, r.text
     run_id = str(r.json()["id"])
     _grade(w, key, list(body["task_ids"]), run_id)
-    with w.env.factory() as s:
-        run = s.get(Run, run_id)
-        assert run is not None
-        run.status = "succeeded"
-        s.commit()
+    _settle(w, run_id)
     return run_id
+
+
+def _counted_rows(w: Wave3, key: tuple[str, str], arm: str) -> list[GradeRow]:
+    """The rows ``GET /readings`` counts under ``arm``: each counted commit's row, by the
+    ``row_hash`` the reading serves for it."""
+    served = _served_readings(w, key[0])[w.readings[key]["reading_id"]]
+    (got,) = [a for a in served["arms"] if a["arm"] == arm]
+    hashes = {c["row_hash"] for c in got["commits"] if c["commit"] in got["counted_commits"]}
+    rows = [r for r in DbLedger(w.env.factory).rows(repo=key[0]) if r.row_hash in hashes]
+    assert len(rows) == len(got["counted_commits"]), (hashes, got)
+    return rows
 
 
 def test_step6_a_reading_counts_only_rows_of_runs_its_campaign_admitted(wave3: Wave3) -> None:
     """Step 6: "only rows of runs the campaign admitted count" — the admitted ``S3`` run's
-    rows are counted under ``S3``; a row of a run the campaign never admitted is not."""
+    reserved rows are counted under ``S3``, each carrying its ``reservation`` and
+    ``treatment`` labels; a row of a run the campaign never admitted carries no reservation
+    and is not. ``pinned_treatment`` is served once the repository's first run reserved."""
     w = wave3
     key = ("cobra", "XS")
+    rid = w.readings[key]["reading_id"]
+    assert _served_readings(w, "cobra")[rid]["pinned_treatment"] is None
     body = _s3_body(w, key)
     r = w.send("POST", "/api/v1/runs", json=body)
     assert r.status_code == 201, r.text
     asked = list(body["task_ids"])
     _grade(w, key, asked[:19], str(r.json()["id"]))
-    _grade(w, key, asked[19:], "a-run-outside-the-campaign")
+    _settle(w, str(r.json()["id"]))
+    _grade(w, key, asked[19:], "a-run-outside-the-campaign", reserved=False)
     assert _counted(w, key, "S3") == asked[:19]
+    rows = _counted_rows(w, key, "S3")
+    assert all(row.labels.get("reservation") and row.labels.get("treatment") for row in rows)
+    cobra = _served_readings(w, "cobra")
+    served = cobra[rid]
+    assert served["attempt_rule"] == "reserved.v1" and "p792" not in served, served
+    assert served["reserved"]["S3"] == 19 and served["settled_unrowed"]["S3"] == 0, served
+    pinned = served["pinned_treatment"]
+    assert pinned["deployment"]["digest"] and set(pinned["arms"]) == {"S3"}, pinned
+    # the campaign's first reservation on cobra pins its other reading's deployment half too;
+    # click has had no run, so nothing is pinned there yet
+    other = cobra[w.readings[("cobra", "S")]["reading_id"]]["pinned_treatment"]
+    assert other == {"deployment": pinned["deployment"], "arms": {}}, other
+    assert {o["pinned_treatment"] for o in _served_readings(w, "click").values()} == {None}
+    assert {row.labels["treatment"] for row in rows} == {
+        hashlib.sha256(
+            f"{pinned['deployment']['digest']}|{pinned['arms']['S3']['digest']}".encode()
+        ).hexdigest()
+    }
+    flat = _flat()
+    for clause in (
+        "each counted row carries `reservation` and `treatment` labels",
+        "`pinned_treatment` is served after the first run on each repository",
+    ):
+        assert clause in flat, clause
 
 
 def test_step6_s1_is_queued_from_the_plan_once_s3_delivers(wave3: Wave3) -> None:

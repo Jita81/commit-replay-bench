@@ -140,7 +140,9 @@ for it at the current apparatus decides:
   `counted` and `needed`, the numbers the Capability page shows for that reading. One request names those
   commits for the arm the hierarchy stopped at (`S3` a sighted replay, `A0` or `S1@<author>` a
   blind one, `S1` with `arm: S1`), with `learning: off` so its rows carry that arm and not the
-  arm `+L`. The estimate is the cell's own mean row cost × the commits requested × up to the
+  arm `+L` — and, for a reserved.v1 reading (every one `POST /readings` registers), the
+  reading's own `budget_profile`, the only profile its run whitelist admits (P-792 C7). The
+  estimate is the cell's own mean row cost × the commits requested × up to the
   ladder's rungs (3) for a blind cell, with `cost_known` false when no row recorded one:
 
 ```json

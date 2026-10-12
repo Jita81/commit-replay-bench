@@ -52,8 +52,9 @@ What it does: Groups every ``protocol`` row's guard refusals by (reason, command
               month (undecided rows kept apart); turns every oracle-held cell into ``test.add``
               backlog items with structural facts from the ledger; lists every registered
               reading waiting on its look with the commits it still needs, the ``POST /runs``
-              body that would grade them and what it costs, and every cell with rows but no
-              reading as needing one registered first.
+              body that would grade them (loop off; on a reserved.v1 reading's own budget
+              profile, so the body passes ``reading_run_fields``) and what it costs, and every
+              cell with rows but no reading as needing one registered first.
               Writes only what a named human decided (``apply_triage``, under a lock on the
               corpus directory; a supplied command only completes a cut example) and queues
               nothing.
@@ -1606,6 +1607,10 @@ class RunRequest:
     #: ``off`` opts the run out of the repository's loop switch, so its rows carry the arm
     #: the reading reads and not that arm ``+L`` (``RunCreateRequest.learning``)
     learning: str = ""
+    #: a reserved.v1 reading's own budget profile: a run of its non-loop arm spends on that
+    #: profile alone (P-792 C7, ``reading_run_fields``); empty — and absent from the body —
+    #: for a legacy reading, whose runs keep the deployment's (``RunCreateRequest.budget_profile``)
+    budget_profile: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         body: dict[str, Any] = {
@@ -1622,6 +1627,8 @@ class RunRequest:
             body["arm"] = self.arm
         if self.learning:
             body["learning"] = self.learning
+        if self.budget_profile:
+            body["budget_profile"] = self.budget_profile
         if self.note:
             body["note"] = self.note
         return body
@@ -2033,6 +2040,9 @@ def remeasure_plan(
                     # a replay's rows carry +L when the repository's switch is on: the arm
                     # has none, so the run opts out and its rows are the arm the reading reads
                     learning="off",
+                    # and a reserved.v1 reading's run spends on the reading's own profile
+                    # (C7) — "" for a legacy reading, whose body is unchanged
+                    budget_profile=reading.budget_profile,
                 ),
             )
         n_requested = sum(r.limit for r in requests)

@@ -16,7 +16,9 @@ What it does: Shows a cell with rows and no reading offered ``register`` with no
               ``undecided`` reading named in ``cannot_clear`` with its reason; the arms a replay
               cannot write (``S2``, ``+L``, another test author, another posture) offered no
               request; gold-clean and relabelled commits left out; valid ``POST /runs`` bodies;
-              unknown cost; determinism; and the CLI rendering.
+              a reserved.v1 reading's top-up on the reading's own budget profile, admitted by
+              the submit gate's whitelist (P-792 C7); unknown cost; determinism; and the CLI
+              rendering.
 How:          Sealed 2.4 rows and readings from ``tests.fixtures.readings``; rows of an older
               apparatus from ``tests.fixtures.posture``; no model, no docker, no store.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -40,6 +42,7 @@ from crb.core import learn
 from crb.core.capability import ReadingBook
 from crb.core.ledger import GradeRow
 from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
     REFUSAL_POOL_SEEN,
     STATE_INSUFFICIENT,
     STATE_UNDECIDED,
@@ -345,6 +348,48 @@ def test_requests_are_valid_post_runs_bodies() -> None:
                 body.pop("note", None)
                 req = RunCreateRequest(**body)
                 assert req.kind in ("replay", "blind") and req.task_ids == list(r.task_ids)
+
+
+def test_a_reserved_readings_top_up_spends_on_the_readings_budget_profile() -> None:
+    """P-792 C7 at the plan: every reading ``POST /readings`` registers is reserved.v1
+    (DL-385), and a run of its non-loop arm spends on the reading's own budget profile — so
+    the top-up's body names that profile beside ``learning: off``, and the submit gate's
+    whitelist over the run as it will be stored (``reading_run_fields_refusal``, the call the
+    worker repeats at claim) admits it. Without the profile the same body is refused
+    ``reading_run_fields`` naming ``budget_profile`` alone. A legacy reading's body carries no
+    profile: it is the body it always was."""
+    pytest.importorskip("pydantic")
+    from crb.server.deps import ApiError
+    from crb.server.routes.runs import new_run, reading_run_fields_refusal
+    from crb.server.schemas import RunCreateRequest
+
+    reserved = register_reading(
+        commits(40),
+        hierarchy=("S3",),
+        attempt_rule=ATTEMPT_RULE_RESERVED,
+        max_reruns=0,
+        budget_profile="default",
+    )
+    (c,) = _plan([], reserved).cells
+    (req,) = c.requests
+    assert (req.learning, req.budget_profile) == ("off", "default")
+    body = {k: v for k, v in req.to_dict().items() if k != "note"}
+    assert body["budget_profile"] == "default"
+
+    def run_of(b: dict[str, Any]) -> Any:
+        return new_run(RunCreateRequest(**b, reading_id=reserved.reading_id), actor="op-1")
+
+    reading_run_fields_refusal(reserved, run_of(body))  # admitted: nothing raised
+    bare = {k: v for k, v in body.items() if k != "budget_profile"}
+    with pytest.raises(ApiError) as exc:
+        reading_run_fields_refusal(reserved, run_of(bare))
+    assert exc.value.code == "reading_run_fields"
+    assert exc.value.detail["fields"] == ["budget_profile"]
+    legacy = register_reading(commits(40), hierarchy=("S3",))
+    (lc,) = _plan([], legacy).cells
+    (lreq,) = lc.requests
+    assert lreq.budget_profile == "" and "budget_profile" not in lreq.to_dict()
+    assert lreq.to_dict() | {"budget_profile": "default"} == req.to_dict()
 
 
 def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_per_rung() -> None:

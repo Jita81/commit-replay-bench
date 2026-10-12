@@ -115,7 +115,7 @@ def _prove(
     ``S1@t1``), then one sealed first attempt per commit on each arm in the reading's seeded
     order — the first five from a run the operator queued (the two-person rule's second
     person), the rest from a worker — and the oracle and controls at 2.4. Returns the rows."""
-    ids = add_tasks(env.factory, 40, prefix=prefix, cell=cell, authored=AUTHORED)
+    ids = add_tasks(env.factory, 40, prefix=prefix, cell=cell, authored=AUTHORED, qualify=True)
     login(env.client, "operator")
     r = env.post(
         "/readings",
@@ -132,7 +132,9 @@ def _prove(
         },
     )
     assert r.status_code == 201, r.text
-    pool = list(r.json()["pool"])
+    reading = r.json()
+    assert reading["attempt_rule"] == "reserved.v1"
+    pool = list(reading["pool"])
     assert sorted(pool) == sorted(ids)
     rows: list[GradeRow] = []
     for arm, outcomes in (("S3", s3), (S1, s1)):
@@ -145,6 +147,7 @@ def _prove(
                 clean=clean,
                 run_id=RUN_IDS["succeeded"] if k < 5 else f"{prefix}-{arm}-{k // 4}",
                 actor="worker-1",
+                reading=reading,
             )
     add_oracle_and_controls(env.factory, pool[:FIRST_LOOK])
     return rows

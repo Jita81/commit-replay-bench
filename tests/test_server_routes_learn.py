@@ -855,15 +855,18 @@ def _sealed(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _add_reading(env: Env, *, graded: int = 0, hierarchy: tuple[str, ...] = ("S3",)) -> Any:
-    """40 qualified commits of :data:`READ_CELL`, a reading registered over them through
-    ``POST /readings``, and a clean sealed first attempt on the first ``graded`` of its seeded
-    order, graded after the registration. Returns the reading as the route served it."""
-    add_proven_tasks(env.factory)
+    """40 qualified commits of :data:`READ_CELL` (each with its qualification record in the
+    sealed posture), a reading registered over them through ``POST /readings`` (reserved.v1,
+    the only rule it registers), and a clean sealed first attempt on the first ``graded`` of
+    its seeded order, each reserved before its build and graded after the registration.
+    Returns the reading as the route served it."""
+    add_proven_tasks(env.factory, qualify=True)
     r = register_via_api(env, hierarchy=hierarchy)
     assert r.status_code == 201, r.text
     reading = r.json()
+    assert reading["attempt_rule"] == "reserved.v1"
     if graded:
-        add_proven_rows(env.factory, reading["pool"][:graded], arm="S3")
+        add_proven_rows(env.factory, reading["pool"][:graded], arm="S3", reading=reading)
     return reading
 
 
@@ -958,7 +961,7 @@ def test_a_readings_top_up_under_a_campaign_is_refused_with_nothing_queued(
     )
     assert campaign.status_code == 201, campaign.text
     cid = campaign.json()["campaign_id"]
-    add_proven_tasks(env.factory)
+    add_proven_tasks(env.factory, qualify=True)
     r = register_via_api(env, hierarchy=("S3",), campaign_id=cid)
     assert r.status_code == 201, r.text
     reading = r.json()
@@ -1008,7 +1011,8 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     del builder_keys
     # registered on a sealed deployment (P-789), which then grades on the host
     _sealed(env, monkeypatch)
-    pool = _add_reading(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"))["pool"]
+    reading = _add_reading(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"))
+    pool = reading["pool"]
     monkeypatch.setattr(env.settings.sandbox, "executor", "local")
     monkeypatch.setattr(env.settings.builder, "executor", "host")
     host = _read_cell(env)
@@ -1020,7 +1024,7 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
     # sealed, and the S3 ceiling delivered: the reading waits on S1@<author>
     _sealed(env, monkeypatch)
-    add_proven_rows(env.factory, pool[:20], arm="S3")
+    add_proven_rows(env.factory, pool[:20], arm="S3", reading=reading)
     s1 = _read_cell(env)
     assert s1["requests"] == [] and PROVEN_AUTHOR in s1["note"]  # no author configured
     monkeypatch.setattr(env.settings.factory, "test_author", f"editblock:{PROVEN_AUTHOR}")

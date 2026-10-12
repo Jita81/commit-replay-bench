@@ -18,11 +18,12 @@ What it does: Relabels a pool task after registration (the CLI's ``tasks label``
               its drift, ``POST /runs`` answers 409 ``pool_drift`` and the claim refuses
               ``run.refused`` ``pool_drift`` before any reservation; proves a 2.4 replay row
               under any arm or test author makes a commit seen for a reserved.v1 registration
-              (and not for a legacy one); proves a mined ``gold_clean`` commit enters a
-              reserved.v1 pool only through a ``qualified`` record in force; proves the pool
-              hash and the id pin the posture and the record ids; proves a requalification is
-              not drift, a revoked record in force leaves its commit pending, and a posture
-              move halts the run before anything is qualified or reserved.
+              (and not for a legacy one, which ``POST /readings`` no longer registers);
+              proves a mined ``gold_clean`` commit enters a reserved.v1 pool only through a
+              ``qualified`` record in force; proves the pool hash and the id pin the posture
+              and the record ids; proves a requalification is not drift, a revoked record in
+              force leaves its commit pending, and a posture move halts the run before
+              anything is qualified or reserved.
 How:          The core tests register in memory (``fixtures.readings``). The route tests run
               the app on the ``backend`` fixture's store (SQLite and PostgreSQL), qualifying
               tasks through the store's writer (``qualify_pool``); the drift test reuses the
@@ -227,7 +228,9 @@ def test_p792_a_commit_with_a_24_a0_row_is_pool_seen(backend: Backend, tmp_path:
     apparatus — was registered as unseen, because ``pool_seen`` read only the hierarchy's
     arms at the reading's apparatus. A reserved.v1 registration now refuses ``pool_seen`` on
     any replay row at 2.4 or later, under any arm or author, on a pool commit or another
-    commit of its change; a legacy registration over the same rows is admitted as before."""
+    commit of its change; a legacy registration over the same rows is admitted as before by
+    the core. ``POST /readings`` registers reserved.v1 only (DL-385), so its bare body is
+    refused ``pool_seen`` as well: the route has no legacy rule left to admit the look."""
     pool = commits(4, "seen")
     changes = {c: f"change-{c}" for c in pool}
     twin = commits(1, "twin")[0]
@@ -255,8 +258,10 @@ def test_p792_a_commit_with_a_24_a0_row_is_pool_seen(backend: Backend, tmp_path:
         assert refused.status_code == 409, refused.text
         err = envelope(refused)
         assert (err["code"], err["detail"]) == (REFUSAL_POOL_SEEN, {"commits": [ids[0]], "n": 1})
-        legacy = register_via_api(env)
-        assert legacy.status_code == 201, legacy.text
+        bare = register_via_api(env)
+        assert bare.status_code == 409, bare.text
+        err = envelope(bare)
+        assert (err["code"], err["detail"]) == (REFUSAL_POOL_SEEN, {"commits": [ids[0]], "n": 1})
 
 
 def test_p792_a_mine_gold_clean_commit_with_a_failing_qualification_is_not_in_the_pool(
@@ -268,8 +273,10 @@ def test_p792_a_mine_gold_clean_commit_with_a_failing_qualification_is_not_in_th
     record at all a reserved.v1 registration now has no pool (422 ``invalid_reading``,
     nothing written); once records exist, its pool is exactly the commits whose record in
     force in the latest posture of the reading's class is ``qualified``, each pinned by its
-    record id — the unqualified, the revoked and the unrecorded commit are left out — while
-    a legacy registration still freezes every mined commit."""
+    record id — the unqualified, the revoked and the unrecorded commit are left out. The
+    route's bare body is that reading (409 ``reading_exists``): ``POST /readings`` registers
+    reserved.v1 only (DL-385), so no body of it freezes a mined commit the records left out
+    (before, the bare body registered a legacy reading of every mined commit)."""
     with _api(backend, tmp_path / "api") as env:
         ids = add_tasks(env.factory)
         empty = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED)
@@ -294,10 +301,9 @@ def test_p792_a_mine_gold_clean_commit_with_a_failing_qualification_is_not_in_th
         assert got["pool_posture_id"] == POSTURE_ID
         assert got["pool_qualifications"] == {c: pins[c] for c in sorted(qualified)}
 
-        legacy = register_via_api(env)
-        assert legacy.status_code == 201, legacy.text
-        assert sorted(legacy.json()["pool"]) == sorted(ids)
-        assert "pool_qualifications" not in legacy.json()
+        bare = register_via_api(env)
+        assert bare.status_code == 409, bare.text
+        assert envelope(bare)["detail"] == {"reading_id": got["reading_id"]}
 
 
 def test_p792_reserved_pool_sha256_pins_the_qualification_ids(

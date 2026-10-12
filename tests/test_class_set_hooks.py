@@ -18,7 +18,8 @@ What it does: Pins that ONE rule classifies both sides — a ticket at intake an
               hash; and that a run is refused a version that does not route.
 How:          The fixture organisation (``tests/fixtures/class_sets.py``) on the seeded app for
               the store-bound hooks; the intake's own poll over a fake tracker; readers built
-              over a registered reading and sealed rows; no model, no docker.
+              over a registered reading (reserved.v1, over qualified commits) and sealed rows
+              each reserved first (``fixtures.readings.reserve_for``); no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 9)
 Works with:   src/crb/server/class_set_state.py (the stamper and the verdict),
@@ -67,6 +68,8 @@ from fixtures.readings import (
     SEALED,
     SEALED_SETTINGS,
     commits,
+    qualify_pool,
+    reserve_for,
     sealed_row,
 )
 from fixtures.server_seed import (
@@ -375,14 +378,20 @@ ORG_REF = CellRef("bug.fix", "S", taxonomy=V1, org_class="parser-fix")
 
 def _a_proven_org_cell(env: Env) -> dict[str, Any]:
     """``acme/classes@v1`` routing on ``alpha``, a reading of ``parser-fix`` registered on it
-    and a clean ``S3`` first attempt on every pool commit: the served readers find its ceiling."""
+    (reserved.v1, the only rule ``POST /readings`` registers — so over the repository's
+    qualified commits) and a clean ``S3`` first attempt on every pool commit, each reserved
+    before its build as the worker reserves it: the served readers find its ceiling."""
     from datetime import UTC, datetime, timedelta
 
     from crb.core.version import APPARATUS_VERSION
     from crb.server.factory_standard import readers_in
     from crb.store.ledger import DbLedger
+    from crb.store.models import Task
 
     routing_version(env)
+    with env.factory() as s:
+        tasks = list(s.execute(select(Task.task_id).where(Task.repo == ALPHA)).scalars())
+    qualify_pool(env.factory, ALPHA, tasks)
     r = env.post(
         "/readings",
         json={"repo": ALPHA, "cell": ORG_CELL, "hierarchy": ["S3"], "posture_class": SEALED,
@@ -390,10 +399,16 @@ def _a_proven_org_cell(env: Env) -> dict[str, Any]:
     )  # fmt: skip
     assert r.status_code == 201, r.text
     reading = r.json()
+    assert reading["attempt_rule"] == "reserved.v1"
     later = (datetime.now(UTC) + timedelta(minutes=5)).isoformat(timespec="seconds")
+    reserved = {
+        c: reserve_for(env.factory, reading_id=reading["reading_id"], arm="S3", task_id=c,
+                       run_id="org-cell", repo=ALPHA)
+        for c in reading["pool"]
+    }  # fmt: skip
     DbLedger(env.factory).append_many(
         sealed_row(c, repo=ALPHA, cell=ORG_CELL, created=later, apparatus_version=APPARATUS_VERSION,
-                   labels={"taxonomy": V1})
+                   run_id="org-cell", labels={"taxonomy": V1, **reserved[c]})
         for c in reading["pool"]
     )  # fmt: skip
     with env.factory() as s:

@@ -13,16 +13,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
-  ceiling the product holds** (P-787 to P-798, G-957, DL-372 to DL-384;
-  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading's id hashes
-  `hypothesis`, `smallest_effect` and campaign; `thin_cell` counts distinct tasks. Readings
-  and runs need docker sandbox and builder (409 `reading_posture_mismatch`) and lint on (409
+  ceiling the product holds** (P-787 to P-798, G-957, DL-372 to DL-385;
+  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
+  `hypothesis`, `smallest_effect`, campaign; `thin_cell` counts distinct tasks. Readings and
+  runs need docker sandbox and builder (409 `reading_posture_mismatch`) and lint on (409
   `lint_disabled`); retries: 409 `reading_exists`. Replay rows record their executor
-  (unsealed: `scope_fault`). `reserved.v1` scores one attempt per commit/ticket, reserved before
-  build, on qualification-pinned pools (drift: 409 `pool_drift`). `POST /campaigns` holds a
-  pound ceiling: runs need `max_cost_usd` within cap (409 `campaign_ceiling`); a reading
-  counts only admitted runs (409 `campaign_required`); `S1` authoring counts; overruns and
-  unplaced spend stop it. CI runs the Go builder image; 2026-10-11's decisions recorded.
+  (unsealed: `scope_fault`). P-792 closed: `POST /readings` registers only `reserved.v1`,
+  scoring each commit's first attempt, reserved before build, on qualification-pinned pools
+  (409 `pool_drift`). `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd` within
+  cap (409 `campaign_ceiling`); a reading counts only admitted runs (409 `campaign_required`);
+  `S1` authoring counts; overruns and unplaced spend stop it. CI runs the Go builder image.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen

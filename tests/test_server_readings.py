@@ -13,7 +13,9 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               every pooled view with 422; carries the arm, builder and model in the CSV export;
               answers ``standard_for`` for the factory's gate; shows a reading licensing only
               the checks arm and posture class it counted on (P-319), a pool picked on
-              outcomes refused ``pool_not_blind`` and a date cut accepted (P-320), imported
+              outcomes refused ``pool_not_blind``, the rule's pool over a cell already looked
+              at refused ``pool_seen`` under reserved.v1 — the only attempt rule the route
+              registers (P-792) — and a date cut accepted (P-320), imported
               rows never counted (P-321), an S3-only standard read as a ceiling, an unsealed
               row of the standard arm served as a ``scope_fault`` that stops it (P-795), a reading
               naming an unknown campaign refused ``campaign_unknown``, and a reading on the
@@ -26,9 +28,10 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               refusing 409 ``lint_disabled`` while the repository's lint is off, and a
               reserved.v1 id hashing the repository's lint config while a legacy id does not
               (P-796).
-How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
-              controls report; the race on each store backend (``tests.conftest_store``); no
-              model, no docker.
+How:          ``make_env`` with ``tests.fixtures.proven`` adding qualified tasks, sealed rows
+              (each reserved for its commit first, as the worker reserves it), scores and a
+              controls report; a legacy reading written as a store holds one; the race on each
+              store backend (``tests.conftest_store``); no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0025-routing-v2.md, docs/adr/0026-the-context-standard.md
 Works with:   src/crb/server/routes/readings.py (``POST`` and ``GET /readings``, ``standard_for``),
@@ -92,13 +95,14 @@ def _cells(env: Env, query: str = "") -> list[dict[str, Any]]:
 
 
 def _proven(env: Env) -> dict[str, Any]:
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     reading = r.json()
+    assert reading["attempt_rule"] == "reserved.v1", reading
     first = reading["pool"][:20]
-    add_rows(env.factory, first, arm="S3")
-    add_rows(env.factory, first, arm=S1)
+    add_rows(env.factory, first, arm="S3", reading=reading)
+    add_rows(env.factory, first, arm=S1, reading=reading)
     add_oracle_and_controls(env.factory, first)
     return dict(reading)
 
@@ -299,24 +303,32 @@ def test_a_pool_chosen_on_outcomes_is_refused(env: Env) -> None:
     """ADR-0026 item 2 (DL-097): the pool is every qualified commit of the cell, or every one
     authored since a date the operator names — never a list. Grading the commits under the
     descriptive ``A0`` arm first and registering only the ones that passed is refused
-    ``pool_not_blind``; the rule's own pool is accepted and recorded."""
-    ids = add_tasks(env.factory)
+    ``pool_not_blind``. Nor can the look be laundered through the rule: every reading
+    ``POST /readings`` registers is reserved.v1 (P-792), which refuses ``pool_seen`` for a
+    pool commit with any 2.4 row, the ``A0`` look included, so the rule's own pool here is
+    refused as well, and nothing is written. On a cell nothing has looked at, the rule's own
+    pool is accepted and recorded (:func:`test_registering_on_a_sealed_deployment_succeeds`)."""
+    ids = add_tasks(env.factory, qualify=True)
     add_rows(env.factory, ids[:20], arm="A0", mode="blind")
     add_rows(env.factory, ids[20:], arm="A0", mode="blind", clean=False)
     picked = register_via_api(env, pool=ids[:20])
     assert picked.status_code == 422, picked.text
     assert picked.json()["error"]["code"] == "pool_not_blind"
     whole = register_via_api(env)
-    assert whole.status_code == 201, whole.text
-    assert sorted(whole.json()["pool"]) == sorted(ids)
-    assert whole.json()["pool_rule"] == "all-qualified"
+    assert whole.status_code == 409, whole.text
+    err = envelope(whole)
+    assert err["code"] == "pool_seen" and err["detail"]["n"] == len(ids), err
+    assert set(err["detail"]["commits"]) <= set(ids)
+    assert _registered_events(env) == 0
 
 
 def test_a_pool_may_start_at_a_date_the_operator_names(env: Env) -> None:
     """A date cut is blind to outcomes (ADR-0026's held-out rule: "commits made since that
     measurement"): the pool is every qualified commit authored at or after it."""
-    old = add_tasks(env.factory, 5, prefix="old")
-    new = add_tasks(env.factory, 25, prefix="new", authored="2026-09-01T00:00:00+00:00")
+    old = add_tasks(env.factory, 5, prefix="old", qualify=True)
+    new = add_tasks(
+        env.factory, 25, prefix="new", authored="2026-09-01T00:00:00+00:00", qualify=True
+    )
     r = register_via_api(env, since="2026-08-15T00:00:00+00:00")
     assert r.status_code == 201, r.text
     assert sorted(r.json()["pool"]) == sorted(new) and not set(old) & set(r.json()["pool"])
@@ -338,7 +350,7 @@ def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env)
 
     from fixtures.readings import sealed_row
 
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     first = r.json()["pool"][:20]
@@ -366,13 +378,14 @@ def test_rows_imported_through_the_ledger_never_count_toward_a_reading(env: Env)
 def test_a_standard_found_on_s3_alone_reads_ceiling_forward_unvalidated(env: Env) -> None:
     """product.value.111: S3 delivers and S1 misses three — the cell's only proven arm is the
     ceiling, shown as ``ceiling S3, forward-unvalidated`` and never as a standard."""
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
-    first = r.json()["pool"][:20]
-    add_rows(env.factory, first, arm="S3")
-    add_rows(env.factory, first[:3], arm=S1, clean=False)
-    add_rows(env.factory, first[3:], arm=S1)
+    reading = r.json()
+    first = reading["pool"][:20]
+    add_rows(env.factory, first, arm="S3", reading=reading)
+    add_rows(env.factory, first[:3], arm=S1, clean=False, reading=reading)
+    add_rows(env.factory, first[3:], arm=S1, reading=reading)
     add_oracle_and_controls(env.factory, first)
     (cell,) = _cells(env)
     assert cell["standard"]["label"] == "ceiling S3, forward-unvalidated"
@@ -385,14 +398,18 @@ def test_an_unsealed_row_of_the_standard_arm_is_served_as_a_scope_fault(env: Env
     the sealed posture class is no other reading's row — its writer failed to label it. The
     reading dropped it in silence, a later clean row stood in for the commit, and the cell
     delivered on a miss it never read. Now the map serves the arm ``undecided`` with the
-    commit in ``scope_faults``, and the cell's only proven arm is the ``S3`` ceiling."""
-    add_tasks(env.factory)
+    commit in ``scope_faults``, and the cell's only proven arm is the ``S3`` ceiling. Under
+    reserved.v1 the unsealed row is the commit's reserved attempt, and the stand-in — a
+    later clean row of a run that reserved nothing — is invisible to the reading (P-792)."""
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
-    first = r.json()["pool"][:20]
-    add_rows(env.factory, first, arm="S3")
-    add_rows(env.factory, first[:1], arm=S1, clean=False, builder_executor="host")
-    add_rows(env.factory, first, arm=S1)  # the stand-in, and the other nineteen
+    reading = r.json()
+    first = reading["pool"][:20]
+    add_rows(env.factory, first, arm="S3", reading=reading)
+    add_rows(env.factory, first[:1], arm=S1, clean=False, builder_executor="host", reading=reading)
+    add_rows(env.factory, first[:1], arm=S1, run_id="stand-in")  # the stand-in
+    add_rows(env.factory, first[1:], arm=S1, reading=reading)  # the other nineteen
     add_oracle_and_controls(env.factory, first)
     (cell,) = _cells(env)
     arms = {a["arm"]: a for a in cell["reading"]["arms"]}
@@ -455,7 +472,7 @@ def test_a_reading_without_its_hypothesis_or_smallest_effect_is_refused_422(
 
 
 def test_hypothesis_and_smallest_effect_are_stored_and_served(env: Env) -> None:
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env, hypothesis=f"  {HYPOTHESIS}  ", smallest_effect=0.05)
     assert r.status_code == 201, r.text
     assert (r.json()["hypothesis"], r.json()["smallest_effect"]) == (HYPOTHESIS, 0.05)
@@ -487,7 +504,7 @@ def test_the_hypothesis_is_inside_the_hash(env: Env) -> None:
     from crb.server.routes.readings import load_readings
     from crb.store.events import append_event
 
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     edited = {**r.json(), "hypothesis": "the richer arm is no better than the leaner one"}
@@ -544,10 +561,16 @@ def test_registering_on_a_host_builder_is_refused(tmp_path: Path) -> None:
 
 
 def test_registering_on_a_sealed_deployment_succeeds(env: Env) -> None:
+    """On a sealed deployment a cell nothing has looked at registers: the pool is the rule's
+    own (every qualified commit of the cell), recorded with its rule, under ``reserved.v1``
+    — the only attempt rule ``POST /readings`` registers (P-792, DL-385)."""
     assert env.settings.posture()["sealed"] is True
-    add_tasks(env.factory)
+    ids = add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
+    assert sorted(r.json()["pool"]) == sorted(ids)
+    assert r.json()["pool_rule"] == "all-qualified"
+    assert (r.json()["attempt_rule"], r.json()["max_reruns"]) == ("reserved.v1", 0)
     assert _registered_events(env) == 1
 
 
@@ -575,7 +598,7 @@ def test_a_reading_names_its_campaign_inside_its_hash(env: Env) -> None:
     record whose campaign was edited or dropped no longer re-hashes."""
     from crb.core.reading import Reading
 
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     cid = _campaign(env)
     r = register_via_api(env, campaign_id=cid)
     assert r.status_code == 201, r.text
@@ -657,7 +680,7 @@ def test_a_reading_on_the_factorys_cell_naming_a_campaign_is_refused_422_with_no
     reading and no submit gate requires them to be filed under its campaign; ``POST /readings``
     refuses its ``campaign_id`` with the forward route's 422 — same code, same reason —
     before anything is written; without one, the same reading registers."""
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     cid = _campaign(env)
     fcell = {**CELL, "process_step": "factory"}
     r = register_via_api(env, hierarchy=("S2",), cell=fcell, campaign_id=cid)
@@ -706,7 +729,7 @@ def test_a_retried_registration_is_refused_reading_exists_and_writes_nothing(
     same second or later — is refused 409 ``reading_exists`` naming the reading already
     registered, and writes nothing: ``GET /readings`` lists the reading once and the cell's
     budget reads one reading's spend. Another question on the same cell is not a retry."""
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     first = register_via_api(env)
     assert first.status_code == 201, first.text
     rid = first.json()["reading_id"]
@@ -739,13 +762,13 @@ def test_a_retried_forward_registration_is_refused_reading_exists(
     retry is the same reading, never a second one that would overspend the cell."""
     from fixtures.server_seed import BUILDER, MODEL, PROVIDER
 
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     first = r.json()["pool"][:20]
-    add_rows(env.factory, first, arm="S3")
-    add_rows(env.factory, first[:3], arm=S1, clean=False)
-    add_rows(env.factory, first[3:], arm=S1)
+    add_rows(env.factory, first, arm="S3", reading=r.json())
+    add_rows(env.factory, first[:3], arm=S1, clean=False, reading=r.json())
+    add_rows(env.factory, first[3:], arm=S1, reading=r.json())
     add_oracle_and_controls(env.factory, first)
     body = {
         "repo": ALPHA,
@@ -778,7 +801,7 @@ def test_a_store_holding_a_duplicate_registration_counts_it_once(env: Env) -> No
     from crb.core.reading import READING_EVENT_ACTION
     from crb.store.events import append_event
 
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     payload = r.json()
@@ -823,7 +846,7 @@ def test_two_racing_retries_register_one_reading_on_each_store(
     init_db(backend.engine)
     seed(backend.factory)
     add_users(backend.factory)
-    add_tasks(backend.factory)
+    add_tasks(backend.factory, qualify=True)
     settings = make_settings(tmp_path, **SEALED_SETTINGS)
     body = ReadingIn.model_validate(
         {
@@ -888,13 +911,13 @@ def test_registering_with_lint_disabled_is_refused_409(env: Env, clock: dict[str
     """P-796, the Wave 3 red team's F7 by code reading: a commit whose row was graded with belt
     5 switched off leaves a legacy reading's pool ``lint_disabled``, and the operator's switch
     can be thrown after outcomes are seen, so it chose which commits leave. Now a repository
-    whose lint is disabled (``RepoConfig.lint = {"disabled": true}``) registers no reading,
-    whatever its attempt rule: ``POST /readings`` (legacy and reserved.v1) and ``POST
+    whose lint is disabled (``RepoConfig.lint = {"disabled": true}``) registers no reading:
+    ``POST /readings`` (its reserved.v1 default and the rule named outright alike) and ``POST
     /readings/forward`` are refused 409 ``lint_disabled`` naming the repository and the
     reason, and nothing is written (each answered 201 before the change)."""
     from fixtures.server_seed import BUILDER, MODEL, PROVIDER
 
-    add_tasks(env.factory)
+    add_tasks(env.factory, qualify=True)
     off = {"repo": ALPHA, "reason": "disabled_by_config"}
     _set_lint(env, {"disabled": True})
     for rule in ({}, {"attempt_rule": "reserved.v1"}):
@@ -908,9 +931,9 @@ def test_registering_with_lint_disabled_is_refused_409(env: Env, clock: dict[str
     r = register_via_api(env)
     assert r.status_code == 201, r.text
     first = r.json()["pool"][:20]
-    add_rows(env.factory, first, arm="S3")
-    add_rows(env.factory, first[:3], arm=S1, clean=False)
-    add_rows(env.factory, first[3:], arm=S1)
+    add_rows(env.factory, first, arm="S3", reading=r.json())
+    add_rows(env.factory, first[:3], arm=S1, clean=False, reading=r.json())
+    add_rows(env.factory, first[3:], arm=S1, reading=r.json())
     add_oracle_and_controls(env.factory, first)
     body = {
         "repo": ALPHA,
@@ -938,10 +961,12 @@ def test_a_reserved_reading_id_hashes_the_lint_config(
     """A reserved.v1 reading names the lint configuration it was registered under (P-796): the
     same registration on two stores whose repository lints differently gets two ids, the
     stored ``lint_digest`` is the sha256 of the canonical lint block, and a record whose
-    digest was edited no longer re-hashes. A legacy reading hashes no lint: its id is the
-    same on both stores and its record carries no ``lint_digest``."""
+    digest was edited no longer re-hashes. A legacy reading (written as a store holds one;
+    ``POST /readings`` registers reserved.v1 only, P-792) hashes no lint: its id is the same
+    on both stores and its record carries no ``lint_digest``."""
     from crb.core.evidence import canonical_json, sha256_text
     from crb.core.reading import Reading
+    from fixtures.proven import write_reading
 
     lints: dict[str, dict[str, Any]] = {"plain": {}, "ruff": {"command": ["ruff", "check"]}}
     got: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
@@ -949,11 +974,12 @@ def test_a_reserved_reading_id_hashes_the_lint_config(
         (tmp_path / name).mkdir()
         with make_env(tmp_path / name, **SEALED_SETTINGS) as store:
             _set_lint(store, lint)
-            qualify_pool(store.factory, ALPHA, add_tasks(store.factory))
-            legacy = register_via_api(store)
+            ids = add_tasks(store.factory)
+            qualify_pool(store.factory, ALPHA, ids)
+            legacy = write_reading(store.factory, ids, hierarchy=("S3", S1))
             reserved = register_via_api(store, attempt_rule="reserved.v1")
-            assert (legacy.status_code, reserved.status_code) == (201, 201), reserved.text
-            got[name] = (legacy.json(), reserved.json())
+            assert reserved.status_code == 201, reserved.text
+            got[name] = (legacy.to_dict(), reserved.json())
     (legacy_a, reserved_a), (legacy_b, reserved_b) = got["plain"], got["ruff"]
     assert legacy_a["reading_id"] == legacy_b["reading_id"]
     assert "lint_digest" not in legacy_a and "lint_digest" not in legacy_b

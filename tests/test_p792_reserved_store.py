@@ -35,7 +35,7 @@ What it does: Pins that a second ``reading.reserved`` row for one (trace, arm, c
               either waits for the row's commit or is seen by the guard, never a row after a
               settled, no-row read; and that no function under src/crb asks for the grades
               or events lock while it holds a ``runs`` row lock.
-How:          The shared ``backend`` fixture (SQLite always, PostgreSQL when
+How:          The ``backend`` fixture of tests/conftest_store.py (SQLite always, PostgreSQL when
               ``CRB_TEST_POSTGRES_URL`` is set); plain ORM adds for the raw duplicates (the
               flush hook chains them); Alembic ``upgrade`` / ``downgrade`` on the backend's
               URL for the revision; a ``JobQueue`` claim and ``reclaim_stale(0.0)`` for the
@@ -54,7 +54,7 @@ Works with:   src/crb/store/models.py (the ``Event`` index),
               src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
               tests/test_store_migrate.py (head parity and drift with the partial index),
               tests/test_advisory_lock_owners.py (one owner per lock id; this suite adds
-              their order), tests/conftest_store.py (the backends)
+              their order)
 Tested by:    tests/test_p792_reserved_store.py
 Touch when:   never for a new repository; the reservation's key or action changes (a new
               revision, never an edit of 0018), or the locked writer's error mapping changes;

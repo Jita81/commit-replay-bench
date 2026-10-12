@@ -1,11 +1,12 @@
 """P-792: an admitted attempt decides its commit, and nothing a run chooses after admission
 can steer which commits leave a reading or what a row says.
 
-docs/PREVENTION.md P-792 (and G-982) records the finding: a round-5 enumeration of the Wave 3
-reading found nineteen channels (C1 to C19) through which an operator could choose which
-commits leave a campaign reading, or what an admitted row says. The round-5 design spec for
-closing them names one test per channel, each reproducing the enumeration's probe and failing
-before its fix; this file holds them as the fixes land, one step at a time.
+docs/PREVENTION.md P-792 records the finding: a round-5 enumeration of the Wave 3 reading
+found nineteen channels (C1 to C19) through which an operator could choose which commits leave
+a campaign reading, or what an admitted row says. The round-5 design spec for closing them
+names one test per channel, each reproducing the enumeration's probe and failing before its
+fix; this file holds them, and P-792 is closed on them now that ``POST /readings`` registers
+every reading under reserved.v1 (DL-385).
 
 C3 (``builder_config``): a run's ``builder_config`` can carry ``extra_args``, which the Claude
 Code builder appends to its argv after the rung's own ``--model`` and ``--max-turns``, and a
@@ -87,7 +88,8 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               reserving one commit apart, a reservation only at r1 and before every outcome
               event, two claims racing for one commit (one wins, on both backends), a settled
               claim's row refused up to ``execute``, a legacy reading's run never reserving,
-              ``POST /readings`` registering reserved.v1 only when asked, the claim's
+              ``POST /readings`` registering reserved.v1 only (DL-385: the bare body
+              reserved.v1, a legacy rule or a re-run refused 422), the claim's
               ``reading_run_fields`` refusal (C3(b) ``extra_args``, C5 ``timeout``, C7 a budget
               profile, a two-rung ladder) and ``GET /readings`` serving ``attempt_rule``,
               ``pinned_treatment`` and ``reserved`` (null before the first reservation; a legacy
@@ -125,7 +127,8 @@ How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`
               ``GET /readings`` tests (``_w_served``) the app over the worker rig's store.
               The submit-gate tests (``_r_stack``) run the app on the ``backend`` fixture's
               store (SQLite and PostgreSQL) with the Wave 3 rehearsal's campaign and
-              registrations opted in to reserved.v1, and settle each admitted run so the
+              registrations (reserved.v1; a legacy one written as its event, ``_r_legacy``),
+              and settle each admitted run so the
               campaign's line is free for the next. The factory tests (``_f_rig``) run a
               factory run on the worker rig over ``test_worker``'s multiply backlog
               with a calibration grant and held-out tests, every cell a ceiling, under a
@@ -146,7 +149,7 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               src/crb/server/reading_book.py and src/crb/server/campaigns.py
               (``load_readings`` filling ``reservations_of``; ``treatment_pins``),
               src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
-              src/crb/server/routes/readings.py (the opt-in fields; ``served_reading``: the
+              src/crb/server/routes/readings.py (the reserved.v1 fields; ``served_reading``: the
               rule, the pins and the reserved counts), src/crb/server/routes/runs.py
               (``submit_refusals``: ``reading_run_fields_refusal``, ``reading_lint_refusal``
               and ``campaign_refusal``, under test), tests/test_wave3_registration_rehearsal.py
@@ -260,9 +263,11 @@ from crb.core.spend import (
     PROFILE_DEFAULT,
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.core.version import APPARATUS_VERSION
 from crb.server import campaigns as campaigns_mod
 from crb.server import worker
 from crb.server.app import create_app
+from crb.server.posture_view import deployment_posture_class
 from crb.server.reading_book import load_readings
 from crb.server.routes import runs as runs_routes
 from crb.server.routes.learn import deployment_author_model
@@ -280,7 +285,7 @@ from crb.store.jobs import (
     claim_guard,
 )
 from crb.store.ledger import AttemptSettled
-from crb.store.models import Event, Repo, Run
+from crb.store.models import Event, Repo, Run, Task
 from fixtures import pyrepo as pr
 from fixtures.builders_repo import make_fixture
 from fixtures.posture import posture_row
@@ -1318,17 +1323,18 @@ def test_p792_reading_run_refusal_whitelist(
     )
     fields = {**_S3_RUN, **_CELL_RUN, **run}
     code, detail = reading_run_refusal(reading, params=params, **fields)
-    if not refused:
+    if refused:
+        assert code == REFUSAL_RUN_FIELDS, name
+        assert detail["fields"] == refused, (name, detail)
+        assert set(detail["reasons"]) == set(refused)
+        assert all(detail["reasons"][f] for f in refused)
+        assert arm == ""  # a refused run maps to no arm
+    else:
         assert (code, detail) == ("", {}), name
-        return
-    assert code == REFUSAL_RUN_FIELDS, name
-    assert detail["fields"] == refused, (name, detail)
-    assert set(detail["reasons"]) == set(refused)
-    assert all(detail["reasons"][f] for f in refused)
-    # a legacy reading is never refused by it: the legacy rule is unchanged
+    # a legacy reading is never refused by it, admitted run or refused: the legacy rule is
+    # unchanged
     legacy = register_reading(commits(3, prefix="w"), descriptive=(("A0", 2),), budget=0.05)
     assert reading_run_refusal(legacy, params=params, **fields) == ("", {})
-    assert arm == ""
 
 
 def test_p792_reading_run_refusal_names_the_whitelist() -> None:
@@ -2089,6 +2095,8 @@ def _w_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | Non
     )
     monkeypatch.setattr(w, "_executor", lambda ctx: _WExec(state, cancel=lambda: w._cancelled(ctx)))
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    # the container's user named, never the host's uid (a root CI container refuses it)
+    monkeypatch.setenv("CRB_BUILDER__USER", "1000:1000")
     monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
     posture = w._deployment_posture_class(pr.REPO_NAME, "docker")
     append = w.ledger.append
@@ -2841,38 +2849,46 @@ def test_p792_a_legacy_readings_run_never_reserves(
     assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
 
 
-def test_p792_post_readings_opts_in_to_reserved(tmp_path: Path) -> None:
-    """``POST /readings`` registers a reserved.v1 reading only when asked: a body naming no
-    rule is registered under the legacy rule as before, ``attempt_rule: reserved.v1`` stores
-    ``max_reruns`` 0 and the budget profile (``default`` unless named), and a reserved.v1
-    body asking for reruns is refused 422 and writes nothing."""
+def test_p792_post_readings_registers_reserved_only(tmp_path: Path) -> None:
+    """Step 13 of the round-5 spec (DL-385): ``POST /readings`` registers every reading
+    under reserved.v1. A body naming no rule is stored ``attempt_rule`` reserved.v1,
+    ``max_reruns`` 0 and the ``default`` budget profile, with no ``p792`` "open" mark when
+    served; the same body naming the rule outright is the same reading (409
+    ``reading_exists``); a body asking for the legacy rule, or for any re-run, is refused 422
+    ``validation_error`` and writes nothing. Before the flip the bare body registered under
+    the legacy rule, ``first_observed.v0`` with ``max_reruns`` 2."""
     from fixtures.proven import add_tasks, register_via_api
     from fixtures.readings import SEALED_SETTINGS, qualify_pool
     from fixtures.server_seed import ALPHA, envelope, make_env
 
+    def registered(env: Any) -> int:
+        with env.factory() as s:
+            return len(list(s.execute(select(Event).where(Event.action == READING_EVENT_ACTION))))
+
     with make_env(tmp_path, **SEALED_SETTINGS) as env:
         qualify_pool(env.factory, ALPHA, add_tasks(env.factory))
-        legacy = register_via_api(env)
-        assert legacy.status_code == 201, legacy.text
-        got = legacy.json()
-        assert got.get("attempt_rule", "") in ("", ATTEMPT_RULE_LEGACY)
-        assert got["max_reruns"] == DEFAULT_MAX_RERUNS
-        reserved = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED)
-        assert reserved.status_code == 201, reserved.text
-        body = reserved.json()
-        assert body["attempt_rule"] == ATTEMPT_RULE_RESERVED
-        assert (body["max_reruns"], body["budget_profile"]) == (0, PROFILE_DEFAULT)
-        assert body["reading_id"] != got["reading_id"]
-        with env.factory() as s:
-            before = len(list(s.execute(select(Event).where(Event.action == READING_EVENT_ACTION))))
-        refused = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED, max_reruns=1)
-        assert refused.status_code == 422, refused.text
-        err = envelope(refused)
-        assert err["code"] == REFUSAL_INVALID
-        assert err["detail"] == {"max_reruns": 1, "budget_profile": PROFILE_DEFAULT}
-        with env.factory() as s:
-            after = len(list(s.execute(select(Event).where(Event.action == READING_EVENT_ACTION))))
-        assert after == before
+        bare = register_via_api(env)
+        assert bare.status_code == 201, bare.text
+        got = bare.json()
+        assert got["attempt_rule"] == ATTEMPT_RULE_RESERVED, got
+        assert (got["max_reruns"], got["budget_profile"]) == (0, PROFILE_DEFAULT)
+        (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+        assert served["attempt_rule"] == ATTEMPT_RULE_RESERVED and "p792" not in served
+        named = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED, max_reruns=0)
+        assert named.status_code == 409, named.text
+        assert envelope(named)["detail"] == {"reading_id": got["reading_id"]}
+        before = registered(env)
+        assert before == 1
+        for ask in (
+            {"attempt_rule": ATTEMPT_RULE_LEGACY},
+            {"attempt_rule": ""},
+            {"max_reruns": DEFAULT_MAX_RERUNS},
+            {"attempt_rule": ATTEMPT_RULE_RESERVED, "max_reruns": 1},
+        ):
+            refused = register_via_api(env, hypothesis=f"{ask}", **ask)
+            assert refused.status_code == 422, (ask, refused.text)
+            assert envelope(refused)["code"] == "validation_error", ask
+        assert registered(env) == before
 
 
 def _w_served(rig: _WRig, home: Path) -> dict[str, dict[str, Any]]:
@@ -3029,8 +3045,10 @@ def _r_stack(
 ) -> Iterator[Wave3]:
     """The Wave 3 rehearsal's stack after step 4 on ``backend``'s store: sealed (sandbox and
     builder on docker), the record's test author, the builders' credential checks stubbed
-    present (no key is set or read), the campaign registered, then its four readings — each
-    opted in to reserved.v1 (``attempt_rule``) unless its ``(repo, size)`` is in ``legacy``."""
+    present (no key is set or read), the campaign registered, then its four readings —
+    each registered through ``POST /readings`` (reserved.v1, the record's body) unless its
+    ``(repo, size)`` is in ``legacy``, which is written as a legacy reading a store
+    registered before step 13 holds (:func:`_r_legacy`)."""
     for key in list(os.environ):
         if key.startswith("CRB_"):
             monkeypatch.delenv(key, raising=False)
@@ -3050,12 +3068,69 @@ def _r_stack(
         w.campaign = r.json()
         author = deployment_author_model(settings)
         for key, body in registration_bodies(w.cid, author).items():
-            rule = {} if key in legacy else {"attempt_rule": ATTEMPT_RULE_RESERVED}
-            r = w.send("POST", "/api/v1/readings", json={**body, **rule})
+            if key in legacy:
+                w.readings[key] = _r_legacy(w, body)
+                assert w.readings[key].get("attempt_rule", "") == "", key
+                continue
+            r = w.send("POST", "/api/v1/readings", json=body)
             assert r.status_code == 201, (key, r.text)
             w.readings[key] = r.json()
-            assert w.readings[key].get("attempt_rule", "") == rule.get("attempt_rule", ""), key
+            assert w.readings[key]["attempt_rule"] == ATTEMPT_RULE_RESERVED, key
         yield w
+
+
+def _r_legacy(w: Wave3, body: Mapping[str, Any]) -> dict[str, Any]:
+    """``body``'s reading under the legacy rule (``first_observed.v0``), as a store holds one
+    registered before step 13 — ``POST /readings`` registers reserved.v1 only (DL-385): the
+    core's ``register`` over every qualified commit of the cell, each its own change, in the
+    deployment's posture class, and the ``reading.registered`` event the route writes on the
+    repository's trace."""
+    repo, cell = str(body["repo"]), dict(body["cell"])
+    with w.env.factory() as s:
+        tasks = list(
+            s.execute(
+                select(Task).where(
+                    Task.repo == repo,
+                    Task.size == cell["size"],
+                    Task.capability_class == cell["capability_class"],
+                    Task.language == cell["language"],
+                )
+            ).scalars()
+        )
+        existing = load_readings(s, repo)
+        posture = str(body.get("posture_class") or "") or deployment_posture_class(
+            w.env.settings, s.get(Repo, repo)
+        )
+    labels = {t.task_id: dict(dict(t.spec_json or {}).get("labels") or {}) for t in tasks}
+    reading = register(
+        repo=repo,
+        cell=cell,
+        hierarchy=list(body["hierarchy"]),
+        pool=sorted(labels),
+        apparatus=APPARATUS_VERSION,
+        taxonomy=GLOBAL_CLASS_SET,
+        posture_class=posture,
+        checks_arm="off",
+        actor="op-legacy",
+        existing=existing,
+        rule=str(body["rule"]),
+        descriptive=[(str(a), int(n)) for a, n in body["descriptive"]],
+        author_model=str(body["author_model"]),
+        changes={c: str(lab.get("change_id") or c) for c, lab in labels.items()},
+        hypothesis=str(body["hypothesis"]),
+        smallest_effect=float(body["smallest_effect"]),
+        campaign_id=str(body["campaign_id"]),
+    )
+    append_event(
+        w.env.factory,
+        trace_id=f"readings:{repo}",
+        stage="system",
+        action=READING_EVENT_ACTION,
+        actor="op-legacy",
+        repo=repo,
+        payload=reading.to_dict(),
+    )
+    return reading.to_dict()
 
 
 def _r_admitted(w: Wave3) -> int:
@@ -3601,6 +3676,8 @@ def _f_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | Non
         w, "_executor", lambda ctx: _WExec({"exec": ""}, cancel=lambda: w._cancelled(ctx))
     )
     monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    # the container's user named, never the host's uid (a root CI container refuses it)
+    monkeypatch.setenv("CRB_BUILDER__USER", "1000:1000")
     monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
     posture = w._deployment_posture_class(pr.REPO_NAME, "docker")
     _every_cell_a_ceiling(monkeypatch)
@@ -3639,12 +3716,13 @@ def test_p792_c8_forward_offcell_run_cannot_reserve(
     another model than the reading's cell is refused 422 ``reading_run_fields`` naming
     ``model`` at ``POST /runs`` (nothing queued; 422 ``validation_error`` before, a factory
     run could name no reading), the on-cell run passes every reading gate (409
-    ``no_frozen_backlog``, the next one), and a factory run naming a legacy reading is still
-    a validation error. At claim the same off-cell run, inserted past the route, is refused
-    ``reading_run_fields`` naming ``model`` alone — nothing built, nothing reserved (before,
-    the claim named ``kind`` and the factory's own params too). The legacy forward rule is
-    pinned unchanged: a ticket's first factory attempt is any rung-``r1`` factory row on
-    the repository graded after registration and never imported."""
+    ``no_frozen_backlog``, the next one), and a factory run naming the replayed ceiling
+    reading is still a validation error. At claim the same off-cell run, inserted past the
+    route, is refused ``reading_run_fields`` naming ``model`` alone — nothing built, nothing
+    reserved (before, the claim named ``kind`` and the factory's own params too). The
+    legacy forward rule is pinned unchanged: a ticket's first factory attempt is any
+    rung-``r1`` factory row on the repository graded after registration and never
+    imported."""
     from crb.core.ledger import LABEL_IMPORTED
     from crb.core.reading import _forward_attempt
     from fixtures.proven import add_oracle_and_controls, add_rows, add_tasks, register_via_api
@@ -3665,14 +3743,14 @@ def test_p792_c8_forward_offcell_run_cannot_reserve(
     # the submit gate
     monkeypatch.setitem(runs_routes.CREDENTIAL_CHECKS, "editblock", lambda *_a, **_k: "")
     with make_env(tmp_path / "submit", **SEALED_SETTINGS) as env:
-        add_tasks(env.factory)
+        add_tasks(env.factory, qualify=True)
         r = register_via_api(env)
         assert r.status_code == 201, r.text
         ceiling = r.json()
         pool = ceiling["pool"][:20]
-        add_rows(env.factory, pool, arm="S3")
-        add_rows(env.factory, pool[:3], arm=S1, clean=False)
-        add_rows(env.factory, pool[3:], arm=S1)
+        add_rows(env.factory, pool, arm="S3", reading=ceiling)
+        add_rows(env.factory, pool[:3], arm=S1, clean=False, reading=ceiling)
+        add_rows(env.factory, pool[3:], arm=S1, reading=ceiling)
         add_oracle_and_controls(env.factory, pool)
         fwd = env.post(
             "/readings/forward",
@@ -3930,13 +4008,13 @@ def test_p792_post_readings_forward_opts_in_to_reserved(tmp_path: Path) -> None:
     from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, envelope, make_env
 
     with make_env(tmp_path, **SEALED_SETTINGS) as env:
-        add_tasks(env.factory)
+        add_tasks(env.factory, qualify=True)
         r = register_via_api(env)
         assert r.status_code == 201, r.text
         pool = r.json()["pool"][:20]
-        add_rows(env.factory, pool, arm="S3")
-        add_rows(env.factory, pool[:3], arm=S1, clean=False)
-        add_rows(env.factory, pool[3:], arm=S1)
+        add_rows(env.factory, pool, arm="S3", reading=r.json())
+        add_rows(env.factory, pool[:3], arm=S1, clean=False, reading=r.json())
+        add_rows(env.factory, pool[3:], arm=S1, reading=r.json())
         add_oracle_and_controls(env.factory, pool)
         body = {
             "repo": ALPHA,

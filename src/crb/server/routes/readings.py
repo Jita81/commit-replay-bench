@@ -16,7 +16,10 @@ test author — P-797), ``422 pool_not_blind`` when the caller names a pool the 
 give, ``409 budget_spent`` when the budget cannot cover the rule, and ``422 invalid_reading``
 for a shape the ADR forbids, and ``404 campaign_unknown`` when it names a ``campaign_id`` no
 verified campaign has — a reading names its campaign at birth, a run filed under it is then
-filed under that campaign, and it counts only runs the campaign admitted (DL-382). ``GET
+filed under that campaign, and it counts only runs the campaign admitted (DL-382). Every
+reading it registers reads under ``reserved.v1`` (P-792, DL-385): only the attempt a run reserves
+for a commit before its build decides it, ``max_reruns`` 0, on the ``default`` budget profile
+unless it names another; a body asking for any other rule or re-run count is refused 422. ``GET
 /readings`` serves every reading of a repository evaluated over its rows — each arm's look
 state, the attempt rule it reads under and, for a reserved.v1 reading, the treatment its
 attempts are pinned to, the commits each arm has reserved (P-792), how many of those settled
@@ -56,9 +59,11 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               reads the rows and the readings already registered under the lock, refuses a
               reading already registered (``reading_exists``, P-793) and any registration
               while the repository's lint is off (``lint_disabled``, P-796), and writes the
-              event (a reserved.v1 reading only when asked: ``attempt_rule``, P-792, hashing
-              the repository's ``lint_digest`` — on ``POST /readings/forward`` too, whose
-              factory runs then reserve each ticket's first build, C8); lists readings
+              event — every ``POST /readings`` reading under ``reserved.v1`` (``max_reruns``
+              0, the ``default`` budget profile; any other rule or count 422, P-792), hashing
+              the repository's ``lint_digest``; on ``POST /readings/forward`` only when asked
+              (``attempt_rule``), whose factory runs then reserve each ticket's first build,
+              C8); lists readings
               with every arm's state and the budget per cell, each with its attempt rule (a
               legacy one ``first_observed.v0``, ``p792: "open on this rule"``), its treatment
               pins, its reserved commits per arm, how many of them settled with no row
@@ -66,7 +71,7 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               drifted reading reads ``undecided``);
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
-How:          ``append_event_checked`` (lock → ``_qualified`` or ``_qualified_reserved`` →
+How:          ``append_event_checked`` (lock → ``_qualified_reserved`` →
               ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
               counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``served_reading``
@@ -90,8 +95,9 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py,
-              tests/test_p792_reserved.py (the attempt rule, the pins and the reserved counts,
-              the forward reading's opt-in),
+              tests/test_p792_reserved.py (the attempt rule registered by default, the pins and
+              the reserved counts, the forward reading's opt-in),
+              tests/test_wave3_registration_rehearsal.py (the Wave 3 record's requests),
               tests/test_p792_pool.py (the pool pinned to its qualification records)
 Touch when:   never for a new repository; the reading's shape or the registration's refusals change
               (an ADR amending ADR-0026 first); never for a new repository.
@@ -122,7 +128,6 @@ from crb.core.ledger import (
 from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
-    ATTEMPT_RULE_RESERVED,
     DEFAULT_MAX_RERUNS,
     OUTCOME_UNDECIDED,
     READING_EVENT_ACTION,
@@ -279,8 +284,9 @@ class ReadingIn(BaseModel):
     """A registration: the full cell, the hierarchy (richest first) and the pool RULE — every
     qualified task of the cell's class, size and language, or every one authored at or after
     ``since`` (DL-097). ``pool``, when given, must be that rule's own pool: a hand-picked list
-    is refused ``pool_not_blind``. Under ``reserved.v1`` a task is qualified when its record in
-    force in the latest posture of the reading's posture class is ``qualified`` (P-797)."""
+    is refused ``pool_not_blind``. Every registration reads under ``reserved.v1`` (P-792), so
+    a task is qualified when its record in force in the latest posture of the reading's
+    posture class is ``qualified`` (P-797)."""
 
     repo: str = Field(min_length=1, max_length=64)
     cell: dict[str, str]
@@ -303,14 +309,16 @@ class ReadingIn(BaseModel):
     #: The campaign every run of this reading spends under (DL-382): it must exist and verify
     #: (404 ``campaign_unknown``); hashed into the reading's id when given.
     campaign_id: CampaignId = None
-    #: How a commit is read (P-792), opt-in: ``""`` the legacy first-observed rule, or
+    #: How a commit is read (P-792): every reading registered here reads under
     #: ``reserved.v1`` — only the attempt a run reserves for a commit before its build decides
-    #: it, so a cancel, kill or harness failure after the reservation is that commit's miss.
-    #: ``max_reruns`` defaults to 2 under the legacy rule and 0 under reserved.v1 (the only
-    #: value it accepts); ``budget_profile`` is the profile every run of a reserved.v1 reading
-    #: spends on, ignored under the legacy rule. Both hashed only with the rule.
-    attempt_rule: Literal["", "reserved.v1"] = ""
-    max_reruns: int | None = Field(default=None, ge=0)
+    #: it, so a cancel, kill, timeout or harness failure after the reservation is that
+    #: commit's miss (fail closed). ``max_reruns`` is 0 — a reserved attempt is never drawn
+    #: again — and ``budget_profile`` is the profile every non-loop run of the reading spends
+    #: on; all three are hashed into the reading. Any other rule or re-run count is refused
+    #: 422: the legacy first-observed rule is no longer registered here (a legacy reading
+    #: already registered keeps its id and is served ``first_observed.v0``).
+    attempt_rule: Literal["reserved.v1"] = "reserved.v1"  # ATTEMPT_RULE_RESERVED
+    max_reruns: Literal[0] = 0
     budget_profile: str = Field(default="default", max_length=64)
 
 
@@ -325,23 +333,6 @@ class ReadingsOut(BaseModel):
     readings: list[dict[str, Any]]
     budgets: list[dict[str, Any]]
     budget: float
-
-
-def _qualified(session: Session, repo: str, cell: Mapping[str, str]) -> dict[str, Task]:
-    """The repository's qualified tasks (gold checked clean) in the cell's class, size and
-    language — what a pool may hold."""
-    q = select(Task).where(
-        Task.repo == repo,
-        Task.capability_class == cell.get("capability_class", ""),
-        Task.size == cell.get("size", ""),
-        Task.gold_clean.is_(True),
-    )
-    lang = cell.get("language", "")
-    return {
-        t.task_id: t
-        for t in session.execute(q).scalars()
-        if not lang or not t.language or t.language == lang
-    }
 
 
 def _qualified_reserved(
@@ -467,11 +458,7 @@ def register_reading(
     def build(s: Session) -> dict[str, Any]:
         lint = _refuse_lint_disabled(s, body.repo)
         _refuse_unknown_campaign(s, body.campaign_id)
-        pool_posture_id, pins = "", dict[str, str]()
-        if body.attempt_rule == ATTEMPT_RULE_RESERVED:
-            qualified, pool_posture_id, pins = _qualified_reserved(s, body.repo, body.cell, posture)
-        else:
-            qualified = _qualified(s, body.repo, body.cell)
+        qualified, pool_posture_id, pins = _qualified_reserved(s, body.repo, body.cell, posture)
         if org:
             # the class the version's rule gave each commit (the label table), and only its
             # confirmation commits: a commit that derived the class never licenses it
@@ -508,15 +495,10 @@ def register_reading(
         )
         refuse_unless_blind(list(dict.fromkeys(body.pool)), pool, pool_rule)
         if not pool:
-            why = (
-                "a reserved.v1 pool freezes only commits whose qualification record in force "
-                f"in the latest {posture} posture is qualified (P-797)"
-                if body.attempt_rule == ATTEMPT_RULE_RESERVED
-                else "a pool freezes qualified commits only"
-            )
             raise ReadingRefused(
                 f"no qualified task of this cell's class, size and language under {pool_rule}"
-                f" — {why}",
+                " — a reserved.v1 pool freezes only commits whose qualification record in "
+                f"force in the latest {posture} posture is qualified (P-797)",
                 code=REFUSAL_INVALID,
                 detail={"pool_posture_id": pool_posture_id} if pool_posture_id else {},
             )
@@ -543,12 +525,8 @@ def register_reading(
             smallest_effect=body.smallest_effect,
             campaign_id=body.campaign_id or "",
             attempt_rule=body.attempt_rule,
-            max_reruns=(
-                body.max_reruns
-                if body.max_reruns is not None
-                else (0 if body.attempt_rule else DEFAULT_MAX_RERUNS)
-            ),
-            budget_profile=body.budget_profile if body.attempt_rule else "",
+            max_reruns=body.max_reruns,
+            budget_profile=body.budget_profile,
             lint_digest=lint_config_digest(lint),
             pool_posture_id=pool_posture_id,
             pool_qualifications={c: pins[c] for c in pool if c in pins},
