@@ -136,6 +136,11 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               next free stage (``_chain_next_stage``, ``FREE_CHAIN``, DL-315) under the
               person who switched it on — only when the finished stage's own pass fact
               holds, once per finished run, and never a kind that spends model money.
+              Projects a reserved attempt's treatment for a reading's pin, as plain JSON with
+              no secret (``deployment_projection``, ``arm_projection``, ``repo_config_digest``
+              under ``REPO_CONFIG_UNPINNED``, ``fingerprint``, ``treatment_digest``; P-792,
+              no caller yet): A0 and A0+L share the deployment, the loop's overlay and the
+              budget profile are a non-loop arm's.
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -168,12 +173,16 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_spend.py, tests/test_worker_chain.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
-              tests/test_observability_metrics.py
+              tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
+              projections and their ratchets)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
               every run must carry is added (``_RunLedger._stamp``); an idle-loop step is
-              added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``).
+              added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``); a
+              ``BuilderContainerSettings`` field or another input an attempt runs under is
+              added (a named field of ``deployment_projection``; a ``RepoConfig`` field is
+              pinned unless named in ``REPO_CONFIG_UNPINNED`` — the ratchets fail first).
 Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
               stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
 
@@ -190,6 +199,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import asdict as dataclass_asdict
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
@@ -207,22 +217,23 @@ from crb.builders.adapter import (
     build_fn_for,
     container_settings_from_env,
     ladder_labels,
+    loop_on,
     rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.brief import ARM_S1, S1Arm
 from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
-from crb.builders.container import UnconfirmedKill
+from crb.builders.container import BuilderContainerSettings, UnconfirmedKill
 from crb.builders.labeller import make_labeller
 from crb.core.campaign import REFUSAL_REQUIRED
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
-from crb.core.context_arm import BASE_S1, REPLAY_MODE
+from crb.core.context_arm import BASE_S1, REPLAY_MODE, parse_arm
 from crb.core.deps import DepsProvider, ProvisionRefused
-from crb.core.evidence import utc_now_iso
+from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.execution import (
     TREE_COPY,
     DockerExecutor,
@@ -270,7 +281,7 @@ from crb.core.patches import PatchStore
 from crb.core.posture import expected_posture_class
 from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.qualify import Qualification
-from crb.core.redact import redact_and_cap
+from crb.core.redact import redact, redact_and_cap
 from crb.core.routing import ROUTE_DELIVER
 from crb.core.run import BuildAttempt, RunSpec, RunSummary
 from crb.core.run import run as core_run
@@ -356,7 +367,7 @@ from crb.server.routes.runs import (
     submit_refusals,
     system_trace_id,
 )
-from crb.server.schemas import BUILD_KINDS, RunCreateRequest
+from crb.server.schemas import BUILD_KINDS, BUILDER_CONFIG_SECRET_MARKERS, RunCreateRequest
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     ROLE_RANK,
@@ -492,6 +503,160 @@ def budget_tier(budget: Budget) -> str:
     if budget.max_cost_usd:
         tier += f"/usd={budget.max_cost_usd:g}"
     return tier
+
+
+# ---------------------------------------------------------------------------
+# The treatment pin (P-792, reserved.v1): what a reservation's two fingerprints hash
+# ---------------------------------------------------------------------------
+
+#: ``RepoConfig`` fields outside the pinned repository digest: where the clone lives, how far
+#: mining walks and whether the free stages chain — none changes what an attempt runs under.
+#: Every other field, a new one included, is pinned (the ratchet in
+#: tests/test_p792_reserved.py lists the dataclass's own fields).
+REPO_CONFIG_UNPINNED: frozenset[str] = frozenset({"path", "mining", "auto_stages"})
+
+
+def repo_config_digest(config: RepoConfig) -> str:
+    """The sha256 of ``canonical_json(config.to_dict())`` without :data:`REPO_CONFIG_UNPINNED`.
+    Switching the lint belt off or editing the runner options after a campaign's first
+    reservation moves it, and so the deployment fingerprint (C4, C11)."""
+    body = {k: v for k, v in config.to_dict().items() if k not in REPO_CONFIG_UNPINNED}
+    return sha256_text(canonical_json(body))
+
+
+def _refuse_secrets(where: str, value: Any, *, keys: bool) -> None:
+    """Fail closed on anything credential-shaped in a treatment projection, which is stored
+    on a reservation event and served: with ``keys``, a mapping key carrying a
+    :data:`BUILDER_CONFIG_SECRET_MARKERS` marker; always, a key or string the redactor would
+    rewrite. The error names the path, never the value."""
+    if isinstance(value, Mapping):
+        for k, v in value.items():
+            key = str(k)
+            if redact(key) != key:
+                raise ValueError(f"{where} has a secret-shaped key: a treatment is never a secret")
+            if keys and any(marker in key.lower() for marker in BUILDER_CONFIG_SECRET_MARKERS):
+                raise ValueError(
+                    f"{where}.{key} is credential-shaped: a treatment is never a secret"
+                )
+            _refuse_secrets(f"{where}.{key}", v, keys=keys)
+    elif isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            _refuse_secrets(f"{where}[{i}]", item, keys=keys)
+    elif isinstance(value, str) and redact(value) != value:
+        raise ValueError(f"{where} holds a secret-shaped value: a treatment is never a secret")
+
+
+def _container_projection(container: BuilderContainerSettings | None) -> dict[str, Any] | None:
+    """Every :class:`BuilderContainerSettings` field by name (``describe()`` omits three and
+    folds a fourth), or ``None`` for a builder on the host. Read from the settings, never
+    from the environment they came from, so nothing else under ``CRB_BUILDER__`` rides in."""
+    if container is None:
+        return None
+    return {
+        "image": container.image,
+        "proxy_image": container.proxy_image,
+        "allow_hosts": list(container.allow_hosts),
+        "egress_network": container.egress_network,
+        "memory": container.memory,
+        "cpus": container.cpus,
+        "pids_limit": container.pids_limit,
+        "tmp_size": container.tmp_size,
+        "user": container.user,
+        "docker_binary": container.docker_binary,
+        "extra_ro_mounts": dict(container.extra_ro_mounts),
+    }
+
+
+def deployment_projection(
+    *,
+    ladder: EscalationLadder,
+    budget: Budget,
+    builder_overrides: Mapping[str, Any],
+    container: BuilderContainerSettings | None,
+    executor: str,
+    timeout: int,
+    preflight: Preflight | None,
+    escalation: str,
+    posture_class: str,
+    config: RepoConfig,
+    s1_author: str,
+) -> dict[str, Any]:
+    """The deployment half of a reserved attempt's treatment: what its r1 attempt runs under
+    that every arm of the campaign on one repository shares, as plain JSON with no secret.
+
+    It holds the r1 rung's builder, model, provider and config (the budget fields of that
+    config are in the budget), the run's ``builder_config`` overrides (C3), the builder
+    container by named field, the executor, ``RunSpec.timeout`` (C5), the r1 budget as
+    :func:`budget_for_rung` makes it from the run's ``budget`` — profile-independent: a
+    calibrated per-task cap is the arm's (:func:`arm_projection`), never passed here — the
+    pre-flight, the escalation policy, ``APPARATUS_VERSION``, the posture class, the
+    :func:`repo_config_digest` (C4, C11) and the S1 test author's label (``""`` off S1).
+    ``escalation`` is the policy resolved from the run's params over the repository's own
+    ``spend`` block, without the loop's overlay: the overlay is the ``+L`` arm's treatment,
+    and A0 and A0+L share this projection. A credential-shaped override or rung key, a
+    secret-shaped value anywhere, or a value JSON cannot hold raises ``ValueError`` /
+    ``TypeError`` (fail closed: nothing is dropped and nothing is hashed)."""
+    r1 = ladder.rungs[0]
+    rung_config = {k: v for k, v in r1.config.items() if k not in Budget.__dataclass_fields__}
+    _refuse_secrets("rung.config", rung_config, keys=True)
+    _refuse_secrets("builder_overrides", builder_overrides, keys=True)
+    projection = {
+        "rung": {
+            "builder": r1.builder,
+            "model": r1.model,
+            "provider": r1.provider,
+            "config": rung_config,
+        },
+        "builder_overrides": dict(builder_overrides),
+        "container": _container_projection(container),
+        "executor": executor,
+        "timeout": int(timeout),
+        "budget": budget_for_rung(r1, budget).to_dict(),
+        "preflight": None if preflight is None else dataclass_asdict(preflight),
+        "escalation": escalation,
+        "apparatus_version": APPARATUS_VERSION,
+        "posture_class": posture_class,
+        "repo_config": repo_config_digest(config),
+        "s1_author": s1_author,
+    }
+    _refuse_secrets("deployment", projection, keys=False)
+    plain: dict[str, Any] = json.loads(canonical_json(projection))
+    return plain
+
+
+def arm_projection(
+    arm: str, learning: LearningSnapshot, budget_profile: str, resolved_r1_budget: Budget
+) -> dict[str, Any]:
+    """The arm half of a reserved attempt's treatment: always ``{arm, learn}``. A non-loop arm
+    adds the loop overlay's digest, its resolved ``budget_profile`` and the r1 budget that
+    profile (or calibration) resolved to (C7); the ``+L`` arm omits all three, because what
+    the loop learns between commits is the treatment it measures. An arm outside the grammar,
+    or one whose ``+L`` disagrees with the loop switch it ran under, raises ``ValueError``."""
+    loop = parse_arm(arm).loop
+    if loop != loop_on(learning):
+        raise ValueError(
+            f"arm {arm!r} disagrees with the loop switch it ran under "
+            f"(learn={learning.auto_apply!r}, opted out={learning.opted_out})"
+        )
+    out: dict[str, Any] = {"arm": arm, "learn": learning.auto_apply}
+    if loop:
+        return out
+    return {
+        **out,
+        "overlay": learning.overlay_digest,
+        "budget_profile": budget_profile,
+        "budget": resolved_r1_budget.to_dict(),
+    }
+
+
+def fingerprint(projection: Mapping[str, Any]) -> str:
+    """``deployment_fp`` / ``arm_fp``: the sha256 of a projection's canonical JSON."""
+    return sha256_text(canonical_json(projection))
+
+
+def treatment_digest(deployment_fp: str, arm_fp: str) -> str:
+    """The ``treatment`` label a reserved row carries: ``sha256(deployment_fp|arm_fp)``."""
+    return sha256_text(f"{deployment_fp}|{arm_fp}")
 
 
 def default_worker_id() -> str:

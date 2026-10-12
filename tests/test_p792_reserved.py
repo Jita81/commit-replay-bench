@@ -22,6 +22,12 @@ budget profile, refused otherwise) each have a test here, beside the goldens tha
 legacy (``first_observed.v0``) reading as it read before and the property that the reserved
 rule's hits are a subset of the legacy rule's.
 
+The treatment pin's projections (worker helpers, no caller yet): a reservation pins a
+``deployment_fp`` per campaign and repository and an ``arm_fp`` per arm, and a later mismatch
+halts the run. C3 (``extra_args``), C4 (lint off), C5 (``timeout``), C7 (the budget profile)
+and C11 (a ``RepoConfig`` edit) each move a fingerprint; the ratchets list ``RepoConfig``'s and
+``BuilderContainerSettings``' own fields, so a new field is pinned or named unpinned.
+
 Navigation
 ----------
 What it is:   The P-792 channel tests — one per channel the round-5 enumeration found, each
@@ -40,13 +46,17 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               and budget profile, the ``reading_run_refusal`` whitelist table and the arm
               each admitted run maps to (C3, C5, C7 at the core), and the hypothesis property
               that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
-              the same look or earlier.
+              the same look or earlier. The projections: every pinned ``RepoConfig`` field and
+              every container field and deployment input moves its fingerprint, A0 and A0+L
+              share ``deployment_fp``, a calibrated profile moves only ``arm_fp``, and no
+              secret reaches a projection (a credential-shaped input is refused).
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
               readings, ``Reservation`` values and chained rows in memory (the reading
               fixture's ``sealed_row`` and the forward suite's ``S2`` row shape) and call the
-              pure core; no store, no server.
+              pure core; no store, no server. The projection tests call the worker's pure
+              helpers on in-memory ``RepoConfig``, ladder and container values.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0026-the-context-standard.md
@@ -55,13 +65,17 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               tests/fixtures/builders_repo.py (the task the argv is built for),
               src/crb/core/reading.py (the reserved.v1 rule, ``reading_run_refusal`` and the
               legacy loop, under test), tests/fixtures/readings.py (the registrations and
-              rows the reading tests build on), docs/PREVENTION.md (P-792, the row these
-              tests close; P-795, the golden's one deliberate move)
+              rows the reading tests build on), src/crb/server/worker.py
+              (``deployment_projection``, ``arm_projection``, ``repo_config_digest``, under
+              test), docs/PREVENTION.md (P-792, the row these tests close; P-795, the golden's
+              one deliberate move)
 Tested by:    tests/test_p792_reserved.py
 Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
               failing first), or a builder gains a constructor option that shapes its argv
               (the stamp names it when set, and ``DEFAULT_STAMP`` stays unchanged); the
               reserved.v1 verdict or the run whitelist changes (its table row here first);
+              a ``RepoConfig`` / ``BuilderContainerSettings`` field or a deployment input is
+              added (its edit in the ratchet's table, which fails until then);
               never to regenerate ``GOLDEN`` — a legacy reading that moves is a regression,
               unless a PREVENTION row moves it on purpose (``P795_MOVED``, beside it).
 """
@@ -69,6 +83,8 @@ Touch when:   never for a new repository; a P-792 channel's fix lands (its test 
 from __future__ import annotations
 
 import copy
+import dataclasses
+import inspect
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -80,6 +96,9 @@ from hypothesis import strategies as st
 
 from crb.builders import base
 from crb.builders import claude_code as cc
+from crb.builders.adapter import Preflight
+from crb.builders.budget import budget_for_rung
+from crb.builders.container import BuilderContainerSettings
 from crb.core.acceptance import (
     RESULT_ERROR,
     RESULT_FAIL,
@@ -87,6 +106,7 @@ from crb.core.acceptance import (
     HeldOutTests,
     held_out_labels,
 )
+from crb.core.evidence import canonical_json
 from crb.core.ledger import (
     FAILURE_OUTAGE,
     GENESIS_HASH,
@@ -95,6 +115,7 @@ from crb.core.ledger import (
     lint_could_change,
 )
 from crb.core.lint import LINT_DISABLED_BY_CONFIG
+from crb.core.prevention import AUTO_CONTEXT, K_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     ATTEMPT_RULE_RESERVED,
@@ -123,7 +144,15 @@ from crb.core.reading import (
     with_enrolment,
     with_reservations,
 )
+from crb.core.spec import BELT_AFFECTED_DIRS, Language, RepoConfig
+from crb.core.spend import (
+    ESCALATION_ALWAYS,
+    ESCALATION_MEASURED,
+    PROFILE_CALIBRATED,
+    PROFILE_DEFAULT,
+)
 from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.server import worker
 from fixtures.builders_repo import make_fixture
 from fixtures.posture import posture_row
 from fixtures.readings import (
@@ -1294,3 +1323,315 @@ def test_p792_new_hits_subset_of_old(data: st.DataObject) -> None:
         assert old.look.state == STATE_DELIVER
         assert old.look.decided_at is not None and new.look.decided_at is not None
         assert old.look.decided_at <= new.look.decided_at
+
+
+# ---------------------------------------------------------------------------
+# The treatment pin's projections (C3, C4, C5, C7, C11): what deployment_fp and arm_fp hash
+# ---------------------------------------------------------------------------
+
+#: A fake provider key: the shape the redactor knows, so a leak of it is unmistakable.
+_FAKE_KEY = "sk-ant-p792-fake-0123456789abcdef"
+
+#: One edit per ``RepoConfig`` field, each valid on its own over ``_repo()``. A field added
+#: to ``RepoConfig`` fails the ratchet until it has an edit here — and the edit then shows
+#: whether it moves the digest, which it must unless it is in ``REPO_CONFIG_UNPINNED``.
+_REPO_FIELD_EDITS: dict[str, Any] = {
+    "name": "p792-other",
+    "language": Language.GO,
+    "runner": "vitest",
+    "path": "/clones/elsewhere",
+    "src_prefix": "src/",
+    "test_prefix": "tests/",
+    "ext": ".pyi",
+    "test_mode": "suffix",
+    "test_suffix": "_spec.py",
+    "belt_scope": BELT_AFFECTED_DIRS,
+    "probe": "tests/test_probe.py",
+    "url": "https://example.invalid/p792.git",
+    "layer": "api",
+    "runner_opts": {"pythonpath_suffix": "src"},
+    "sandbox_image": "crb-sandbox:other",
+    "mining": {"log_n": 50},
+    "lint": {"disabled": True},
+    "sandbox_tree": "copy",
+    "spend": {"budget_profile": PROFILE_CALIBRATED},
+    "checks": {"format_step": True},
+    "auto_stages": True,
+}
+
+#: One edit per ``BuilderContainerSettings`` field, valid over ``_container()``.
+_CONTAINER_FIELD_EDITS: dict[str, Any] = {
+    "image": "crb-builder:2",
+    "proxy_image": "crb-proxy:2",
+    "allow_hosts": ("api.anthropic.com", "example.invalid:8443"),
+    "egress_network": "crb-egress",
+    "memory": "8g",
+    "cpus": "4",
+    "pids_limit": 2048,
+    "tmp_size": "2g",
+    "user": "1001:1001",
+    "docker_binary": "/usr/local/bin/docker",
+    "extra_ro_mounts": {"/opt/cache": "/cache"},
+}
+
+
+def _repo(**edits: Any) -> RepoConfig:
+    config = RepoConfig(
+        name="p792", language=Language.PYTHON, path="/clones/p792", test_suffix="_tests.py"
+    )
+    return dataclasses.replace(config, **edits)
+
+
+def _container(**edits: Any) -> BuilderContainerSettings:
+    return dataclasses.replace(
+        BuilderContainerSettings(image="crb-builder:1", user="1000:1000"), **edits
+    )
+
+
+def _ladder(model: str = "claude-sonnet-5", **config: Any) -> base.EscalationLadder:
+    rung = base.Rung("claude_code", model, "anthropic", {"max_turns": 40, **config})
+    second = base.Rung("claude_code", "claude-opus-5", "anthropic")
+    return base.EscalationLadder((rung, second))
+
+
+def _deployment_inputs(**edits: Any) -> dict[str, Any]:
+    inputs: dict[str, Any] = {
+        "ladder": _ladder(),
+        "budget": base.Budget(max_turns=30, max_tool_calls=30),
+        "builder_overrides": {"effort": "high"},
+        "container": _container(),
+        "executor": "docker",
+        "timeout": 1800,
+        "preflight": None,
+        "escalation": ESCALATION_MEASURED,
+        "posture_class": "docker/copy/offline",
+        "config": _repo(),
+        "s1_author": "",
+    }
+    return {**inputs, **edits}
+
+
+def _deployment(**edits: Any) -> dict[str, Any]:
+    return worker.deployment_projection(**_deployment_inputs(**edits))
+
+
+def _deployment_fp(**edits: Any) -> str:
+    return worker.fingerprint(_deployment(**edits))
+
+
+def _r1_budget() -> base.Budget:
+    inputs = _deployment_inputs()
+    return budget_for_rung(inputs["ladder"].rungs[0], inputs["budget"])
+
+
+def test_p792_repo_config_pin_ratchet() -> None:
+    """C11: every ``RepoConfig`` field is in the pinned repository digest unless it is named
+    in ``REPO_CONFIG_UNPINNED`` (where the clone lives, how far mining walks, and the free-stage
+    chain change no attempt). The list is the dataclass's own fields, so a new field is pinned
+    by default and this test fails until it has an edit."""
+    names = {f.name for f in dataclasses.fields(RepoConfig)}
+    assert set(_REPO_FIELD_EDITS) == names, "a RepoConfig field has no edit in this ratchet"
+    assert frozenset({"path", "mining", "auto_stages"}) == worker.REPO_CONFIG_UNPINNED
+    config = _repo()
+    digest = worker.repo_config_digest(config)
+    assert len(digest) == 64 and digest == worker.repo_config_digest(_repo())
+    for name in sorted(names):
+        edited = dataclasses.replace(config, **{name: _REPO_FIELD_EDITS[name]})
+        assert getattr(edited, name) != getattr(config, name), name
+        moved = worker.repo_config_digest(edited) != digest
+        assert moved is (name not in worker.REPO_CONFIG_UNPINNED), name
+
+
+def test_p792_container_projection_ratchet() -> None:
+    """Every ``BuilderContainerSettings`` field is a named field of the deployment, and an
+    edit to any one of them moves the deployment fingerprint; a builder on the host projects
+    no container at all."""
+    names = {f.name for f in dataclasses.fields(BuilderContainerSettings)}
+    assert set(_CONTAINER_FIELD_EDITS) == names, "a container field has no edit in this ratchet"
+    projected = _deployment()["container"]
+    assert set(projected) == names
+    assert projected["tmp_size"] == "1g" and projected["extra_ro_mounts"] == {}
+    pinned = _deployment_fp()
+    for name in sorted(names):
+        edited = _container(**{name: _CONTAINER_FIELD_EDITS[name]})
+        assert getattr(edited, name) != getattr(_container(), name), name
+        assert _deployment_fp(container=edited) != pinned, name
+    assert _deployment(container=None)["container"] is None
+    assert _deployment_fp(container=None) != pinned
+
+
+def test_p792_a0_and_a0l_share_the_deployment_fp() -> None:
+    """A0 and A0+L are one deployment and two arms: the loop's overlay, the budget profile
+    it may set and the budget that resolves to are the +L arm's treatment, so they live in a
+    non-L arm's ``arm_fp`` and nowhere in the deployment. The +L arm pins only its arm id
+    and learn level — what the loop learns between commits is what it measures."""
+    params = inspect.signature(worker.deployment_projection).parameters
+    assert not {"arm", "learning", "budget_profile", "budget_for_task"} & set(params)
+    deployment_fp = _deployment_fp()
+    r1 = _r1_budget()
+    off = empty_snapshot("p792")
+    on = LearningSnapshot(
+        repo="p792", auto_apply=AUTO_CONTEXT, overlay={K_SECTION: {"escalation": "always"}}
+    )
+    a0 = worker.arm_projection("A0", off, PROFILE_DEFAULT, r1)
+    a0l = worker.arm_projection(
+        "A0+L", on, PROFILE_CALIBRATED, dataclasses.replace(r1, max_turns=9)
+    )
+    assert a0 == {
+        "arm": "A0",
+        "learn": "off",
+        "overlay": "",
+        "budget_profile": PROFILE_DEFAULT,
+        "budget": r1.to_dict(),
+    }
+    assert a0l == {"arm": "A0+L", "learn": AUTO_CONTEXT}
+    a0_fp, a0l_fp = worker.fingerprint(a0), worker.fingerprint(a0l)
+    assert a0_fp != a0l_fp
+    assert worker.treatment_digest(deployment_fp, a0_fp) != worker.treatment_digest(
+        deployment_fp, a0l_fp
+    )
+    assert worker.treatment_digest(deployment_fp, a0_fp) == worker.treatment_digest(
+        _deployment_fp(), worker.fingerprint(worker.arm_projection("A0", off, PROFILE_DEFAULT, r1))
+    )
+    # the loop learning a new overlay between commits is +L's treatment, not a drift of it
+    learned = dataclasses.replace(on, overlay={K_SECTION: {"budget_profile": PROFILE_CALIBRATED}})
+    assert worker.fingerprint(worker.arm_projection("A0+L", learned, PROFILE_DEFAULT, r1)) == a0l_fp
+    # an overlay reaching a non-L arm is a drift of A0's treatment
+    stray = dataclasses.replace(off, overlay={K_SECTION: {"escalation": "always"}})
+    assert worker.fingerprint(worker.arm_projection("A0", stray, PROFILE_DEFAULT, r1)) != a0_fp
+    # fail closed: an arm that disagrees with the loop switch it ran under is refused
+    with pytest.raises(ValueError, match="loop"):
+        worker.arm_projection("A0+L", off, PROFILE_DEFAULT, r1)
+    with pytest.raises(ValueError, match="loop"):
+        worker.arm_projection("A0", on, PROFILE_DEFAULT, r1)
+    with pytest.raises(ValueError):
+        worker.arm_projection("A9", off, PROFILE_DEFAULT, r1)
+
+
+def test_p792_a_calibrated_profile_moves_only_arm_fp() -> None:
+    """C7: a non-loop run on the calibrated profile is a different arm treatment from one on
+    the default profile, and the same deployment. The deployment's r1 budget is the declared
+    one (``budget_for_rung`` over the run's budget), never a per-task calibrated cap."""
+    r1 = _r1_budget()
+    calibrated = dataclasses.replace(r1, max_turns=12, max_tool_calls=14)
+    off = empty_snapshot("p792")
+    deployment = _deployment()
+    assert deployment["budget"] == r1.to_dict()
+    assert deployment["budget"]["max_turns"] == 40  # the rung's override, profile-independent
+    declared = worker.arm_projection("A0", off, PROFILE_DEFAULT, r1)
+    profiled = worker.arm_projection("A0", off, PROFILE_CALIBRATED, r1)
+    capped = worker.arm_projection("A0", off, PROFILE_CALIBRATED, calibrated)
+    fps = {worker.fingerprint(declared), worker.fingerprint(profiled), worker.fingerprint(capped)}
+    assert len(fps) == 3
+    assert capped["budget"] == calibrated.to_dict()
+    assert _deployment_fp() == worker.fingerprint(deployment)
+    sighted = worker.arm_projection("S3", off, PROFILE_CALIBRATED, calibrated)
+    assert sighted["budget_profile"] == PROFILE_CALIBRATED
+
+
+def test_p792_lint_and_runner_opts_move_the_repo_digest() -> None:
+    """C4 and C11: switching the repository's lint belt off, or editing its runner options,
+    after the first reservation moves the repository digest and so the deployment
+    fingerprint (the next reservation halts ``reading_treatment_mismatch``); moving the
+    clone or the mining depth moves neither."""
+    pinned_repo = worker.repo_config_digest(_repo())
+    pinned = _deployment_fp()
+    assert _deployment()["repo_config"] == pinned_repo
+    for edit in ({"lint": {"disabled": True}}, {"runner_opts": {"python": "python3.13"}}):
+        assert worker.repo_config_digest(_repo(**edit)) != pinned_repo, edit
+        assert _deployment_fp(config=_repo(**edit)) != pinned, edit
+    for edit in ({"path": "/clones/moved"}, {"mining": {"max_candidates": 9}}):
+        assert worker.repo_config_digest(_repo(**edit)) == pinned_repo, edit
+        assert _deployment_fp(config=_repo(**edit)) == pinned, edit
+
+
+def test_p792_timeout_and_extra_args_move_the_deployment_fp() -> None:
+    """C5 and C3: the run's ``timeout`` (``RunSpec.timeout``) and a ``builder_config`` that
+    carries ``extra_args`` or ``claude_binary`` each move the deployment fingerprint; so does
+    every other input the deployment takes — each parameter has an edit here, so a new one
+    fails until it is shown to be pinned. Only the r1 rung is pinned, and only its non-budget
+    config is projected as config (its budget fields are in the r1 budget)."""
+    pinned = _deployment_fp()
+    assert _deployment()["timeout"] == 1800
+    assert _deployment_fp(timeout=1) != pinned
+    extra = {"effort": "high", "extra_args": ["--model", "claude-opus-5"]}
+    assert _deployment(builder_overrides=extra)["builder_overrides"] == extra
+    assert _deployment_fp(builder_overrides=extra) != pinned
+    assert _deployment_fp(builder_overrides={"effort": "high", "claude_binary": "/opt/c"}) != pinned
+    projected_rung = _deployment()["rung"]
+    assert projected_rung == {
+        "builder": "claude_code",
+        "model": "claude-sonnet-5",
+        "provider": "anthropic",
+        "config": {},
+    }
+    assert _deployment_fp(ladder=_ladder(reasoning="max")) != pinned
+    edits: dict[str, Any] = {
+        "ladder": _ladder(model="claude-opus-5"),
+        "budget": base.Budget(max_turns=30, max_tool_calls=60),
+        "builder_overrides": {"effort": "low"},
+        "container": _container(memory="16g"),
+        "executor": "local",
+        "timeout": 3600,
+        "preflight": Preflight(),
+        "escalation": ESCALATION_ALWAYS,
+        "posture_class": "docker/readonly/offline",
+        "config": _repo(probe="tests/test_other.py"),
+        "s1_author": "claude_code:claude-opus-5",
+    }
+    params = set(inspect.signature(worker.deployment_projection).parameters)
+    assert set(edits) == params, "a deployment input has no edit in this test"
+    for name, value in sorted(edits.items()):
+        assert _deployment_fp(**{name: value}) != pinned, name
+    assert _deployment_fp(preflight=Preflight(repair_turns=0)) != _deployment_fp(
+        preflight=Preflight()
+    )
+    # the r2 rung climbs after the reserved attempt; it is not the reserved treatment
+    r2_moved = base.EscalationLadder(
+        (_ladder().rungs[0], base.Rung("claude_code", "gpt-6", "openai"))
+    )
+    assert _deployment_fp(ladder=r2_moved) == pinned
+    deployment = _deployment()
+    assert deployment["apparatus_version"] == worker.APPARATUS_VERSION
+    assert json.loads(canonical_json(deployment)) == deployment  # plain JSON, no objects
+
+
+def test_p792_projection_holds_no_secret() -> None:
+    """The treatment body is stored on a reservation event and served on GET /readings, so
+    it must hold no secret. A provider key in the worker's environment never reaches it (the
+    container is projected by named fields, not by the environment it was read from), and a
+    credential-shaped override key or a secret-shaped value anywhere in the projection is
+    refused before anything is hashed — fail closed, never projected or dropped, and the
+    refusal never repeats the value."""
+    env = {
+        "CRB_BUILDER__EXECUTOR": "docker",
+        "CRB_BUILDER__IMAGE": "crb-builder:1",
+        "CRB_BUILDER__USER": "1000:1000",
+        "CRB_BUILDER__ANTHROPIC_API_KEY": _FAKE_KEY,
+        "CRB_BUILDER__TOKEN": _FAKE_KEY,
+        "ANTHROPIC_API_KEY": _FAKE_KEY,
+    }
+    container = BuilderContainerSettings.from_env(env)
+    assert container is not None
+    deployment = _deployment(container=container)
+    learning = LearningSnapshot(
+        repo="p792", auto_apply=AUTO_CONTEXT, overlay={K_SECTION: {"note": _FAKE_KEY}}
+    )
+    arm = worker.arm_projection("A0+L", learning, PROFILE_DEFAULT, _r1_budget())
+    a0 = worker.arm_projection("A0", empty_snapshot("p792"), PROFILE_DEFAULT, _r1_budget())
+    body = canonical_json({"deployment": deployment, "arm": arm, "a0": a0})
+    assert _FAKE_KEY not in body
+    assert "fake" not in body.lower()
+    refused = (
+        {"api_key": _FAKE_KEY},
+        {"env": {"ANTHROPIC_API_KEY": _FAKE_KEY}},
+        {"extra_args": ["--header", f"x-api-key={_FAKE_KEY}"]},
+        {"extra_args": ["--key", _FAKE_KEY]},
+    )
+    for overrides in refused:
+        with pytest.raises(ValueError) as exc:
+            _deployment(builder_overrides=overrides)
+        assert _FAKE_KEY not in str(exc.value), overrides
+    with pytest.raises(ValueError) as exc:
+        _deployment(ladder=_ladder(auth_token=_FAKE_KEY))
+    assert _FAKE_KEY not in str(exc.value)
