@@ -15,10 +15,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
   ceiling the product holds** (P-787 to P-798, G-957, DL-372 to DL-386;
   [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
-  `hypothesis`, `smallest_effect`, campaign. Readings register only on a sealed deployment
-  (422 `invalid_reading`); their runs need docker sandbox and builder (409
-  `reading_posture_mismatch`) and lint on (409 `lint_disabled`). Replay rows record their
-  executor. P-792 closed: `POST /readings` registers only `reserved.v1`, scoring each commit's
+  `hypothesis`, `smallest_effect`, campaign. Replayed readings need a sealed deployment
+  (422 `invalid_reading`); runs under any reading need docker sandbox and builder (409
+  `reading_unsealed`) and lint on (409 `lint_disabled`). Replay rows record their executor.
+  P-792 closed: `POST /readings` registers only `reserved.v1`, scoring each commit's
   reserved first attempt on qualification-pinned pools (409 `pool_drift`); `A0+L` runs in
   seeded order and pending loop pairs fail closed. `POST /campaigns` holds a pound ceiling:
   runs need `max_cost_usd` within cap (409 `campaign_ceiling`); readings count only admitted

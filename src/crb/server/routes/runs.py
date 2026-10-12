@@ -1018,7 +1018,9 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> Readi
     cell, the sealed posture class, rung ``r1``, after registration); without it the reading
     never sees its rows; every Wave 3 body carries ``reading_id``; 409 ``reading_unsealed``
     when the run's sandbox executor or the deployment's builder executor is not ``docker`` —
-    a reading is registered only on a sealed deployment; 409 ``reading_posture_mismatch`` when the posture class the run would be graded in (the
+    a replayed reading registers only on a sealed deployment, and a forward one (no such
+    check at ``POST /readings/forward``) is held to it here, run by run; 409
+    ``reading_posture_mismatch`` when the posture class the run would be graded in (the
     run's executor with the repository's ``sandbox_tree``, else the deployment's) is not the
     one the reading counts — its tree changed since the registration, or the reading named
     another class. A run graded anywhere but the reading's class would be another posture's
