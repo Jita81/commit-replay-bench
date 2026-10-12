@@ -1180,11 +1180,12 @@ class GradeRow:
     def assert_executor_recorded(self) -> None:
         """At write only (P-795): a measured replay row of 2.4 or later that this deployment
         graded records where its builder ran (``builder_executor`` — ``docker`` or ``host``).
-        Without it the row reads unsealed (:attr:`sealed` fails closed), so a reading drops it
-        and its commit reads pending — re-rolled until a row comes back clean. A row stored
-        before the guard still reads: this is never called from :meth:`assert_invariants`,
-        which every read runs. An imported row (somebody else's record) and a factory row
-        (no replay builder; P-795's residual) are not refused."""
+        Without it the row reads unsealed (:attr:`sealed` fails closed), and a reading that
+        would otherwise count the row names it a ``scope_fault``: its commit is never pending
+        or re-rolled, and the arm reads undecided. A row stored before the guard still reads:
+        this is never called from :meth:`assert_invariants`, which every read runs. An
+        imported row (somebody else's record) and a factory row (no replay builder; P-795's
+        residual) are not refused."""
         if (
             self.process_step != PROCESS_REPLAY
             or not self.carries_classification
@@ -1195,7 +1196,8 @@ class GradeRow:
         raise LedgerIntegrityError(
             f"ledger refuses row {self.task_id[:10]} ({self.repo}) of {self.apparatus_version}: "
             "no builder_executor label — a replay row records where its builder ran (docker "
-            "or host), or it reads unsealed and a reading drops it (P-795)"
+            "or host), or it reads unsealed and a reading names it a scope_fault, its arm "
+            "undecided (P-795)"
         )
 
     @property

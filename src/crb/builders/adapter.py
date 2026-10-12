@@ -1056,7 +1056,8 @@ def build_fn_for(
         otherwise record unstamped (ADR-0024 §5 and §6, ADR-0026 item 1: a row's arm is read
         from the stamp, so an unstamped row of a checks-on run would join arm ``off``, and an
         unstamped S1 row no arm at all; ADR-0026 item 2: a row that does not record its
-        executor reads unsealed, a reading drops it and the commit reads pending — P-795).
+        executor reads unsealed, and a reading names it a ``scope_fault`` — its commit never
+        pending or re-rolled, its arm undecided — P-795).
         The executor is this exit's, whatever an earlier stamp said."""
         where = executor_of(rung_label)
         try:

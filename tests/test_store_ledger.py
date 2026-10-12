@@ -481,14 +481,17 @@ def test_a_24_replay_row_without_builder_executor_is_refused_at_write(
     """P-795: a row that does not record where its builder ran reads unsealed, so a reading
     dropped it in silence and its commit read pending — re-rolled until it was clean. Both
     ledgers now refuse it at write, by ``append`` and by ``append_many`` (all or nothing),
-    naming the row; the same row recording ``host`` or ``docker`` is written. An imported
-    row (another deployment's record) is not refused."""
+    naming the row and today's consequence — a reading names it a ``scope_fault``, never a
+    dropped row (R5V3-01); the same row recording ``host`` or ``docker`` is written. An
+    imported row (another deployment's record) is not refused."""
     row = _no_executor()
     jsonl = JsonlLedger(tmp_path / "ledger.jsonl")
     for target in (ledger, jsonl):
         with pytest.raises(LedgerIntegrityError, match=r"builder_executor") as refused:
             target.append(row)
-        assert row.task_id[:10] in str(refused.value)
+        message = str(refused.value)
+        assert row.task_id[:10] in message
+        assert "scope_fault" in message and "drops it" not in message, message
         with pytest.raises(LedgerIntegrityError, match=r"builder_executor"):
             target.append_many([grade_row(trial="first"), row])
     assert ledger.count() == 0 and not list(jsonl.rows())
