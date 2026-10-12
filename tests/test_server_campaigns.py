@@ -67,6 +67,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from crb.core.campaign import CAMPAIGN_ADMITTED, CAMPAIGN_REGISTERED
+from crb.core.ledger import GradeRow
 from crb.core.reading import arm_reading
 from crb.server.app import create_app
 from crb.server.campaigns import admitted_runs
@@ -628,6 +629,52 @@ def test_a_rowed_attempt_is_not_counted_twice(backend_env: Env) -> None:
     assert view["spent_usd"] == pytest.approx(0.62 + 0.25 + 0.30)
     assert view["runs"][0]["unrowed_usd"] == pytest.approx(0.30)
     assert view["stopped"]["code"] == "unplaced_spend"
+
+
+def _imported(run_id: str, commit: str, cost: float) -> GradeRow:
+    """A red row naming the run, as an admin can post it to ``POST /ledger/import``: a fresh
+    ``row_id`` and no evidence pack, so the route's dedupe lets it through beside the run's
+    own row."""
+    row = sealed_row(
+        commit,
+        clean=False,
+        repo=ALPHA,
+        run_id=run_id,
+        cost_usd=cost,
+        labels={"cost_known": "true"},
+    )
+    d = {**row.to_dict(), "row_id": "", "evidence_pack_hash": "", "prev_hash": "", "row_hash": ""}
+    return GradeRow.from_dict(d)
+
+
+def test_an_imported_row_naming_an_admitted_run_is_never_its_spend(backend_env: Env) -> None:
+    """P-798 (found by code reading while fixing R5V3-IMPORT-1): the tally read every row of an
+    admitted run's id, an imported one too. An admin's import of a row naming the run added
+    its cost to the run's spend, and a row naming a commit whose ``build.done`` had no row
+    placed that attempt, charged at the imported row's own cost: here $0.00, so the $0.42
+    attempt went uncharged and the campaign ran on. An imported row is not one the run wrote
+    (P-321): the run's spend is its own rows and its unplaced attempts, as before the import."""
+    env = backend_env
+    cid = _register(env)["campaign_id"]
+    rid = env.post("/runs", json={**GOLD, "max_cost_usd": 5, "campaign_id": cid}).json()["id"]
+    ledger = DbLedger(env.factory)
+    _build_done(env, rid, "c1", 0.42)
+    ledger.append(_row(rid, "c1", 0.42))
+    _build_done(env, rid, "c2", 0.42)
+    ledger.import_rows(
+        [_imported(rid, "c1", 3.0), _imported(rid, "c2", 0.0)],
+        imported_by="admin-1",
+        imported_at="2026-10-12T00:00:00+00:00",
+    )
+    assert sorted(r.imported for r in ledger.rows(run_id=rid)) == [False, True, True]
+    _settle(env, rid, "failed")
+    view = env.get(f"/campaigns/{cid}").json()
+    (run,) = view["runs"]
+    assert run["rows_usd"] == pytest.approx(0.42) and run["commits_done"] == 1
+    assert run["unrowed_usd"] == pytest.approx(0.42)
+    assert view["spent_usd"] == pytest.approx(0.84)
+    assert view["stopped"]["code"] == "unplaced_spend"
+    assert view["stopped"]["run_ids"] == [rid]
 
 
 @pytest.mark.parametrize(

@@ -127,12 +127,15 @@ def rows_in(session: Session, repo: str) -> list[GradeRow]:
 
 def rows_of_runs(session: Session, run_ids: Iterable[str]) -> list[GradeRow]:
     """The rows these runs wrote, in chain (``seq``) order, read in the caller's session —
-    what a campaign's tally sums under the events write lock (G-957)."""
+    what a campaign's tally sums under the events write lock (G-957). An imported row naming
+    one of the runs is not one it wrote (P-321): an admin's import never adds to a run's
+    spend, nor places an attempt its ``build.done`` left without a row (P-798)."""
     ids = list(run_ids)
     if not ids:
         return []
     q = select(Grade).where(Grade.run_id.in_(ids)).order_by(Grade.seq)
-    return [_from_model(m) for m in session.execute(q).scalars()]
+    rows = (_from_model(m) for m in session.execute(q).scalars())
+    return [r for r in rows if not r.imported]
 
 
 class AttemptSettled(RuntimeError):
