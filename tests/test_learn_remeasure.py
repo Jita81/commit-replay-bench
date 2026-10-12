@@ -17,7 +17,9 @@ What it does: Shows a cell with rows and no reading offered ``register`` with no
               cannot write (``S2``, ``+L``, another test author, another posture) offered no
               request; gold-clean and relabelled commits left out; valid ``POST /runs`` bodies;
               a reserved.v1 reading's top-up on the reading's own budget profile, admitted by
-              the submit gate's whitelist (P-792 C7); unknown cost, and a blind top-up priced
+              the submit gate's whitelist (P-792 C7); a reserved.v1 reading whose run would
+              resolve another checks arm than it froze flagged ``checks_arm_moved`` with no
+              request (RT2B-1); unknown cost, and a blind top-up priced
               at the one rung its run climbs; determinism; and the CLI rendering.
 How:          Sealed 2.4 rows and readings from ``tests.fixtures.readings``; rows of an older
               apparatus from ``tests.fixtures.posture``; no model, no docker, no store.
@@ -405,6 +407,50 @@ def test_a_reserved_readings_top_up_spends_on_the_readings_budget_profile() -> N
     (lreq,) = lc.requests
     assert lreq.budget_profile == "" and "budget_profile" not in lreq.to_dict()
     assert lreq.to_dict() | {"budget_profile": "default"} == req.to_dict()
+
+
+def _reserved(pool: list[str], hierarchy: tuple[str, ...] = ("S3",)) -> Any:
+    return register_reading(
+        pool,
+        hierarchy=hierarchy,
+        attempt_rule=ATTEMPT_RULE_RESERVED,
+        max_reruns=0,
+        budget_profile="default",
+    )
+
+
+def test_a_reserved_reading_off_its_checks_arm_is_flagged_and_asked_nothing() -> None:
+    """RT2B-1: a reserved.v1 reading's runs halt ``reading_checks_arm_mismatch`` off the checks
+    arm it froze. Given the arm each entry's run would resolve — ``checks_arm`` for every
+    request the plan composes (``learning: off``: the team's block alone), ``checks_arm_loop``
+    for a ``+L`` arm's run (the loop's overlay too) — an entry whose run arm moved is flagged
+    ``(frozen, current)``, with no request and next act ``config``. A move of the overlay alone
+    leaves a learning-off arm's top-up as it was; a legacy reading, and a plan given no arm
+    (the host's ``crb learn remeasure``), flag nothing."""
+    reserved = _reserved(commits(40))
+    (moved,) = _plan([], reserved, checks_arm="fmt", checks_arm_loop="fmt").cells
+    assert moved.checks_arm_moved == ("off", "fmt") and moved.requests == ()
+    assert moved.next_act == learn.NEXT_CONFIG and moved.short_by == moved.n_needed == 20
+    assert "moved from off to fmt" in moved.note and "reading_checks_arm_mismatch" in moved.note
+    assert moved.to_dict()["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    # the loop's overlay moved, the team's block did not: a learning-off run still reads off
+    (held,) = _plan([], reserved, checks_arm="off", checks_arm_loop="fmt").cells
+    assert held.checks_arm_moved is None and held.next_act == learn.NEXT_REPLAY
+    assert held.requests[0].task_ids == reserved.pool[:20]
+    assert held.to_dict()["checks_arm_moved"] is None
+    # a +L arm's run, queued by hand, resolves the overlay
+    loop = _reserved(commits(40, "loop"), hierarchy=("S3+L",))
+    (lp,) = _plan([], loop, checks_arm="off", checks_arm_loop="fmt").cells
+    assert lp.checks_arm_moved == ("off", "fmt") and lp.next_act == learn.NEXT_CONFIG
+    (lp_off,) = _plan([], loop, checks_arm="fmt", checks_arm_loop="off").cells
+    assert lp_off.checks_arm_moved is None and lp_off.next_act == learn.NEXT_BY_HAND
+    # no arm given, or a legacy reading: nothing flagged
+    (bare,) = _plan([], reserved).cells
+    assert bare.checks_arm_moved is None and bare.requests
+    legacy = register_reading(commits(40), hierarchy=("S3",))
+    (lc,) = _plan([], legacy, checks_arm="fmt", checks_arm_loop="fmt").cells
+    assert lc.checks_arm_moved is None and lc.requests
+    assert learn.holds_its_checks_arm(reserved) and not learn.holds_its_checks_arm(legacy)
 
 
 def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_at_its_one_rung() -> None:

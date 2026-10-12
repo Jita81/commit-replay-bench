@@ -369,18 +369,21 @@ def empty_for(repo: str) -> LearningSnapshot:
     return empty_snapshot(repo)
 
 
-def checks_arm_in(session: Session, repo: str) -> str:
+def checks_arm_in(session: Session, repo: str, *, learning: bool = True) -> str:
     """The ``checks`` arm ``repo``'s next run grades under when the run overrides nothing:
     the repository's own ``checks`` block under the loop's overlay (the team's keys win),
     resolved exactly as the worker resolves a run (ADR-0024), read in ``session``. It is what
     a reader of the repository's cells sees by default, so a switch turned on starts its cells
     afresh rather than lending them the rows of the instrument it replaced. A chain that
     cannot be read is ``learn: off`` (as for a run); a block the configuration refuses is no
-    switch at all."""
+    switch at all. ``learning=False`` reads it for a run that opts out of the loop
+    (``learning: off`` — every request the re-measurement plan composes): the team's block
+    alone, no overlay."""
     repo_row = session.get(Repo, repo)
     try:
         recs = EventsPreventionStore(session, repo).records()
-        snap = snapshot(recs, repo=repo, params={}, base_config=base_config(repo_row))
+        params = {} if learning else {"learning": AUTO_OFF}
+        snap = snapshot(recs, repo=repo, params=params, base_config=base_config(repo_row))
     except Exception as exc:  # a read path never fails on the loop's chain
         log.warning("prevention: snapshot for %s unreadable (%s); learn=off", repo, exc)
         snap = empty_snapshot(repo)
@@ -392,10 +395,10 @@ def checks_arm_in(session: Session, repo: str) -> str:
     return resolve_checks(checks, None).arm
 
 
-def current_checks_arm(factory: sessionmaker[Session], repo: str) -> str:
+def current_checks_arm(factory: sessionmaker[Session], repo: str, *, learning: bool = True) -> str:
     """:func:`checks_arm_in` in a session of its own."""
     with factory() as s:
-        return checks_arm_in(s, repo)
+        return checks_arm_in(s, repo, learning=learning)
 
 
 __all__ = [

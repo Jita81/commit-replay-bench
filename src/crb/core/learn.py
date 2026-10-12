@@ -28,7 +28,10 @@ byte-identical for the same input, and which **never act**:
   commits requested); each cell with rows but no reading (``stale`` or ``thin``), offered
   registration and never a replay; each reading decided against its cell, or unable to read
   a row of its arm (a ``scope_fault``: ``audit``, never a re-run — P-795; a reserved row off
-  the reading's checks arm names the frozen arm and the row's — RT2B-1). It queues nothing.
+  the reading's checks arm names the frozen arm and the row's — RT2B-1); and a reserved.v1
+  reading whose run would resolve another checks arm than the one it froze is listed with
+  ``checks_arm_moved`` and no request (``config``: the run would halt — RT2B-1). It queues
+  nothing.
 
 Why the three human steps are deliberate, not missing: a loop that appended its own
 refusals to its own guard corpus would launder a false positive into policy the
@@ -55,7 +58,9 @@ What it does: Groups every ``protocol`` row's guard refusals by (reason, command
               reading waiting on its look with the commits it still needs, the ``POST /runs``
               body that would grade them (loop off; on a reserved.v1 reading's own budget
               profile, so the body passes ``reading_run_fields``) and what it costs, and every
-              cell with rows but no reading as needing one registered first.
+              cell with rows but no reading as needing one registered first; a reserved.v1
+              reading whose run would resolve another checks arm than it froze is listed
+              flagged ``checks_arm_moved`` ({frozen, current}) with no request.
               Writes only what a named human decided (``apply_triage``, under a lock on the
               corpus directory; a supplied command only completes a cut example) and queues
               nothing.
@@ -67,8 +72,10 @@ How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason``
               ``OracleTaskScore``) → ``StrengthenItem``;
               ``remeasure_plan`` (each reading's outcome → the blocking arm's pending commits
               in the seeded order → ``RunRequest``; a scope-faulted arm → ``audit``, no
-              request; rows of a cell no reading covers →
-              ``register``; ``first_attempts`` for their distinct commits).
+              request; a reserved.v1 reading off its frozen checks arm
+              (``holds_its_checks_arm`` → ``_checks_arm_moved``) → ``config``, no request;
+              rows of a cell no reading covers → ``register``; ``first_attempts`` for their
+              distinct commits).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules (the loop itself:
               docs/LEARNING-LOOP.md#2-what-crbcorelearn-adds)
 ADRs:         docs/adr/0003-one-routing-rule.md
@@ -119,6 +126,7 @@ from crb.core.ledger import (
     group_by_cell,
 )
 from crb.core.reading import (
+    HALT_CHECKS_ARM_MISMATCH,
     LABEL_RESERVATION,
     SCOPE_CHECKS_ARM,
     STATE_DELIVER,
@@ -142,6 +150,9 @@ from crb.core.routing import (
 )
 from crb.core.routing import (
     NEXT_AUDIT as ROUTING_NEXT_AUDIT,
+)
+from crb.core.routing import (
+    NEXT_CONFIG as ROUTING_NEXT_CONFIG,
 )
 from crb.core.routing import (
     NEXT_MINE as ROUTING_NEXT_MINE,
@@ -1655,11 +1666,14 @@ REASON_STALE = "stale"
 REASON_THIN = "thin"
 REASON_PENDING = "look_pending"
 #: What an entry's next act is — the routing rule's own words (``crb.core.routing.NEXT_*``):
-#: queue the reading's pending commits, register a reading first, or (``runs``) queue by hand
-#: a run this plan cannot compose, because a replay it composed would write another arm.
+#: queue the reading's pending commits, register a reading first, (``runs``) queue by hand
+#: a run this plan cannot compose, because a replay it composed would write another arm, or
+#: (``config``) restore the repository's checks arm, which moved since a reserved.v1 reading
+#: froze it, so any run of the reading would halt (RT2B-1, :attr:`RemeasureCell.checks_arm_moved`).
 NEXT_REPLAY = ROUTING_NEXT_REPLAY
 NEXT_REGISTER = ROUTING_NEXT_REGISTER
 NEXT_BY_HAND = "runs"
+NEXT_CONFIG = ROUTING_NEXT_CONFIG
 #: What an operator reads when a reading's pool is too small for its next look.
 MINE_MORE = "mine more history"
 
@@ -1701,13 +1715,18 @@ class RemeasureCell:
     #: how many of ``n_needed`` no request asks for, and ``note`` says why
     short_by: int = 0
     note: str = ""
-    #: ``replay`` (queue the requests), ``register`` (register a reading first) or ``runs``
+    #: ``replay`` (queue the requests), ``register`` (register a reading first), ``runs``
+    #: (queue by hand) or ``config`` (restore the checks arm, ``checks_arm_moved``)
     next_act: str = NEXT_REPLAY
     #: the context arm this entry is about: the reading's blocking arm, or the rows' own arm
     #: (``""`` for rows written before apparatus 2.4, which carry none)
     arm: str = ""
     reading_id: str = ""
     next_look: int | None = None
+    #: ``(frozen, current)`` when the checks arm a run of this reserved.v1 reading's entry
+    #: would resolve is no longer the one the reading froze (RT2B-1): the run would halt
+    #: ``reading_checks_arm_mismatch``, so the entry carries no request; ``None`` otherwise
+    checks_arm_moved: tuple[str, str] | None = None
 
     @property
     def key(self) -> str:
@@ -1742,6 +1761,11 @@ class RemeasureCell:
             "repos": list(self.repos),
             "requests": [r.to_dict() for r in self.requests],
             "note": self.note,
+            "checks_arm_moved": (
+                {"frozen": self.checks_arm_moved[0], "current": self.checks_arm_moved[1]}
+                if self.checks_arm_moved
+                else None
+            ),
         }
 
 
@@ -1945,6 +1969,30 @@ def _scope_fault_why(reading: Reading, blocking: ArmReading, rows: Sequence[Grad
     )
 
 
+def holds_its_checks_arm(reading: Reading) -> bool:
+    """Does every run of ``reading`` halt off the checks arm it froze (RT2B-1)? A reserved.v1
+    reading of a pool frozen at registration does (``reading_checks_arm_mismatch``), so the
+    plan lists it whatever arm the repository grades under now, flagged when that arm moved
+    — never a legacy reading, never a forward one, which the plan reads on the current arm
+    only."""
+    return reading.reserved and not reading.prospective
+
+
+def _checks_arm_moved(
+    reading: Reading, arm: str, checks_arm: str | None, checks_arm_loop: str | None
+) -> tuple[str, str] | None:
+    """``(frozen, current)`` when a run of ``arm`` of ``reading`` would resolve a checks arm
+    other than the one the reading froze — the repository's own ``checks`` block for a run
+    with the loop off (every request the plan composes), that block over the loop's overlay
+    for a ``+L`` arm's run — else ``None``; always ``None`` when no arm was given or the
+    reading does not hold its arm (:func:`holds_its_checks_arm`)."""
+    if checks_arm is None or not holds_its_checks_arm(reading):
+        return None
+    loop = parse_arm(arm).loop
+    now = checks_arm_loop if loop and checks_arm_loop is not None else checks_arm
+    return None if now == reading.checks_arm else (reading.checks_arm, now)
+
+
 def remeasure_plan(
     rows: Iterable[GradeRow],
     *,
@@ -1955,12 +2003,16 @@ def remeasure_plan(
     gold_clean_tasks: Iterable[str] | None = None,
     s1_author_model: str = "",
     deployment_posture: str | None = None,
+    checks_arm: str | None = None,
+    checks_arm_loop: str | None = None,
 ) -> RemeasurePlan:
     """What each cell needs before a reading at ``current_apparatus`` can license it.
 
     ``readings`` are the repository's registered readings, evaluated over the ledger
     (``ReadingBook.evaluate(...).outcomes``); the caller passes those of its own scope (checks
-    arm, class-set version). Per cell the reading that speaks (``latest_outcome``) decides:
+    arm, class-set version — a reserved.v1 reading whatever its checks arm,
+    :func:`holds_its_checks_arm`). Per cell the reading that speaks (``latest_outcome``)
+    decides:
 
     * **waiting on its look** → a ``look_pending`` entry for the arm the hierarchy stopped at:
       ``n_current`` the commits its look has read, ``n_needed`` the commits still needed before
@@ -1969,7 +2021,14 @@ def remeasure_plan(
       registration. A commit that is not gold-clean (``gold_clean_tasks``; the worker builds
       only those) or whose current label moved (``task_labels``) is left out and ``short_by``
       says so. No request at all when a replay could not write rows the reading counts
-      (:func:`_arm_request_blocker` — ``next_act`` ``runs``).
+      (:func:`_arm_request_blocker` — ``next_act`` ``runs``), nor when the checks arm moved
+      since a reserved.v1 reading froze it (``checks_arm_moved`` ``(frozen, current)``,
+      ``next_act`` ``config``): the run would halt ``reading_checks_arm_mismatch`` (RT2B-1).
+      ``checks_arm`` is the arm a run with the loop off resolves (the repository's own
+      ``checks`` block — every request runs ``learning: off``), ``checks_arm_loop`` the one a
+      ``+L`` arm's run queued by hand resolves (that block over the loop's overlay; the first
+      when not given); with no ``checks_arm`` (the host's ``crb learn remeasure``) nothing is
+      flagged.
     * **delivered** (a standard, or the ceiling of an ``S3`` chain) → ``up_to_date``.
     * **insufficient** or **undecided** → ``cannot_clear``, with the routing rule's words and
       next act (a new reading; mine further back).
@@ -2083,6 +2142,7 @@ def remeasure_plan(
         ]
         not_gold = [t for t in pending if gold is not None and t not in gold]
         askable = [t for t in pending if t not in relabelled and t not in not_gold]
+        moved = _checks_arm_moved(reading, arm, checks_arm, checks_arm_loop)
         blocker = _arm_request_blocker(
             arm,
             s1_author_model=s1_author_model,
@@ -2090,7 +2150,7 @@ def remeasure_plan(
             deployment_posture=deployment_posture,
         )
         requests: tuple[RunRequest, ...] = ()
-        if askable and not blocker:
+        if askable and not blocker and not moved:
             requests = (
                 RunRequest(
                     repo=repo,
@@ -2113,7 +2173,13 @@ def remeasure_plan(
         n_requested = sum(r.limit for r in requests)
         attempts = sum(r.limit * r.rungs for r in requests)
         notes: list[str] = []
-        if blocker:
+        if moved:
+            notes.append(
+                f"the checks arm moved from {moved[0]} to {moved[1]} since the reading froze "
+                f"it: a run would halt {HALT_CHECKS_ARM_MISMATCH} — restore the repository's "
+                f"{moved[0]} checks arm, or end the stage"
+            )
+        elif blocker:
             notes.append(blocker)
         if not_gold:
             notes.append(
@@ -2151,10 +2217,11 @@ def remeasure_plan(
                 n_requested=n_requested,
                 short_by=look.needed - n_requested,
                 note="; ".join(notes),
-                next_act=NEXT_REPLAY if requests else NEXT_BY_HAND,
+                next_act=NEXT_CONFIG if moved else NEXT_REPLAY if requests else NEXT_BY_HAND,
                 arm=arm,
                 reading_id=reading.reading_id,
                 next_look=look.next_look,
+                checks_arm_moved=moved,
             )
         )
 
@@ -2328,6 +2395,7 @@ __all__ = [
     "LINE_BREAKS",
     "MINE_MORE",
     "NEXT_BY_HAND",
+    "NEXT_CONFIG",
     "NEXT_REGISTER",
     "NEXT_REPLAY",
     "REASON_PENDING",
@@ -2362,6 +2430,7 @@ __all__ = [
     "encode_corpus_line",
     "guard_false_positives",
     "has_line_break",
+    "holds_its_checks_arm",
     "load_decisions",
     "load_oracle_scores",
     "normalise_command",

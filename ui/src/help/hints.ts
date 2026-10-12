@@ -2016,6 +2016,10 @@ export const HINTS = {
     'The runs in flight on this cell’s commits and not yet finished: those an earlier Queue put on the queue, and a campaign’s runs that would attempt one of the commits it asks for. Queue comes back once they have graded, so the same estimate is never spent twice and no commit is requested while a run is still attempting it.',
   'text.learn.remeasure_register':
     'This cell has rows but no registered reading at this apparatus. Rows graded before a reading is registered never count, so nothing is queued here: register a reading of the cell first (crb reading register, or POST /readings).',
+  'text.learn.remeasure_checks_arm_moved':
+    'The repository’s checks arm is no longer the one this reading froze when it was registered. Any run of the reading would halt before its first build, so nothing can be queued for it until the arm is restored or the stage is ended.',
+  'text.learn.remeasure_restore_arm':
+    'Nothing can be queued for this reading: its runs would halt, here or by hand, because the repository’s checks arm moved. Restore the checks arm the reading froze, or end the stage.',
   'link.learn.remeasure_by_hand':
     'The runs page for this repository. The reading waits on an arm this plan cannot compose a replay for (another test author, the loop switch, a factory arm or another posture), so the run is queued there by hand.',
   'link.learn.remeasure_mine':

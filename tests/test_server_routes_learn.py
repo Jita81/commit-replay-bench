@@ -40,7 +40,9 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               that Learn and the map agree on why a cell is held (P-426); that a
               ``command`` only completes a cut example (P-183); that a note with a line break is
               refused (P-161); that each write refuses a field it does not name; that the reads
-              and writes follow the repository's checks arm (ADR-0024); that a viewer, a
+              and writes follow the repository's checks arm (ADR-0024), a reserved.v1 reading
+              whose checks arm moved listed flagged with no request and never queued (RT2B-1);
+              that a viewer, a
               request with no CSRF token and one with another session's token are each refused
               with nothing written; and that the writes hold under concurrency — two queues of
               one cell spend once, a prevention record landing mid-queue costs nothing, two
@@ -1717,7 +1719,11 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     # the repository switches belt 6 on: only the belt-6 arm is read, by the reads AND writes
     assert env.put(f"/repos/{ALPHA}", json={"checks": {"api_stable": True}}).status_code == 200
     assert planned() == [STALE_CELL]
-    assert READ_CELL not in cells()  # its reading counts the off arm's rows only
+    # its reserved.v1 reading counts the off arm's rows only and a run of it would halt, so
+    # it is listed flagged with no request — never hidden (RT2B-1)
+    moved = _read_cell(env)
+    assert moved["checks_arm_moved"] == {"frozen": "off", "current": "api"}
+    assert moved["requests"] == [] and moved["next_act"] == "config"
     before = env.get("/runs").json()["total"]
     assert _queue(env, cell=legacy).status_code == 422
     gone = _queue(env, cell=READ_CELL)
@@ -1732,6 +1738,44 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     assert unregistered.status_code == 422, unregistered.text
     assert envelope(unregistered)["code"] == "reading_unregistered"
     assert env.get("/runs").json()["total"] == before
+
+
+def test_remeasure_lists_a_reading_whose_checks_arm_moved(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RT2B-1: a reserved.v1 reading's runs halt ``reading_checks_arm_mismatch`` off the checks
+    arm it froze. The plan read readings on the repository's current arm only, so when the arm
+    moved the waiting reading vanished from the list without a word. It is now listed, flagged
+    ``checks_arm_moved`` ``{frozen, current}``, with no request (a run would halt) and next act
+    ``config``; the queue refuses it 422 with nothing queued, and restoring the arm gives the
+    reading its top-up back."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, graded=12)  # registered while every switch is off
+    assert reading["checks_arm"] == "off"
+    assert _read_cell(env).get("checks_arm_moved") is None
+    # the repository's own checks block switches the format step on: its arm reads fmt
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": True}}).status_code == 200
+    listed = {c["label"]: c for c in env.get(f"/learn/remeasure?repo={ALPHA}").json()["cells"]}
+    assert READ_CELL in listed, "a reading whose checks arm moved is listed, never hidden"
+    cell = listed[READ_CELL]
+    assert cell["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    assert cell["requests"] == [] and cell["n_requested"] == 0
+    assert (cell["reason"], cell["next_act"], cell["arm"]) == ("look_pending", "config", "S3")
+    assert cell["reading_id"] == reading["reading_id"]
+    assert (cell["n_current"], cell["n_needed"], cell["short_by"]) == (12, 8, 8)
+    assert "moved from off to fmt" in cell["note"]
+    assert "reading_checks_arm_mismatch" in cell["note"] and "end the stage" in cell["note"]
+    before = env.get("/runs").json()["total"]
+    refused = _queue(env, cell=READ_CELL)
+    assert refused.status_code == 422 and envelope(refused)["code"] == "validation_error"
+    assert envelope(refused)["detail"]["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    assert env.get("/runs").json()["total"] == before and not _queued_events(env)
+    # the arm restored: the entry is the reading's top-up again
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": False}}).status_code == 200
+    back = _read_cell(env)
+    assert back["checks_arm_moved"] is None and back["next_act"] == "replay"
+    assert len(back["requests"]) == 1 and back["n_requested"] == 8
 
 
 # ---------------------------------------------------------------------------

@@ -75,7 +75,7 @@ describe('the register fixture', () => {
 /** One refusal class, one strengthening item and one stale cell — the rows the three decisions act on. */
 const GROUP: RefusalGroup = { group_id: 'g1', prefix: 'network', reason: 'egress refused', shape: 'curl <url>', n: 3, cost_usd: 1.2, minutes: 4, repos: ['alpha'], tasks: ['t1'], examples: ['curl https://x'], truncated: false, candidate_honest: 'curl https://x', candidate_refused: 'curl https://x\tnetwork:', verdict: 'unsure' }
 const ITEM: StrengthenItem = { id: 'strengthen-1', title: 'Strengthen the divide tests', description: 'kill the surviving mutants', capability_class: 'test.add', labels: { cell: 'bug.fix|S', reason_code: 'oracle_weak', oracle_strength: '0.40', threshold: '0.80', escaped: '1' } }
-const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', key: 'replay|bug.fix|S|python|editblock|m|cerebras|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_1', next_look: 20, mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 14, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], note: '', in_flight_run_ids: [] }
+const CELL: RemeasureCell = { label: 'replay|bug.fix|S|python|editblock|m|cerebras', key: 'replay|bug.fix|S|python|editblock|m|cerebras|sighted|S3', reason: 'look_pending', next_act: 'replay', arm: 'S3', reading_id: 'rdg_1', next_look: 20, mode: 'sighted', stale_versions: ['2.1'], n_stale: 12, n_current: 14, n_needed: 6, n_requested: 6, short_by: 0, est_cost_usd: 2.4, est_minutes: 30, cost_known: true, repos: ['alpha'], requests: [{ kind: 'replay' }, { kind: 'replay' }], note: '', in_flight_run_ids: [], checks_arm_moved: null }
 
 /** The signed-in operator's view of one repository with one row in each report. */
 function operatorApi(extra: Record<string, unknown> = {}) {
@@ -451,6 +451,20 @@ describe('LearnPage', () => {
     expect(needed).toHaveTextContent('register a reading of this cell at apparatus 2.2 first')
     expect(needed.querySelector('[data-hint="text.learn.remeasure_short"]')).not.toBeNull()
     expect(screen.queryByRole('button', { name: 'Queue runs' })).toBeNull()
+  })
+
+  it('a reading whose checks arm moved is listed with both arms and nothing to queue, never hidden (RT2B-1)', async () => {
+    const moved: RemeasureCell = { ...CELL, next_act: 'config', n_requested: 0, short_by: 6, est_cost_usd: 0, requests: [], note: 'the checks arm moved from off to fmt since the reading froze it: a run would halt reading_checks_arm_mismatch — restore the repository’s off checks arm, or end the stage', checks_arm_moved: { frozen: 'off', current: 'fmt' } }
+    mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [moved] } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    const flag = await screen.findByTestId(`learn-checks-arm-moved-${moved.key}`)
+    expect(flag).toHaveTextContent('checks arm moved: frozen off, now fmt — a run would halt')
+    expect(flag).toHaveAttribute('data-hint', 'text.learn.remeasure_checks_arm_moved')
+    // a run would halt from here or by hand: no Queue, no route to Runs, the act that comes first
+    expect(screen.queryByRole('button', { name: 'Queue runs' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Queue from Runs' })).toBeNull()
+    expect(document.querySelector('[data-hint="text.learn.remeasure_restore_arm"]')).toHaveTextContent('Restore the checks arm first')
+    expect(screen.getByTestId(`learn-needed-${moved.key}`)).toHaveTextContent('end the stage')
   })
 
   it('an empty plan never says every cell reached the look while a reading has decided against one', async () => {

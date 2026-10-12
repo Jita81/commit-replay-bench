@@ -41,7 +41,9 @@ the request body, so a decision cannot be filed under somebody else's name:
   cell whose registered reading waits on its look, through the submit gate ``POST /runs``
   applies (``submit_refusals``) before it is enqueued; refused ``reading_unregistered`` for
   a cell with no such reading, ``campaign_required`` for one whose reading names a campaign
-  (DL-382), and never for a what-if plan; event ``learn.remeasure.queued``.
+  (DL-382), ``validation_error`` for one whose reserved reading's checks arm moved (its
+  ``checks_arm_moved`` is in the detail: the run would halt — RT2B-1), and never for a
+  what-if plan; event ``learn.remeasure.queued``.
 
 Nothing about *which* decision is right moves into the product: the item bodies and the
 run bodies are re-derived here from the ledger, never taken from the caller, so a write
@@ -60,7 +62,12 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               that a campaign's live run would attempt one of its commits for (F87-2) — is
               refused and served with those runs, so money is never spent twice (P-182); a
               cell with no request (no commit left it has not graded) is refused with the
-              plan's own reason, so nothing is queued that would repeat a commit.
+              plan's own reason, so nothing is queued that would repeat a commit. The plan
+              reads a reserved.v1 reading whatever the repository's checks arm is now: when a
+              run of its entry would resolve another arm than the reading froze (the team's
+              block for a learning-off request, the loop's overlay for a ``+L`` arm) the
+              entry is listed flagged ``checks_arm_moved``, with no request, and its queue is
+              refused 422 — the run would halt ``reading_checks_arm_mismatch`` (RT2B-1).
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
@@ -75,6 +82,8 @@ Works with:   src/crb/core/learn.py (the three derivations and ``apply_triage`` 
               writer the CLI uses), src/crb/server/routes/oracle.py (``SCORE_ACTIONS``,
               ``latest_controls_verdict``), src/crb/server/routes/capability.py
               (``rows_for_arm`` — a report and its write read one checks arm, ADR-0024),
+              src/crb/server/prevention_state.py (``current_checks_arm`` — the overlay's arm,
+              and with ``learning=False`` the team block's arm a learning-off run resolves),
               src/crb/server/app.py (``CsrfMiddleware`` — every write is bound to the
               session's CSRF token before it reaches a route), src/crb/server/factory_state.py
               (``FactoryHome.register_backlog`` / ``register_evolution`` — the one
@@ -128,6 +137,7 @@ from crb.core.learn import (
     apply_triage,
     guard_false_positives,
     has_line_break,
+    holds_its_checks_arm,
     load_oracle_scores,
     remeasure_plan,
     strengthening_backlog,
@@ -351,12 +361,15 @@ def derive_remeasure(
     rows = rows_for_arm(factory, repo, every, CHECKS_CURRENT)
     checks = current_checks_arm(factory, repo)
     # every reading evaluated over every row (the hierarchy reads its arms together); the
-    # plan reads those of this checks arm and the global class set — the rows it plans on
+    # plan reads those of this checks arm and the global class set — the rows it plans on —
+    # and a reserved.v1 reading whatever its checks arm: its runs halt off the arm it froze,
+    # so it is listed flagged (``checks_arm_moved``), never hidden (RT2B-1)
     book = reading_book(db, repo, every)
     outcomes = [
         o
         for o in book.outcomes
-        if o.reading.checks_arm == checks and o.reading.taxonomy in ("", GLOBAL_CLASS_SET)
+        if (holds_its_checks_arm(o.reading) or o.reading.checks_arm == checks)
+        and o.reading.taxonomy in ("", GLOBAL_CLASS_SET)
     ]
     # each task's CURRENT label and whether it is gold-clean: a pending commit relabelled
     # out of the cell, or no longer gold-clean (the worker skips it), is left out and named
@@ -377,6 +390,10 @@ def derive_remeasure(
             if posture_class is not None
             else deployment_posture_class(settings, db.get(Repo, repo))
         ),
+        # the checks arm each entry's run would resolve: every request runs the loop off
+        # (the team's block alone); a +L arm's run, queued by hand, under the loop's overlay
+        checks_arm=current_checks_arm(factory, repo, learning=False),
+        checks_arm_loop=checks,
     )
 
 
@@ -1192,14 +1209,21 @@ def queue_remeasurement(  # noqa: PLR0917 — FastAPI dependencies + body + quer
             detail={"modes": sorted(c.mode for c in pending)},
         )
     cell = pending[0]
-    if not cell.requests:
+    moved = cell.to_dict()["checks_arm_moved"]
+    if not cell.requests or moved:
         # the reading waits, but nothing this plan may compose can write rows it counts
-        # (another arm, another author or posture, or its commits are not buildable)
+        # (another arm, another author or posture, or its commits are not buildable) — or the
+        # checks arm moved since its reserved.v1 reading froze it, so any run of it would halt
+        # reading_checks_arm_mismatch (RT2B-1): a moved cell is never queued, request or not
         raise ApiError(
             422,
             "validation_error",
             f"cell {body.cell!r} ({cell.mode}) has no run to queue: {cell.note}",
-            detail={"n_needed": cell.n_needed, "short_by": cell.short_by},
+            detail={
+                "n_needed": cell.n_needed,
+                "short_by": cell.short_by,
+                "checks_arm_moved": moved,
+            },
         )
     require_jobs()  # 503 before anything is read under the lock
     # every run is built and put to the submit gate BEFORE any is enqueued: a cell is queued

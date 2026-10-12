@@ -18,7 +18,9 @@
  *               while rows are undecided — G-536), `/learn/strengthen` (cells withheld from
  *               deliver for a weak oracle, as frozen-backlog-shaped items) and
  *               `/learn/remeasure` (each registered reading waiting on its look, with the
- *               commits it still needs and what they cost, and each cell with rows but no
+ *               commits it still needs and what they cost — a reserved.v1 reading whose checks
+ *               arm moved flagged "checks arm moved: frozen X, now Y — a run would halt", with
+ *               nothing to queue, RT2B-1 — and each cell with rows but no
  *               reading, offered registration first — G-565, ADR-0026 item 2); then the learn
  *               stream's own flow figures (`FlowPanel`, each count explained on hover). An
  *               operator decides from the report that computed the thing: accept a refusal
@@ -52,7 +54,8 @@
  *               ui/src/components/FlowPanel.tsx (the learn stream's lead times and counts)
  * Tested by:    ui/src/screens/Learn/LearnPage.test.tsx (plain eyebrows, the intro sentences,
  *               the terms, the register card and its operator controls, each action's
- *               success state, the viewer who is offered none); the derivations are pinned in
+ *               success state, the viewer who is offered none, the moved checks arm's flag);
+ *               the derivations are pinned in
  *               tests/test_learn.py and the routes in tests/test_server_routes_learn.py
  * Touch when:   never for a new repository — every report reads the chosen repository's own
  *               rows; a report gains a field (src/crb/core/learn.py — mirror the interface
@@ -242,8 +245,8 @@ export interface RemeasureCell {
   /** `label|mode|arm` — one entry per (cell, mode, context arm), never two arms pooled. */
   key: string
   reason: 'look_pending' | 'stale' | 'thin'
-  /** `replay` — queue the requests; `register` — register a reading first; `runs` — queue by hand from the Runs page. */
-  next_act: 'replay' | 'register' | 'runs'
+  /** `replay` — queue the requests; `register` — register a reading first; `runs` — queue by hand from the Runs page; `config` — restore the repository's checks arm (`checks_arm_moved`). */
+  next_act: 'replay' | 'register' | 'runs' | 'config'
   /** The context arm: the reading's arm it waits on, or the rows' own ('' before apparatus 2.4). */
   arm: string
   reading_id: string
@@ -269,6 +272,8 @@ export interface RemeasureCell {
   note: string
   /** Runs not finished on this cell's commits — an earlier queue's of it, and a campaign's that would attempt one of its requests: shown in place of Queue. */
   in_flight_run_ids: string[]
+  /** The checks arm a reserved.v1 reading froze and the one a run of this entry would resolve now, when they differ (RT2B-1): the run would halt, so the entry carries no request; `null` otherwise. */
+  checks_arm_moved: { frozen: string; current: string } | null
 }
 
 /** A cell whose registered reading has decided against it: no further attempt on it can help. */
@@ -991,6 +996,12 @@ function RemeasureSection({ repo }: { repo: string }) {
           <span className="text-xs">
             {c.label}
             <span className="block text-on-surface-muted">{`${c.mode} · ${c.arm || 'no arm (before 2.4)'}`}</span>
+            {/* RT2B-1: the reading is listed, never hidden, when the checks arm moved under it */}
+            {c.checks_arm_moved && (
+              <Hint as="span" id="text.learn.remeasure_checks_arm_moved" className="block font-sans font-semibold text-on-surface-body" data-testid={`learn-checks-arm-moved-${c.key}`}>
+                {`checks arm moved: frozen ${c.checks_arm_moved.frozen}, now ${c.checks_arm_moved.current} — a run would halt`}
+              </Hint>
+            )}
           </span>
         ),
       },
@@ -1047,6 +1058,12 @@ function RemeasureSection({ repo }: { repo: string }) {
                   // queue too (reading_unregistered); the page names the act that comes first
                   <Hint as="span" id="text.learn.remeasure_register" className="text-xs text-on-surface-muted">
                     Register a reading first
+                  </Hint>
+                ) : c.checks_arm_moved ? (
+                  // a run of the reading would halt reading_checks_arm_mismatch, by hand as
+                  // well as from here, so the page offers no route to one (RT2B-1)
+                  <Hint as="span" id="text.learn.remeasure_restore_arm" className="text-xs text-on-surface-muted">
+                    Restore the checks arm first
                   </Hint>
                 ) : !c.requests.length ? (
                   <Hint as={Link} id="link.learn.remeasure_by_hand" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">
