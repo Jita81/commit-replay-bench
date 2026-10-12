@@ -542,8 +542,8 @@ about it:
     uses it; its readings are registered through `POST /readings`.
   - **The loop's config switches are learned in-sample.** The loop's playbook lines are held
     out by task and taught only by older commits (ADR-0026 item 7), but its config family —
-    `finish_gate`, `budget_calibrated`, `format_step` — has no held-out rule: the register
-    reads every ledger row of the repository (`register_for`,
+    `finish_gate`, `budget_calibrated` (`format_step` is held off, Q-31) — has no held-out
+    rule: the register reads every ledger row of the repository (`register_for`,
     `src/crb/server/prevention_state.py`), `A0`'s rows on the paired commits included, and a
     switch it throws applies to every later `A0+L` run. Since a cell's `A0` runs before its
     `A0+L` ("Order", part 1), a pair's `A0+L` attempt can be built with a switch learned from
