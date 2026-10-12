@@ -77,18 +77,29 @@ reads the prefix of decided commits and waits at the first pending one.
 reproduced over random worlds by
 `tests/test_p792_reserved.py::test_p792_new_hits_subset_of_old`]**:
 
-1. A campaign-admitted run must name the reading, and its arm and fields must match. So every
-   built r1 attempt of an enrolled commit on an arm is reserved, and at most one exists. That
-   reserved row R is exactly the old rule's "first observed attempt" for that commit.
-2. A new hit requires everything the old hit required, plus extra conditions: not gold-red,
-   not harness or outage, on the pinned treatment, and ordered after registration. So, commit
-   by commit, new-hit implies old-hit, whatever any old re-run would have returned.
+1. **Given that no other reading of the campaign enrols the commit on that arm** — true for
+   Wave 3, which registers one reading per cell on four distinct cells, so no commit is in two
+   pools — a campaign-admitted run must name the reading, and its arm and fields must match.
+   So every built r1 attempt of an enrolled commit on an arm is reserved, and at most one
+   exists. That reserved row R is exactly the old rule's "first observed attempt" for that
+   commit.
+2. Under the same condition, a new hit requires everything the old hit required, plus extra
+   conditions: not gold-red, not harness or outage, on the pinned treatment, and ordered after
+   registration. So, commit by commit, new-hit implies old-hit, whatever any old re-run would
+   have returned.
 3. The old rule only removes non-hits (leaves). So for every prefix length n, old hits in its
    first n non-left commits ≥ new hits in the first n enrolled commits. Likewise, new misses ≥
    old misses.
 4. Therefore, under look.v1, a new deliver at 20/20, 29/30 or 38/40 implies an old deliver at
    the same look or earlier. A new insufficient can come only earlier.
 5. Every hit is still an honest first attempt, so false-pass can only fall. Only power falls.
+
+Without the condition, step 1 and step 2 fail: another `reserved.v1` reading of the same
+campaign, cell and arm can reserve the same commit as well, the old rule reads that reading's
+earlier miss as the first observed attempt, and this reading's reserved hit is a new hit with
+no old one (`tests/test_p792_reserved.py::test_p792_conservative_needs_one_reading_per_commit_and_arm`).
+The random worlds of `test_p792_new_hits_subset_of_old` add other readings' earlier rows only
+within the condition: on another arm, or on the same arm in a run another campaign admitted.
 
 The seeded order is ascending
 `sha256("crb.reading.v1|" + repo + "|" + canonical cell key + "|" + commit sha)` (item 2). The
@@ -193,6 +204,9 @@ pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is ob
   Which rate that is stays as Paul's words name it; this record recommends the value
   baseline's blind rate for the cell's size, taken in the host posture where the target commit
   stays in the object store (part 4's prior), and Paul confirms it before step 4.
+- **In-sample switches.** The loop's config switches (`finish_gate`, `budget_calibrated`,
+  `format_step`) may be learned from `A0`'s rows on the same commits the pair compares, so b
+  can be inflated; the stage-1 report reads the loop pair with that caveat (K7, part 2).
 - **Order.** Within each cell, `A0` runs before `A0+L`: a cell's `A0+L` run is queued only
   after its `A0` run has ended, which narrows choice (e) and leaves `A0` queued beside `S3`
   from the start. Each run records the levers in force: its apparatus stamp's `extra.learning`
@@ -403,6 +417,22 @@ about it:
     amendment keeps the first-observed rule; `GET /readings` serves each on the old rule
     with `attempt_rule` `first_observed.v0` and `p792` "open on this rule". Wave 3 registers
     neither.
+  - **The CLI's file readings.** `crb reading register` writes only `readings.jsonl` under
+    the first-observed rule: no worker reads it, nothing reserves against it and
+    `GET /readings` does not serve it, so nothing marks it as on the old rule. Wave 3 never
+    uses it; its readings are registered through `POST /readings`.
+  - **The loop's config switches are learned in-sample.** The loop's playbook lines are held
+    out by task and taught only by older commits (ADR-0026 item 7), but its config family —
+    `finish_gate`, `budget_calibrated`, `format_step` — has no held-out rule: the register
+    reads every ledger row of the repository (`register_for`,
+    `src/crb/server/prevention_state.py`), `A0`'s rows on the paired commits included, and a
+    switch it throws applies to every later `A0+L` run. Since a cell's `A0` runs before its
+    `A0+L` ("Order", part 1), a pair's `A0+L` attempt can be built with a switch learned from
+    its own `A0` attempt. The bias can only favour b over c **[hypothesis — argued from the
+    code, not measured]**. Time-ordering the switches or excluding the pool's rows from the
+    register is a change to the loop, out of proportion under the freeze (Q-24); the loop
+    pair is descriptive (ADR-0026 item 13), and the stage-1 report states this beside it and
+    lists the config changes in force on each `A0+L` run (`extra.learning`, as "Order" asks).
   - **Power, the cost of failing closed.** An honest kill, outage, harness row or
     gold-control timeout after the reservation is a miss, and `look.v1` reads
     `insufficient` at the third miss, so an infrastructure fault rate f scales the chance of
@@ -414,8 +444,13 @@ about it:
     first use: a rebuilt image, a `RepoConfig` edit, another executor or a changed worker
     environment afterwards halts every later reservation there
     (`reading_treatment_mismatch`, naming the half and the fields that differ) until it is
-    restored or a new reading is registered. A loop-switch edit made for `A0+L` halts that
-    arm the same way (C7).
+    restored or a new reading is registered. On `A0+L` the arm's pin holds the loop's switch
+    level and a digest of a person's acts on the loop's chain — a veto-revert
+    (`POST /learn/changes/{id}/revert`) and a link (`POST /learn/links`) — so a level edit, a
+    veto or a link made between `A0+L` runs halts that arm the same way (C7); the loop's own
+    applies and retires are the treatment and do not. Operator rule: from the first `A0+L`
+    reservation on a repository until the campaign reports, no one edits the loop's level,
+    vetoes a change or links a record on that repository.
   - **C19, information.** A reading counts only rows that carry its own reservation, so no
     reading counts another's rows, but one reading's rows stay visible beside another's:
     information without a lever.

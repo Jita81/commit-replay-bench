@@ -105,7 +105,7 @@ rule makes them prospective (item 10).
    |---|---|---|
    | `+facts@<drafter>` | structural facts drafted by a pinned model from the ticket and the parent tree | drafted in the sealed parent checkout, no person's edit or selection |
    | `+library@<version>` | a frozen set of library entries (item 10) | every entry mined mechanically at a commit at or before the reading's pool began, no person's edit or selection |
-   | `+L` | the repository's loop switch on (ADR-0020) — a **policy**, not a snapshot | always (the loop learns only from other, older commits — item 7) |
+   | `+L` | the repository's loop switch on (ADR-0020) — a **policy**, not a snapshot | always (the loop's lines are taught only by other, older commits — item 7; its config switches have no such rule and may be learned from the same commits under another arm, a caveat on any paired reading — K7 of docs/reviews/2026-10-09-wave-3-registration.md) |
 
    The composer that builds the brief (stream F, one for replay and the factory) stamps
    `labels.context_arm` from what the brief actually carried. Everything else about the brief is
