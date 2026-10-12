@@ -149,7 +149,8 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               no secret (``deployment_projection``, ``arm_projection``, ``repo_config_digest``
               under ``REPO_CONFIG_UNPINNED``, ``fingerprint``, ``treatment_digest``; P-792):
               A0 and A0+L share the deployment, the loop's overlay and the budget profile are
-              a non-loop arm's. For a replay or blind run filed under a reserved.v1 reading,
+              a non-loop arm's, a person's vetoes and links on the loop's chain the +L arm's.
+              For a replay or blind run filed under a reserved.v1 reading,
               reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``
               → ``_unit_reserver``: one ``reading.reserved`` event under the events lock, or
               a skip, or a halt before ``build.start`` — the run not owned, a cancel asked, a
@@ -283,7 +284,6 @@ from crb.core.grade import MODE_BLIND, MODE_SIGHTED
 from crb.core.ledger import (
     FAILURE_HARNESS,
     LABEL_FAILURE_KIND,
-    PROCESS_FACTORY,
     GradeRow,
     LedgerIntegrityError,
     false_q1_total,
@@ -328,6 +328,7 @@ from crb.core.reading import (
     enrolled,
     lint_refusal,
     reading_run_refusal,
+    reservation_unit,
 )
 from crb.core.redact import redact, redact_and_cap
 from crb.core.routing import ROUTE_DELIVER
@@ -696,8 +697,11 @@ def arm_projection(
     """The arm half of a reserved attempt's treatment: always ``{arm, learn}``. A non-loop arm
     adds the loop overlay's digest, its resolved ``budget_profile`` and the r1 budget that
     profile (or calibration) resolved to (C7); the ``+L`` arm omits all three, because what
-    the loop learns between commits is the treatment it measures. An arm outside the grammar,
-    or one whose ``+L`` disagrees with the loop switch it ran under, raises ``ValueError``."""
+    the loop learns between commits is the treatment it measures, and adds ``person`` — the
+    digest of a person's vetoes and links on the loop's chain (``LearningSnapshot.person``),
+    which reshape what the loop gives without being the loop's own act. An arm outside the
+    grammar, or one whose ``+L`` disagrees with the loop switch it ran under, raises
+    ``ValueError``."""
     loop = parse_arm(arm).loop
     if loop != loop_on(learning):
         raise ValueError(
@@ -706,7 +710,7 @@ def arm_projection(
         )
     out: dict[str, Any] = {"arm": arm, "learn": learning.auto_apply}
     if loop:
-        return out
+        return {**out, "person": learning.person}
     return {
         **out,
         "overlay": learning.overlay_digest,
@@ -996,8 +1000,9 @@ class _RunLedger:
     @staticmethod
     def _unit(row: GradeRow) -> str:
         """What a reservation names a row's attempt by: a factory row's ticket (its
-        ``item_id`` label — its ``task_id`` is the build's own id), else its commit."""
-        return row.labels.get("item_id", "") if row.process_step == PROCESS_FACTORY else row.task_id
+        ``item_id`` label — its ``task_id`` is the build's own id), else its commit — the
+        one ``reservation_unit`` F8's ``unplaced_attempts`` places rows by."""
+        return reservation_unit(row)
 
     def _stamp(self, row: GradeRow) -> GradeRow:
         """Add the run-declared labels for this row's trial (``budget_tier``,

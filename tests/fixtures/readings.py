@@ -166,11 +166,11 @@ TEST_DEPLOYMENT: dict[str, Any] = {
 
 def arm_half_for(arm: str, *, budget_profile: str = "default") -> dict[str, Any]:
     """The arm half ``reserve_for`` pins: the shape ``crb.server.worker.arm_projection``
-    writes — ``{arm, learn}``, and for a non-loop arm the overlay, the budget profile and the
-    r1 budget too."""
+    writes — ``{arm, learn}``, for a loop arm a person's acts on the chain (none here), and
+    for a non-loop arm the overlay, the budget profile and the r1 budget."""
     out: dict[str, Any] = {"arm": arm, "learn": "off"}
     if parse_arm(arm).loop:
-        return {**out, "learn": "auto"}
+        return {**out, "learn": "auto", "person": ""}
     return {
         **out,
         "overlay": "",

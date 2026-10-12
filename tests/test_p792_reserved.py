@@ -78,15 +78,22 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               other runs, reservations and claims, with the legacy control), C15, C19, each
               check a named miss (replay and forward), the registration's ``max_reruns`` 0
               and budget profile, the ``reading_run_refusal`` whitelist table and the arm
-              each admitted run maps to (C3, C5, C7 at the core), and the hypothesis property
+              each admitted run maps to (C3, C5, C7 at the core), the hypothesis property
               that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
-              the same look or earlier. The projections: every pinned ``RepoConfig`` field and
-              every container field and deployment input moves its fingerprint, A0 and A0+L
-              share ``deployment_fp``, a calibrated profile moves only ``arm_fp``, and no
-              secret reaches a projection (a credential-shaped input is refused). The worker:
+              the same look or earlier (with other readings' earlier rows inside the
+              argument's condition), and the condition's counterexample: two readings of one
+              campaign enrolling a commit on one arm. The projections: every pinned
+              ``RepoConfig`` field and every container field and deployment input moves its
+              fingerprint, A0 and A0+L share ``deployment_fp``, a calibrated profile moves
+              only ``arm_fp``, a person's veto or link on the loop's chain moves the ``A0+L``
+              ``arm_fp`` as a level edit does while the loop's own retire does not (C7), and
+              no secret reaches a projection (a credential-shaped input is refused). The worker:
               C1 (SQLite and PostgreSQL), C2, C5(b, c), C9-C13 and C15 end to end, S3 and A0
               reserving one commit apart, a reservation only at r1 and before every outcome
-              event, two claims racing for one commit (one wins, on both backends), a settled
+              event, two claims racing for one commit (one wins, on both backends), the
+              reserver's recheck under the lock (a run cancelled or reclaimed between claim
+              and reserve refused ``cancel_requested`` or ``run_not_owned``, the commit
+              pending), a settled
               claim's row refused up to ``execute``, a legacy reading's run never reserving,
               ``POST /readings`` registering reserved.v1 only (DL-385: the bare body
               reserved.v1, a legacy rule or a re-run refused 422), the claim's
@@ -109,8 +116,10 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               refused at submit and at claim, nothing reserved), C16 (a grading exception
               after the reservation is a miss), the hook never blocking delivery (a store
               error, a ticket not enrolled), only the reserved attempt counting (SQLite and
-              PostgreSQL), the ``RESERVED_FACTORY_PARAMS`` ratchet and ``POST
-              /readings/forward`` opting in.
+              PostgreSQL), a reserved ticket placed by its ``item_id`` in F8's tally and
+              ``settled_unrowed`` (rowed: nothing unplaced; unrowed: one attempt at its
+              hold, the campaign stopped), the ``RESERVED_FACTORY_PARAMS`` ratchet and
+              ``POST /readings/forward`` opting in.
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
@@ -147,7 +156,9 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               one deliberate move), tests/test_worker.py (``Harness``, ``FakeBuilder``,
               ``_multiply_backlog``),
               src/crb/server/reading_book.py and src/crb/server/campaigns.py
-              (``load_readings`` filling ``reservations_of``; ``treatment_pins``),
+              (``load_readings`` filling ``reservations_of``; ``treatment_pins``;
+              ``unplaced_attempts``, ``members`` and ``tally``), src/crb/core/prevention.py
+              (``snapshot`` and ``person_acts_digest``, the ``A0+L`` pin's person half),
               src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
               src/crb/server/routes/readings.py (the reserved.v1 fields; ``served_reading``: the
               rule, the pins and the reserved counts), src/crb/server/routes/runs.py
@@ -222,6 +233,8 @@ from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     ATTEMPT_RULE_RESERVED,
     DEFAULT_MAX_RERUNS,
+    HALT_CANCEL_REQUESTED,
+    HALT_RUN_NOT_OWNED,
     HALT_TREATMENT_MISMATCH,
     LABEL_CLAIM,
     LABEL_RESERVATION,
@@ -1447,8 +1460,14 @@ def test_p792_new_hits_subset_of_old(data: st.DataObject) -> None:
     its first ``n`` kept commits are at least the reserved hits among the first ``n``
     enrolled; and so a reserved ``deliver`` is a legacy ``deliver`` at the same look or
     earlier. Every legacy commit has a final observed row, so the legacy world is complete
-    (no re-run left to wait for)."""
+    (no re-run left to wait for). The argument holds when no other reading whose rows the
+    legacy rule reads enrols the commit on the same arm (``test_p792_conservative_needs_one_
+    reading_per_commit_and_arm``), so the worlds draw, before each reserved attempt, an
+    earlier row of another reading that keeps to it: on another arm, or — when both
+    readings name a campaign — on the same arm in a run another campaign admitted."""
     rule = data.draw(st.sampled_from(sorted(RULES)), label="rule")
+    campaign = data.draw(st.sampled_from(("", "camp-h")), label="campaign")
+    others = ("none", "other_arm", "other_campaign") if campaign else ("none", "other_arm")
     order = list(register_reading(_H_POOL, hierarchy=("S3",), budget=0.05).pool)
     changes: dict[str, str] = {}
     pairs = data.draw(
@@ -1468,8 +1487,17 @@ def test_p792_new_hits_subset_of_old(data: st.DataObject) -> None:
             exits[pos] = data.draw(st.sampled_from(_R_EXITS))
     reservations: list[Reservation] = []
     rows: list[GradeRow] = []
+    outside: set[str] = set()
     for i, commit in enumerate(order):
         exit_ = exits[i] if i < _DRAWN else "clean"
+        other = data.draw(st.sampled_from(others), label="other") if i < _DRAWN else "none"
+        if other == "other_arm":
+            rows.append(
+                sealed_row(commit, arm="A0", run_id=f"other-{i}", clean=data.draw(st.booleans()))
+            )
+        elif other == "other_campaign":
+            outside.add(f"outside-{i}")
+            rows.append(sealed_row(commit, run_id=f"outside-{i}", clean=data.draw(st.booleans())))
         res = _res(
             "S3",
             commit,
@@ -1485,9 +1513,26 @@ def test_p792_new_hits_subset_of_old(data: st.DataObject) -> None:
         for k, kind in enumerate(data.draw(st.lists(st.sampled_from(_LATER), max_size=3))):
             rows.append(_later_row(commit, kind, f"later-{i}-{k}"))
         rows.append(sealed_row(commit, clean=data.draw(st.booleans()), run_id=f"final-{i}"))
-    legacy = register_reading(_H_POOL, hierarchy=("S3",), rule=rule, budget=0.05, changes=changes)
-    reserved = _read(
-        _reserved_reading(_H_POOL, hierarchy=("S3",), rule=rule, changes=changes), reservations
+    admitted = sorted({r.run_id for r in rows} - outside)
+    legacy = with_admissions(
+        register_reading(
+            _H_POOL,
+            hierarchy=("S3",),
+            rule=rule,
+            budget=0.05,
+            changes=changes,
+            campaign_id=campaign,
+        ),
+        admitted,
+    )
+    reserved = with_admissions(
+        _read(
+            _reserved_reading(
+                _H_POOL, hierarchy=("S3",), rule=rule, changes=changes, campaign_id=campaign
+            ),
+            reservations,
+        ),
+        admitted,
     )
     old = arm_reading(legacy, "S3", rows)
     new = arm_reading(reserved, "S3", rows)
@@ -1511,6 +1556,38 @@ def test_p792_new_hits_subset_of_old(data: st.DataObject) -> None:
         assert old.look.state == STATE_DELIVER
         assert old.look.decided_at is not None and new.look.decided_at is not None
         assert old.look.decided_at <= new.look.decided_at
+
+
+def test_p792_conservative_needs_one_reading_per_commit_and_arm() -> None:
+    """The bound of the round-5 argument: its steps 1 and 2 hold only when no other reading
+    whose rows the legacy rule reads enrols the commit on the same arm. Two reserved.v1
+    readings of one campaign on one cell and arm can each reserve the same commit; the legacy
+    rule reads the other reading's earlier miss as the commit's first observed attempt, and
+    this reading's own reserved hit is a new hit with no old one. Wave 3 keeps to the bound —
+    one reading per cell, and a commit in one cell's pool — so the registration scopes the
+    argument to it rather than refusing the overlap."""
+    pool = commits(25, prefix="o")
+    camp = "camp-1"
+    legacy = with_admissions(
+        register_reading(pool, hierarchy=("S3",), budget=0.05, campaign_id=camp),
+        ["run-B", "run-A"],
+    )
+    first = legacy.pool[0]
+    res_b = _res("S3", first, run="run-B", event="ev-B")
+    res_a = _res("S3", first, run="run-A", event="ev-A", seq=REG_EVENT + 20)
+    rows = [_reserved_row(res_b, clean=False), _reserved_row(res_a)]
+    reserved = with_admissions(
+        _read(_reserved_reading(pool, hierarchy=("S3",), campaign_id=camp), [res_a]),
+        ["run-B", "run-A"],
+    )
+    old = arm_reading(legacy, "S3", rows).commits[0]
+    new = arm_reading(reserved, "S3", rows).commits[0]
+    assert (old.commit, new.commit) == (first, first)
+    assert (old.outcome, old.left) == (False, "")
+    assert (new.outcome, new.reason) == (True, "")
+    # without the other reading's row, the old hit is the new one
+    alone = arm_reading(legacy, "S3", rows[1:]).commits[0]
+    assert (alone.outcome, alone.left) == (True, "")
 
 
 # ---------------------------------------------------------------------------
@@ -1651,8 +1728,9 @@ def test_p792_container_projection_ratchet() -> None:
 def test_p792_a0_and_a0l_share_the_deployment_fp() -> None:
     """A0 and A0+L are one deployment and two arms: the loop's overlay, the budget profile
     it may set and the budget that resolves to are the +L arm's treatment, so they live in a
-    non-L arm's ``arm_fp`` and nowhere in the deployment. The +L arm pins only its arm id
-    and learn level — what the loop learns between commits is what it measures."""
+    non-L arm's ``arm_fp`` and nowhere in the deployment. The +L arm pins its arm id, learn
+    level and a person's acts on the loop's chain (none here) — what the loop learns between
+    commits is what it measures."""
     params = inspect.signature(worker.deployment_projection).parameters
     assert not {"arm", "learning", "budget_profile", "budget_for_task"} & set(params)
     deployment_fp = _deployment_fp()
@@ -1672,7 +1750,7 @@ def test_p792_a0_and_a0l_share_the_deployment_fp() -> None:
         "budget_profile": PROFILE_DEFAULT,
         "budget": r1.to_dict(),
     }
-    assert a0l == {"arm": "A0+L", "learn": AUTO_CONTEXT}
+    assert a0l == {"arm": "A0+L", "learn": AUTO_CONTEXT, "person": ""}
     a0_fp, a0l_fp = worker.fingerprint(a0), worker.fingerprint(a0l)
     assert a0_fp != a0l_fp
     assert worker.treatment_digest(deployment_fp, a0_fp) != worker.treatment_digest(
@@ -1694,6 +1772,64 @@ def test_p792_a0_and_a0l_share_the_deployment_fp() -> None:
         worker.arm_projection("A0", on, PROFILE_DEFAULT, r1)
     with pytest.raises(ValueError):
         worker.arm_projection("A9", off, PROFILE_DEFAULT, r1)
+
+
+def test_p792_a_person_on_the_loop_moves_the_l_arm_fp() -> None:
+    """C7 on ``+L``: the arm half pins what a person did to the loop's chain, not only its
+    level. The loop applying a switch and retiring it (its own acts) is the ``+L`` treatment
+    and keeps ``arm_fp``; a person's veto revert (``POST /learn/changes/{id}/revert``: the
+    change leaves force and the loop never re-applies it) or link (``POST /learn/links``)
+    moves it, as a level edit does, so the reading's next ``A0+L`` reservation halts
+    ``reading_treatment_mismatch``. Before, ``{arm, learn}`` alone was pinned and a veto
+    reshaped the ``+L`` treatment mid-reading with ``arm_fp`` unmoved."""
+    from crb.core.prevention import AUTO_CONFIG, PreventionRecord, snapshot
+
+    r1 = _r1_budget()
+    repo = "p792"
+
+    def rec(kind: str, payload: dict[str, Any], *, actor: str, at: int) -> PreventionRecord:
+        return PreventionRecord(
+            kind, repo, payload, actor=actor, created=f"2026-10-12T0{at}:00:00+00:00"
+        )
+
+    def arm_fp(*records: PreventionRecord) -> str:
+        learning = snapshot(records, repo=repo, params={})
+        return worker.fingerprint(worker.arm_projection("A0+L", learning, PROFILE_DEFAULT, r1))
+
+    switched = rec("switched", {"auto_apply": AUTO_CONFIG}, actor="op-1", at=0)
+    applied = rec(
+        "applied",
+        {
+            "change_id": "chg-1",
+            "lever_id": "budget_calibrated",
+            "family": "config",
+            "level": "config",
+            "targets": ["E-BUDGET"],
+            "key": "k",
+            "what": {"section": K_SECTION, "key": "budget_profile", "value": PROFILE_CALIBRATED},
+        },
+        actor="loop",
+        at=1,
+    )
+    pinned = arm_fp(switched, applied)
+    assert snapshot([switched, applied], repo=repo, params={}).overlay
+    # the loop's own acts — applying, then retiring by measurement — are the treatment
+    assert arm_fp(switched) == pinned
+    retired = rec(
+        "reverted", {"change_id": "chg-1", "by": "loop", "veto": False}, actor="loop", at=2
+    )
+    assert arm_fp(switched, applied, retired) == pinned
+    # a person's veto revert, exactly as the route writes it, moves the +L arm
+    veto = rec("reverted", {"change_id": "chg-1", "by": "person", "veto": True}, actor="op-1", at=2)
+    assert not snapshot([switched, applied, veto], repo=repo, params={}).overlay
+    assert arm_fp(switched, applied, veto) != pinned
+    # so does a person's link of classes to a fix made outside the loop
+    linked = rec("linked", {"targets": ["E-BUDGET"], "ref": "PR #9"}, actor="op-1", at=3)
+    assert arm_fp(switched, applied, linked) != pinned
+    assert arm_fp(switched, applied, veto, linked) not in {pinned, arm_fp(switched, applied, veto)}
+    # and a level edit, as before
+    level = rec("switched", {"auto_apply": AUTO_CONTEXT}, actor="op-1", at=4)
+    assert arm_fp(switched, applied, level) != pinned
 
 
 def test_p792_a_calibrated_profile_moves_only_arm_fp() -> None:
@@ -2244,6 +2380,76 @@ def test_p792_c2_cancel_during_witness_is_a_miss(
     assert "build.start" not in rig.actions(second.id)
     assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
     assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
+
+
+def _w_before_reserve(
+    rig: _WRig, monkeypatch: pytest.MonkeyPatch, act: Callable[[Run], None]
+) -> None:
+    """Run ``act`` on the run once, after the run's own stop check and just before the first
+    commit's reserve transaction (the ``_reserver`` the worker built for it, wrapped)."""
+    w = rig.h.worker
+    real = w._reserver
+    done: list[bool] = []
+
+    def reserver(ctx: Any, *a: Any, **kw: Any) -> Any:
+        inner = real(ctx, *a, **kw)
+
+        def call(task: Any) -> Any:
+            if not done:
+                done.append(True)
+                act(ctx.run)
+            return inner(task)
+
+        return call
+
+    monkeypatch.setattr(w, "_reserver", reserver)
+
+
+@pytest.mark.parametrize("how", ["cancel", "reclaim"])
+def test_p792_reserve_rechecks_the_run_under_the_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """The reserve transaction re-reads the run under the events lock: a cancel asked, or a
+    reclaim and a claim by another worker, landing after the run's own stop check and before
+    the reservation halts the run there — ``cancel_requested``, or ``run_not_owned`` naming
+    the status, the owner, the claim it reserved under and the claim the run is at now —
+    with no ``reading.reserved`` written, nothing built and the commit still pending. Pinned
+    by mutation: without the re-read's cancel check, or its owner and claim checks, the
+    attempt is reserved and built."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    run = rig.enqueue(reading)
+    rig.state["b"] = "gold"
+    if how == "cancel":
+        _w_before_reserve(
+            rig, monkeypatch, lambda r: rig.h.queue.request_cancel(r.id, actor="op-1")
+        )
+    else:
+
+        def steal(r: Run) -> None:
+            assert [x.id for x in rig.h.queue.reclaim_stale(0.0)] == [r.id]
+            other = rig.h.queue.claim_next("worker-2")
+            assert other is not None and other.id == r.id
+
+        _w_before_reserve(rig, monkeypatch, steal)
+    with contextlib.suppress(Exception):
+        rig.h.run_one()
+    (halted,) = rig.payloads(run.id, "run.halted")
+    if how == "cancel":
+        assert halted["reason"] == HALT_CANCEL_REQUESTED
+    else:
+        assert halted["reason"] == HALT_RUN_NOT_OWNED
+        detail = halted["detail"]
+        assert {k: detail[k] for k in ("status", "owner", "claim", "at_claim")} == {
+            "status": STATUS_RUNNING,
+            "owner": "worker-2",
+            "claim": 0,
+            "at_claim": 1,
+        }, detail
+    assert rig.reservations(reading) == []
+    assert "build.start" not in rig.actions(run.id)
+    assert rig.rows(run.id) == []
+    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
 
 
 def test_p792_c5_timeout_refused_and_gold_red_is_a_miss(
@@ -3649,6 +3855,19 @@ class _FRig:
                 out.setdefault(ev.action, []).append(int(ev.id))
         return out
 
+    def settled_unrowed(self, reading: Reading) -> dict[str, int]:
+        """The reading's ``settled_unrowed`` as ``GET /readings`` serves it
+        (``served_reading``): the reading as ``load_readings`` fills it, over every row of
+        the repository."""
+        from crb.server.routes.readings import served_reading
+
+        with self.h.factory() as s:
+            loaded = next(
+                r for r in load_readings(s, pr.REPO_NAME) if r.reading_id == reading.reading_id
+            )
+            rows = list(self.h.worker.ledger.rows(repo=pr.REPO_NAME))
+            return dict(served_reading(s, evaluate(loaded, rows))["settled_unrowed"])
+
 
 def _f_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | None = None) -> _FRig:
     """The factory rig on SQLite, or on ``store``'s database when one is given."""
@@ -3920,6 +4139,75 @@ def test_p792_forward_reserved_counts_only_the_reserved_attempt(
         )
     )
     assert rig.verdicts(reading) == {"I-1": (True, "")}
+
+
+@pytest.mark.parametrize("graded", [True, False], ids=["rowed", "unrowed"])
+def test_p792_forward_reserved_ticket_is_placed_by_its_item(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, graded: bool
+) -> None:
+    """F8 on a forward reading: the reservation names the ticket (``I-1``) while its row's
+    ``task_id`` is the build's own id, so ``unplaced_attempts`` places a factory row against
+    its reservation by the row's ``item_id`` label (``reservation_unit``, the key the worker
+    stamps the row by). A reserved ticket built and rowed is no unplaced attempt: the reading
+    serves ``settled_unrowed`` 0 and the campaign the run is admitted under is charged its
+    row alone and admits on. One whose grade raised after the reservation (no row) is one, at
+    its hold: served as 1, and the campaign stops ``unplaced_spend``. On SQLite and
+    PostgreSQL. Before, every rowed reserved ticket was counted settled with no row — the
+    reading served 1 and its campaign stopped, charged the hold on top of the row."""
+    cid = "cmp_" + "f" * 24
+    rig = _f_rig(tmp_path, monkeypatch, store=backend)
+    real = rig.h.worker._unit_reserver
+    monkeypatch.setattr(
+        rig.h.worker, "_unit_reserver", lambda *a, **kw: real(*a, **{**kw, "hold_usd": 0.4})
+    )
+    if not graded:
+
+        def broken(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError("the grader fell over")
+
+        monkeypatch.setattr("crb.factory.build.grade", broken)
+    reading = rig.register()
+    rig.enrol()
+    run = rig.enqueue(reading)
+    append_event(
+        rig.h.factory,
+        trace_id=cid,
+        stage="system",
+        action=CAMPAIGN_ADMITTED,
+        payload={
+            "campaign_id": cid,
+            "run_id": run.id,
+            "cap_usd": 10.0,
+            "s1": False,
+            "commits": 1,
+            "headroom_usd": 5.0,
+        },
+    )
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, (done.status, done.error)
+    (res,) = rig.reservations(reading)
+    rows = [r for r in rig.rows(run.id) if r.trial == "r1"]
+    with rig.h.factory() as s:
+        unplaced = campaigns_mod.unplaced_attempts(s, [run.id])
+        (member,) = campaigns_mod.members(s, cid)
+    t = tally(54.0, [member])
+    if graded:
+        (row,) = rows
+        assert (row.labels["item_id"], res.task_id) == ("I-1", "I-1") and row.task_id != "I-1"
+        assert rig.verdicts(reading) == {"I-1": (True, "")}
+        assert unplaced == [], unplaced
+        assert rig.settled_unrowed(reading) == {"S2": 0}
+        assert (member.unrowed, member.unrowed_usd) == (0, 0.0), member
+        assert not t.stopped, t
+    else:
+        assert rows == []
+        assert rig.verdicts(reading) == {"I-1": (False, "unobserved")}
+        assert [(u.task_id, u.trial, u.cost_usd, u.reservation_event_id) for u in unplaced] == [
+            ("I-1", "r1", 0.4, res.event_id)
+        ]
+        assert rig.settled_unrowed(reading) == {"S2": 1}
+        assert (member.unrowed, member.unrowed_usd) == (1, 0.4), member
+        assert t.unplaced_runs == (run.id,), t
 
 
 def test_p792_reserved_factory_params_ratchet() -> None:

@@ -112,8 +112,10 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               reading's cell and arms, the loop off on the reading's budget profile; a
               forward reading's sighted factory runs on ``S2`` alone — C8); pins
               a reserved pool to its posture and qualification ids (``pool_posture_id``,
-              ``pool_qualifications``, ``reserved_pool_digest`` — P-797) and widens its
-              ``pool_seen`` to any replay row at apparatus 2.4 or later.
+              ``pool_qualifications``, ``reserved_pool_digest`` — P-797), widens its
+              ``pool_seen`` to any replay row at apparatus 2.4 or later, and names the unit a
+              row's attempt is reserved by (``reservation_unit`` — a factory row's ticket,
+              else its commit).
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
               taking each commit's first observed ``r1`` attempt this deployment graded after
               registration on the reading's checks arm (never an imported row) — or, under
@@ -580,6 +582,14 @@ class Reservation:
     hold_usd: float | None
     #: The run is terminal, or reclaimed past ``claim``: a reservation with no row is a miss.
     settled: bool
+
+
+def reservation_unit(row: GradeRow) -> str:
+    """What a reservation names ``row``'s attempt by (its ``task_id``): a factory row's ticket
+    — its ``item_id`` label; the row's own ``task_id`` is the build's id — else the commit.
+    The worker stamps a reserved row by it and F8's ``unplaced_attempts`` places a row against
+    its reservation by it, so the two never key one attempt two ways."""
+    return row.labels.get("item_id", "") if row.process_step == PROCESS_FACTORY else row.task_id
 
 
 @dataclass(frozen=True)

@@ -27,15 +27,16 @@ What it does: Keeps a campaign only when its id re-hashes and it sits on its own
               and each run's unplaced spend), held, left, its stop and its runs; reads each first
               ``reading.reserved`` as a ``Reservation``, settled once its run is terminal,
               missing or reclaimed past the claim it reserved under; lists each settled
-              attempt with no row of its run for its commit and trial, at its ``build.done``
-              cost, else its reservation's hold, else unknown — never one still in flight,
-              which its run's cap and headroom hold.
+              attempt with no row of its run for its commit and trial (a factory row placed
+              by its ticket, ``reservation_unit``), at its ``build.done`` cost, else its
+              reservation's hold, else unknown — never one still in flight, which its run's
+              cap and headroom hold.
 How:          ``Event`` rows by action and trace → ``Campaign.from_dict`` → ``verify`` →
               ``rows_of_runs``, ``author.attempt`` events and ``unplaced_attempts`` →
               ``Spend.of_rows`` / ``with_authoring`` per run → ``crb.core.campaign.tally``;
               ``reading.reserved`` events → their runs (one read) → ``Reservation``
               (``reservations_of``); a ``build`` stage ``build.done`` per attempt less the
-              rows of its (run, commit, trial), plus each settled reservation with neither →
+              rows of its (run, unit, trial), plus each settled reservation with neither →
               ``UnplacedAttempt`` (``unplaced_attempts``).
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0030-a-run-keeps-its-spend-cap.md (§3: a run's cap is a guard)
@@ -72,7 +73,7 @@ from crb.core.campaign import (
     Tally,
     tally,
 )
-from crb.core.reading import READING_RESERVED_ACTION, RUNG_R1, Reservation
+from crb.core.reading import READING_RESERVED_ACTION, RUNG_R1, Reservation, reservation_unit
 from crb.server.spend_cap import AUTHOR_ATTEMPT, Spend
 from crb.store.jobs import ACTIVE_STATUSES, RECLAIMS_KEY
 from crb.store.ledger import rows_of_runs
@@ -211,8 +212,10 @@ def reservations_of(session: Session, reading_ids: Iterable[str]) -> list[Reserv
 
 #: The ``build.done`` an attempt is read by: core/run.py's, after the builder and before
 #: ``grade()``, routed to the ``build`` stage with the commit as its ``task_id``. A builder's
-#: own (``builder.build.done``) and the factory's (stage ``factory``, keyed by its item, whose
-#: row names the oracle's commit) are not attempts here.
+#: own (``builder.build.done``) and the factory's (stage ``factory``) are not attempts here:
+#: a factory ticket's attempt is counted only by its reservation, and placed by the row
+#: whose ``item_id`` label names the ticket (``reservation_unit``; the row's own
+#: ``task_id`` is the build's id).
 _BUILD_DONE = "build.done"
 _BUILD_STAGE = "build"
 
@@ -275,9 +278,11 @@ def unplaced_attempts(session: Session, run_ids: Iterable[str]) -> list[Unplaced
     ).scalars():
         trial = str(dict(ev.payload_json or {}).get("trial") or "")
         built[(ev.trace_id, ev.task_id, trial)].append(ev)
+    # a row is placed by the unit its reservation names (a factory row's ticket, not the
+    # build's id); a replay row's unit is its commit, as its ``build.done`` names it
     rowed: dict[tuple[str, str, str], int] = defaultdict(int)
     for row in rows_of_runs(session, ids):
-        rowed[(row.run_id, row.task_id, row.trial)] += 1
+        rowed[(row.run_id, reservation_unit(row), row.trial)] += 1
     reading_of = {
         rid: str((run.params_json or {}).get("reading_id") or "") for rid, run in runs.items()
     }
