@@ -22,7 +22,10 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               registration and a retried forward reading — the same second or later, the same
               operator or another, two racing on SQLite and PostgreSQL — refused 409
               ``reading_exists`` naming the first, nothing written, and a store already
-              holding a reading twice listing and spending it once (P-793).
+              holding a reading twice listing and spending it once (P-793); both routes
+              refusing 409 ``lint_disabled`` while the repository's lint is off, and a
+              reserved.v1 id hashing the repository's lint config while a legacy id does not
+              (P-796).
 How:          ``make_env`` with ``tests.fixtures.proven`` adding tasks, sealed rows, scores and a
               controls report; the race on each store backend (``tests.conftest_store``); no
               model, no docker.
@@ -864,3 +867,101 @@ def test_two_racing_retries_register_one_reading_on_each_store(
     assert [o["reading_id"] for o in served["readings"]] == [outcomes[0][1]]
     (cell,) = served["budgets"]
     assert cell["readings"] == 1
+
+
+# --- an operator's lint switch never reshapes what a reading counts (P-796) ------------------
+
+
+def _set_lint(env: Env, lint: dict[str, Any]) -> None:
+    """Store ``lint`` as the repository's ``RepoConfig.lint`` — what an operator's config edit
+    writes and the next registration, submit and claim read."""
+    from crb.store.models import Repo
+
+    with env.factory() as s:
+        repo = s.get(Repo, ALPHA)
+        assert repo is not None
+        repo.config_json = {**dict(repo.config_json or {}), "lint": dict(lint)}
+        s.commit()
+
+
+def test_registering_with_lint_disabled_is_refused_409(env: Env, clock: dict[str, str]) -> None:
+    """P-796, the Wave 3 red team's F7 by code reading: a commit whose row was graded with belt
+    5 switched off leaves a legacy reading's pool ``lint_disabled``, and the operator's switch
+    can be thrown after outcomes are seen, so it chose which commits leave. Now a repository
+    whose lint is disabled (``RepoConfig.lint = {"disabled": true}``) registers no reading,
+    whatever its attempt rule: ``POST /readings`` (legacy and reserved.v1) and ``POST
+    /readings/forward`` are refused 409 ``lint_disabled`` naming the repository and the
+    reason, and nothing is written (each answered 201 before the change)."""
+    from fixtures.server_seed import BUILDER, MODEL, PROVIDER
+
+    add_tasks(env.factory)
+    off = {"repo": ALPHA, "reason": "disabled_by_config"}
+    _set_lint(env, {"disabled": True})
+    for rule in ({}, {"attempt_rule": "reserved.v1"}):
+        r = register_via_api(env, **rule)
+        assert r.status_code == 409, (rule, r.text)
+        err = envelope(r)
+        assert (err["code"], err["detail"]) == ("lint_disabled", off), err
+    assert _registered_events(env) == 0
+
+    _set_lint(env, {})
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    first = r.json()["pool"][:20]
+    add_rows(env.factory, first, arm="S3")
+    add_rows(env.factory, first[:3], arm=S1, clean=False)
+    add_rows(env.factory, first[3:], arm=S1)
+    add_oracle_and_controls(env.factory, first)
+    body = {
+        "repo": ALPHA,
+        "promotes": r.json()["reading_id"],
+        "builder": BUILDER,
+        "model": MODEL,
+        "provider": PROVIDER,
+        "hypothesis": HYPOTHESIS,
+        "smallest_effect": SMALLEST_EFFECT,
+    }
+    _set_lint(env, {"disabled": True})
+    fwd = env.post("/readings/forward", json=body)
+    assert fwd.status_code == 409, fwd.text
+    err = envelope(fwd)
+    assert (err["code"], err["detail"]) == ("lint_disabled", off), err
+    assert _registered_events(env) == 1
+    _set_lint(env, {})
+    assert env.post("/readings/forward", json=body).status_code == 201
+    assert _registered_events(env) == 2
+
+
+def test_a_reserved_reading_id_hashes_the_lint_config(
+    tmp_path: Path, clock: dict[str, str]
+) -> None:
+    """A reserved.v1 reading names the lint configuration it was registered under (P-796): the
+    same registration on two stores whose repository lints differently gets two ids, the
+    stored ``lint_digest`` is the sha256 of the canonical lint block, and a record whose
+    digest was edited no longer re-hashes. A legacy reading hashes no lint: its id is the
+    same on both stores and its record carries no ``lint_digest``."""
+    from crb.core.evidence import canonical_json, sha256_text
+    from crb.core.reading import Reading
+
+    lints: dict[str, dict[str, Any]] = {"plain": {}, "ruff": {"command": ["ruff", "check"]}}
+    got: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    for name, lint in lints.items():
+        (tmp_path / name).mkdir()
+        with make_env(tmp_path / name, **SEALED_SETTINGS) as store:
+            _set_lint(store, lint)
+            add_tasks(store.factory)
+            legacy = register_via_api(store)
+            reserved = register_via_api(store, attempt_rule="reserved.v1")
+            assert (legacy.status_code, reserved.status_code) == (201, 201), reserved.text
+            got[name] = (legacy.json(), reserved.json())
+    (legacy_a, reserved_a), (legacy_b, reserved_b) = got["plain"], got["ruff"]
+    assert legacy_a["reading_id"] == legacy_b["reading_id"]
+    assert "lint_digest" not in legacy_a and "lint_digest" not in legacy_b
+    assert reserved_a["reading_id"] != reserved_b["reading_id"]
+    for name, (_, reserved) in got.items():
+        assert reserved["lint_digest"] == sha256_text(canonical_json(lints[name])), name
+        assert Reading.from_dict(reserved).verify()
+        moved = {**reserved, "lint_digest": sha256_text(canonical_json({"disabled": True}))}
+        assert not Reading.from_dict(moved).verify()
+        dropped = {k: v for k, v in reserved.items() if k != "lint_digest"}
+        assert not Reading.from_dict(dropped).verify()

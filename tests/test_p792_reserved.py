@@ -89,7 +89,11 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               fields; their stored ``params`` keys are ``RESERVED_RUN_PARAMS``), the pin that
               ``new_run``'s empty ladder is ``RESERVED_RUN_LADDER``, 409 ``reading_required``
               (C19), the step-6 re-measure bodies admitted, and both refusals re-checked under
-              the events lock.
+              the events lock. Lint (P-796): a run of a reading of either rule on a repository
+              whose lint is off refused 409 ``lint_disabled`` at submit and ``run.refused`` at
+              claim (nothing reserved, the commit pending), and lint switched off after the
+              first reservation refused, then switched on as another config halting the next
+              ``reading_treatment_mismatch`` on the repository pin.
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
@@ -125,9 +129,10 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
               src/crb/server/routes/readings.py (the opt-in fields; ``served_reading``: the
               rule, the pins and the reserved counts), src/crb/server/routes/runs.py
-              (``submit_refusals``: ``reading_run_fields_refusal`` and ``campaign_refusal``,
-              under test), tests/test_wave3_registration_rehearsal.py (the campaign, the
-              registrations and the step-6 bodies the submit-gate tests post)
+              (``submit_refusals``: ``reading_run_fields_refusal``, ``reading_lint_refusal``
+              and ``campaign_refusal``, under test), tests/test_wave3_registration_rehearsal.py
+              (the campaign, the registrations and the step-6 bodies the submit-gate tests
+              post)
 Tested by:    tests/test_p792_reserved.py
 Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
               failing first), or a builder gains a constructor option that shapes its argv
@@ -3122,3 +3127,95 @@ def test_p792_admission_rechecks_both_refusals_under_the_lock(
         no_reading = {k: v for k, v in a0.items() if k != "reading_id"}
         _r_refused(w, no_reading, 409, REFUSAL_READING_REQUIRED)
         assert len(calls) == 2
+
+
+# --- an operator's lint switch never reshapes what a reading counts (P-796) ------------------
+
+
+def _r_lint(w: Wave3, repo: str, lint: dict[str, Any]) -> None:
+    """Store ``lint`` as ``repo``'s ``RepoConfig.lint`` (the operator's config edit)."""
+    with w.env.factory() as s:
+        row = s.get(Repo, repo)
+        assert row is not None
+        row.config_json = {**dict(row.config_json or {}), "lint": dict(lint)}
+        s.commit()
+
+
+def test_p792_a_run_of_a_reading_on_a_lint_disabled_repo_is_refused(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-796 (the Wave 3 red team's F7, by code reading): a row graded with belt 5 switched
+    off lets its commit leave a legacy reading ``lint_disabled`` and is a reserved.v1
+    reading's miss, and the switch is the operator's to throw after outcomes are seen. Now a
+    run filed under a reading of either rule on a repository whose lint is disabled is
+    refused 409 ``lint_disabled`` at submit, nothing queued or admitted (201 before), and a
+    run that reached the queue past the gate is refused at claim — ``run.refused``
+    ``lint_disabled``, failed before any build, nothing reserved, every commit still pending
+    (built and reserved before)."""
+    off = {"disabled": True}
+    (tmp_path / "submit").mkdir()
+    with _r_stack(backend, tmp_path / "submit", monkeypatch, legacy=[("click", "XS")]) as w:
+        for key in (("cobra", "XS"), ("click", "XS")):
+            body = _a0(w, key)
+            _r_lint(w, key[0], off)
+            err = _r_refused(w, body, 409, "lint_disabled")
+            assert err["detail"] == {
+                "reading_id": body["reading_id"],
+                "repo": key[0],
+                "reason": LINT_DISABLED_BY_CONFIG,
+            }, key
+            _r_lint(w, key[0], {})
+            assert _r_admit(w, body).status == STATUS_CANCELLED
+
+    (tmp_path / "claim").mkdir()
+    rig = _w_rig(tmp_path / "claim", monkeypatch)
+    for reading in (rig.register(), rig.register(legacy=True)):
+        rig.edit_config(lint=off)
+        run = rig.enqueue(reading)
+        done = rig.h.run_one()
+        assert done.status == STATUS_FAILED and done.error.startswith("lint_disabled"), done.error
+        (refused,) = rig.payloads(run.id, "run.refused")
+        assert (refused["code"], refused["reading_id"]) == ("lint_disabled", reading.reading_id)
+        assert (refused["repo"], refused["reason"]) == (pr.REPO_NAME, LINT_DISABLED_BY_CONFIG)
+        assert "build.start" not in rig.actions(run.id)
+        assert rig.rows(run.id) == [] and rig.reservations(reading) == []
+        assert rig.verdicts(reading, "A0")[rig.first][0] is None
+        rig.edit_config(lint={})
+
+
+def test_p792_toggling_lint_after_the_first_reservation_halts_the_next(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-796 against the treatment pin: once a reserved.v1 reading's first reservation has
+    pinned the repository's configuration, switching belt 5 off refuses the next run at
+    claim (``lint_disabled``, before any reservation — it halted on the pin before the claim
+    check), and switching it back on under another lint block (``{"disabled": false}`` is
+    not the ``{}`` pinned) halts the next ``reading_treatment_mismatch`` on the repository
+    digest, before ``build.start``. The second commit stays pending throughout, and the
+    first keeps the verdict its reservation gave it."""
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    rig.enqueue(reading)
+    rig.h.run_one()
+    (res,) = rig.reservations(reading)
+    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
+
+    rig.state["b"] = "multiply"
+    rig.edit_config(lint={"disabled": True})
+    off = rig.enqueue(reading, rig.second)
+    done = rig.h.run_one()
+    assert done.status == STATUS_FAILED and done.error.startswith("lint_disabled"), done.error
+    (refused,) = rig.payloads(off.id, "run.refused")
+    assert refused["code"] == "lint_disabled"
+    assert rig.payloads(off.id, "run.halted") == []
+    assert "build.start" not in rig.actions(off.id)
+
+    rig.edit_config(lint={"disabled": False})
+    on = rig.enqueue(reading, rig.second)
+    done = rig.h.run_one()
+    assert done.error == HALT_TREATMENT_MISMATCH
+    (halted,) = rig.payloads(on.id, "run.halted")
+    assert halted["detail"]["fields"] == ["repo_config"]
+    assert "build.start" not in rig.actions(on.id)
+    assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
+    assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}

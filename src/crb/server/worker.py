@@ -118,8 +118,10 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               event names (P-789, DL-382, DL-383), or a run of a reserved.v1 reading that sets
               a field the reading does not register (``_reading_run_fields`` over
               ``reading_run_refusal``: ``builder_config``, ``timeout``, another budget profile
-              or ladder; P-792 C3, C5, C7) — dispatches by kind (setup,
-              probe, mine, label, replay, blind, oracle, controls, factory), streams
+              or ladder; P-792 C3, C5, C7), or a run of a reading of either rule while the
+              repository's lint is switched off (``_reading_lint_disabled``, P-796) —
+              dispatches by kind (setup, probe, mine, label, replay, blind, oracle, controls,
+              factory), streams
               StepEvents, writes grade rows through the append-only ledger with the run's
               labels stamped, records the apparatus, and marks the run succeeded / failed /
               cancelled honestly (all-attempts-errored is a failure; a provider outage streak
@@ -277,6 +279,7 @@ from crb.core.ledger import (
     rows_for_checks,
 )
 from crb.core.library import ACTOR_FRESHNESS, files_cited
+from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -305,10 +308,12 @@ from crb.core.reading import (
     LABEL_CLAIM,
     LABEL_RESERVATION,
     LABEL_TREATMENT,
+    REFUSAL_LINT_DISABLED,
     SKIP_COMMIT_RESERVED,
     SKIP_TASK_NOT_ENROLLED,
     Reading,
     enrolled,
+    lint_refusal,
     reading_run_refusal,
 )
 from crb.core.redact import redact, redact_and_cap
@@ -382,7 +387,7 @@ from crb.server.intake import (
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
-from crb.server.reading_book import load_readings, treatment_pins
+from crb.server.reading_book import load_readings, repo_lint, treatment_pins
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -1633,6 +1638,8 @@ class Worker:
                 status, error = STATUS_FAILED, moved
             elif (unadmitted := self._campaign_unadmitted(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unadmitted
+            elif (lint_off := self._reading_lint_disabled(run, emitter)) is not None:
+                status, error = STATUS_FAILED, lint_off
             elif (unregistered := self._reading_run_fields(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unregistered
             else:
@@ -1868,6 +1875,42 @@ class Worker:
             code=REFUSAL_REQUIRED,
             reading_id=reading_id,
             campaign_id=campaign_id,
+        )
+        return error
+
+    def _reading_lint_disabled(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading of
+        either rule (``params.reading_id``) and the operator switched the repository's lint
+        off since submit (P-796, :func:`~crb.core.reading.lint_refusal` — the rule ``POST
+        /runs`` refuses 409 ``lint_disabled`` by): a row graded with belt 5 off never counts as
+        one graded with it on, so the switch, thrown after outcomes are seen, could reshape
+        what the reading counts. Refused before the reservation, so the commit stays pending;
+        restoring the lint it ran under resumes it (another lint halts a reserved.v1 reading
+        ``reading_treatment_mismatch`` on its pin). ``None`` for a run under no reading, under one
+        this repository has no verified record of (:meth:`_reading_unsealed` refuses it), or
+        while lint is on."""
+        reading_id = str(dict(run.params_json or {}).get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+            reason = lint_refusal(run.repo, repo_lint(s, run.repo)) if reading else ""
+        if not reason:
+            return None
+        error = (
+            f"{REFUSAL_LINT_DISABLED}: a run of reading {reading_id!r}: {reason}; nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_LINT_DISABLED,
+            reading_id=reading_id,
+            repo=run.repo,
+            reason=LINT_DISABLED_BY_CONFIG,
         )
         return error
 

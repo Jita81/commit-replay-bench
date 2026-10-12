@@ -37,11 +37,13 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               reading that would not be graded sealed in the reading's posture class, and (422
               ``reading_run_fields``) a run of a reserved.v1 reading that sets a field the
               reading does not register, and (409 ``reading_required``) a campaign run naming
-              no reading while its campaign holds a reserved.v1 one on the repository (P-792) —
-              through ``submit_refusals``, the one gate every route that queues a run calls; serves
-              run views with counts re-derived from the ledger when the worker wrote none; streams
-              events as SSE with resume-by-seq; cancellation is a flag the worker honours;
-              lifting the sign-off clause for one run is refused at enqueue and granted only
+              no reading while its campaign holds a reserved.v1 one on the repository (P-792),
+              and (409 ``lint_disabled``) a run of a reading while the repository's lint is
+              off (P-796) — through ``submit_refusals``, the one gate every route that queues
+              a run calls; serves run views with counts re-derived from the ledger when the
+              worker wrote none; streams events as SSE with resume-by-seq; cancellation is
+              a flag the worker honours; lifting the sign-off clause for one run is refused
+              at enqueue and granted only
               by an approver who did not queue the run, as an event (GOV-4, ADR-0003
               amendment 2026-09-27) — it never lifts the route gate (ADR-0026 item 8);
               and owns the out-of-band ``system`` event writers the other routes share
@@ -114,11 +116,14 @@ from crb.core.campaign import (
 )
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
+from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     ATTEMPT_RULE_RESERVED,
+    REFUSAL_LINT_DISABLED,
     REFUSAL_READING_REQUIRED,
     REFUSAL_RUN_FIELDS,
     Reading,
+    lint_refusal,
     reading_run_refusal,
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
@@ -136,7 +141,7 @@ from crb.server.posture_view import (
     deployment_posture_class,
     refuse_unqualified,
 )
-from crb.server.reading_book import load_readings
+from crb.server.reading_book import load_readings, repo_lint
 from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
@@ -1036,6 +1041,28 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> Readi
     return reading
 
 
+def reading_lint_refusal(db: Session, reading: Reading) -> None:
+    """P-796 at submit: 409 ``lint_disabled`` when a run names ``reading`` (either attempt
+    rule) on a repository whose lint the operator switched off — a row graded with belt 5 off
+    never counts as one graded with it on (a legacy reading drops it, a reserved one would
+    bind it as a miss), so nothing a reading counts is built while the switch is off
+    (:func:`crb.core.reading.lint_refusal`; the worker re-checks at claim,
+    ``Worker._reading_lint_disabled``). ``detail`` is ``{reading_id, repo, reason}``."""
+    reason = lint_refusal(reading.repo, repo_lint(db, reading.repo))
+    if not reason:
+        return
+    raise ApiError(
+        409,
+        REFUSAL_LINT_DISABLED,
+        f"a run of reading {reading.reading_id!r}: {reason} — nothing was queued",
+        detail={
+            "reading_id": reading.reading_id,
+            "repo": reading.repo,
+            "reason": LINT_DISABLED_BY_CONFIG,
+        },
+    )
+
+
 def reading_run_fields_refusal(reading: Reading, run: Run) -> None:
     """P-792 channels C3, C5, C7 and C17 at submit: 422 ``reading_run_fields`` when ``run``,
     filed under the reserved.v1 ``reading``, sets a field the reading does not register — the
@@ -1220,6 +1247,9 @@ def submit_refusals(
       the reading does not register (``builder_config``, ``timeout``, another budget profile,
       ladder, cell or arm…): nothing a run chooses may steer a reserved attempt (P-792 C3, C5,
       C7, C17; :func:`reading_run_fields_refusal`; the worker re-checks at claim);
+    * 409 ``lint_disabled`` — a run filed under a reading of either rule on a repository whose
+      lint the operator switched off: nothing a reading counts is built while belt 5 is off
+      (P-796; :func:`reading_lint_refusal`; the worker re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -1253,7 +1283,9 @@ def submit_refusals(
         )
     campaign_refusal(db, body)
     if body.reading_id is not None:
-        reading_run_fields_refusal(reading_refusal(db, settings, body), run)
+        reading = reading_refusal(db, settings, body)
+        reading_lint_refusal(db, reading)
+        reading_run_fields_refusal(reading, run)
     if not login:
         return
     # last: the only refusal that can cost a verify turn (P-462)

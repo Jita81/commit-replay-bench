@@ -22,19 +22,22 @@ What it does: Reads the repository's reading events; keeps a record only when it
               first registration's ``Event.id`` (``with_reservations``, P-792). Reads a
               reserved.v1 reading's treatment pins (``treatment_pins``, trust on first use):
               the campaign's first reservation on the repository and each arm's first.
+              Reads a repository's lint configuration (``repo_lint``, P-796) for the one
+              ``lint_disabled`` refusal at registration, submit and claim.
 How:          ``Event`` rows (``action == reading.registered``) → ``Reading.from_dict`` →
               ``Reading.verify`` → ``with_enrolment`` over ``load_held_out`` →
               ``with_admissions`` over ``admitted_runs`` (one read per campaign) →
               ``with_reservations`` over ``reservations_of`` (one read per reserved reading);
               ``treatment_pins``: the repository's ``reading.reserved`` events in ``Event.id``
-              order.
+              order; ``repo_lint``: the ``Repo`` row's ``config_json["lint"]``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 2)
 Works with:   src/crb/server/routes/readings.py (registers readings; re-exports this reader;
               serves the pins as ``pinned_treatment``),
-              src/crb/server/routes/runs.py (``reading_refusal``: a run filed under a reading),
-              src/crb/server/worker.py (``_reading_unsealed``, ``_reading_posture_mismatch``:
-              the same rules at claim; ``_treatment_pins``: the reserver halts on a moved pin),
+              src/crb/server/routes/runs.py (``reading_refusal``: a run filed under a reading;
+              ``reading_lint_refusal``), src/crb/server/worker.py (``_reading_unsealed``,
+              ``_reading_posture_mismatch``, ``_reading_lint_disabled``: the same rules at
+              claim; ``_treatment_pins``: the reserver halts on a moved pin),
               src/crb/core/reading.py (the record, its hash and the enrolment rule),
               src/crb/server/acceptance.py (``load_held_out``: a forward reading's records),
               src/crb/server/campaigns.py (``admitted_runs``: the runs a campaign admitted;
@@ -46,6 +49,8 @@ Touch when:   never for a new repository; a reading's verified set changes (an A
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -62,7 +67,7 @@ from crb.core.reading import (
 )
 from crb.server.acceptance import load_held_out
 from crb.server.campaigns import admitted_runs, reservations_of
-from crb.store.models import Event
+from crb.store.models import Event, Repo
 
 
 def load_readings(session: Session, repo: str) -> list[Reading]:
@@ -134,4 +139,13 @@ def treatment_pins(session: Session, reading: Reading) -> tuple[Event | None, di
     return deployment, arms
 
 
-__all__ = ["load_readings", "treatment_pins"]
+def repo_lint(session: Session, repo: str) -> dict[str, Any]:
+    """The repository's lint configuration as ``RepoConfig.from_dict`` reads it (``{}`` when the
+    row names none, or there is no row) — what ``crb.core.reading.lint_refusal`` and
+    ``lint_config_digest`` read (P-796)."""
+    row = session.get(Repo, repo)
+    config = dict((row.config_json if row is not None else None) or {})
+    return dict(config.get("lint") or {})
+
+
+__all__ = ["load_readings", "repo_lint", "treatment_pins"]

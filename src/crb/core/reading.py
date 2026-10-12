@@ -53,9 +53,10 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   graded on the record that enrolled the ticket and otherwise lets the ticket leave the pool
   (``not_graded``), and it alone can make a ceiling a standard.
 * **The reserved attempt** (``attempt_rule`` ``reserved.v1``, P-792). A reading registered
-  under it (``max_reruns`` 0, a named ``budget_profile``; both hashed, a legacy reading's id
-  unchanged) reads each enrolled commit (:func:`enrolled` — the pool, one commit per change,
-  the first ``n`` of a descriptive arm) by the one ``r1`` row its reservation
+  under it (``max_reruns`` 0, a named ``budget_profile``, the repository's ``lint_digest`` —
+  P-796; all hashed, a legacy reading's id unchanged) reads each enrolled commit
+  (:func:`enrolled` — the pool, one commit per change, the first ``n`` of a descriptive
+  arm) by the one ``r1`` row its reservation
   (:class:`Reservation`, the ``reading.reserved`` event the store loads with
   :func:`with_reservations`) wrote — that run, that claim, stamped with the reservation's
   event id. Nothing leaves and nothing is re-run: a harness failure, an outage, belt 5
@@ -79,8 +80,10 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               admitted under it (``with_admissions``; none when unread; a row of any other
               run is invisible to it); refuses a campaign on the factory's cell
               (``campaign_unsupported_reading``), a reading already registered
-              (``reading_exists`` — a retry writes nothing), a registration over
-              commits already graded under its arms at its apparatus (``pool_seen``), beyond
+              (``reading_exists`` — a retry writes nothing), a repository whose lint the
+              operator switched off (``lint_refusal`` → ``lint_disabled`` at registration,
+              submit and claim — P-796), a registration over commits already graded under
+              its arms at its apparatus (``pool_seen``), beyond
               the cell's budget (``budget_spent``) or outside the arm rules; evaluates each
               arm of a reading over the ledger's rows in the seeded order; stops the
               hierarchy at the first arm that does not deliver; names the standard, a ceiling
@@ -108,6 +111,7 @@ Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 6),
               docs/adr/0025-routing-v2.md (items 1, 2 and 8 as ADR-0026 amends them)
 Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
+              src/crb/core/lint.py (``lint_disabled``, the operator's belt 5 switch),
               src/crb/core/acceptance.py (the held-out records a forward reading enrols and
               the one rule for a held-out-graded row),
               src/crb/core/ledger.py (the rows; ``GradeRow.context_arm``, ``taxonomy``,
@@ -167,6 +171,7 @@ from crb.core.ledger import (
     PROCESS_FACTORY,
     lint_could_change,
 )
+from crb.core.lint import LINT_DISABLED_BY_CONFIG, lint_disabled
 from crb.core.stats import Interval, wilson_interval
 
 if TYPE_CHECKING:
@@ -306,6 +311,13 @@ REFUSAL_CAMPAIGN_UNSUPPORTED = "campaign_unsupported_reading"
 #: same registration under another second or another actor (:func:`registered_twin`). A
 #: retried request writes nothing and spends nothing; the caller reads the reading back.
 REFUSAL_EXISTS = "reading_exists"
+#: A registration, or a run of a reading of either rule, on a repository whose operator
+#: switched belt 5 off (``RepoConfig.lint = {"disabled": true}``, :func:`lint_refusal`) —
+#: 409 at ``POST /readings``, ``POST /readings/forward`` and ``POST /runs``, and
+#: ``run.refused`` at claim (P-796). The switch is the operator's, thrown at any time, and a
+#: row graded with it off leaves a legacy reading's pool (:data:`LEFT_LINT_DISABLED`), so
+#: while it is off nothing a reading counts is registered or built.
+REFUSAL_LINT_DISABLED = "lint_disabled"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
@@ -314,6 +326,7 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_NOT_A_CEILING,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_EXISTS,
+    REFUSAL_LINT_DISABLED,
 )
 #: A run of a reserved.v1 reading that carries a field the reading does not allow
 #: (:func:`reading_run_refusal`): refused at submit (422) and again at claim.
@@ -582,6 +595,11 @@ class Reading:
     #: (hashed only with the rule).
     attempt_rule: str = ""
     budget_profile: str = ""
+    #: The sha256 of the repository's canonical lint configuration when the reading was
+    #: registered (:func:`lint_config_digest`, P-796) — hashed only with the attempt rule and
+    #: only when present, so a legacy reading's id never moves and a reserved.v1 reading names
+    #: the belt 5 its commits are graded under.
+    lint_digest: str = ""
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
@@ -605,6 +623,7 @@ class Reading:
             object.__setattr__(self, "attempt_rule", "")  # the legacy rule is never hashed
         if not self.attempt_rule:
             object.__setattr__(self, "budget_profile", "")
+            object.__setattr__(self, "lint_digest", "")
         if self.reservations is not None:
             object.__setattr__(self, "reservations", dict(self.reservations))
         object.__setattr__(self, "hierarchy", tuple(self.hierarchy))
@@ -697,6 +716,7 @@ class Reading:
                 if self.attempt_rule
                 else {}
             ),
+            **({"lint_digest": self.lint_digest} if self.attempt_rule and self.lint_digest else {}),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -736,6 +756,7 @@ class Reading:
             campaign_id=str(d.get("campaign_id", "") or ""),
             attempt_rule=str(d.get("attempt_rule", "") or ""),
             budget_profile=str(d.get("budget_profile", "") or ""),
+            lint_digest=str(d.get("lint_digest", "") or ""),
         )
 
     def verify(self) -> bool:
@@ -951,6 +972,34 @@ def campaign_unsupported(process_step: str) -> str:
     )
 
 
+def lint_config_digest(lint: Mapping[str, Any] | None) -> str:
+    """The sha256 of a repository's canonical lint configuration (``RepoConfig.lint``, P-796).
+
+    ``{}`` and ``None`` hash alike — both mean belt 5 runs its default plan. A reserved.v1
+    reading hashes this as ``lint_digest``, so an edited lint makes a different reading."""
+    return sha256_text(canonical_json(dict(lint or {})))
+
+
+def lint_refusal(repo: str, lint: Mapping[str, Any] | None) -> str:
+    """Why nothing a reading counts may be registered or built on ``repo``, or ``""`` (P-796).
+
+    One rule for registration (``POST /readings``, ``POST /readings/forward``), submit
+    (``POST /runs`` naming a reading) and claim: while the operator's switch has belt 5 off
+    (:func:`crb.core.lint.lint_disabled`), a row graded then never counts the same as one
+    graded with it on — a legacy reading drops it (:data:`LEFT_LINT_DISABLED`) and a reserved
+    one would bind it as a failure — so the switch, thrown after outcomes are seen, could
+    reshape what a reading counts. Refusing while it is off keeps the counted set the
+    registration named; restoring the lint it ran under resumes it."""
+    if not lint_disabled(lint):
+        return ""
+    return (
+        f"lint is disabled on {repo} (RepoConfig.lint {{'disabled': true}}): a row graded "
+        f"with belt 5 off never counts as one graded with it on, so nothing a reading counts "
+        f"is registered or built while the switch is off — re-enable lint first (P-796, "
+        f"reason {LINT_DISABLED_BY_CONFIG})"
+    )
+
+
 def register(
     *,
     repo: str,
@@ -978,6 +1027,7 @@ def register(
     campaign_id: str = "",
     attempt_rule: str = "",
     budget_profile: str = "",
+    lint_digest: str = "",
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
@@ -992,7 +1042,9 @@ def register(
     ``campaign_unsupported_reading`` when it names a campaign on the factory's cell
     (:func:`campaign_unsupported`); a replay or blind reading may name one. ``attempt_rule``
     :data:`ATTEMPT_RULE_RESERVED` needs ``max_reruns`` 0 and a ``budget_profile``
-    (``invalid_reading`` otherwise, as is an unknown rule; :func:`_attempt_rule_of`). The
+    (``invalid_reading`` otherwise, as is an unknown rule; :func:`_attempt_rule_of`), and
+    hashes ``lint_digest`` (:func:`lint_config_digest` of the repository's lint, P-796) — the
+    caller refuses a repository whose lint is disabled first (:func:`lint_refusal`). The
     caller writes the returned reading as a ``reading.registered`` event before any attempt.
     """
     cell_d = {str(k): str(v) for k, v in cell.items()}
@@ -1054,6 +1106,7 @@ def register(
         campaign_id=campaign_id,
         attempt_rule=attempt,
         budget_profile=profile,
+        lint_digest=lint_digest,
     )
     prior = list(existing)
     _refuse_twin(reading, prior)
@@ -1105,6 +1158,7 @@ def register_forward(
     smallest_effect: float | None = None,
     attempt_rule: str = "",
     budget_profile: str = "",
+    lint_digest: str = "",
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -1122,7 +1176,7 @@ def register_forward(
     no ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
     be filed under its campaign — ``POST /readings/forward`` refuses a ``campaign_id``.
     Under ``attempt_rule`` :data:`ATTEMPT_RULE_RESERVED` it re-runs nothing (``max_reruns``
-    0) and names its ``budget_profile``, as :func:`register` requires."""
+    0), names its ``budget_profile`` and hashes ``lint_digest``, as :func:`register` does."""
     if ceiling.state != OUTCOME_CEILING:
         raise ReadingRefused(
             f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
@@ -1180,6 +1234,7 @@ def register_forward(
         max_reruns=max_reruns,
         attempt_rule=attempt,
         budget_profile=profile,
+        lint_digest=lint_digest,
     )
     prior = list(existing)
     _refuse_twin(reading, prior)
@@ -2333,6 +2388,7 @@ __all__ = [
     "REFUSAL_BUDGET_SPENT",
     "REFUSAL_CAMPAIGN_UNSUPPORTED",
     "REFUSAL_EXISTS",
+    "REFUSAL_LINT_DISABLED",
     "REFUSAL_NOT_A_CEILING",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
@@ -2372,6 +2428,8 @@ __all__ = [
     "evaluate",
     "first_per_id",
     "latest_outcome",
+    "lint_config_digest",
+    "lint_refusal",
     "look_state",
     "outcomes_for_cell",
     "p_deliver",

@@ -9,7 +9,8 @@ or every one authored since a date), never by a hand-picked list (DL-097). ``POS
 event under the events store's write lock, so two registrations can never both spend the last
 of a cell's budget; it is refused ``409 reading_exists`` when the reading is already
 registered (a retried request, under any second or actor, names it in ``detail.reading_id``
-and writes nothing — P-793), ``409 pool_seen`` when a pool commit already has a graded row
+and writes nothing — P-793), ``409 lint_disabled`` while the repository's lint is switched off
+(P-796), ``409 pool_seen`` when a pool commit already has a graded row
 under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the caller names a
 pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
 ``422 invalid_reading`` for a shape the ADR forbids, and ``404 campaign_unknown`` when it names
@@ -44,8 +45,10 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               verify (``campaign_unknown``, DL-382) and any campaign on a reading of the
               factory's cell, the forward reading included (``campaign_unsupported_reading``),
               reads the rows and the readings already registered under the lock, refuses a
-              reading already registered (``reading_exists``, P-793), and writes the event
-              (a reserved.v1 reading only when asked: ``attempt_rule``, P-792); lists readings
+              reading already registered (``reading_exists``, P-793) and any registration
+              while the repository's lint is off (``lint_disabled``, P-796), and writes the
+              event (a reserved.v1 reading only when asked: ``attempt_rule``, P-792, hashing
+              the repository's ``lint_digest``); lists readings
               with every arm's state and the budget per cell, each with its attempt rule (a
               legacy one ``first_observed.v0``, ``p792: "open on this rule"``), its treatment
               pins and its reserved commits per arm (``served_reading``, P-792);
@@ -65,7 +68,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
               src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
               submit gate and the worker read it below this module; ``treatment_pins``, the
-              pins the worker halts a moved treatment by and ``GET /readings`` serves),
+              pins the worker halts a moved treatment by and ``GET /readings`` serves;
+              ``repo_lint``, the lint a registration refuses or hashes),
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py,
@@ -96,12 +100,14 @@ from crb.core.ledger import (
     GradeRow,
     is_sealed_class,
 )
+from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     DEFAULT_MAX_RERUNS,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_INVALID,
+    REFUSAL_LINT_DISABLED,
     REFUSAL_NOT_A_CEILING,
     REFUSAL_POOL_NOT_BLIND,
     RULE_LOOK_V1,
@@ -115,6 +121,8 @@ from crb.core.reading import (
     enrolled,
     evaluate,
     first_per_id,
+    lint_config_digest,
+    lint_refusal,
     pool_by_rule,
     refuse_unless_blind,
     register,
@@ -129,7 +137,7 @@ from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import current_checks_arm
-from crb.server.reading_book import load_readings, treatment_pins
+from crb.server.reading_book import load_readings, repo_lint, treatment_pins
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.class_sets import DbClassSets
 from crb.store.events import append_event_checked
@@ -317,6 +325,23 @@ def _change_of(task: Task) -> str:
     return str(labels.get(LABEL_CHANGE_ID, "") or "")
 
 
+def _refuse_lint_disabled(s: Session, repo: str) -> dict[str, Any]:
+    """The repository's lint, read under the events lock — or 409 ``lint_disabled`` while the
+    operator has switched it off, before anything is read or written (P-796,
+    :func:`crb.core.reading.lint_refusal`): a row graded with belt 5 off never counts as one
+    graded with it on, so a switch thrown after outcomes are seen could reshape what the
+    reading counts."""
+    lint = repo_lint(s, repo)
+    reason = lint_refusal(repo, lint)
+    if reason:
+        raise ReadingRefused(
+            reason,
+            code=REFUSAL_LINT_DISABLED,
+            detail={"repo": repo, "reason": LINT_DISABLED_BY_CONFIG},
+        )
+    return lint
+
+
 def _refuse(exc: ReadingRefused) -> ApiError:
     shape = (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND, REFUSAL_CAMPAIGN_UNSUPPORTED)
     code = 422 if exc.code in shape else 409
@@ -385,6 +410,7 @@ def register_reading(
         )
 
     def build(s: Session) -> dict[str, Any]:
+        lint = _refuse_lint_disabled(s, body.repo)
         _refuse_unknown_campaign(s, body.campaign_id)
         qualified = _qualified(s, body.repo, body.cell)
         if org:
@@ -457,6 +483,7 @@ def register_reading(
                 else (0 if body.attempt_rule else DEFAULT_MAX_RERUNS)
             ),
             budget_profile=body.budget_profile if body.attempt_rule else "",
+            lint_digest=lint_config_digest(lint),
         )
         return reading.to_dict()
 
@@ -510,7 +537,8 @@ def register_forward_reading(
     factory's cell, counted only on calibration builds graded on a second person's held-out
     acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
     ``ceiling`` now, **409** ``reading_exists`` when the same forward reading is already
-    registered (a retry writes nothing — P-793), **409** ``budget_spent`` when the ceiling's
+    registered (a retry writes nothing — P-793), **409** ``lint_disabled`` while the
+    repository's lint is switched off (P-796), **409** ``budget_spent`` when the ceiling's
     cell budget cannot cover the rule, **404** for a reading the repository does not have, **422**
     ``campaign_unsupported_reading`` for any ``campaign_id`` — before anything is read or
     written: its calibration builds are factory runs, which carry no ``reading_id``, so
@@ -527,6 +555,7 @@ def register_forward_reading(
     rows = list(DbLedger(factory).rows(repo=body.repo))
 
     def build(s: Session) -> dict[str, Any]:
+        lint = _refuse_lint_disabled(s, body.repo)
         readings = load_readings(s, body.repo)
         named = next((r for r in readings if r.reading_id == body.promotes), None)
         if named is None:
@@ -542,6 +571,7 @@ def register_forward_reading(
             budget=cell_error_budget(),
             hypothesis=body.hypothesis,
             smallest_effect=body.smallest_effect,
+            lint_digest=lint_config_digest(lint),
         )
         return reading.to_dict()
 
