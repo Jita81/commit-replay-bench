@@ -234,15 +234,40 @@ def _go_code(src: str) -> str:
     return _GO_NOT_CODE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), src)
 
 
+#: A line opening a top-level func named as a test, any signature: read in the OTHER test
+#: files beside the authored one (:func:`_go_tests_beside`).
+_GO_TEST_NAMED = re.compile(r"^func\s+((?:Test|Fuzz|Example)\w*)", re.M)
+
+
+def _go_tests_beside(test_file: Path) -> frozenset[str]:
+    """The test names the other ``*_test.go`` files in ``test_file``'s directory open a
+    top-level ``func`` line with. A name is not unique in a package's test binary: a
+    ``package calc`` and a ``package calc_test`` file may each declare ``FuzzOld``, and
+    both report ``<pkg>::FuzzOld`` (R6A-LASTFIX-R1-2). Read loosely — any signature,
+    comments and build tags included — so it over-counts and only ever refuses more."""
+    names: set[str] = set()
+    for other in sorted(test_file.parent.glob("*_test.go")):
+        if other.name != test_file.name and other.is_file():
+            names.update(_GO_TEST_NAMED.findall(other.read_text("utf-8", errors="replace")))
+    return frozenset(names)
+
+
 #: What a Go RED is counted by, as the ``S1`` refusal states it (:func:`authored_red`).
 GO_RED_RULE = (
     "a Go test counts by a top-level Test, Fuzz or Example func the file declares, "
-    "never by a suite method that a runner in another file runs"
+    "never by a name another test file in its directory declares too, "
+    "nor by a suite method that a runner in another file runs"
 )
 
 
 def authored_red(
-    runner_name: str, path: str, content: str, failing: frozenset[str], baseline: Sequence[str]
+    runner_name: str,
+    path: str,
+    content: str,
+    failing: frozenset[str],
+    baseline: Sequence[str],
+    *,
+    beside: frozenset[str] = frozenset(),
 ) -> frozenset[str] | None:
     """The ids failing at the parent that the ``S1`` author's test at ``path`` defines, less
     the task's ``baseline`` — the only RED the S1 step accepts (F87-1 part 3). A RED from a
@@ -252,7 +277,10 @@ def authored_red(
       ``func TestX(t *testing.T)``, ``func FuzzX(f *testing.F)`` or ``func ExampleX()`` — a
       subtest (``TestX/sub``, ``FuzzX/seed#0``) counting as its test — read from the file's
       code alone: a draft in a block comment or a raw string declares nothing
-      (R6A-LASTFIX-R1-1). The RED scope is the whole package, so an old test that fails
+      (R6A-LASTFIX-R1-1) — and never a name in ``beside``, the names the parent's other
+      test files in that directory declare (:func:`_go_tests_beside`): an external
+      ``package calc_test`` file may redeclare an internal test's name, and both report one
+      id (R6A-LASTFIX-R1-2). The RED scope is the whole package, so an old test that fails
       there is the reason this rule exists. A testify suite method (``func (s *S) TestY()``)
       counts only under a runner the file defines, by that runner's name; one that a runner
       in another file runs is refused (:data:`GO_RED_RULE`, the arm's ``authoring`` miss):
@@ -270,7 +298,7 @@ def authored_red(
     failing id stands, as it always has: no ``S1`` reading runs those runners yet."""
     if runner_name == "go":
         code = _go_code(content)
-        names = {name for pattern in _GO_TEST_FUNCS for name in pattern.findall(code)}
+        names = {name for pattern in _GO_TEST_FUNCS for name in pattern.findall(code)} - beside
         own = {f for f in failing if f.partition("::")[2].split("/", 1)[0] in names}
     elif runner_name == "pytest":
 
@@ -1006,6 +1034,9 @@ def build_fn_for(
         parent = deps.parent if deps is not None else None
         timeout = int(runner.opts.get("timeout", runner.default_timeout))
         try:
+            # the names the parent's other test files there declare: one may share the
+            # authored test's id, so it never attributes the RED (R6A-LASTFIX-R1-2)
+            beside = _go_tests_beside(target) if runner.name == "go" else frozenset()
             valid = runner.is_valid_oracle(ws.root, path)
             red = (
                 runner.run_for(
@@ -1058,7 +1089,9 @@ def build_fn_for(
                 return fail(f"{AUTHORING_HARNESS_ERROR} {fault}")
             why = "timed out" if red.timed_out else "failed without attributable test ids"
             return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
-        own = authored_red(runner.name, path, content, red.failing, task.baseline_failing)
+        own = authored_red(
+            runner.name, path, content, red.failing, task.baseline_failing, beside=beside
+        )
         if own is not None and not own:
             remove_authored(ws)
             shown = ", ".join(sorted(red.failing)[:3])

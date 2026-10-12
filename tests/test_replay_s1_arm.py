@@ -552,12 +552,14 @@ def _s1_on_go(
     *,
     src: str = GO_AUTHORED_SRC,
     baseline: tuple[str, ...] = (),
+    parent: dict[str, str] | None = None,
 ) -> tuple[Any, Any]:
     """One S1 attempt on the Go fixture's feat commit through the run's own ``BuildFn``,
-    under the sealed binding; returns the attempt and the task's deps."""
+    under the sealed binding (``parent`` = more files at the parent); returns the attempt
+    and the task's deps."""
     monkeypatch.setitem(builders_pkg._REGISTRY, "idle", _Idle)
     monkeypatch.setattr(_Idle, "calls", 0)
-    root, feat = gorepo.build(tmp_path)
+    root, feat = gorepo.build(tmp_path, extra=parent)
     repo, cfg = GitRepo(root), gorepo.config()
     deps = _sealed_go_deps(tmp_path)
     task = TaskSpec(
@@ -783,6 +785,73 @@ def test_s1_red_reads_a_go_test_only_from_code(
         "",
     )
     attempt, _ = _s1_on_go(tmp_path, monkeypatch, _Docker(drafts), src=GO_DRAFT_SRC)
+    assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
+    assert _Idle.calls == 0
+
+
+#: An old internal test file at the parent: a fuzz target whose seed always fails and an
+#: example whose ``// Output:`` is wrong — both failing there, outside the task's baseline.
+GO_OLD_SRC = (
+    'package calc\n\nimport (\n\t"fmt"\n\t"testing"\n)\n\n'
+    "func FuzzOld(f *testing.F) {\n\tf.Add(1)\n"
+    '\tf.Fuzz(func(t *testing.T, n int) { t.Fatal("old") })\n}\n\n'
+    "func ExampleAdd() {\n\tfmt.Println(Add(1, 1))\n\t// Output: 3\n}\n"
+)
+#: The authored file in the EXTERNAL test package, redeclaring both names (``go vet`` and
+#: ``go test`` accept it): both pass, yet each reports the old one's id too.
+GO_EXTERNAL_SRC = (
+    'package calc_test\n\nimport (\n\t"fmt"\n\t"testing"\n\n\t"example.com/m/calc"\n)\n\n'
+    "func FuzzOld(f *testing.F) {\n\tf.Add(1)\n\tf.Fuzz(func(t *testing.T, n int) {})\n}\n\n"
+    "func ExampleAdd() {\n\tfmt.Println(calc.Add(1, 1))\n\t// Output: 2\n}\n"
+)
+
+
+def test_s1_red_never_counts_a_go_name_another_test_file_declares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6A-LASTFIX-R1-2: a Go test name is NOT unique within its package's test binary — a
+    ``package calc`` and a ``package calc_test`` file in one directory may each declare
+    ``FuzzOld``, and both report ``<pkg>::FuzzOld``. An authored external file redeclaring
+    an old failing internal test's name therefore took that old failure as its RED while
+    its own copy passed. A name another test file in the directory declares at the parent
+    never counts; the author's other names still do."""
+    pkg = gorepo.CALC_PKG
+    old = frozenset({f"{pkg}::FuzzOld/seed#0", f"{pkg}::FuzzOld", f"{pkg}::ExampleAdd"})
+    taken = {"FuzzOld", "ExampleAdd"}
+    assert adapter.authored_red("go", GO_AUTHORED, GO_EXTERNAL_SRC, old, (), beside=taken) == (
+        frozenset()
+    )
+    new = GO_EXTERNAL_SRC + 'func TestNew(t *testing.T) {\n\tt.Fatal("want 5")\n}\n'
+    mine = old | {f"{pkg}::TestNew"}
+    assert adapter.authored_red("go", GO_AUTHORED, new, mine, (), beside=taken) == {
+        f"{pkg}::TestNew"
+    }
+    # through the BuildFn, old_test.go at the parent: no RED, and the builder never runs
+    both = ExecResult(
+        1,
+        _go_events(
+            ("run", "FuzzOld"),
+            ("run", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld"),
+            ("run", "ExampleAdd"),
+            ("fail", "ExampleAdd"),
+            ("run", "FuzzOld"),
+            ("run", "FuzzOld/seed#0"),
+            ("pass", "FuzzOld/seed#0"),
+            ("pass", "FuzzOld"),
+            ("run", "ExampleAdd"),
+            ("pass", "ExampleAdd"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(
+        tmp_path,
+        monkeypatch,
+        _Docker(both),
+        src=GO_EXTERNAL_SRC,
+        parent={"calc/old_test.go": GO_OLD_SRC},
+    )
     assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
     assert _Idle.calls == 0
 
