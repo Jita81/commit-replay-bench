@@ -700,9 +700,14 @@ def test_s1_red_counts_each_top_level_go_test_the_author_defines(
     )
     failing = frozenset({f"{pkg}::ExampleNew", old})
     assert adapter.authored_red("go", GO_AUTHORED, example, failing, ()) == {f"{pkg}::ExampleNew"}
-    # a function that only looks like one is not a test go runs
-    lookalike = "package calc\n\nfunc FuzzNew(n int) {}\n\nfunc ExampleNew(n int) {}\n"
-    assert adapter.authored_red("go", GO_AUTHORED, lookalike, seeds, ()) == frozenset()
+    # a function that only looks like one is not a test go runs — each lookalike's id is
+    # offered as failing, so each signature check is pinned (R6A-LASTFIX-R1-3)
+    lookalike = (
+        "package calc\n\nfunc FuzzNew(n int) {}\n\nfunc FuzzT(t *testing.T) {}\n\n"
+        "func ExampleNew(n int) {}\n"
+    )
+    offered = seeds | {f"{pkg}::FuzzT", f"{pkg}::ExampleNew"}
+    assert adapter.authored_red("go", GO_AUTHORED, lookalike, offered, ()) == frozenset()
     # a suite: counted under its own runner, refused when another file's runner runs it
     in_suite = frozenset({f"{pkg}::TestCalcSuite/TestNew", f"{pkg}::TestCalcSuite"})
     whole = "package calc\n\n" + GO_SUITE_RUNNER + GO_SUITE_METHOD
