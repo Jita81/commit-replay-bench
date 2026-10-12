@@ -234,21 +234,26 @@ def _go_code(src: str) -> str:
     return _GO_NOT_CODE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), src)
 
 
-#: A line opening a top-level func named as a test, any signature: read in the OTHER test
-#: files beside the authored one (:func:`_go_tests_beside`).
-_GO_TEST_NAMED = re.compile(r"^func\s+((?:Test|Fuzz|Example)\w*)", re.M)
+#: A ``func`` named as a test, anywhere and with any signature: read in the OTHER test files
+#: beside the authored one (:func:`_go_tests_beside`). Not anchored to a line's start — go
+#: accepts ``/* c */ func TestX``, an indented one and ``func /* c */ TestX`` (gofmt keeps
+#: the last), none of which opens its line with ``func`` (REDFIX-FIXCHECK-R2-2).
+_GO_TEST_NAMED = re.compile(r"\bfunc\s+((?:Test|Fuzz|Example)\w*)")
 
 
 def _go_tests_beside(test_file: Path) -> frozenset[str]:
-    """The test names the other ``*_test.go`` files in ``test_file``'s directory open a
-    top-level ``func`` line with. A name is not unique in a package's test binary: a
-    ``package calc`` and a ``package calc_test`` file may each declare ``FuzzOld``, and
-    both report ``<pkg>::FuzzOld`` (R6A-LASTFIX-R1-2). Read loosely — any signature,
-    comments and build tags included — so it over-counts and only ever refuses more."""
+    """The test names the other ``*_test.go`` files in ``test_file``'s directory declare. A
+    name is not unique in a package's test binary: a ``package calc`` and a
+    ``package calc_test`` file may each declare ``FuzzOld``, and both report
+    ``<pkg>::FuzzOld`` (R6A-LASTFIX-R1-2). Read loosely — the raw text and its code with
+    comments blanked (so ``func /* c */ FuzzOld`` reads too), any signature, a func in a
+    comment, a string or a build-tagged file included — so it over-counts and only ever
+    refuses more."""
     names: set[str] = set()
     for other in sorted(test_file.parent.glob("*_test.go")):
         if other.name != test_file.name and other.is_file():
-            names.update(_GO_TEST_NAMED.findall(other.read_text("utf-8", errors="replace")))
+            text = other.read_text("utf-8", errors="replace")
+            names.update(_GO_TEST_NAMED.findall(text + "\n" + _go_code(text)))
     return frozenset(names)
 
 

@@ -818,6 +818,18 @@ GO_EXTERNAL_SRC = (
     "func FuzzOld(f *testing.F) {\n\tf.Add(1)\n\tf.Fuzz(func(t *testing.T, n int) {})\n}\n\n"
     "func ExampleAdd() {\n\tfmt.Println(calc.Add(1, 1))\n\t// Output: 2\n}\n"
 )
+#: ``GO_OLD_SRC`` with ``FuzzOld`` opened in each shape ``go vet`` and ``go test`` accept
+#: that no column-0 ``func`` line shows: after a comment, indented, and with a comment
+#: between ``func`` and the name (the last two gofmt-clean) — REDFIX-FIXCHECK-R2-2.
+GO_OLD_SHAPES = tuple(
+    GO_OLD_SRC.replace("func FuzzOld", shape)
+    for shape in (
+        "/* legacy */ func FuzzOld",
+        "\tfunc FuzzOld",
+        "func /* x */ FuzzOld",
+        "func // x\nFuzzOld",
+    )
+)
 
 
 def test_s1_red_never_counts_a_go_name_another_test_file_declares(
@@ -828,7 +840,8 @@ def test_s1_red_never_counts_a_go_name_another_test_file_declares(
     ``FuzzOld``, and both report ``<pkg>::FuzzOld``. An authored external file redeclaring
     an old failing internal test's name therefore took that old failure as its RED while
     its own copy passed. A name another test file in the directory declares at the parent
-    never counts; the author's other names still do."""
+    never counts, in any shape go accepts it in (REDFIX-FIXCHECK-R2-2); the author's other
+    names still do."""
     pkg = gorepo.CALC_PKG
     old = frozenset({f"{pkg}::FuzzOld/seed#0", f"{pkg}::FuzzOld", f"{pkg}::ExampleAdd"})
     taken = {"FuzzOld", "ExampleAdd"}
@@ -840,7 +853,7 @@ def test_s1_red_never_counts_a_go_name_another_test_file_declares(
     assert adapter.authored_red("go", GO_AUTHORED, new, mine, (), beside=taken) == {
         f"{pkg}::TestNew"
     }
-    # through the BuildFn, old_test.go at the parent: no RED, and the builder never runs
+    # through the BuildFn, old_test.go at the parent in each shape: no RED, no builder run
     both = ExecResult(
         1,
         _go_events(
@@ -859,15 +872,17 @@ def test_s1_red_never_counts_a_go_name_another_test_file_declares(
         ),
         "",
     )
-    attempt, _ = _s1_on_go(
-        tmp_path,
-        monkeypatch,
-        _Docker(both),
-        src=GO_EXTERNAL_SRC,
-        parent={"calc/old_test.go": GO_OLD_SRC},
-    )
-    assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
-    assert _Idle.calls == 0
+    for i, old_src in enumerate((GO_OLD_SRC, *GO_OLD_SHAPES)):
+        attempt, _ = _s1_on_go(
+            tmp_path / str(i),
+            monkeypatch,
+            _Docker(both),
+            src=GO_EXTERNAL_SRC,
+            parent={"calc/old_test.go": old_src},
+        )
+        refusal = "no test it defines fails there; " + adapter.GO_RED_RULE
+        assert refusal in attempt.error, (old_src, attempt.error)
+        assert _Idle.calls == 0
 
 
 def test_s1_unattributed_red_with_red_env_probe_is_harness(
