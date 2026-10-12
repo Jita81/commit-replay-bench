@@ -53,7 +53,7 @@ from crb.builders.adapter import as_run_ledger
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import LocalExecutor
 from crb.core.grade import Belts
-from crb.core.ledger import GradeRow, grade_row_from_result
+from crb.core.ledger import LABEL_BUILDER_EXECUTOR, GradeRow, grade_row_from_result
 from crb.core.patches import NOTE_KEY as PATCH_NOTE_KEY
 from crb.core.patches import PatchStore, keep_patch
 from crb.core.review import ReviewRecord
@@ -234,7 +234,12 @@ class Retained:
         self.pack_hash = pack.pack_hash
         self.row: GradeRow = ledger.append(
             grade_row_from_result(
-                result, task, pack_hash=pack.pack_hash, builder=builder, run_id=RETAINED_RUN
+                result,
+                task,
+                pack_hash=pack.pack_hash,
+                builder=builder,
+                run_id=RETAINED_RUN,
+                labels={LABEL_BUILDER_EXECUTOR: "host"},  # P-795: as the adapter stamps it
             )
         )
 
@@ -463,7 +468,10 @@ class TestRetainedPatch:
             def build_fn(ws: Any, t: Any, mode: str, rung: str, name: str = attempt) -> Any:
                 pr.apply_gold(ws)
                 pr.write_files(ws, [(f"src/calc/{name}.py", f"NAME = {name!r}\n")])
-                return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p"))
+                return BuildAttempt(
+                    BuilderRef(name="fixture", model="m", provider="p"),
+                    labels={LABEL_BUILDER_EXECUTOR: "host"},  # P-795: as the adapter stamps it
+                )
 
             out = run_task(spec, repo.repo, task, build_fn, on_event=emitter.on_event("build"))
             rows += out.rows

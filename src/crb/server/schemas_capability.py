@@ -171,7 +171,8 @@ class ShortfallOut(BaseModel):
 class ArmReadingOut(BaseModel):
     """One arm of a registered reading (``crb.core.reading.ArmReading.to_dict``): its state
     under the look rule, the distinct commits read in the seeded order, clean, the Wilson
-    interval, the next look and the commits still needed."""
+    interval, the next look and the commits still needed — and the commits whose row it
+    could not read (``scope_faults``, which make it ``undecided``; P-795)."""
 
     arm: str
     state: str
@@ -188,6 +189,8 @@ class ArmReadingOut(BaseModel):
     look_state: str = ""
     left: list[dict[str, Any]] = Field(default_factory=list)
     counted_commits: list[str] = Field(default_factory=list)
+    scope_faults: list[str] = Field(default_factory=list)
+    unsealed_dropped: int = 0
 
 
 class ReadingOut(BaseModel):

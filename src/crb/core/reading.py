@@ -91,7 +91,10 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               builds. Under ``reserved.v1``
               (``attempt_rule``, P-792) reads each enrolled commit by its reservation's row
               alone (``with_reservations``, ``enrolled``, ``_reserved_verdict``; every
-              failure a named miss, none a leave; unread reservations read pending) and
+              failure a named miss, none a leave; unread reservations read pending); names
+              the commits whose rows a sealed reading could not read because they do not
+              record a sealed executor (``scope_faults`` — ``scope_fault``, the arm
+              ``undecided``, never pending, never re-rolled — P-795) and
               refuses a run that could steer a reserved attempt (``reading_run_refusal``:
               the param whitelist, the default pool, executor, timeout and ladder, the
               reading's cell and arms, the loop off on the reading's budget profile).
@@ -278,6 +281,13 @@ LEFT_HELD_OUT_ERROR = "held_out_error"
 #: scope. Decided without reading its result, so it leaves the pool rather than holding the
 #: reading open for an attempt that can never come (DL-334, P-694).
 LEFT_NOT_GRADED = "not_graded"
+#: A commit whose row is in every way the arm's but its builder's executor: graded in the
+#: reading's sealed posture class without recording ``builder_executor`` ``docker``, so it
+#: reads unsealed (P-795). Never a leave: the commit cannot be read and the arm is
+#: ``undecided`` (``ArmReading.scope_faults``), never pending and never re-rolled.
+REASON_SCOPE_FAULT = "scope_fault"
+#: :func:`_scope_miss`'s answer for a row that fails only on its executor.
+SCOPE_UNSEALED = "unsealed"
 
 # --- registration refusals ---------------------------------------------------------
 REFUSAL_POOL_SEEN = "pool_seen"
@@ -1300,7 +1310,8 @@ class CommitReading:
     left: str = ""  # why it left the pool ("" = it did not)
     row_hash: str = ""  # the first observed attempt (reserved.v1: the reserved attempt's row)
     #: reserved.v1: why the reserved attempt is not a hit (``"miss"``, ``"harness"``,
-    #: ``"unobserved"``, …) or ``"pending"``; ``""`` for a hit and on the legacy rule.
+    #: ``"unobserved"``, …) or ``"pending"``; ``""`` for a hit and on the legacy rule, but for
+    #: ``"scope_fault"`` (either rule — its row reads unsealed, P-795).
     reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -1326,11 +1337,21 @@ class ArmReading:
     #: A descriptive arm's fixed count ``n``: it tallies the commits observed among its first
     #: ``limit`` commits in the pool. ``0`` for a hierarchy arm.
     limit: int = 0
+    #: The commits whose rows the arm could not read (``scope_fault``, P-795): each is in the
+    #: arm's scope but for its executor. Any one makes the arm ``undecided`` — its look
+    #: cannot be read, so it never delivers and nothing is mined or re-rolled for it.
+    scope_faults: tuple[str, ...] = ()
+    #: How many rows of the arm's commits were dropped because they read unsealed.
+    unsealed_dropped: int = 0
 
     @property
     def state(self) -> str:
+        """Stopped by a richer arm; else ``undecided`` when a row could not be read (P-795,
+        a descriptive arm too); else descriptive; else the look's state."""
         if self.stopped_by:
             return STATE_STOPPED
+        if self.scope_faults:
+            return STATE_UNDECIDED
         return STATE_DESCRIPTIVE if self.descriptive else self.look.state
 
     @property
@@ -1358,6 +1379,8 @@ class ArmReading:
             "look_state": self.look.state,
             "left": [c.to_dict() for c in self.left],
             "counted_commits": list(self.counted_commits),
+            "scope_faults": list(self.scope_faults),
+            "unsealed_dropped": self.unsealed_dropped,
             # every commit the arm reads, in the seeded order: what the loop pair is read on
             "commits": [c.to_dict() for c in self.commits],
         }
@@ -1372,18 +1395,25 @@ def _admitted_run(reading: Reading, row: GradeRow) -> bool:
     return reading.admitted is not None and row.run_id in reading.admitted
 
 
-def _in_scope(reading: Reading, arm: str, row: GradeRow) -> bool:
-    """Is ``row`` one of the rows ``arm`` of ``reading`` reads (before first-attempt), by
-    every check but its run's admission (:func:`_admitted_run`)? Its repository, cell,
-    apparatus, class-set version, checks arm and context arm are the reading's; it is a rung
-    ``r1`` attempt this deployment graded (never an imported row, whose labels were set
-    elsewhere — P-321); it was graded strictly AFTER the registration (whole seconds, so a
-    row of the same second does not count); and it was graded in the sealed posture class
-    the reading names — or, for ``S2``, on held-out acceptance tests. :func:`arm_reading`
-    reads a row only when it is in scope AND its run was admitted (:func:`_admitted_run`)."""
+def _scope_miss(reading: Reading, arm: str, row: GradeRow) -> str:
+    """Why ``row`` is not one of the rows ``arm`` of ``reading`` reads (before
+    first-attempt), by every check but its run's admission (:func:`_admitted_run`) — ``""``
+    when it is one. Its repository, cell, apparatus, class-set version, checks arm and
+    context arm are the reading's; it is a rung ``r1`` attempt this deployment graded (never
+    an imported row, whose labels were set elsewhere — P-321); it was graded strictly AFTER
+    the registration (whole seconds, so a row of the same second does not count); and it was
+    graded in the sealed posture class the reading names, its builder in the sealed
+    container — or, for ``S2``, on held-out acceptance tests.
+
+    ``unsealed`` (:data:`SCOPE_UNSEALED`) is the one answer that is not the row being
+    another reading's: every other check holds and the posture class is the reading's, but
+    the row does not record ``builder_executor`` ``docker``. That is a row the writer
+    failed to label (P-795), so a reading names it a ``scope_fault`` rather than dropping it
+    and reading its commit pending."""
+    if row.imported:
+        return "imported"
     if (
-        row.imported
-        or row.repo != reading.repo
+        row.repo != reading.repo
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
         or row.taxonomy != reading.taxonomy
@@ -1391,14 +1421,23 @@ def _in_scope(reading: Reading, arm: str, row: GradeRow) -> bool:
         or row.cell.to_dict() != reading.cell
         or row.trial.strip().lower() != RUNG_R1
     ):
-        return False
+        return "other_reading"
     registered = reading.registered
     created = _parse_ts(row.created)
     if registered is None or created is None or created <= registered:
-        return False  # graded before (or as) the reading was registered: never counts
+        return "before_registration"  # graded before (or as) the registration: never counts
     if parse_arm(arm).prospective_only:
-        return held_out_graded(row.labels)
-    return row.posture_class == reading.posture_class and row.sealed
+        return "" if held_out_graded(row.labels) else "not_held_out"
+    if row.posture_class != reading.posture_class:
+        return "posture"
+    return "" if row.sealed else SCOPE_UNSEALED
+
+
+def _in_scope(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` one of the rows ``arm`` of ``reading`` reads (:func:`_scope_miss` names
+    none)? :func:`arm_reading` reads a row only when it is in scope AND its run was admitted
+    (:func:`_admitted_run`)."""
+    return not _scope_miss(reading, arm, row)
 
 
 def _forward_attempt(reading: Reading, row: GradeRow) -> bool:
@@ -1537,7 +1576,8 @@ def _reserved_verdict(
       reclaimed past the reserving claim), pending until then; two rows — ``duplicate``;
     * the one row is a hit only when its run was admitted, it is in the arm's scope
       (:func:`_in_scope`; for a forward reading :func:`_counts_forward` on the record that
-      enrolled the ticket — ``not_graded`` otherwise), its reservation was written after the
+      enrolled the ticket — ``not_graded`` otherwise; ``scope_fault`` for a row that is the
+      arm's but for its executor, P-795), its reservation was written after the
       registration, it is not a harness failure or an outage, its gold is not red, belt 5 could
       not have changed it, it was built on the treatment it reserved, it is clean and not
       disqualified — and, forward, its held-out tests passed on the reading's builder, model
@@ -1559,8 +1599,9 @@ def _reserved_verdict(
             r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(res.task_id, "")
         ):
             return False, LEFT_NOT_GRADED
-    elif not _in_scope(reading, arm, r):
-        return False, "out_of_scope"
+    elif miss := _scope_miss(reading, arm, r):
+        # a row the writer did not label sealed is the arm's fault, not another reading's
+        return False, REASON_SCOPE_FAULT if miss == SCOPE_UNSEALED else "out_of_scope"
     checks: tuple[tuple[bool, str], ...] = (
         (res.event_seq_id > reading.registered_event_id, "before_registration"),
         (r.failure_kind != FAILURE_HARNESS, "harness"),
@@ -1588,7 +1629,8 @@ def _reserved_verdict(
 def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: int) -> ArmReading:
     """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
     by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
-    commits as they stand; a descriptive arm tallies its fixed count (``ArmReading.limit``)."""
+    commits as they stand; a descriptive arm tallies its fixed count (``ArmReading.limit``).
+    A commit read ``scope_fault`` is named in ``ArmReading.scope_faults`` (P-795)."""
     reservations = reading.reservations or {}
     events = {res.event_id for res in reservations.values() if res.event_id}
     stamped: dict[str, list[GradeRow]] = {}
@@ -1613,12 +1655,21 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
             )
         )
     outcomes = [c.outcome for c in out]
+    faults = tuple(c.commit for c in out if c.reason == REASON_SCOPE_FAULT)
     n = _descriptive_count(reading, arm, limit)
     if n:
         look = _descriptive_look(outcomes, n)
-        return ArmReading(arm, look, tuple(out), descriptive=True, limit=n)
-    look = look_state(outcomes, reading.rule, open_pool=reading.prospective)
-    return ArmReading(arm, look, tuple(out))
+    else:
+        look = look_state(outcomes, reading.rule, open_pool=reading.prospective)
+    return ArmReading(
+        arm,
+        look,
+        tuple(out),
+        descriptive=bool(n),
+        limit=n,
+        scope_faults=faults,
+        unsealed_dropped=len(faults),
+    )
 
 
 def arm_reading(
@@ -1649,7 +1700,12 @@ def arm_reading(
 
     A reserved.v1 reading reads each enrolled commit by its reserved attempt alone
     (:func:`_arm_reserved`, :func:`_reserved_verdict`): no commit leaves, nothing is re-run,
-    and this loop is never entered."""
+    and this loop is never entered.
+
+    A row in every way the arm's but for its executor (:data:`SCOPE_UNSEALED` — its writer
+    did not record the sealed container, P-795) is never dropped in silence: its commit reads
+    ``scope_fault`` (outcome ``None``, no other row standing in for it) and is named in
+    ``ArmReading.scope_faults``, which makes the arm ``undecided``."""
     if reading.reserved:
         return _arm_reserved(reading, arm, rows, limit)
     if reading.admissions_unread:
@@ -1657,11 +1713,18 @@ def arm_reading(
     if reading.prospective:
         return _arm_forward(reading, arm, rows)
     by_commit: dict[str, list[GradeRow]] = {}
+    unsealed: dict[str, list[GradeRow]] = {}
     pool = set(reading.pool)
     for r in rows:
-        if r.task_id in pool and _in_scope(reading, arm, r) and _admitted_run(reading, r):
+        if r.task_id not in pool or not _admitted_run(reading, r):
+            continue
+        miss = _scope_miss(reading, arm, r)
+        if not miss:
             by_commit.setdefault(r.task_id, []).append(r)
+        elif miss == SCOPE_UNSEALED:
+            unsealed.setdefault(r.task_id, []).append(r)  # the writer's fault, never dropped
     out: list[CommitReading] = []
+    faults: list[str] = []
     seen_changes: set[str] = set()
     for commit in reading.pool:
         rs = by_commit.get(commit, [])
@@ -1672,6 +1735,12 @@ def arm_reading(
             out.append(CommitReading(commit, change, None, LEFT_SAME_CHANGE))
             continue
         seen_changes.add(change)
+        if commit in unsealed:
+            # its attempt cannot be read, so no later row may stand in for it (P-795)
+            faults.append(commit)
+            first = unsealed[commit][0].row_hash
+            out.append(CommitReading(commit, change, None, "", first, REASON_SCOPE_FAULT))
+            continue
         observed = None
         unobserved: list[str] = []
         for r in rs:
@@ -1705,11 +1774,21 @@ def arm_reading(
         else:
             out.append(CommitReading(commit, change, None))
     kept = [c.outcome for c in out if not c.left]
+    dropped = sum(len(v) for v in unsealed.values())
     if limit:
         kept = kept[:limit]
-        descriptive_look = _descriptive_look(kept, limit)
-        return ArmReading(arm, descriptive_look, tuple(out), descriptive=True, limit=limit)
-    return ArmReading(arm, look_state(kept, reading.rule), tuple(out))
+        look = _descriptive_look(kept, limit)
+    else:
+        look = look_state(kept, reading.rule)
+    return ArmReading(
+        arm,
+        look,
+        tuple(out),
+        descriptive=bool(limit),
+        limit=limit,
+        scope_faults=tuple(faults),
+        unsealed_dropped=dropped,
+    )
 
 
 def _descriptive_look(outcomes: Sequence[bool | None], limit: int) -> LookState:
@@ -1796,7 +1875,7 @@ class ReadingOutcome:
     def needed(self) -> int:
         """The commits still needed to the next look of the arm the cell waits on."""
         b = self.blocking
-        return b.look.needed if b is not None and b.look.state == STATE_LOOK_PENDING else 0
+        return b.look.needed if b is not None and b.state == STATE_LOOK_PENDING else 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1830,8 +1909,9 @@ class ReadingOutcome:
 
 def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     """Read every arm of ``reading`` and its hierarchy (ADR-0026 item 4): stop at the first
-    arm that does not deliver; the standard is the leanest certifying arm of the unbroken
-    chain; ``S3`` alone is a ceiling."""
+    arm that does not deliver — an arm with a ``scope_fault`` reads ``undecided``, so it never
+    does (P-795); the standard is the leanest certifying arm of the unbroken chain; ``S3``
+    alone is a ceiling."""
     rs = list(rows)
     arms: dict[str, ArmReading] = {}
     chain: list[str] = []
@@ -1840,7 +1920,7 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
         a = arm_reading(reading, arm, rs)
         if stopped_at:
             a = replace(a, stopped_by=stopped_at)
-        elif a.look.state == STATE_DELIVER:
+        elif a.state == STATE_DELIVER:  # a scope-faulted arm never delivers (P-795)
             chain.append(arm)
         else:
             stopped_at = arm
@@ -1854,7 +1934,7 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     elif not stopped_at:
         state = OUTCOME_CEILING
     else:
-        blocked = arms[stopped_at].look.state
+        blocked = arms[stopped_at].state
         if chain and blocked in (STATE_INSUFFICIENT, STATE_UNDECIDED):
             state = OUTCOME_CEILING
         else:
@@ -2037,7 +2117,9 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
     """The router's reading of ``arm`` (ADR-0026 items 4 and 6): unregistered when no reading
     names it; descriptive for ``A0`` / ``A0+L``; the blocking arm's state when the hierarchy
     stopped at a richer arm; ``ceiling`` for a delivering ``S3``; ``leaner_standard`` for a
-    delivering certifying arm that is not the cell's standard; else the arm's own look state."""
+    delivering certifying arm that is not the cell's standard; else the arm's own look state.
+    An arm with a ``scope_fault`` (P-795) is ``undecided`` with nothing needed and no next
+    look — a descriptive one too — and so is every arm it stopped."""
     if outcome is None:
         return ArmVerdict(arm, VERDICT_UNREGISTERED)
     r = outcome.reading
@@ -2057,15 +2139,18 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
         "counted_commits": a.counted_commits,
         "pool_remaining": len(kept),
     }
+    if a.scope_faults and not a.stopped_by:
+        return ArmVerdict(arm, STATE_UNDECIDED, **common)
     if a.descriptive:
         return ArmVerdict(arm, VERDICT_DESCRIPTIVE, **common)
     if a.stopped_by:
         b = outcome.arms[a.stopped_by]
+        faulted = bool(b.scope_faults)
         return ArmVerdict(
             arm,
-            b.look.state,
-            needed=b.look.needed,
-            next_look=b.look.next_look,
+            b.state,
+            needed=0 if faulted else b.look.needed,
+            next_look=None if faulted else b.look.next_look,
             blocking=a.stopped_by,
             **common,
         )

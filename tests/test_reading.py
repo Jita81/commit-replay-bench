@@ -21,12 +21,16 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               exact McNemar p (P-794), and registration refused ``reading_exists`` (a reading
               already registered, before the pool and the budget are read — P-793),
               ``pool_seen`` and ``budget_spent``, the budget counting each ``reading_id``
-              once.
+              once; and (P-795) an S1 authoring miss of a sealed run read as the arm's miss,
+              and a row unsealed but in every other way the arm's read as a ``scope_fault`` on
+              both attempt rules — the arm, the outcome and the router ``undecided``, nothing
+              needed or re-rolled, ``/learn/remeasure``'s ``audit``.
 How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5)
 Works with:   src/crb/core/reading.py (the code under test),
               src/crb/core/ledger.py (the rows a reading counts),
+              src/crb/builders/adapter.py and src/crb/core/learn.py (P-795's writer and plan),
               tests/fixtures/readings.py (sealed rows and registered readings)
 Tested by:    this file
 Touch when:   never for a new repository; a rule, the counting or the budget changes (an ADR
@@ -39,10 +43,19 @@ import hashlib
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+import crb.builders as builders_pkg
+from crb.builders import adapter
+from crb.builders.base import Budget, EscalationLadder, Rung
+from crb.builders.brief import S1Arm
+from crb.builders.container import BuilderContainerSettings
+from crb.core import learn
+from crb.core.context_arm import BASE_S1, LABEL_CONTEXT_ARM, REPLAY_MODE
+from crb.core.execution import LocalExecutor
 from crb.core.ledger import FAILURE_OUTAGE, LABEL_FAILURE_KIND, GradeRow
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
@@ -80,7 +93,10 @@ from crb.core.reading import (
     with_admissions,
     with_reservations,
 )
+from crb.core.runners.pytest_runner import PytestRunner
+from fixtures import pyrepo as pr
 from fixtures.readings import (
+    AUTHOR,
     BEFORE,
     CELL,
     REPO,
@@ -728,3 +744,137 @@ def test_loop_pair_counts_discordant_pairs_and_its_exact_p() -> None:
     assert mcnemar_p(0, 0) == 1.0 and mcnemar_p(3, 3) == 1.0
     assert mcnemar_p(5, 0) == pytest.approx(0.0625) and mcnemar_p(0, 6) == pytest.approx(0.03125)
     assert mcnemar_p(11, 1) == got.p
+
+
+# --- a sealed run's row the reading cannot read (P-795) -------------------------------------
+
+
+class _NoDaemon:
+    """Stands in for the builder's container session: no daemon, no overrides."""
+
+    def __init__(self, settings: BuilderContainerSettings, checkout: Any, **kw: Any) -> None:
+        self.checkout = checkout
+
+    def __enter__(self) -> _NoDaemon:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def overrides_for(self, builder: str) -> dict[str, Any]:
+        return {}
+
+
+class _NeverBuilds:
+    """A sealable builder an ``S1`` authoring failure never reaches."""
+
+    name = "fake"
+
+    def __init__(self, *, model: str, provider: str = "", **cfg: Any) -> None:
+        self.model = model
+        self.provider = provider
+
+    def describe(self) -> dict[str, Any]:
+        return {"builder": self.name, "model": self.model}
+
+    def build(self, *_a: Any, **_kw: Any) -> Any:
+        raise AssertionError("an S1 authoring failure never reaches the builder")
+
+
+def _author_fails(_ws: Any, _subject: str, _message: str) -> tuple[str, str]:
+    raise RuntimeError("the author fell over")
+
+
+def test_an_s1_authoring_miss_under_docker_reads_as_a_miss_not_pending(
+    pyrepo: pr.PyRepo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-795 (the Wave 3 red team on c5b9e5ec): an ``S1`` authoring failure is the arm's miss
+    (ADR-0026 item 1, DL-360), and its row is in the reading's cell (the rung's builder, model
+    and provider). Under docker it carried no ``builder_executor``, so it read unsealed, the
+    reading dropped it and the commit read pending — re-rolled until it was clean. The row the
+    adapter's attempt writes is now read: the commit is the miss it is."""
+    monkeypatch.setitem(builders_pkg._REGISTRY, "fake", _NeverBuilds)
+    monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"fake"}))
+    fn = adapter.build_fn_for(
+        EscalationLadder((Rung("fake", "m0", "p"),)),
+        budget=Budget(),
+        runner=PytestRunner(pyrepo.config),
+        executor=LocalExecutor(),
+        config=pyrepo.config,
+        container=BuilderContainerSettings(image="crb-builder:test", user="10001:10001"),
+        session_factory=_NoDaemon,
+        s1=S1Arm(author=_author_fails, author_model=AUTHOR),
+    )
+    ws = pyrepo.trial(tmp_path / "t", overlay_tests=False)
+    try:
+        attempt = fn(ws, pyrepo.feat_task(), REPLAY_MODE[BASE_S1], "fake:m0")
+    finally:
+        ws.remove()
+    assert attempt.error.startswith("authoring:") and attempt.labels[LABEL_CONTEXT_ARM] == S1
+    cell = {
+        **CELL,
+        "builder": attempt.builder.name,
+        "model": attempt.builder.model,
+        "provider": attempt.builder.provider,
+    }
+    reading = register_reading(commits(40), cell=cell)
+    commit = reading.pool[0]
+    row = sealed_row(
+        commit,
+        clean=False,
+        arm=S1,
+        error=attempt.error,
+        cell=cell,
+        # what the adapter recorded, never the fixture's sealed default
+        builder_executor=attempt.labels.get("builder_executor", ""),
+        labels=dict(attempt.labels),
+    )
+    got = evaluate(reading, [row]).arms[S1]
+    assert got.commits[0].outcome is False and not got.commits[0].left
+    assert (got.look.counted, got.look.misses) == (1, 1)
+    assert got.scope_faults == () and got.unsealed_dropped == 0
+
+
+@pytest.mark.parametrize("attempt_rule", [ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED])
+def test_an_unsealed_row_of_an_admitted_run_makes_the_arm_undecided_scope_fault(
+    attempt_rule: str,
+) -> None:
+    """P-795: a row of a run the reading admits, on the arm, the cell and the posture class
+    the reading names, but recording no sealed builder, is one the reading cannot read. It was
+    dropped in silence, so its commit read pending — re-rolled until a row came back clean, a
+    false deliver. Now the arm is ``undecided`` and names the commit (``scope_faults``): never
+    pending, never re-rolled, whatever its look says; under reserved.v1 the reserved row reads
+    ``(False, "scope_fault")``. Nothing asks for another attempt."""
+    reading, rows = _first_attempts(_registered(attempt_rule), {"S3": [True] * 20})
+    faulted = reading.pool[1]
+    rows = [
+        replace(r, labels={**r.labels, "builder_executor": "host"}) if r.task_id == faulted else r
+        for r in rows
+    ]
+    out = evaluate(reading, rows)
+    s3 = out.arms["S3"]
+    assert (s3.scope_faults, s3.unsealed_dropped) == ((faulted,), 1)
+    assert s3.state == STATE_UNDECIDED and out.state == STATE_UNDECIDED
+    assert out.needed == 0 and out.standard == "" and not out.chain
+    assert verdict_for(out, "S3").state == STATE_UNDECIDED
+    served = {a["arm"]: a for a in out.to_dict()["arms"]}["S3"]
+    assert (served["state"], served["scope_faults"], served["unsealed_dropped"]) == (
+        STATE_UNDECIDED,
+        [faulted],
+        1,
+    )
+    c = s3.commits[1]
+    if attempt_rule == ATTEMPT_RULE_RESERVED:
+        assert (c.outcome, c.reason) == (False, "scope_fault")
+    else:
+        assert (c.outcome, c.reason) == (None, "scope_fault")
+    # never re-rolled: the plan asks for no attempt on the faulted arm, and says why
+    plan = learn.remeasure_plan(rows, readings=(out,), current_apparatus="2.4")
+    assert not plan.pending and not plan.up_to_date
+    (blocked,) = plan.cannot_clear
+    assert (blocked.arm, blocked.state, blocked.next_act) == ("S3", STATE_UNDECIDED, "audit")
+    assert faulted in blocked.reason
+    # the same rows, every one sealed: the arm reads by its look, as before
+    resealed = [replace(r, labels={**r.labels, "builder_executor": "docker"}) for r in rows]
+    sealed = evaluate(reading, resealed).arms["S3"]
+    assert sealed.scope_faults == () and sealed.state == STATE_DELIVER

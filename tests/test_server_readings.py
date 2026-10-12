@@ -14,7 +14,8 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               answers ``standard_for`` for the factory's gate; shows a reading licensing only
               the checks arm and posture class it counted on (P-319), a pool picked on
               outcomes refused ``pool_not_blind`` and a date cut accepted (P-320), imported
-              rows never counted (P-321), an S3-only standard read as a ceiling, a reading
+              rows never counted (P-321), an S3-only standard read as a ceiling, an unsealed
+              row of the standard arm served as a ``scope_fault`` that stops it (P-795), a reading
               naming an unknown campaign refused ``campaign_unknown``, and a reading on the
               factory's cell — the forward reading included — naming any campaign refused
               ``campaign_unsupported_reading`` by both routes (DL-382); a retried
@@ -372,6 +373,29 @@ def test_a_standard_found_on_s3_alone_reads_ceiling_forward_unvalidated(env: Env
     add_oracle_and_controls(env.factory, first)
     (cell,) = _cells(env)
     assert cell["standard"]["label"] == "ceiling S3, forward-unvalidated"
+    assert cell["standard"]["ceiling"] is True and cell["standard"]["standard"] == "S3"
+    assert cell["route"] != "deliver"
+
+
+def test_an_unsealed_row_of_the_standard_arm_is_served_as_a_scope_fault(env: Env) -> None:
+    """P-795: a row of the reading's ``S1`` arm that records ``builder_executor`` ``host`` in
+    the sealed posture class is no other reading's row — its writer failed to label it. The
+    reading dropped it in silence, a later clean row stood in for the commit, and the cell
+    delivered on a miss it never read. Now the map serves the arm ``undecided`` with the
+    commit in ``scope_faults``, and the cell's only proven arm is the ``S3`` ceiling."""
+    add_tasks(env.factory)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    first = r.json()["pool"][:20]
+    add_rows(env.factory, first, arm="S3")
+    add_rows(env.factory, first[:1], arm=S1, clean=False, builder_executor="host")
+    add_rows(env.factory, first, arm=S1)  # the stand-in, and the other nineteen
+    add_oracle_and_controls(env.factory, first)
+    (cell,) = _cells(env)
+    arms = {a["arm"]: a for a in cell["reading"]["arms"]}
+    assert arms[S1]["state"] == "undecided", arms[S1]
+    assert (arms[S1]["scope_faults"], arms[S1]["unsealed_dropped"]) == ([first[0]], 1)
+    assert (arms["S3"]["scope_faults"], arms["S3"]["unsealed_dropped"]) == ([], 0)
     assert cell["standard"]["ceiling"] is True and cell["standard"]["standard"] == "S3"
     assert cell["route"] != "deliver"
 

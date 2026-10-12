@@ -32,13 +32,15 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               set describes itself byte for byte as it did before. The legacy goldens: every
               registration variant's id and every scenario's outcome, looks and per-commit
               verdicts, printed from the code before reserved.v1 (the deciding row by its
-              index, since a row hash covers its random ``row_id``). reserved.v1: C4, C6
-              (every exit, against later rows of other runs, reservations and claims, with
-              the legacy control), C15, C19, each check a named miss (replay and forward),
-              the registration's ``max_reruns`` 0 and budget profile, the
-              ``reading_run_refusal`` whitelist table and the arm each admitted run maps to
-              (C3, C5, C7 at the core), and the hypothesis property that a reserved hit is a
-              legacy hit and a reserved ``deliver`` a legacy one at the same look or earlier.
+              index, since a row hash covers its random ``row_id``), with the one deliberate
+              move beside them (``P795_MOVED``: an unsealed replay row reads ``scope_fault``,
+              its arm ``undecided``). reserved.v1: C4, C6 (every exit, against later rows of
+              other runs, reservations and claims, with the legacy control), C15, C19, each
+              check a named miss (replay and forward), the registration's ``max_reruns`` 0
+              and budget profile, the ``reading_run_refusal`` whitelist table and the arm
+              each admitted run maps to (C3, C5, C7 at the core), and the hypothesis property
+              that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
+              the same look or earlier.
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
@@ -54,17 +56,19 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               src/crb/core/reading.py (the reserved.v1 rule, ``reading_run_refusal`` and the
               legacy loop, under test), tests/fixtures/readings.py (the registrations and
               rows the reading tests build on), docs/PREVENTION.md (P-792, the row these
-              tests close)
+              tests close; P-795, the golden's one deliberate move)
 Tested by:    tests/test_p792_reserved.py
 Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
               failing first), or a builder gains a constructor option that shapes its argv
               (the stamp names it when set, and ``DEFAULT_STAMP`` stays unchanged); the
               reserved.v1 verdict or the run whitelist changes (its table row here first);
-              never to regenerate ``GOLDEN`` — a legacy reading that moves is a regression.
+              never to regenerate ``GOLDEN`` — a legacy reading that moves is a regression,
+              unless a PREVENTION row moves it on purpose (``P795_MOVED``, beside it).
 """
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -97,6 +101,7 @@ from crb.core.reading import (
     LEFT_LINT_DISABLED,
     OUTCOME_CEILING,
     POOL_RULE_ALL,
+    REASON_SCOPE_FAULT,
     REFUSAL_INVALID,
     REFUSAL_RUN_FIELDS,
     RESERVED_RUN_LADDER,
@@ -413,7 +418,8 @@ def _g_snapshot() -> dict[str, Any]:
 
 
 #: The legacy goldens: ``_g_snapshot()`` printed from the code before reserved.v1 existed.
-#: A legacy reading's id, its outcome and every commit's verdict must never move.
+#: A legacy reading's id, its outcome and every commit's verdict must never move — but for
+#: the one deliberate move named in :data:`P795_MOVED`, applied beside this record, never in it.
 GOLDEN: dict[str, Any] = {
     "ids": {
         "question": "rdg_c5396a8975ea3ceca1dea904",
@@ -532,12 +538,44 @@ GOLDEN: dict[str, Any] = {
 }
 
 
+#: The one legacy verdict moved on purpose since ``GOLDEN`` was printed (P-795), as
+#: ``(recorded, now)``. The replay's ``p[5]`` row records ``builder_executor`` ``local`` in
+#: the reading's sealed posture class: a row its writer failed to label sealed. It was
+#: dropped in silence and the commit's next row (the miss at index 11) stood in for it — a
+#: re-roll. Now the commit reads ``scope_fault`` on that row (index 10) with no verdict and
+#: no stand-in, and ``S3``, so the reading, is ``undecided``: stricter, failing closed.
+P795_MOVED: dict[str, tuple[Any, Any]] = {
+    "state": ("insufficient", "undecided"),
+    "S3_look": (("insufficient", 5, 2, 3, 0), ("undecided", 4, 2, 2, 31)),
+    "S3_p5": ((False, "", 11), (None, "", 10)),
+}
+
+
+def _golden_after_p795() -> dict[str, Any]:
+    """``GOLDEN`` with :data:`P795_MOVED` applied, each recorded value checked against
+    ``GOLDEN`` first — so the move is exactly the one named and the record never changes."""
+    golden = copy.deepcopy(GOLDEN)
+    replay = golden["replay"]
+    look, verdicts = replay["arms"]["S3"]
+    recorded = {"state": replay["state"], "S3_look": look, "S3_p5": verdicts[5]}
+    assert recorded == {k: was for k, (was, _) in P795_MOVED.items()}
+    replay["state"] = P795_MOVED["state"][1]
+    verdicts[5] = P795_MOVED["S3_p5"][1]
+    replay["arms"]["S3"] = (P795_MOVED["S3_look"][1], verdicts)
+    return golden
+
+
 def test_p792_legacy_reading_ids_and_verdicts_unchanged() -> None:
     """Adding the reserved.v1 fields moved no legacy reading: every registration variant
     hashes to the id it hashed to before, and every scenario of the first-observed loop —
     replay, campaign admissions read and unread, forward — reads the same outcome, the
-    same looks and the same per-commit verdicts and rows."""
-    assert _g_snapshot() == GOLDEN
+    same looks and the same per-commit verdicts and rows; the one exception is the P-795
+    move (:data:`P795_MOVED`), whose commit is named a scope fault."""
+    assert _g_snapshot() == _golden_after_p795()
+    reading, rows = _g_replay()
+    s3 = evaluate(reading, rows).arms["S3"]
+    assert s3.scope_faults == (reading.pool[5],)
+    assert s3.commits[5].reason == REASON_SCOPE_FAULT
 
 
 # --- reserved.v1: the reserved attempt alone decides its commit (C4, C6, C7, C15, C19) ---
@@ -848,7 +886,8 @@ def test_p792_reserved_each_check_is_a_named_miss() -> None:
             (False, "disqualified"),
         ),
         "graded_before": (_res("S3", c), {"created": BEFORE}, (False, "out_of_scope")),
-        "local_executor": (_res("S3", c), {"builder_executor": "local"}, (False, "out_of_scope")),
+        # the arm's row but for its executor: the writer's fault, never another reading's (P-795)
+        "local_executor": (_res("S3", c), {"builder_executor": "local"}, (False, "scope_fault")),
     }
     for name, (res, kw, expect) in replay.items():
         row = _reserved_row(res, **kw)

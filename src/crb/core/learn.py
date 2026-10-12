@@ -26,7 +26,8 @@ byte-identical for the same input, and which **never act**:
   waiting on its look, with the commits it still needs in its seeded order, the ``POST /runs``
   body an operator can queue for them and its cost (that cell's own mean row cost × the
   commits requested); each cell with rows but no reading (``stale`` or ``thin``), offered
-  registration and never a replay; each reading decided against its cell. It queues nothing.
+  registration and never a replay; each reading decided against its cell, or unable to read
+  a row of its arm (a ``scope_fault``: ``audit``, never a re-run — P-795). It queues nothing.
 
 Why the three human steps are deliberate, not missing: a loop that appended its own
 refusals to its own guard corpus would launder a false positive into policy the
@@ -63,7 +64,8 @@ How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason``
               ``strengthening_backlog`` (cells with an oracle reason code ×
               ``OracleTaskScore``) → ``StrengthenItem``;
               ``remeasure_plan`` (each reading's outcome → the blocking arm's pending commits
-              in the seeded order → ``RunRequest``; rows of a cell no reading covers →
+              in the seeded order → ``RunRequest``; a scope-faulted arm → ``audit``, no
+              request; rows of a cell no reading covers →
               ``register``; ``first_attempts`` for their distinct commits).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules (the loop itself:
               docs/LEARNING-LOOP.md#2-what-crbcorelearn-adds)
@@ -118,6 +120,7 @@ from crb.core.reading import (
     STATE_DELIVER,
     STATE_INSUFFICIENT,
     STATE_LOOK_PENDING,
+    STATE_UNDECIDED,
     ReadingOutcome,
     latest_outcome,
     rule_looks,
@@ -130,6 +133,9 @@ from crb.core.routing import (
     REASON_CONTROLS_THIN,
     REASON_ORACLE_WEAK,
     RoutingPolicy,
+)
+from crb.core.routing import (
+    NEXT_AUDIT as ROUTING_NEXT_AUDIT,
 )
 from crb.core.routing import (
     NEXT_MINE as ROUTING_NEXT_MINE,
@@ -1723,7 +1729,8 @@ class RemeasureCell:
 class CannotClear:
     """A cell whose registered reading has decided against it at this apparatus, so no
     further attempt on that reading can help: ``insufficient`` (its third miss — the look rule
-    never re-reads it) or ``undecided`` (its pool is too small for the next look)."""
+    never re-reads it) or ``undecided`` (its pool is too small for the next look; or, with
+    ``next_act`` ``audit``, a row of the arm it could not read — a ``scope_fault``, P-795)."""
 
     label: str
     mode: str
@@ -1905,6 +1912,10 @@ def remeasure_plan(
     * **delivered** (a standard, or the ceiling of an ``S3`` chain) → ``up_to_date``.
     * **insufficient** or **undecided** → ``cannot_clear``, with the routing rule's words and
       next act (a new reading; mine further back).
+    * **a scope fault** (the arm has a row it could not read: graded in the sealed posture
+      class without recording the sealed executor, P-795) → ``cannot_clear`` ``undecided``
+      naming the commits, next act ``audit``, and no request — re-running a faulted commit
+      would let a later row stand in for the one the reading lost.
     * **no reading at this apparatus** → one entry per (mode, context arm) of its rows,
       ``stale`` when all its rows predate the apparatus, else ``thin``, with ``next_act``
       ``register`` and no request: rows graded before a reading is registered never count, and
@@ -1941,14 +1952,34 @@ def remeasure_plan(
         reading = outcome.reading
         cell = CellKey(**{f: str(reading.cell.get(f, "")) for f in CELL_FIELDS})
         blocking = outcome.blocking
-        if blocking is None or blocking.look.state == STATE_DELIVER:
+        if blocking is None or blocking.state == STATE_DELIVER:
             arm = outcome.standard or (outcome.chain[-1] if outcome.chain else "")
             delivered.append(f"{cell.label}|{arm}")
             continue
         arm = blocking.arm
         mode = REPLAY_MODE.get(parse_arm(arm).base, "")
         look = blocking.look
-        if look.state != STATE_LOOK_PENDING:
+        if blocking.scope_faults:
+            faulted = ", ".join(blocking.scope_faults)
+            why = (
+                f"its reading cannot read {arm}: {len(blocking.scope_faults)} commit(s) "
+                f"({faulted}) have a row graded in its sealed posture class that does not "
+                f"record its builder in the sealed container ({blocking.unsealed_dropped} "
+                "row(s), P-795) — audit the writer; nothing is re-run for a faulted commit"
+            )
+            beyond.append(
+                CannotClear(
+                    cell.label,
+                    mode,
+                    arm,
+                    STATE_UNDECIDED,
+                    why,
+                    ROUTING_NEXT_AUDIT,
+                    reading.reading_id,
+                )
+            )
+            continue
+        if blocking.state != STATE_LOOK_PENDING:
             verdict = verdict_for(outcome, arm)
             if look.state == STATE_INSUFFICIENT:
                 why = (

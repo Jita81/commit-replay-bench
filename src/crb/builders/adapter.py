@@ -64,7 +64,9 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               proves it RED (removing it before the grade; an author whose provider refused the
               call is recorded ``model_error:`` so the ledger reads an outage — P-293), stamps
               every attempt with the run's one arm (``run_arm_for``, module level so a caller
-              outside the closure names the same arm — P-295), runs one ``builder.build`` — on
+              outside the closure names the same arm — P-295) and, on every exit, where its
+              builder ran (``builder_executor``, never replaced by the calibrated budget
+              profile's labels — P-795), runs one ``builder.build`` — on
               the host or against a sealed checkout in a container — writes the redacted
               transcript to a file, maps the outcome to a ``BuildAttempt`` and discards the
               source edits of any errored attempt so it can never grade clean-with-error. A
@@ -90,7 +92,8 @@ Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and call
               errored attempt must not carry a patch), src/crb/server/worker.py (the caller
               that supplies ``container`` from the environment)
 Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py,
-              tests/test_builders_finish_gate.py
+              tests/test_builders_finish_gate.py, tests/test_reading.py (an S1 authoring miss
+              under docker read as the arm's miss)
 Touch when:   never for a new repository (the sighted test command comes from the runner);
               a new builder that must run sealed is added to ``SEALABLE_BUILDERS`` in
               src/crb/builders/container.py; a new attempt error kind must keep its prefix on
@@ -735,7 +738,8 @@ def build_fn_for(
         ``(task, mode, rung, rung_budget) -> (budget, labels)`` — the calibrated budget
         profile (:func:`crb.core.spend.calibrate`, bound by the worker). The attempt runs
         under the returned budget and ``labels`` go on its row (``budget_profile``,
-        ``budget_calibration``, ``budget_tier``). ``None`` = the rung's budget as declared.
+        ``budget_calibration``, ``budget_tier``) beside ``builder_executor``, which is the
+        adapter's own and never one of them (P-795). ``None`` = the rung's budget as declared.
     on_kill_unconfirmed:
         Receives ``(task_id, UnconfirmedKill)`` for every sealed container whose
         enforced kill the daemon did not confirm — after the attempt, whether the
@@ -770,6 +774,16 @@ def build_fn_for(
     """
     index = rung_index(ladder)
     dates_cache: dict[str, str] = {}
+
+    def executor_of(rung_label: str) -> str:
+        """Where ``rung_label``'s builder runs — ``docker`` (its sealed container) when the
+        run is sealed and the rung's builder is sealable, else ``host``: decided once per
+        attempt, before its first exit, so every row of the attempt records it (P-795). An
+        unknown rung under a container reads the run's posture: no builder ran, and its row
+        names no builder a reading's cell does."""
+        rung = index.get(rung_label)
+        sealable = rung is None or rung.builder in SEALABLE_BUILDERS
+        return BUILDER_EXECUTOR_SEALED if container is not None and sealable else "host"
 
     def dates_of(repo: Any, shas: Sequence[str]) -> dict[str, str]:
         """Commit dates for the time-order rule, read once per sha for the run."""
@@ -838,6 +852,9 @@ def build_fn_for(
         )
         stamp = {
             LABEL_CONTEXT_ARM: run_arm(mode),
+            # the authoring miss is the arm's row in the reading's cell: it records where
+            # the builder would have run, or a sealed run's miss reads unsealed (P-795)
+            LABEL_BUILDER_EXECUTOR: executor_of(rung_label),
             **({LABEL_CTX_AUTHOR: s1.author_stamp} if s1.author_stamp else {}),
         }
 
@@ -1033,11 +1050,15 @@ def build_fn_for(
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``. The ONE
-        exit every attempt leaves by, so the ``checks`` stamp and the run's context arm are
-        on each of them — a refusal before spend, a builder that could not be built or
-        raised, and an error the core would otherwise record unstamped (ADR-0024 §5 and §6,
-        ADR-0026 item 1: a row's arm is read from the stamp, so an unstamped row of a
-        checks-on run would join arm ``off``, and an unstamped S1 row no arm at all)."""
+        exit every attempt leaves by, so the ``checks`` stamp, the run's context arm and
+        where the builder ran are on each of them — a refusal before spend, an authoring
+        failure, a builder that could not be built or raised, and an error the core would
+        otherwise record unstamped (ADR-0024 §5 and §6, ADR-0026 item 1: a row's arm is read
+        from the stamp, so an unstamped row of a checks-on run would join arm ``off``, and an
+        unstamped S1 row no arm at all; ADR-0026 item 2: a row that does not record its
+        executor reads unsealed, a reading drops it and the commit reads pending — P-795).
+        The executor is this exit's, whatever an earlier stamp said."""
+        where = executor_of(rung_label)
         try:
             attempt = attempt_of(ws, task, mode, rung_label)
         except SandboxUnavailable:
@@ -1055,6 +1076,8 @@ def build_fn_for(
             # a refusal before compose is still this run's attempt: the arm's row, never
             # an unstamped one a per-arm reading drops (P-295)
             stamps[LABEL_CONTEXT_ARM] = run_arm(mode)
+        if attempt.labels.get(LABEL_BUILDER_EXECUTOR) != where:
+            stamps[LABEL_BUILDER_EXECUTOR] = where
         if checks is not None and LABEL_CHECKS not in attempt.labels:
             stamps[LABEL_CHECKS] = checks.label()
         if not stamps:
@@ -1072,7 +1095,7 @@ def build_fn_for(
         if missing:
             emit(on_event, BUILDER_EVENT_PREFIX + "refused", task=task.task_id, error=missing)
             return _failed_attempt(rung_label, mode, missing)
-        sealed = container is not None and rung.builder in SEALABLE_BUILDERS
+        sealed = executor_of(rung_label) == BUILDER_EXECUTOR_SEALED
         try:
             builder = instantiate(rung)
         except Exception as exc:
@@ -1167,13 +1190,13 @@ def build_fn_for(
             )
         rung_budget = budget_for_rung(rung, budget)
         # where the builder ran: with the posture class it says whether the row was graded in
-        # the SEALED posture a registered reading counts (ADR-0026 item 2); kept from 2.4
-        spend_labels: dict[str, str] = {
-            LABEL_BUILDER_EXECUTOR: BUILDER_EXECUTOR_SEALED if sealed else "host"
-        }
+        # the SEALED posture a registered reading counts (ADR-0026 item 2); kept from 2.4.
+        # The calibrated profile's labels join it and never replace it (P-795)
+        executor_label = {LABEL_BUILDER_EXECUTOR: executor_of(rung_label)}
+        spend_labels: dict[str, str] = dict(executor_label)
         if budget_for_task is not None:
             rung_budget, calibrated = budget_for_task(task, mode, rung, rung_budget)
-            spend_labels = dict(calibrated)
+            spend_labels = {**calibrated, **executor_label}
         try:
             if sealed:
                 outcome = sealed_build(ws, task, rung, brief, rung_budget)

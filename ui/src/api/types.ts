@@ -1211,6 +1211,11 @@ export interface ArmReading {
   ci_high: number
   next_look: number | null
   needed: number
+  /** P-795: the commits whose row the arm could not read (it does not record the sealed
+   * builder executor). Any one makes the arm `undecided`: it never delivers. */
+  scope_faults?: string[]
+  /** How many of the arm's rows were dropped because they read unsealed. */
+  unsealed_dropped?: number
 }
 
 /** A registered reading evaluated (`crb.core.reading.ReadingOutcome.to_dict`). */

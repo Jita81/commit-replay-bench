@@ -54,7 +54,7 @@ from crb.builders.adapter import build_fn_for, ladder_from_spec
 from crb.builders.base import Budget
 from crb.core.evidence import BuilderRef
 from crb.core.execution import LocalExecutor
-from crb.core.ledger import JsonlLedger, verify_chain
+from crb.core.ledger import LABEL_BUILDER_EXECUTOR, JsonlLedger, verify_chain
 from crb.core.reading import (
     HALT_CANCEL_REQUESTED,
     HALT_RUN_NOT_OWNED,
@@ -92,7 +92,11 @@ def _spec(pyrepo: pr.PyRepo, runner: PytestRunner, executor: LocalExecutor, tmp:
 
 
 def _attempt() -> BuildAttempt:
-    return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p", mode="sighted"))
+    # a host build records where it ran, as the adapter stamps every attempt (P-795)
+    return BuildAttempt(
+        BuilderRef(name="fixture", model="m", provider="p", mode="sighted"),
+        labels={LABEL_BUILDER_EXECUTOR: "host"},
+    )
 
 
 def test_run_task_disqualifies_a_worktree_whose_builder_committed_the_poison(
@@ -286,6 +290,7 @@ def test_every_pack_names_the_worktree_its_row_graded(
         return BuildAttempt(
             BuilderRef(name="fixture", model="m", provider="p", mode="sighted"),
             notes={"worktree": "run-" + "0" * 12},  # a builder naming another worktree
+            labels={LABEL_BUILDER_EXECUTOR: "host"},
         )
 
     events: list[tuple[str, dict[str, Any]]] = []

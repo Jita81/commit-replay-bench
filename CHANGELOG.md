@@ -13,16 +13,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading is fixed before its data, measured sealed, and spends under a
-  ceiling the product holds** (P-787 to P-794, G-957, DL-372 to DL-384;
-  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading hashes `hypothesis`,
-  `smallest_effect` and its campaign into its id; `thin_cell` counts distinct tasks. A
-  reading registers, and its runs are admitted, only with sandbox and builder on docker, in its
-  posture class (409 `reading_posture_mismatch`); a retry is 409 `reading_exists`, each
-  reading counted once. `POST /campaigns` holds a ceiling in pounds:
-  runs need `max_cost_usd`, admitted while cap plus headroom fits (409 `campaign_ceiling`); a
-  reading counts only admitted runs (409 `campaign_required`); `S1` author calls count;
-  overrunning admitted headroom stops the campaign. CI runs the Go builder image;
-  2026-10-11's decisions are recorded.
+  ceiling the product holds** (P-787 to P-795, G-957, DL-372 to DL-384;
+  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). A reading's id hashes
+  `hypothesis`, `smallest_effect` and its campaign; `thin_cell` counts distinct tasks. A
+  reading and its runs need sandbox and builder on docker, in its posture class (409
+  `reading_posture_mismatch`); a retry is 409 `reading_exists`. Replay rows record their
+  executor; an unsealed one is a `scope_fault` (arm undecided). `POST /campaigns` holds a
+  ceiling in pounds: runs need `max_cost_usd` and fit cap plus headroom (409
+  `campaign_ceiling`); a reading counts only admitted runs (409 `campaign_required`); `S1`
+  author calls count; an overrun stops the campaign. CI runs the Go builder image;
+  2026-10-11's decisions recorded.
 
 - **The value baseline says who made its thirteen verdicts**
   ([#80](https://github.com/Jita81/commit-replay-bench/pull/80)). It said nine of "the thirteen

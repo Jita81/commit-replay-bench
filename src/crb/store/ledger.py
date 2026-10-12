@@ -24,7 +24,8 @@ What it is:   The database ledgers — ``DbLedger`` for ``grades`` (+ the ``evid
               and ``DbReviewLedger`` for ``reviews`` — plus ``assert_append_only``, the
               append-only probe of every table for ``/health``, ``crb doctor`` and start-up.
 What it does: Appends hash-chained rows under a per-table write lock, re-asserting the
-              false-Q1 invariant before every insert; reads rows back as the core's
+              false-Q1 invariant before every insert and refusing a replay row that does not
+              record where its builder ran (P-795, write-only); reads rows back as the core's
               dataclasses; imports foreign JSONL rows by re-chaining them, stamped as
               imported inside the hash (``import_stamp``); exports rows that verify
               standalone. Refuses a review whose row
@@ -169,7 +170,8 @@ class DbLedger:
         """Chain ``row`` onto the head and insert it; returns the chained copy.
 
         The invariant check runs BEFORE the lock is taken so a false-Q1 row costs nothing
-        but the exception; the database constraint and triggers are the second line.
+        but the exception; the database constraint and triggers are the second line. A
+        replay row that does not record where its builder ran is refused with it (P-795).
 
         ``guard`` runs in the append's transaction, under the grades lock and before the head
         is read; it raises (:class:`AttemptSettled` for a settled attempt) to refuse the row,
@@ -177,6 +179,7 @@ class DbLedger:
         reserved attempt; it locks the run's row, after the grades lock — the one order.
         """
         row.assert_invariants()
+        row.assert_executor_recorded()  # write-only: a stored row without it still reads
         with self._factory() as s:
             self._lock(s)
             if guard is not None:
@@ -195,6 +198,7 @@ class DbLedger:
             prev = self._last_hash(s)
             for row in rows:
                 row.assert_invariants()
+                row.assert_executor_recorded()
                 chained = row.chained(prev)
                 s.add(_to_model(chained))
                 prev = chained.row_hash

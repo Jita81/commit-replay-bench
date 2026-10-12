@@ -17,8 +17,10 @@ What it does: Pins that a sighted brief carries the tests and the test command b
               with and without an S1 author (P-295); that ``attempt_error`` caps the detail
               never the prefix; that the transcript is written to a file, never inlined; that
               the sighted test command is best-effort and brings the oracle services up
-              (mesh-client, DL-024); and that a run climbs the ladder (rung 1 red → rung 2 gold
-              clean) into two chained rows.
+              (mesh-client, DL-024); that every exit of ``build``, an S1 authoring failure and
+              a calibrated budget profile's attempt record where the builder ran
+              (``builder_executor``, P-795); and that a run climbs the ladder (rung 1 red →
+              rung 2 gold clean) into two chained rows.
 How:          ``FakeBuilder`` registered as ``fake`` with a scripted behaviour → ``adapter`` /
               ``run`` over ``pyrepo`` with the real ``PytestRunner`` and ``LocalExecutor``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -56,9 +58,11 @@ from crb.builders.base import (
     Rung,
 )
 from crb.builders.brief import LABEL_CONTEXT_ARM, S1Arm
+from crb.builders.container import BuilderContainerSettings
+from crb.core.checks import RepoChecks, resolve
 from crb.core.execution import LocalExecutor
-from crb.core.grade import MODE_SIGHTED, MODES
-from crb.core.ledger import JsonlLedger, verify_chain
+from crb.core.grade import MODE_SIGHTED, MODES, Belts
+from crb.core.ledger import GradeRow, JsonlLedger, grade_row_from_result, verify_chain
 from crb.core.lint import LintPlan, LintTool
 from crb.core.prevention import AUTO_CONFIG, AUTO_CONTEXT, AUTO_OFF, LearningSnapshot
 from crb.core.run import BuildAttempt, RunSpec, run
@@ -66,7 +70,7 @@ from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
-from fixtures.posture import witnessed_context_for
+from fixtures.posture import posture_result, witnessed_context_for
 
 # --- a scripted builder ---------------------------------------------------------------------
 
@@ -977,3 +981,188 @@ def test_preflight_repair_turn_is_one_bounded_build_with_the_findings(
     assert "X001 ugly" in second.repair_note and "REPAIR:" in second.task_text()
     assert row.cost_usd == 0.02  # both calls are one attempt's spend
     assert any(a == "builder.preflight.repaired" for a, _ in events)
+
+
+# --- build_fn: where the builder ran, on every exit (P-795) ---------------------------------
+
+#: the posture class a sealed worker grades in: the row is sealed only when it also records
+#: that its builder ran in the sealed container (``GradeRow.sealed`` fails closed)
+_SEALED_CLASS = "docker/inplace/sealed"
+_CONTAINER = BuilderContainerSettings(image="crb-builder:test", user="10001:10001")
+
+
+class _Session:
+    """Stands in for :class:`ContainerSession`: no daemon, no overrides."""
+
+    def __init__(self, settings: BuilderContainerSettings, checkout: Any, **kw: Any) -> None:
+        self.checkout = checkout
+
+    def __enter__(self) -> _Session:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def overrides_for(self, builder: str) -> dict[str, Any]:
+        return {}
+
+
+def _sealed_row(attempt: BuildAttempt, task: TaskSpec, mode: str, tmp_path: Path) -> GradeRow:
+    """The row the sealed worker writes for ``attempt``, appended through the ledger."""
+    belts = Belts(True, False, True, False, None)
+    result = posture_result(
+        task.task_id, pr.REPO_NAME, mode, False, belts, posture_class=_SEALED_CLASS
+    )
+    row = grade_row_from_result(
+        result,
+        task,
+        pack_hash="h" * 64,
+        builder=attempt.builder,
+        builder_error=attempt.error,
+        labels=dict(attempt.labels),
+    )
+    return JsonlLedger(tmp_path / "ledger.jsonl").append(row)
+
+
+def _no_tool(*_a: Any, **_kw: Any) -> str:
+    return "pytest is not installed in the sandbox"
+
+
+def _harness_down(*_a: Any, **_kw: Any) -> str:
+    raise RuntimeError("the harness could not describe its command")
+
+
+_LEAK_CHECKS = {
+    "finish_gate": True,
+    "commands": [{"name": "peek", "argv": ["pytest", pr.TEST_SUBTRACT], "blind_only": True}],
+}
+
+#: every exit of ``build`` — (rung label, ladder behaviour, mode, what the exit is): the
+#: refusals before any builder ran, the authoring failure, a builder that raised, and a build
+_EXITS: dict[str, tuple[str, str, str, str]] = {
+    "unknown_rung": ("fake:zzz", "noop", "sighted", "unknown rung"),
+    "runner_tool_missing": ("fake:m0", "noop", "sighted", "not installed"),
+    "builder_unavailable": ("no-such-builder:m", "noop", "sighted", "builder unavailable"),
+    "harness_raised": ("fake:m0", "noop", "sighted", "RuntimeError"),
+    "finish_gate_refused": ("fake:m0", "noop", "blind", "finish gate refused"),
+    "s1_authoring_failed": ("fake:m0", "noop", "sighted", "authoring"),
+    "builder_raised": ("fake:m0", "raise", "sighted", "builder raised"),
+    "built": ("fake:m0", "noop", "sighted", ""),
+}
+
+
+@pytest.mark.parametrize("exit_", list(_EXITS))
+def test_every_early_exit_of_build_stamps_the_executor(
+    pyrepo: pr.PyRepo,
+    tmp_path: Path,
+    harness: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    exit_: str,
+) -> None:
+    """A sealed run's row is read by a registered reading only when it records that its
+    builder ran in the sealed container. Every exit but the last two once left
+    ``builder_executor`` off, so a sealed miss read unsealed, a reading dropped it, and the
+    commit read pending — re-rolled until it was clean (the Wave 3 red team on c5b9e5ec)."""
+    rung_label, behaviour, mode, says = _EXITS[exit_]
+    monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"fake", "no-such-builder"}))
+    if exit_ == "runner_tool_missing":
+        monkeypatch.setattr(adapter, "runner_tool_missing", _no_tool)
+    if exit_ == "harness_raised":
+        monkeypatch.setattr(adapter, "sighted_test_command", _harness_down)
+    ladder = (
+        EscalationLadder((Rung("no-such-builder", "m"),))
+        if exit_ == "builder_unavailable"
+        else _ladder(behaviour)
+    )
+    checks = (
+        resolve(RepoChecks.from_config(_LEAK_CHECKS), None)
+        if exit_ == "finish_gate_refused"
+        else None
+    )
+    s1 = S1Arm(author=_author_raises, author_model="t1") if exit_ == "s1_authoring_failed" else None
+    fn = adapter.build_fn_for(
+        ladder,
+        budget=Budget(),
+        container=_CONTAINER,
+        session_factory=_Session,
+        checks=checks,
+        s1=s1,
+        **harness,
+    )
+    task = pyrepo.feat_task()
+    ws = pyrepo.trial(tmp_path / "t", overlay_tests=mode == MODE_SIGHTED)
+    try:
+        attempt = fn(ws, task, mode, rung_label)
+    finally:
+        ws.remove()
+    assert (says in attempt.error) if says else attempt.error == ""
+    assert attempt.labels.get("builder_executor") == "docker"
+    row = _sealed_row(attempt, task, mode, tmp_path)
+    assert row.sealed and row.builder_executor == "docker"
+
+
+def test_a_calibrated_budget_profile_keeps_builder_executor_docker(
+    pyrepo: pr.PyRepo, tmp_path: Path, harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The calibrated budget profile's labels once REPLACED the executor stamp, so every row
+    of a calibrated sealed run read unsealed and no reserved.v1 reading (which requires a
+    budget profile) could count one. Its labels are kept; the executor is the adapter's,
+    whatever the profile says."""
+    monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"fake"}))
+    profile = {"budget_profile": "calibrated", "budget_tier": "XS", "builder_executor": "host"}
+
+    def calibrated(_t: TaskSpec, _m: str, _r: Rung, b: Budget) -> tuple[Budget, dict[str, str]]:
+        return b, dict(profile)
+
+    task = pyrepo.feat_task()
+    for behaviour in ("noop", "raise"):  # the build, and a builder that raised
+        fn = adapter.build_fn_for(
+            _ladder(behaviour),
+            budget=Budget(),
+            container=_CONTAINER,
+            session_factory=_Session,
+            budget_for_task=calibrated,
+            **harness,
+        )
+        ws = pyrepo.trial(tmp_path / behaviour)
+        try:
+            attempt = fn(ws, task, "sighted", "fake:m0")
+        finally:
+            ws.remove()
+        assert attempt.labels["budget_profile"] == "calibrated"
+        assert attempt.labels["budget_tier"] == "XS"
+        assert attempt.labels["builder_executor"] == "docker"
+        row = _sealed_row(attempt, task, "sighted", tmp_path / behaviour)
+        assert row.sealed and row.labels["budget_profile"] == "calibrated"
+
+
+def test_an_s1_authoring_failure_under_docker_is_sealed(
+    pyrepo: pr.PyRepo, tmp_path: Path, harness: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ``S1`` authoring failure is the arm's miss (ADR-0026 item 1, DL-360) and its row
+    carries the rung's builder, model and provider, so it is in the reading's cell. It once
+    carried no executor, so under docker it read unsealed and the reading never saw the
+    miss; off docker it reads host, as the builder would have run."""
+    monkeypatch.setattr(adapter, "SEALABLE_BUILDERS", frozenset({"fake"}))
+    task = pyrepo.feat_task()
+    for container, want in ((_CONTAINER, "docker"), (None, "host")):
+        fn = adapter.build_fn_for(
+            _ladder("gold"),
+            budget=Budget(),
+            container=container,
+            session_factory=_Session,
+            s1=S1Arm(author=_author_raises, author_model="t1"),
+            **harness,
+        )
+        ws = pyrepo.trial(tmp_path / want)
+        try:
+            attempt = fn(ws, task, "sighted", "fake:m0")
+        finally:
+            ws.remove()
+        assert attempt.error.startswith("authoring:") and FakeBuilder.briefs == []
+        assert (attempt.builder.name, attempt.builder.model) == ("fake", "m0")
+        assert attempt.labels["builder_executor"] == want
+        assert attempt.labels[LABEL_CONTEXT_ARM] == "S1@t1"
+        row = _sealed_row(attempt, task, "sighted", tmp_path / want)
+        assert row.sealed is (want == "docker")
+        assert row.failure_kind == "authoring"

@@ -46,7 +46,7 @@ import pytest
 from sqlalchemy import select
 
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
-from crb.core.ledger import GradeRow, grade_row_from_result
+from crb.core.ledger import LABEL_BUILDER_EXECUTOR, GradeRow, grade_row_from_result
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.app import API_PREFIX
 from crb.server.routes import runs as runs_mod
@@ -1175,7 +1175,11 @@ class TestBudgetLadder:
                     builder=pack.builder,
                     run_id=run_id,
                     trial=trial,
-                    labels={"budget_tier": f"{25 * 2**i}/25/900", "rung_index": str(i)},
+                    labels={
+                        "budget_tier": f"{25 * 2**i}/25/900",
+                        "rung_index": str(i),
+                        LABEL_BUILDER_EXECUTOR: "host",  # P-795: as the adapter stamps it
+                    },
                 )
             )
         ledger.append_many(rows)

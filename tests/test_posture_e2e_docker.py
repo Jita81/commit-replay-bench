@@ -176,11 +176,17 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
     def gold_fn(ws: Workspace, t: TaskSpec, mode: str, rung: str) -> BuildAttempt:
         calls.append("gold")
         ws.overlay_sources(t.src_files)
-        return BuildAttempt(BuilderRef(name="fixture_gold", model="gold", mode=mode))
+        return BuildAttempt(  # an in-process fixture: it ran on the host (P-795)
+            BuilderRef(name="fixture_gold", model="gold", mode=mode),
+            labels={lg.LABEL_BUILDER_EXECUTOR: "host"},
+        )
 
     def counting_fn(ws: Workspace, t: TaskSpec, mode: str, rung: str) -> BuildAttempt:
         calls.append("counting")
-        return BuildAttempt(BuilderRef(name="counting", model="none", mode=mode))
+        return BuildAttempt(
+            BuilderRef(name="counting", model="none", mode=mode),
+            labels={lg.LABEL_BUILDER_EXECUTOR: "host"},
+        )
 
     # (a) qualified in the sealed posture, its dependencies provisioned for THIS task
     g1 = gate()

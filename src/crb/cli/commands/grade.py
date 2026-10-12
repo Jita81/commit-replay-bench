@@ -17,7 +17,8 @@ What it is:   ``crb prep`` / ``crb grade`` — the manual trial lifecycle: make 
 What it does: ``prep`` creates the worktree and overlays the target tests only in sighted
               mode; ``grade`` refuses any worktree whose HEAD is not the task's parent (a
               harness error, never a verdict), runs the core grader, and with ``--ledger``
-              writes the evidence pack FIRST and then the row that carries its hash. Exit
+              writes the evidence pack FIRST and then the row that carries its hash (its
+              builder ran on the host: ``builder_executor`` ``host``, P-795). Exit
               0 clean, 1 not clean / disqualified, 2 harness error.
 How:          ``_load`` → ``_worktree_for`` (integrity) → ``grade`` → ``EvidencePack`` →
               ``write_pack`` → ``grade_row_from_result`` → ``JsonlLedger.append``.
@@ -64,7 +65,7 @@ from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
 from crb.core.execution import Executor
 from crb.core.git import GitRepo
 from crb.core.grade import MODE_SIGHTED, MODES, GradeContext, GradeResult, grade
-from crb.core.ledger import GradeRow, JsonlLedger, grade_row_from_result
+from crb.core.ledger import LABEL_BUILDER_EXECUTOR, GradeRow, JsonlLedger, grade_row_from_result
 from crb.core.posture import resolve_posture
 from crb.core.qualify import (
     GoldWitness,
@@ -193,7 +194,9 @@ def row_from_result(
     trial: str,
     actor: str,
 ) -> GradeRow:
-    """Thin wrapper over :func:`crb.core.ledger.grade_row_from_result` (the ONE mapping)."""
+    """Thin wrapper over :func:`crb.core.ledger.grade_row_from_result` (the ONE mapping).
+    The builder edited the worktree outside any container the bench runs, so the row records
+    ``builder_executor`` ``host`` — the ledger refuses a replay row that names none (P-795)."""
     return grade_row_from_result(
         result,
         task,
@@ -203,6 +206,7 @@ def row_from_result(
         trial=trial,
         actor=actor,
         language=task.language or config.language.value,
+        labels={LABEL_BUILDER_EXECUTOR: "host"},
     )
 
 
