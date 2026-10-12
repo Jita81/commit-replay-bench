@@ -222,6 +222,23 @@ On a stop, Claude Code queues nothing more and cancels the runs that have not st
 product refuses every new run of a stopped campaign whatever is queued. A running run ends at its
 cap, which was set to fit.
 
+**Not a stop: a model called from inside a build.** An attempt disqualified `nested_model_call`
+is reported, and counts as a miss. The builder's container can reach one host, the model
+endpoint, so a builder could call a second model whose spend its `cost_usd` never shows. The
+product now refuses the claude CLI by name, and every tool input the builder emits passes a
+tripwire: the endpoint `api.anthropic.com`, the path `/v1/messages`, the claude CLI run as a
+command, an import of the anthropic SDK, or the name (never the value) of a model credential
+variable. A hit is recorded as `network: nested_model_call: …` and the build is stopped there;
+the row's kind is `protocol`, so the commit is read as missed and never re-run (F5, P-805, DL-391).
+Round-1 red-teaming widened the guard: it now catches the CLI at any argument position (behind
+`timeout`, inside an `os.system`/`subprocess.run` string, or written to a script and run) and
+unwraps `env -S` and other command wrappers, a written script caught by the tripwire reading the
+write (R1-F5-1, HON-R1-F5-1, R1-NEW-1). Round-2 red-teaming made it parse the wrappers' options
+as the tools do (`env -`, `unshare`'s value options, `--prefix` abbreviations; R2-REG-1, R2-HON-1).
+**Known gap:** the tripwire reads text. A call that is encoded or reached indirectly passes it,
+and its spend would go unmetered: the tally holds the builder's reported cost only. Closing it
+needs a proxy on the container's one allowed host that understands the API.
+
 **What Claude Code reports at the end of stage 1**, to Paul and as a dated record under
 `docs/reviews/`:
 
@@ -230,6 +247,7 @@ cap, which was set to fit.
 - for each reading arm: commits counted, clean and missed, and its state (`deliver`,
   `insufficient`, `look_pending` with the commits still needed, or `undecided`);
 - for each descriptive arm: commits run and clean;
+- every attempt disqualified `nested_model_call`, by run and commit (each counted as a miss above);
 - what stage 2 would buy: the statement of part 4.
 
 **Stage 2** starts only on Paul's written release, recorded in the decision log: a new decision
@@ -252,6 +270,22 @@ campaign, as that answer asks.
 
 **What it reviews.** Every clean row of the blind arms — `A0`, `A0+L` and `S1@<author>` — that a
 reading counts. `S3` is sighted and is not reviewed.
+
+**A forged Go pass: what is closed and what is not.** The round-2 red team found that a non-test
+Go source can make `go test -json` report the target tests passed when they never ran, and belt 2
+graded that patch clean (F4-GO-TEST2JSON-SPOOF, high; P-804). Grading now disqualifies a touched
+non-test file in a Go repository that starts printing the testing package's event lines, frames a
+summary line with its `\x16` byte, or exits past its `os.Exit(0)` guard. It reads a `.go` source, a
+`//go:embed` data file and a cgo or assembly source alike, with string escapes decoded
+(REDFIX-REGRESS-HONESTY-R1-1). All five forgeries that graded clean are now disqualified, and no
+commit in cobra's history trips the scan **[measured — n = 5 forgeries, and 889 non-test Go file
+versions (42 distinct files) and 492 versions of 59 other files across cobra's 992 non-merge
+commits; method: P-804's tests run with each fix reverted and restored, and the shipped scan over
+every non-merge commit; apparatus n/a, the product's own grader]**. It reads text: a forgery that
+assembles the text from pieces, or stores it encoded and decodes it at run time, still passes it.
+So a clean cobra row still rests on this review as well as on the belts, and the review reads any
+non-test change in a Go package that prints or exits, its embedded, cgo and assembly files
+included.
 
 **How a verdict is filed.** `POST /api/v1/reviews`, as an operator, with the row's
 `grade_row_hash`, a statement, the findings, `mergeable`, and `patch_sha256` from
