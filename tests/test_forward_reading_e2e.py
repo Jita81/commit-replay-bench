@@ -329,8 +329,9 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
 def test_the_forward_reading_route_refuses_what_it_must(env: Env) -> None:
     """verify_fwd_evidence: the route's refusals were tested nowhere. A viewer may not register
     one (403); an unknown reading is 404; a reading that is not a ceiling is 409
-    ``not_a_ceiling``; a second forward reading that would overspend the ceiling's one budget
-    is 409 ``budget_spent``."""
+    ``not_a_ceiling``; the same forward reading sent again is 409 ``reading_exists`` naming
+    the first (a retry, P-793); a second forward reading that would overspend the ceiling's
+    one budget is 409 ``budget_spent``."""
     from crb.server.routes.readings import load_readings
 
     # the XS cell is a ceiling (S1 misses three); the S cell proves S1 outright: a standard
@@ -348,6 +349,11 @@ def test_the_forward_reading_route_refuses_what_it_must(env: Env) -> None:
     assert r.status_code == 404 and envelope(r)["code"] == "not_found"
     r = env.post("/readings/forward", json={**body, "promotes": standard_id})
     assert r.status_code == 409 and envelope(r)["code"] == "not_a_ceiling", r.text
-    assert env.post("/readings/forward", json={**body, "promotes": ceiling_id}).status_code == 201
+    first = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
+    assert first.status_code == 201, first.text
     r = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
+    assert r.status_code == 409 and envelope(r)["code"] == "reading_exists", r.text
+    assert envelope(r)["detail"] == {"reading_id": first.json()["reading_id"]}
+    second = {**body, "hypothesis": f"{body['hypothesis']}, a second question"}
+    r = env.post("/readings/forward", json={**second, "promotes": ceiling_id})
     assert r.status_code == 409 and envelope(r)["code"] == "budget_spent", r.text

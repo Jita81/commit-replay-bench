@@ -12,18 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a
-  product-held ceiling** (P-787 to P-791, P-804 to P-806, G-957, DL-372 to DL-383, DL-390,
-  DL-391; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
-  `hypothesis`, `smallest_effect`, campaign; `thin_cell` counts distinct tasks. Registration,
-  admission need docker sandbox, builder in-posture (409 `reading_posture_mismatch`).
-  `POST /campaigns` holds a pound ceiling: runs need `max_cost_usd` within cap+headroom
-  (409 `campaign_ceiling`); only campaign-admitted runs count (409 `campaign_required`); `S1`
-  author calls count; overruns stop it. CI builds/runs the Go builder image; operator
-  decisions recorded. Belt 2 needs gold's target passes, ids relocated per component; belt 1b
-  disqualifies pytest-machinery patches, forged Go test events. In-build model calls are
-  `nested_model_call` misses, caught through any wrapper (`env -`, `--prefix`). Claude Code
-  costs messages once.
+- **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a product-held ceiling**
+  (P-787 to P-793, P-800 to P-806, G-957, DL-372 to DL-384, DL-390 to DL-392, DL-400 to DL-405;
+  [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash `hypothesis`,
+  `smallest_effect` and campaign; a retry is 409 `reading_exists`; `thin_cell` counts tasks.
+  Registration and admission need docker and the reading's posture (409 `reading_posture_mismatch`).
+  `POST /campaigns` holds a pound ceiling (409 `campaign_ceiling`); a reading counts only admitted
+  runs; `S1` author calls count. Grading disqualifies forged Go test events and pytest-machinery
+  patches; in-build model calls are `nested_model_call` misses. An authored RED is read under the
+  parent's dependencies. CI builds the Go builder image. Decisions 8 and 9 are recorded.
 
 - **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
   [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off

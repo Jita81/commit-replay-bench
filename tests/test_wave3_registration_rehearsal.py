@@ -17,7 +17,9 @@ What it does: Step 4: logs in as an operator, registers the record's campaign (2
               the campaign named, the pool in seeded order, each cell's budget spent at 2.10% of
               5%), refuses a registration without its question (422) and meets the refusals the
               record names (``campaign_unknown``, ``pool_not_blind``, ``pool_seen``,
-              ``budget_spent``, ``invalid_reading``); a retried registration is recorded.
+              ``budget_spent``, ``invalid_reading`` naming both executors on a host builder and
+              the posture class with the sandbox off docker); a retried registration is
+              refused 409 ``reading_exists`` naming the first reading, which lists once.
               Step 6: queues ``S3`` from the remeasure plan, ``A0`` and ``A0+L`` from the
               record's bodies, each admitted under the campaign (``admitted_runs`` rising on
               every reading of it), then ``S1`` from the plan once ``S3`` delivers; meets 409
@@ -34,7 +36,8 @@ How:          ``make_env`` on the sealed settings with the record's test author;
               paths. No worker runs: a finished run is the worker's status and rows written to
               the store. The claude_code and editblock credential checks are stubbed to
               "present" — the stack's credential is the operator's, and the rehearsal never sets
-              or reads a key. A disagreement is a strict ``xfail`` whose reason says
+              or reads a key. A disagreement found here is fixed in the record or the
+              product before the run; a strict ``xfail`` marks one left open, its reason
               ``DOC-WRONG``, ``PRODUCT-WRONG`` or ``AMBIGUOUS``.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md, docs/adr/0030-a-run-keeps-its-spend-cap.md
@@ -522,27 +525,24 @@ def test_step4_meets_the_refusals_the_record_names(stack: Wave3) -> None:
     assert _registered(w.env) == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "PRODUCT-WRONG: step 4's 'budget spent at 2.10% of 5%' rests on each reading being "
-        "registered once, but POST /readings is not idempotent: the same body sent again (a "
-        "retried request) answers 201 with the same reading_id, writes a second "
-        "reading.registered event, GET /readings lists the reading twice and the cell's "
-        "budget reads 4.19% with readings 2 — neither the same reading back nor a refusal"
-    ),
-)
 def test_step4_a_retried_registration_is_the_same_reading_once(stack: Wave3) -> None:
+    """Step 4's "budget spent at 2.10% of 5%" rests on each reading registered once: the same
+    body sent again (a retried request) is refused 409 ``reading_exists`` naming the first
+    reading, as the record says, and writes nothing — ``GET /readings`` reads it back."""
     w = stack
     cid = w.send("POST", "/api/v1/campaigns", json=campaign_body()).json()["campaign_id"]
     body = registration_bodies(cid, deployment_author_model(w.env.settings))[("cobra", "XS")]
     first = w.send("POST", "/api/v1/readings", json=body)
     assert first.status_code == 201, first.text
-    w.send("POST", "/api/v1/readings", json=body)  # the retry: same answer or a refusal
+    retry = w.send("POST", "/api/v1/readings", json=body)  # the retry
+    err = _refused(retry, 409, "reading_exists")
+    assert err["detail"]["reading_id"] == first.json()["reading_id"], err
+    assert _registered(w.env) == 1
     served = w.send("GET", "/api/v1/readings", params={"repo": "cobra"}).json()
     assert [o["reading_id"] for o in served["readings"]] == [first.json()["reading_id"]]
     (cell,) = [b for b in served["budgets"] if b["cell"]["size"] == "XS"]
     assert f"{cell['spent']:.2%}" == "2.10%" and cell["readings"] == 1
+    assert "`reading_exists`" in _step(4)
 
 
 @pytest.mark.parametrize(
@@ -550,31 +550,30 @@ def test_step4_a_retried_registration_is_the_same_reading_once(stack: Wave3) -> 
     [
         pytest.param({"sandbox": {"executor": "docker"}}, id="builder-on-the-host"),
         pytest.param(
-            {"builder": {"executor": "docker", "image": "crb-builder:test"}},
-            id="sandbox-local",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "DOC-WRONG: step 4 says invalid_reading 'on an unsealed deployment names "
-                    "both executors'; with the sandbox off docker the product refuses first "
-                    "on the posture class and its detail is {'posture_class': "
-                    "'local/inplace/host-env'} alone — only a docker sandbox with a host "
-                    "builder names sandbox_executor and builder_executor"
-                ),
-            ),
+            {"builder": {"executor": "docker", "image": "crb-builder:test"}}, id="sandbox-local"
         ),
     ],
 )
-def test_step4_an_unsealed_deployment_is_refused_naming_both_executors(
+def test_step4_an_unsealed_deployment_is_refused_naming_what_is_unsealed(
     tmp_path: Path, settings: dict[str, Any]
 ) -> None:
+    """Step 4's two unsealed cases, as the record words them: a docker sandbox with a host
+    builder is refused naming both executors; with the sandbox off docker the posture-class
+    refusal fires first and names the posture class alone."""
     for env in _env(tmp_path, **settings, factory={"test_author": TEST_AUTHOR}):
         w = Wave3(env=env)
         cid = w.send("POST", "/api/v1/campaigns", json=campaign_body()).json()["campaign_id"]
         body = registration_bodies(cid, deployment_author_model(env.settings))[("cobra", "XS")]
         err = _refused(w.send("POST", "/api/v1/readings", json=body), 422, "invalid_reading")
         assert _registered(env) == 0
-        assert {"sandbox_executor", "builder_executor"} <= set(err["detail"]), err
+        detail = set(err["detail"])
+        if "sandbox" in settings:  # the sandbox on docker, the builder on the host
+            assert {"sandbox_executor", "builder_executor"} <= detail, err
+            assert "`{sandbox_executor, builder_executor}`" in _step(4)
+        else:  # the sandbox off docker: the posture class is not a sealed one
+            assert "posture_class" in detail, err
+            assert not detail & {"sandbox_executor", "builder_executor"}, err
+            assert "`{posture_class}`" in _step(4)
 
 
 # --- step 6 -----------------------------------------------------------------------------------

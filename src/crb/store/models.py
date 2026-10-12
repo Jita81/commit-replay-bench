@@ -9,7 +9,9 @@ grades     — APPEND-ONLY: one row per graded attempt, hash-chained (``GradeRow
 evidence   — evidence pack bodies keyed by pack hash (opt-in retention window applies
              to any transcript ref inside; the pack itself is always kept)
 events     — APPEND-ONLY: StepEvent stream, ordered by (trace_id, seq), hash-chained in id
-             order (``prev_hash`` / ``row_hash``; revision 0013, ADR-0029)
+             order (``prev_hash`` / ``row_hash``; revision 0013, ADR-0029); one
+             ``reading.reserved`` row per (reading, arm, commit) by a partial unique index
+             (revision 0018, P-792)
 signoffs   — APPEND-ONLY: human attestations (revocations are new rows)
 reviews    — APPEND-ONLY: human post-hoc verdicts on ONE graded row each, hash-chained
              (``ReviewRecord`` columns; revision 0003)
@@ -56,9 +58,10 @@ Tested by:    tests/test_store_migrate.py, tests/test_store_db.py, tests/test_st
 Touch when:   never for a new repository (``repos.config_json`` absorbs any ``RepoConfig``
               change); adding a column or table means a new Alembic revision under
               src/crb/store/migrations/versions/ plus a ``REVISION_MARKERS`` /
-              ``REVISION_TABLES`` entry in src/crb/store/migrate.py, and — for an append-only
-              table — a pinned tuple in that revision; a ``grades`` column also changes the
-              hashed body in src/crb/core/ledger.py and needs an ADR.
+              ``REVISION_TABLES`` entry in src/crb/store/migrate.py (an index alone: a
+              ``REVISION_INDEXES`` entry), and — for an append-only table — a pinned tuple
+              in that revision; a ``grades`` column also changes the hashed body in
+              src/crb/core/ledger.py and needs an ADR.
 """
 
 from __future__ import annotations
@@ -77,13 +80,22 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from crb.core.reading import READING_RESERVED_ACTION
 
 #: The CHECK on ``events`` (revision 0013, P-254): both chain columns hold a SHA-256 in hex.
 #: ``length`` is the one spelling SQLite and PostgreSQL share.
 EVENTS_CHAIN_CHECK_NAME = "ck_events_chain_hashes"
 EVENTS_CHAIN_CHECK = "length(prev_hash) = 64 AND length(row_hash) = 64"
+#: The partial unique index on ``events`` that holds one reading reservation per (reading,
+#: arm, commit) — ``trace_id``, ``step_id``, ``task_id`` — and its predicate (revision 0018,
+#: P-792): the database's backstop behind the reserver's check under the events lock. Only
+#: reservation rows are bound by it; every other event shares those columns freely.
+READING_RESERVED_INDEX = "uq_events_reading_reserved"
+READING_RESERVED_WHERE = f"action = '{READING_RESERVED_ACTION}'"
 
 
 def _now() -> str:
@@ -293,11 +305,24 @@ class Event(Base):
     # lose one on ``?after=`` (revision 0004; ``DbEventSink`` re-allocates on collision).
     # UNIQUE ``prev_hash``: one successor per row, so a writer that copies the head cannot
     # fork the chain (revision 0013). The CHECK refuses a row whose chain columns are not
-    # hashes at all — the unique index alone would accept the first such row.
+    # hashes at all — the unique index alone would accept the first such row. The PARTIAL
+    # unique index refuses a second ``reading.reserved`` row for one (reading, arm, commit)
+    # (revision 0018, P-792); ``crb.store.events.append_event_checked`` names that refusal
+    # ``ReservationExists``, and ``crb.store.migrate`` compares its predicate, which
+    # alembic's ``compare_metadata`` does not read.
     __table_args__ = (
         Index("uq_events_trace_seq", "trace_id", "seq", unique=True),
         Index("uq_events_prev_hash", "prev_hash", unique=True),
         Index("uq_events_row_hash", "row_hash", unique=True),
+        Index(
+            READING_RESERVED_INDEX,
+            "trace_id",
+            "step_id",
+            "task_id",
+            unique=True,
+            sqlite_where=text(READING_RESERVED_WHERE),
+            postgresql_where=text(READING_RESERVED_WHERE),
+        ),
         CheckConstraint(EVENTS_CHAIN_CHECK, name=EVENTS_CHAIN_CHECK_NAME),
     )
 

@@ -47,7 +47,7 @@ from crb.core.capability import PROJECTION_CELL, ReadingBook, build_capability_m
 from crb.core.checks import ARM_OFF, ARMS
 from crb.core.context_arm import is_arm, mode_admits
 from crb.core.ledger import DEFAULT_READ_ARM, JsonlLedger, rows_for_checks, rows_for_reading
-from crb.core.reading import Reading
+from crb.core.reading import Reading, first_per_id
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DO_NOT_SHIP, RoutingPolicy
 from crb.core.version import APPARATUS_VERSION
 
@@ -174,8 +174,9 @@ def oracle_minimums(spec: str, apparatus: str) -> dict[str, float | None]:
 
 
 def load_readings_file(spec: str) -> list[Reading]:
-    """The readings a ``--readings`` JSON-lines file holds; a record that does not re-hash
-    is refused (a reading licenses nothing it cannot prove)."""
+    """The readings a ``--readings`` JSON-lines file holds, the first record of each
+    ``reading_id`` (``first_per_id``, P-793); a record that does not re-hash is refused (a
+    reading licenses nothing it cannot prove)."""
     if not spec:
         return []
     raw = _read_json(spec, what="--readings")
@@ -186,7 +187,7 @@ def load_readings_file(spec: str) -> list[Reading]:
         if not reading.verify():
             raise CliError(f"--readings: reading {reading.reading_id!r} does not re-hash")
         out.append(reading)
-    return out
+    return first_per_id(out)
 
 
 def cmd_route(args: argparse.Namespace) -> int:

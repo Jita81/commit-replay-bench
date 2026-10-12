@@ -7,7 +7,9 @@ pool of qualified commits with its SHA-256 — frozen by RULE (every qualified c
 or every one authored since a date), never by a hand-picked list (DL-097). ``POST /readings``
 (operator; CSRF-bound like every cookie-authenticated write) writes one ``reading.registered``
 event under the events store's write lock, so two registrations can never both spend the last
-of a cell's budget; it is refused ``409 pool_seen`` when a pool commit already has a graded row
+of a cell's budget; it is refused ``409 reading_exists`` when the reading is already
+registered (a retried request, under any second or actor, names it in ``detail.reading_id``
+and writes nothing — P-793), ``409 pool_seen`` when a pool commit already has a graded row
 under an arm of the hierarchy at this apparatus, ``422 pool_not_blind`` when the caller names a
 pool the rule does not give, ``409 budget_spent`` when the budget cannot cover the rule, and
 ``422 invalid_reading`` for a shape the ADR forbids, and ``404 campaign_unknown`` when it names
@@ -39,8 +41,8 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               refuses an unsealed posture for a replayed arm, a campaign that does not
               verify (``campaign_unknown``, DL-382) and any campaign on a reading of the
               factory's cell, the forward reading included (``campaign_unsupported_reading``),
-              reads the rows and the readings already registered under the lock, and writes
-              the event; lists readings with every arm's state and the budget per cell;
+              reads the rows and the readings already registered under the lock, refuses a
+              reading already registered (``reading_exists``, P-793), and writes the event; lists readings with every arm's state and the budget per cell;
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
 How:          ``append_event_checked`` (lock → ``crb.core.reading.register`` → insert) →
@@ -99,6 +101,7 @@ from crb.core.reading import (
     campaign_unsupported,
     cell_error_budget,
     evaluate,
+    first_per_id,
     pool_by_rule,
     refuse_unless_blind,
     register,
@@ -206,7 +209,9 @@ def rows_on_standard_arms(
 
 
 def budget_by_cell(readings: Sequence[Reading]) -> list[dict[str, Any]]:
-    """What each cell (repository × cell key × apparatus × class-set version) has spent."""
+    """What each cell (repository × cell key × apparatus × class-set version) has spent —
+    each ``reading_id`` once (``first_per_id``, P-793)."""
+    readings = first_per_id(readings)
     seen: dict[tuple[str, str, str, str], Reading] = {}
     for r in readings:
         seen.setdefault(r.budget_key, r)
@@ -470,8 +475,9 @@ def register_forward_reading(
     """The one reading that can promote an ``S3`` ceiling to a standard: ``S2`` on the
     factory's cell, counted only on calibration builds graded on a second person's held-out
     acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
-    ``ceiling`` now, **409** ``budget_spent`` when the ceiling's cell budget cannot cover the
-    rule, **404** for a reading the repository does not have, **422**
+    ``ceiling`` now, **409** ``reading_exists`` when the same forward reading is already
+    registered (a retry writes nothing — P-793), **409** ``budget_spent`` when the ceiling's
+    cell budget cannot cover the rule, **404** for a reading the repository does not have, **422**
     ``campaign_unsupported_reading`` for any ``campaign_id`` — before anything is read or
     written: its calibration builds are factory runs, which carry no ``reading_id``, so
     nothing ties them to the reading and no submit gate requires them to be filed under its

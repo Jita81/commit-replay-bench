@@ -4,9 +4,11 @@ A cell is licensed only by a reading registered before its first attempt: the ce
 hierarchy of context arms (richest first), the look rule, the share of the cell's error budget
 it spends, the test author's model and the frozen pool of qualified commits. The CLI writes it
 as one JSON line to ``<workdir>/readings.jsonl`` (``--readings`` elsewhere) — the file ``crb
-route --readings`` reads — refusing it ``pool_seen`` when a pool commit already has a graded
-row under an arm of the hierarchy at this apparatus, and ``budget_spent`` when the cell's
-budget cannot cover it. ``crb reading list`` prints what is registered.
+route --readings`` reads — refusing it ``reading_exists`` when the file already holds it (a
+retried registration, under any second or actor, writes nothing — P-793), ``pool_seen`` when
+a pool commit already has a graded row under an arm of the hierarchy at this apparatus, and
+``budget_spent`` when the cell's budget cannot cover it. ``crb reading list`` prints what is
+registered, each ``reading_id`` once.
 
 Navigation
 ----------
@@ -17,7 +19,9 @@ What it does: Builds the full cell from its flags, freezes the pool by rule — 
               for a replayed arm and a ``--campaign`` whose ``--campaign-record`` does not
               verify (``campaign_unknown``, DL-382), registers through
               ``crb.core.reading.register`` against the JSONL ledger and the readings already
-              on file, and appends the record; lists the registered readings with their spend.
+              on file (a reading already on file is ``reading_exists``: exit 2, nothing
+              appended), and appends the record; lists the registered readings with their
+              spend, keeping the first record of each ``reading_id`` (P-793).
 How:          ``Workdir.load_tasks`` → ``register`` (the core's rules, unchanged) → one JSON
               line appended with ``fsync``.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
@@ -56,7 +60,14 @@ from crb.core.ledger import (
     is_sealed_class,
     jsonl_append_lock,
 )
-from crb.core.reading import RULE_LOOK_V1, RULES, Reading, ReadingRefused, pool_by_rule
+from crb.core.reading import (
+    RULE_LOOK_V1,
+    RULES,
+    Reading,
+    ReadingRefused,
+    first_per_id,
+    pool_by_rule,
+)
 from crb.core.reading import register as register_reading
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
@@ -138,7 +149,8 @@ def readings_path(args: argparse.Namespace) -> Path:
 
 
 def load_readings(path: Path) -> list[Reading]:
-    """Every reading on file; one that does not re-hash is refused, never skipped quietly."""
+    """Every reading on file, the first record of each ``reading_id`` (``first_per_id``,
+    P-793); one that does not re-hash is refused, never skipped quietly."""
     if not path.is_file():
         return []
     out: list[Reading] = []
@@ -149,7 +161,7 @@ def load_readings(path: Path) -> list[Reading]:
         if not reading.verify():
             raise CliError(f"{path}:{n}: reading {reading.reading_id!r} does not re-hash")
         out.append(reading)
-    return out
+    return first_per_id(out)
 
 
 def campaign_named(campaign_id: str, record: str) -> str:

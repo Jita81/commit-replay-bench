@@ -108,6 +108,7 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guard
               src/crb/server/builder_login.py (the run preflight and the verification cache)
 Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py,
               tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py,
+              tests/test_p792_reserved.py (the stamp names the argv overrides),
               tests/test_nested_model_call.py (the deny rules and credential names)
 Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
               per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
@@ -868,8 +869,11 @@ class ClaudeCodeBuilder:
         self.workdir_alias = workdir_alias.rstrip("/")
 
     def describe(self) -> dict[str, Any]:
-        """The apparatus stamp: model, tool set, effort, ``bare``/``auth`` posture."""
-        d = {
+        """The apparatus stamp: model, tool set, effort, ``bare``/``auth`` posture, and the
+        argv overrides when set (``extra_args`` follow the rung's own ``--model`` in the argv,
+        so a stamp that hid them would name a model the CLI did not run; P-792). With neither
+        set, the stamp is what it always was."""
+        d: dict[str, Any] = {
             "builder": self.name,
             "model": self.model,
             "provider": self.provider,
@@ -880,6 +884,10 @@ class ClaudeCodeBuilder:
         }
         if self.workdir_alias:
             d["container_workdir"] = self.workdir_alias
+        if self.extra_args:
+            d["extra_args"] = list(self.extra_args)
+        if self.claude_binary:
+            d["claude_binary"] = self.claude_binary
         return d
 
     def _binary(self) -> str:

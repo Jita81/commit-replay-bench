@@ -8,10 +8,12 @@ re-exports it for its existing callers.
 Navigation
 ----------
 What it is:   The one reader of ``reading.registered`` events: the verified readings of a
-              repository, in registration order, a forward reading's pool enrolled and a
-              campaign-named reading's admitted runs read.
+              repository, in registration order, each ``reading_id`` once, a forward
+              reading's pool enrolled and a campaign-named reading's admitted runs read.
 What it does: Reads the repository's reading events; keeps a record only when its id and pool
-              hash re-hash and it names this repository; fills a forward reading's pool from the
+              hash re-hash and it names this repository, and only the first record of each
+              ``reading_id`` (``first_per_id``, P-793 — a retried registration stored twice
+              before the ``reading_exists`` refusal reads, lists and spends once); fills a forward reading's pool from the
               held-out records written after it (``with_enrolment``, DL-334); fills a reading
               that names a campaign with the runs admitted under it (``with_admissions``,
               DL-382), so every server reader counts only those runs' rows.
@@ -39,7 +41,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from crb.core.acceptance import HeldOutTests
-from crb.core.reading import READING_EVENT_ACTION, Reading, with_admissions, with_enrolment
+from crb.core.reading import (
+    READING_EVENT_ACTION,
+    Reading,
+    first_per_id,
+    with_admissions,
+    with_enrolment,
+)
 from crb.server.acceptance import load_held_out
 from crb.server.campaigns import admitted_runs
 from crb.store.models import Event
@@ -47,8 +55,9 @@ from crb.store.models import Event
 
 def load_readings(session: Session, repo: str) -> list[Reading]:
     """The repository's registered readings, in registration order. A record whose id or pool
-    hash does not re-hash licenses nothing and is left out (the verified set is what counts).
-    A forward reading's pool is filled here, once, from the held-out records written after it
+    hash does not re-hash licenses nothing and is left out (the verified set is what counts),
+    and a ``reading_id`` stored twice is read once, by its first record (``first_per_id``,
+    P-793). A forward reading's pool is filled here, once, from the held-out records written after it
     (``crb.core.reading.with_enrolment``, DL-334) — so every reader of readings, the factory's
     gate included, reads the same enrolled pool. A reading that names a campaign is filled with
     the runs admitted under it (``with_admissions``, DL-382): it counts only their rows."""
@@ -71,7 +80,7 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
                     admissions[reading.campaign_id] = admitted_runs(session, reading.campaign_id)
                 reading = with_admissions(reading, admissions[reading.campaign_id])
             out.append(reading)
-    return out
+    return first_per_id(out)
 
 
 __all__ = ["load_readings"]

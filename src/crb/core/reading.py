@@ -36,7 +36,10 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   ``A0+L`` are descriptive and spend nothing.
 * **The budget.** One error budget per (repository, cell key, apparatus, class-set version),
   :data:`CELL_ERROR_BUDGET` unless the operator fixed another value; every registration spends
-  its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend.
+  its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend. A
+  registration of a reading already registered — a retried request, under any second or
+  actor — is refused ``reading_exists`` before the pool or the budget is read, and every
+  reader keeps the first record of a ``reading_id`` (:func:`first_per_id`, P-793).
 * **The forward reading** (ADR-0026 items 4 and 8, DL-334). :func:`register_forward` registers
   ``S2`` on the factory's cell of a ceiling's class, size and language — refused
   ``not_a_ceiling`` unless the named reading reads ``ceiling`` — spending from the CEILING's
@@ -59,7 +62,8 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               (``campaign_id``, hashed when present — DL-382) and reads only rows of runs
               admitted under it (``with_admissions``; none when unread; a row of any other
               run is invisible to it); refuses a campaign on the factory's cell
-              (``campaign_unsupported_reading``), a registration over
+              (``campaign_unsupported_reading``), a reading already registered
+              (``reading_exists`` — a retry writes nothing), a registration over
               commits already graded under its arms at its apparatus (``pool_seen``), beyond
               the cell's budget (``budget_spent``) or outside the arm rules; evaluates each
               arm of a reading over the ledger's rows in the seeded order; stops the
@@ -128,6 +132,10 @@ if TYPE_CHECKING:
 READING_SCHEMA = "crb.reading.v1"
 #: The event a registration is written as (stage ``system``).
 READING_EVENT_ACTION = "reading.registered"
+#: The event that reserves one commit on one arm of a reading (stage ``system``; trace = the
+#: reading id, ``step_id`` = the arm, ``task_id`` = the commit). The store holds at most one
+#: per (reading, arm, commit): revision 0018's partial unique index (P-792).
+READING_RESERVED_ACTION = "reading.reserved"
 #: The prefix of the seeded order's preimage (ADR-0026 item 2).
 SEED_PREFIX = "crb.reading.v1|"
 
@@ -208,6 +216,10 @@ REFUSAL_NOT_A_CEILING = "not_a_ceiling"
 #: requires them to be filed under its campaign — the reading's evidence would rest on a
 #: filing habit. One rule for ``POST /readings`` and ``POST /readings/forward``.
 REFUSAL_CAMPAIGN_UNSUPPORTED = "campaign_unsupported_reading"
+#: A registration of a reading already registered (P-793): the same ``reading_id``, or the
+#: same registration under another second or another actor (:func:`registered_twin`). A
+#: retried request writes nothing and spends nothing; the caller reads the reading back.
+REFUSAL_EXISTS = "reading_exists"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
@@ -215,7 +227,11 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_NOT_BLIND,
     REFUSAL_NOT_A_CEILING,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
+    REFUSAL_EXISTS,
 )
+#: The fields of a reading's body that say who registered it and when, not what it reads:
+#: a retried registration differs from the first only in these (P-793).
+PROVENANCE_FIELDS: tuple[str, ...] = ("registered_at", "actor")
 
 # --- the pool rule (DL-097) --------------------------------------------------------------
 #: Every qualified commit of the cell.
@@ -631,9 +647,55 @@ def cell_error_budget(env: Mapping[str, str] | None = None) -> float:
     return value
 
 
+def first_per_id(readings: Iterable[Reading]) -> list[Reading]:
+    """``readings`` with the first record of each ``reading_id`` kept, in order (P-793): a
+    store that holds a registration twice — a retried request written before the refusal
+    existed — reads, lists and spends it once."""
+    seen: set[str] = set()
+    out: list[Reading] = []
+    for r in readings:
+        if r.reading_id not in seen:
+            seen.add(r.reading_id)
+            out.append(r)
+    return out
+
+
 def budget_spent(readings: Iterable[Reading], key: tuple[str, str, str, str]) -> float:
-    """What the readings already registered on the cell ``key`` have spent."""
-    return sum(r.spend for r in readings if r.budget_key == key)
+    """What the readings already registered on the cell ``key`` have spent — each
+    ``reading_id`` once (:func:`first_per_id`)."""
+    return sum(r.spend for r in first_per_id(readings) if r.budget_key == key)
+
+
+def registration_content(reading: Reading) -> dict[str, Any]:
+    """What ``reading`` registers, without who registered it or when
+    (:data:`PROVENANCE_FIELDS`) and without its pool's list (a forward reading's pool is
+    filled on read; ``pool_sha256`` keeps the registered pool)."""
+    drop = {*PROVENANCE_FIELDS, "pool"}
+    return {k: v for k, v in reading.body().items() if k not in drop}
+
+
+def registered_twin(reading: Reading, existing: Iterable[Reading]) -> Reading | None:
+    """The reading in ``existing`` that ``reading`` repeats, or ``None`` (P-793): one with the
+    same ``reading_id``, or one that registers the same content (:func:`registration_content`)
+    — the id hashes ``registered_at`` and ``actor``, so a retry a second later or by another
+    operator has a new id and would otherwise be a second reading spending the budget twice."""
+    content = registration_content(reading)
+    for r in existing:
+        if r.reading_id == reading.reading_id or registration_content(r) == content:
+            return r
+    return None
+
+
+def _refuse_twin(reading: Reading, existing: Iterable[Reading]) -> None:
+    """Raise ``reading_exists`` when ``reading`` is already registered (:func:`registered_twin`)."""
+    twin = registered_twin(reading, existing)
+    if twin is not None:
+        raise ReadingRefused(
+            f"reading {twin.reading_id} is already registered — a retried registration "
+            "writes nothing and spends nothing; read it back with GET /readings",
+            code=REFUSAL_EXISTS,
+            detail={"reading_id": twin.reading_id},
+        )
 
 
 def _validate(
@@ -736,7 +798,10 @@ def register(
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
-    Refused ``pool_seen`` when any pool commit — or another commit of the same change — already
+    Refused ``reading_exists`` first, when ``existing`` already holds it — the same id, or the
+    same registration under another second or actor (:func:`registered_twin`, P-793), so a
+    retried request is answered before any rule reads the pool or the budget;
+    ``pool_seen`` when any pool commit — or another commit of the same change — already
     has a graded row under an arm of the hierarchy at this apparatus, whatever class-set version
     graded it;
     ``budget_spent`` when the cell's spend plus this rule's P(deliver | 0.80) would exceed
@@ -774,41 +839,9 @@ def register(
     author = author_model or (next(iter(authors)) if authors else "")
     key = reading_cell_key(cell_d, org_class)
     ordered = seeded_order(repo, key, pool)
-    arms = set(hier)
-    pool_set = set(ordered)
-    pool_changes = {v for c, v in (changes or {}).items() if c in pool_set and v}
-    seen = sorted(
-        {
-            r.task_id
-            for r in rows
-            if r.repo == repo
-            and r.apparatus_version == apparatus
-            and r.context_arm in arms
-            and (r.task_id in pool_set or (r.change_id and r.change_id in pool_changes))
-        }
-    )
-    if seen:
-        raise ReadingRefused(
-            f"{len(seen)} pool commit(s) already have a graded row under an arm of this reading "
-            f"at apparatus {apparatus} — a reading counts only commits it has not seen "
-            "(ADR-0026 item 2); register a pool of commits no arm has graded",
-            code=REFUSAL_POOL_SEEN,
-            detail={"commits": seen[:20], "n": len(seen)},
-        )
     cap = cell_error_budget() if budget is None else budget
     spend = rule_spend(rule)
-    prior = list(existing)
-    budget_key = (repo, key, apparatus, taxonomy)
-    spent = budget_spent(prior, budget_key)
-    if spent + spend > cap + 1e-12:
-        raise ReadingRefused(
-            f"the cell's error budget is {cap:.2%}; {spent:.2%} is spent and {rule} would spend "
-            f"{spend:.2%} more — no further reading can be registered on this cell at "
-            f"apparatus {apparatus} and class-set version {taxonomy}",
-            code=REFUSAL_BUDGET_SPENT,
-            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
-        )
-    return Reading(
+    reading = Reading(
         repo=repo,
         cell=cell_d,
         apparatus=apparatus,
@@ -833,6 +866,39 @@ def register(
         smallest_effect=smallest_effect,
         campaign_id=campaign_id,
     )
+    prior = list(existing)
+    _refuse_twin(reading, prior)
+    arms = set(hier)
+    pool_set = set(ordered)
+    pool_changes = {v for c, v in (changes or {}).items() if c in pool_set and v}
+    seen = sorted(
+        {
+            r.task_id
+            for r in rows
+            if r.repo == repo
+            and r.apparatus_version == apparatus
+            and r.context_arm in arms
+            and (r.task_id in pool_set or (r.change_id and r.change_id in pool_changes))
+        }
+    )
+    if seen:
+        raise ReadingRefused(
+            f"{len(seen)} pool commit(s) already have a graded row under an arm of this reading "
+            f"at apparatus {apparatus} — a reading counts only commits it has not seen "
+            "(ADR-0026 item 2); register a pool of commits no arm has graded",
+            code=REFUSAL_POOL_SEEN,
+            detail={"commits": seen[:20], "n": len(seen)},
+        )
+    spent = budget_spent(prior, reading.budget_key)
+    if spent + spend > cap + 1e-12:
+        raise ReadingRefused(
+            f"the cell's error budget is {cap:.2%}; {spent:.2%} is spent and {rule} would spend "
+            f"{spend:.2%} more — no further reading can be registered on this cell at "
+            f"apparatus {apparatus} and class-set version {taxonomy}",
+            code=REFUSAL_BUDGET_SPENT,
+            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
+        )
+    return reading
 
 
 def register_forward(
@@ -857,7 +923,8 @@ def register_forward(
     of the same class, size and language, built by ``builder`` / ``model`` / ``provider``; it
     inherits the ceiling's apparatus, class-set version, posture class and checks arm, so the
     factory's gate reads the two in one scope, and it spends its rule's P(deliver | 0.80) from
-    the CEILING's cell budget (``budget_spent`` when that cannot cover it). Its pool is the
+    the CEILING's cell budget (``budget_spent`` when that cannot cover it; ``reading_exists``
+    before that when ``existing`` already holds it — :func:`registered_twin`). Its pool is the
     rule :data:`POOL_RULE_CALIBRATION`: the calibration builds whose held-out tests are
     written after it — no ticket is chosen by a person, and none exists yet. It names no
     campaign (DL-382, :func:`campaign_unsupported`): its builds are factory runs, which carry
@@ -892,16 +959,7 @@ def register_forward(
         raise ReadingRefused(why, code=REFUSAL_INVALID)
     cap = cell_error_budget() if budget is None else budget
     spend = rule_spend(rule)
-    spent = budget_spent(list(existing), base.budget_key)
-    if spent + spend > cap + 1e-12:
-        raise ReadingRefused(
-            f"the ceiling's cell has an error budget of {cap:.2%}; {spent:.2%} is spent and "
-            f"{rule} would spend {spend:.2%} more — a forward reading spends from the same "
-            "budget as the reading that found the ceiling (ADR-0026 item 5)",
-            code=REFUSAL_BUDGET_SPENT,
-            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
-        )
-    return Reading(
+    reading = Reading(
         repo=base.repo,
         cell=cell,
         apparatus=base.apparatus,
@@ -922,6 +980,18 @@ def register_forward(
         hypothesis=hypothesis,
         smallest_effect=smallest_effect,
     )
+    prior = list(existing)
+    _refuse_twin(reading, prior)
+    spent = budget_spent(prior, base.budget_key)
+    if spent + spend > cap + 1e-12:
+        raise ReadingRefused(
+            f"the ceiling's cell has an error budget of {cap:.2%}; {spent:.2%} is spent and "
+            f"{rule} would spend {spend:.2%} more — a forward reading spends from the same "
+            "budget as the reading that found the ceiling (ADR-0026 item 5)",
+            code=REFUSAL_BUDGET_SPENT,
+            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
+        )
+    return reading
 
 
 def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading:
@@ -1122,7 +1192,9 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
     held-out tests are run once, so there is no re-run: an attempt the instrument could not
     observe (``harness``, ``outage``) or whose held-out tests could not be run (``error``)
     leaves the pool with its reason, never a miss; ``fail`` is a miss; ``pass`` on a clean
-    build is clean. A ticket with no attempt yet is pending.
+    build is clean, unless belt 5 was switched off by configuration — then the ticket leaves
+    (``lint_disabled``), as a replayed commit does (P-342), since belt 5 could have changed it.
+    A ticket with no attempt yet is pending.
 
     A forward reading may name no campaign (``campaign_unsupported_reading``, DL-382). If one
     does (a record written by hand), it reads as a replay reading does: only rows of runs its
@@ -1161,6 +1233,11 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
             out.append(CommitReading(item, item, None, LEFT_UNOBSERVED, r.row_hash))
         elif held_out_result(r.labels) == RESULT_ERROR:
             out.append(CommitReading(item, item, None, LEFT_HELD_OUT_ERROR, r.row_hash))
+        elif lint_could_change(r) and held_out_result(r.labels) == RESULT_PASS:
+            # belt 5 off: the replay loop's rule (P-342, P-792 channel C4). It leaves only an
+            # attempt belt 5 could have changed; a factory row's ``clean`` leaves out its
+            # held-out result, so a held-out ``fail`` is the miss it is whatever the linter says
+            out.append(CommitReading(item, item, None, LEFT_LINT_DISABLED, r.row_hash))
         else:
             clean = r.clean and not r.disqualified and held_out_result(r.labels) == RESULT_PASS
             out.append(CommitReading(item, item, clean, "", r.row_hash))
@@ -1590,10 +1667,13 @@ __all__ = [
     "POOL_RULE_ALL",
     "POOL_RULE_CALIBRATION",
     "POOL_RULE_SINCE",
+    "PROVENANCE_FIELDS",
     "READING_EVENT_ACTION",
+    "READING_RESERVED_ACTION",
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
     "REFUSAL_CAMPAIGN_UNSUPPORTED",
+    "REFUSAL_EXISTS",
     "REFUSAL_NOT_A_CEILING",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
@@ -1620,6 +1700,7 @@ __all__ = [
     "canonical_cell_key",
     "cell_error_budget",
     "evaluate",
+    "first_per_id",
     "latest_outcome",
     "look_state",
     "outcomes_for_cell",
@@ -1630,6 +1711,8 @@ __all__ = [
     "refuse_unless_blind",
     "register",
     "register_forward",
+    "registered_twin",
+    "registration_content",
     "rule_spend",
     "seed_of",
     "seeded_order",

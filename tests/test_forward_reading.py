@@ -10,11 +10,12 @@ What it does: Pins that a forward reading registers only on a cell that reads ``
               whose held-out tests were written after it, in the order they were written; that
               it counts only an ``S2`` row graded on held-out tests (``acceptance: held_out``),
               at rung ``r1``, graded after it, and reads a held-out ``fail`` as a miss and an
-              ``error``, another builder or a harness row as leaving the pool; that twenty passes
-              promote the ceiling to an ``S2`` standard, while more ``S3`` rows, a pending or an
-              insufficient forward reading never do; that one under a campaign counts only first
-              attempts its campaign admitted (DL-382); and that the ledger's routing first
-              attempts read the same rule (P-690).
+              ``error``, another builder, a harness row or a pass graded with belt 5 switched
+              off (P-792 channel C4) as leaving the pool; that twenty passes promote the
+              ceiling to an ``S2`` standard, while more ``S3`` rows, a pending or an
+              insufficient forward reading never do; that one under a campaign counts only
+              first attempts its campaign admitted (DL-382); and that the ledger's routing
+              first attempts read the same rule (P-690).
 How:          ``fixtures.readings`` for the ceiling reading and its sealed rows;
               ``register_forward`` and ``with_enrolment`` over ``HeldOutTests`` records;
               factory ``S2`` rows built with ``fixtures.posture.posture_row``.
@@ -46,15 +47,18 @@ from crb.core.acceptance import (
     none_labels,
 )
 from crb.core.ledger import GradeRow, first_attempts
+from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     LEFT_HARNESS,
     LEFT_HELD_OUT_ERROR,
+    LEFT_LINT_DISABLED,
     LEFT_NOT_GRADED,
     LEFT_OTHER_CELL,
     OUTCOME_CEILING,
     OUTCOME_STANDARD,
     POOL_RULE_CALIBRATION,
     REFUSAL_BUDGET_SPENT,
+    REFUSAL_EXISTS,
     REFUSAL_NOT_A_CEILING,
     RULE_LOOK_V1_LATE,
     STATE_DELIVER,
@@ -63,6 +67,7 @@ from crb.core.reading import (
     Reading,
     ReadingOutcome,
     ReadingRefused,
+    arm_reading,
     budget_spent,
     evaluate,
     latest_outcome,
@@ -72,13 +77,15 @@ from crb.core.reading import (
     with_enrolment,
 )
 from fixtures.posture import posture_row
-from fixtures.readings import CELL, REPO, S1, commits, register_reading, rows_for
+from fixtures.readings import CELL, REPO, S1, commits, register_reading, rows_for, sealed_row
 
 FWD_AT = "2026-09-27T12:00:00+00:00"
 WRITTEN = "2026-09-27T13:00:00+00:00"
 GRADED = "2026-09-27T14:00:00+00:00"
 BUILDER, MODEL, PROVIDER = "claude_code", "claude-sonnet-5", "anthropic"
 FACTORY_CELL = {**CELL, "process_step": "factory"}
+#: Belt 5 switched off by configuration (``RepoConfig.lint.disabled``), as a row stamps it.
+LINT_OFF = {"lint_reason": LINT_DISABLED_BY_CONFIG}
 
 
 def _ceiling() -> tuple[Reading, list[GradeRow], ReadingOutcome]:
@@ -196,11 +203,25 @@ def test_a_forward_reading_registers_only_on_a_ceiling_and_reads_s2_on_the_facto
 
 def test_a_forward_reading_spends_from_the_ceilings_one_budget() -> None:
     """ADR-0026 item 5: one budget per cell, across every phase — a forward reading spends
-    from the ceiling's cell, never a fresh one; a second look.v1 would overspend 5%."""
+    from the ceiling's cell, never a fresh one; a second look.v1 would overspend 5%. The same
+    forward reading registered again is a retry, refused ``reading_exists`` before the budget
+    is read (P-793)."""
     reading, _rows, ceiling = _ceiling()
     fwd = _forward(ceiling)
     assert fwd.budget_key == reading.budget_key
     assert budget_spent([reading, fwd], reading.budget_key) == pytest.approx(2 * fwd.spend)
+    with pytest.raises(ReadingRefused) as exc:
+        register_forward(  # the same forward reading again: a retry
+            ceiling=ceiling,
+            builder=BUILDER,
+            model=MODEL,
+            provider=PROVIDER,
+            actor="op-1",
+            existing=[reading, fwd],
+            now=FWD_AT,
+        )
+    assert exc.value.code == REFUSAL_EXISTS
+    assert exc.value.detail == {"reading_id": fwd.reading_id}
     with pytest.raises(ReadingRefused) as exc:
         register_forward(
             ceiling=ceiling,
@@ -210,6 +231,7 @@ def test_a_forward_reading_spends_from_the_ceilings_one_budget() -> None:
             actor="op-1",
             existing=[reading, fwd],
             now=FWD_AT,
+            hypothesis="a second question",
         )
     assert exc.value.code == REFUSAL_BUDGET_SPENT
     late = register_forward(
@@ -297,6 +319,46 @@ def test_a_held_out_fail_is_a_miss_and_an_instrument_failure_leaves_the_pool() -
     assert by["T-3"].left == LEFT_OTHER_CELL
     assert by["T-4"].left == LEFT_HARNESS
     assert arm.look.counted == 2 and arm.look.misses == 1
+
+
+def test_p792_c4_forward_lint_disabled_is_not_a_hit_legacy() -> None:
+    """P-792 channel C4 (round-5 enumeration probe ``test_zz_enum_fwd_lint_probe``): with belt 5
+    switched off by configuration (``PUT /repos`` ``lint.disabled``) a build that would fail
+    only the linter grades clean. The replay loop makes such a first attempt leave the pool
+    (P-342); the forward reading counted it as a hit, so switching the linter off raised the
+    rate that promotes a ceiling. Its ticket now leaves (``lint_disabled``), the same rule on
+    both paths, and the next ticket takes its place."""
+    _reading, _rows, ceiling = _ceiling()
+    recs = [_record(i) for i in range(21)]
+    fwd = with_enrolment(_forward(ceiling), recs)
+    off = _s2_row(recs[0], labels={**held_out_labels(recs[0], RESULT_PASS), **LINT_OFF})
+    assert off.clean and off.lint_reason == LINT_DISABLED_BY_CONFIG
+    arm = evaluate(fwd, [off, *(_s2_row(r) for r in recs[1:])]).arms["S2"]
+    assert (arm.commits[0].outcome, arm.commits[0].left) == (None, LEFT_LINT_DISABLED)
+    assert "T-0" not in arm.counted_commits
+    assert (arm.look.counted, arm.look.clean, arm.look.state) == (20, 20, STATE_DELIVER)
+    # the replay loop reads the same lint state the same way
+    replay = register_reading(commits(1))
+    row = sealed_row(replay.pool[0], labels=dict(LINT_OFF))
+    assert arm_reading(replay, "S3", [row]).commits[0].left == LEFT_LINT_DISABLED
+
+
+def test_a_lint_disabled_forward_miss_is_still_a_miss() -> None:
+    """P-342 on the forward path: belt 5 off lets a ticket leave only when belt 5 could have
+    changed its outcome — a build clean on every other belt AND on its held-out tests. A
+    held-out ``fail`` or a red build is the miss it is whatever the linter says; erasing it
+    would let switching the linter off help."""
+    _reading, _rows, ceiling = _ceiling()
+    recs = [_record(i) for i in range(2)]
+    fwd = with_enrolment(_forward(ceiling), recs)
+    rows = [
+        _s2_row(recs[0], labels={**held_out_labels(recs[0], RESULT_FAIL), **LINT_OFF}),
+        _s2_row(recs[1], clean=False, labels={**held_out_labels(recs[1], RESULT_PASS), **LINT_OFF}),
+    ]
+    assert rows[0].clean and rows[0].lint_reason == LINT_DISABLED_BY_CONFIG
+    arm = evaluate(fwd, rows).arms["S2"]
+    assert [(c.outcome, c.left) for c in arm.commits] == [(False, "")] * 2
+    assert arm.look.counted == 2 and arm.look.misses == 2
 
 
 # --- promotion --------------------------------------------------------------------------

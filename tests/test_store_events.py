@@ -9,14 +9,20 @@ What it does: Pins that every ``StepEvent`` field survives the round trip, that 
               by ``seq`` and resumable from ``after``, that the read limit is clamped, that
               ``emit_many`` batches and falls back row by row, that a failed insert is logged and
               dropped — never raised into the run — even when the factory itself is broken, that
-              the table is append-only, and that ``append_event`` allocates the next ``seq`` and
-              never raises.
-How:          A temp SQLite session factory; ``DbEventSink`` through an ``Emitter``.
+              the table is append-only, that ``append_event`` allocates the next ``seq`` and
+              never raises, and that ``append_event_checked`` stores the ``task_id`` and
+              ``step_id`` it is given (P-792) while a caller that names neither writes and chains
+              the row it wrote before.
+How:          A temp SQLite session factory; ``DbEventSink`` through an ``Emitter``; the
+              ``append_event_checked`` cases on the shared ``backend`` fixture (SQLite always,
+              PostgreSQL when ``CRB_TEST_POSTGRES_URL`` is set), each row's hash recomputed from
+              a hand-listed body.
 Layer:        tests — docs/ARCHITECTURE.md#72-observability
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md
 Works with:   src/crb/store/events.py (under test), src/crb/observability/events.py (the
               ``StepEvent`` envelope and ``Emitter``), src/crb/server/routes/runs.py (SSE reads
-              the same table), tests/test_server_routes_runs.py
+              the same table), tests/test_server_routes_runs.py, tests/conftest_store.py
+              (the backends), src/crb/core/event_chain.py (the hash rule)
 Tested by:    tests/test_store_events.py
 Touch when:   never for a new repository; a field is added to ``StepEvent`` (the round-trip case
               must list it); the read limit or batching changes.
@@ -26,21 +32,31 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from crb.core.event_chain import GENESIS_HASH, event_row_hash
 from crb.observability.events import Emitter, StepEvent, StepStatus
 from crb.store import init_db, make_engine, make_session_factory
 from crb.store.events import (
     MAX_READ_LIMIT,
     DbEventSink,
     append_event,
+    append_event_checked,
     count_events,
     last_seq,
     read_events,
+    verify_events,
 )
+from crb.store.models import Event
+
+try:
+    from tests.conftest_store import SHA, Backend, backend, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import SHA, Backend, backend, pg_schema  # noqa: F401
 
 
 @pytest.fixture
@@ -49,6 +65,14 @@ def factory(tmp_path: Path) -> sessionmaker[Session]:
     engine = make_engine(f"sqlite:///{tmp_path / 'events.db'}")
     init_db(engine)
     return make_session_factory(engine)
+
+
+@pytest.fixture
+def db(backend: Backend) -> Backend:
+    """The shared backend (SQLite always, PostgreSQL when ``CRB_TEST_POSTGRES_URL`` is set)
+    with every table and trigger installed."""
+    init_db(backend.engine)
+    return backend
 
 
 def test_round_trip_preserves_every_field(factory: sessionmaker[Session]) -> None:
@@ -241,3 +265,116 @@ def test_seq_collision_is_reallocated_under_the_lock_never_dropped(
             {"prev": "c" * 64, "row": "d" * 64},
         )
         s.commit()
+
+
+def _stored(b: Backend, trace_id: str) -> list[Event]:
+    with b.factory() as s:
+        return list(
+            s.execute(select(Event).where(Event.trace_id == trace_id).order_by(Event.id)).scalars()
+        )
+
+
+def _body_as_today(ev: StepEvent, *, step_id: str = "", task_id: str = "") -> dict[str, Any]:
+    """The hashed values of a row ``append_event_checked`` writes, listed by hand: only the
+    trace, stage, action, actor, repo and payload come from the caller (and now the step and
+    task ids); every other column is the envelope's default. A column that drifted from this
+    list would change the row's hash."""
+    return {
+        "event_id": ev.event_id,
+        "trace_id": ev.trace_id,
+        "seq": ev.seq,
+        "timestamp": ev.timestamp,
+        "stage": "system",
+        "action": ev.action,
+        "status": "ok",
+        "step_id": step_id,
+        "parent_step_id": "",
+        "actor": "worker-1",
+        "repo": "r1",
+        "task_id": task_id,
+        "input_ref": "",
+        "output_ref": "",
+        "error_code": "",
+        "error_message": "",
+        "duration_ms": None,
+        "cost_usd": None,
+        "payload": {"v": 1},
+    }
+
+
+def test_append_event_checked_records_task_and_step_ids(db: Backend) -> None:
+    """A reading's reservation (P-792) is keyed by its trace, arm and commit, so the locked
+    writer must store the ``task_id`` and ``step_id`` it is given — before this, it had no
+    way to name them and every checked event read ``''`` for both. The returned event, the
+    read and the stored row all carry them, and the row hashes them into the chain."""
+    trace = "rdg_" + "a" * 24
+    ev = append_event_checked(
+        db.factory,
+        trace_id=trace,
+        stage="system",
+        action="reading.reserved",
+        build=lambda _s: {"v": 1},
+        actor="worker-1",
+        repo="r1",
+        task_id=SHA,
+        step_id="S1@" + "x" * 61,  # the String(64) column's full width
+    )
+    assert (ev.task_id, ev.step_id, ev.seq) == (SHA, "S1@" + "x" * 61, 1)
+    (got,) = read_events(db.factory, trace)
+    assert got.to_dict() == ev.to_dict()
+    (row,) = _stored(db, trace)
+    assert (row.task_id, row.step_id, row.parent_step_id) == (SHA, "S1@" + "x" * 61, "")
+    assert row.prev_hash == GENESIS_HASH
+    assert row.row_hash == event_row_hash(
+        _body_as_today(ev, step_id="S1@" + "x" * 61, task_id=SHA), GENESIS_HASH
+    )
+    # a second event on another arm of the same trace takes the next seq and chains on
+    ev2 = append_event_checked(
+        db.factory,
+        trace_id=trace,
+        stage="system",
+        action="reading.reserved",
+        build=lambda _s: {"v": 1},
+        actor="worker-1",
+        repo="r1",
+        task_id=SHA,
+        step_id="A0+L",
+    )
+    assert (ev2.seq, ev2.step_id) == (2, "A0+L")
+    rows = _stored(db, trace)
+    assert [(r.step_id, r.task_id) for r in rows] == [("S1@" + "x" * 61, SHA), ("A0+L", SHA)]
+    assert rows[1].prev_hash == rows[0].row_hash
+    report = verify_events(db.factory)
+    assert report.ok and report.rows == 2 and report.head == rows[1].row_hash
+
+
+def test_append_event_checked_defaults_are_unchanged(db: Backend) -> None:
+    """The new keywords default to the envelope's own ``''``, so every existing caller (the
+    readings, campaigns, acceptance and runs routes, which name neither) writes the row it
+    wrote before: both ids empty, and a ``row_hash`` equal to the hash of the hand-listed
+    body that has no ids. An event written with the defaults and one written with the ids
+    given as ``''`` are the same row, and both chain."""
+    trace = "rdg_" + "b" * 24
+    kw: dict[str, Any] = {
+        "trace_id": trace,
+        "stage": "system",
+        "action": "reading.registered",
+        "build": lambda _s: {"v": 1},
+        "actor": "worker-1",
+        "repo": "r1",
+    }
+    plain = append_event_checked(db.factory, **kw)
+    explicit = append_event_checked(db.factory, **kw, task_id="", step_id="")
+    first, second = _stored(db, trace)
+    for ev, row, prev in ((plain, first, GENESIS_HASH), (explicit, second, first.row_hash)):
+        assert (ev.task_id, ev.step_id) == ("", "")
+        assert (row.task_id, row.step_id) == ("", "")
+        assert row.prev_hash == prev
+        assert row.row_hash == event_row_hash(_body_as_today(ev), prev)
+    (r1, r2) = read_events(db.factory, trace)
+    assert r1.to_dict() == plain.to_dict() and r2.to_dict() == explicit.to_dict()
+    assert {k: v for k, v in r1.to_dict().items() if k not in ("event_id", "seq", "timestamp")} == {
+        k: v for k, v in r2.to_dict().items() if k not in ("event_id", "seq", "timestamp")
+    }
+    report = verify_events(db.factory)
+    assert report.ok and report.rows == 2

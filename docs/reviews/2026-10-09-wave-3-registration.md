@@ -8,8 +8,9 @@ values accepted), Q-14 (the restart and the money), Q-06 (each campaign is appro
 maximum) and his answer on Wave 3's reviews (decision 5). The source is
 `feedback/2026-10-09-project-room-decisions.md` in the private crb-handbook repository. This
 record was written against `main` at `48c25abd`. The values Paul fixed on 2026-10-11, before
-any data, are at the end of part 1 (DL-375 to DL-381), and part 2 is amended to the campaign
-record the product now keeps (DL-374), which each reading names (DL-382).
+any data, are at the end of part 1 (DL-375 to DL-381, and his decision 9, DL-400 to DL-405), and
+part 2 is amended to the campaign record the product now keeps (DL-374), which each reading names
+(DL-382).
 
 **Claims in this record.** Nothing here is measured on a graded row. A protocol value is the one
 ADR-0026 item 13 fixes. A cost is item 13's projection, or arithmetic on it. The rate of dollars
@@ -39,7 +40,7 @@ copies it and adds nothing. The choices it leaves open follow the table.
 | order | the seeded order, below: one order per cell, shared by every arm | item 2 |
 | what counts | a commit's first observed attempt graded after registration, on the reading's checks arm; a `harness` row is run again; a commit the instrument cannot grade leaves the pool, and the next in order takes its place | item 2 |
 | qualification | each cell's pool is mined and qualified first, at no model cost | PLAN, Wave 3 |
-| the loop pair | descriptive: published with its interval beside the minimum detectable effect; it changes no default | item 13 |
+| the loop pair | one test on 64 pooled pairs: a pair is a commit observed in both `A0` and `A0+L`, among the first 16 of its cell's pool; an exact two-sided McNemar test at 0.05, read once, when both arms of every cell are complete (how Q-25 is read, below); it changes no default | item 13; DL-384; DL-402 |
 
 The seeded order is ascending
 `sha256("crb.reading.v1|" + repo + "|" + canonical cell key + "|" + commit sha)` (item 2). The
@@ -84,7 +85,10 @@ row written, so none was chosen knowing a result:
   delivers but the loop or the test author moves the rate by more than noise. Stop if nothing
   moves and the sealed rate sits within noise of the lower bound of the rate taken where the
   answer was reachable. Whichever it is, the result is published with its rows in the
-  repository." The registered smallest effect is each reading's `smallest_effect` (step 4).
+  repository." The registered smallest effect is one value, which every reading carries as
+  `smallest_effect` (step 4; Q-28, DL-402). Q-25 reads the loop's pooled paired difference
+  against it, and "a cell delivers" means a proven standard (Q-27, DL-401), as "How Q-25 is
+  read", after this list, fixes.
 - **When (Q-19; DL-377).** The decision is taken on Friday 6 November 2026, or when Wave 3
   reports, if that is sooner.
 - **The open choices (Q-21; DL-378)**, each as recommended above:
@@ -100,9 +104,106 @@ row written, so none was chosen knowing a result:
   and the ceiling, £80, is $108.00 **[hypothesis — the operator's fixed conversion, not a
   market rate (DL-379)]**. The rate is stored on the campaign record (part 2). The
   ledger's `cost_usd` and the `S1` test author's calls count against the £80; Claude Code's own
-  sessions do not. Stage 1's £40 is released; stage 2 is a new decision (DL-381).
+  sessions do not. Stage 1's £40 is released (DL-381). Stage 2's £40 is released in advance, on
+  a fixed rule (Q-26, DL-400, below), which replaces DL-381's "stage 2 is a new decision".
 - **The freeze (Q-24; DL-375).** No new feature work until Wave 3 reports, except the pre-run
   pull request that made this record's checks the product's own.
+
+**Decision 9, fixed before any data, 2026-10-11 (CRB Project room).** Paul Glover answered the
+handbook's Q-26 to Q-30 yes, each as recommended, and R-13, before any reading was registered,
+any run queued or any Wave 3 row written. The source is
+`feedback/2026-10-11-project-room-decisions.md` in the private crb-handbook repository.
+
+- **Stage 2 is released now, on a fixed rule (Q-26; DL-400).** Stage 2's £40 is released if
+  stage 1 ends at its £40 line, because nothing more fits under $54.00 (part 2), with any cell
+  still waiting on a look, whatever the readings say. A cell is waiting on a look while its
+  reading is `look_pending`, or while its `A0` or `A0+L` arm has run fewer than its 16 commits,
+  which holds back the loop pair's one look (below) **[hypothesis — the reading Claude Code took
+  of "waiting on a look", flagged to Paul: it is the pre-run simulation's, which released stage 2 whenever
+  stage 1 stopped at its line, and in which the descriptive arms were never complete in stage
+  1]**. Claude Code files the release at step 9 and takes no further decision. No stage-1
+  result can hold it back, the interim `A0` and `A0+L` tallies included. Nothing is released
+  when stage 1 ends on a stop (part 2) or with the protocol complete. Under DL-381's "stage 2
+  is a new decision", stage 1's result would have chosen whether to keep measuring.
+- **A cell delivers when it holds a proven standard (Q-27; DL-401).** In Q-25, "a cell
+  delivers" means that `S3` and `S1@<author>` both read `deliver` in that cell. `S3` reading
+  `deliver` alone does not count. With four cells, the chance that some cell delivers by luck
+  is 1.3–1.5% this way, against 7.5–8.1% for `S3` alone. A proven standard comes out in at most
+  5.6% of simulated runs unless `S1` is nearly as clean as `S3`, so Change course or Stop is the
+  likely outcome **[hypothesis — the pre-run simulation, at the host-posture priors]**.
+- **How the loop's difference clears (Q-28; DL-402).** The rule is in "How Q-25 is read",
+  below: the pooled test, and the pooled difference against one registered smallest effect.
+- **The run order is kept (Q-29; DL-403).** Part 1's order and choice (e) stand; the readings
+  are not queued ahead of the descriptive arms.
+- **A reading that infrastructure decides (Q-30; DL-404).** Under the round-5 rule
+  (`reserved.v1`), an outage, a harness fault, a cancel or a missing row after a commit is
+  reserved counts as a miss and is never run again, and the verdict does not change. When at
+  least one of the misses that make a reading `insufficient` is of that kind, so that the
+  builder's patches alone did not decide it, the report labels the reading "insufficient —
+  infrastructure".
+  Q-25's Stop does not fire on that cell alone. Paul then decides whether to register the cell
+  again on a fresh pool.
+- **The builder's own account (R-13; DL-405).** The builder runs in `api_key` mode, on its own
+  Anthropic API key, in a Workspace of its own whose spend limit sits at the ceiling. Paul sets
+  it up and funds it. Part 5's "The builder's account" is the check before the reading runs.
+  The `S1` test author runs on Cerebras (choice (a)).
+
+**How Q-25 is read (amended before step 4, 2026-10-11; DL-384, and decision 9's DL-401 and
+DL-402).** The Wave 3 pre-run red team
+found that Q-25's Continue and Stop could be met or missed by a choice an analyst makes after
+the data is in. These fix the statistics first, for 16 commits in each of four cells, so 64
+pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is observed yet]**:
+
+- **The loop pair.** One test, on the pairs of the four cells pooled. A pair is a commit
+  observed in both `A0` and `A0+L`, among the first 16 of its cell's pool; a commit observed in
+  one arm only is not a pair. With b the number of pairs clean under `A0+L` only and c the
+  number clean under `A0` only, the test is an exact two-sided McNemar test at 0.05: p is
+  twice the binomial probability of at most the smaller of b and c successes in b + c trials
+  at one half, capped at 1, and 1 when b + c is 0.
+- **What "clears" means (Q-28; DL-402, which replaces DL-384's per-cell bound).** The loop's
+  difference is the pooled paired difference, (b − c) / n, with b, c and n counted over the
+  pairs of the four cells pooled: the observed difference in clean share between `A0+L` and
+  `A0`. The loop clears when the pooled test gives p < 0.05 with b above c and the pooled
+  difference is at least the registered smallest effect. Continue's second clause holds when
+  it clears. A difference in either direction is reported; only a positive one clears. Each
+  cell's own paired difference is reported beside it, and is descriptive.
+- **One smallest effect, which no code reads.** All four readings carry one `smallest_effect`,
+  the registered smallest effect, and Paul fixes it before step 4. The product stores
+  `smallest_effect` in each reading and hashes it into the reading's id, but no code reads it.
+  Claude Code computes the test and the comparison from the pairs when the loop pair is read,
+  and the report shows the computation.
+- **What the test can find.** The smallest difference it finds 80% of the time is 22–32 points
+  after stage 1 (about 38 pairs) and 18–25 points after stage 2 (about 64 pairs). A loop effect
+  smaller than about 20 points will usually be missed, so a loop that does not clear has not
+  been shown to do nothing **[hypothesis — the pre-run power simulation, at the host-posture
+  priors]**.
+- **A cell delivers (Q-27; DL-401).** When `S3` and `S1@<author>` both read `deliver` in it, a
+  proven standard. Continue's first clause holds when any cell does.
+- **When it is read.** Once, when both arms of every cell are complete: each cell's `A0` and
+  `A0+L` have run their 16 commits. If the campaign ends first, it is read once then, on the
+  pairs observed, and the record says how many short of 64 it fell. Before that, an `A0` or
+  `A0+L` tally is interim: the stage-1 report labels it "interim, not tested", and nothing
+  rests on the difference, the stage-2 release included.
+- **Noise.** Every Wilson interval this record serves or reports is descriptive (fixed-n, not
+  adjusted for the sequential look): the Wilson 95% interval of clean over counted, taken as
+  if the count had been fixed in advance. That includes the `ci_low` and `ci_high` that
+  `GET /api/v1/readings` serves on each arm (`crb.core.reading`); `look.v1` decides a reading,
+  never an interval. Q-25's "noise" is defined against that fixed-n rate. A rate moves by more
+  than noise when it lies outside the fixed-n Wilson 95% interval of the rate it is compared
+  with, in the same cell: the loop's `A0+L` rate against `A0`'s, the test author's
+  `S1@<author>` rate against `A0`'s. The sealed rate, each cell's `A0` rate, sits within noise
+  of the lower bound of the rate taken where the answer was reachable when that bound, the
+  lower end of that rate's fixed-n Wilson 95% interval, lies inside the sealed rate's own.
+  Which rate that is stays as Paul's words name it; this record recommends the value
+  baseline's blind rate for the cell's size, taken in the host posture where the target commit
+  stays in the object store (part 4's prior), and Paul confirms it before step 4.
+- **Order.** Within each cell, `A0` runs before `A0+L`: a cell's `A0+L` run is queued only
+  after its `A0` run has ended, which narrows choice (e) and leaves `A0` queued beside `S3`
+  from the start. Each run records the levers in force: its apparatus stamp's `extra.learning`
+  (`auto_apply`, `changes`, `overlay`), which the stage-1 report lists per run. Under the
+  fail-closed attempt rule the operator chose for item 2, which a later amendment writes into
+  the "what counts" row, no commit leaves, so none is replaced. Until then, and if an
+  amendment ever allows a replacement, it is queued in both arms.
 
 ## 2. Money
 
@@ -215,8 +316,9 @@ is set to fit. The rule limits how many runs are in flight at once; a worker run
 - a stop: a cost the tally cannot know (an event or row with `cost_known: false`, or a run
   refused `spend_cap_unpriced` because a model it would call has no known price), a refused
   registration, a run whose spend passes its cap plus the headroom it was admitted with (never
-  the headroom now, which its own overshooting attempt raises), or spend the tally cannot place
-  against a run.
+  the headroom now, which its own overshooting attempt raises),
+  a row of an admitted run graded unsealed in the reading's posture class (`scope_fault`), which leaves its arm undecided,
+  or spend the tally cannot place against a run.
 
 On a stop, Claude Code queues nothing more and cancels the runs that have not started; the
 product refuses every new run of a stopped campaign whatever is queued. A running run ends at its
@@ -246,20 +348,63 @@ needs a proxy on the container's one allowed host that understands the API.
   the total against $54.00;
 - for each reading arm: commits counted, clean and missed, and its state (`deliver`,
   `insufficient`, `look_pending` with the commits still needed, or `undecided`);
-- for each descriptive arm: commits run and clean;
+- for each descriptive arm: commits run and clean, labelled "interim, not tested" (the loop
+  pair is tested once, when both arms of every cell are complete; part 1), with the levers in
+  force on each run;
 - every attempt disqualified `nested_model_call`, by run and commit (each counted as a miss above);
+- why stage 1 ended (part 2), which cells still wait on a look, and so whether
+  Q-26's rule releases stage 2 (DL-400);
 - what stage 2 would buy: the statement of part 4.
 
-**Stage 2** starts only on Paul's written release, recorded in the decision log: a new decision
-(DL-381). It is then filed as `POST /api/v1/campaigns/{id}/release` with `{"released_gbp": 80,
-"decision": "<the release's decision log id and words>"}`, which raises the line and never
-passes the ceiling (409 `campaign_release_invalid`). Its line is $108.00 for the campaign in
-all. Nothing is queued while the release is awaited.
+**Stage 2** is released in advance, on a fixed rule (Q-26, DL-400; part 1): when stage 1 ends
+because nothing more fits under $54.00, with any cell still waiting on a look. Claude Code then
+files `POST /api/v1/campaigns/{id}/release` with `{"released_gbp": 80,
+"decision": "<the release's decision log id and words>"}`, the decision being DL-400's id and
+words. The release raises the line and never passes the ceiling (409
+`campaign_release_invalid`). Its line is $108.00 for the campaign in all. No decision is taken
+after stage 1: the stage-1 report (step 8) shows why stage 1 ended and which cells still wait on
+a look, and the release follows from those alone. It does not depend on any reading's state or
+on the interim difference between `A0` and `A0+L`, and the loop pair is tested only as part 1
+says.
 
 **Assumptions.** The ceiling is held against the ledger's `cost_usd`, the cost the builder
 reports, and the `S1` test author's calls, not against the provider's bill. Claude Code's own
 sessions (this one, the campaign's and the reviewer's) are not counted against the £80. Both
 were confirmed by Paul Glover on 2026-10-11 (DL-379).
+
+### Known gaps (recorded before step 4)
+
+The Wave 3 pre-run red team found these, and its triage records them as known gaps rather
+than fixes (DL-384). Each is recorded here with why it is accepted and what the campaign does
+about it:
+
+- **K1, red-once.** RED runs once (`crb.core.qualify`), and the flaky set is never compared
+  with `red.failing`. A flaky target can only add misses, or a clean that the gold control and
+  witness would also see. Step 3 records an audit that `red.failing ⊆ baseline_failing − flaky`
+  for each pool commit, and the step-3 amendment notes its result.
+- **K2, author spend.** `DbEventSink` swallows write errors (`src/crb/store/events.py`), so an
+  `author.attempt` cost can go missing. Each author call is at most $0.15 by item 13, and the
+  headroom holds it **[hypothesis — item 13's assumption, not measured]**. The bias is toward
+  under-counting.
+- **K3, the author's price.** Step 2's success condition gains "and `<author>` has a known
+  price". Otherwise the run is refused `spend_cap_unpriced`, which is already a stop.
+- **K4, an orphaned container.** Only a hard worker death orphans a paid container: SIGTERM
+  drains, and `keep_patch` never raises. Operator rules for the campaign: no `kill -9` during
+  it, and a check for orphaned builder containers before resuming after a crash.
+- **K5, cache writes.** `Pricing` (`src/crb/builders/budget.py`) has no cache-write rate, so
+  cache creation is priced at the input rate: an under-count of about 3% **[hypothesis — the
+  red team's estimate; method: Pricing in src/crb/builders/budget.py read against the
+  published rates]**. It cannot flip a verdict, because the ceiling is held against `cost_usd`
+  (DL-379).
+- **K6, residuals.**
+  - Once the builder is kept from calling a model inside its container (F5), a nested `claude`
+    call by an obfuscated route would still go unmetered; an API-aware proxy to catch it is out
+    of proportion.
+  - Pre-2.4 history — the 2026-09-25 export, the Jita81/cobra pull requests — cannot be erased,
+    but it cannot bias a pool that holds every qualified commit by rule (choice (c)) and is
+    frozen.
+  - The code half of Wilson and of treatment order is not fixed in code; the labels and the
+    order in part 1 ("How Q-25 is read") cover it.
 
 ## 3. The reviews
 
@@ -329,12 +474,13 @@ partly a person's, as decision 7 asked. Both records stay in the hash-chained re
 7 asks for; not yet computed]**:
 
 - on `mergeable`, the primary measure: the share on which Paul and Claude agree, with its Wilson
-  95% interval, and Cohen's κ with a bootstrap percentile interval (10,000 resamples from a fixed
+  95% interval, descriptive (fixed-n, not adjusted for the sequential look), and Cohen's κ with a bootstrap percentile interval (10,000 resamples from a fixed
   seed; resamples where κ is undefined are counted and reported);
 - on the headline verdict, the secondary measure: the same two figures over the six verdicts.
 
 At n = 10 both intervals are wide, and the report says so plainly: 9 agreements of 10 give a
-Wilson 95% interval of 59.6% to 98.2% **[hypothesis — an illustration of the width at n = 10, not
+Wilson 95% interval of 59.6% to 98.2%, descriptive (fixed-n, not adjusted for the sequential
+look) **[hypothesis — an illustration of the width at n = 10, not
 a result; method: the Wilson score interval]**. The agreement is a first look at whether Claude's
 verdicts can stand in for a person's, not a measure of it.
 
@@ -359,7 +505,8 @@ measured at apparatus 2.2 in the host posture, not at 2.4 in the sealed posture;
 value baseline's headline table]**.
 
 **The precision it buys.** The half-width, in points, of the Wilson 95% interval on the share of
-reviewed patches judged mergeable, at n = E:
+reviewed patches judged mergeable, at n = E, an interval that is descriptive (fixed-n, not
+adjusted for the sequential look):
 
 ```text
 h = z / (1 + z²/n) × √( p(1 − p)/n + z²/(4n²) ),   z = 1.96
@@ -383,7 +530,8 @@ a result.
 
 The interval treats each patch as independent. `A0` and `A0+L` patches of one commit are paired,
 so it is narrower than the commits alone support **[hypothesis — unmeasured; the value baseline
-says the same of attempts and tasks]**.
+says the same of attempts and tasks]**. Like every Wilson interval this record serves or
+reports, it is descriptive (fixed-n, not adjusted for the sequential look).
 
 **A worked example.** From the descriptive arms alone, with no `S1` patch and the baseline's
 rates: E = 2 arms × 2 cells × 16 commits × 0.565 at XS, plus the same × 0.233 at S, which is
@@ -396,8 +544,8 @@ Wave 3 — the stage-2 statement — <date>
 Stage 1 spent $<s> (£<s / 1.35>) of $54.00, author calls included; see <stage-1 record>.
 Clean blind patches expected for review by the campaign's end: E = <E>
   per cell and arm: <cell> <arm>: N = <N>, p̂ = <p̂> (<stage 1 | value baseline>)
-Precision bought: the share judged mergeable to ±<h> points (Wilson 95%, n = <E>, p = <p>),
-  ±<h at p = 0.5> points at worst. Paul's 10 give the agreement as in part 3.
+Precision bought: the share judged mergeable to ±<h> points (Wilson 95%, n = <E>, p = <p>;
+  descriptive: fixed-n, not adjusted for the sequential look), ±<h at p = 0.5> points at worst. Paul's 10 give the agreement as in part 3.
 Stage 2 asks for up to $<t> (£<t / 1.35>); the line becomes $108.00 for the campaign in all.
 ```
 
@@ -409,17 +557,63 @@ and stops and reports at the first step whose success condition fails.
 | # | step | who and how | success condition | state |
 |---|---|---|---|---|
 | 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14). The order and the sealed settings are DEPLOYMENT §1.1's: `source ~/crb-stack/env.sh` before `crb migrate`, the UI rebuilt before `crb doctor`, the worker on `--executor docker`; with both processes stopped across a migration (§6.1) | `crb doctor` has no `fail`; `/health` reads ok once the builder's login is verified, and the worker is up | not yet run |
-| 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos` | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used] | not yet run |
-| 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>` | not yet run |
-| 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here | not yet run |
-| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373) | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, the `pool` in seeded order, `pool_sha256` and `pool_rule`; `GET /api/v1/readings?repo=<repo>` lists each, its cell's budget spent at 2.10% of 5%. A refusal (`campaign_unknown`, `pool_seen`, `budget_spent`, `pool_not_blind`, `invalid_reading`, which on an unsealed deployment names both executors) stops the campaign before any spend. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | not yet run |
+| 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos`; then the builder's-account check below (R-13) | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used]; the check passes, and the login's source label and fingerprint are recorded here | not yet run |
+| 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>`, and `<author>` has a known price (else an `S1` run is refused `spend_cap_unpriced`, a stop; K3, part 2) | not yet run |
+| 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click. The parameters are pinned, as values the step-3 amendment records: each mine and qualify body as sent (`pool`, `limit`, `max_candidates`, `ref`, and no `task_ids`), and the `since` and `taxonomy` step 4's bodies leave out (empty: every qualified commit, choice (c), and the global vocabulary); none changes after step 3. From then on: no label run, CLI label edit or 2.4 replay on cobra or click between step 3 and the end of step 11, but the runs step 6 files under the campaign | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here. The step-3 amendment records, for each cell, the qualified-set sha256 (its qualified commits in seeded order, hashed as `pool_sha256` is) and where each label came from (classifier or human), and the result of K1's audit (part 2) | not yet run |
+| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373) | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, the `pool` in seeded order, `pool_sha256` and `pool_rule`; `GET /api/v1/readings?repo=<repo>` lists each, its cell's budget spent at 2.10% of 5%. A refusal (`campaign_unknown`, `pool_seen`, `budget_spent`, `pool_not_blind`, `invalid_reading`) stops the campaign before any spend. On an unsealed deployment `invalid_reading` names what is unsealed in its `detail`: both executors, `{sandbox_executor, builder_executor}`, when the sandbox is on docker and the builder on the host; the posture class alone, `{posture_class}`, when the sandbox is not on docker, because that refusal comes first. A `409` `reading_exists` (`detail` `{reading_id}`, nothing written, nothing spent) answers a reading already registered, a retried request under any second or actor: it is a retry, not a stop; read the reading back with `GET /api/v1/readings?repo=<repo>`. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | not yet run |
 | 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is recorded here | the Learn page reads `config` for cobra and for click | not yet run |
-| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is admitted and spends under the ceiling but skips every reading gate, and its rows count only when graded in the reading's scope — every body here carries `reading_id` (DL-382). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`. **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"` | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_unknown`, `reading_unsealed`, `reading_posture_mismatch`); an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`; its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run | not yet run |
-| 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is empty, and spent and held stay at or under the stage's line; otherwise part 2's stop | not yet run |
-| 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the record is committed under `docs/reviews/` | not yet run |
-| 9 | stage 2 | Paul releases it in writing, a new decision; the release is recorded in the decision log and filed as `POST /api/v1/campaigns/{id}/release` (part 2); Claude Code resumes step 6 with the line at $108.00 | the release is recorded before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
+| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, after the builder's-account check below passes at the start of each session, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is admitted and spends under the ceiling but skips every reading gate, and its rows count only when graded in the reading's scope — every body here carries `reading_id` (DL-382). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`. **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"` | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_unknown`, `reading_unsealed`, `reading_posture_mismatch`); an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`; its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run | not yet run |
+| 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is `null` while the campaign runs, and spent and held stay at or under the stage's line; otherwise part 2's stop, which `stopped` serves as `{code, message, run_ids}` | not yet run |
+| 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the report says why stage 1 ended and whether Q-26's rule releases stage 2; the record is committed under `docs/reviews/` | not yet run |
+| 9 | stage 2 | Claude Code, on decision 9's fixed rule (Q-26; DL-400): when stage 1 ended at its line with any cell still waiting on a look, it files `POST /api/v1/campaigns/{id}/release` (part 2), with no further decision; then the builder's-account check below, and step 6 resumes with the line at $108.00. When stage 1 ended on a stop or with the protocol complete, nothing is released | the release answers `200` with the campaign and is filed before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
 | 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 5 | not yet run |
 | 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals | not yet run |
+
+**The builder's account (R-13; DL-405).** The builder runs on its own Anthropic API key, in a
+Workspace of its own whose spend limit sits at the ceiling (the default Workspace takes no
+custom limit). Paul sets it up and funds it. Claude Code runs this check at step 1, at the start
+of each session of step 6, and before step 9 resumes step 6, and queues nothing until it
+passes. It reads no credential to do so: not `~/crb-stack/env.sh`, not the secrets directory,
+not a keychain.
+
+1. **The auth mode.** `GET /api/v1/builders/logins`, with the operator session: the
+   `claude_code` item marked `default: true` reads `auth` `api_key` and `state` `verified`,
+   within its `ttl_s`. The route serves a source label (`env`, `secrets_file` or `keychain`)
+   and a fingerprint of at most 4 characters, never the token. Both are recorded at step 1, and
+   a later check that reads another fingerprint is a stop. When the verification is older than
+   `ttl_s`, `POST /api/v1/builders/claude_code/login/verify?auth=api_key` verifies it once: one
+   no-tool Haiku turn, billed to the builder's Workspace and outside the campaign. In `api_key`
+   mode the CLI runs with `--bare` and authenticates with the key alone, so a run cannot fall
+   back to a subscription login (`src/crb/builders/claude_code.py`).
+2. **The bodies.** No step-6 body carries a `builder_config`, so every run takes the
+   deployment's default auth. A body that sets `builder_config.auth` is not filed.
+3. **The account.** Before step 4, Paul confirms in the Anthropic Console that the key's
+   Workspace is the builder's own, and names its spend limit, which is recorded here. The
+   product cannot read the Workspace or its limit.
+4. **Heavy work stays off it.** While a reading's run is queued or running, nothing else spends
+   on the builder's key. No run outside the campaign calls `claude_code` on this stack. Claude
+   Code's own sessions, workflows and subagents run on Paul's subscription login, never on the
+   builder's key, which Claude Code never sets or reads. The `S1` test author runs on Cerebras
+   (choice (a)), on an account of its own.
+
+Its known gaps:
+
+- **No product refusal.** The product does not refuse a reading's run in `cli` mode, so the
+  check above is the only guard. In `cli` mode the builder would share Paul's subscription
+  allowance with Claude Code's sessions; in the 2026-09-25 export, 240 of 518 rows were the
+  builder's usage limit **[hypothesis — the pre-run red team's count over that export, n = 518
+  rows]**.
+- **Two processes.** `GET /builders/logins` reads the API process's default auth, and the
+  worker resolves its own from its own environment. Both are started from the same `env.sh` at
+  step 0, so they agree **[hypothesis — DEPLOYMENT §1.1's start order; the worker's auth mode is
+  not served]**.
+- **The limit can fire before the line.** The tally prices cache writes at the input rate,
+  about 3% under (K5, part 2), and the login verifications are billed outside the campaign. A
+  Workspace limit of exactly $108.00 could be reached while the tally reads about $105, and the
+  builder's next call would then fail. Under the round-5 rule, the run's reserved commit would
+  count as a miss. So the limit should sit above the ceiling by that margin, at about $115, as a
+  backstop that fires only past the product's own stop **[hypothesis — K5's 3% is the red
+  team's estimate]**. This is raised with Paul.
 
 The registration body for cobra XS:
 
@@ -447,10 +641,15 @@ The registration body for cobra XS:
 
 `hypothesis` (1 to 2,000 characters) and `smallest_effect` are required and hashed into the
 reading's id, so neither can be edited after registration. Both are open: Paul fixes them
-before step 4, and this record proposes no number for the smallest effect. It is the
-"registered smallest effect" Q-25 reads the loop's paired difference against. `campaign_id` is
-hashed into the id as well: every run filed under the reading is filed under that campaign or
-refused, and the reading counts only rows of runs the campaign admitted (DL-382).
+before step 4 (handbook Q-34), and this record proposes no number for the smallest effect. All
+four readings carry the same `smallest_effect` (Q-28, DL-402). It is the "registered smallest
+effect": the loop clears when the pooled test gives p < 0.05 and the pooled paired difference is
+at least that large (part 1, "How Q-25 is read"). The product stores it, and no code reads it
+**[aspiration — ADR-0026 item 13's design: one reading per cell, four in all; none is
+registered yet]**.
+`campaign_id` is hashed into the id as well: every run filed under the reading is filed under
+that campaign or refused, and the reading counts only rows of runs the campaign admitted
+(DL-382).
 
 The other bodies change only `repo`, `size` and `language`: cobra S (`go`), click XS and click S
 (`python`). `pool`, `since`, `taxonomy`, `posture_class` and `org_class` are left out, so the
