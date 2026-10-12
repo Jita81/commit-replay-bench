@@ -174,7 +174,10 @@ class ArmReadingOut(BaseModel):
     """One arm of a registered reading (``crb.core.reading.ArmReading.to_dict``): its state
     under the look rule, the distinct commits read in the seeded order, clean, the Wilson
     interval, the next look and the commits still needed — and the commits whose row it
-    could not read (``scope_faults``, which make it ``undecided``; P-795)."""
+    could not read (``scope_faults``, which make it ``undecided``): a row graded unsealed in
+    the reading's posture class (P-795), or a reserved.v1 row built off the checks arm the
+    reading froze (RT2B-1). Each ``left`` entry's ``scope`` names which (``unsealed`` or
+    ``checks_arm``; ``""`` otherwise)."""
 
     arm: str
     state: str

@@ -27,7 +27,8 @@ byte-identical for the same input, and which **never act**:
   body an operator can queue for them and its cost (that cell's own mean row cost × the
   commits requested); each cell with rows but no reading (``stale`` or ``thin``), offered
   registration and never a replay; each reading decided against its cell, or unable to read
-  a row of its arm (a ``scope_fault``: ``audit``, never a re-run — P-795). It queues nothing.
+  a row of its arm (a ``scope_fault``: ``audit``, never a re-run — P-795; a reserved row off
+  the reading's checks arm names the frozen arm and the row's — RT2B-1). It queues nothing.
 
 Why the three human steps are deliberate, not missing: a loop that appended its own
 refusals to its own guard corpus would launder a false positive into policy the
@@ -118,10 +119,14 @@ from crb.core.ledger import (
     group_by_cell,
 )
 from crb.core.reading import (
+    LABEL_RESERVATION,
+    SCOPE_CHECKS_ARM,
     STATE_DELIVER,
     STATE_INSUFFICIENT,
     STATE_LOOK_PENDING,
     STATE_UNDECIDED,
+    ArmReading,
+    Reading,
     ReadingOutcome,
     latest_outcome,
     rule_looks,
@@ -1745,7 +1750,8 @@ class CannotClear:
     """A cell whose registered reading has decided against it at this apparatus, so no
     further attempt on that reading can help: ``insufficient`` (its third miss — the look rule
     never re-reads it) or ``undecided`` (its pool is too small for the next look; or, with
-    ``next_act`` ``audit``, a row of the arm it could not read — a ``scope_fault``, P-795)."""
+    ``next_act`` ``audit``, a row of the arm it could not read — a ``scope_fault``, P-795,
+    or a reserved row built off the reading's checks arm, RT2B-1)."""
 
     label: str
     mode: str
@@ -1898,6 +1904,47 @@ def _first_attempt_count(rows: Sequence[GradeRow]) -> int:
     return len(first_attempts(rows))
 
 
+def _scope_fault_why(reading: Reading, blocking: ArmReading, rows: Sequence[GradeRow]) -> str:
+    """Why ``blocking`` cannot be read, naming each kind of scope fault it holds: rows graded
+    in the sealed posture class that do not record the sealed builder (P-795), and reserved
+    rows built off the checks arm the reading froze — the reading's checks arm against each
+    reserved row's own, the row found by its reservation stamp (RT2B-1). Nothing is re-run
+    for a faulted commit."""
+    frozen = reading.checks_arm
+    off = [c for c in blocking.commits if c.scope == SCOPE_CHECKS_ARM]
+    unsealed = [c for c in blocking.scope_faults if c not in {x.commit for x in off}]
+    parts: list[str] = []
+    if unsealed:
+        parts.append(
+            f"{len(unsealed)} commit(s) ({', '.join(unsealed)}) have a row graded in its "
+            "sealed posture class that does not record its builder in the sealed container "
+            f"({blocking.unsealed_dropped} row(s), P-795)"
+        )
+    if off:
+        reserved = reading.reservations or {}
+        events = {
+            reserved[(blocking.arm, c.commit)].event_id
+            for c in off
+            if (blocking.arm, c.commit) in reserved
+        }
+        built = sorted(
+            {
+                r.checks_arm
+                for r in rows
+                if r.labels.get(LABEL_RESERVATION, "") in events and r.checks_arm != frozen
+            }
+        )
+        parts.append(
+            f"{len(off)} commit(s) ({', '.join(c.commit for c in off)}) have a reserved row "
+            f"built on checks arm {', '.join(built) or 'another'} where the reading froze "
+            f"checks arm {frozen} (RT2B-1)"
+        )
+    return (
+        f"its reading cannot read {blocking.arm}: {'; '.join(parts)} — audit the writer; "
+        "nothing is re-run for a faulted commit"
+    )
+
+
 def remeasure_plan(
     rows: Iterable[GradeRow],
     *,
@@ -1927,9 +1974,11 @@ def remeasure_plan(
     * **insufficient** or **undecided** → ``cannot_clear``, with the routing rule's words and
       next act (a new reading; mine further back).
     * **a scope fault** (the arm has a row it could not read: graded in the sealed posture
-      class without recording the sealed executor, P-795) → ``cannot_clear`` ``undecided``
-      naming the commits, next act ``audit``, and no request — re-running a faulted commit
-      would let a later row stand in for the one the reading lost.
+      class without recording the sealed executor, P-795; or, reserved.v1, a reserved row
+      built off the checks arm the reading froze, RT2B-1) → ``cannot_clear`` ``undecided``
+      naming the commits — and for an off-arm row the frozen checks arm against the row's —
+      next act ``audit``, and no request — re-running a faulted commit would let a later row
+      stand in for the one the reading lost.
     * **no reading at this apparatus** → one entry per (mode, context arm) of its rows,
       ``stale`` when all its rows predate the apparatus, else ``thin``, with ``next_act``
       ``register`` and no request: rows graded before a reading is registered never count, and
@@ -1975,13 +2024,7 @@ def remeasure_plan(
         mode = REPLAY_MODE.get(parse_arm(arm).base, "")
         look = blocking.look
         if blocking.scope_faults:
-            faulted = ", ".join(blocking.scope_faults)
-            why = (
-                f"its reading cannot read {arm}: {len(blocking.scope_faults)} commit(s) "
-                f"({faulted}) have a row graded in its sealed posture class that does not "
-                f"record its builder in the sealed container ({blocking.unsealed_dropped} "
-                "row(s), P-795) — audit the writer; nothing is re-run for a faulted commit"
-            )
+            why = _scope_fault_why(reading, blocking, rs)
             beyond.append(
                 CannotClear(
                     cell.label,

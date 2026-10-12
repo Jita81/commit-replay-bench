@@ -420,6 +420,33 @@ def test_an_unsealed_row_of_the_standard_arm_is_served_as_a_scope_fault(env: Env
     assert cell["route"] != "deliver"
 
 
+def test_a_reserved_row_off_the_checks_arm_is_served_as_a_scope_fault(env: Env) -> None:
+    """RT2B-1 (round 6): a reserved row built on ``fmt`` for a reading frozen ``off`` carries
+    the reading's reservation, so it is no other reading's row and no miss. ``GET /readings``
+    serves each such commit ``reason`` ``scope_fault`` with ``scope`` ``checks_arm``, names it
+    in the arm's ``scope_faults`` (none counted unsealed), and the arm and the reading read
+    ``undecided``: no standard, no ceiling, and the cell does not deliver."""
+    add_tasks(env.factory, qualify=True)
+    r = register_via_api(env)
+    assert r.status_code == 201, r.text
+    reading = r.json()
+    assert reading["checks_arm"] == "off"
+    first = reading["pool"][:20]
+    off = [first[i] for i in (2, 9, 15)]
+    add_rows(env.factory, [c for c in first if c not in off], arm="S3", reading=reading)
+    add_rows(env.factory, off, arm="S3", labels={"checks": "fmt=1"}, reading=reading)
+    add_oracle_and_controls(env.factory, first)
+    (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    s3 = {a["arm"]: a for a in served["arms"]}["S3"]
+    assert s3["state"] == "undecided" and served["state"] == "undecided", s3
+    assert (sorted(s3["scope_faults"]), s3["unsealed_dropped"]) == (sorted(off), 0)
+    faulted = {c["commit"]: (c["reason"], c["scope"]) for c in s3["commits"] if c["scope"]}
+    assert faulted == dict.fromkeys(off, ("scope_fault", "checks_arm"))
+    assert served["standard"] is None and served["ceiling"] is False
+    (cell,) = _cells(env)
+    assert cell["route"] != "deliver", cell
+
+
 # --- a reading states its hypothesis and smallest effect before any row (P-787) --------------
 
 

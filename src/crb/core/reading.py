@@ -109,7 +109,9 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               failure a named miss, none a leave; unread reservations read pending); names
               the commits whose rows a sealed reading could not read because they do not
               record a sealed executor (``scope_faults`` — ``scope_fault``, the arm
-              ``undecided``, never pending, never re-rolled — P-795) and
+              ``undecided``, never pending, never re-rolled — P-795) or, under
+              ``reserved.v1``, because the reserved row was built off the reading's checks
+              arm (``scope`` ``checks_arm`` — RT2B-1, never a miss) and
               refuses a run that could steer a reserved attempt (``reading_run_refusal``:
               the param whitelist, the default pool, executor, timeout and ladder, the
               reading's cell and arms, the loop off on the reading's budget profile, an
@@ -315,11 +317,20 @@ LEFT_HELD_OUT_ERROR = "held_out_error"
 LEFT_NOT_GRADED = "not_graded"
 #: A commit whose row is in every way the arm's but its builder's executor: graded in the
 #: reading's sealed posture class without recording ``builder_executor`` ``docker``, so it
-#: reads unsealed (P-795). Never a leave: the commit cannot be read and the arm is
-#: ``undecided`` (``ArmReading.scope_faults``), never pending and never re-rolled.
+#: reads unsealed (P-795) — or, on a reserved.v1 reading, whose reserved row was built off
+#: the checks arm the reading froze (:data:`SCOPE_CHECKS_ARM`, RT2B-1). Never a leave: the
+#: commit cannot be read and the arm is ``undecided`` (``ArmReading.scope_faults``), never
+#: pending and never re-rolled. ``CommitReading.scope`` names which.
 REASON_SCOPE_FAULT = "scope_fault"
 #: :func:`_scope_miss`'s answer for a row that fails only on its executor.
 SCOPE_UNSEALED = "unsealed"
+#: :func:`_scope_miss`'s answer for a row that is the arm's in every way it checks before
+#: the checks arm (posture class, or held-out grading for ``S2``) but was graded on another
+#: checks arm than the one the reading froze (ADR-0024). The legacy rule drops it as another
+#: reading's row; a reserved.v1 reading's reserved row carries this reading's reservation,
+#: so it is no other reading's — the reading names it a ``scope_fault`` (RT2B-1), never a
+#: miss and never a re-run.
+SCOPE_CHECKS_ARM = "checks_arm"
 
 # --- registration refusals ---------------------------------------------------------
 REFUSAL_POOL_SEEN = "pool_seen"
@@ -1539,8 +1550,12 @@ class CommitReading:
     row_hash: str = ""  # the first observed attempt (reserved.v1: the reserved attempt's row)
     #: reserved.v1: why the reserved attempt is not a hit (``"miss"``, ``"harness"``,
     #: ``"unobserved"``, …) or ``"pending"``; ``""`` for a hit and on the legacy rule, but for
-    #: ``"scope_fault"`` (either rule — its row reads unsealed, P-795).
+    #: ``"scope_fault"`` (either rule — its row reads unsealed, P-795; reserved.v1 also when
+    #: its reserved row is off the reading's checks arm, RT2B-1).
     reason: str = ""
+    #: Why a ``scope_fault`` commit's row could not be read — :data:`SCOPE_UNSEALED` or
+    #: :data:`SCOPE_CHECKS_ARM`; ``""`` for every other reason.
+    scope: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1550,6 +1565,7 @@ class CommitReading:
             "left": self.left,
             "row_hash": self.row_hash,
             "reason": self.reason,
+            "scope": self.scope,
         }
 
 
@@ -1637,7 +1653,15 @@ def _scope_miss(reading: Reading, arm: str, row: GradeRow) -> str:
     another reading's: every other check holds and the posture class is the reading's, but
     the row does not record ``builder_executor`` ``docker``. That is a row the writer
     failed to label (P-795), so a reading names it a ``scope_fault`` rather than dropping it
-    and reading its commit pending."""
+    and reading its commit pending.
+
+    ``checks_arm`` (:data:`SCOPE_CHECKS_ARM`) is a row that passes every check up to and
+    including the posture class (``S2``: its held-out grading) but was graded on another
+    checks arm than the reading's. It is checked after them, so a row failing an earlier
+    check keeps that earlier answer, and before an ``S2`` row is let in, so a held-out row
+    off the arm is never in scope. The legacy rule drops it as another reading's row; a
+    reserved.v1 reading names its reserved row a ``scope_fault`` (:func:`_reserved_verdict`,
+    RT2B-1)."""
     if row.imported:
         return "imported"
     if (
@@ -1645,7 +1669,6 @@ def _scope_miss(reading: Reading, arm: str, row: GradeRow) -> str:
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
         or row.taxonomy != reading.taxonomy
-        or row.checks_arm != reading.checks_arm
         or row.cell.to_dict() != reading.cell
         or row.trial.strip().lower() != RUNG_R1
     ):
@@ -1654,11 +1677,15 @@ def _scope_miss(reading: Reading, arm: str, row: GradeRow) -> str:
     created = _parse_ts(row.created)
     if registered is None or created is None or created <= registered:
         return "before_registration"  # graded before (or as) the registration: never counts
-    if parse_arm(arm).prospective_only:
-        return "" if held_out_graded(row.labels) else "not_held_out"
-    if row.posture_class != reading.posture_class:
+    prospective = parse_arm(arm).prospective_only
+    if prospective:
+        if not held_out_graded(row.labels):
+            return "not_held_out"
+    elif row.posture_class != reading.posture_class:
         return "posture"
-    return "" if row.sealed else SCOPE_UNSEALED
+    if row.checks_arm != reading.checks_arm:
+        return SCOPE_CHECKS_ARM  # after every earlier check, before an S2 row is let in
+    return "" if prospective or row.sealed else SCOPE_UNSEALED
 
 
 def _in_scope(reading: Reading, arm: str, row: GradeRow) -> bool:
@@ -1810,7 +1837,9 @@ def _reserved_verdict(
     * the one row is a hit only when its run was admitted, it is in the arm's scope
       (:func:`_in_scope`; for a forward reading :func:`_counts_forward` on the record that
       enrolled the ticket — ``not_graded`` otherwise; ``scope_fault`` for a row that is the
-      arm's but for its executor, P-795), its reservation was written after the
+      arm's but for its executor, P-795, or but for its checks arm, RT2B-1 — the reserved
+      row carries this reading's reservation, so it is no other reading's; ``out_of_scope``
+      for every other answer of :func:`_scope_miss`), its reservation was written after the
       registration, it is not a harness failure or an outage, its gold is not red, belt 5 could
       not have changed it, it was built on the treatment it reserved, it is clean and not
       disqualified — and, forward, its held-out tests passed on the reading's builder, model
@@ -1833,8 +1862,10 @@ def _reserved_verdict(
         ):
             return False, LEFT_NOT_GRADED
     elif miss := _scope_miss(reading, arm, r):
-        # a row the writer did not label sealed is the arm's fault, not another reading's
-        return False, REASON_SCOPE_FAULT if miss == SCOPE_UNSEALED else "out_of_scope"
+        # a row the writer did not label sealed, or built off the checks arm the reading
+        # froze, is the arm's fault, not another reading's (P-795, RT2B-1)
+        faulted = miss in (SCOPE_UNSEALED, SCOPE_CHECKS_ARM)
+        return False, REASON_SCOPE_FAULT if faulted else "out_of_scope"
     checks: tuple[tuple[bool, str], ...] = (
         (res.event_seq_id > reading.registered_event_id, "before_registration"),
         (r.failure_kind != FAILURE_HARNESS, "harness"),
@@ -1863,7 +1894,10 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
     """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
     by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
     commits as they stand; a descriptive arm tallies its fixed count (``ArmReading.limit``).
-    A commit read ``scope_fault`` is named in ``ArmReading.scope_faults`` (P-795)."""
+    A commit read ``scope_fault`` is named in ``ArmReading.scope_faults`` (P-795), with
+    why in its ``CommitReading.scope`` (:func:`_scope_miss` on its reserved row: unsealed,
+    or off the reading's checks arm — RT2B-1); ``unsealed_dropped`` counts the unsealed
+    ones only."""
     reservations = reading.reservations or {}
     events = {res.event_id for res in reservations.values() if res.event_id}
     stamped: dict[str, list[GradeRow]] = {}
@@ -1877,6 +1911,7 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
         mine = stamped.get(res.event_id, []) if res is not None else []
         outcome, reason = _reserved_verdict(reading, arm, res, mine)
         found = _reserved_candidates(reading, res, mine) if res is not None else []
+        faulted = reason == REASON_SCOPE_FAULT and len(found) == 1
         out.append(
             CommitReading(
                 commit,
@@ -1885,6 +1920,7 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
                 "",
                 found[0].row_hash if len(found) == 1 and outcome is not None else "",
                 reason,
+                _scope_miss(reading, arm, found[0]) if faulted else "",
             )
         )
     outcomes = [c.outcome for c in out]
@@ -1901,7 +1937,7 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
         descriptive=bool(n),
         limit=n,
         scope_faults=faults,
-        unsealed_dropped=len(faults),
+        unsealed_dropped=sum(c.scope == SCOPE_UNSEALED for c in out),
     )
 
 
@@ -1972,7 +2008,9 @@ def arm_reading(
             # its attempt cannot be read, so no later row may stand in for it (P-795)
             faults.append(commit)
             first = unsealed[commit][0].row_hash
-            out.append(CommitReading(commit, change, None, "", first, REASON_SCOPE_FAULT))
+            out.append(
+                CommitReading(commit, change, None, "", first, REASON_SCOPE_FAULT, SCOPE_UNSEALED)
+            )
             continue
         observed = None
         unobserved: list[str] = []
@@ -2717,6 +2755,7 @@ __all__ = [
     "RULES",
     "RULE_LOOK_V1",
     "RUN_REFUSAL_CODES",
+    "SCOPE_CHECKS_ARM",
     "SKIP_COMMIT_RESERVED",
     "SKIP_TASK_NOT_ENROLLED",
     "VERDICT_CEILING",

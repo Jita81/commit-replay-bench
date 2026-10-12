@@ -1213,8 +1213,10 @@ export interface ArmReading {
   ci_high: number
   next_look: number | null
   needed: number
-  /** P-795: the commits whose row the arm could not read (it does not record the sealed
-   * builder executor). Any one makes the arm `undecided`: it never delivers. */
+  /** P-795: the commits whose row the arm could not read — it does not record the sealed
+   * builder executor (`scope` `unsealed`), or, under reserved.v1, it was built off the
+   * reading's checks arm (`scope` `checks_arm`, RT2B-1). Any one makes the arm `undecided`:
+   * it never delivers, and the commit is never a miss and never re-run. */
   scope_faults?: string[]
   /** How many of the arm's rows were dropped because they read unsealed. */
   unsealed_dropped?: number

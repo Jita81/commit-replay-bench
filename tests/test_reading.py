@@ -70,6 +70,7 @@ from crb.core.reading import (
     RULE_LOOK_V1,
     RULE_LOOK_V1_LATE,
     RULE_LOOK_V1_STRICT,
+    SCOPE_UNSEALED,
     STATE_DELIVER,
     STATE_INSUFFICIENT,
     STATE_LOOK_PENDING,
@@ -663,8 +664,8 @@ def test_a_descriptive_arm_with_a_pending_commit_counts_only_its_observed_commit
 
 def test_arm_to_dict_serves_every_commits_outcome_and_row_hash() -> None:
     """F3, P-794: ``GET /readings`` serves every commit an arm reads, in the seeded order,
-    with its outcome, why it left, the row that decided it and the reserved rule's reason —
-    so the loop pair (the commits observed in both ``A0`` and ``A0+L``) can be computed from
+    with its outcome, why it left, the row that decided it, the reserved rule's reason and,
+    for a scope fault, its kind (``scope``, RT2B-1; ``""`` here) — so the loop pair (the commits observed in both ``A0`` and ``A0+L``) can be computed from
     the API. It served the left commits and the counted ones' shas, never an outcome."""
     reading = register_reading(commits(40), descriptive=(("A0", 16),))
     p = reading.pool
@@ -688,6 +689,7 @@ def test_arm_to_dict_serves_every_commits_outcome_and_row_hash() -> None:
             "left": "",
             "row_hash": rows[0].row_hash,
             "reason": "",
+            "scope": "",
         },
         {
             "commit": p[1],
@@ -696,6 +698,7 @@ def test_arm_to_dict_serves_every_commits_outcome_and_row_hash() -> None:
             "left": "",
             "row_hash": rows[1].row_hash,
             "reason": "",
+            "scope": "",
         },
         {
             "commit": p[2],
@@ -704,8 +707,17 @@ def test_arm_to_dict_serves_every_commits_outcome_and_row_hash() -> None:
             "left": "lint_disabled",
             "row_hash": rows[2].row_hash,
             "reason": "",
+            "scope": "",
         },
-        {"commit": p[3], "change": p[3], "outcome": None, "left": "", "row_hash": "", "reason": ""},
+        {
+            "commit": p[3],
+            "change": p[3],
+            "outcome": None,
+            "left": "",
+            "row_hash": "",
+            "reason": "",
+            "scope": "",
+        },
     ]
     a0 = {a["arm"]: a for a in out.to_dict()["arms"]}["A0"]["commits"]
     assert (a0[0]["outcome"], a0[0]["row_hash"]) == (True, rows[3].row_hash)
@@ -925,6 +937,8 @@ def test_an_unsealed_row_of_an_admitted_run_makes_the_arm_undecided_scope_fault(
         assert (c.outcome, c.reason) == (False, "scope_fault")
     else:
         assert (c.outcome, c.reason) == (None, "scope_fault")
+    # which scope fault (RT2B-1 names a second): the row reads unsealed, on either rule
+    assert c.scope == SCOPE_UNSEALED == c.to_dict()["scope"]
     # never re-rolled: the plan asks for no attempt on the faulted arm, and says why
     plan = learn.remeasure_plan(rows, readings=(out,), current_apparatus="2.4")
     assert not plan.pending and not plan.up_to_date

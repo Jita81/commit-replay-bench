@@ -38,7 +38,7 @@ copies it and adds nothing. The choices it leaves open follow the table.
 | budget profile | one profile for every arm but `A0+L` | item 13 |
 | pool | chosen by a rule blind to every outcome and frozen with its sha256 at registration; a hand-picked list is refused `pool_not_blind` | item 2; DL-097 |
 | order | the seeded order, below: one order per cell, shared by every arm | item 2 |
-| what counts | a commit's attempt on an arm is the first attempt reserved for it on that arm after registration, and that attempt alone decides the commit; anything else is a miss and is never run again. The rule in full, amended before step 4, follows this table | item 2; P-792 |
+| what counts | a commit's attempt on an arm is the first attempt reserved for it on that arm after registration, and that attempt alone decides the commit; anything else is a miss and is never run again — but a reserved row built off the reading's checks arm (or graded unsealed in its posture class) reads `scope_fault`: its arm undecided, no hit, never a miss and never a re-run (RT2B-1, P-795). The rule in full, amended before step 4, follows this table | item 2; P-792 |
 | attempt rule | reserved.v1; max_reruns 0; no re-run, no leave | item 2; P-792 |
 | run fields | repo, kind, mode, builder, model, provider, task_ids or limit, arm, test_author (S1), learning, budget_profile, reading_id, campaign_id, max_cost_usd, and the stop knobs outage_stop, env_stop, qualify_first; pool, executor and timeout only at the values `POST /runs` stores when a body leaves them out; an `A0+L` run's task_ids are its enrolled commits it has not reserved, in the seeded order (all, or the first of them); anything else 422 reading_run_fields, refused again at claim | item 2; P-792; DL-386 |
 | treatment | pinned by the campaign's first reservation on each repository (deployment) and each arm's first (arm); served as pinned_treatment on GET /readings; a later mismatch halts the run before any build | item 2; P-792 |
@@ -70,7 +70,9 @@ been reclaimed. A cancel or a kill after the reservation costs the commit.
 
 An attempt refused before its reservation is not an attempt: the commit stays pending in its
 place. A reading run whose resolved checks arm differs from the reading's frozen arm halts
-`reading_checks_arm_mismatch` before it reserves, and the commit stays pending. Only runs whose
+`reading_checks_arm_mismatch` before it reserves, and the commit stays pending; a reserved row
+built off the frozen arm all the same reads `scope_fault` (`scope` `checks_arm`): the arm is
+undecided with no hit, the row is never a miss, and nothing is re-run (RT2B-1). Only runs whose
 bodies carry the registered fields, with the registered values, may reserve. The pool and its
 order are fixed at registration. No commit leaves the pool. A look reads the prefix of decided
 commits and waits at the first pending one.
@@ -419,7 +421,9 @@ is set to fit. The rule limits how many runs are in flight at once; a worker run
   refused `spend_cap_unpriced` because a model it would call has no known price), a refused
   registration, a run whose spend passes its cap plus the headroom it was admitted with (never
   the headroom now, which its own overshooting attempt raises),
-  a row of an admitted run graded unsealed in the reading's posture class (`scope_fault`), which leaves its arm undecided,
+  a row of an admitted run graded unsealed in the reading's posture class, or a reserved row built
+  off the reading's checks arm (each a `scope_fault`, P-795 and RT2B-1), which leaves its arm
+  undecided with no hit — never a miss and never a re-run,
   or spend the tally cannot place against a run, `unplaced_spend`. An attempt with no row once
   its run has ended or been reclaimed is charged at its `build.done` cost, else at its
   reservation's hold, and the campaign stops (`crb.server.campaigns.unplaced_attempts`, F8);

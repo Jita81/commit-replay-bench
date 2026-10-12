@@ -77,7 +77,9 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               its arm ``undecided``). reserved.v1: C4, C6 (every exit, against later rows of
               other runs, reservations and claims, with the legacy control), C15, C19, an
               imported copy of a reserved row deciding nothing (R5V3-IMPORT-1, P-321), each
-              check a named miss (replay and forward), the registration's ``max_reruns`` 0
+              check a named miss (replay and forward), a reserved row off the reading's
+              checks arm read ``scope_fault`` (``scope`` ``checks_arm``, the arm
+              ``undecided``, never a miss — RT2B-1), the registration's ``max_reruns`` 0
               and budget profile, the ``reading_run_refusal`` whitelist table and the arm
               each admitted run maps to (C3, C5, C7 at the core), the hypothesis property
               that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
@@ -224,6 +226,7 @@ from crb.core.acceptance import (
 from crb.core.campaign import CAMPAIGN_ADMITTED, tally
 from crb.core.evidence import canonical_json
 from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
+from crb.core.learn import remeasure_plan
 from crb.core.ledger import (
     FAILURE_OUTAGE,
     GENESIS_HASH,
@@ -267,8 +270,11 @@ from crb.core.reading import (
     RULE_LOOK_V1,
     RULE_LOOK_V1_STRICT,
     RULES,
+    SCOPE_CHECKS_ARM,
+    SCOPE_UNSEALED,
     SKIP_COMMIT_RESERVED,
     STATE_DELIVER,
+    STATE_UNDECIDED,
     Reading,
     ReadingRefused,
     Reservation,
@@ -279,6 +285,7 @@ from crb.core.reading import (
     reading_run_refusal,
     register,
     register_forward,
+    verdict_for,
     with_admissions,
     with_enrolment,
     with_reservations,
@@ -1180,12 +1187,28 @@ def test_p792_reserved_each_check_is_a_named_miss() -> None:
         "graded_before": (_res("S3", c), {"created": BEFORE}, (False, "out_of_scope")),
         # the arm's row but for its executor: the writer's fault, never another reading's (P-795)
         "local_executor": (_res("S3", c), {"builder_executor": "local"}, (False, "scope_fault")),
+        # the arm's reserved row but for its checks arm: this reading's reservation, so never
+        # another reading's row — a scope fault, never a miss (RT2B-1)
+        "checks_arm": (_res("S3", c), {"labels": {"checks": "fmt=1"}}, (False, "scope_fault")),
+        # off the checks arm AND failing an earlier check: the earlier check's answer stands
+        "checks_arm_graded_before": (
+            _res("S3", c),
+            {"labels": {"checks": "fmt=1"}, "created": BEFORE},
+            (False, "out_of_scope"),
+        ),
+        "checks_arm_host_posture": (
+            _res("S3", c),
+            {"labels": {"checks": "fmt=1"}, "posture_class": "local/inplace/host-env"},
+            (False, "out_of_scope"),
+        ),
     }
+    scopes = {"local_executor": SCOPE_UNSEALED, "checks_arm": SCOPE_CHECKS_ARM}
     for name, (res, kw, expect) in replay.items():
         row = _reserved_row(res, **kw)
         got = arm_reading(_read(reading, [res]), "S3", [row]).commits[0]
         assert (got.outcome, got.reason) == expect, name
         assert got.left == "" and got.row_hash == row.row_hash, name
+        assert got.scope == scopes.get(name, "") == got.to_dict()["scope"], name
     # a campaign-named reading: a reserved row of a run its campaign never admitted
     camp = _reserved_reading(commits(2, prefix="n"), hierarchy=("S3",), campaign_id="camp-n")
     out = _res("S3", camp.pool[0], run="run-out")
@@ -1210,6 +1233,55 @@ def test_p792_reserved_each_check_is_a_named_miss() -> None:
     for name, (kw, expect) in forward.items():
         row = _g_s2(rec, extra=_stamp(res), run_id=res.run_id, **kw)
         assert _verdicts(_read(fwd, [res]), "S2", [row]) == [expect], name
+
+
+def test_a_reserved_row_off_the_readings_checks_arm_is_scope_fault_not_a_miss() -> None:
+    """RT2B-1 part 2 (round 6): a reserved.v1 reading freezes its checks arm (``off``), and
+    a reserved row graded on another (``fmt``) carries this reading's reservation, so it is
+    no other reading's row. It read ``out_of_scope`` — a miss — so three such rows among the
+    20 reserved rows of an ``S3`` look read the arm ``insufficient``: an apparatus fault
+    charged to the builder, and the cell barred. Each now reads ``scope_fault`` with
+    ``scope`` ``checks_arm``: the arm is ``undecided`` and names the three commits in
+    ``scope_faults`` (no hit among them, none counted unsealed), the reading has no standard
+    and needs nothing, and the remeasure plan asks for no attempt — it names the checks arm
+    the reading froze against the rows' — so nothing is re-run."""
+    reading = _reserved_reading(commits(20, prefix="ck"), hierarchy=("S3",))
+    assert reading.checks_arm == "off"
+    off = {reading.pool[i] for i in (2, 9, 15)}
+    reservations = [
+        _res("S3", c, run=f"run-{i}", event=f"ev-ck-{i}") for i, c in enumerate(reading.pool)
+    ]
+    rows = [
+        _reserved_row(res, labels={"checks": "fmt=1"} if res.task_id in off else None)
+        for res in reservations
+    ]
+    assert sorted(r.checks_arm for r in rows) == ["fmt"] * 3 + ["off"] * 17
+    out = evaluate(_read(reading, reservations), rows)
+    s3 = out.arms["S3"]
+    got = {c.commit: (c.outcome, c.reason, c.scope) for c in s3.commits}
+    assert {c: got[c] for c in off} == dict.fromkeys(
+        off, (False, REASON_SCOPE_FAULT, SCOPE_CHECKS_ARM)
+    )
+    assert all(got[c] == (True, "", "") for c in reading.pool if c not in off)
+    assert s3.scope_faults == tuple(c for c in reading.pool if c in off)
+    assert s3.unsealed_dropped == 0
+    assert s3.state == STATE_UNDECIDED and out.state == STATE_UNDECIDED
+    assert out.standard == "" and out.chain == () and out.needed == 0
+    assert verdict_for(out, "S3").state == STATE_UNDECIDED
+    served = {a["arm"]: a for a in out.to_dict()["arms"]}["S3"]
+    assert sorted(served["scope_faults"]) == sorted(off)
+    assert {c["commit"]: c["scope"] for c in served["commits"] if c["scope"]} == dict.fromkeys(
+        off, SCOPE_CHECKS_ARM
+    )
+    plan = remeasure_plan(rows, readings=(out,), current_apparatus="2.4")
+    assert not plan.pending and not plan.up_to_date
+    (blocked,) = plan.cannot_clear
+    assert (blocked.arm, blocked.state, blocked.next_act) == ("S3", STATE_UNDECIDED, "audit")
+    assert "built on checks arm fmt where the reading froze checks arm off" in blocked.reason
+    assert all(c in blocked.reason for c in off) and "sealed container" not in blocked.reason
+    # the same rows on the reading's arm: the arm reads by its look and delivers
+    on_arm = [_reserved_row(res) for res in reservations]
+    assert evaluate(_read(reading, reservations), on_arm).arms["S3"].state == STATE_DELIVER
 
 
 def test_p792_reserved_requires_max_reruns_zero_and_a_budget_profile() -> None:
