@@ -580,8 +580,9 @@ def test_a_grade_that_raises_after_build_done_is_charged_and_stops_unplaced_spen
 def test_an_in_flight_attempt_is_held_not_charged(backend_env: Env) -> None:
     """An attempt built and still grading — its run running, no row yet — is in flight: the
     tally holds the run's cap and headroom for it and charges nothing, so the attempt is never
-    both held and spent, and the campaign admits the next run. Once its run ends with no row
-    the attempt is charged and the campaign stops ``unplaced_spend``."""
+    both held and spent, and the campaign admits the next run (on another arm: the live run
+    holds its own, F87-2). Once its run ends with no row the attempt is charged and the
+    campaign stops ``unplaced_spend``."""
     env = backend_env
     cid = _register(env)["campaign_id"]
     rid = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid}).json()["id"]
@@ -591,7 +592,7 @@ def test_an_in_flight_attempt_is_held_not_charged(backend_env: Env) -> None:
     assert view["spent_usd"] == 0.0 and view["held_usd"] == pytest.approx(1.0 + 5.0)
     assert view["runs"][0]["unrowed_usd"] == 0.0
     assert view["stopped"] is None
-    r = env.post("/runs", json={**GOLD, "max_cost_usd": 1, "campaign_id": cid})
+    r = env.post("/runs", json={**GOLD, "kind": "blind", "max_cost_usd": 1, "campaign_id": cid})
     assert r.status_code == 201, r.text
     _settle(env, rid, "cancelled")
     view = env.get(f"/campaigns/{cid}").json()

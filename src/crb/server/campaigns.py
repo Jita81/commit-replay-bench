@@ -51,9 +51,7 @@ Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
               src/crb/server/routes/runs.py (``POST /runs`` admits a run under the tally and
               while no run on its arm is live), src/crb/server/routes/learn.py
               (``in_flight_runs`` counts the live admitted runs beside the Learn queue's),
-              src/crb/store/jobs.py (``ACTIVE_STATUSES``: queued or running),
               src/crb/server/spend_cap.py (``Spend``, ``AUTHOR_ATTEMPT``: a run's own sum),
-              src/crb/store/ledger.py (``rows_of_runs``: the rows in the caller's session),
               src/crb/server/reading_book.py (``load_readings`` fills a reading's reservations),
               src/crb/core/run.py (writes the ``build.done`` an attempt is read by),
               src/crb/server/routes/readings.py (``served_reading``: ``settled_unrowed``)

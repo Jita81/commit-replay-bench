@@ -1017,8 +1017,8 @@ def test_a_campaigns_live_run_is_in_flight_so_the_plan_holds_its_commits(
     del builder_keys
     _sealed(env, monkeypatch)
     cid = env.post("/campaigns", json=WAVE3).json()["campaign_id"]
-    add_proven_tasks(env.factory)
-    r = register_via_api(env, hierarchy=("S3",), campaign_id=cid)
+    add_proven_tasks(env.factory, qualify=True)
+    r = register_via_api(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"), campaign_id=cid)
     assert r.status_code == 201, r.text
     reading = r.json()
     cell = _read_cell(env)
@@ -1026,8 +1026,10 @@ def test_a_campaigns_live_run_is_in_flight_so_the_plan_holds_its_commits(
     (request,) = cell["requests"]
     rid = _post_campaign_run(env, cid, request, reading_id=reading["reading_id"])
     assert _read_cell(env)["in_flight_run_ids"] == [rid]
-    # a blind run on the same commits writes A0 rows, never this sighted S3 entry
-    _post_campaign_run(env, cid, {**request, "kind": "blind", "mode": "blind"})
+    # a blind run of the reading on the same commits writes S1 rows, never this sighted S3
+    # entry (every campaign run names a reserved.v1 reading and one of its arms, P-792 C19)
+    blind = {**request, "kind": "blind", "mode": "blind", "arm": "S1"}
+    _post_campaign_run(env, cid, blind, reading_id=reading["reading_id"])
     assert _read_cell(env)["in_flight_run_ids"] == [rid]
     _finish(env, rid)
     assert _read_cell(env)["in_flight_run_ids"] == []
