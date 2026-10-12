@@ -40,12 +40,13 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               no reading while its campaign holds a reserved.v1 one on the repository (P-792),
               and (409 ``lint_disabled``) a run of a reading while the repository's lint is
               off (P-796), and (409 ``pool_drift``) a run of a reserved.v1 reading whose pool
-              moved since registration (P-797) — through ``submit_refusals``, the one gate
-              every route that queues
-              a run calls; serves run views with counts re-derived from the ledger when the
-              worker wrote none; streams events as SSE with resume-by-seq; cancellation is
-              a flag the worker honours; lifting the sign-off clause for one run is refused
-              at enqueue and granted only
+              moved since registration (P-797), and (422 ``validation_error``) a factory run
+              naming any reading but a reserved.v1 forward one (P-792 C8) — through
+              ``submit_refusals``, the one gate every route that queues a run calls; serves
+              run views with counts re-derived from the ledger when the worker wrote none;
+              streams events as SSE with resume-by-seq; cancellation is a flag the worker
+              honours; lifting the sign-off clause for one run is refused at enqueue and
+              granted only
               by an approver who did not queue the run, as an event (GOV-4, ADR-0003
               amendment 2026-09-27) — it never lifts the route gate (ADR-0026 item 8);
               and owns the out-of-band ``system`` event writers the other routes share
@@ -976,6 +977,34 @@ READING_UNSEALED_CODE = "reading_unsealed"
 READING_POSTURE_MISMATCH_CODE = "reading_posture_mismatch"
 
 
+def factory_reading_refusal(db: Session, body: RunCreateRequest) -> None:
+    """P-792 C8 at submit: a ``factory`` run may name only a reserved.v1 FORWARD reading of
+    its repository — its ticket's first build is then reserved under that reading and the
+    reserved.v1 whitelist binds the run (:func:`reading_run_fields_refusal`). Any other
+    ``reading_id`` on a factory run (a legacy forward reading, a replay reading, an unknown
+    one) is refused 422 ``validation_error`` as the request model refuses one on a kind no
+    reading measures (``RunCreateRequest``), so nothing is queued and no other refusal reads
+    the run first. Every other kind passes untouched."""
+    if body.kind != KIND_FACTORY or not body.reading_id:
+        return
+    if any(
+        r.reading_id == body.reading_id and r.reserved and r.prospective
+        for r in load_readings(db, body.repo)
+    ):
+        return
+    why = (
+        "reading_id applies to replay and blind runs only, and to a factory run filed under "
+        "a reserved.v1 forward reading"
+    )
+    raise ApiError(
+        422,
+        "validation_error",
+        f"{why}: {body.reading_id!r} is not a reserved.v1 forward reading of "
+        f"{body.repo!r} — nothing was queued",
+        detail={"reading_id": body.reading_id, "why": why},
+    )
+
+
 def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> Reading:
     """The refusals of a run filed under a reading (P-789, DL-382, DL-383): 422
     ``reading_unknown`` when ``body.reading_id`` is not a verified reading of ``body.repo``;
@@ -1241,6 +1270,10 @@ def submit_refusals(
     ``POST /runs``). ``tests/test_server_routes_runs.py`` fails when a function that
     enqueues a run does not call this.
 
+    * 422 ``validation_error`` — FIRST, a ``factory`` run naming a ``reading_id`` that is not
+      a reserved.v1 FORWARD reading of the repository: a factory run's build is a reading's
+      measurement only when that reading reserves its first attempt (P-792 C8;
+      :func:`factory_reading_refusal`), so no other reading is spent on;
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
     * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
@@ -1291,6 +1324,7 @@ def submit_refusals(
     login and record it on a second connection, which would wait on the lock the caller's
     own transaction holds (P-729).
     """
+    factory_reading_refusal(db, body)
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
     spend_cap_refusal(

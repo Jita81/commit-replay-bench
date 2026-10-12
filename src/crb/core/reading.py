@@ -51,7 +51,10 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   acceptance tests were written after it, in the order written (:func:`with_enrolment`); it
   reads each ticket's first factory attempt after registration, counts it only when it was
   graded on the record that enrolled the ticket and otherwise lets the ticket leave the pool
-  (``not_graded``), and it alone can make a ceiling a standard.
+  (``not_graded``), and it alone can make a ceiling a standard. Under ``reserved.v1`` a
+  factory run names it (``reading_id``) and reserves each ticket's first build before it
+  starts; only that attempt decides the ticket (P-792 C8, C16), and the run carries only
+  :data:`RESERVED_FACTORY_PARAMS` on the reading's cell (:func:`reading_run_refusal`).
 * **The reserved attempt** (``attempt_rule`` ``reserved.v1``, P-792). A reading registered
   under it (``max_reruns`` 0, a named ``budget_profile``, the repository's ``lint_digest`` —
   P-796; all hashed, a legacy reading's id unchanged) reads each enrolled commit
@@ -106,7 +109,8 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               ``undecided``, never pending, never re-rolled — P-795) and
               refuses a run that could steer a reserved attempt (``reading_run_refusal``:
               the param whitelist, the default pool, executor, timeout and ladder, the
-              reading's cell and arms, the loop off on the reading's budget profile); pins
+              reading's cell and arms, the loop off on the reading's budget profile; a
+              forward reading's sighted factory runs on ``S2`` alone — C8); pins
               a reserved pool to its posture and qualification ids (``pool_posture_id``,
               ``pool_qualifications``, ``reserved_pool_digest`` — P-797) and widens its
               ``pool_seen`` to any replay row at apparatus 2.4 or later.
@@ -315,9 +319,10 @@ REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
 #: A forward reading names a reading that does not read ``ceiling`` (DL-334).
 REFUSAL_NOT_A_CEILING = "not_a_ceiling"
 #: A reading on the factory's cell names a campaign (DL-382): its runs are factory runs,
-#: which carry no ``reading_id``, so nothing ties them to the reading and no submit gate
-#: requires them to be filed under its campaign — the reading's evidence would rest on a
-#: filing habit. One rule for ``POST /readings`` and ``POST /readings/forward``.
+#: which no submit gate requires to be filed under a campaign (a factory run names a
+#: ``reading_id`` only under a reserved.v1 forward reading, which reserves the ticket's first
+#: build itself, P-792 C8) — the reading's evidence would rest on a filing habit. One rule
+#: for ``POST /readings`` and ``POST /readings/forward``.
 REFUSAL_CAMPAIGN_UNSUPPORTED = "campaign_unsupported_reading"
 #: A registration of a reading already registered (P-793): the same ``reading_id``, or the
 #: same registration under another second or another actor (:func:`registered_twin`). A
@@ -1066,19 +1071,20 @@ def campaign_unsupported(process_step: str) -> str:
     """Why a reading on a cell of ``process_step`` may not name a campaign, or ``""`` (DL-382).
 
     The rule, one for ``POST /readings`` and ``POST /readings/forward``: a reading on the
-    factory's cell may name no campaign. Its runs are factory runs, which carry no
-    ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
-    be filed under its campaign; the reading's evidence would rest on a filing habit. A
+    factory's cell may name no campaign. Its runs are factory runs, and no submit gate
+    requires a factory run to be filed under a campaign — one names a ``reading_id`` only
+    under a reserved.v1 forward reading, which reserves the ticket's first build itself
+    (P-792 C8), and a legacy one is tied to its runs by nothing at all — so the reading's
+    evidence would rest on a filing habit. A
     replay or blind reading may name one, because a run filed under it by ``reading_id`` is
     held to the campaign (409 ``campaign_required``, P-789) and any row counts only when the
     campaign admitted its run."""
     if process_step != PROCESS_FACTORY:
         return ""
     return (
-        "a reading on the factory's cell names no campaign: it counts factory runs, which "
-        "carry no reading_id, so nothing ties them to the reading and no submit gate requires "
-        "them to be filed under its campaign — its evidence would rest on a filing habit; "
-        "register it without campaign_id (DL-382)"
+        "a reading on the factory's cell names no campaign: it counts factory runs, and no "
+        "submit gate requires a factory run to be filed under a campaign — its evidence would "
+        "rest on a filing habit; register it without campaign_id (DL-382)"
     )
 
 
@@ -1301,6 +1307,7 @@ def register_forward(
     attempt_rule: str = "",
     budget_profile: str = "",
     lint_digest: str = "",
+    max_reruns: int | None = None,
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -1314,11 +1321,16 @@ def register_forward(
     before that when ``existing`` already holds it — :func:`registered_twin`). Its pool is the
     rule :data:`POOL_RULE_CALIBRATION`: the calibration builds whose held-out tests are
     written after it — no ticket is chosen by a person, and none exists yet. It names no
-    campaign (DL-382, :func:`campaign_unsupported`): its builds are factory runs, which carry
-    no ``reading_id``, so nothing ties them to the reading and no submit gate requires them to
-    be filed under its campaign — ``POST /readings/forward`` refuses a ``campaign_id``.
-    Under ``attempt_rule`` :data:`ATTEMPT_RULE_RESERVED` it re-runs nothing (``max_reruns``
-    0), names its ``budget_profile`` and hashes ``lint_digest``, as :func:`register` does."""
+    campaign (DL-382, :func:`campaign_unsupported`): its builds are factory runs, which no
+    submit gate requires to be filed under a campaign — ``POST /readings/forward`` refuses a
+    ``campaign_id``. Under the legacy rule nothing ties a factory run to the reading: each
+    ticket is read by its first ``r1`` factory row after registration. Under
+    ``attempt_rule`` :data:`ATTEMPT_RULE_RESERVED` a factory run names the reading
+    (``reading_id``) and reserves each ticket's first build before it starts (P-792 C8), so
+    the ticket is read by that attempt alone; the reading re-runs nothing (``max_reruns``
+    defaults to 0, and any other value is refused ``invalid_reading`` by
+    :func:`_attempt_rule_of`), names its ``budget_profile`` and hashes ``lint_digest``, as
+    :func:`register` does. ``max_reruns`` left ``None`` is the rule's default."""
     if ceiling.state != OUTCOME_CEILING:
         raise ReadingRefused(
             f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
@@ -1346,8 +1358,8 @@ def register_forward(
     )
     if why:
         raise ReadingRefused(why, code=REFUSAL_INVALID)
-    reserved = attempt_rule.strip() == ATTEMPT_RULE_RESERVED
-    max_reruns = 0 if reserved else DEFAULT_MAX_RERUNS
+    if max_reruns is None:
+        max_reruns = 0 if attempt_rule.strip() == ATTEMPT_RULE_RESERVED else DEFAULT_MAX_RERUNS
     attempt, profile = _attempt_rule_of(
         attempt_rule, max_reruns=max_reruns, budget_profile=budget_profile
     )
@@ -2387,6 +2399,31 @@ RESERVED_RUN_PARAMS: frozenset[str] = frozenset(
         "qualify_first",
     }
 )
+#: The only ``params`` keys a factory run of a reserved.v1 FORWARD reading may carry (P-792
+#: C8): the replay whitelist without its replay-only keys — no ``budget_profile`` or
+#: ``learning`` (the factory's ``S2`` arm has no loop twin), no ``arm`` (a forward reading
+#: reads ``S2`` alone) and no ``campaign_id`` (it names no campaign, DL-382) — plus the
+#: factory's own: the ``backlog_hash`` and ``evolutions_hash`` ``POST /runs`` pins, and
+#: ``deliver`` and ``max_rework``, which act after the reserved ``r1`` attempt is graded.
+RESERVED_FACTORY_PARAMS: frozenset[str] = frozenset(
+    {
+        "task_ids",
+        "limit",
+        "pool",
+        "executor",
+        "timeout",
+        "max_cost_usd",
+        "test_author",
+        "reading_id",
+        "outage_stop",
+        "env_stop",
+        "qualify_first",
+        "backlog_hash",
+        "evolutions_hash",
+        "deliver",
+        "max_rework",
+    }
+)
 #: The one ladder a run of a reserved.v1 reading climbs: what ``POST /runs`` stores for a
 #: run that names none (``new_run``: ``ladder or ["r1"]``) — one rung, the reading's own cell.
 RESERVED_RUN_LADDER: tuple[str, ...] = (RUNG_R1,)
@@ -2398,6 +2435,9 @@ _RESERVED_RUN_KINDS: Mapping[str, tuple[str, str]] = {
     "replay": ("sighted", BASE_S3),
     "blind": ("blind", BASE_A0),
 }
+#: The run kind a reserved.v1 FORWARD reading reads (``crb.store.jobs`` ``KIND_FACTORY``), the
+#: mode it runs in and the one arm it reads.
+_RESERVED_FACTORY_KIND: tuple[str, str, str] = (PROCESS_FACTORY, "sighted", BASE_S2)
 
 
 def _test_author_model(test_author: str) -> str:
@@ -2409,6 +2449,44 @@ def _test_author_model(test_author: str) -> str:
     if len(parts) < 2:
         return ""
     return parts[1].strip().lower().split("@", 1)[0].rsplit("/", 1)[-1]
+
+
+def _run_shape_reasons(
+    reading: Reading,
+    allowed: frozenset[str],
+    *,
+    builder: str,
+    model: str,
+    provider: str,
+    ladder: Sequence[Any],
+    params: Mapping[str, Any],
+) -> dict[str, str]:
+    """What a run of the reserved.v1 ``reading`` sets that it may not, whatever its kind:
+    a ``params`` key outside ``allowed``; ``pool``, ``executor`` or ``timeout`` off the
+    default ``POST /runs`` stores; a ladder other than :data:`RESERVED_RUN_LADDER`; a
+    builder, model or provider other than the reading's cell — as ``{field: why}``."""
+    rule = ATTEMPT_RULE_RESERVED
+    reasons: dict[str, str] = {}
+    for key in sorted(set(params) - allowed):
+        reasons[key] = f"a run of a {rule} reading carries no {key!r}: it could steer an attempt"
+    for key, default in _RESERVED_RUN_DEFAULTS.items():
+        if params.get(key, default) not in (default, None):
+            reasons[key] = f"a run of a {rule} reading keeps {key} at its default {default!r}"
+    if [*ladder] != [*RESERVED_RUN_LADDER]:
+        reasons["ladder"] = (
+            f"a run of a {rule} reading climbs the one ladder {list(RESERVED_RUN_LADDER)}, "
+            "the reading's own cell"
+        )
+    for name, value in (("builder", builder), ("model", model), ("provider", provider)):
+        if (value or "") != reading.cell.get(name, ""):
+            reasons[name] = f"the reading's cell is built by {name} {reading.cell.get(name)!r}"
+    return reasons
+
+
+def _refused(reasons: Mapping[str, str], arm: str) -> tuple[str, dict[str, Any]]:
+    if not reasons:
+        return "", {}
+    return REFUSAL_RUN_FIELDS, {"fields": sorted(reasons), "reasons": dict(reasons), "arm": arm}
 
 
 def reading_run_refusal(
@@ -2437,25 +2515,39 @@ def reading_run_refusal(
     * on a non-loop arm, runs with the loop off (``learning: off``) on the reading's budget
       profile (C7), so no run spends on another profile.
 
-    A ``factory`` run is refused here (``kind``): the forward reading's runs are reserved by
-    the factory, not by this whitelist. A legacy reading is never refused by it."""
+    A reserved.v1 FORWARD reading (``prospective``) reads factory runs alone (C8): a sighted
+    ``factory`` run on the reading's cell and the one ladder, carrying only the
+    :data:`RESERVED_FACTORY_PARAMS` keys (``pool``, ``executor`` and ``timeout`` at their
+    defaults) — its arm is ``S2``, the factory's reserving each ticket's first build under it;
+    a replay or blind run of it is refused ``kind``. A ``factory`` run of any other reserved.v1
+    reading is refused ``kind``. A legacy reading is never refused by it."""
     if not reading.reserved:
         return "", {}
-    rule = ATTEMPT_RULE_RESERVED
-    reasons: dict[str, str] = {}
-    for key in sorted(set(params) - RESERVED_RUN_PARAMS):
-        reasons[key] = f"a run of a {rule} reading carries no {key!r}: it could steer an attempt"
-    for key, default in _RESERVED_RUN_DEFAULTS.items():
-        if params.get(key, default) not in (default, None):
-            reasons[key] = f"a run of a {rule} reading keeps {key} at its default {default!r}"
-    if [*ladder] != [*RESERVED_RUN_LADDER]:
-        reasons["ladder"] = (
-            f"a run of a {rule} reading climbs the one ladder {list(RESERVED_RUN_LADDER)}, "
-            "the reading's own cell"
+
+    def shape_reasons(allowed: frozenset[str]) -> dict[str, str]:
+        return _run_shape_reasons(
+            reading,
+            allowed,
+            builder=builder,
+            model=model,
+            provider=provider,
+            ladder=ladder,
+            params=params,
         )
-    for name, value in (("builder", builder), ("model", model), ("provider", provider)):
-        if (value or "") != reading.cell.get(name, ""):
-            reasons[name] = f"the reading's cell is built by {name} {reading.cell.get(name)!r}"
+
+    rule = ATTEMPT_RULE_RESERVED
+    if reading.prospective:
+        reasons = shape_reasons(RESERVED_FACTORY_PARAMS)
+        factory_kind, factory_mode, factory_arm = _RESERVED_FACTORY_KIND
+        if kind != factory_kind:
+            reasons["kind"] = f"a {rule} forward reading reads {factory_kind!r} runs alone"
+        elif mode != factory_mode:
+            reasons["mode"] = f"a factory run of a {rule} forward reading runs {factory_mode}"
+        arm = "" if reasons.keys() & {"kind", "mode"} else factory_arm
+        if arm and arm not in reading.arms:
+            reasons["arm"] = f"the run's arm {arm!r} is not one the reading reads"
+        return _refused(reasons, arm)
+    reasons = shape_reasons(RESERVED_RUN_PARAMS)
     shape = _RESERVED_RUN_KINDS.get(kind)
     if shape is None:
         reasons["kind"] = f"a {rule} reading reads {sorted(_RESERVED_RUN_KINDS)} runs"
@@ -2490,9 +2582,7 @@ def reading_run_refusal(
             arm = ""
         if arm not in reading.arms:
             reasons["arm"] = f"the run's arm {arm!r} is not one the reading reads"
-    if not reasons:
-        return "", {}
-    return REFUSAL_RUN_FIELDS, {"fields": sorted(reasons), "reasons": reasons, "arm": arm}
+    return _refused(reasons, arm)
 
 
 def describe_rules() -> str:
@@ -2539,6 +2629,7 @@ __all__ = [
     "REFUSAL_POOL_SEEN",
     "REFUSAL_READING_REQUIRED",
     "REFUSAL_RUN_FIELDS",
+    "RESERVED_FACTORY_PARAMS",
     "RESERVED_RUN_LADDER",
     "RESERVED_RUN_PARAMS",
     "RESERVE_HALTS",

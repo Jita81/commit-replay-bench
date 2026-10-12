@@ -1638,7 +1638,8 @@ def test_a_run_of_a_reading_registered_in_another_class_is_refused_409(
 @pytest.mark.parametrize("kind", ["mine", "oracle", "controls", "qualify", "factory"])
 def test_reading_id_on_a_build_run_is_refused_422(env: Env, jobs: FakeJobs, kind: str) -> None:
     """P-789: only a replay or a blind run measures a reading; any other kind naming one is
-    a validation error, before any refusal reads the database."""
+    a validation error, before any other refusal. A factory run may name a reserved.v1
+    forward reading alone (P-792 C8) — this legacy reading is still refused."""
     login(env.client, "operator")
     reading = write_reading(env.factory, [task_id(1)])
     body = {"repo": ALPHA, "kind": kind, "reading_id": reading.reading_id}

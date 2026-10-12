@@ -29,9 +29,10 @@ the seam the factory's entry gate reads (ADR-0026 item 8). ``POST /readings/forw
 registers the forward reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on
 calibration builds graded on a second person's held-out tests, the one reading that can promote
 the ceiling; ``load_readings`` enrols its pool. A reading on the factory's cell — the forward
-reading among them — may name no campaign (DL-382): its runs are factory runs, which carry no
-``reading_id``, so nothing ties them to the reading and no submit gate requires them to be filed
-under its campaign; both routes refuse its ``campaign_id`` ``422 campaign_unsupported_reading``.
+reading among them — may name no campaign (DL-382): its runs are factory runs, which no submit
+gate requires to be filed under a campaign (a factory run names a ``reading_id`` only under a
+reserved.v1 forward reading, ``attempt_rule``, which reserves each ticket's first build, P-792
+C8); both routes refuse its ``campaign_id`` ``422 campaign_unsupported_reading``.
 A replay or blind reading may name one, because a run filed under it by ``reading_id`` is held
 to the campaign (409 ``campaign_required``) and any row counts only when the campaign admitted
 its run.
@@ -56,7 +57,8 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               reading already registered (``reading_exists``, P-793) and any registration
               while the repository's lint is off (``lint_disabled``, P-796), and writes the
               event (a reserved.v1 reading only when asked: ``attempt_rule``, P-792, hashing
-              the repository's ``lint_digest``); lists readings
+              the repository's ``lint_digest`` — on ``POST /readings/forward`` too, whose
+              factory runs then reserve each ticket's first build, C8); lists readings
               with every arm's state and the budget per cell, each with its attempt rule (a
               legacy one ``first_observed.v0``, ``p792: "open on this rule"``), its treatment
               pins, its reserved commits per arm, how many of them settled with no row
@@ -88,7 +90,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py,
-              tests/test_p792_reserved.py (the attempt rule, the pins and the reserved counts),
+              tests/test_p792_reserved.py (the attempt rule, the pins and the reserved counts,
+              the forward reading's opt-in),
               tests/test_p792_pool.py (the pool pinned to its qualification records)
 Touch when:   never for a new repository; the reading's shape or the registration's refusals change
               (an ADR amending ADR-0026 first); never for a new repository.
@@ -584,6 +587,16 @@ class ForwardIn(BaseModel):
     #: Refused when given (422 ``campaign_unsupported_reading``, DL-382): kept on the model so
     #: a body that names a campaign is refused by name, never registered without it.
     campaign_id: CampaignId = None
+    #: How a ticket is read (P-792 C8), opt-in as on ``ReadingIn``: ``""`` the legacy rule
+    #: (its first ``r1`` factory row after registration), or ``reserved.v1`` — a factory run
+    #: filed under the reading (``reading_id``) reserves the ticket's first build before it
+    #: starts, and only that attempt decides it, so a failure after the reservation is a
+    #: miss. ``max_reruns`` defaults to 2 under the legacy rule and 0 under reserved.v1 (the
+    #: only value it accepts); ``budget_profile`` is ignored under the legacy rule. Both are
+    #: hashed only with the rule, so a forward reading registered without one keeps its id.
+    attempt_rule: Literal["", "reserved.v1"] = ""
+    max_reruns: int | None = Field(default=None, ge=0)
+    budget_profile: str = Field(default="default", max_length=64)
 
 
 @router.post(
@@ -606,9 +619,12 @@ def register_forward_reading(
     repository's lint is switched off (P-796), **409** ``budget_spent`` when the ceiling's
     cell budget cannot cover the rule, **404** for a reading the repository does not have, **422**
     ``campaign_unsupported_reading`` for any ``campaign_id`` — before anything is read or
-    written: its calibration builds are factory runs, which carry no ``reading_id``, so
-    nothing ties them to the reading and no submit gate requires them to be filed under its
-    campaign (DL-382, :func:`crb.core.reading.campaign_unsupported`)."""
+    written: its calibration builds are factory runs, which no submit gate requires to be
+    filed under a campaign (DL-382, :func:`crb.core.reading.campaign_unsupported`), and
+    **422** ``invalid_reading`` (``detail: {max_reruns, budget_profile}``, nothing written)
+    for a reserved.v1 body asking for re-runs or naming no budget profile. With
+    ``attempt_rule: reserved.v1`` a factory run names the reading and reserves each ticket's
+    first build (P-792 C8); without it nothing ties a factory run to the reading."""
     if body.campaign_id is not None:
         raise ApiError(
             422,
@@ -637,6 +653,13 @@ def register_forward_reading(
             hypothesis=body.hypothesis,
             smallest_effect=body.smallest_effect,
             lint_digest=lint_config_digest(lint),
+            attempt_rule=body.attempt_rule,
+            max_reruns=(
+                body.max_reruns
+                if body.max_reruns is not None
+                else (0 if body.attempt_rule else DEFAULT_MAX_RERUNS)
+            ),
+            budget_profile=body.budget_profile if body.attempt_rule else "",
         )
         return reading.to_dict()
 

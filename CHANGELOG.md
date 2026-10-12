@@ -18,7 +18,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `hypothesis`, `smallest_effect` and campaign; `thin_cell` counts distinct tasks. Readings
   and runs need docker sandbox and builder (409 `reading_posture_mismatch`) and lint on (409
   `lint_disabled`); retries: 409 `reading_exists`. Replay rows record their executor
-  (unsealed: `scope_fault`). `reserved.v1` scores one attempt per commit, reserved before
+  (unsealed: `scope_fault`). `reserved.v1` scores one attempt per commit/ticket, reserved before
   build, on qualification-pinned pools (drift: 409 `pool_drift`). `POST /campaigns` holds a
   pound ceiling: runs need `max_cost_usd` within cap (409 `campaign_ceiling`); a reading
   counts only admitted runs (409 `campaign_required`); `S1` authoring counts; overruns and

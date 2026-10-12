@@ -790,7 +790,9 @@ class RunCreateRequest(BaseModel):
     #: The author rung and the build rung are never the same rung: a label that is also on
     #: this run's ladder is refused before anything is built.
     test_author: str | None = Field(default=None, max_length=200)
-    #: ``replay`` and ``blind`` runs only: the registered reading this run is filed under
+    #: ``replay`` and ``blind`` runs, and a ``factory`` run filed under a reserved.v1 FORWARD
+    #: reading (its ticket's first build reserved, C8 — any other reading on a factory run is
+    #: 422 ``validation_error``): the registered reading this run is filed under
     #: (``rdg_<24 hex>``). Refused 422 ``reading_unknown`` unless it is a verified reading
     #: of the repository, 409 ``reading_unsealed`` unless the run's sandbox executor and
     #: the deployment's builder executor are both ``docker``, and 409
@@ -947,10 +949,11 @@ class RunCreateRequest(BaseModel):
                 f"max_cost_usd applies to build runs only ({sorted(BUILD_KINDS)}): a "
                 f"{self.kind!r} run makes no builder attempt"
             )
-        if self.reading_id is not None and self.kind not in ("replay", "blind"):
+        if self.reading_id is not None and self.kind not in ("replay", "blind", "factory"):
             raise ValueError(
-                f"reading_id applies to replay and blind runs only: a {self.kind!r} run is "
-                "not a reading's measurement"
+                "reading_id applies to replay and blind runs only, and to a factory run filed "
+                f"under a reserved.v1 forward reading: a {self.kind!r} run is not a reading's "
+                "measurement"
             )
         if self.campaign_id is not None and self.kind not in BUILD_KINDS:
             raise ValueError(

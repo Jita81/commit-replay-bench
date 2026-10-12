@@ -35,7 +35,10 @@ What it does: Commits ONLY the RED-proven test on a throwaway branch parented at
               rungs until clean or disqualified, refusing any rung that authored the oracle; a
               calibration build's first rung is also run against a second person's held-out
               acceptance tests after the builder finishes (``run_held_out``), stamped inside
-              its row and taken out of the tree again.
+              its row and taken out of the tree again; under a reserved.v1 forward reading
+              that first rung is reserved before ``build.start`` through the worker's
+              ``reserve`` hook (``Worker._factory_reserver``, by way of the loop), which never
+              blocks the build (``build.not_reserved`` when it raises; P-792 C8, C16).
 How:          ``stage_oracle_commit`` → ``Workspace.create(repo, oracle_sha)`` + ``overlay_tests`` →
               baseline → ``factory_brief`` (THE composer, from the item's context arm; the loop's
               lines only on a ``+L`` arm) → builder → ``grade`` → ``EvidencePack`` + ``write_pack``
@@ -52,7 +55,7 @@ Works with:   src/crb/builders/brief.py (the one composer and the held-out stamp
               rows use too), src/crb/factory/delivery.py (commits the kept workspace),
               src/crb/factory/review.py (replays the edits it recorded)
 Tested by:    tests/test_factory_build.py, tests/test_factory_loop.py,
-              tests/test_factory_held_out.py
+              tests/test_factory_held_out.py, tests/test_p792_reserved.py (the reserve hook)
 Touch when:   never for a new repository; when ``GradeRow`` gains a field (``factory_row``
               maps it — keep it in step with ``grade_row_from_result`` in the core); when
               the oracle-commit convention changes (the review probes read the same branch).
@@ -603,6 +606,7 @@ def build_item(
     learning: LearningSnapshot | None = None,
     author_stamp: str = "",
     held_out: HeldOutTests | None = None,
+    reserve: Callable[[], None] | None = None,
 ) -> BuildResult:
     """Stage the oracle, build at the parent with it overlaid, grade, pack, ledger.
 
@@ -610,6 +614,14 @@ def build_item(
     build's FIRST attempt — are run on the built tree only after the builder has finished and
     the attempt is graded (:func:`run_held_out`); the row carries ``acceptance: held_out``, the
     record's id, digest and result inside its hash. They never reach the brief.
+
+    P-792 C8: ``reserve`` — the worker's hook for a run filed under a reserved.v1 forward
+    reading — is called once on trial ``r1``, after the brief is composed and before
+    ``build.start``, so the attempt is reserved before the builder is called and anything
+    after it (a builder, grader or harness failure — C16) is the reading's miss. It never
+    blocks the build: an exception from it (a refusal, a halt, a store error) is a
+    ``build.not_reserved`` event naming the item, the trial and why, and the item is built
+    and graded as it was before, its row carrying no reservation.
 
     Never returns a clean result it did not observe: a builder exception is
     recorded and the (unchanged) worktree is still graded — it fails belts 2/4.
@@ -684,6 +696,17 @@ def build_item(
             root=str(ws.root),
         )
         brief = composed.brief
+        if reserve is not None and trial == "r1":
+            try:
+                reserve()
+            except Exception as exc:  # never blocks the build — the reading only loses it
+                _emit(
+                    on_event,
+                    "build.not_reserved",
+                    item=item.id,
+                    trial=trial,
+                    error=redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=500),
+                )
         _emit(on_event, "build.start", item=item.id, trial=trial, rung=label, mode=MODE_SIGHTED)
         t0 = time.monotonic()
         outcome: BuildOutcome | None = None
@@ -954,6 +977,7 @@ def build_ladder(
     author_stamp: str = "",
     held_out: HeldOutTests | None = None,
     on_result: Callable[[BuildResult], None] | None = None,
+    reserve: Callable[[], None] | None = None,
 ) -> list[BuildResult]:
     """Climb the escalation ladder: one graded, ledgered attempt per rung until a
     rung is clean or an attempt is disqualified. Every rung's label is checked
@@ -962,7 +986,8 @@ def build_ladder(
     ``held_out`` grades the FIRST rung only: a later attempt is never an ``S2`` reading's
     row (ADR-0026 item 8). ``on_result`` is called with each attempt as it is graded, before
     the next rung starts — so a ladder that dies on a later rung has its earlier attempts
-    on the record (P-692)."""
+    on the record (P-692). ``reserve`` reserves the FIRST rung only (:func:`build_item`;
+    P-792 C8), the one attempt a reserved.v1 forward reading reads."""
     if not rungs:
         raise ValueError("ladder must have at least one rung")
     for r in rungs:
@@ -999,6 +1024,7 @@ def build_ladder(
             learning=learning,
             author_stamp=author_stamp,
             held_out=held_out if i == 1 else None,
+            reserve=reserve if i == 1 else None,
         )
         results.append(res)
         if on_result is not None:

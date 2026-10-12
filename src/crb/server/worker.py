@@ -118,7 +118,8 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               event names (P-789, DL-382, DL-383), or a run of a reserved.v1 reading that sets
               a field the reading does not register (``_reading_run_fields`` over
               ``reading_run_refusal``: ``builder_config``, ``timeout``, another budget profile
-              or ladder; P-792 C3, C5, C7), or a run of a reading of either rule while the
+              or ladder, a factory run off a forward reading's cell; P-792 C3, C5, C7, C8),
+              or a run of a reading of either rule while the
               repository's lint is switched off (``_reading_lint_disabled``, P-796), or a run
               of a reserved.v1 reading whose pool moved since registration
               (``_reading_pool_drift`` over ``pool_drift``; at build, a live posture other than
@@ -149,10 +150,14 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               under ``REPO_CONFIG_UNPINNED``, ``fingerprint``, ``treatment_digest``; P-792):
               A0 and A0+L share the deployment, the loop's overlay and the budget profile are
               a non-loop arm's. For a replay or blind run filed under a reserved.v1 reading,
-              reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``:
-              one ``reading.reserved`` event under the events lock, or a skip, or a halt
-              before ``build.start`` — the run not owned, a cancel asked, a treatment that is
-              not the pinned one, the pins read by ``treatment_pins``), stamps the reserved
+              reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``
+              → ``_unit_reserver``: one ``reading.reserved`` event under the events lock, or
+              a skip, or a halt before ``build.start`` — the run not owned, a cancel asked, a
+              treatment that is not the pinned one, the pins read by ``treatment_pins``); for
+              a factory run filed under a reserved.v1 forward reading, each ticket's first
+              ``S2`` build the same way, keyed on its item id (``_factory_reserver``, the
+              loop's ``FactorySpec.reserve``; anything but ``ok`` is ``build.not_reserved``
+              and the build runs on — C8). Stamps the reserved
               row with the reservation, treatment and claim, and appends it under
               ``claim_guard``; a row whose claim was
               reclaimed or settled is refused (``AttemptSettled``) and the run's finish is
@@ -176,7 +181,8 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               ``params.test_author``), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
               src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
-              which runs first; the loop itself is src/crb/factory/loop.py),
+              which runs first; the loop itself is src/crb/factory/loop.py, whose
+              ``FactorySpec.reserve`` src/crb/factory/build.py calls before an item's r1),
               src/crb/server/intake.py (the idle loop's tracker poll — the watched column
               of every repository whose listener an operator switched on, ADR-0017),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
@@ -193,7 +199,8 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
               projections and their ratchets; the reserver, the stamped row and the guard,
-              C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7),
+              C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7; the
+              factory reservation, C8 and C16),
               tests/test_p792_pool.py (the claim's ``pool_drift`` refusal)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
@@ -252,7 +259,7 @@ from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
-from crb.core.context_arm import BASE_S1, REPLAY_MODE, parse_arm
+from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, parse_arm
 from crb.core.deps import DepsProvider, ProvisionRefused
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.execution import (
@@ -276,6 +283,7 @@ from crb.core.grade import MODE_BLIND, MODE_SIGHTED
 from crb.core.ledger import (
     FAILURE_HARNESS,
     LABEL_FAILURE_KIND,
+    PROCESS_FACTORY,
     GradeRow,
     LedgerIntegrityError,
     false_q1_total,
@@ -935,8 +943,9 @@ class RunContext:
 
 class _ReserveRefused(Exception):
     """A ``reading.reserved`` build that refused before anything was written: it carries the
-    skip or halt :meth:`Worker._reserver` answers, raised out of the locked transaction so the
-    event is never inserted (P-792)."""
+    skip or halt :meth:`Worker._unit_reserver` answers, raised out of the locked transaction so
+    the event is never inserted (P-792). A factory build's reserve hook raises it too, for any
+    answer but ``ok``: the build runs on and no reading counts it (``build.not_reserved``)."""
 
     def __init__(self, result: ReserveResult) -> None:
         super().__init__(result.reason)
@@ -954,8 +963,9 @@ class _RunLedger:
     used to emit the event and append the clean row anyway). A forged body is never
     stored: the table is content-addressed and first write wins.
 
-    A reserved.v1 attempt (P-792) is named in ``reserved`` by its ``(task_id, trial)`` once
-    :meth:`Worker._reserver` wrote its ``reading.reserved`` event: its row is stamped with the
+    A reserved.v1 attempt (P-792) is named in ``reserved`` by its ``(unit, trial)`` — the unit
+    a replay row's commit, a factory row's ``item_id`` label — once
+    :meth:`Worker._unit_reserver` wrote its ``reading.reserved`` event: its row is stamped with the
     reservation, the treatment and the claim, and appended under :func:`claim_guard`, so a row
     written after its run was reclaimed or settled raises :class:`AttemptSettled` and is never
     stored (C1, C11). Every other row is appended exactly as before.
@@ -979,8 +989,15 @@ class _RunLedger:
         self._runner_name = runner_name
         self._trial_labels = {k: dict(v) for k, v in (trial_labels or {}).items()}
         self._worker_id = worker_id or ctx.run.worker_id
-        #: ``(task_id, trial) → {reservation, treatment, claim}`` for each reserved attempt
+        #: ``(unit, trial) → {reservation, treatment, claim}`` for each reserved attempt — the
+        #: unit a commit, or a factory ticket's item id (:meth:`_unit`)
         self.reserved: dict[tuple[str, str], dict[str, str]] = {}
+
+    @staticmethod
+    def _unit(row: GradeRow) -> str:
+        """What a reservation names a row's attempt by: a factory row's ticket (its
+        ``item_id`` label — its ``task_id`` is the build's own id), else its commit."""
+        return row.labels.get("item_id", "") if row.process_step == PROCESS_FACTORY else row.task_id
 
     def _stamp(self, row: GradeRow) -> GradeRow:
         """Add the run-declared labels for this row's trial (``budget_tier``,
@@ -991,7 +1008,7 @@ class _RunLedger:
         turn a red row clean. A trial the ladder does not know, of an attempt not reserved,
         is left untouched."""
         extra = self._trial_labels.get(row.trial)
-        reserved = self.reserved.get((row.task_id, row.trial))
+        reserved = self.reserved.get((self._unit(row), row.trial))
         if not extra and not reserved:
             return row
         labels = {**row.labels, **(extra or {})}
@@ -1081,7 +1098,7 @@ class _RunLedger:
         )
 
     def append(self, row: GradeRow) -> GradeRow:
-        reserved = self.reserved.get((row.task_id, row.trial))
+        reserved = self.reserved.get((self._unit(row), row.trial))
         row = self._stamp(row)
         body, why = self._kept_pack(row) if row.evidence_pack_hash else (None, "")
         if row.clean and body is None:
@@ -1930,7 +1947,10 @@ class Worker:
         missed) still cannot steer the attempt it would reserve: a ``builder_config`` whose
         ``extra_args`` override the rung's ``--model`` (C3), a ``timeout`` (C5), another
         budget profile (C7), another ladder, cell, kind or mode, or an arm the reading does not
-        read. Nothing is reserved, so every enrolled commit stays pending. ``None`` for a run
+        read. A factory run under a reserved.v1 forward reading is held to the factory
+        whitelist (``RESERVED_FACTORY_PARAMS``) on the reading's cell, sighted, arm ``S2``
+        (C8): an off-cell run is refused here, before it can reserve. Nothing is reserved,
+        so every enrolled commit or ticket stays pending. ``None`` for a run
         under no reading, under one this repository has no verified record of
         (:meth:`_reading_unsealed` refuses it), or under a legacy reading, which no whitelist
         binds."""
@@ -2967,25 +2987,45 @@ class Worker:
         hold_usd: float | None,
         ledger: _RunLedger,
     ) -> Callable[[TaskSpec], ReserveResult]:
-        """``RunSpec.reserve`` for a run filed under the reserved.v1 reading ``reading_id``
-        (P-792): before a task's ``r1`` build, one ``reading.reserved`` event on the reading's
-        trace (``step_id`` the arm, ``task_id`` the commit), its payload decided under the
-        events lock — or a skip or a halt that writes nothing.
+        """``RunSpec.reserve`` for a replay run filed under the reserved.v1 reading
+        ``reading_id`` (P-792): :meth:`_unit_reserver` keyed on the task's commit, with the
+        task's spec and ``arm_body_for(task)`` — a calibrated r1 budget is per task."""
+        unit = self._unit_reserver(
+            ctx, reading_id, arm=arm, deployment=deployment, hold_usd=hold_usd, ledger=ledger
+        )
+        return lambda task: unit(task.task_id, task.to_dict(), arm_body_for(task))
+
+    def _unit_reserver(
+        self,
+        ctx: RunContext,
+        reading_id: str,
+        *,
+        arm: str,
+        deployment: Mapping[str, Any],
+        hold_usd: float | None,
+        ledger: _RunLedger,
+    ) -> Callable[[str, Mapping[str, Any], Mapping[str, Any]], ReserveResult]:
+        """The reservation for one unit of a run filed under the reserved.v1 reading
+        ``reading_id`` (P-792) — a replay task's commit, or a factory ticket's item id —
+        called with the unit, the spec it is built from and its arm half: before the unit's
+        ``r1`` build, one ``reading.reserved`` event on the reading's trace (``step_id`` the
+        arm, ``task_id`` the unit), its payload decided under the events lock — or a skip or
+        a halt that writes nothing.
 
         Under the lock it re-reads the reading and its reservations, then: a reading not
         registered reserved.v1 here, or an arm it does not read, halts ``reading_arm_unknown``;
-        a commit the arm does not enrol is skipped; a run no longer ``running`` on this worker
+        a unit the arm does not enrol is skipped; a run no longer ``running`` on this worker
         under the claim it was claimed with halts ``run_not_owned``, one asked to cancel halts
-        ``cancel_requested``; a commit this arm already reserved is skipped (the database's
+        ``cancel_requested``; a unit this arm already reserved is skipped (the database's
         index is the backstop, :class:`ReservationExists`). The first reservation of the
         campaign on this repository (of the reading, without one) pins the deployment half,
         and the reading's first on this arm pins the arm half; an attempt whose half differs
         halts ``reading_treatment_mismatch`` with both fingerprints (trust on first use, C3-C5,
-        C11). On ``ok`` the attempt's row is named in ``ledger.reserved`` — stamped with the
-        reservation, the treatment and the claim, and appended under :func:`claim_guard`.
+        C11). On ``ok`` the attempt's row is named in ``ledger.reserved`` by its unit — stamped
+        with the reservation, the treatment and the claim, and appended under
+        :func:`claim_guard`.
 
-        ``arm_body_for`` gives each task's arm half: a calibrated r1 budget is per task. No
-        row lock is taken here: the run's row is read plainly, and the guard on the row's
+        No row lock is taken here: the run's row is read plainly, and the guard on the row's
         append is the one that decides whether the attempt still counts."""
         run = ctx.run
         claim = int((run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0)
@@ -2995,8 +3035,10 @@ class Worker:
         def halt(reason: str, **detail: Any) -> _ReserveRefused:
             return _ReserveRefused(ReserveResult(RESERVE_HALT, reason, detail))
 
-        def reserve(task: TaskSpec) -> ReserveResult:
-            arm_body = dict(arm_body_for(task))
+        def reserve(
+            unit: str, spec_body: Mapping[str, Any], arm_half: Mapping[str, Any]
+        ) -> ReserveResult:
+            arm_body = dict(arm_half)
             arm_fp = fingerprint(arm_body)
             treatment = treatment_digest(deployment_fp, arm_fp)
 
@@ -3016,7 +3058,7 @@ class Worker:
                         reading_id=reading_id,
                         why=f"the reading does not read arm {arm[:80]!r}",
                     )
-                if task.task_id not in enrolled(reading, arm):
+                if unit not in enrolled(reading, arm):
                     raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_TASK_NOT_ENROLLED))
                 now = s.execute(
                     select(Run).where(Run.id == run.id).execution_options(populate_existing=True)
@@ -3038,7 +3080,7 @@ class Worker:
                     )
                 if now.cancel_requested:
                     raise halt(HALT_CANCEL_REQUESTED, run_id=run.id)
-                if (arm, task.task_id) in (reading.reservations or {}):
+                if (arm, unit) in (reading.reservations or {}):
                     raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_COMMIT_RESERVED))
                 pinned_by = ""
                 for half, ev in self._treatment_pins(s, reading, arm):
@@ -3069,7 +3111,7 @@ class Worker:
                     "trial": "r1",
                     "worker_id": self.worker_id,
                     "claim": claim,
-                    "task_spec_sha256": sha256_text(canonical_json(task.to_dict())),
+                    "task_spec_sha256": sha256_text(canonical_json(dict(spec_body))),
                     "hold_usd": hold_usd,
                     "deployment_fp": deployment_fp,
                     "arm_fp": arm_fp,
@@ -3084,7 +3126,7 @@ class Worker:
                     trace_id=reading_id,
                     stage="system",
                     action="reading.reserved",
-                    task_id=task.task_id,
+                    task_id=unit,
                     step_id=arm,
                     repo=run.repo,
                     actor=self.worker_id,
@@ -3094,7 +3136,7 @@ class Worker:
                 return refused.result
             except ReservationExists:  # the index's backstop: another writer reserved first
                 return ReserveResult(RESERVE_SKIP, SKIP_COMMIT_RESERVED)
-            ledger.reserved[(task.task_id, "r1")] = {
+            ledger.reserved[(unit, "r1")] = {
                 LABEL_RESERVATION: ev.event_id,
                 LABEL_TREATMENT: treatment,
                 LABEL_CLAIM: str(claim),
@@ -3194,6 +3236,67 @@ class Worker:
             hold_usd=base.max_cost_usd or None,
             ledger=ledger,
         )
+
+    def _factory_reserver(
+        self,
+        ctx: RunContext,
+        reading: Reading,
+        *,
+        ladder: EscalationLadder,
+        budget: Budget,
+        ledger: _RunLedger,
+    ) -> Callable[[BacklogItem, str], None]:
+        """``FactorySpec.reserve`` for a factory run filed under the reserved.v1 forward
+        ``reading`` (P-792 C8): :meth:`_unit_reserver` keyed on the ticket's item id, called
+        by the build just before an item's first standard-arm attempt (trial ``r1``). The
+        deployment half is projected as a replay's (the run's ladder, budget, overrides,
+        executor, timeout, escalation policy, posture and repository configuration; no
+        container and no pre-flight — factory builders run on the host); the arm half is
+        ``S2`` with no loop overlay and the reading's ``budget_profile`` over the r1 rung's
+        budget. The hold is the r1 rung's cost cap.
+
+        It raises for anything but ``ok`` — :class:`_ReserveRefused` carrying the skip or
+        halt, ``ValueError`` for an arm other than ``S2`` — and the build catches it, runs on
+        and emits ``build.not_reserved``: the hook never blocks delivery, and an attempt it
+        did not reserve is counted by no reading (``ledger.reserved`` names none)."""
+        p = ctx.params
+        kind = run_executor_kind(p, self.settings).strip().lower()
+        deployment = deployment_projection(
+            ladder=ladder,
+            budget=budget,
+            builder_overrides=dict(p.get("builder_config") or {}),
+            container=None,
+            executor=kind,
+            timeout=ctx.timeout,
+            preflight=None,
+            escalation=resolve_policy(p, ctx.config.spend).escalation,
+            posture_class=self._deployment_posture_class(ctx.run.repo, kind),
+            config=ctx.config,
+            s1_author="",
+        )
+        r1_budget = budget_for_rung(ladder.rungs[0], budget)
+        arm_body = arm_projection(
+            BASE_S2, empty_snapshot(ctx.run.repo), reading.budget_profile, r1_budget
+        )
+        unit = self._unit_reserver(
+            ctx,
+            reading.reading_id,
+            arm=BASE_S2,
+            deployment=deployment,
+            hold_usd=r1_budget.max_cost_usd or None,
+            ledger=ledger,
+        )
+
+        def reserve(item: BacklogItem, arm: str) -> None:
+            if arm != BASE_S2:
+                raise ValueError(
+                    f"the reading reserves the {BASE_S2} arm only; this build's arm is {arm!r}"
+                )
+            result = unit(item.id, item.to_dict(), arm_body)
+            if result.status != RESERVE_OK:
+                raise _ReserveRefused(result)
+
+        return reserve
 
     def _run_replay(self, ctx: RunContext, *, mode: str) -> tuple[str, dict[str, Any], str]:
         run = ctx.run
@@ -3972,7 +4075,10 @@ class Worker:
         as ``delivery_failed`` when asked for); ``max_rework`` (default 1); ``test_author``
         (a rung label, or ``none``; default the deployment's ``CRB_FACTORY__TEST_AUTHOR``)
         — the rung that writes the failing test for an item nobody authored an oracle for,
-        refused when it is a rung on this run's own ladder."""
+        refused when it is a rung on this run's own ladder; ``reading_id`` (P-792 C8) — a
+        reserved.v1 forward reading's, which the claim admitted only on the reading's cell:
+        each item's first standard-arm attempt is reserved before it is built
+        (:meth:`_factory_reserver`), and a reservation that fails never stops the build."""
         run = ctx.run
         p = ctx.params
         if self.settings.refuse_unsealed:
@@ -4048,7 +4154,11 @@ class Worker:
             ctx,
             runner.name,
             trial_labels=rungs,
+            worker_id=self.worker_id,
         )
+        # P-792 C8 — a run filed under a reserved.v1 forward reading reserves each item's
+        # first build; the claim already refused one off the reading's cell
+        reading = self._reserved_reading(run.repo, str(p.get("reading_id") or ""))
         self._stamp(
             ctx,
             backlog_hash=backlog.backlog_hash,
@@ -4151,6 +4261,12 @@ class Worker:
                 on_event=ctx.on_event,
             ),
             keep_patches=self.settings.store_patches,
+            # P-792 C8 — the reservation for an item's first build; never blocks it
+            reserve=self._factory_reserver(
+                ctx, reading, ladder=ladder, budget=budget, ledger=run_ledger
+            )
+            if reading is not None and reading.prospective
+            else None,
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
         total = len(backlog.ordered())

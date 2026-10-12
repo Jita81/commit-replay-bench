@@ -52,6 +52,15 @@ campaign holding a reserved.v1 reading on its repository without naming one is r
 ``reading_required`` (C19); both refusals hold again under the events lock where the campaign
 admits the run, and the real step-6 bodies are admitted.
 
+The factory (C8, C16): a forward reading opts in to reserved.v1 on ``POST /readings/forward``
+(``attempt_rule``; ``max_reruns`` 0 only), and a factory run filed under it by ``reading_id``
+is admitted only on the reading's cell — an off-cell run is refused 422 ``reading_run_fields``
+at submit and ``run.refused`` at claim, nothing reserved (C8) — and reserves each ticket's
+first ``S2`` build, so only that attempt decides it, whatever later rows say; an exception
+after the reservation is a miss (C16), and a reservation that cannot be written never blocks
+the build (``build.not_reserved``, the ticket counted by no reading). The legacy forward
+rule's ``_forward_attempt`` goldens stand beside them, unchanged.
+
 Navigation
 ----------
 What it is:   The P-792 channel tests — one per channel the round-5 enumeration found, each
@@ -93,7 +102,13 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               whose lint is off refused 409 ``lint_disabled`` at submit and ``run.refused`` at
               claim (nothing reserved, the commit pending), and lint switched off after the
               first reservation refused, then switched on as another config halting the next
-              ``reading_treatment_mismatch`` on the repository pin.
+              ``reading_treatment_mismatch`` on the repository pin. The factory: C8 (the
+              legacy ``_forward_attempt`` golden and its variants; an off-cell factory run
+              refused at submit and at claim, nothing reserved), C16 (a grading exception
+              after the reservation is a miss), the hook never blocking delivery (a store
+              error, a ticket not enrolled), only the reserved attempt counting (SQLite and
+              PostgreSQL), the ``RESERVED_FACTORY_PARAMS`` ratchet and ``POST
+              /readings/forward`` opting in.
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
@@ -111,7 +126,10 @@ How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`
               The submit-gate tests (``_r_stack``) run the app on the ``backend`` fixture's
               store (SQLite and PostgreSQL) with the Wave 3 rehearsal's campaign and
               registrations opted in to reserved.v1, and settle each admitted run so the
-              campaign's line is free for the next.
+              campaign's line is free for the next. The factory tests (``_f_rig``) run a
+              factory run on the worker rig over ``test_worker``'s multiply backlog
+              with a calibration grant and held-out tests, every cell a ceiling, under a
+              forward reading appended as its event (``_FRig.register``).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0026-the-context-standard.md
@@ -123,7 +141,8 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               rows the reading tests build on), src/crb/server/worker.py
               (``deployment_projection``, ``arm_projection``, ``repo_config_digest``, under
               test), docs/PREVENTION.md (P-792, the row these tests close; P-795, the golden's
-              one deliberate move), tests/test_worker.py (``Harness``, ``FakeBuilder``),
+              one deliberate move), tests/test_worker.py (``Harness``, ``FakeBuilder``,
+              ``_multiply_backlog``),
               src/crb/server/reading_book.py and src/crb/server/campaigns.py
               (``load_readings`` filling ``reservations_of``; ``treatment_pins``),
               src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
@@ -132,7 +151,9 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               (``submit_refusals``: ``reading_run_fields_refusal``, ``reading_lint_refusal``
               and ``campaign_refusal``, under test), tests/test_wave3_registration_rehearsal.py
               (the campaign, the registrations and the step-6 bodies the submit-gate tests
-              post)
+              post), src/crb/factory/build.py and src/crb/factory/loop.py (the reserve hook,
+              ``build.not_reserved``), tests/test_worker_held_out.py (``HELD_OUT`` and
+              ``_every_cell_a_ceiling``), src/crb/server/acceptance.py (``write_held_out``)
 Tested by:    tests/test_p792_reserved.py
 Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
               failing first), or a builder gains a constructor option that shapes its argv
@@ -3398,3 +3419,551 @@ def test_p792_toggling_lint_after_the_first_reservation_halts_the_next(
     assert "build.start" not in rig.actions(on.id)
     assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
     assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}
+
+
+# --- the factory: a reserved.v1 forward reading reserves each ticket's first build (C8, C16) --
+
+#: The factory rung a forward reading's cell names: the fake builder's ``multiply`` build of
+#: the one-item backlog (``test_worker._multiply_backlog``), on ``fake:m0@p``.
+_F_RUNG = {"builder": "fake", "model": "m0", "provider": "p"}
+
+
+@dataclasses.dataclass
+class _FRig:
+    """One worker over the fixture repository on a sealed deployment, with the one-item
+    ``bug.fix × XS`` backlog (``I-1`` and its operator-authored oracle) frozen and every cell
+    a ceiling, so a calibration grant builds the item and grades its first attempt on the
+    held-out tests a second person wrote (``test_worker_held_out``)."""
+
+    h: Harness
+    home: Any
+    backlog: Any
+    posture: str
+    feat: str
+
+    def register(self, *, reserved: bool = True) -> Reading:
+        """Register a ceiling (a legacy replay reading of the fixture commit, ten minutes
+        ago) and its forward reading on :data:`_F_RUNG` (five minutes ago; reserved.v1
+        unless ``reserved`` is false), and store both ``reading.registered`` events."""
+        now = datetime.now(UTC)
+        base = register(
+            repo=pr.REPO_NAME,
+            cell=_W_CELL,
+            hierarchy=("S3",),
+            pool=[self.feat],
+            apparatus=worker.APPARATUS_VERSION,
+            taxonomy=GLOBAL_CLASS_SET,
+            posture_class=self.posture,
+            checks_arm="off",
+            actor="op-1",
+            hypothesis=HYPOTHESIS,
+            smallest_effect=SMALLEST_EFFECT,
+            now=(now - timedelta(minutes=10)).isoformat(timespec="seconds"),
+        )
+        from crb.core.reading import ReadingOutcome
+
+        ceiling = ReadingOutcome(
+            reading=base, arms={}, chain=("S3",), stopped_at="", standard="", state=OUTCOME_CEILING
+        )
+        opt_in = {"attempt_rule": ATTEMPT_RULE_RESERVED, "budget_profile": PROFILE_DEFAULT}
+        fwd = register_forward(
+            ceiling=ceiling,
+            **_F_RUNG,
+            actor="op-1",
+            existing=[base],
+            hypothesis=HYPOTHESIS,
+            smallest_effect=SMALLEST_EFFECT,
+            now=(now - timedelta(minutes=5)).isoformat(timespec="seconds"),
+            **(opt_in if reserved else {}),
+        )
+        for r in (base, fwd):
+            append_event(
+                self.h.factory,
+                trace_id=f"readings:{pr.REPO_NAME}",
+                stage="system",
+                action=READING_EVENT_ACTION,
+                repo=pr.REPO_NAME,
+                payload=r.to_dict(),
+            )
+        return fwd
+
+    def enrol(self, *, written_at: str = "") -> HeldOutTests:
+        """Grant ``I-1`` a calibration build and store its held-out tests, written now (after
+        the registration, so the ticket is enrolled) unless ``written_at`` says otherwise."""
+        from crb.server.acceptance import write_held_out
+        from test_worker_held_out import HELD_OUT
+
+        grant = self.home.evidence(actor="approver:ada").record_calibration(
+            "I-1", approver="approver:ada", reason="the forward reading"
+        )
+        record = HeldOutTests(
+            repo=pr.REPO_NAME,
+            item_id="I-1",
+            grant=grant.event_id,
+            files=(("tests/test_multiply_held_out.py", HELD_OUT),),
+            author="operator:bea",
+            written_at=written_at or datetime.now(UTC).isoformat(timespec="seconds"),
+            capability_class="bug.fix",
+            size="XS",
+            language="python",
+        )
+        write_held_out(self.h.factory, record)
+        return record
+
+    def enqueue(
+        self, reading: Reading | None, *, params: dict[str, Any] | None = None, **fields: Any
+    ) -> Run:
+        """Enqueue a factory run filed under ``reading`` (none when ``None``), stored as
+        ``POST /runs`` stores one: the cell's rung on the ladder ``["r1"]``, sighted, the
+        backlog's frozen hash and evolutions chain pinned; ``params`` and ``fields`` laid
+        over it."""
+        stored: dict[str, Any] = {
+            "task_ids": [],
+            "limit": None,
+            "pool": "",
+            "executor": "",
+            "timeout": 0,
+            "backlog_hash": self.backlog.backlog_hash,
+            "evolutions_hash": self.backlog.evolutions_hash,
+        }
+        if reading is not None:
+            stored["reading_id"] = reading.reading_id
+        base = {**_F_RUNG, "mode": "sighted", "ladder_json": list(RESERVED_RUN_LADDER)}
+        return self.h.enqueue(
+            "factory", params_json={**stored, **(params or {})}, **{**base, **fields}
+        )
+
+    def reservations(self, reading: Reading) -> list[Event]:
+        """The reading's ``reading.reserved`` events, in ``Event.id`` order."""
+        with self.h.factory() as s:
+            return list(
+                s.execute(
+                    select(Event)
+                    .where(
+                        Event.action == READING_RESERVED_ACTION,
+                        Event.trace_id == reading.reading_id,
+                    )
+                    .order_by(Event.id)
+                ).scalars()
+            )
+
+    def verdicts(self, reading: Reading) -> dict[str, tuple[bool | None, str]]:
+        """Each enrolled ticket of the ``S2`` arm as the server reads it: the reading as
+        ``load_readings`` fills it (its pool enrolled), over every row in the ledger."""
+        with self.h.factory() as s:
+            loaded = next(
+                r for r in load_readings(s, pr.REPO_NAME) if r.reading_id == reading.reading_id
+            )
+        rows = list(self.h.worker.ledger.rows())
+        return {c.commit: (c.outcome, c.reason) for c in arm_reading(loaded, "S2", rows).commits}
+
+    def events(self, run_id: str, action: str) -> list[Any]:
+        return [e for e in self.h.events(run_id) if e.action == action]
+
+    def actions(self, run_id: str) -> list[str]:
+        return [e.action for e in self.h.events(run_id)]
+
+    def rows(self, run_id: str) -> list[GradeRow]:
+        return list(self.h.worker.ledger.rows(run_id=run_id))
+
+    def event_ids(self, run_id: str) -> dict[str, list[int]]:
+        """``Event.id`` of each of a run's events, by action."""
+        out: dict[str, list[int]] = {}
+        with self.h.factory() as s:
+            for ev in s.execute(select(Event).where(Event.trace_id == run_id)).scalars():
+                out.setdefault(ev.action, []).append(int(ev.id))
+        return out
+
+
+def _f_rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: Backend | None = None) -> _FRig:
+    """The factory rig on SQLite, or on ``store``'s database when one is given."""
+    from test_worker import _multiply_backlog
+    from test_worker_held_out import _every_cell_a_ceiling
+
+    pyrepo = pr.build(tmp_path / "pyrepo")
+    h = Harness(tmp_path, pyrepo)
+    if store is not None:
+        h.url = store.url
+        h.settings = dataclasses.replace(h.settings, database_url=store.url)
+        h.worker = worker.Worker(h.settings, engine=store.engine)
+        h.factory = h.worker.factory
+        h.queue = JobQueue(h.factory)
+    h.add_repo()
+    h.add_task(pyrepo.feat_task())
+    # _multiply_backlog sets the registry's fake builder; the monkeypatch restores it
+    monkeypatch.setitem(builders_pkg._REGISTRY, "fake", FakeBuilder)
+    w = h.worker
+    # a sealed worker: both executors docker (P-789), the sandbox a local one on the cancel token
+    monkeypatch.setattr(
+        w, "settings", dataclasses.replace(w.settings, executor="docker", builder_executor="docker")
+    )
+    monkeypatch.setattr(
+        w, "_executor", lambda ctx: _WExec({"exec": ""}, cancel=lambda: w._cancelled(ctx))
+    )
+    monkeypatch.setenv("CRB_BUILDER__IMAGE", "crb-builder:test")
+    monkeypatch.delenv("CRB_BUILDER__EXECUTOR", raising=False)
+    posture = w._deployment_posture_class(pr.REPO_NAME, "docker")
+    _every_cell_a_ceiling(monkeypatch)
+    home, _item, backlog = _multiply_backlog(h)
+    return _FRig(h, home, backlog, posture, pyrepo.feat_sha)
+
+
+def _f_forward(*, reserved: bool = True) -> Reading:
+    """A forward reading in memory (the goldens' ceiling, :func:`_g_forward`), reserved.v1
+    unless ``reserved`` is false."""
+    pool = commits(20, prefix="f")
+    ceiling_reading = register_reading(pool, hierarchy=("S3", S1), budget=0.05)
+    ceiling = evaluate(
+        ceiling_reading,
+        rows_for([True] * 20, pool, arm="S3") + rows_for([True] * 17 + [False] * 3, pool, arm=S1),
+    )
+    opt_in = {"attempt_rule": ATTEMPT_RULE_RESERVED, "budget_profile": PROFILE_DEFAULT}
+    return register_forward(
+        ceiling=ceiling,
+        builder="claude_code",
+        model="claude-sonnet-5",
+        provider="anthropic",
+        actor="op-1",
+        existing=[ceiling_reading],
+        now=_G_FWD_AT,
+        budget=0.05,
+        **(opt_in if reserved else {}),
+    )
+
+
+def test_p792_c8_forward_offcell_run_cannot_reserve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C8: a factory run filed under a reserved.v1 forward reading reserves the ticket's
+    first build, so the whitelist binds it as it binds a replay run's — a run built on
+    another model than the reading's cell is refused 422 ``reading_run_fields`` naming
+    ``model`` at ``POST /runs`` (nothing queued; 422 ``validation_error`` before, a factory
+    run could name no reading), the on-cell run passes every reading gate (409
+    ``no_frozen_backlog``, the next one), and a factory run naming a legacy reading is still
+    a validation error. At claim the same off-cell run, inserted past the route, is refused
+    ``reading_run_fields`` naming ``model`` alone — nothing built, nothing reserved (before,
+    the claim named ``kind`` and the factory's own params too). The legacy forward rule is
+    pinned unchanged: a ticket's first factory attempt is any rung-``r1`` factory row on
+    the repository graded after registration and never imported."""
+    from crb.core.ledger import LABEL_IMPORTED
+    from crb.core.reading import _forward_attempt
+    from fixtures.proven import add_oracle_and_controls, add_rows, add_tasks, register_via_api
+    from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, envelope, make_env
+
+    # the legacy forward rule, pinned: nine first attempts, and each way a row is not one
+    legacy, rows = _g_forward()
+    assert [_forward_attempt(legacy, r) for r in rows] == [True] * 9
+    first = rows[0]
+    for change in (
+        {"trial": "r2"},
+        {"labels": {**first.labels, LABEL_IMPORTED: "true"}},
+        {"repo": "other/repo"},
+        {"created": "2026-09-27T11:00:00+00:00"},
+    ):
+        assert not _forward_attempt(legacy, GradeRow(**{**first.fields(), **change})), change
+
+    # the submit gate
+    monkeypatch.setitem(runs_routes.CREDENTIAL_CHECKS, "editblock", lambda *_a, **_k: "")
+    with make_env(tmp_path / "submit", **SEALED_SETTINGS) as env:
+        add_tasks(env.factory)
+        r = register_via_api(env)
+        assert r.status_code == 201, r.text
+        ceiling = r.json()
+        pool = ceiling["pool"][:20]
+        add_rows(env.factory, pool, arm="S3")
+        add_rows(env.factory, pool[:3], arm=S1, clean=False)
+        add_rows(env.factory, pool[3:], arm=S1)
+        add_oracle_and_controls(env.factory, pool)
+        fwd = env.post(
+            "/readings/forward",
+            json={
+                "repo": ALPHA,
+                "promotes": ceiling["reading_id"],
+                "builder": BUILDER,
+                "model": MODEL,
+                "provider": PROVIDER,
+                "hypothesis": HYPOTHESIS,
+                "smallest_effect": SMALLEST_EFFECT,
+                "attempt_rule": ATTEMPT_RULE_RESERVED,
+            },
+        )
+        assert fwd.status_code == 201, fwd.text
+        body = {
+            "repo": ALPHA,
+            "kind": "factory",
+            "builder": BUILDER,
+            "model": MODEL,
+            "provider": PROVIDER,
+            "reading_id": fwd.json()["reading_id"],
+        }
+        with env.factory() as s:
+            queued = len(list(s.execute(select(Run.id)).scalars()))
+        off = env.post("/runs", json={**body, "model": "gpt-oss-20b"})
+        assert off.status_code == 422, off.text
+        err = envelope(off)
+        assert err["code"] == REFUSAL_RUN_FIELDS, err
+        assert err["detail"]["fields"] == ["model"], err
+        on = env.post("/runs", json=body)
+        assert on.status_code == 409, on.text
+        assert envelope(on)["code"] == "no_frozen_backlog"
+        named = env.post("/runs", json={**body, "reading_id": ceiling["reading_id"]})
+        assert named.status_code == 422, named.text
+        err = envelope(named)
+        assert err["code"] == "validation_error"
+        assert "replay and blind runs only" in json.dumps(err), err
+        with env.factory() as s:
+            assert len(list(s.execute(select(Run.id)).scalars())) == queued
+
+    # the claim
+    rig = _f_rig(tmp_path / "claim", monkeypatch)
+    reading = rig.register()
+    rig.enrol()
+    run = rig.enqueue(reading, model="m1")
+    done = rig.h.run_one()
+    assert done.status == STATUS_FAILED, (done.status, done.error)
+    assert done.error.startswith(REFUSAL_RUN_FIELDS), done.error
+    (refused,) = [dict(e.payload or {}) for e in rig.events(run.id, "run.refused")]
+    assert (refused["code"], refused["fields"]) == (REFUSAL_RUN_FIELDS, ["model"]), refused
+    assert "build.start" not in rig.actions(run.id)
+    assert rig.reservations(reading) == [] and rig.rows(run.id) == []
+    assert rig.verdicts(reading) == {"I-1": (None, "pending")}
+
+
+def test_p792_c16_factory_exception_after_reserve_is_a_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C16: a factory build that raises after its reservation — here the grader itself —
+    writes no row, the loop records the item as an error and the run settles, and the
+    reserved ticket reads a miss (``unobserved``), as a replay attempt's does (C15): fail
+    closed, an instrument failure after the reservation is the reading's cost. Before, the
+    run was refused at claim and never reserved."""
+    rig = _f_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    rig.enrol()
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("the grader fell over")
+
+    monkeypatch.setattr("crb.factory.build.grade", broken)
+    run = rig.enqueue(reading)
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, (done.status, done.error)
+    (outcome,) = dict(done.counts_json or {})["outcomes"]
+    assert outcome["status"] == "error", outcome
+    (res,) = rig.reservations(reading)
+    assert (res.task_id, dict(res.payload_json or {})["run_id"]) == ("I-1", run.id)
+    assert rig.rows(run.id) == []
+    assert rig.verdicts(reading) == {"I-1": (False, "unobserved")}
+
+
+@pytest.mark.parametrize("how", ["store_error", "not_enrolled"])
+def test_p792_factory_reserve_never_blocks_delivery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """The factory's reservation hook never blocks a build: a reservation that cannot be
+    written (the events store raising) or that the reading refuses (a ticket it does not
+    enrol — its held-out tests written before the registration) is a ``build.not_reserved``
+    event naming the item, the trial and why, and the item is built and graded as it was
+    before, its row carrying no reservation. The ticket the store failed for stays pending;
+    the one the reading never enrolled is not in its pool."""
+    from crb.core.reading import SKIP_TASK_NOT_ENROLLED
+
+    rig = _f_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    if how == "store_error":
+        rig.enrol()
+        real = worker.append_event_checked
+
+        def flaky(*a: Any, **kw: Any) -> Any:
+            if kw.get("action") == READING_RESERVED_ACTION:
+                raise RuntimeError("the events store went away")
+            return real(*a, **kw)
+
+        monkeypatch.setattr(worker, "append_event_checked", flaky)
+    else:
+        rig.enrol(written_at=(datetime.now(UTC) - timedelta(minutes=20)).isoformat())
+    run = rig.enqueue(reading)
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, (done.status, done.error)
+    (event,) = rig.events(run.id, "build.not_reserved")
+    assert {k: dict(event.payload or {}).get(k) for k in ("item", "trial")} == {
+        "item": "I-1",
+        "trial": "r1",
+    }
+    assert "build.start" in rig.actions(run.id)
+    rows = [r for r in rig.rows(run.id) if r.trial == "r1"]
+    assert len(rows) == 1 and LABEL_RESERVATION not in rows[0].labels, rows
+    assert rig.reservations(reading) == []
+    if how == "store_error":
+        assert "the events store went away" in event.error_message
+        assert rig.verdicts(reading) == {"I-1": (None, "pending")}
+    else:
+        assert SKIP_TASK_NOT_ENROLLED in event.error_message
+        assert rig.verdicts(reading) == {}
+
+
+def test_p792_forward_reserved_counts_only_the_reserved_attempt(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A factory run filed under a reserved.v1 forward reading reserves the ticket's ``r1``
+    build before it starts (one ``reading.reserved`` event: the ticket, the ``S2`` arm, the
+    run, no campaign), its row is stamped with that reservation, the claim and the
+    treatment, and the ticket is read by that row alone — a later unreserved copy of the
+    row, failing its held-out tests, does not move it. On SQLite and PostgreSQL. Before, the
+    run was refused at claim and nothing was reserved."""
+    rig = _f_rig(tmp_path, monkeypatch, store=backend)
+    reading = rig.register()
+    record = rig.enrol()
+    run = rig.enqueue(reading)
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, (done.status, done.error)
+    (res,) = rig.reservations(reading)
+    p = dict(res.payload_json or {})
+    assert (res.task_id, res.step_id) == ("I-1", "S2")
+    assert (p["run_id"], p["arm"], p["trial"], p["campaign_id"]) == (run.id, "S2", "r1", "")
+    (row,) = [r for r in rig.rows(run.id) if r.trial == "r1"]
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert row.labels[LABEL_CLAIM] == "0"
+    assert row.labels[LABEL_TREATMENT] == p["treatment"]
+    assert int(res.id) < min(rig.event_ids(run.id)["build.start"])
+    assert rig.verdicts(reading) == {"I-1": (True, "")}
+    unreserved = {
+        k: v
+        for k, v in row.labels.items()
+        if k not in (LABEL_RESERVATION, LABEL_TREATMENT, LABEL_CLAIM)
+    }
+    rig.h.worker.ledger.append(
+        GradeRow(
+            **{
+                **row.fields(),
+                "row_id": "",
+                "labels": {**unreserved, **held_out_labels(record, RESULT_FAIL)},
+            }
+        )
+    )
+    assert rig.verdicts(reading) == {"I-1": (True, "")}
+
+
+def test_p792_reserved_factory_params_ratchet() -> None:
+    """The factory whitelist (:data:`RESERVED_FACTORY_PARAMS`) is the replay one without the
+    replay-only keys (``budget_profile``, ``learning``, ``arm``, ``campaign_id`` — a
+    forward reading names no campaign and reads ``S2`` alone) plus the factory's own
+    (``backlog_hash``, ``evolutions_hash``, ``deliver``, ``max_rework``), and the core
+    table: a sighted factory run of a reserved.v1 forward reading on its cell and the one
+    ladder is admitted with every whitelisted key; anything else is refused naming it; a
+    replay or blind run of a forward reading, and a factory run of a replay reading, are
+    refused ``kind``."""
+    from crb.core.context_arm import BASE_S2
+    from crb.core.reading import RESERVED_FACTORY_PARAMS
+
+    replay_only = {"budget_profile", "learning", "arm", "campaign_id"}
+    factory_own = {"backlog_hash", "evolutions_hash", "deliver", "max_rework"}
+    expected = (RESERVED_RUN_PARAMS - replay_only) | factory_own
+    assert expected == RESERVED_FACTORY_PARAMS
+    fwd = _f_forward()
+    assert fwd.reserved and fwd.prospective
+    cell = {k: fwd.cell[k] for k in ("builder", "model", "provider")}
+    params: dict[str, Any] = {
+        "task_ids": [],
+        "limit": None,
+        "pool": "",
+        "executor": "",
+        "timeout": 0,
+        "backlog_hash": "b" * 64,
+        "evolutions_hash": "",
+        "deliver": False,
+        "max_rework": 1,
+        "test_author": "fake:author",
+        "reading_id": fwd.reading_id,
+        "outage_stop": 3,
+        "env_stop": 3,
+        "qualify_first": True,
+        "max_cost_usd": 1.0,
+    }
+    assert set(params) == RESERVED_FACTORY_PARAMS
+
+    def refusal(
+        reading: Reading = fwd, *, kind: str = "factory", mode: str = "sighted", **over: Any
+    ) -> tuple[str, dict[str, Any]]:
+        args: dict[str, Any] = {**cell, "ladder": list(RESERVED_RUN_LADDER), "params": params}
+        return reading_run_refusal(reading, kind=kind, mode=mode, **{**args, **over})
+
+    assert refusal() == ("", {})
+    cases: list[tuple[dict[str, Any], list[str]]] = [
+        ({"params": {**params, "builder_config": {"x": 1}}}, ["builder_config"]),
+        ({"params": {**params, "budget_profile": PROFILE_DEFAULT}}, ["budget_profile"]),
+        ({"params": {**params, "learning": "off"}}, ["learning"]),
+        ({"params": {**params, "timeout": 1}}, ["timeout"]),
+        ({"ladder": ["r1", "r2"]}, ["ladder"]),
+        ({"model": "other"}, ["model"]),
+        ({"mode": "blind"}, ["mode"]),
+    ]
+    for over, fields in cases:
+        code, detail = refusal(**over)
+        assert (code, detail["fields"]) == (REFUSAL_RUN_FIELDS, fields), over
+        assert detail["arm"] == ("" if "mode" in fields else BASE_S2), (over, detail)
+    for kind in ("replay", "blind"):
+        code, detail = refusal(kind=kind, mode="blind" if kind == "blind" else "sighted")
+        assert code == REFUSAL_RUN_FIELDS and "kind" in detail["fields"], (kind, detail)
+    replay = _reserved_reading(commits(4, prefix="q"), hierarchy=("S3",))
+    assert replay.reserved and not replay.prospective
+    code, detail = refusal(replay, **{k: replay.cell[k] for k in ("builder", "model", "provider")})
+    assert code == REFUSAL_RUN_FIELDS and "kind" in detail["fields"], detail
+    assert reading_run_refusal(
+        _f_forward(reserved=False),
+        kind="factory",
+        mode="sighted",
+        ladder=["r9"],
+        params={"x": 1},
+        builder="",
+        model="",
+        provider="",
+    ) == ("", {})
+
+
+def test_p792_post_readings_forward_opts_in_to_reserved(tmp_path: Path) -> None:
+    """``POST /readings/forward`` registers a reserved.v1 forward reading only when asked:
+    ``attempt_rule: reserved.v1`` stores ``max_reruns`` 0 and the budget profile
+    (``default`` unless named), and a reserved.v1 body asking for reruns is refused 422
+    ``invalid_reading`` and writes nothing. Before, the route took no rule."""
+    from fixtures.proven import add_oracle_and_controls, add_rows, add_tasks, register_via_api
+    from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, envelope, make_env
+
+    with make_env(tmp_path, **SEALED_SETTINGS) as env:
+        add_tasks(env.factory)
+        r = register_via_api(env)
+        assert r.status_code == 201, r.text
+        pool = r.json()["pool"][:20]
+        add_rows(env.factory, pool, arm="S3")
+        add_rows(env.factory, pool[:3], arm=S1, clean=False)
+        add_rows(env.factory, pool[3:], arm=S1)
+        add_oracle_and_controls(env.factory, pool)
+        body = {
+            "repo": ALPHA,
+            "promotes": r.json()["reading_id"],
+            "builder": BUILDER,
+            "model": MODEL,
+            "provider": PROVIDER,
+            "hypothesis": HYPOTHESIS,
+            "smallest_effect": SMALLEST_EFFECT,
+            "attempt_rule": ATTEMPT_RULE_RESERVED,
+        }
+
+        def registered() -> int:
+            with env.factory() as s:
+                q = select(Event).where(Event.action == READING_EVENT_ACTION)
+                return len(list(s.execute(q).scalars()))
+
+        before = registered()
+        refused = env.post("/readings/forward", json={**body, "max_reruns": 1})
+        assert refused.status_code == 422, refused.text
+        err = envelope(refused)
+        assert err["code"] == REFUSAL_INVALID, err
+        assert err["detail"] == {"max_reruns": 1, "budget_profile": PROFILE_DEFAULT}
+        assert registered() == before
+        fwd = env.post("/readings/forward", json=body)
+        assert fwd.status_code == 201, fwd.text
+        got = fwd.json()
+        assert got["attempt_rule"] == ATTEMPT_RULE_RESERVED
+        assert (got["max_reruns"], got["budget_profile"]) == (0, PROFILE_DEFAULT)
+        assert registered() == before + 1
