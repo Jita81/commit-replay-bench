@@ -746,12 +746,12 @@ def test_s1_red_counts_each_top_level_go_test_the_author_defines(
     assert _Idle.calls == 0
 
 
-#: An authored Go file whose one live test passes: a ``"/*"`` it logs opens no comment, and
-#: an earlier draft kept in a block comment and a raw string names an old failing fuzz
-#: target, example and test at column 0.
+#: An authored Go file whose one live test passes: a ``"/*"`` declared above it opens no
+#: comment, and an earlier draft kept in a block comment and a raw string names an old
+#: failing fuzz target, example and test at column 0.
 GO_DRAFT_SRC = (
-    'package calc\n\nimport "testing"\n\n'
-    'func TestNewAdds(t *testing.T) {\n\tt.Log("/*")\n\tif Add(2, 2) != 4 {\n'
+    'package calc\n\nimport "testing"\n\nvar open = "/*"\n\n'
+    "func TestNewAdds(t *testing.T) {\n\tt.Log(open)\n\tif Add(2, 2) != 4 {\n"
     '\t\tt.Fatal("want 4")\n\t}\n}\n\n'
     "/*\nAn earlier draft:\n\nfunc FuzzOld(f *testing.F) {}\n\nfunc ExampleAdd() {}\n*/\n\n"
     "var draft = `\nfunc TestRawOld(t *testing.T) {}\n`\n"
@@ -765,17 +765,26 @@ def test_s1_red_reads_a_go_test_only_from_code(
     kept in a block comment or a raw string "declared" ``FuzzOld``, ``ExampleAdd`` and
     ``TestRawOld``; an old test failing under one of those names in the package became the
     authored test's RED while the authored test itself passed. A test counts only from the
-    file's code, each comment and string literal blanked first."""
+    file's code, each comment and string literal blanked first, read left to right: a
+    ``"/*"`` or a stray backtick inside a string, a rune or a ``//`` comment opens nothing
+    (R6A-FIXCHECK-R2-1: no case pinned the string, rune or line-comment reading)."""
     pkg = gorepo.CALC_PKG
     old = frozenset(
         f"{pkg}::{name}" for name in ("FuzzOld/seed#0", "FuzzOld", "ExampleAdd", "TestRawOld")
     )
     assert adapter.authored_red("go", GO_AUTHORED, GO_DRAFT_SRC, old, ()) == frozenset()
-    # the live test still counts: the "/*" it logs is a string, not a comment's start
+    # the live test still counts: the "/*" above it is a string, not a comment's start that
+    # would run to the draft's "*/" and hide the test
     mine = old | {f"{pkg}::TestNewAdds"}
     assert adapter.authored_red("go", GO_AUTHORED, GO_DRAFT_SRC, mine, ()) == {
         f"{pkg}::TestNewAdds"
     }
+    # a backtick in a string, a rune or a line comment opens no raw string: read as one, it
+    # would run to the draft's opening backtick, hide the live test and bare TestRawOld
+    for stray in ('var tick = "`"', "var rtick = '`'", "// a stray ` here"):
+        src = GO_DRAFT_SRC.replace("var open", f"{stray}\n\nvar open", 1)
+        counted = adapter.authored_red("go", GO_AUTHORED, src, mine, ())
+        assert counted == {f"{pkg}::TestNewAdds"}, stray
     # through the BuildFn: the old failures are no RED, and the builder never runs
     drafts = ExecResult(
         1,
