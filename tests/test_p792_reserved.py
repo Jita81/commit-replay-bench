@@ -75,7 +75,8 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               index, since a row hash covers its random ``row_id``), with the one deliberate
               move beside them (``P795_MOVED``: an unsealed replay row reads ``scope_fault``,
               its arm ``undecided``). reserved.v1: C4, C6 (every exit, against later rows of
-              other runs, reservations and claims, with the legacy control), C15, C19, each
+              other runs, reservations and claims, with the legacy control), C15, C19, an
+              imported copy of a reserved row deciding nothing (R5V3-IMPORT-1, P-321), each
               check a named miss (replay and forward), the registration's ``max_reruns`` 0
               and budget profile, the ``reading_run_refusal`` whitelist table and the arm
               each admitted run maps to (C3, C5, C7 at the core), the hypothesis property
@@ -91,12 +92,12 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               C1 (SQLite and PostgreSQL), C2, C5(b, c), C9-C13 and C15 end to end, S3 and A0
               reserving one commit apart, a reservation only at r1 and before every outcome
               event, two claims racing for one commit (one wins, on both backends), the
-              reserver's recheck under the lock (a run cancelled or reclaimed between claim
-              and reserve refused ``cancel_requested`` or ``run_not_owned``, the commit
-              pending), a settled
-              claim's row refused up to ``execute``, a legacy reading's run never reserving,
-              ``POST /readings`` registering reserved.v1 only (DL-385: the bare body
-              reserved.v1, a legacy rule or a re-run refused 422), the claim's
+              reserver's recheck under the lock (a run cancelled, or reclaimed and claimed
+              again by another worker or by one with this one's id, between claim and
+              reserve refused ``cancel_requested`` or ``run_not_owned``, the commit pending),
+              a settled claim's row refused up to ``execute``, a legacy reading's run never
+              reserving, ``POST /readings`` registering reserved.v1 only (DL-385: the bare
+              body reserved.v1, a legacy rule or a re-run refused 422), the claim's
               ``reading_run_fields`` refusal (C3(b) ``extra_args``, C5 ``timeout``, C7 a budget
               profile, a two-rung ladder) and ``GET /readings`` serving ``attempt_rule``,
               ``pinned_treatment`` and ``reserved`` (null before the first reservation; a legacy
@@ -298,7 +299,7 @@ from crb.store.jobs import (
     JobQueue,
     claim_guard,
 )
-from crb.store.ledger import AttemptSettled
+from crb.store.ledger import AttemptSettled, DbLedger, import_stamp
 from crb.store.models import Event, Repo, Run, Task
 from fixtures import pyrepo as pr
 from fixtures.builders_repo import make_fixture
@@ -1088,6 +1089,54 @@ def test_p792_c19_counts_only_its_own_reservation() -> None:
     # two rows of one reservation: neither is chosen
     dup = [*own, _reserved_row(r1, clean=False)]
     assert _verdicts(loaded, S1, dup)[0] == (False, "duplicate")
+
+
+def _imported_copy(row: GradeRow) -> GradeRow:
+    """What an admin can post to ``POST /ledger/import`` after reading ``row`` off ``GET
+    /ledger/export``: the same run, commit, rung and reservation, claim and treatment labels,
+    with a fresh ``row_id`` and no evidence pack, so the route's dedupe (on ``row_id`` and
+    pack hash) lets it through."""
+    d = {**row.to_dict(), "row_id": "", "evidence_pack_hash": "", "prev_hash": "", "row_hash": ""}
+    return GradeRow.from_dict(d)
+
+
+def test_p792_reserved_an_imported_copy_decides_nothing(backend: Backend) -> None:
+    """R5V3-IMPORT-1 (P-792, P-321): an imported row never counts toward a reserved.v1
+    reading, whatever labels it carries. An admin who, after the outcomes, imports a red copy
+    of a reserved row — its run, commit, rung, reservation, claim and treatment — leaves a
+    hit a hit (it read ``duplicate`` before), an attempt in flight pending (``out_of_scope``
+    before) and a settled attempt with no row of its own ``unobserved``; the hit is served by
+    the reserved row's own hash. In memory, and end to end through ``DbLedger.append`` and
+    ``DbLedger.import_rows`` on the backend's store (SQLite, and PostgreSQL when set), as
+    ``POST /ledger/import`` writes it and ``GET /readings`` reads it."""
+    reading = _reserved_reading(commits(2, prefix="imp"), hierarchy=("S3",))
+    c = reading.pool[0]
+    res = _res("S3", c)
+    loaded = _read(reading, [res])
+    own = _reserved_row(res)
+    copy = _imported_copy(_reserved_row(res, clean=False))
+    imported = GradeRow(
+        **{**import_stamp(copy, imported_by="admin-1", imported_at="2026-10-12"), "prev_hash": ""}
+    )
+    assert imported.imported and imported.labels[LABEL_RESERVATION] == res.event_id
+    assert _verdicts(loaded, "S3", [own])[0] == (True, "")
+    assert _verdicts(loaded, "S3", [own, imported])[0] == (True, "")
+    assert _verdicts(loaded, "S3", [imported])[0] == (None, "pending")
+    settled = _read(reading, [dataclasses.replace(res, settled=True)])
+    assert _verdicts(settled, "S3", [imported])[0] == (False, "unobserved")
+    assert arm_reading(loaded, "S3", [imported, own]).commits[0].row_hash == own.row_hash
+
+    init_db(backend.engine)
+    ledger = DbLedger(backend.factory)
+    ledger.import_rows([copy], imported_by="admin-1", imported_at="2026-10-12T00:00:00+00:00")
+    in_flight = list(ledger.rows(repo=REPO))
+    assert [(r.imported, r.labels[LABEL_RESERVATION]) for r in in_flight] == [(True, res.event_id)]
+    assert _verdicts(loaded, "S3", in_flight)[0] == (None, "pending")
+    landed = ledger.append(own)
+    stored = list(ledger.rows(repo=REPO))
+    assert sorted(r.imported for r in stored) == [False, True]
+    got = arm_reading(loaded, "S3", stored).commits[0]
+    assert (got.outcome, got.reason, got.row_hash) == (True, "", landed.row_hash)
 
 
 def test_p792_reserved_each_check_is_a_named_miss() -> None:
@@ -2469,21 +2518,26 @@ def _w_before_reserve(
     monkeypatch.setattr(w, "_reserver", reserver)
 
 
-@pytest.mark.parametrize("how", ["cancel", "reclaim"])
+@pytest.mark.parametrize("how", ["cancel", "reclaim", "reclaim_same_worker"])
 def test_p792_reserve_rechecks_the_run_under_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
 ) -> None:
     """The reserve transaction re-reads the run under the events lock: a cancel asked, or a
-    reclaim and a claim by another worker, landing after the run's own stop check and before
-    the reservation halts the run there — ``cancel_requested``, or ``run_not_owned`` naming
-    the status, the owner, the claim it reserved under and the claim the run is at now —
-    with no ``reading.reserved`` written, nothing built and the commit still pending. Pinned
-    by mutation: without the re-read's cancel check, or its owner and claim checks, the
-    attempt is reserved and built."""
+    reclaim and a claim — by another worker, or by a worker with this one's id (two
+    processes sharing a configured id, or a restart repeating hostname-pid) — landing after
+    the run's own stop check and before the reservation halts the run there —
+    ``cancel_requested``, or ``run_not_owned`` naming the status, the owner, the claim it
+    reserved under and the claim the run is at now — with no ``reading.reserved`` written,
+    nothing built and the commit still pending. Pinned by mutation: without the re-read's
+    cancel check the ``cancel`` case is reserved and built, and without its claim check the
+    ``reclaim_same_worker`` case, whose owner never moves (R3-HON-1). The owner check is
+    pinned only with the claim check: through the queue a run changes owner only by a
+    reclaim, which moves the claim too."""
     rig = _w_rig(tmp_path, monkeypatch)
     reading = rig.register()
     run = rig.enqueue(reading)
     rig.state["b"] = "gold"
+    owner = rig.h.worker.worker_id if how == "reclaim_same_worker" else "worker-2"
     if how == "cancel":
         _w_before_reserve(
             rig, monkeypatch, lambda r: rig.h.queue.request_cancel(r.id, actor="op-1")
@@ -2492,8 +2546,8 @@ def test_p792_reserve_rechecks_the_run_under_the_lock(
 
         def steal(r: Run) -> None:
             assert [x.id for x in rig.h.queue.reclaim_stale(0.0)] == [r.id]
-            other = rig.h.queue.claim_next("worker-2")
-            assert other is not None and other.id == r.id
+            other = rig.h.queue.claim_next(owner)
+            assert other is not None and (other.id, other.worker_id) == (r.id, owner)
 
         _w_before_reserve(rig, monkeypatch, steal)
     with contextlib.suppress(Exception):
@@ -2506,7 +2560,7 @@ def test_p792_reserve_rechecks_the_run_under_the_lock(
         detail = halted["detail"]
         assert {k: detail[k] for k in ("status", "owner", "claim", "at_claim")} == {
             "status": STATUS_RUNNING,
-            "owner": "worker-2",
+            "owner": owner,
             "claim": 0,
             "at_claim": 1,
         }, detail

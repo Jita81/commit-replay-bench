@@ -123,7 +123,8 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
               taking each commit's first observed ``r1`` attempt this deployment graded after
               registration on the reading's checks arm (never an imported row) — or, under
-              ``reserved.v1``, the one row stamped with the commit's reservation →
+              ``reserved.v1``, the one row stamped with the commit's reservation that this
+              deployment graded (never an imported copy) →
               ``look_state`` applies the rule → ``evaluate`` reads the hierarchy →
               ``standard_of`` answers the factory's gate on one checks arm and posture class.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -1774,11 +1775,15 @@ def _reserved_candidates(
 ) -> list[GradeRow]:
     """The rows ``res``'s attempt wrote: its run, its commit, rung ``r1``, stamped with its
     event id and its claim. A row of another run, of another reservation (another arm's,
-    another reading's) or of a later claim of the same run is never one of them."""
+    another reading's) or of a later claim of the same run is never one of them, and nor is
+    an imported row, whatever labels it carries (P-321): an admin's import of a copy of the
+    reserved row is neither a second row (``duplicate``) nor, while the attempt is in
+    flight, its row (``out_of_scope``) — it is never counted, so it can decide nothing."""
     return [
         r
         for r in rows
-        if r.run_id == res.run_id
+        if not r.imported
+        and r.run_id == res.run_id
         and _row_unit(reading, r) == res.task_id
         and r.trial.strip().lower() == RUNG_R1
         and res.event_id
@@ -1795,8 +1800,9 @@ def _reserved_verdict(
     row alone decides it, whatever any other row says (P-792, fail closed):
 
     * no reservation, or the reading's reservations (or admissions) never read — pending;
-    * no reserved row — a miss (``unobserved``) once the run is settled (terminal, or
-      reclaimed past the reserving claim), pending until then; two rows — ``duplicate``;
+    * no reserved row (:func:`_reserved_candidates`; an imported row is never one, P-321) —
+      a miss (``unobserved``) once the run is settled (terminal, or reclaimed past the
+      reserving claim), pending until then; two rows — ``duplicate``;
     * the one row is a hit only when its run was admitted, it is in the arm's scope
       (:func:`_in_scope`; for a forward reading :func:`_counts_forward` on the record that
       enrolled the ticket — ``not_graded`` otherwise; ``scope_fault`` for a row that is the
