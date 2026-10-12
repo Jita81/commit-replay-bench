@@ -273,15 +273,19 @@ reading counts. `S3` is sighted and is not reviewed.
 
 **A forged Go pass: what is closed and what is not.** The round-2 red team found that a non-test
 Go source can make `go test -json` report the target tests passed when they never ran, and belt 2
-graded that patch clean (F4-GO-TEST2JSON-SPOOF, high; P-796). Grading now disqualifies a touched Go
-source that starts printing the testing package's event lines, frames a summary line with its
-`\x16` byte, or exits past its `os.Exit(0)` guard. All three forgeries that graded clean are now
-disqualified, and no commit in cobra's history trips the scan **[measured — n = 3 forgeries and
-885 non-test Go files across cobra's 992 commits; method: P-796's tests run with the fix reverted
-and restored, and the scan over every non-merge commit; apparatus n/a, the product's own
-grader]**. It reads text: a forgery that builds
-the text at run time still passes it. So a clean cobra row still rests on this review as well as
-on the belts, and the review reads a non-test `.go` change that prints or exits for this.
+graded that patch clean (F4-GO-TEST2JSON-SPOOF, high; P-796). Grading now disqualifies a touched
+non-test file in a Go repository that starts printing the testing package's event lines, frames a
+summary line with its `\x16` byte, or exits past its `os.Exit(0)` guard. It reads a `.go` source, a
+`//go:embed` data file and a cgo or assembly source alike, with string escapes decoded
+(REDFIX-REGRESS-HONESTY-R1-1). All five forgeries that graded clean are now disqualified, and no
+commit in cobra's history trips the scan **[measured — n = 5 forgeries, and 889 non-test Go file
+versions (42 distinct files) and 492 versions of 59 other files across cobra's 992 non-merge
+commits; method: P-796's tests run with each fix reverted and restored, and the shipped scan over
+every non-merge commit; apparatus n/a, the product's own grader]**. It reads text: a forgery that
+assembles the text from pieces, or stores it encoded and decodes it at run time, still passes it.
+So a clean cobra row still rests on this review as well as on the belts, and the review reads any
+non-test change in a Go package that prints or exits, its embedded, cgo and assembly files
+included.
 
 **How a verdict is filed.** `POST /api/v1/reviews`, as an operator, with the row's
 `grade_row_hash`, a statement, the findings, `mergeable`, and `patch_sha256` from

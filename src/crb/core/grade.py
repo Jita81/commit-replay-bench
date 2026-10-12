@@ -479,11 +479,12 @@ def infra_tampered(
     ``exclude`` is the task's own test files (overlaid by the harness, held
     byte-for-byte by belt 1a). A section-aware file (``pyproject.toml``…) counts
     only when its oracle-relevant sections differ between the parent and the
-    worktree; an absent side is the empty document. A non-test source that is not
-    in the table counts when it begins naming pytest's own machinery (Python) or
-    carrying ``go test`` event text, the framing byte or a guard-skipping exit (Go)
-    (:func:`crb.core.test_infra.framework_tamper`), which forges the target passes.
-    Sorted, for stable evidence.
+    worktree; an absent side is the empty document. A file that is not in the table
+    counts when it begins naming pytest's own machinery (a Python source) or carrying
+    ``go test`` event text, the framing byte or a guard-skipping exit (any file in a Go
+    repository, escapes decoded: an embedded data file or a cgo source reaches the
+    binary too) (:func:`crb.core.test_infra.framework_tamper`), which forges the target
+    passes. Sorted, for stable evidence.
     """
     skip = set(exclude)
     language, runner = config.language.value, config.runner
@@ -494,12 +495,15 @@ def infra_tampered(
             continue
         rule = matching_rule(rel, language, runner=runner)
         if rule is None:
-            # A non-test source is not in the table, but one that patches pytest's own
+            # A non-test file is not in the table, but one that patches pytest's own
             # machinery (R1-F4-1) or prints go test's events and exits 0
-            # (F4-GO-TEST2JSON-SPOOF) forges every target test's PASS; belt 1b never sees it.
+            # (F4-GO-TEST2JSON-SPOOF) forges every target test's PASS. Go reads every such
+            # file: an embedded or cgo one carries the forgery as a .go one does.
             if tamper_suffix is not None and rel.lower().endswith(tamper_suffix):
                 before = ws.parent_text(rel) or ""
-                after = ws.read(rel) if ws.exists(rel) else ""
+                # a link is read only through to a regular file: a directory is not text,
+                # and a device such as /dev/zero would never finish
+                after = ws.read(rel) if (ws.root / rel).is_file() else ""
                 if framework_tamper(before, after, language):
                     out.append(rel)
             continue

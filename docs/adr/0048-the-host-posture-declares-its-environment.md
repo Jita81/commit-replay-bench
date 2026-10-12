@@ -137,10 +137,12 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
    failure, a discovery, the factory's red proof), one pass at least. A runner that reports
    no passes (`cargo`, the JVM and node runners) is read by its exit code, as before.
    A Go runner's passes come from the test binary's own stdout, so belt 1b also
-   disqualifies a touched non-test Go source that newly carries test-event text, a
-   `\x16`-framed summary line or an exit past the `os.Exit(0)` guard
-   (F4-GO-TEST2JSON-SPOOF); a forgery that builds that text at run time is left to the
-   Wave 3 review.
+   disqualifies any touched non-test file in a Go repository (a `.go` source, a
+   `//go:embed` data file, a cgo or assembly source) that newly carries test-event text,
+   a `\x16`-framed summary line or an exit past the `os.Exit(0)` guard, read as written
+   and with its string escapes decoded (F4-GO-TEST2JSON-SPOOF,
+   REDFIX-REGRESS-HONESTY-R1-1); a forgery that assembles that text from pieces, or
+   stores it encoded and decodes it at run time, is left to the Wave 3 review.
 
 ## Consequences
 

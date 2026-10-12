@@ -79,17 +79,22 @@ Known residuals (documented, not covered)
   (``getattr(mod, "run" + "test")``), or reaches the run through ``gc`` / another
   object graph, is not matched. Closing that needs the gold witness, which judges
   the honest gold's own run, not the text.
-* The Go forgery scan (F4-GO-TEST2JSON-SPOOF) reads literals and calls too. It does
-  not match event text or the framing byte built at run time (``"--- " + "PASS"``,
-  ``string(rune(22))``), an aliased ``syscall`` import, an assembly (``.s``) source,
-  code that runs only under a test binary (``testing.Testing()``) or a file whose
-  parent already carried the text. Every runtime tell read from the binary's stdout is
-  as forgeable as the events themselves; a tell the binary cannot write (a coverage
-  profile, ``m.Run`` completing) changes how the oracle is built and is left open. A
-  repository that is itself a syscall library or a test-output tool, or a comment that
-  quotes test output, can trip it on an honest edit (1.08% of the non-test Go files in
-  a local module cache match as new files: ``x/sys`` wrappers, and tools or comments
-  that write, parse or quote test output; none in cobra's history).
+* The Go forgery scan (F4-GO-TEST2JSON-SPOOF) reads literals and calls too, in every
+  touched file outside the table (a ``//go:embed`` data file, a cgo, assembly or
+  ``.syso`` source as well as a ``.go`` one), with string escapes decoded. It does not
+  match event text or the framing byte assembled from pieces (``"--- " + "PASS"``,
+  ``string(rune(22))``, a byte slice, assembly ``DATA`` split mid-word) or stored
+  encoded (compressed, base64) and decoded at run time, an aliased ``syscall`` import,
+  an exit or write issued by assembly or C, code that runs only under a test binary
+  (``testing.Testing()``) or a file whose parent already carried the text. Every runtime
+  tell read from the binary's stdout is as forgeable as the events themselves; a tell
+  the binary cannot write (a coverage profile, ``m.Run`` completing) changes how the
+  oracle is built and is left open. A repository that is itself a syscall library or a
+  test-output tool, or a comment or document that quotes test output, can trip it on an
+  honest edit (1.08% of the non-test Go files in a local module cache match as new
+  files: ``x/sys`` wrappers, tools or comments that write, parse or quote test output,
+  and ``x/tools`` code that names ``syscall.Exit``; 2 of 10,161 other files there, a
+  README and a script that quote it; none in cobra's history).
 * Dependency trees (``node_modules``, ``vendor``, ``.venv``) are git-ignored and are
   the sandbox's responsibility (ADR-0005), not belt 1's.
 
@@ -107,8 +112,8 @@ What it does: Answers "is this path test infrastructure?" from a documented patt
               mocha, babel, surefire, dev-dependencies, the linters belt 5 reads) rather
               than a version or a runtime dependency; and flags a non-test Python source that
               starts naming ``_pytest`` / ``pluggy`` / ``runtest`` / ``call_and_report`` /
-              a ``pytest_runtest_*`` hook, or a non-test Go source that starts printing
-              ``go test``'s event lines or exiting past its guard (a forged PASS). Fails
+              a ``pytest_runtest_*`` hook, or a non-test file in a Go repository that starts
+              carrying ``go test``'s event lines or an exit past its guard (a forged PASS). Fails
               closed on anything it cannot parse, anything too large, and any XML with a
               DOCTYPE.
 How:          ``rules_for`` (language + optional runner narrowing) → ``matching_rule``
@@ -117,8 +122,9 @@ How:          ``rules_for`` (language + optional runner narrowing) → ``matchin
               key paths (TOML / JSON), section bodies (INI), directives (go.mod) or
               elements (pom.xml) and compares the projections; ``framework_tamper`` matches a
               fixed set of pytest-internal names (Python) or event-text, framing and exit
-              spellings (Go) and flags any the after text introduces;
-              ``FRAMEWORK_TAMPER_SUFFIX`` names the source files each language's scan reads.
+              spellings, read with string escapes decoded too (Go), and flags any the after
+              text introduces; ``FRAMEWORK_TAMPER_SUFFIX`` names the files each language's
+              scan reads (Go: every one).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0001-four-belts-and-false-q1-at-write.md, docs/adr/0011-repo-lint-belt.md,
               docs/adr/0010-polyglot-negative-controls.md
@@ -807,7 +813,7 @@ _FRAMEWORK_TAMPER_RE = re.compile(
 )
 
 
-#: What a non-test Go source needs to forge ``go test -json``'s events
+#: What a non-test file in a Go package needs to forge ``go test -json``'s events
 #: (F4-GO-TEST2JSON-SPOOF). test2json reads the test binary's stdout, so a line shaped like
 #: the testing package's own (``=== RUN``, ``--- PASS:``), printed from an ``init`` before the
 #: first framed line, or framed by the ``\x16`` byte itself, becomes a real ``run`` /
@@ -827,11 +833,38 @@ _GO_FORGERY_RE = re.compile(
 )
 
 #: The source suffix each language's tamper scan reads (a ``*_test.go`` is already a rule).
-FRAMEWORK_TAMPER_SUFFIX: dict[str, str] = {_PY: ".py", _GO: ".go"}
+#: Go's is empty, so every touched file outside the table is read: a ``//go:embed`` data file,
+#: a cgo or assembly source and a ``.syso`` object reach the test binary as a ``.go`` source
+#: does (REDFIX-REGRESS-HONESTY-R1-1).
+FRAMEWORK_TAMPER_SUFFIX: dict[str, str] = {_PY: ".py", _GO: ""}
+
+#: A Go (or C) string escape. The binary prints what a literal decodes to, so
+#: ``"===\x20RUN"`` is the event text ``=== RUN`` (REDFIX-REGRESS-HONESTY-R1-1).
+_GO_ESCAPE_RE = re.compile(
+    r"\\(?:x([0-9A-Fa-f]{2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|([0-7]{3})|(.))"
+)
+_GO_SIMPLE_ESCAPES = {"a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v"}
 
 
-def _tamper_names(pattern: re.Pattern[str], text: str) -> set[str]:
-    return {re.sub(r"[ \t]+", " ", m) for m in pattern.findall(text)}
+def _go_unescaped(text: str) -> str:
+    """``text`` with every Go string escape replaced by the character it decodes to."""
+
+    def one(m: re.Match[str]) -> str:
+        if hexa := m[1] or m[2] or m[3]:
+            code = int(hexa, 16)
+            return chr(code) if code <= 0x10FFFF else m[0]
+        if m[4]:
+            return chr(int(m[4], 8))
+        return _GO_SIMPLE_ESCAPES.get(m[5], m[5])
+
+    return _GO_ESCAPE_RE.sub(one, text)
+
+
+def _tamper_names(pattern: re.Pattern[str], text: str, *, decoded: bool = False) -> set[str]:
+    """The distinct names ``pattern`` finds in ``text`` (blanks folded), and, when
+    ``decoded``, in ``text`` with its Go escapes decoded as well."""
+    found = pattern.findall(text) + (pattern.findall(_go_unescaped(text)) if decoded else [])
+    return {re.sub(r"[ \t]+", " ", m) for m in found}
 
 
 def framework_tamper(before_text: str, after_text: str, language: str) -> bool:
@@ -846,7 +879,9 @@ def framework_tamper(before_text: str, after_text: str, language: str) -> bool:
     not in :data:`INFRA_RULES` (no runner config, not a conftest), so belt 1b never looks at
     it; this scan does, at grade time. The Go case is the same forgery one layer out: an
     ``init`` that prints ``=== RUN   TestX`` / ``--- PASS: TestX`` and ``PASS`` and exits 0
-    gives a ``go test -json`` stream no parser can tell from a real pass. It is anchored on the
+    gives a ``go test -json`` stream no parser can tell from a real pass. Go text is read both
+    as written and with its string escapes decoded, because the binary prints the decoded
+    string (``"---\\x20PASS"``). It is anchored on the
     set of distinct names GROWING (``after`` minus ``before``), so a repository whose own code
     already names these — a pytest plugin, a Go tool that parses test output — is not
     disqualified for keeping them (R1-F4-1).
@@ -855,7 +890,9 @@ def framework_tamper(before_text: str, after_text: str, language: str) -> bool:
     pattern = {_PY: _FRAMEWORK_TAMPER_RE, _GO: _GO_FORGERY_RE}.get(lang)
     if pattern is None:
         return False
-    return bool(_tamper_names(pattern, after_text) - _tamper_names(pattern, before_text))
+    go = lang == _GO
+    after = _tamper_names(pattern, after_text, decoded=go)
+    return bool(after - _tamper_names(pattern, before_text, decoded=go))
 
 
 __all__ = [

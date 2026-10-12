@@ -56,7 +56,7 @@ import pytest
 from crb.core.deps import HOST_ENV_DEPS, TaskDeps
 from crb.core.execution import ExecResult, LocalExecutor
 from crb.core.git import GitRepo
-from crb.core.grade import GradeContext, GradeResult, grade
+from crb.core.grade import GradeContext, GradeResult, grade, infra_tampered
 from crb.core.mine import qualify
 from crb.core.posture import Posture
 from crb.core.qualify import Qualification
@@ -64,7 +64,8 @@ from crb.core.runners import base as rb
 from crb.core.runners import get_runner
 from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import BELT_BARE, Language, RepoConfig, TaskSpec
-from fixtures.langs import two_commit_repo
+from crb.core.workspace import Workspace
+from fixtures.langs import commit_all, init_repo, two_commit_repo, write_files
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests import conftest_langs as langs
@@ -385,6 +386,28 @@ _GO_HONEST_INIT = (
     "var ops = map[string]func(int, int) int{}\n\n"
     'func init() { ops["sub"] = Sub }\n'
 )
+# REDFIX-REGRESS-HONESTY-R1-1: the same events, spelled with escapes the scan did not decode,
+# or carried by a data file a ``//go:embed`` directive compiles into the test binary.
+_GO_FORGE_ESCAPED = _GO_FORGE_INIT.replace("=== RUN", "===\\x20RUN").replace(
+    "--- PASS", "---\\x20PASS"
+)
+_GO_EMBED_NOTES = "calc/notes.txt"
+_GO_FORGE_EMBED = (
+    'package calc\n\nimport (\n\t_ "embed"\n\t"fmt"\n\t"os"\n\t"strings"\n)\n\n'
+    "// Sub returns a - b.\nfunc Sub(a, b int) int { return a + b }\n\n"
+    "//go:embed notes.txt\nvar notes string\n\n"
+    'func init() {\n\tif strings.HasSuffix(os.Args[0], ".test") {\n'
+    "\t\tfmt.Print(notes)\n\t\tos.Exit(0)\n\t}\n}\n"
+)
+_GO_FORGED_NOTES = (
+    "=== RUN   TestAdd\n--- PASS: TestAdd (0.00s)\n"
+    "=== RUN   TestSub\n--- PASS: TestSub (0.00s)\nPASS\n"
+)
+_GO_HONEST_EMBED = (
+    'package calc\n\nimport _ "embed"\n\n'
+    "// Sub returns a - b.\nfunc Sub(a, b int) int { return a - b }\n\n"
+    "//go:embed notes.txt\nvar notes string\n"
+)
 
 
 @needs_go
@@ -398,8 +421,13 @@ def test_the_buggy_go_sub_alone_is_not_green(go_task: _Qualified, tmp_path: Path
 @needs_go
 @pytest.mark.parametrize(
     "forgery",
-    [_GO_FORGE_INIT, _GO_FORGE_VAR, _GO_FORGE_FRAMED_EXIT],
-    ids=["init-prints-events-and-exits", "var-prints-events-and-exits", "framed-pass-syscall-exit"],
+    [_GO_FORGE_INIT, _GO_FORGE_VAR, _GO_FORGE_FRAMED_EXIT, _GO_FORGE_ESCAPED],
+    ids=[
+        "init-prints-events-and-exits",
+        "var-prints-events-and-exits",
+        "framed-pass-syscall-exit",
+        "init-prints-escaped-events-and-exits",
+    ],
 )
 def test_a_go_source_that_forges_the_test_events_is_disqualified(
     go_task: _Qualified, tmp_path: Path, forgery: str
@@ -416,6 +444,72 @@ def test_a_go_source_that_forges_the_test_events_is_disqualified(
 def test_an_honest_go_init_still_grades_clean(go_task: _Qualified, tmp_path: Path) -> None:
     res = _graded(go_task, tmp_path / "trial", {gorepo.SRC_SUB: _GO_HONEST_INIT})
     assert res.clean is True, res.note
+
+
+@needs_go
+def test_a_go_forgery_carried_by_an_embedded_file_is_disqualified(
+    go_task: _Qualified, tmp_path: Path
+) -> None:
+    """REDFIX-REGRESS-HONESTY-R1-1: the source only prints an embedded string and exits; the
+    event text sits in the data file, which the scan now reads like any touched file."""
+    writes = {gorepo.SRC_SUB: _GO_FORGE_EMBED, _GO_EMBED_NOTES: _GO_FORGED_NOTES}
+    res = _graded(go_task, tmp_path / "trial", writes)
+    assert res.clean is False and res.disqualified is True, res.note
+    assert _GO_EMBED_NOTES in res.dq_reason
+
+
+@needs_go
+def test_an_honest_go_embed_still_grades_clean(go_task: _Qualified, tmp_path: Path) -> None:
+    writes = {gorepo.SRC_SUB: _GO_HONEST_EMBED, _GO_EMBED_NOTES: "Sub subtracts.\n"}
+    res = _graded(go_task, tmp_path / "trial", writes)
+    assert res.clean is True, res.note
+
+
+def test_belt_1b_reads_every_touched_go_file_and_survives_a_binary_one(tmp_path: Path) -> None:
+    """A cgo source or an embedded data file that carries the events is caught; a binary
+    file the parent also carries is read with its undecodable bytes replaced, not raised."""
+    root = tmp_path / "repo"
+    init_repo(root)
+    write_files(
+        root, {"go.mod": f"module {gorepo.MODULE}\n\ngo 1.22\n", "calc/calc.go": "package calc\n"}
+    )
+    (root / "assets").mkdir()
+    (root / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00")
+    commit_all(root, "initial")
+    write_files(root, {gorepo.SRC_SUB: "package calc\n"})
+    sha = commit_all(root, "feat")
+    with Workspace.create(GitRepo(root), sha, tmp_path / "ws") as ws:
+        (ws.root / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfd\x01")
+        (ws.root / "calc" / "forge.c").write_text(
+            "#include <stdio.h>\n#include <stdlib.h>\n\n__attribute__((constructor))\n"
+            'static void forge(void) { printf("---\\x20PASS: TestSub (0.00s)\\n"); _Exit(0); }\n',
+            encoding="utf-8",
+        )
+        (ws.root / _GO_EMBED_NOTES).write_text(_GO_FORGED_NOTES, encoding="utf-8")
+        assert "\ufffd" in (ws.parent_text("assets/logo.png") or "")
+        flagged = infra_tampered(ws, ws.touched_files(), exclude=(), config=gorepo.config())
+        assert flagged == ["calc/forge.c", _GO_EMBED_NOTES]
+
+
+def test_belt_1b_reads_a_touched_go_link_only_when_it_is_a_file(tmp_path: Path) -> None:
+    """Belt 1b reads every touched file in a Go repository, so a link it touches is read
+    only when it resolves to a regular file: a link to a directory is not text (reading it
+    raised), and a link to a device such as ``/dev/zero`` would never finish."""
+    root = tmp_path / "repo"
+    init_repo(root)
+    write_files(root, {"go.mod": f"module {gorepo.MODULE}\n\ngo 1.22\n", "docs/v1/a.md": "a\n"})
+    commit_all(root, "initial")
+    write_files(root, {gorepo.SRC_SUB: "package calc\n"})
+    sha = commit_all(root, "feat")
+    with Workspace.create(GitRepo(root), sha, tmp_path / "ws") as ws:
+        (ws.root / "docs" / "latest").symlink_to("v1")
+        (ws.root / "calc").mkdir(exist_ok=True)
+        (ws.root / _GO_EMBED_NOTES).write_text(_GO_FORGED_NOTES, encoding="utf-8")
+        (ws.root / "calc" / "events.txt").symlink_to("notes.txt")
+        touched = ws.touched_files()
+        assert {"docs/latest", "calc/events.txt"} <= set(touched)
+        flagged = infra_tampered(ws, touched, exclude=(), config=gorepo.config())
+        assert flagged == ["calc/events.txt", _GO_EMBED_NOTES]
 
 
 # --- Python ----------------------------------------------------------------

@@ -850,6 +850,23 @@ class TestFrameworkTamper:
         after = self._GO_SUB + f"\nfunc init() {{\n\t{line}\n}}\n"
         assert ti.framework_tamper(self._GO_SUB, after, "go")
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            'fmt.Print("===\\x20RUN   TestSub\\n---\\x20PASS: TestSub (0.00s)\\n")',
+            'fmt.Print("\\u002d\\u002d\\u002d PASS: TestSub")',
+            'fmt.Print("\\055\\055\\055 PASS: TestSub")',
+            'fmt.Print("---\\tPASS: TestSub")',
+            'os.Stdout.WriteString("\\x16\\x50ASS\\n")',
+        ],
+        ids=["hex", "unicode", "octal", "tab", "framed-pass"],
+    )
+    def test_go_event_text_spelled_with_escapes_is_tamper(self, line: str) -> None:
+        """REDFIX-REGRESS-HONESTY-R1-1: the binary prints the decoded string, so the scan
+        reads a literal's escapes (``\\x``, ``\\u``, ``\\U``, octal, ``\\t``) as they decode."""
+        after = self._GO_SUB + f"\nfunc init() {{\n\t{line}\n}}\n"
+        assert ti.framework_tamper(self._GO_SUB, after, "go")
+
     def test_go_text_already_in_the_parent_is_not_new_tamper(self) -> None:
         before = self._GO_SUB + 'const report = "--- PASS: %s"\n'
         assert not ti.framework_tamper(before, before + "var x = 1\n", "go")
@@ -864,6 +881,7 @@ class TestFrameworkTamper:
             'package calc\n\nimport "os"\n\nfunc Fatal() { os.Exit(1) }\n',
             'package calc\n\n// PASS and RUN are words; --- is a rule.\nconst sep = "---"\n',
             'package calc\n\nvar table = "\\x0a\\x16\\x12\\x14"\n',
+            'package calc\n\nconst banner = "\\u2014 done \\x2d\\x2d\\t\\"ok\\"\\n"\n',
             "package calc\n\nconst (\n\tSYS_EXIT       = 1\n\tSYS_EXIT_GROUP = 231\n)\n",
             'package calc\n\nimport _ "unsafe"\n\n//go:linkname nanotime runtime.nanotime\n'
             "func nanotime() int64\n",
@@ -874,6 +892,7 @@ class TestFrameworkTamper:
             "os-exit",
             "words-not-events",
             "byte-table",
+            "escaped-banner",
             "syscall-table",
             "linkname-clock",
         ],
@@ -882,4 +901,7 @@ class TestFrameworkTamper:
         assert not ti.framework_tamper(self._GO_SUB, after, "go")
 
     def test_every_tamper_language_names_its_source_suffix(self) -> None:
-        assert ti.FRAMEWORK_TAMPER_SUFFIX == {"python": ".py", "go": ".go"}
+        """Go's is empty, so every touched file is read: a ``//go:embed`` data file, a cgo or
+        assembly source and a ``.syso`` object reach the test binary as surely as a ``.go``
+        source does (REDFIX-REGRESS-HONESTY-R1-1)."""
+        assert ti.FRAMEWORK_TAMPER_SUFFIX == {"python": ".py", "go": ""}
