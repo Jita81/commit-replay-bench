@@ -796,20 +796,27 @@ class RunCreateRequest(BaseModel):
     #: the deployment's builder executor are both ``docker``, and 409
     #: ``reading_posture_mismatch`` unless the run would be graded in the reading's posture
     #: class (DL-383); the worker re-checks both at claim and fails the run (``run.refused``)
-    #: before any builder call.
+    #: before any builder call. Under a reserved.v1 reading, a run setting a field the
+    #: reading does not register (``builder_config``, ``timeout``, another budget profile,
+    #: ladder or arm…) is refused 422 ``reading_run_fields`` (``detail.fields``), at submit
+    #: and again at claim (P-792).
     #: A reading that names a campaign takes only runs filed under that same campaign: 409
     #: ``campaign_required`` otherwise, and at claim for a run no ``campaign.admitted`` event
-    #: names (DL-382). A run posted without ``reading_id`` is not checked, and such a
-    #: reading never counts its rows unless its campaign admitted it (DL-382). Stored as
-    #: ``params.reading_id`` only when set.
+    #: names (DL-382). A run posted without ``reading_id`` is not checked against a reading
+    #: — refused 409 ``reading_required`` when its ``campaign_id`` names a campaign holding a
+    #: reserved.v1 reading on the repository (P-792) — and such a reading never counts its
+    #: rows unless its campaign admitted it (DL-382). Stored as ``params.reading_id`` only
+    #: when set.
     reading_id: str | None = Field(default=None, pattern=r"^rdg_[0-9a-f]{24}$")
     #: Build runs only: the campaign this run is filed under (``cmp_<24 hex>``, G-957). The
     #: run must name ``max_cost_usd`` (422 ``campaign_cap_required``) and, on ``arm: S1``,
     #: ``task_ids`` or ``limit`` (422 ``campaign_s1_unbounded``); it is refused 404
     #: ``campaign_unknown`` unless the campaign verifies, and 409 ``campaign_ceiling`` /
     #: ``campaign_cost_unknown`` / ``campaign_overrun`` when the campaign's tally cannot hold
-    #: it — read and decided under the events write lock, before anything is queued.
-    #: Stored as ``params.campaign_id`` only when set.
+    #: it — read and decided under the events write lock, before anything is queued; 409
+    #: ``reading_required`` when it names no ``reading_id`` and the campaign holds a
+    #: reserved.v1 reading on the repository (P-792). Stored as ``params.campaign_id`` only
+    #: when set.
     campaign_id: str | None = Field(default=None, pattern=r"^cmp_[0-9a-f]{24}$")
 
     @field_validator("kind")

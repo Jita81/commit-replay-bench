@@ -34,7 +34,10 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               presence only) a run whose builder auth has no credential, and (422
               ``builder_provider_mismatch``) one whose OpenAI-compatible rung or test author
               names a provider the configured endpoint is not, and (409) a run filed under a
-              reading that would not be graded sealed in the reading's posture class —
+              reading that would not be graded sealed in the reading's posture class, and (422
+              ``reading_run_fields``) a run of a reserved.v1 reading that sets a field the
+              reading does not register, and (409 ``reading_required``) a campaign run naming
+              no reading while its campaign holds a reserved.v1 one on the repository (P-792) —
               through ``submit_refusals``, the one gate every route that queues a run calls; serves
               run views with counts re-derived from the ledger when the worker wrote none; streams
               events as SSE with resume-by-seq; cancellation is a flag the worker honours;
@@ -54,7 +57,9 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
               the operator as actor), src/crb/store/events.py (``lock_event_writes`` — the
               one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
-              queued run becomes; the counts shapes per kind), src/crb/server/campaigns.py
+              queued run becomes; the counts shapes per kind; its claim re-runs the reserved.v1
+              run whitelist this module runs at submit, ``reading_run_refusal`` in
+              src/crb/core/reading.py, P-792), src/crb/server/campaigns.py
               (``campaign_tally``: a run filed under a campaign is admitted under its money
               ceiling, G-957; a run of a reading that names a campaign is refused 409
               ``campaign_required`` unless filed under it, DL-382), src/crb/store/models.py
@@ -62,7 +67,8 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
               factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
-Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py
+Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py,
+              tests/test_p792_reserved.py (the reserved.v1 submit refusals)
 Touch when:   never for a new repository; a run parameter is added (schema field →
               ``params`` here → the worker reads it → docs/API.md → the UI type); a field
               is added to ``RunOut`` (the UI type first); a run kind is added (decide in
@@ -108,6 +114,13 @@ from crb.core.campaign import (
 )
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
+from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
+    REFUSAL_READING_REQUIRED,
+    REFUSAL_RUN_FIELDS,
+    Reading,
+    reading_run_refusal,
+)
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
@@ -954,23 +967,25 @@ READING_UNSEALED_CODE = "reading_unsealed"
 READING_POSTURE_MISMATCH_CODE = "reading_posture_mismatch"
 
 
-def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
+def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> Reading:
     """The refusals of a run filed under a reading (P-789, DL-382, DL-383): 422
     ``reading_unknown`` when ``body.reading_id`` is not a verified reading of ``body.repo``;
     409 ``campaign_required`` when the reading names a campaign and the run is not filed
     under that same campaign — a run filed under the reading spends only under the ceiling
     its campaign holds, whatever route queues it (the Learn re-measurement queue included);
     a run posted without ``reading_id`` passes no reading gate here or at claim — with the
-    campaign's ``campaign_id`` it is admitted and spends under the ceiling, and its rows count
-    only when graded in the reading's scope (its cell, the sealed posture class, rung ``r1``,
-    after registration); without it the reading never sees its rows; every Wave 3 body carries
-    ``reading_id``; 409 ``reading_unsealed`` when the run's sandbox executor or the deployment's
-    builder executor is not ``docker`` — a reading is registered only on a sealed deployment; 409
-    ``reading_posture_mismatch`` when the posture class the run would be graded in (the
+    campaign's ``campaign_id`` it is refused 409 ``reading_required`` when the campaign holds a
+    reserved.v1 reading on the repository (:func:`campaign_refusal`), and otherwise admitted to
+    spend under the ceiling, its rows counting only when graded in the reading's scope (its
+    cell, the sealed posture class, rung ``r1``, after registration); without it the reading
+    never sees its rows; every Wave 3 body carries ``reading_id``; 409 ``reading_unsealed``
+    when the run's sandbox executor or the deployment's builder executor is not ``docker`` —
+    a reading is registered only on a sealed deployment; 409 ``reading_posture_mismatch`` when the posture class the run would be graded in (the
     run's executor with the repository's ``sandbox_tree``, else the deployment's) is not the
     one the reading counts — its tree changed since the registration, or the reading named
     another class. A run graded anywhere but the reading's class would be another posture's
-    rows, every one of them spent and none of them the reading's measurement."""
+    rows, every one of them spent and none of them the reading's measurement. Returns the
+    reading, for :func:`reading_run_fields_refusal`."""
     reading = next(
         (r for r in load_readings(db, body.repo) if r.reading_id == body.reading_id), None
     )
@@ -1018,6 +1033,41 @@ def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> None:
                 "run_posture_class": graded,
             },
         )
+    return reading
+
+
+def reading_run_fields_refusal(reading: Reading, run: Run) -> None:
+    """P-792 channels C3, C5, C7 and C17 at submit: 422 ``reading_run_fields`` when ``run``,
+    filed under the reserved.v1 ``reading``, sets a field the reading does not register — the
+    pure whitelist :func:`~crb.core.reading.reading_run_refusal` over the run AS IT WILL BE
+    STORED (its columns, its stored ladder and its ``params``), the same call the worker makes
+    at claim (``Worker._reading_run_fields``), so a body is refused here for exactly what the
+    claim would fail it for: a ``builder_config`` (``extra_args`` can override the rung's
+    ``--model``, C3), a ``timeout`` (C5), another budget profile or learning switch on a
+    non-loop arm (C7), a non-default ``pool``/``executor``, another ladder, cell, kind, mode or
+    arm, or any field outside :data:`~crb.core.reading.RESERVED_RUN_PARAMS` (C17). ``detail``
+    is ``{reading_id, fields, reasons, arm}``. A legacy reading is never refused by it."""
+    code, detail = reading_run_refusal(
+        reading,
+        kind=run.kind,
+        mode=run.mode or "",
+        builder=run.builder or "",
+        model=run.model or "",
+        provider=run.provider or "",
+        ladder=list(run.ladder_json or []),
+        params=dict(run.params_json or {}),
+    )
+    if not code:
+        return
+    fields = list(detail.get("fields") or [])
+    raise ApiError(
+        422,
+        REFUSAL_RUN_FIELDS,
+        f"a run of {ATTEMPT_RULE_RESERVED} reading {reading.reading_id!r} sets "
+        f"{', '.join(fields)}, which the reading does not register: a reserved attempt is "
+        "steered by nothing a run chooses — nothing was queued",
+        detail={"reading_id": reading.reading_id, **detail},
+    )
 
 
 def campaign_refusal(db: Session, body: RunCreateRequest) -> None:
@@ -1025,8 +1075,12 @@ def campaign_refusal(db: Session, body: RunCreateRequest) -> None:
     ``campaign_cap_required``: no ``max_cost_usd``, so nothing could be held for it; 422
     ``campaign_s1_unbounded``: an ``S1`` run naming neither ``task_ids`` nor ``limit``, whose
     author headroom (per commit) could not be counted; 404 ``campaign_unknown``: no verified
-    campaign has that id. The tally itself is read where the run is admitted
-    (:func:`admit_under_campaign`), under the events write lock."""
+    campaign has that id; 409 ``reading_required`` (P-792 C19): no ``reading_id`` while the
+    campaign holds a reserved.v1 reading on ``body.repo`` — such a run would spend the
+    campaign's line with no reading gate (``reading_run_fields``, sealed, posture) checking
+    it, so it names its reading (``detail.reading_ids``, sorted); a campaign whose readings on
+    the repository are all legacy admits it as before. The tally itself is read where the run
+    is admitted (:func:`admit_under_campaign`), under the events write lock."""
     if body.campaign_id is None:
         return
     detail = {"campaign_id": body.campaign_id}
@@ -1049,6 +1103,22 @@ def campaign_refusal(db: Session, body: RunCreateRequest) -> None:
     if campaign_of(db, body.campaign_id) is None:
         raise ApiError(
             404, REFUSAL_UNKNOWN, f"no verified campaign {body.campaign_id!r}", detail=detail
+        )
+    if body.reading_id is not None:
+        return
+    held = sorted(
+        r.reading_id
+        for r in load_readings(db, body.repo)
+        if r.reserved and r.campaign_id == body.campaign_id
+    )
+    if held:
+        raise ApiError(
+            409,
+            REFUSAL_READING_REQUIRED,
+            f"campaign {body.campaign_id!r} holds {ATTEMPT_RULE_RESERVED} readings on "
+            f"{body.repo!r} ({', '.join(held)}): a run filed under it names its reading "
+            "(reading_id), so the reading's gate checks what it spends — nothing was queued",
+            detail={"campaign_id": body.campaign_id, "reading_ids": held},
         )
 
 
@@ -1143,6 +1213,13 @@ def submit_refusals(
       a run filed under a campaign without a cap, an ``S1`` one without counted commits, or
       under no verified campaign (G-957; :func:`campaign_refusal` — the campaign's tally is
       read where the run is admitted, :func:`admit_under_campaign`);
+    * 409 ``reading_required`` — a run filed under a campaign that holds a reserved.v1
+      reading on the repository, naming no ``reading_id``: it would spend the campaign's line
+      with no reading gate checking it (P-792 C19; :func:`campaign_refusal`);
+    * 422 ``reading_run_fields`` — a run filed under a reserved.v1 reading that sets a field
+      the reading does not register (``builder_config``, ``timeout``, another budget profile,
+      ladder, cell or arm…): nothing a run chooses may steer a reserved attempt (P-792 C3, C5,
+      C7, C17; :func:`reading_run_fields_refusal`; the worker re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -1176,7 +1253,7 @@ def submit_refusals(
         )
     campaign_refusal(db, body)
     if body.reading_id is not None:
-        reading_refusal(db, settings, body)
+        reading_run_fields_refusal(reading_refusal(db, settings, body), run)
     if not login:
         return
     # last: the only refusal that can cost a verify turn (P-462)

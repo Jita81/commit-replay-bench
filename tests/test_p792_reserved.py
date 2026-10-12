@@ -13,8 +13,8 @@ Code builder appends to its argv after the rung's own ``--model`` and ``--max-tu
 both when they are set, so a row cannot describe the rung's model while the argv ran another.
 Part (b) is the refusal at claim: a run inserted past submit with ``extra_args`` is failed
 ``reading_run_fields`` before anything is built (the round-5 probe
-``test_builder_config_extra_args_validates_and_overrides_argv``); part (a), the refusal at
-submit, is added to the same test later.
+``test_builder_config_extra_args_validates_and_overrides_argv``); part (a) is the same
+refusal at submit, 422 on ``POST /runs`` with nothing queued.
 
 The reserved.v1 attempt rule (core): a reading registered under it reads each enrolled
 commit by the one row its reservation wrote. C4 (a lint-off row is a miss, never a
@@ -44,6 +44,13 @@ worker checked the run's fields); the legacy reading's run, which never reserves
 both by design. ``GET /readings`` serves the rule each reading reads under, a reserved.v1
 reading's treatment pins and its reserved commits per arm (C3, C5, C17), and a legacy reading
 as open on its rule.
+
+The submit gate (``POST /runs``): under a reserved.v1 reading the same whitelist refuses a
+body 422 ``reading_run_fields`` before anything is queued (C3(a), C5(a), C7), every request
+field is classified so a new one fails the ratchet until it is (C17), and a run filed under a
+campaign holding a reserved.v1 reading on its repository without naming one is refused 409
+``reading_required`` (C19); both refusals hold again under the events lock where the campaign
+admits the run, and the real step-6 bodies are admitted.
 
 Navigation
 ----------
@@ -75,7 +82,14 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               ``reading_run_fields`` refusal (C3(b) ``extra_args``, C5 ``timeout``, C7 a budget
               profile, a two-rung ladder) and ``GET /readings`` serving ``attempt_rule``,
               ``pinned_treatment`` and ``reserved`` (null before the first reservation; a legacy
-              reading ``first_observed.v0``, ``p792: "open on this rule"``).
+              reading ``first_observed.v0``, ``p792: "open on this rule"``). The submit gate:
+              ``POST /runs`` refusing 422 ``reading_run_fields`` (C3(a) ``extra_args``, C5(a)
+              ``timeout``, C7 the budget profile and learning switch, each with nothing queued
+              or admitted), the request-field ratchet (C17: free, default, refused and factory
+              fields; their stored ``params`` keys are ``RESERVED_RUN_PARAMS``), the pin that
+              ``new_run``'s empty ladder is ``RESERVED_RUN_LADDER``, 409 ``reading_required``
+              (C19), the step-6 re-measure bodies admitted, and both refusals re-checked under
+              the events lock.
 How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
               cleared, and reads its argv for the fixture task from
               ``fixtures.builders_repo``; no model call, no store. The reading tests build
@@ -90,6 +104,10 @@ How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`
               stores one the whitelist admits; ``_w_peek`` acts the moment belt 2 reads red.
               The ``POST /readings`` test runs the app on a seeded SQLite store, and the
               ``GET /readings`` tests (``_w_served``) the app over the worker rig's store.
+              The submit-gate tests (``_r_stack``) run the app on the ``backend`` fixture's
+              store (SQLite and PostgreSQL) with the Wave 3 rehearsal's campaign and
+              registrations opted in to reserved.v1, and settle each admitted run so the
+              campaign's line is free for the next.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0026-the-context-standard.md
@@ -106,7 +124,10 @@ Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under 
               (``load_readings`` filling ``reservations_of``; ``treatment_pins``),
               src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
               src/crb/server/routes/readings.py (the opt-in fields; ``served_reading``: the
-              rule, the pins and the reserved counts)
+              rule, the pins and the reserved counts), src/crb/server/routes/runs.py
+              (``submit_refusals``: ``reading_run_fields_refusal`` and ``campaign_refusal``,
+              under test), tests/test_wave3_registration_rehearsal.py (the campaign, the
+              registrations and the step-6 bodies the submit-gate tests post)
 Tested by:    tests/test_p792_reserved.py
 Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
               failing first), or a builder gains a constructor option that shapes its argv
@@ -120,18 +141,21 @@ Touch when:   never for a new repository; a P-792 channel's fix lands (its test 
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import inspect
 import json
+import os
 import threading
 import types
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from sqlalchemy import select
@@ -180,6 +204,7 @@ from crb.core.reading import (
     READING_RESERVED_ACTION,
     REASON_SCOPE_FAULT,
     REFUSAL_INVALID,
+    REFUSAL_READING_REQUIRED,
     REFUSAL_RUN_FIELDS,
     RESERVED_RUN_LADDER,
     RESERVED_RUN_PARAMS,
@@ -210,9 +235,15 @@ from crb.core.spend import (
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.server import worker
+from crb.server.app import create_app
 from crb.server.reading_book import load_readings
+from crb.server.routes import runs as runs_routes
+from crb.server.routes.learn import deployment_author_model
+from crb.server.schemas import RunCreateRequest
+from crb.store.db import init_db
 from crb.store.events import append_event
 from crb.store.jobs import (
+    STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_QUEUED,
     STATUS_RUNNING,
@@ -233,11 +264,25 @@ from fixtures.readings import (
     REPO,
     S1,
     SEALED,
+    SEALED_SETTINGS,
     SMALLEST_EFFECT,
     commits,
     register_reading,
     rows_for,
     sealed_row,
+)
+from fixtures.server_seed import Env, add_users, login, make_settings, seed
+from test_wave3_registration_rehearsal import (
+    TEST_AUTHOR,
+    Wave3,
+    _a0,
+    _refused,
+    _runs,
+    _s3_body,
+    a0l_body,
+    add_repos_and_tasks,
+    campaign_body,
+    registration_bodies,
 )
 from test_worker import FakeBuilder, Harness
 
@@ -263,15 +308,26 @@ def _worker_defaults_cleared(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_p792_c3_builder_config_refused_and_described(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """C3, reproducing the enumeration's probe
     ``test_builder_config_extra_args_validates_and_overrides_argv``, which found the argv
-    carrying a second ``--model`` while ``describe()`` named only the rung's. (b) A run of a
-    reserved.v1 reading inserted straight into the queue, past ``POST /runs``, with
-    ``builder_config.extra_args`` is refused at claim — ``run.refused`` ``reading_run_fields``
-    naming ``builder_config`` — before anything is built or reserved, and the commit stays
-    pending. (c) ``describe()`` names ``extra_args`` and ``claude_binary`` when they are set."""
+    carrying a second ``--model`` while ``describe()`` named only the rung's. (a) ``POST
+    /runs`` filed under a reserved.v1 reading with ``builder_config.extra_args`` is refused
+    422 ``reading_run_fields`` naming ``builder_config``, with nothing queued and nothing
+    admitted (201 before the route's check), on ``backend``'s store; the same body without
+    it is admitted. (b) A run of a reserved.v1 reading inserted straight into the queue, past
+    ``POST /runs``, with ``builder_config.extra_args`` is refused at claim — ``run.refused``
+    ``reading_run_fields`` naming ``builder_config`` — before anything is built or reserved,
+    and the commit stays pending. (c) ``describe()`` names ``extra_args`` and
+    ``claude_binary`` when they are set."""
+    (tmp_path / "submit").mkdir()
+    with _r_stack(backend, tmp_path / "submit", monkeypatch) as w:
+        a0 = _a0(w, ("cobra", "XS"))
+        extra = {**a0, "builder_config": {"extra_args": ["--model", "x"]}}
+        assert _r_fields(w, extra, ["builder_config"])["arm"] == "A0"
+        _r_admit(w, a0)
+
     (tmp_path / "claim").mkdir()
     rig = _w_rig(tmp_path / "claim", monkeypatch)
     reading = rig.register()
@@ -2131,16 +2187,24 @@ def test_p792_c2_cancel_during_witness_is_a_miss(
 
 
 def test_p792_c5_timeout_refused_and_gold_red_is_a_miss(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """C5, measured in round 4: a gold control that timed out (blame ``GOLD_CONTROL_RED``)
-    wrote a harness row the legacy rule passes over, and a later clean row of another run
-    decided the commit; and a ``RepoConfig`` edit moved what later attempts ran under while
-    the reading read on. (b) Now the timed-out control's row is the reserved attempt's: a
-    miss, which a later clean row never changes. (c) A ``runner_opts`` edit after the first
-    reservation halts the next run ``reading_treatment_mismatch`` before ``build.start``,
-    naming the field that moved. Part (a), ``POST /runs`` refusing a reading's run its own
-    ``timeout``, lands with the route's check (step 10)."""
+    """C5, measured in round 4: a short timeout turned an honest attempt red, a gold control
+    that timed out (blame ``GOLD_CONTROL_RED``) wrote a harness row the legacy rule passes
+    over, and a later clean row of another run decided the commit; and a ``RepoConfig`` edit
+    moved what later attempts ran under while the reading read on. (a) ``POST /runs`` filed
+    under a reserved.v1 reading with its own ``timeout`` is refused 422 ``reading_run_fields``
+    naming ``timeout``, nothing queued (201 before the route's check), on ``backend``'s
+    store. (b) Now the timed-out control's row is the reserved attempt's: a miss, which a
+    later clean row never changes. (c) A ``runner_opts`` edit after the first reservation
+    halts the next run ``reading_treatment_mismatch`` before ``build.start``, naming the
+    field that moved."""
+    (tmp_path / "submit").mkdir()
+    with _r_stack(backend, tmp_path / "submit", monkeypatch) as w:
+        a0 = _a0(w, ("cobra", "XS"))
+        _r_fields(w, {**a0, "timeout": 1}, ["timeout"])
+        _r_admit(w, a0)
+
     rig = _w_rig(tmp_path, monkeypatch)
     reading = rig.register()
     # (b) the reserved attempt's gold control times out
@@ -2745,3 +2809,316 @@ def test_p792_a_legacy_reading_is_served_open_on_this_rule(
             rig.enqueue(legacy)
             rig.h.run_one()
     assert rig.reservations(legacy) == []
+
+
+# --- the submit gate (POST /runs): 422 reading_run_fields and 409 reading_required --------
+
+
+@contextlib.contextmanager
+def _r_stack(
+    backend: Backend,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    legacy: Sequence[tuple[str, str]] = (),
+) -> Iterator[Wave3]:
+    """The Wave 3 rehearsal's stack after step 4 on ``backend``'s store: sealed (sandbox and
+    builder on docker), the record's test author, the builders' credential checks stubbed
+    present (no key is set or read), the campaign registered, then its four readings — each
+    opted in to reserved.v1 (``attempt_rule``) unless its ``(repo, size)`` is in ``legacy``."""
+    for key in list(os.environ):
+        if key.startswith("CRB_"):
+            monkeypatch.delenv(key, raising=False)
+    for name in ("claude_code", "editblock"):
+        monkeypatch.setitem(runs_routes.CREDENTIAL_CHECKS, name, lambda *_a, **_k: "")
+    init_db(backend.engine)
+    info = seed(backend.factory)
+    add_users(backend.factory)
+    settings = make_settings(tmp_path, **SEALED_SETTINGS, factory={"test_author": TEST_AUTHOR})
+    with TestClient(create_app(settings, backend.factory)) as client:
+        env = Env(client=client, factory=backend.factory, info=info, settings=settings)
+        add_repos_and_tasks(env)
+        login(client, "operator")
+        w = Wave3(env=env)
+        r = w.send("POST", "/api/v1/campaigns", json=campaign_body())
+        assert r.status_code == 201, r.text
+        w.campaign = r.json()
+        author = deployment_author_model(settings)
+        for key, body in registration_bodies(w.cid, author).items():
+            rule = {} if key in legacy else {"attempt_rule": ATTEMPT_RULE_RESERVED}
+            r = w.send("POST", "/api/v1/readings", json={**body, **rule})
+            assert r.status_code == 201, (key, r.text)
+            w.readings[key] = r.json()
+            assert w.readings[key].get("attempt_rule", "") == rule.get("attempt_rule", ""), key
+        yield w
+
+
+def _r_admitted(w: Wave3) -> int:
+    """How many runs the campaign admitted (its ``campaign.admitted`` events)."""
+    with w.env.factory() as s:
+        return len(
+            s.execute(
+                select(Event.id).where(Event.action == CAMPAIGN_ADMITTED, Event.trace_id == w.cid)
+            ).all()
+        )
+
+
+def _r_admit(w: Wave3, body: Mapping[str, Any]) -> Run:
+    """``POST /runs`` ``body`` answers 201, the campaign admits it, and the run is then
+    settled (``cancelled``, as an operator's cancel before its claim leaves it) so it holds
+    none of the line; the stored run is returned."""
+    before = _r_admitted(w)
+    r = w.send("POST", "/api/v1/runs", json=dict(body))
+    assert r.status_code == 201, r.text
+    assert _r_admitted(w) == before + (1 if body.get("campaign_id") else 0)
+    with w.env.factory() as s:
+        run = s.get(Run, str(r.json()["id"]))
+        assert run is not None
+        run.status = STATUS_CANCELLED
+        s.commit()
+        s.refresh(run)
+        s.expunge(run)
+    return run
+
+
+def _r_refused(w: Wave3, body: Mapping[str, Any], status: int, code: str) -> dict[str, Any]:
+    """``POST /runs`` ``body`` is refused ``status`` ``code`` with nothing queued and
+    nothing admitted; the error envelope is returned."""
+    before, admitted = _runs(w.env), _r_admitted(w)
+    err = _refused(w.send("POST", "/api/v1/runs", json=dict(body)), status, code)
+    assert _runs(w.env) == before and _r_admitted(w) == admitted
+    return err
+
+
+def _r_fields(w: Wave3, body: Mapping[str, Any], fields: list[str]) -> dict[str, Any]:
+    """``body`` is refused 422 ``reading_run_fields`` naming exactly ``fields`` (with a
+    reason each), nothing queued; the error's ``detail`` is returned."""
+    err = _r_refused(w, body, 422, REFUSAL_RUN_FIELDS)
+    detail = dict(err["detail"])
+    assert detail["fields"] == fields, detail
+    assert detail["reading_id"] == body["reading_id"]
+    assert set(detail["reasons"]) == set(fields) and all(detail["reasons"].values())
+    assert "nothing was queued" in err["message"]
+    return detail
+
+
+def test_p792_c7_budget_profile_mismatch_refused(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C7 and C17 at submit, reproducing the probe ``test_in_scope_reads_no_run_parameter``
+    (the reading's scope reads no run parameter, so a run's own profile was counted as the
+    reading's): a non-loop arm spending on a budget profile other than the reading's
+    (``calibrated`` against ``default``), a non-loop arm without ``learning: off``, and the
+    ``+L`` arm naming a budget profile are each refused 422 ``reading_run_fields`` naming
+    what moved, nothing queued (201 before the route's check). ``learning: on`` is the
+    schema's 422 (green before: the loop is opted out, never in). The step-6 ``A0`` and
+    ``A0+L`` bodies are admitted."""
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        key = ("cobra", "XS")
+        a0 = _a0(w, key)
+        a0l = a0l_body(a0)
+        s3 = _s3_body(w, key)
+        assert a0["budget_profile"] == w.readings[key]["budget_profile"] == PROFILE_DEFAULT
+        cases: list[tuple[dict[str, Any], list[str], str]] = [
+            ({**a0, "budget_profile": PROFILE_CALIBRATED}, ["budget_profile"], "A0"),
+            ({k: v for k, v in a0.items() if k != "learning"}, ["learning"], "A0"),
+            ({**a0l, "budget_profile": PROFILE_CALIBRATED}, ["budget_profile", "learning"], "A0"),
+            ({**s3, "budget_profile": PROFILE_CALIBRATED}, ["budget_profile"], "S3"),
+        ]
+        for body, fields, arm in cases:
+            assert _r_fields(w, body, fields)["arm"] == arm, fields
+        err = _r_refused(w, {**a0, "learning": "on"}, 422, "validation_error")
+        assert "learning" in json.dumps(err)
+        assert _r_admit(w, a0).params_json["learning"] == "off"
+        assert "learning" not in _r_admit(w, a0l).params_json
+
+
+#: Every ``RunCreateRequest`` field, as a run filed under a reserved.v1 reading may set it
+#: (C17). ``free``: admitted with the value beside it (``{}``: the step-6 ``A0`` body sets
+#: it already). ``default``: admitted at its default (the first body), refused naming it
+#: otherwise (the second). ``refused``: refused naming it, whatever it is set to.
+#: ``factory``: refused 422 ``validation_error`` before the gate (factory runs only). A new
+#: field fails :func:`test_p792_run_fields_ratchet` until it is classified here.
+_R_FREE: dict[str, dict[str, Any]] = {
+    "repo": {},
+    "kind": {},
+    "builder": {},
+    "model": {},
+    "provider": {},
+    "task_ids": {},
+    "max_cost_usd": {},
+    "budget_profile": {},
+    "learning": {},
+    "reading_id": {},
+    "campaign_id": {},
+    "mode": {"mode": "blind"},
+    "limit": {"limit": 16},
+    "arm": {"arm": "S1"},
+    "test_author": {"arm": "S1", "test_author": TEST_AUTHOR},
+    "outage_stop": {"outage_stop": 3},
+    "env_stop": {"env_stop": 3},
+    "qualify_first": {"qualify_first": True},
+}
+_R_DEFAULT: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
+    "pool": ({"pool": ""}, {"pool": "hard"}),
+    "executor": ({"executor": ""}, {"executor": "docker"}),
+    "timeout": ({"timeout": None}, {"timeout": 1}),
+    "ladder": ({"ladder": ["r1"]}, {"ladder": ["claude_code:claude-sonnet-5"]}),
+}
+_R_REFUSED: dict[str, Any] = {
+    "budget": {"max_turns": 3},
+    "builder_config": {"extra_args": ["--model", "x"]},
+    "retain": {"worktrees": True},
+    "preflight": True,
+    "escalation": ESCALATION_ALWAYS,
+    "checks": {"finish_gate": False},
+    "taxonomy": GLOBAL_CLASS_SET,
+}
+_R_FACTORY: dict[str, Any] = {
+    "backlog_hash": "0" * 64,
+    "deliver": True,
+    "deliver_override": True,
+    "max_rework": 1,
+}
+#: The fields a run stores as columns, not under ``params``.
+_R_COLUMNS = frozenset({"repo", "kind", "mode", "builder", "model", "provider", "ladder"})
+
+
+def test_p792_run_fields_ratchet(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C17, the ratchet: every ``RunCreateRequest`` field is classified (``_R_FREE``,
+    ``_R_DEFAULT``, ``_R_REFUSED``, ``_R_FACTORY``), so a field added to the request fails
+    here until it is; the ``params`` keys the admitted classes store are exactly the core's
+    :data:`RESERVED_RUN_PARAMS`, and no refused field's is one. Each class behaves as named
+    on ``POST /runs`` filed under a reserved.v1 reading: a free field admitted, a default
+    field admitted at its default and refused 422 ``reading_run_fields`` naming it
+    otherwise, a refused field refused naming it, a factory field 422 ``validation_error`` —
+    each refusal with nothing queued."""
+    classes = [set(_R_FREE), set(_R_DEFAULT), set(_R_REFUSED), set(_R_FACTORY)]
+    assert sum(len(c) for c in classes) == len(set().union(*classes))  # disjoint
+    assert set(RunCreateRequest.model_fields) == set().union(*classes)
+    assert (set(_R_FREE) | set(_R_DEFAULT)) - _R_COLUMNS == RESERVED_RUN_PARAMS
+    assert RESERVED_RUN_PARAMS.isdisjoint(_R_REFUSED) and RESERVED_RUN_PARAMS.isdisjoint(_R_FACTORY)
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        a0 = _a0(w, ("cobra", "XS"))
+        for name, over in _R_FREE.items():
+            assert over or name in a0, name
+            run = _r_admit(w, {**a0, **over})
+            stored = dict(run.params_json or {})
+            assert name in _R_COLUMNS or name in stored, (name, stored)
+        for name, (default, other) in _R_DEFAULT.items():
+            run = _r_admit(w, {**a0, **default})
+            assert run.ladder_json == list(RESERVED_RUN_LADDER), name
+            _r_fields(w, {**a0, **other}, [name])
+        for name, value in _R_REFUSED.items():
+            _r_fields(w, {**a0, name: value}, [name])
+        for name, value in _R_FACTORY.items():
+            err = _r_refused(w, {**a0, name: value}, 422, "validation_error")
+            assert name in err["message"], (name, err)
+
+
+def test_p792_empty_ladder_default_is_what_new_run_stores() -> None:
+    """The one ladder a reserved.v1 reading's run climbs (:data:`RESERVED_RUN_LADDER`) is
+    what ``new_run`` stores for a body naming none, and ``pool``, ``executor`` and
+    ``timeout`` are stored at the defaults the whitelist keeps — so a step-6 body, which
+    names none of them, is the run the whitelist admits. A pin: green before the route's
+    check, it fails if either side's default moves without the other."""
+    for kind in ("replay", "blind"):
+        body = RunCreateRequest(
+            repo="cobra",
+            kind=kind,
+            builder="claude_code",
+            model="claude-sonnet-5",
+            provider="anthropic",
+            task_ids=[],
+        )
+        run = runs_routes.new_run(body, actor="u")
+        assert run.ladder_json == list(RESERVED_RUN_LADDER) == ["r1"], kind
+        params = dict(run.params_json or {})
+        assert {k: params[k] for k in ("pool", "executor", "timeout")} == {
+            "pool": "",
+            "executor": "",
+            "timeout": 0,
+        }
+        assert set(params) <= RESERVED_RUN_PARAMS, params
+
+
+def test_p792_reading_required_for_campaign_runs(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C19: a run filed under a campaign that holds a reserved.v1 reading on its repository
+    names its reading — without ``reading_id`` it is refused 409 ``reading_required``
+    (``detail: {campaign_id, reading_ids}``) with nothing queued and nothing admitted (201
+    and admitted before the route's check), since it would spend the campaign's line while
+    no reading's gate (``reading_run_fields``, sealed, posture) checked it. A repository
+    whose readings in the campaign are all legacy is admitted as before; a run under no
+    campaign, or under another campaign holding no reading, is unaffected."""
+    legacy = (("click", "XS"), ("click", "S"))
+    with _r_stack(backend, tmp_path, monkeypatch, legacy=legacy) as w:
+        cobra = {k: v for k, v in _a0(w, ("cobra", "XS")).items() if k != "reading_id"}
+        err = _r_refused(w, cobra, 409, REFUSAL_READING_REQUIRED)
+        held = sorted(w.readings[("cobra", s)]["reading_id"] for s in ("XS", "S"))
+        assert err["detail"] == {"campaign_id": w.cid, "reading_ids": held}
+        assert "nothing was queued" in err["message"]
+        click = {k: v for k, v in _a0(w, ("click", "XS")).items() if k != "reading_id"}
+        _r_admit(w, click)
+        outside = {k: v for k, v in cobra.items() if k != "campaign_id"}
+        admitted = _r_admitted(w)
+        _r_admit(w, outside)
+        assert _r_admitted(w) == admitted
+        r = w.send("POST", "/api/v1/campaigns", json={**campaign_body(), "name": "p792-other"})
+        assert r.status_code == 201, r.text
+        other = str(r.json()["campaign_id"])
+        assert other != w.cid
+        r = w.send("POST", "/api/v1/runs", json={**cobra, "campaign_id": other})
+        assert r.status_code == 201, r.text
+
+
+def test_p792_remeasure_bodies_are_admitted(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spec risk 6, the whitelist against the real step-6 bodies on an opt-in reserved.v1
+    reading: the ``GET /learn/remeasure`` plan's own request plus the three filing fields
+    and the profile (``S3``), and the record's ``A0`` and ``A0+L`` bodies, are each
+    admitted 201 and stored as the record words them; a body asking to ``retain`` its
+    worktrees is refused 422 ``reading_run_fields`` (on purpose: allowing it would be a
+    registration amendment)."""
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        key = ("cobra", "XS")
+        a0 = _a0(w, key)
+        runs = [_r_admit(w, b) for b in (_s3_body(w, key), a0, a0l_body(a0))]
+        assert [r.kind for r in runs] == ["replay", "blind", "blind"]
+        assert [dict(r.params_json or {}).get("learning") for r in runs] == ["off", "off", None]
+        assert all(r.ladder_json == list(RESERVED_RUN_LADDER) for r in runs)
+        _r_fields(w, {**a0, "retain": {"worktrees": True}}, ["retain"])
+
+
+def test_p792_admission_rechecks_both_refusals_under_the_lock(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``admit_under_campaign`` re-runs the submit gate under the events write lock, so both
+    new refusals hold there too: when the readings read before the lock are still legacy
+    and the ones read under it are reserved.v1 (an opt-in landing between the two reads),
+    a run setting ``timeout`` is refused 422 ``reading_run_fields`` and a run without
+    ``reading_id`` 409 ``reading_required`` — each with nothing queued and nothing admitted
+    (both 201 before the route's checks)."""
+    real = runs_routes.load_readings
+    calls: list[str] = []
+
+    def first_read_legacy(db: Any, repo: str) -> list[Reading]:
+        got = list(real(db, repo))
+        calls.append(repo)
+        if len(calls) == 1:
+            return [dataclasses.replace(r, attempt_rule="") for r in got]
+        return got
+
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        a0 = _a0(w, ("cobra", "XS"))
+        monkeypatch.setattr(runs_routes, "load_readings", first_read_legacy)
+        _r_fields(w, {**a0, "timeout": 1}, ["timeout"])
+        assert len(calls) == 2
+        calls.clear()
+        no_reading = {k: v for k, v in a0.items() if k != "reading_id"}
+        _r_refused(w, no_reading, 409, REFUSAL_READING_REQUIRED)
+        assert len(calls) == 2
