@@ -115,7 +115,10 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               the submit check's code when it is gone (P-050), and a run of a reading this
               worker cannot grade sealed, would grade in a posture class the reading does not
               count, or, when the reading names a campaign, that no ``campaign.admitted``
-              event names (P-789, DL-382, DL-383) — dispatches by kind (setup,
+              event names (P-789, DL-382, DL-383), or a run of a reserved.v1 reading that sets
+              a field the reading does not register (``_reading_run_fields`` over
+              ``reading_run_refusal``: ``builder_config``, ``timeout``, another budget profile
+              or ladder; P-792 C3, C5, C7) — dispatches by kind (setup,
               probe, mine, label, replay, blind, oracle, controls, factory), streams
               StepEvents, writes grade rows through the append-only ledger with the run's
               labels stamped, records the apparatus, and marks the run succeeded / failed /
@@ -144,8 +147,9 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``:
               one ``reading.reserved`` event under the events lock, or a skip, or a halt
               before ``build.start`` — the run not owned, a cancel asked, a treatment that is
-              not the pinned one), stamps the reserved row with the reservation, treatment
-              and claim, and appends it under ``claim_guard``; a row whose claim was
+              not the pinned one, the pins read by ``treatment_pins``), stamps the reserved
+              row with the reservation, treatment and claim, and appends it under
+              ``claim_guard``; a row whose claim was
               reclaimed or settled is refused (``AttemptSettled``) and the run's finish is
               not written (``run.finish_refused``).
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
@@ -175,14 +179,16 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``),
               src/crb/store/library.py (``mark_stale`` — the library's staleness after a mine),
               src/crb/server/routes/runs.py (``new_run`` and ``submit_refusals`` — a chained
-              run is made and refused exactly as ``POST /runs`` makes one)
+              run is made and refused exactly as ``POST /runs`` makes one),
+              src/crb/server/reading_book.py (``load_readings``; ``treatment_pins``, the pins
+              ``GET /readings`` serves too)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_spend.py, tests/test_worker_chain.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
               projections and their ratchets; the reserver, the stamped row and the guard,
-              C1-C15 end to end)
+              C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
@@ -291,6 +297,7 @@ from crb.core.posture import expected_posture_class
 from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.qualify import Qualification
 from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
     HALT_ARM_UNKNOWN,
     HALT_CANCEL_REQUESTED,
     HALT_RUN_NOT_OWNED,
@@ -298,11 +305,11 @@ from crb.core.reading import (
     LABEL_CLAIM,
     LABEL_RESERVATION,
     LABEL_TREATMENT,
-    READING_RESERVED_ACTION,
     SKIP_COMMIT_RESERVED,
     SKIP_TASK_NOT_ENROLLED,
     Reading,
     enrolled,
+    reading_run_refusal,
 )
 from crb.core.redact import redact, redact_and_cap
 from crb.core.routing import ROUTE_DELIVER
@@ -375,7 +382,7 @@ from crb.server.intake import (
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
-from crb.server.reading_book import load_readings
+from crb.server.reading_book import load_readings, treatment_pins
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -1626,6 +1633,8 @@ class Worker:
                 status, error = STATUS_FAILED, moved
             elif (unadmitted := self._campaign_unadmitted(run, emitter)) is not None:
                 status, error = STATUS_FAILED, unadmitted
+            elif (unregistered := self._reading_run_fields(run, emitter)) is not None:
+                status, error = STATUS_FAILED, unregistered
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
@@ -1859,6 +1868,59 @@ class Worker:
             code=REFUSAL_REQUIRED,
             reading_id=reading_id,
             campaign_id=campaign_id,
+        )
+        return error
+
+    def _reading_run_fields(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reserved.v1
+        reading (``params.reading_id``) and sets a field the reading does not register — the
+        pure whitelist :func:`~crb.core.reading.reading_run_refusal` (P-792 channels C3, C5
+        and C7) applied at claim to the run as stored, so a run that reached the queue by a
+        path that skipped ``POST /runs`` (inserted directly, or queued by a route the gate
+        missed) still cannot steer the attempt it would reserve: a ``builder_config`` whose
+        ``extra_args`` override the rung's ``--model`` (C3), a ``timeout`` (C5), another
+        budget profile (C7), another ladder, cell, kind or mode, or an arm the reading does not
+        read. Nothing is reserved, so every enrolled commit stays pending. ``None`` for a run
+        under no reading, under one this repository has no verified record of
+        (:meth:`_reading_unsealed` refuses it), or under a legacy reading, which no whitelist
+        binds."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+        if reading is None or not reading.reserved:
+            return None
+        code, detail = reading_run_refusal(
+            reading,
+            kind=run.kind,
+            mode=run.mode or "",
+            builder=run.builder or "",
+            model=run.model or "",
+            provider=run.provider or "",
+            ladder=list(run.ladder_json or []),
+            params=params,
+        )
+        if not code:
+            return None
+        fields = list(detail.get("fields") or [])
+        error = (
+            f"{code}: a run of {ATTEMPT_RULE_RESERVED} reading {reading_id!r} sets "
+            f"{', '.join(fields)}, which the reading does not register; nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=code,
+            reading_id=reading_id,
+            fields=fields,
+            reasons=dict(detail.get("reasons") or {}),
+            arm=str(detail.get("arm") or ""),
         )
         return error
 
@@ -2963,30 +3025,12 @@ class Worker:
         use): ``("deployment", e)`` for the first ``reading.reserved`` event on the reading's
         repository under its campaign (under the reading itself when it names none), and
         ``("arm", e)`` for the reading's first on ``arm``. Either is absent before its first
-        reservation."""
-        deployment: Event | None = None
-        arm_pin: Event | None = None
-        for ev in s.execute(
-            select(Event)
-            .where(Event.action == READING_RESERVED_ACTION, Event.repo == reading.repo)
-            .order_by(Event.id)
-        ).scalars():
-            same_campaign = str((ev.payload_json or {}).get("campaign_id") or "") == (
-                reading.campaign_id
-            )
-            if (
-                deployment is None
-                and same_campaign
-                and (reading.campaign_id or ev.trace_id == reading.reading_id)
-            ):
-                deployment = ev
-            if arm_pin is None and ev.trace_id == reading.reading_id and ev.step_id == arm:
-                arm_pin = ev
-            if deployment is not None and arm_pin is not None:
-                break
+        reservation. The rule is :func:`~crb.server.reading_book.treatment_pins`, the one
+        ``GET /readings`` serves the pins by."""
+        deployment, arms = treatment_pins(s, reading)
         return [
             (half, ev)
-            for half, ev in (("deployment", deployment), ("arm", arm_pin))
+            for half, ev in (("deployment", deployment), ("arm", arms.get(arm)))
             if ev is not None
         ]
 

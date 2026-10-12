@@ -19,17 +19,22 @@ What it does: Reads the repository's reading events; keeps a record only when it
               (``with_enrolment``, DL-334); fills a reading that names a campaign with the runs
               admitted under it (``with_admissions``, DL-382), so every server reader counts
               only those runs' rows; fills a reserved.v1 reading with its reservations and its
-              first registration's ``Event.id`` (``with_reservations``, P-792).
+              first registration's ``Event.id`` (``with_reservations``, P-792). Reads a
+              reserved.v1 reading's treatment pins (``treatment_pins``, trust on first use):
+              the campaign's first reservation on the repository and each arm's first.
 How:          ``Event`` rows (``action == reading.registered``) → ``Reading.from_dict`` →
               ``Reading.verify`` → ``with_enrolment`` over ``load_held_out`` →
               ``with_admissions`` over ``admitted_runs`` (one read per campaign) →
-              ``with_reservations`` over ``reservations_of`` (one read per reserved reading).
+              ``with_reservations`` over ``reservations_of`` (one read per reserved reading);
+              ``treatment_pins``: the repository's ``reading.reserved`` events in ``Event.id``
+              order.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 2)
-Works with:   src/crb/server/routes/readings.py (registers readings; re-exports this reader),
+Works with:   src/crb/server/routes/readings.py (registers readings; re-exports this reader;
+              serves the pins as ``pinned_treatment``),
               src/crb/server/routes/runs.py (``reading_refusal``: a run filed under a reading),
               src/crb/server/worker.py (``_reading_unsealed``, ``_reading_posture_mismatch``:
-              the same rules at claim),
+              the same rules at claim; ``_treatment_pins``: the reserver halts on a moved pin),
               src/crb/core/reading.py (the record, its hash and the enrolment rule),
               src/crb/server/acceptance.py (``load_held_out``: a forward reading's records),
               src/crb/server/campaigns.py (``admitted_runs``: the runs a campaign admitted;
@@ -48,6 +53,7 @@ from sqlalchemy.orm import Session
 from crb.core.acceptance import HeldOutTests
 from crb.core.reading import (
     READING_EVENT_ACTION,
+    READING_RESERVED_ACTION,
     Reading,
     first_per_id,
     with_admissions,
@@ -99,4 +105,33 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
     ]
 
 
-__all__ = ["load_readings"]
+def treatment_pins(session: Session, reading: Reading) -> tuple[Event | None, dict[str, Event]]:
+    """The reservations that pin a reserved.v1 reading's treatment (P-792, trust on first
+    use), as ``(deployment, {arm: event})``: the deployment half is the first
+    ``reading.reserved`` event on the reading's repository under its campaign (under the
+    reading itself when it names none), and each arm's half the reading's first reservation on
+    that arm. The deployment half is ``None``, and an arm absent, before its first reservation.
+    One rule for the worker, which halts a run whose treatment moved from these pins, and for
+    ``GET /readings``, which serves them."""
+    deployment: Event | None = None
+    arms: dict[str, Event] = {}
+    for ev in session.execute(
+        select(Event)
+        .where(Event.action == READING_RESERVED_ACTION, Event.repo == reading.repo)
+        .order_by(Event.id)
+    ).scalars():
+        same_campaign = str((ev.payload_json or {}).get("campaign_id") or "") == (
+            reading.campaign_id
+        )
+        if (
+            deployment is None
+            and same_campaign
+            and (reading.campaign_id or ev.trace_id == reading.reading_id)
+        ):
+            deployment = ev
+        if ev.trace_id == reading.reading_id:
+            arms.setdefault(ev.step_id, ev)
+    return deployment, arms
+
+
+__all__ = ["load_readings", "treatment_pins"]

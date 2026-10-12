@@ -1241,6 +1241,29 @@ export interface ReadingOutcome {
   pool: number
   pool_sha256: string
   arms: ArmReading[]
+  /** The attempt rule it reads under: `reserved.v1`, or `first_observed.v0` for a legacy reading (GET /readings, P-792). */
+  attempt_rule?: string
+  /** A legacy reading only: `"open on this rule"` — the P-792 channels stay open on it (GET /readings). */
+  p792?: string
+  /** What its attempts are pinned to: the campaign's first reservation and each arm's first; `null` before any, or legacy (GET /readings, P-792). */
+  pinned_treatment?: PinnedTreatment | null
+  /** The commits each arm has reserved of those it enrols; `null` for a legacy reading (GET /readings, P-792). */
+  reserved?: Record<string, number> | null
+}
+
+/** One half of a reserved.v1 reading's treatment pin, as its reservation stored it (P-792). */
+export interface TreatmentPin {
+  body: Record<string, unknown>
+  /** `deployment_fp` or `arm_fp`. */
+  digest: string
+  /** The `reading.reserved` event that pinned it. */
+  event_id: string
+}
+
+/** A reserved.v1 reading's treatment pins: the deployment half (per campaign and repository) and one per arm. */
+export interface PinnedTreatment {
+  deployment: TreatmentPin | null
+  arms: Record<string, TreatmentPin>
 }
 
 /** A cell's proven context: its standard arm, or `standard: null` — "no proven standard". */

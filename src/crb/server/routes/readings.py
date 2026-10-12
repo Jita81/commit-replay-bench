@@ -16,7 +16,9 @@ pool the rule does not give, ``409 budget_spent`` when the budget cannot cover t
 a ``campaign_id`` no verified campaign has — a reading names its campaign at birth, a run filed
 under it is then filed under that campaign, and it counts only runs the campaign admitted
 (DL-382). ``GET /readings`` serves every reading of a repository evaluated over its rows — each
-arm's look state — and each cell's budget spent. ``standard_for`` is the seam the factory's
+arm's look state, the attempt rule it reads under and, for a reserved.v1 reading, the treatment
+its attempts are pinned to and the commits each arm has reserved (P-792) — and each cell's
+budget spent. ``standard_for`` is the seam the factory's
 entry gate reads (ADR-0026 item 8). ``POST /readings/forward`` (operator) registers the forward
 reading of a ceiling (DL-334): ``S2`` on the factory's cell, counted on calibration builds graded
 on a second person's held-out tests, the one reading that can promote the ceiling;
@@ -44,12 +46,15 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               reads the rows and the readings already registered under the lock, refuses a
               reading already registered (``reading_exists``, P-793), and writes the event
               (a reserved.v1 reading only when asked: ``attempt_rule``, P-792); lists readings
-              with every arm's state and the budget per cell;
+              with every arm's state and the budget per cell, each with its attempt rule (a
+              legacy one ``first_observed.v0``, ``p792: "open on this rule"``), its treatment
+              pins and its reserved commits per arm (``served_reading``, P-792);
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
 How:          ``append_event_checked`` (lock → ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
-              counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``standard_of``.
+              counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``served_reading``
+              (``treatment_pins``) → ``standard_of``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5 and 8's seam),
               docs/adr/0025-routing-v2.md
@@ -59,10 +64,12 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/routes/capability.py (routes every cell on its reading),
               src/crb/server/routes/signoffs.py (the sign-off write path reads the same book),
               src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
-              submit gate and the worker read it below this module),
+              submit gate and the worker read it below this module; ``treatment_pins``, the
+              pins the worker halts a moved treatment by and ``GET /readings`` serves),
               src/crb/server/posture_view.py (the deployment's posture class),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
-Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py
+Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py,
+              tests/test_p792_reserved.py (the attempt rule, the pins and the reserved counts)
 Touch when:   never for a new repository; the reading's shape or the registration's refusals change
               (an ADR amending ADR-0026 first); never for a new repository.
 """
@@ -90,6 +97,7 @@ from crb.core.ledger import (
     is_sealed_class,
 )
 from crb.core.reading import (
+    ATTEMPT_RULE_LEGACY,
     DEFAULT_MAX_RERUNS,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
@@ -98,11 +106,13 @@ from crb.core.reading import (
     REFUSAL_POOL_NOT_BLIND,
     RULE_LOOK_V1,
     Reading,
+    ReadingOutcome,
     ReadingRefused,
     Standard,
     budget_spent,
     campaign_unsupported,
     cell_error_budget,
+    enrolled,
     evaluate,
     first_per_id,
     pool_by_rule,
@@ -119,12 +129,12 @@ from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import current_checks_arm
-from crb.server.reading_book import load_readings
+from crb.server.reading_book import load_readings, treatment_pins
 from crb.server.routes.repos import get_repo_or_404
 from crb.store.class_sets import DbClassSets
 from crb.store.events import append_event_checked
 from crb.store.ledger import DbLedger
-from crb.store.models import Repo, Task
+from crb.store.models import Event, Repo, Task
 
 router = APIRouter(tags=["capability"])
 _ERR = {"model": ErrorEnvelope}
@@ -274,6 +284,11 @@ class ReadingIn(BaseModel):
 
 
 class ReadingsOut(BaseModel):
+    """``GET /readings``: every reading of ``repo`` evaluated over its rows (each arm's look
+    state), with the attempt rule it reads under (``attempt_rule``; a legacy reading also
+    ``p792: "open on this rule"``), its treatment pins (``pinned_treatment``) and its reserved
+    commits per arm (``reserved``) — :func:`served_reading` — and each cell's budget spent."""
+
     repo: str
     readings: list[dict[str, Any]]
     budgets: list[dict[str, Any]]
@@ -565,10 +580,64 @@ def list_readings(
     book = ReadingBook.evaluate(readings, DbLedger(factory).rows(repo=repo))
     return ReadingsOut(
         repo=repo,
-        readings=[o.to_dict() for o in book.outcomes],
+        readings=[served_reading(db, o) for o in book.outcomes],
         budgets=budget_by_cell(readings),
         budget=cell_error_budget(),
     )
+
+
+#: What ``GET /readings`` says of a legacy reading's P-792 channels: the reserved.v1 rule
+#: closes them, and the legacy rule (``first_observed.v0``), whose id never moves, does not.
+P792_OPEN = "open on this rule"
+
+
+def _pin(ev: Event, half: str) -> dict[str, Any]:
+    """One half of a treatment pin as its reservation stored it: the body, its digest
+    (``deployment_fp`` / ``arm_fp``) and the event that pinned it."""
+    payload = dict(ev.payload_json or {})
+    body = dict((payload.get("treatment_body") or {}).get(half) or {})
+    return {"body": body, "digest": str(payload.get(f"{half}_fp") or ""), "event_id": ev.event_id}
+
+
+def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
+    """One reading as ``GET /readings`` serves it: the evaluated outcome
+    (``ReadingOutcome.to_dict``) with the attempt rule it reads under (``attempt_rule``:
+    ``reserved.v1``, else ``first_observed.v0`` with ``p792: "open on this rule"``) and, for a
+    reserved.v1 reading (P-792 channels C3, C5 and C17), the treatment its attempts are pinned
+    to — ``pinned_treatment``: ``{deployment: {body, digest, event_id} | null, arms: {arm:
+    {body, digest, event_id}}}`` from the campaign's first reservation on the repository and
+    each arm's first (:func:`~crb.server.reading_book.treatment_pins`, the rule the worker
+    halts a moved treatment by), ``null`` before any — and ``reserved``, the commits each arm
+    has reserved of those it enrols. A legacy reading has neither (``null``)."""
+    reading = outcome.reading
+    out = outcome.to_dict()
+    if not reading.reserved:
+        out.update(
+            attempt_rule=ATTEMPT_RULE_LEGACY,
+            p792=P792_OPEN,
+            pinned_treatment=None,
+            reserved=None,
+        )
+        return out
+    deployment, arms = treatment_pins(session, reading)
+    pinned = {a: _pin(ev, "arm") for a, ev in arms.items() if a in reading.arms}
+    reservations = reading.reservations or {}
+    out.update(
+        attempt_rule=reading.attempt_rule,
+        pinned_treatment=(
+            {
+                "deployment": _pin(deployment, "deployment") if deployment is not None else None,
+                "arms": pinned,
+            }
+            if deployment is not None or pinned
+            else None
+        ),
+        reserved={
+            arm: sum(1 for c in enrolled(reading, arm) if (arm, c) in reservations)
+            for arm in reading.arms
+        },
+    )
+    return out
 
 
 __all__ = [
@@ -579,5 +648,6 @@ __all__ = [
     "reading_book",
     "router",
     "rows_on_standard_arms",
+    "served_reading",
     "standard_for",
 ]
