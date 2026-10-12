@@ -564,7 +564,7 @@ class StreamStats:
         self.tool_uses = 0
         self.tool_names: list[str] = []
         #: ``(tokens_in, tokens_out, cached_in)`` of each assistant message, keyed by its
-        #: ``message.id`` (P-798): the CLI streams one event per content block, each repeating
+        #: ``message.id`` (P-806): the CLI streams one event per content block, each repeating
         #: the whole message's usage, so a message counts once and its last event wins; an
         #: event with no id is a message of its own
         self.usage_by_message: dict[str, tuple[int, int, int]] = {}

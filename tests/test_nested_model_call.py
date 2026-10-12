@@ -28,7 +28,7 @@ ADRs:         docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   src/crb/builders/base.py (the guard and the tripwire under test),
               src/crb/builders/claude_code.py (the deny rules and the credential names),
               tests/test_builders_claude_code.py (the build-level cases: the violation, the
-              stop, the row's ``protocol`` kind), docs/PREVENTION.md (P-797)
+              stop, the row's ``protocol`` kind), docs/PREVENTION.md (P-805)
 Tested by:    tests/test_nested_model_call.py
 Touch when:   never for a new repository (unless its own code names the endpoint, the SDK
               or a credential variable: then an honest edit trips it — a case in ``HONEST``
@@ -97,7 +97,7 @@ def test_the_tripwire_alone_finds_the_plain_forms(command: str) -> None:
     """The text scan finds every form the red team named, ``env claude`` and
     ``cd /work && claude`` included: the claude pattern now matches the CLI at an argument
     position, not only at a command position, so a model call written to a script the shell
-    parse cannot open (``run.sh``, ``fix.py``) is still caught (F5 widening, P-797)."""
+    parse cannot open (``run.sh``, ``fix.py``) is still caught (F5 widening, P-805)."""
     assert base.nested_model_call_input({"command": command})[0].startswith(NESTED)
 
 
@@ -118,7 +118,7 @@ def test_the_tripwire_finds_a_model_call_at_an_argument_position() -> None:
 def test_the_widened_claude_pattern_keeps_its_near_misses() -> None:
     """The pattern stays case-sensitive and anchored on word boundaries, so a model id, a
     doc file and a directory named for the model are not read as a model call (the one known
-    new false positive, ``grep claude src``, is documented in P-797, not pinned here)."""
+    new false positive, ``grep claude src``, is documented in P-805, not pinned here)."""
     for text in (
         "claude-sonnet-5",
         "CLAUDE.md",

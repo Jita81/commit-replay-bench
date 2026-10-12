@@ -229,7 +229,7 @@ product now refuses the claude CLI by name, and every tool input the builder emi
 tripwire: the endpoint `api.anthropic.com`, the path `/v1/messages`, the claude CLI run as a
 command, an import of the anthropic SDK, or the name (never the value) of a model credential
 variable. A hit is recorded as `network: nested_model_call: …` and the build is stopped there;
-the row's kind is `protocol`, so the commit is read as missed and never re-run (F5, P-797, DL-391).
+the row's kind is `protocol`, so the commit is read as missed and never re-run (F5, P-805, DL-391).
 Round-1 red-teaming widened the guard: it now catches the CLI at any argument position (behind
 `timeout`, inside an `os.system`/`subprocess.run` string, or written to a script and run) and
 unwraps `env -S` and other command wrappers, a written script caught by the tripwire reading the
@@ -273,14 +273,14 @@ reading counts. `S3` is sighted and is not reviewed.
 
 **A forged Go pass: what is closed and what is not.** The round-2 red team found that a non-test
 Go source can make `go test -json` report the target tests passed when they never ran, and belt 2
-graded that patch clean (F4-GO-TEST2JSON-SPOOF, high; P-796). Grading now disqualifies a touched
+graded that patch clean (F4-GO-TEST2JSON-SPOOF, high; P-804). Grading now disqualifies a touched
 non-test file in a Go repository that starts printing the testing package's event lines, frames a
 summary line with its `\x16` byte, or exits past its `os.Exit(0)` guard. It reads a `.go` source, a
 `//go:embed` data file and a cgo or assembly source alike, with string escapes decoded
 (REDFIX-REGRESS-HONESTY-R1-1). All five forgeries that graded clean are now disqualified, and no
 commit in cobra's history trips the scan **[measured — n = 5 forgeries, and 889 non-test Go file
 versions (42 distinct files) and 492 versions of 59 other files across cobra's 992 non-merge
-commits; method: P-796's tests run with each fix reverted and restored, and the shipped scan over
+commits; method: P-804's tests run with each fix reverted and restored, and the shipped scan over
 every non-merge commit; apparatus n/a, the product's own grader]**. It reads text: a forgery that
 assembles the text from pieces, or stores it encoded and decodes it at run time, still passes it.
 So a clean cobra row still rests on this review as well as on the belts, and the review reads any

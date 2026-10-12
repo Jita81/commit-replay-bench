@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a
-  product-held ceiling** (P-787 to P-791, P-796 to P-798, G-957, DL-372 to DL-383, DL-390,
+  product-held ceiling** (P-787 to P-791, P-804 to P-806, G-957, DL-372 to DL-383, DL-390,
   DL-391; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
   `hypothesis`, `smallest_effect`, campaign; `thin_cell` counts distinct tasks. Registration,
   admission need docker sandbox, builder in-posture (409 `reading_posture_mismatch`).

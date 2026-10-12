@@ -1152,7 +1152,7 @@ _CODE_NET_TOOL = re.compile(
 #: ``subprocess.run`` string, or in a ``.split()`` list written to a script the shell parse
 #: cannot open (F5, HON-R1-F5-1). It stays case-sensitive and anchored on word boundaries,
 #: so ``claude-sonnet-5``, ``CLAUDE.md`` and a path like ``.../claude-501/`` do not match;
-#: the one honest casualty is a bare ``grep claude src`` (docs/PREVENTION.md P-797).
+#: the one honest casualty is a bare ``grep claude src`` (docs/PREVENTION.md P-805).
 _NESTED_MODEL_CALL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("the model endpoint", re.compile(r"api\.anthropic\.com", re.IGNORECASE)),
     ("the Messages API path", re.compile(r"/v1/messages\b")),
@@ -1897,7 +1897,7 @@ def nested_model_call(text: str) -> str:
     of the anthropic SDK, the NAME of a model credential variable
     (:data:`MODEL_CREDENTIAL_ENV`; values are never looked at) and the claude CLI run as a
     command. A text scan over what the builder asked to run or write: a call that is
-    encoded or reached indirectly passes it (docs/PREVENTION.md P-797).
+    encoded or reached indirectly passes it (docs/PREVENTION.md P-805).
     """
     what, _ = _nested_hit(text)
     return _nested_reason(f"names {what}") if what else ""
@@ -2008,7 +2008,7 @@ class GitArchaeologyGuard:
     could contaminate a measurement by recovering the gold patch. The sealed builder
     container is not ``--network=none``: its one allowed host is the model endpoint, so
     a nested model call is reachable there; the text tripwire catches the plain forms
-    and an encoded or indirect call needs an API-aware proxy (P-797).
+    and an encoded or indirect call needs an API-aware proxy (P-805).
 
     History (false positives this guard has refused on honest builds, each now a
     corpus line in ``tests/fixtures/shell_corpus.txt``):

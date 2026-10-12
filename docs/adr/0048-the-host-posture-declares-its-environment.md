@@ -1,6 +1,6 @@
 # ADR-0048 — The host posture declares its test environment, and a package that names no failing test never subtracts
 
-**Status:** Proposed (DL-235, DL-236; stream Q2, P-446 to P-455); decision 7 added by DL-390 (P-796)
+**Status:** Proposed (DL-235, DL-236; stream Q2, P-446 to P-455); decision 7 added by DL-390 (P-804)
 **Date:** 2026-09-27
 **Apparatus impact:** rides apparatus 2.4 (the Wave 2 bump). The host posture's identity gains
 a field, so every host-posture qualification is stale and is measured again for no model money
@@ -123,7 +123,7 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
    exits with a code other than 0 or 1, prints a stop banner (`KeyboardInterrupt`,
    `pytest.exit`, `stopping after N failures`), or exits 0 with no result line at all
    (`os._exit(0)`).
-7. **A target run is green only when the target tests the gold passed pass (DL-390, P-796).**
+7. **A target run is green only when the target tests the gold passed pass (DL-390, P-804).**
    An exit code of 0 with no failure named is not a pass. A patch that adds a Go file whose
    `init` sets `-test.run=^$`, or prints `PASS` and calls `os.Exit(0)`, or that skips or
    xfails its target tests, exits 0 and names no failure, and graded clean. The Go parser
