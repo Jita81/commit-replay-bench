@@ -122,7 +122,9 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               record a sealed executor (``scope_faults`` — ``scope_fault``, the arm
               ``undecided``, never pending, never re-rolled — P-795) or, under
               ``reserved.v1``, because the reserved row was built off the reading's checks
-              arm (``scope`` ``checks_arm`` — RT2B-1, never a miss) and
+              arm (``scope`` ``checks_arm`` — RT2B-1, replay or forward); a scope fault reads
+              outcome ``None`` under either rule — never a miss in a look, a tally or the
+              loop pair (which reads it pending, against the loop) — and
               refuses a run that could steer a reserved attempt (``reading_run_refusal``:
               the param whitelist, the default pool, executor, timeout and ladder, the
               reading's cell and arms, the loop off on the reading's budget profile, an
@@ -334,9 +336,10 @@ LEFT_NOT_GRADED = "not_graded"
 #: A commit whose row is in every way the arm's but its builder's executor: graded in the
 #: reading's sealed posture class without recording ``builder_executor`` ``docker``, so it
 #: reads unsealed (P-795) — or, on a reserved.v1 reading, whose reserved row was built off
-#: the checks arm the reading froze (:data:`SCOPE_CHECKS_ARM`, RT2B-1). Never a leave: the
-#: commit cannot be read and the arm is ``undecided`` (``ArmReading.scope_faults``), never
-#: pending and never re-rolled. ``CommitReading.scope`` names which.
+#: the checks arm the reading froze (:data:`SCOPE_CHECKS_ARM`, RT2B-1). Never a leave and
+#: never a miss (outcome ``None`` under either rule): the commit cannot be read and the arm
+#: is ``undecided`` (``ArmReading.scope_faults``), never pending and never re-rolled.
+#: ``CommitReading.scope`` names which.
 REASON_SCOPE_FAULT = "scope_fault"
 #: :func:`_scope_miss`'s answer for a row that fails only on its executor.
 SCOPE_UNSEALED = "unsealed"
@@ -1569,7 +1572,7 @@ class CommitReading:
 
     commit: str
     change: str
-    outcome: bool | None  # clean / miss / pending
+    outcome: bool | None  # clean / miss / pending or scope_fault (never a miss)
     left: str = ""  # why it left the pool ("" = it did not)
     row_hash: str = ""  # the first observed attempt (reserved.v1: the reserved attempt's row)
     #: reserved.v1: why the reserved attempt is not a hit (``"miss"``, ``"harness"``,
@@ -1610,17 +1613,18 @@ class ArmReading:
     #: ``limit`` commits in the pool. ``0`` for a hierarchy arm.
     limit: int = 0
     #: The commits whose rows the arm could not read (``scope_fault``, P-795): each is in the
-    #: arm's scope but for its executor. Any one makes the arm ``undecided`` — its look
+    #: arm's scope but for its executor (or, reserved.v1, its checks arm — RT2B-1), and reads
+    #: outcome ``None``, never a miss. Any one makes the arm ``undecided`` — its look
     #: cannot be read, so it never delivers and nothing is mined or re-rolled for it.
     scope_faults: tuple[str, ...] = ()
     #: How many rows of the arm's commits were dropped because they read unsealed.
     unsealed_dropped: int = 0
     #: How many of the arm's attempts the reading did not read on a commit it had decided
     #: (F87-2): rows in the arm's scope, of an admitted run — under reserved.v1, on a commit
-    #: read hit or miss, every one but the reservation's row; under the legacy rule every
-    #: one after the row that decided the commit (its first observed attempt, or the row
-    #: that made it leave). A pending commit counts none. Shown to a person only: no state,
-    #: look or verdict reads it.
+    #: read hit, miss or scope fault, every one but the reservation's row; under the legacy
+    #: rule every one after the row that decided the commit (its first observed attempt, or
+    #: the row that made it leave). A pending commit counts none. Shown to a person only: no
+    #: state, look or verdict reads it.
     duplicate_commits: int = 0
 
     @property
@@ -1746,14 +1750,11 @@ def _forward_attempt(reading: Reading, row: GradeRow) -> bool:
     return registered is not None and created is not None and created > registered
 
 
-def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
-    """Is ``row`` one a FORWARD reading's ``arm`` may count? A factory ``S2`` row graded on
-    held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`), rung ``r1``, on
-    the reading's repository, apparatus, class-set version and checks arm, graded after the
-    registration and never imported. The ticket (``labels.item_id``) is the pool's unit; its
-    class, size and language were fixed when it was enrolled, and a builder, model or
-    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`). Which
-    runs' rows the reading sees is :func:`_arm_forward`'s choice, before this check."""
+def _forward_miss(reading: Reading, arm: str, row: GradeRow) -> str:
+    """Why ``row`` is not one a FORWARD reading's ``arm`` may count — ``""`` when it is
+    (:func:`_counts_forward`); :data:`SCOPE_CHECKS_ARM` when it passes every other check but
+    was graded on another checks arm than the reading's (checked last, so a row failing an
+    earlier check keeps that answer); ``"not_counted"`` for every other answer."""
     if (
         row.imported
         or row.repo != reading.repo
@@ -1761,14 +1762,27 @@ def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
         or row.taxonomy != reading.taxonomy
-        or row.checks_arm != reading.checks_arm
         or row.trial.strip().lower() != RUNG_R1
         or not held_out_graded(row.labels)
     ):
-        return False
+        return "not_counted"
     registered = reading.registered
     created = _parse_ts(row.created)
-    return registered is not None and created is not None and created > registered
+    if registered is None or created is None or created <= registered:
+        return "not_counted"
+    return SCOPE_CHECKS_ARM if row.checks_arm != reading.checks_arm else ""
+
+
+def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` one a FORWARD reading's ``arm`` may count? A factory ``S2`` row graded on
+    held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`), rung ``r1``, on
+    the reading's repository, apparatus, class-set version and checks arm, graded after the
+    registration and never imported (:func:`_forward_miss`). The ticket (``labels.item_id``)
+    is the pool's unit; its class, size and language were fixed when it was enrolled, and a
+    builder, model or provider other than the cell's makes it leave the pool
+    (:data:`LEFT_OTHER_CELL`). Which runs' rows the reading sees is :func:`_arm_forward`'s
+    choice, before this check."""
+    return not _forward_miss(reading, arm, row)
 
 
 def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmReading:
@@ -1865,10 +1879,11 @@ def _reserved_candidates(
 
 def _reserved_verdict(
     reading: Reading, arm: str, res: Reservation | None, rows: Sequence[GradeRow]
-) -> tuple[bool | None, str]:
-    """The verdict of one commit on ``arm`` of a reserved.v1 reading: ``(True, "")`` a hit,
-    ``(False, reason)`` a miss, ``(None, "pending")`` not yet decided. The reserved attempt's
-    row alone decides it, whatever any other row says (P-792, fail closed):
+) -> tuple[bool | None, str, str]:
+    """The verdict of one commit on ``arm`` of a reserved.v1 reading, with its scope:
+    ``(True, "", "")`` a hit, ``(False, reason, "")`` a miss, ``(None, "pending", "")`` not
+    yet decided, ``(None, "scope_fault", scope)`` a row the arm cannot read. The reserved
+    attempt's row alone decides it, whatever any other row says (P-792, fail closed):
 
     * no reservation, or the reading's reservations (or admissions) never read — pending;
     * no reserved row (:func:`_reserved_candidates`; an imported row is never one, P-321) —
@@ -1876,36 +1891,44 @@ def _reserved_verdict(
       reserving claim), pending until then; two rows — ``duplicate``;
     * the one row is a hit only when its run was admitted, it is in the arm's scope
       (:func:`_in_scope`; for a forward reading :func:`_counts_forward` on the record that
-      enrolled the ticket — ``not_graded`` otherwise; ``scope_fault`` for a row that is the
-      arm's but for its executor, P-795, or but for its checks arm, RT2B-1 — the reserved
-      row carries this reading's reservation, so it is no other reading's; ``out_of_scope``
-      for every other answer of :func:`_scope_miss`), its reservation was written after the
+      enrolled the ticket — ``not_graded`` otherwise; ``out_of_scope`` for every answer of
+      :func:`_scope_miss` but the two below), its reservation was written after the
       registration, it is not a harness failure or an outage, its gold is not red, belt 5 could
       not have changed it, it was built on the treatment it reserved, it is clean and not
       disqualified — and, forward, its held-out tests passed on the reading's builder, model
       and provider. Each failed check is a miss named by its reason, never a leave and never
-      a re-run: an instrument failure after the reservation is the reading's cost."""
+      a re-run: an instrument failure after the reservation is the reading's cost.
+
+    A row that is the arm's but for its executor (:data:`SCOPE_UNSEALED`, P-795), or but for
+    its checks arm (:data:`SCOPE_CHECKS_ARM`, RT2B-1 — replay or forward), carries this
+    reading's reservation, so it is no other reading's: it reads ``scope_fault`` with outcome
+    ``None``, as the legacy rule reads an unsealed row — no hit, no miss, never counted by a
+    look, a tally or the loop pair (``NEW-1`` reads it pending, against the loop) — and its
+    arm is ``undecided`` (``ArmReading.scope_faults``)."""
     if res is None or reading.reservations_unread or reading.admissions_unread:
-        return None, "pending"
+        return None, "pending", ""
     found = _reserved_candidates(reading, res, rows)
     if not found:
-        return (False, "unobserved") if res.settled else (None, "pending")
+        return (False, "unobserved", "") if res.settled else (None, "pending", "")
     if len(found) > 1:
-        return False, "duplicate"
+        return False, "duplicate", ""
     r = found[0]
     if not _admitted_run(reading, r):
-        return False, "not_admitted"
+        return False, "not_admitted", ""
     if reading.prospective:
         by_item = dict(reading.enrolled)
-        if not _counts_forward(reading, arm, r) or (
-            r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(res.task_id, "")
-        ):
-            return False, LEFT_NOT_GRADED
+        if r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(res.task_id, ""):
+            return False, LEFT_NOT_GRADED, ""
+        if miss := _forward_miss(reading, arm, r):
+            if miss == SCOPE_CHECKS_ARM:
+                return None, REASON_SCOPE_FAULT, miss  # off the frozen arm alone (RT2B-1)
+            return False, LEFT_NOT_GRADED, ""
     elif miss := _scope_miss(reading, arm, r):
         # a row the writer did not label sealed, or built off the checks arm the reading
         # froze, is the arm's fault, not another reading's (P-795, RT2B-1)
-        faulted = miss in (SCOPE_UNSEALED, SCOPE_CHECKS_ARM)
-        return False, REASON_SCOPE_FAULT if faulted else "out_of_scope"
+        if miss in (SCOPE_UNSEALED, SCOPE_CHECKS_ARM):
+            return None, REASON_SCOPE_FAULT, miss
+        return False, "out_of_scope", ""
     checks: tuple[tuple[bool, str], ...] = (
         (res.event_seq_id > reading.registered_event_id, "before_registration"),
         (r.failure_kind != FAILURE_HARNESS, "harness"),
@@ -1921,13 +1944,13 @@ def _reserved_verdict(
     )
     for ok, reason in checks:
         if not ok:
-            return False, reason
+            return False, reason, ""
     if reading.prospective:
         if held_out_result(r.labels) != RESULT_PASS:
-            return False, "held_out"
+            return False, "held_out", ""
         if any(getattr(r, f) != reading.cell.get(f, "") for f in ("builder", "model", "provider")):
-            return False, LEFT_OTHER_CELL
-    return True, ""
+            return False, LEFT_OTHER_CELL, ""
+    return True, "", ""
 
 
 def _arm_attempt(reading: Reading, arm: str, row: GradeRow) -> bool:
@@ -1947,17 +1970,19 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
     """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
     by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
     commits as they stand; a descriptive arm tallies its fixed count (``ArmReading.limit``).
-    A commit read ``scope_fault`` is named in ``ArmReading.scope_faults`` (P-795), with
-    why in its ``CommitReading.scope`` (:func:`_scope_miss` on its reserved row: unsealed,
-    or off the reading's checks arm — RT2B-1); ``unsealed_dropped`` counts the unsealed
-    ones only.
+    A commit read ``scope_fault`` (outcome ``None``: no hit and no miss, so the look stops
+    at it, a tally leaves it out and the loop pair reads it pending) is named in
+    ``ArmReading.scope_faults`` (P-795), with why in its ``CommitReading.scope``
+    (:func:`_scope_miss` on its reserved row: unsealed, or off the reading's checks arm —
+    RT2B-1; forward, off the checks arm alone, :func:`_forward_miss`); ``unsealed_dropped``
+    counts the unsealed ones only.
 
     The ORDER of ``rows`` is never read: the reservation's row decides its commit wherever
     it falls, so two admitted attempts of one commit are read by the one the reservation
     names — the attempt admitted first, since a second run on a reserved commit skips it
     (``commit_reserved``) — even when the other's row was written first (F87-2).
-    ``duplicate_commits`` counts, on each decided commit, the arm's other attempts
-    (:func:`_arm_attempt`) the reading did not read."""
+    ``duplicate_commits`` counts, on each decided commit (a hit, a miss or a scope fault),
+    the arm's other attempts (:func:`_arm_attempt`) the reading did not read."""
     reservations = reading.reservations or {}
     events = {res.event_id for res in reservations.values() if res.event_id}
     stamped: dict[str, list[GradeRow]] = {}
@@ -1977,21 +2002,22 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
     for commit in enrolled:
         res = reservations.get((arm, commit))
         mine = stamped.get(res.event_id, []) if res is not None else []
-        outcome, reason = _reserved_verdict(reading, arm, res, mine)
+        outcome, reason, scope = _reserved_verdict(reading, arm, res, mine)
         found = _reserved_candidates(reading, res, mine) if res is not None else []
-        if outcome is not None:
+        # decided — a hit, a miss, or a scope fault on its reserved row: never pending
+        decided = reason != "pending"
+        if decided:
             read = {id(r) for r in found}
             duplicates += sum(1 for r in attempts.get(commit, []) if id(r) not in read)
-        faulted = reason == REASON_SCOPE_FAULT and len(found) == 1
         out.append(
             CommitReading(
                 commit,
                 reading.changes.get(commit) or commit,
                 outcome,
                 "",
-                found[0].row_hash if len(found) == 1 and outcome is not None else "",
+                found[0].row_hash if len(found) == 1 and decided else "",
                 reason,
-                _scope_miss(reading, arm, found[0]) if faulted else "",
+                scope,
             )
         )
     outcomes = [c.outcome for c in out]

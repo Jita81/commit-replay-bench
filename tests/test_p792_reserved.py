@@ -79,7 +79,10 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               imported copy of a reserved row deciding nothing (R5V3-IMPORT-1, P-321), each
               check a named miss (replay and forward), a reserved row off the reading's
               checks arm read ``scope_fault`` (``scope`` ``checks_arm``, the arm
-              ``undecided``, never a miss — RT2B-1), the registration's ``max_reruns`` 0
+              ``undecided``, never a miss — RT2B-1), a reserved scope fault outcome ``None``
+              so no look, tally or loop pair counts it a miss (VS1-2), a forward reserved row
+              off the frozen arm a ``scope_fault`` and another attempt of a reserved ticket a
+              duplicate (round 6), the registration's ``max_reruns`` 0
               and budget profile, the ``reading_run_refusal`` whitelist table and the arm
               each admitted run maps to (C3, C5, C7 at the core), the hypothesis property
               that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
@@ -278,6 +281,8 @@ from crb.core.reading import (
     SCOPE_UNSEALED,
     SKIP_COMMIT_RESERVED,
     STATE_DELIVER,
+    STATE_INSUFFICIENT,
+    STATE_LOOK_PENDING,
     STATE_UNDECIDED,
     Reading,
     ReadingRefused,
@@ -1233,8 +1238,9 @@ def test_p792_reserved_an_imported_copy_decides_nothing(backend: Backend) -> Non
 def test_p792_reserved_each_check_is_a_named_miss() -> None:
     """Every check the reserved row must pass is a miss named by its reason when it fails —
     never a leave, never a hit — on a replay arm and on a forward reading; each case's
-    reserved row is otherwise the clean hit of the first case. A reservation that pins no
-    treatment can never be a hit (fail closed)."""
+    reserved row is otherwise the clean hit of the first case, and a scope fault (unsealed,
+    or off the checks arm) is no hit and no miss: outcome ``None`` (VS1-2). A reservation
+    that pins no treatment can never be a hit (fail closed)."""
     reading = _reserved_reading(commits(2, prefix="n"), hierarchy=("S3",))
     c = reading.pool[0]
     replay: dict[str, tuple[Reservation, dict[str, Any], tuple[bool | None, str]]] = {
@@ -1256,11 +1262,12 @@ def test_p792_reserved_each_check_is_a_named_miss() -> None:
             (False, "disqualified"),
         ),
         "graded_before": (_res("S3", c), {"created": BEFORE}, (False, "out_of_scope")),
-        # the arm's row but for its executor: the writer's fault, never another reading's (P-795)
-        "local_executor": (_res("S3", c), {"builder_executor": "local"}, (False, "scope_fault")),
+        # the arm's row but for its executor: the writer's fault, never another reading's
+        # (P-795) — no hit and no miss, outcome None as on the legacy rule (VS1-2)
+        "local_executor": (_res("S3", c), {"builder_executor": "local"}, (None, "scope_fault")),
         # the arm's reserved row but for its checks arm: this reading's reservation, so never
         # another reading's row — a scope fault, never a miss (RT2B-1)
-        "checks_arm": (_res("S3", c), {"labels": {"checks": "fmt=1"}}, (False, "scope_fault")),
+        "checks_arm": (_res("S3", c), {"labels": {"checks": "fmt=1"}}, (None, "scope_fault")),
         # off the checks arm AND failing an earlier check: the earlier check's answer stands
         "checks_arm_graded_before": (
             _res("S3", c),
@@ -1331,7 +1338,7 @@ def test_a_reserved_row_off_the_readings_checks_arm_is_scope_fault_not_a_miss() 
     s3 = out.arms["S3"]
     got = {c.commit: (c.outcome, c.reason, c.scope) for c in s3.commits}
     assert {c: got[c] for c in off} == dict.fromkeys(
-        off, (False, REASON_SCOPE_FAULT, SCOPE_CHECKS_ARM)
+        off, (None, REASON_SCOPE_FAULT, SCOPE_CHECKS_ARM)
     )
     assert all(got[c] == (True, "", "") for c in reading.pool if c not in off)
     assert s3.scope_faults == tuple(c for c in reading.pool if c in off)
@@ -1353,6 +1360,141 @@ def test_a_reserved_row_off_the_readings_checks_arm_is_scope_fault_not_a_miss() 
     # the same rows on the reading's arm: the arm reads by its look and delivers
     on_arm = [_reserved_row(res) for res in reservations]
     assert evaluate(_read(reading, reservations), on_arm).arms["S3"].state == STATE_DELIVER
+
+
+def test_p792_a_reserved_scope_fault_is_no_miss_in_a_look_a_tally_or_the_loop_pair() -> None:
+    """VS1-2, F1, V1-CA-1 (round 6): a reserved.v1 ``scope_fault`` read outcome ``False``, so
+    the served look counted it a miss — three among an ``S3`` look's 20 read the look
+    ``insufficient`` with three misses in its Wilson bounds — a descriptive arm's tally
+    counted it, and the loop pair read an ``A0`` fault as an ``A0`` miss: a discordant pair
+    FOR the loop (``b`` 1). The docs said never a miss. It now reads outcome ``None``, as the
+    legacy rule reads an unsealed row: the look stops at it with no miss, the tally leaves it
+    out, and the loop pair names it pending (NEW-1, read against the loop), ``b`` 0. Its
+    reserved row is still named, and another admitted attempt of the commit is still counted
+    in ``duplicate_commits``."""
+    reading = _reserved_reading(
+        commits(20, prefix="sf"), hierarchy=("S3",), descriptive=(("A0", 16), ("A0+L", 16))
+    )
+    off = [reading.pool[i] for i in (2, 9, 15)]
+    first_a0 = enrolled(reading, "A0")[0]
+    reservations = [
+        _res("S3", c, run=f"s3-{i}", event=f"ev-s3-{i}") for i, c in enumerate(reading.pool)
+    ]
+    for arm in ("A0", "A0+L"):
+        reservations += [
+            _res(arm, c, run=f"{arm}-{i}", event=f"ev-{arm}-{i}")
+            for i, c in enumerate(enrolled(reading, arm))
+        ]
+    faulted = {("S3", c) for c in off} | {("A0", first_a0)}
+    # chained as the ledger writes them, so each row has a hash; the last is a second
+    # admitted attempt of a faulted commit, on the arm: a duplicate, never read
+    rows = _g_chain(
+        [
+            *(
+                _reserved_row(
+                    res, labels={"checks": "fmt=1"} if (res.arm, res.task_id) in faulted else None
+                )
+                for res in reservations
+            ),
+            sealed_row(off[0], arm="S3", run_id="s3-again"),
+        ]
+    )
+    reserved = {(r.context_arm, r.task_id): r for r in rows[: len(reservations)]}
+    assert all(r.row_hash for r in rows)
+    out = evaluate(_read(reading, reservations), rows)
+    served = {a["arm"]: a for a in out.to_dict()["arms"]}
+    s3 = served["S3"]
+    assert (s3["state"], s3["look_state"], s3["counted"], s3["misses"]) == (
+        STATE_UNDECIDED,
+        STATE_LOOK_PENDING,
+        2,
+        0,
+    )
+    assert s3["look_state"] != STATE_INSUFFICIENT
+    assert sorted(s3["scope_faults"]) == sorted(off) and s3["duplicate_commits"] == 1
+    commits_of = {c["commit"]: c for c in s3["commits"]}
+    for c in off:
+        got = commits_of[c]
+        assert (got["outcome"], got["reason"], got["scope"], got["row_hash"]) == (
+            None,
+            REASON_SCOPE_FAULT,
+            SCOPE_CHECKS_ARM,
+            reserved[("S3", c)].row_hash,
+        )
+    a0 = out.arms["A0"]
+    head = a0.commits[0]
+    assert (head.commit, head.outcome, head.reason, head.scope) == (
+        first_a0,
+        None,
+        REASON_SCOPE_FAULT,
+        SCOPE_CHECKS_ARM,
+    )
+    assert a0.state == STATE_UNDECIDED and a0.scope_faults == (first_a0,)
+    assert (served["A0"]["counted"], served["A0"]["misses"]) == (15, 0)
+    assert first_a0 not in a0.counted_commits
+    pair = loop_pair(a0, out.arms["A0+L"])
+    assert first_a0 in pair.pairs
+    assert (pair.b, pair.c, pair.pending, pair.complete) == (0, 0, (first_a0,), False)
+
+
+def test_p792_a_forward_reserved_row_off_the_checks_arm_is_a_scope_fault() -> None:
+    """V1-CA-2 (round 6): a forward reserved.v1 reading's reserved ``S2`` row graded on
+    another checks arm than the reading froze failed ``_counts_forward`` and read
+    ``(False, "not_graded")`` — a counted miss — where the replay rule reads the same row a
+    scope fault (RT2B-1). It now reads ``scope_fault`` (``scope`` ``checks_arm``, outcome
+    ``None``): the ticket is named in ``scope_faults``, the arm is ``undecided`` and its look
+    counts no miss. A row off the arm that fails an earlier check too keeps that answer."""
+    fwd = _reserved_forward(2)
+    assert fwd.checks_arm == "off"
+    r0, r1 = (_res("S2", item, run=f"fac-{i}", settled=True) for i, item in enumerate(fwd.pool))
+    loaded = _read(fwd, [r0, r1])
+    off_arm, on_arm = _g_chain(
+        [
+            _g_s2(_g_record(0), extra={**_stamp(r0), "checks": "fmt=1"}, run_id=r0.run_id),
+            _g_s2(_g_record(1), extra=_stamp(r1), run_id=r1.run_id),
+        ]
+    )
+    assert (off_arm.checks_arm, on_arm.checks_arm) == ("fmt", "off")
+    assert off_arm.row_hash and on_arm.row_hash
+    s2 = arm_reading(loaded, "S2", [off_arm, on_arm])
+    assert [(c.outcome, c.reason, c.scope, c.row_hash) for c in s2.commits] == [
+        (None, REASON_SCOPE_FAULT, SCOPE_CHECKS_ARM, off_arm.row_hash),
+        (True, "", "", on_arm.row_hash),
+    ]
+    assert s2.scope_faults == (fwd.pool[0],) and s2.unsealed_dropped == 0
+    assert s2.state == STATE_UNDECIDED and s2.look.misses == 0
+    earlier: dict[str, dict[str, Any]] = {
+        "other_record": {"stamp": held_out_labels(_g_record(1), RESULT_PASS)},
+        "not_held_out": {"stamp": {}},
+    }
+    for name, kw in earlier.items():
+        row = _g_s2(_g_record(0), extra={**_stamp(r0), "checks": "fmt=1"}, run_id=r0.run_id, **kw)
+        assert _verdicts(loaded, "S2", [row, on_arm])[0] == (False, "not_graded"), name
+
+
+def test_p792_forward_reserved_counts_another_attempt_of_a_ticket_a_duplicate() -> None:
+    """F5 (round 6): a forward reserved.v1 reading's ticket built twice by admitted runs — an
+    unreserved attempt written first, failing its held-out tests, then the reserved one — is
+    read by the reserved row alone (a hit), and the other attempt is counted in
+    ``duplicate_commits`` (the forward branch of ``_arm_attempt``: a ticket's factory
+    attempt, ``_forward_attempt``), never read toward the verdict. A ticket whose reserved
+    row is its only attempt counts none."""
+    fwd = _reserved_forward(2)
+    r0, r1 = (_res("S2", item, run=f"fac-{i}", settled=True) for i, item in enumerate(fwd.pool))
+    other, reserved, lone = _g_chain(
+        [
+            _g_s2(_g_record(0), result=RESULT_FAIL, run_id="fac-x"),
+            _g_s2(_g_record(0), extra=_stamp(r0), run_id=r0.run_id),
+            _g_s2(_g_record(1), extra=_stamp(r1), run_id=r1.run_id),
+        ]
+    )
+    assert len({other.row_hash, reserved.row_hash, lone.row_hash}) == 3
+    s2 = arm_reading(_read(fwd, [r0, r1]), "S2", [other, reserved, lone])
+    assert [(c.outcome, c.reason, c.row_hash) for c in s2.commits] == [
+        (True, "", reserved.row_hash),
+        (True, "", lone.row_hash),
+    ]
+    assert s2.duplicate_commits == 1
 
 
 def test_p792_reserved_requires_max_reruns_zero_and_a_budget_profile() -> None:

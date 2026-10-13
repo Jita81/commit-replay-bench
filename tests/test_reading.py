@@ -23,7 +23,8 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               ``pool_seen`` and ``budget_spent``, the budget counting each ``reading_id``
               once; and (P-795) an S1 authoring miss of a sealed run read as the arm's miss,
               and a row unsealed but in every other way the arm's read as a ``scope_fault`` on
-              both attempt rules — the arm, the outcome and the router ``undecided``, nothing
+              both attempt rules, outcome ``None`` and never a miss (VS1-2) — the arm, the
+              outcome and the router ``undecided``, nothing
               needed or re-rolled, ``/learn/remeasure``'s ``audit``; and (FZ-2) a later
               hierarchy arm reading ``waiting`` while the arm before it is still being read
               and ``stopped`` once that arm reads insufficient or undecided, neither read
@@ -915,8 +916,9 @@ def test_an_unsealed_row_of_an_admitted_run_makes_the_arm_undecided_scope_fault(
     the reading names, but recording no sealed builder, is one the reading cannot read. It was
     dropped in silence, so its commit read pending — re-rolled until a row came back clean, a
     false deliver. Now the arm is ``undecided`` and names the commit (``scope_faults``): never
-    pending, never re-rolled, whatever its look says; under reserved.v1 the reserved row reads
-    ``(False, "scope_fault")``. Nothing asks for another attempt."""
+    pending, never re-rolled, whatever its look says; on either rule the commit reads
+    ``(None, "scope_fault")`` — no hit and no miss (VS1-2: under reserved.v1 it read
+    ``False``, a miss in the served look). Nothing asks for another attempt."""
     reading, rows = _first_attempts(_registered(attempt_rule), {"S3": [True] * 20})
     faulted = reading.pool[1]
     rows = [
@@ -936,10 +938,8 @@ def test_an_unsealed_row_of_an_admitted_run_makes_the_arm_undecided_scope_fault(
         1,
     )
     c = s3.commits[1]
-    if attempt_rule == ATTEMPT_RULE_RESERVED:
-        assert (c.outcome, c.reason) == (False, "scope_fault")
-    else:
-        assert (c.outcome, c.reason) == (None, "scope_fault")
+    assert (c.outcome, c.reason) == (None, "scope_fault")
+    assert (served["misses"], served["counted"]) == (0, 1)  # the look stops at it, no miss
     # which scope fault (RT2B-1 names a second): the row reads unsealed, on either rule
     assert c.scope == SCOPE_UNSEALED == c.to_dict()["scope"]
     # never re-rolled: the plan asks for no attempt on the faulted arm, and says why
