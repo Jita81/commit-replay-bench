@@ -1480,12 +1480,15 @@ def test_p792_forward_reserved_counts_another_attempt_of_a_ticket_a_duplicate() 
     read by the reserved row alone (a hit), and the other attempt is counted in
     ``duplicate_commits`` (the forward branch of ``_arm_attempt``: a ticket's factory
     attempt, ``_forward_attempt``), never read toward the verdict. A ticket whose reserved
-    row is its only attempt counts none."""
+    row is its only attempt counts none. The other attempt is graded off the reading's
+    checks arm (``fmt=1``): the forward branch counts it whatever it was graded on, while the
+    replay scope it would otherwise fall to (``_in_scope``) drops it as a checks-arm miss, so
+    the count pins the branch (R6V2-1)."""
     fwd = _reserved_forward(2)
     r0, r1 = (_res("S2", item, run=f"fac-{i}", settled=True) for i, item in enumerate(fwd.pool))
     other, reserved, lone = _g_chain(
         [
-            _g_s2(_g_record(0), result=RESULT_FAIL, run_id="fac-x"),
+            _g_s2(_g_record(0), result=RESULT_FAIL, extra={"checks": "fmt=1"}, run_id="fac-x"),
             _g_s2(_g_record(0), extra=_stamp(r0), run_id=r0.run_id),
             _g_s2(_g_record(1), extra=_stamp(r1), run_id=r1.run_id),
         ]
