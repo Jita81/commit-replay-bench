@@ -24,7 +24,9 @@ What it does: Walks a version from proposal (an operator, its sponsor; every com
               backlog item cannot carry an organisation's class by hand, and that a refusal names
               the class it is about.
 How:          ``fixtures.server_seed.make_env`` (SQLite, the four role accounts, ``alpha``), the
-              fixture organisation's commits inserted as ``Task`` rows, ``login`` per role.
+              fixture organisation's commits inserted as ``Task`` rows and qualified in the
+              sealed posture (``fixtures.readings.qualify_pool``: a reading registers
+              reserved.v1, pooled from qualified commits), ``login`` per role.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (item 9)
 Works with:   src/crb/server/routes/classes.py (the routes under test),
@@ -51,7 +53,7 @@ from crb.store.class_sets import DbClassSets
 from crb.store.models import ClassLabelRow, Event, Grade, Task
 from fixtures.class_sets import add_commits, sha
 from fixtures.proven import AUTHOR, S1
-from fixtures.readings import SEALED
+from fixtures.readings import QUESTION, SEALED, SEALED_SETTINGS, qualify_pool
 from fixtures.server_seed import (
     ALPHA,
     BUILDER,
@@ -109,8 +111,10 @@ def _no_ambient_crb_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path, role="operator") as e:
-        add_commits(e.factory)
+    with make_env(tmp_path, role="operator", **SEALED_SETTINGS) as e:
+        # qualified in the sealed posture: a reading registers reserved.v1, whose pool is the
+        # cell's qualified commits (P-797) — every one here, so the pool is the class's own
+        qualify_pool(e.factory, ALPHA, add_commits(e.factory))
         yield e
 
 
@@ -461,6 +465,7 @@ def test_a_reading_of_an_organisation_class_reads_confirmation_commits_only(env:
         "author_model": AUTHOR,
         "taxonomy": V1,
         "org_class": "parser-fix",
+        **QUESTION,
     }
     # unsigned: the version routes nothing, so no reading of its classes is registered
     r = env.post("/readings", json=body)
@@ -535,7 +540,7 @@ def test_a_reading_of_an_organisation_class_sits_on_its_parents_cell_and_counts_
     s_cell = next(x for x in page["sizes"] if x["size"] == "S")
     body = {
         "repo": ALPHA, "cell": CELL, "hierarchy": ["S3", S1], "posture_class": SEALED,
-        "author_model": AUTHOR, "taxonomy": V1, "org_class": "parser-fix",
+        "author_model": AUTHOR, "taxonomy": V1, "org_class": "parser-fix", **QUESTION,
     }  # fmt: skip
     reading = env.post("/readings", json=body)
     assert reading.status_code == 201, reading.text

@@ -7,7 +7,9 @@ What it does: Shows that without the controls report, the oracle export and the 
               readings every cell reads unmeasured and never ``deliver``; that with all three
               the standard arm delivers and the ``S3`` arm is a ceiling; that ``--apparatus
               all`` and an arm outside the grammar are refused; that two posture classes exit
-              2; and that ``--help`` quotes ``RoutingPolicy.describe()``.
+              2; that a reading naming a campaign counts no row from a file, which holds no
+              admissions, and is named under ``admissions_unread`` (DL-382); and that
+              ``--help`` quotes ``RoutingPolicy.describe()``.
 How:          ``crb.cli.main.main`` with ``--workdir`` in ``tmp_path``; rows from
               ``tests.fixtures.readings``; exports written as JSON files.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
@@ -140,3 +142,35 @@ def test_route_help_quotes_the_published_bar(capsys: pytest.CaptureFixture[str])
     code, out, _ = _run(["route", "--help"], capsys)
     assert code == 0
     assert " ".join(DEFAULT_POLICY.describe().split()) in " ".join(out.split())
+
+
+def test_a_campaign_reading_read_from_a_file_counts_no_row_and_says_why(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """DL-382, fail closed offline: a reading that names a campaign counts only rows of runs
+    admitted under it, and a readings file holds no admissions — so ``crb route`` counts none
+    of its rows (never all), names the reading under ``admissions_unread`` and says to read it
+    on the server. The same rows under a reading of no campaign deliver (the test above)."""
+    reading = register_reading(commits(40), campaign_id="cmp_" + "a" * 24)
+    path = _ledger(
+        tmp_path,
+        [
+            *rows_for([True] * 20, reading.pool, run_id="run-in"),
+            *rows_for([True] * 20, reading.pool, arm=S1, run_id="run-in"),
+        ],
+    )
+    readings = tmp_path / "readings.jsonl"
+    readings.write_text(json.dumps(reading.to_dict()) + "\n", encoding="utf-8")
+    oracle, controls = _exports(tmp_path, list(reading.pool[:20]))
+    full = [
+        *("--workdir", str(tmp_path / ".crb"), "--path", str(path), "--readings", str(readings)),
+        *("--oracle", str(oracle), "--controls", str(controls)),
+    ]
+    code, out, _ = _run(["route", "--arm", S1, *full, "--json"], capsys)
+    got = json.loads(out)
+    (s1,) = got["decisions"]
+    assert code == 0 and s1["route"] != "deliver" and s1["standard"] != S1, s1["reason"]
+    assert got["admissions_unread"] == [reading.reading_id]
+    code, out, _ = _run(["route", "--arm", S1, *full], capsys)
+    assert code == 0 and f"{reading.reading_id} names campaign" in out
+    assert "counted no row" in out

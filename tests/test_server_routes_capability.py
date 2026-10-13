@@ -583,7 +583,9 @@ class TestCapabilityMap:
         # run and strong oracle scores land and the route is deliver
         cell = {"capability_class": "bug.fix", "size": "S"}
         r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))
-        assert r.status_code == 409 and envelope(r)["detail"]["code"] == "controls_escapes"
+        # 40 attempts on 4 commits: thin by distinct tasks first (P-788), then the escape
+        refusals = [x["code"] for x in envelope(r)["detail"]["refusals"]]
+        assert r.status_code == 409 and refusals[:2] == ["thin_cell", "controls_escapes"]
         assert _cells(env)["bug.fix|S"]["route"] == "calibrate"
         clear_policy(env)
         r = env.post("/signoffs", json=attested_body(env, cell, note="ok"))

@@ -32,7 +32,9 @@ checks, not judgement calls.
      version (`Workspace.tests_byte_identical`: `git diff <sha> -- <paths>` **and** a SHA-256
      compare). A modified oracle **disqualifies** the trial (`disqualified=True`).
    - `target_green` — the target scope passes; a timeout is a failure (`TestRun.green`
-     requires `returncode == 0 and not timed_out and not parse_error`).
+     requires `returncode == 0 and not timed_out and not parse_error`). Where the runner
+     reports the tests that passed, each target test the gold passed must be among them:
+     an exit code of 0 is not a pass (ADR-0048 decision 7, DL-390).
    - `no_new_failures` — the belt scope's failing set minus the task's `baseline_failing`
      is empty; a belt run that timed out or produced unattributable output
      (`parse_error`) sets the belt `False`.

@@ -14,8 +14,10 @@ What it does: Pins that appends chain from genesis and verify, that ``append_man
               append-only table seeded from its own columns, each trigger swapped for one
               that lets its write through, one table and one verb at a time (P-253) — that import
               re-chains and keeps the source row hash, that an export re-verifies standalone,
-              pack store / get round trip and append-only, and that four threads appending
-              concurrently form one valid chain.
+              pack store / get round trip and append-only, that four threads appending
+              concurrently form one valid chain, and that both ledgers refuse at write a
+              measured 2.4 replay row that does not record its builder's executor while a row
+              stored before the guard still reads (P-795).
 How:          ``conftest_store`` backends and row builders; threads for the concurrency case.
 Layer:        tests — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         docs/adr/0002-append-only-hash-chained-ledger.md,
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -453,3 +456,71 @@ def test_every_imported_row_is_stamped_imported_even_without_a_source_hash(
     (row,) = ledger.rows()
     assert row.labels["imported"] == "true" and row.imported
     assert row.labels["source_row_hash"] == ""
+
+
+# ---------------------------------------------------------------------------
+# where the builder ran, recorded at write (P-795)
+# ---------------------------------------------------------------------------
+
+#: the posture class a sealed worker grades in
+_SEALED_CLASS = "docker/inplace/sealed"
+
+
+def _no_executor(**kw: Any) -> GradeRow:
+    """A measured 2.4 replay row graded in the sealed posture class that does not record
+    where its builder ran: what every early exit of the adapter's build wrote, and every row
+    of a calibrated budget profile (the Wave 3 red team on c5b9e5ec)."""
+    row = grade_row(**kw, labels={"posture_class": _SEALED_CLASS})
+    labels = {k: v for k, v in row.labels.items() if k != "builder_executor"}
+    return replace(row, labels=labels)
+
+
+def test_a_24_replay_row_without_builder_executor_is_refused_at_write(
+    ledger: DbLedger, tmp_path: Path
+) -> None:
+    """P-795: a row that does not record where its builder ran reads unsealed, so a reading
+    dropped it in silence and its commit read pending — re-rolled until it was clean. Both
+    ledgers now refuse it at write, by ``append`` and by ``append_many`` (all or nothing),
+    naming the row and today's consequence — a reading names it a ``scope_fault``, never a
+    dropped row (R5V3-01); the same row recording ``host`` or ``docker`` is written. An
+    imported row (another deployment's record) is not refused."""
+    row = _no_executor()
+    jsonl = JsonlLedger(tmp_path / "ledger.jsonl")
+    for target in (ledger, jsonl):
+        with pytest.raises(LedgerIntegrityError, match=r"builder_executor") as refused:
+            target.append(row)
+        message = str(refused.value)
+        assert row.task_id[:10] in message
+        assert "scope_fault" in message and "drops it" not in message, message
+        with pytest.raises(LedgerIntegrityError, match=r"builder_executor"):
+            target.append_many([grade_row(trial="first"), row])
+    assert ledger.count() == 0 and not list(jsonl.rows())
+    for executor in ("host", "docker"):
+        labels = {**row.labels, "builder_executor": executor}
+        kept = replace(row, labels=labels, trial=executor, row_id="")
+        assert ledger.append(kept).builder_executor == executor
+        assert jsonl.append(kept).sealed is (executor == "docker")
+    assert ledger.verify() == 2 and jsonl.verify() == 2
+    (imported,) = ledger.import_rows([row], imported_by="admin-1", imported_at="2026-09-28")
+    assert imported.imported and imported.builder_executor == ""
+
+
+def test_a_stored_legacy_row_without_the_label_still_reads(
+    ledger: DbLedger, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-795: the guard is write-only. A row stored before it — no ``builder_executor`` —
+    still reads and verifies on both ledgers, and reads unsealed (a reading never counts it,
+    and names its commit a scope fault); writing it again is refused."""
+    row = _no_executor()
+    jsonl = JsonlLedger(tmp_path / "ledger.jsonl")
+    # the writer before P-795: no executor guard
+    monkeypatch.setattr(GradeRow, "assert_executor_recorded", lambda self: None)
+    stored = (ledger.append(row), jsonl.append(row))
+    monkeypatch.undo()
+    for target, was in zip((ledger, jsonl), stored, strict=True):
+        (back,) = target.rows()
+        assert back.row_hash == was.row_hash and back.verify_hash()
+        assert back.builder_executor == "" and not back.sealed
+        assert target.verify() == 1
+        with pytest.raises(LedgerIntegrityError, match=r"builder_executor"):
+            target.append(replace(back, row_hash="", prev_hash=""))

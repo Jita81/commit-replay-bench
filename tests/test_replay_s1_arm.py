@@ -15,40 +15,58 @@ What it does: Pins that the author works in a checkout holding one commit and no
               ``authoring`` row that counts against the arm and never against the builder or
               the harness, unless the author's provider refused the call on the production
               path (an ``outage``, outside n — P-293); that every row of one run carries the
-              run's arm, ``+L`` included (P-295); and that ``POST /runs`` takes ``arm: S1`` on
-              a blind run only.
+              run's arm, ``+L`` included (P-295); that ``POST /runs`` takes ``arm: S1`` on
+              a blind run only; and that the RED runs under the task's PARENT binding, must be
+              a test the author defined, and is ``harness`` when it names no test while the
+              env probe is red under that binding (P-800).
 How:          ``pyrepo``'s feat commit replayed blind through ``crb.core.run.run`` with a
-              recording builder that applies the commit's own patch and a scripted author.
+              recording builder that applies the commit's own patch and a scripted author;
+              the binding cases drive the Go fixture's feat commit through the run's own
+              ``BuildFn`` with a docker-named executor that records and runs nothing.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md
 Works with:   src/crb/builders/adapter.py (the S1 step), src/crb/builders/brief.py
               (``S1Arm``), src/crb/core/ledger.py (the ``authoring`` failure kind),
               src/crb/server/worker.py (``_s1_arm``), src/crb/server/routes/runs.py (``arm`` on
-              ``POST /runs``)
+              ``POST /runs``), src/crb/core/runners/go_runner.py (the Go ids and the env probe
+              the RED is read with), src/crb/core/deps.py (the sealed bindings),
+              tests/fixtures/langs/gorepo.py (the Go fixture)
 Tested by:    tests/test_replay_s1_arm.py
 Touch when:   never for a new repository; the S1 arm's steps change (an ADR-0026 amendment).
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
 import crb.builders as builders_pkg
 from crb.builders import adapter
-from crb.builders.base import Budget, EscalationLadder, Rung
+from crb.builders.base import STOP_DONE, Budget, BuildOutcome, EscalationLadder, Rung
 from crb.builders.brief import LABEL_CONTEXT_ARM, LABEL_CTX_AUTHOR, S1Arm
-from crb.core.execution import LocalExecutor
-from crb.core.ledger import FAILURE_AUTHORING, cell_stats, derive_failure_kind
+from crb.core.deps import SCHEME_GO, BundleMount, DepsBinding, TaskDeps, register_store_root
+from crb.core.execution import Command, ExecResult, LocalExecutor
+from crb.core.git import GitRepo
+from crb.core.ledger import FAILURE_AUTHORING, FAILURE_HARNESS, cell_stats, derive_failure_kind
 from crb.core.prevention import AUTO_CONTEXT, LearningSnapshot
+from crb.core.runners.go_runner import GoRunner
 from crb.core.runners.pytest_runner import PytestRunner
+from crb.core.spec import TaskSpec
 from crb.core.workspace import Workspace
 from fixtures import pyrepo as pr
 from fixtures.server_seed import ALPHA, envelope, login, make_env
 from test_builders_brief import Recorder, _replay
+
+try:
+    from tests import conftest_langs as langs
+except ImportError:  # pragma: no cover
+    import conftest_langs as langs  # type: ignore[no-redef]
+
+gorepo = langs.fixture_module("gorepo")
 
 
 @pytest.fixture(autouse=True)
@@ -416,3 +434,488 @@ def test_the_fixtures_write_each_arm_in_the_mode_its_writer_writes_it(
     assert mode_admits("blind", "S1@t1", "sighted") and mode_admits("sighted", "S2", "blind")
     assert not mode_admits("blind", "A0", "sighted") and not mode_admits("sighted", "S3", "blind")
     assert not mode_admits("blind", "", "sighted") and mode_admits("blind", "A0", "all")
+
+
+# --- the S1 RED under the parent's binding, from the authored test (F87-1, P-800) ---------
+
+#: Two sealed sets, both at ``/deps/gomod``: the parent's and the builder's. The RED and its
+#: probe must carry the PARENT's (ADR-0019), never the builder's and never none.
+PARENT_KEY = "dep_" + "a" * 64
+BUILDER_KEY = "dep_" + "b" * 64
+GO_AUTHORED = "calc/new_test.go"
+GO_AUTHORED_SRC = (
+    'package calc\n\nimport "testing"\n\n'
+    'func TestNew(t *testing.T) {\n\tif Add(2, 2) != 5 {\n\t\tt.Fatal("want 5")\n\t}\n}\n'
+)
+
+
+def _go_events(*events: tuple[str, str]) -> str:
+    """``go test -json`` lines for ``(action, test)`` pairs in the fixture's ``calc``
+    package, ending with the binary's own summary and the package's verdict."""
+    pkg = gorepo.CALC_PKG
+    lines = [{"Action": a, "Package": pkg, "Test": t} for a, t in events]
+    failed = any(a == "fail" for a, _ in events)
+    lines.append({"Action": "output", "Package": pkg, "Output": "FAIL\n" if failed else "PASS\n"})
+    lines.append({"Action": "fail" if failed else "pass", "Package": pkg})
+    return "\n".join(json.dumps(x) for x in lines) + "\n"
+
+
+#: The sealed posture with nothing loadable: every package fails to build, naming no test.
+_UNLOADABLE = "calc/calc.go:3:8: no required module provides package github.com/spf13/pflag"
+
+
+class _Docker:
+    """A docker-named executor that runs nothing: it records each command (and whether the
+    authored test was on disk when it ran) and answers ``go test`` with ``red`` and the
+    ``go list`` env probe with ``probe``."""
+
+    name = "docker"
+
+    def __init__(self, red: ExecResult, probe: ExecResult | None = None) -> None:
+        self.red, self.probe = red, probe or ExecResult(0, "", "")
+        self.cmds: list[tuple[Command, bool]] = []
+
+    def run(self, cmd: Command) -> ExecResult:
+        self.cmds.append((cmd, (Path(cmd.root) / GO_AUTHORED).exists()))
+        if cmd.argv[1:2] == ("test",):
+            return self.red
+        if cmd.argv[1:2] == ("list",):
+            return self.probe
+        return ExecResult(0, "", "")
+
+    def tool(self, name: str, host_override: str | None = None) -> str:
+        return name
+
+    def describe(self) -> dict[str, Any]:
+        return {"executor": self.name}
+
+    def posture_facts(self) -> dict[str, str]:
+        return {"executor": self.name, "tree": "copy", "network": "none"}
+
+    def ran(self, verb: str) -> list[tuple[Command, bool]]:
+        return [(c, present) for c, present in self.cmds if c.argv[1:2] == (verb,)]
+
+
+class _Idle:
+    """Registered as ``idle``: records that it was called and changes nothing."""
+
+    name = "idle"
+    calls: ClassVar[int] = 0
+
+    def __init__(self, *, model: str = "m", provider: str = "", **cfg: Any) -> None:
+        self.model, self.provider = model, provider
+
+    def describe(self) -> dict[str, Any]:
+        return {"builder": self.name, "model": self.model}
+
+    def build(
+        self, workspace: Any, brief: Any, budget: Budget, *, on_event: Any = None
+    ) -> BuildOutcome:
+        _Idle.calls += 1
+        return BuildOutcome(
+            builder=self.name,
+            model=self.model,
+            provider=self.provider,
+            mode=brief.mode,
+            done=True,
+            stop_reason=STOP_DONE,
+            budget=budget,
+        )
+
+
+def _sealed_go_deps(tmp_path: Path) -> Any:
+    """A sealed ``TaskDeps`` whose parent and builder sets both sit at ``/deps/gomod``."""
+    store = register_store_root(tmp_path / "store")
+
+    def binding(role: str, key: str) -> DepsBinding:
+        host = store / "go" / key / "gomod"
+        host.mkdir(parents=True)
+        return DepsBinding(
+            role=role,
+            lang="go",
+            scheme=SCHEME_GO,
+            key=key,
+            digest="sha256:" + key[-64:],
+            mounts=(BundleMount(host, "/deps/gomod", key),),
+            env={"GOMODCACHE": "/deps/gomod", "GOPROXY": "off", "GOSUMDB": "off"},
+            local_env={"GOMODCACHE": str(host), "GOPROXY": "off"},
+        )
+
+    parent, builder = binding("parent", PARENT_KEY), binding("builder", BUILDER_KEY)
+    return TaskDeps("sealed", "go", parent=parent, gold=parent, builder=builder)
+
+
+def _s1_on_go(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    executor: _Docker,
+    *,
+    src: str = GO_AUTHORED_SRC,
+    baseline: tuple[str, ...] = (),
+    parent: dict[str, str] | None = None,
+) -> tuple[Any, Any]:
+    """One S1 attempt on the Go fixture's feat commit through the run's own ``BuildFn``,
+    under the sealed binding (``parent`` = more files at the parent); returns the attempt
+    and the task's deps."""
+    monkeypatch.setitem(builders_pkg._REGISTRY, "idle", _Idle)
+    monkeypatch.setattr(_Idle, "calls", 0)
+    root, feat = gorepo.build(tmp_path, extra=parent)
+    repo, cfg = GitRepo(root), gorepo.config()
+    deps = _sealed_go_deps(tmp_path)
+    task = TaskSpec(
+        task_id=feat,
+        repo=cfg.name,
+        subject="feat: add Sub",
+        authored=repo.author_date(feat),
+        test_files=(gorepo.TEST_SUB,),
+        src_files=(gorepo.SRC_SUB,),
+        target_tests=("./calc",),
+        belt_scope=(),
+        language="go",
+        baseline_failing=baseline,
+    )
+
+    def author(ws: Any, subject: str, message: str) -> tuple[str, str]:
+        return GO_AUTHORED, src
+
+    ladder = EscalationLadder((Rung("idle", "m"),))
+    fn = adapter.build_fn_for(
+        ladder,
+        budget=Budget(),
+        runner=GoRunner(cfg),
+        executor=executor,
+        config=cfg,
+        s1=S1Arm(author=author, author_model="t1"),
+        deps_for=lambda t: deps,
+    )
+    with Workspace.create(repo, feat, tmp_path / "ws", config=cfg) as ws:
+        attempt = fn(ws, task, "blind", adapter.ladder_labels(ladder)[0])
+        assert not (ws.root / GO_AUTHORED).exists()
+    return attempt, deps
+
+
+def _bound_to(cmd: Command, deps: Any) -> bool:
+    """``cmd`` reads the PARENT's sealed set: its module cache, offline, mounted."""
+    return (
+        cmd.env.get("GOMODCACHE") == "/deps/gomod"
+        and cmd.env.get("GOPROXY") == "off"
+        and deps.parent.mounts[0] in cmd.ro_mounts
+        and deps.builder.mounts[0] not in cmd.ro_mounts
+    )
+
+
+def test_s1_red_runs_under_the_parent_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F87-1 part 1: the S1 RED ran with no binding, so under the sealed docker posture the
+    Go runner pointed ``GOMODCACHE`` at an empty ``/tmp/gomod`` with the network off and
+    mounted nothing; every cobra package failed to build and every authored test read
+    "not RED at the parent" — the instrument's fault, recorded as the arm's miss. The RED
+    now runs under the task's PARENT binding, as qualification proves the held-out tests."""
+    red = ExecResult(1, _go_events(("run", "TestNew"), ("fail", "TestNew")), "")
+    executor = _Docker(red)
+    attempt, deps = _s1_on_go(tmp_path, monkeypatch, executor)
+    ((cmd, present),) = executor.ran("test")
+    assert present, "the RED ran without the authored test on disk"
+    assert "/tmp/gomod" not in cmd.env.values(), cmd.env
+    assert _bound_to(cmd, deps), (cmd.env, cmd.ro_mounts)
+    # RED on the authored test itself: the builder is called, and no probe was needed
+    assert not (attempt.error or "").startswith("authoring:"), attempt.error
+    assert _Idle.calls == 1 and executor.ran("list") == []
+
+
+def test_s1_red_requires_the_authored_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """F87-1 part 3: the Go RED scope is the whole package, and any failing id was taken as
+    the authored test's RED — so an old test already failing there (``TestOld``) passed a
+    test that discriminates nothing (``TestNew`` passes). The RED must be a test the author
+    defined, less the task's baseline; otherwise it is the arm's ``authoring`` miss."""
+    old = ExecResult(
+        1,
+        _go_events(
+            ("run", "TestOld"), ("fail", "TestOld"), ("run", "TestNew"), ("pass", "TestNew")
+        ),
+        "",
+    )
+    executor = _Docker(old)
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, executor)
+    assert attempt.error.startswith("authoring: the authored test 'calc/new_test.go' is not RED")
+    assert "no test it defines fails there" in attempt.error, attempt.error
+    assert derive_failure_kind(clean=False, disqualified=False, error=attempt.error) == (
+        FAILURE_AUTHORING
+    )
+    assert _Idle.calls == 0
+    # the authored test failing only as a baseline id is no RED either
+    mine = ExecResult(1, _go_events(("run", "TestNew"), ("fail", "TestNew")), "")
+    attempt, _ = _s1_on_go(
+        tmp_path / "baseline",
+        monkeypatch,
+        _Docker(mine),
+        baseline=(f"{gorepo.CALC_PKG}::TestNew",),
+    )
+    assert "no test it defines fails there" in attempt.error, attempt.error
+    # the rule, per runner: a Go subtest is its test's; a pytest id is the authored file's,
+    # a collection error included; a runner whose ids name neither keeps any failing id
+    pkg = gorepo.CALC_PKG
+    failing = frozenset({f"{pkg}::TestNew/sub", f"{pkg}::TestOld"})
+    assert adapter.authored_red("go", GO_AUTHORED, GO_AUTHORED_SRC, failing, ()) == {
+        f"{pkg}::TestNew/sub"
+    }
+    py = frozenset({"tests/test_s1.py::test_a[1]", "tests/test_s1.py", "tests/test_x.py::test_b"})
+    assert adapter.authored_red("pytest", "tests/test_s1.py", "", py, ("tests/test_s1.py",)) == {
+        "tests/test_s1.py::test_a[1]"
+    }
+    assert adapter.authored_red("jest", "a.test.js", "", frozenset({"adds"}), ()) is None
+
+
+#: An authored Go file whose one test is a fuzz target: ``go test`` runs its seed corpus,
+#: and a failing seed reports ``FuzzNew/seed#0`` and then ``FuzzNew``.
+GO_FUZZ_SRC = (
+    'package calc\n\nimport "testing"\n\n'
+    "func FuzzNew(f *testing.F) {\n\tf.Add(2)\n\tf.Fuzz(func(t *testing.T, n int) {\n"
+    '\t\tif Add(n, n) != 5 {\n\t\t\tt.Fatal("want 5")\n\t\t}\n\t})\n}\n'
+)
+#: A testify suite method, and the runner that runs it: ``TestCalcSuite/TestNew``.
+GO_SUITE_METHOD = "func (s *CalcSuite) TestNew() {\n\ts.Equal(5, Add(2, 2))\n}\n"
+GO_SUITE_RUNNER = "func TestCalcSuite(t *testing.T) {\n\tsuite.Run(t, new(CalcSuite))\n}\n"
+
+
+def test_s1_red_counts_each_top_level_go_test_the_author_defines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RT2-V2-1: the Go rule read only ``func TestX(t *testing.T)``, so the two other
+    top-level tests ``go test`` runs — a fuzz target's seed corpus (``FuzzNew/seed#0``) and
+    an example with an ``// Output:`` comment (``ExampleNew``) — were refused "no test it
+    defines fails there" while the authored test was the one failing. Each now counts by
+    its own name, and an old test failing beside it still never does. A testify suite
+    method counts only under a runner the file defines: an id's second segment is any
+    subtest's name (an old test's ``t.Run("TestNew", …)`` carries it too), so a method that
+    a runner in another file runs stays refused — a limit the refusal now states."""
+    pkg = gorepo.CALC_PKG
+    old = f"{pkg}::TestOld"
+    seeds = frozenset({f"{pkg}::FuzzNew/seed#0", f"{pkg}::FuzzNew"})
+    assert adapter.authored_red("go", GO_AUTHORED, GO_FUZZ_SRC, seeds | {old}, ()) == seeds
+    example = (
+        'package calc\n\nimport "fmt"\n\n'
+        "func ExampleNew() {\n\tfmt.Println(Add(2, 2))\n\t// Output: 5\n}\n"
+    )
+    failing = frozenset({f"{pkg}::ExampleNew", old})
+    assert adapter.authored_red("go", GO_AUTHORED, example, failing, ()) == {f"{pkg}::ExampleNew"}
+    # a function that only looks like one is not a test go runs — each lookalike's id is
+    # offered as failing, so each signature check is pinned (R6A-LASTFIX-R1-3)
+    lookalike = (
+        "package calc\n\nfunc FuzzNew(n int) {}\n\nfunc FuzzT(t *testing.T) {}\n\n"
+        "func ExampleNew(n int) {}\n"
+    )
+    offered = seeds | {f"{pkg}::FuzzT", f"{pkg}::ExampleNew"}
+    assert adapter.authored_red("go", GO_AUTHORED, lookalike, offered, ()) == frozenset()
+    # a suite: counted under its own runner, refused when another file's runner runs it
+    in_suite = frozenset({f"{pkg}::TestCalcSuite/TestNew", f"{pkg}::TestCalcSuite"})
+    whole = "package calc\n\n" + GO_SUITE_RUNNER + GO_SUITE_METHOD
+    assert adapter.authored_red("go", GO_AUTHORED, whole, in_suite, ()) == in_suite
+    method_only = "package calc\n\n" + GO_SUITE_METHOD
+    assert adapter.authored_red("go", GO_AUTHORED, method_only, in_suite, ()) == frozenset()
+    # through the BuildFn: the failing seed is the authored test's RED, and the builder runs
+    fuzz = ExecResult(
+        1,
+        _go_events(
+            ("run", "FuzzNew"),
+            ("run", "FuzzNew/seed#0"),
+            ("fail", "FuzzNew/seed#0"),
+            ("fail", "FuzzNew"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(tmp_path / "fuzz", monkeypatch, _Docker(fuzz), src=GO_FUZZ_SRC)
+    assert not (attempt.error or "").startswith("authoring:"), attempt.error
+    assert _Idle.calls == 1
+    suite = ExecResult(
+        1,
+        _go_events(
+            ("run", "TestCalcSuite"),
+            ("run", "TestCalcSuite/TestNew"),
+            ("fail", "TestCalcSuite/TestNew"),
+            ("fail", "TestCalcSuite"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(tmp_path / "suite", monkeypatch, _Docker(suite), src=method_only)
+    assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
+    assert derive_failure_kind(clean=False, disqualified=False, error=attempt.error) == (
+        FAILURE_AUTHORING
+    )
+    assert _Idle.calls == 0
+
+
+#: An authored Go file whose one live test passes: a ``"/*"`` declared above it opens no
+#: comment, and an earlier draft kept in a block comment and a raw string names an old
+#: failing fuzz target, example and test at column 0.
+GO_DRAFT_SRC = (
+    'package calc\n\nimport "testing"\n\nvar open = "/*"\n\n'
+    "func TestNewAdds(t *testing.T) {\n\tt.Log(open)\n\tif Add(2, 2) != 4 {\n"
+    '\t\tt.Fatal("want 4")\n\t}\n}\n\n'
+    "/*\nAn earlier draft:\n\nfunc FuzzOld(f *testing.F) {}\n\nfunc ExampleAdd() {}\n*/\n\n"
+    "var draft = `\nfunc TestRawOld(t *testing.T) {}\n`\n"
+)
+
+
+def test_s1_red_reads_a_go_test_only_from_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6A-LASTFIX-R1-1: the Go rule matched ``^func`` over the file's raw text, so a draft
+    kept in a block comment or a raw string "declared" ``FuzzOld``, ``ExampleAdd`` and
+    ``TestRawOld``; an old test failing under one of those names in the package became the
+    authored test's RED while the authored test itself passed. A test counts only from the
+    file's code, each comment and string literal blanked first, read left to right: a
+    ``"/*"`` or a stray backtick inside a string, a rune or a ``//`` comment opens nothing
+    (R6A-FIXCHECK-R2-1: no case pinned the string, rune or line-comment reading)."""
+    pkg = gorepo.CALC_PKG
+    old = frozenset(
+        f"{pkg}::{name}" for name in ("FuzzOld/seed#0", "FuzzOld", "ExampleAdd", "TestRawOld")
+    )
+    assert adapter.authored_red("go", GO_AUTHORED, GO_DRAFT_SRC, old, ()) == frozenset()
+    # the live test still counts: the "/*" above it is a string, not a comment's start that
+    # would run to the draft's "*/" and hide the test
+    mine = old | {f"{pkg}::TestNewAdds"}
+    assert adapter.authored_red("go", GO_AUTHORED, GO_DRAFT_SRC, mine, ()) == {
+        f"{pkg}::TestNewAdds"
+    }
+    # a backtick in a string, a rune or a line comment opens no raw string: read as one, it
+    # would run to the draft's opening backtick, hide the live test and bare TestRawOld
+    for stray in ('var tick = "`"', "var rtick = '`'", "// a stray ` here"):
+        src = GO_DRAFT_SRC.replace("var open", f"{stray}\n\nvar open", 1)
+        counted = adapter.authored_red("go", GO_AUTHORED, src, mine, ())
+        assert counted == {f"{pkg}::TestNewAdds"}, stray
+    # through the BuildFn: the old failures are no RED, and the builder never runs
+    drafts = ExecResult(
+        1,
+        _go_events(
+            ("run", "TestNewAdds"),
+            ("pass", "TestNewAdds"),
+            ("run", "FuzzOld"),
+            ("run", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld"),
+        ),
+        "",
+    )
+    attempt, _ = _s1_on_go(tmp_path, monkeypatch, _Docker(drafts), src=GO_DRAFT_SRC)
+    assert "no test it defines fails there; " + adapter.GO_RED_RULE in attempt.error, attempt.error
+    assert _Idle.calls == 0
+
+
+#: An old internal test file at the parent: a fuzz target whose seed always fails and an
+#: example whose ``// Output:`` is wrong — both failing there, outside the task's baseline.
+GO_OLD_SRC = (
+    'package calc\n\nimport (\n\t"fmt"\n\t"testing"\n)\n\n'
+    "func FuzzOld(f *testing.F) {\n\tf.Add(1)\n"
+    '\tf.Fuzz(func(t *testing.T, n int) { t.Fatal("old") })\n}\n\n'
+    "func ExampleAdd() {\n\tfmt.Println(Add(1, 1))\n\t// Output: 3\n}\n"
+)
+#: The authored file in the EXTERNAL test package, redeclaring both names (``go vet`` and
+#: ``go test`` accept it): both pass, yet each reports the old one's id too.
+GO_EXTERNAL_SRC = (
+    'package calc_test\n\nimport (\n\t"fmt"\n\t"testing"\n\n\t"example.com/m/calc"\n)\n\n'
+    "func FuzzOld(f *testing.F) {\n\tf.Add(1)\n\tf.Fuzz(func(t *testing.T, n int) {})\n}\n\n"
+    "func ExampleAdd() {\n\tfmt.Println(calc.Add(1, 1))\n\t// Output: 2\n}\n"
+)
+#: ``GO_OLD_SRC`` with ``FuzzOld`` opened in each shape ``go vet`` and ``go test`` accept
+#: that no column-0 ``func`` line shows: after a comment, indented, and with a comment
+#: between ``func`` and the name (the last two gofmt-clean) — REDFIX-FIXCHECK-R2-2.
+GO_OLD_SHAPES = tuple(
+    GO_OLD_SRC.replace("func FuzzOld", shape)
+    for shape in (
+        "/* legacy */ func FuzzOld",
+        "\tfunc FuzzOld",
+        "func /* x */ FuzzOld",
+        "func // x\nFuzzOld",
+    )
+)
+
+
+def test_s1_red_never_counts_a_go_name_another_test_file_declares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6A-LASTFIX-R1-2: a Go test name is NOT unique within its package's test binary — a
+    ``package calc`` and a ``package calc_test`` file in one directory may each declare
+    ``FuzzOld``, and both report ``<pkg>::FuzzOld``. An authored external file redeclaring
+    an old failing internal test's name therefore took that old failure as its RED while
+    its own copy passed. A name another test file in the directory declares at the parent
+    never counts, in any shape go accepts it in (REDFIX-FIXCHECK-R2-2); the author's other
+    names still do."""
+    pkg = gorepo.CALC_PKG
+    old = frozenset({f"{pkg}::FuzzOld/seed#0", f"{pkg}::FuzzOld", f"{pkg}::ExampleAdd"})
+    taken = {"FuzzOld", "ExampleAdd"}
+    assert adapter.authored_red("go", GO_AUTHORED, GO_EXTERNAL_SRC, old, (), beside=taken) == (
+        frozenset()
+    )
+    new = GO_EXTERNAL_SRC + 'func TestNew(t *testing.T) {\n\tt.Fatal("want 5")\n}\n'
+    mine = old | {f"{pkg}::TestNew"}
+    assert adapter.authored_red("go", GO_AUTHORED, new, mine, (), beside=taken) == {
+        f"{pkg}::TestNew"
+    }
+    # through the BuildFn, old_test.go at the parent in each shape: no RED, no builder run
+    both = ExecResult(
+        1,
+        _go_events(
+            ("run", "FuzzOld"),
+            ("run", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld/seed#0"),
+            ("fail", "FuzzOld"),
+            ("run", "ExampleAdd"),
+            ("fail", "ExampleAdd"),
+            ("run", "FuzzOld"),
+            ("run", "FuzzOld/seed#0"),
+            ("pass", "FuzzOld/seed#0"),
+            ("pass", "FuzzOld"),
+            ("run", "ExampleAdd"),
+            ("pass", "ExampleAdd"),
+        ),
+        "",
+    )
+    for i, old_src in enumerate((GO_OLD_SRC, *GO_OLD_SHAPES)):
+        attempt, _ = _s1_on_go(
+            tmp_path / str(i),
+            monkeypatch,
+            _Docker(both),
+            src=GO_EXTERNAL_SRC,
+            parent={"calc/old_test.go": old_src},
+        )
+        refusal = "no test it defines fails there; " + adapter.GO_RED_RULE
+        assert refusal in attempt.error, (old_src, attempt.error)
+        assert _Idle.calls == 0
+
+
+def test_s1_unattributed_red_with_red_env_probe_is_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F87-1 part 1: a RED that names no test (nothing built) while the runner's env probe
+    is red under the SAME parent binding is the posture's fault, not the author's: the row
+    is ``harness`` (rule 4b), reported and never counted as the arm's miss. The label does
+    not buy a retry — nothing here re-runs, and after a reservation (round 5's
+    reserved.v1) a harness row is a miss. The probe runs with the authored test removed, so
+    an author's own bad import can never be read as the posture's; with the probe green the
+    refusal stays the arm's ``authoring`` miss."""
+    unbuilt = ExecResult(1, "", _UNLOADABLE)
+    executor = _Docker(unbuilt, probe=ExecResult(1, "", _UNLOADABLE))
+    attempt, deps = _s1_on_go(tmp_path, monkeypatch, executor)
+    assert attempt.error.startswith("authoring: harness error proving RED:"), attempt.error
+    assert derive_failure_kind(clean=False, disqualified=False, error=attempt.error) == (
+        FAILURE_HARNESS
+    )
+    assert _Idle.calls == 0
+    ((probe, present),) = executor.ran("list")
+    assert not present, "the probe ran with the authored test still in the tree"
+    assert _bound_to(probe, deps), (probe.env, probe.ro_mounts)
+    assert len(executor.ran("test")) == 1, "the RED was re-run"
+    # the posture loads the parent: the same unattributed RED is the arm's miss
+    green_probe = _Docker(unbuilt, probe=ExecResult(0, "", ""))
+    attempt, _ = _s1_on_go(tmp_path / "loads", monkeypatch, green_probe)
+    assert "failed without attributable test ids" in attempt.error, attempt.error
+    assert derive_failure_kind(clean=False, disqualified=False, error=attempt.error) == (
+        FAILURE_AUTHORING
+    )
+    # the tree could not be copied for the RED: the instrument's, before any probe
+    copy = _Docker(ExecResult(125, "", "copy failed", env_error="tree_copy_failed"))
+    attempt, _ = _s1_on_go(tmp_path / "copy", monkeypatch, copy)
+    assert attempt.error.startswith("authoring: harness error proving RED:"), attempt.error
+    assert copy.ran("list") == []

@@ -15,8 +15,10 @@ What it does: Pins that a replay stops before the attempt whose own cost cap wou
               that a run whose last attempt or item, with no cost cap of its own, passed the
               cap ends ``failed`` saying so (a guard, not a guarantee); that a factory run's
               test author's calls count as its spend, a reclaim included, and an author
-              whose cost is not known stops a capped run; that every module that opens a
-              model chat is one the cap can see;
+              whose cost is not known stops a capped run; that an ``S1`` blind replay's
+              test author's calls count the same way and reserve one authoring pass per
+              attempt (P-775); that every module that opens a model chat is one the cap
+              can see;
               that an attempt with no cost cap of its own is reserved at the dearest attempt
               the run has made; that an attempt whose cost was not known halts the run (the
               cap cannot be kept blind); that a run with no cap climbs every rung; that a
@@ -350,6 +352,89 @@ def test_a_test_author_whose_cost_is_not_known_stops_a_capped_factory_run(
     assert attempt.payload["cost_known"] is False
 
 
+def _s1_replay(h: Harness, **params: Any) -> Any:
+    """A blind replay on the ``S1`` arm (ADR-0026 item 1) over the three fake rungs: before
+    each attempt :func:`_paid_author`'s author writes a test in a sealed checkout of the
+    parent, and its unusable reply makes every attempt an ``authoring`` row that cost the
+    builder nothing — so all the run spends is the author's calls."""
+    return h.enqueue("blind", ladder_json=LADDER, params_json={"arm": "S1", **params})
+
+
+def test_an_s1_replays_author_calls_count_toward_its_cap(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-775: the S1 author's two $0.03 calls are the run's spend though they write no row,
+    and the next attempt is reserved at one authoring pass more ($0.06): under a $0.10 cap
+    one attempt runs and the run stops before the second — not three attempts, six calls
+    and $0.18 the cap never saw."""
+    from crb.builders.openai_client import ChatReply
+
+    _paid_author(monkeypatch, ChatReply("no file line", cost_usd=0.03))
+    run = _s1_replay(h, max_cost_usd=0.10)
+    done = h.run_one()
+    calls = [e for e in h.events(run.id) if e.action == "author.attempt"]
+    assert [e.cost_usd for e in calls] == [0.03, 0.03]
+    assert len(list(h.worker.ledger.rows(run_id=run.id))) == 1
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert done.error.startswith("spend cap: $0.06 of $0.10 spent; the next attempt")
+    assert "plus $0.06 for its test author's calls" in done.error
+    (event,) = _stopped(h, run.id)
+    assert event.payload["spent_usd"] == pytest.approx(0.06)
+    assert event.payload["authoring_reserve_usd"] == pytest.approx(0.06)
+    assert event.payload["reserve_usd"] == pytest.approx(0.06)
+
+
+def test_a_reclaimed_s1_replay_counts_the_authoring_its_first_claim_spent(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first claim's author calls are on the run's events, not on the author the second
+    claim builds: read back, they stop the run before it authors again."""
+    from crb.builders.openai_client import ChatReply
+    from crb.store.events import append_event
+
+    _paid_author(monkeypatch, ChatReply("no file line", cost_usd=0.01))
+    run = _s1_replay(h, max_cost_usd=0.10)
+    append_event(
+        h.factory,
+        trace_id=run.id,
+        stage="factory",
+        action="author.attempt",
+        payload={"cost_usd": 0.08, "cost_known": True},
+    )
+    done = h.run_one()
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert done.error.startswith("spend cap: $0.08 of $0.10 spent; the next attempt")
+    assert [e for e in h.events(run.id) if e.action == "author.attempt"][1:] == []
+
+
+def test_an_s1_author_whose_cost_is_not_known_stops_a_capped_replay(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reply that carries no usage is an author call the cap cannot see: the run stops
+    after the attempt that made it, never climbing the ladder blind."""
+    _paid_author(monkeypatch, "no file line")
+    run = _s1_replay(h, max_cost_usd=5.0)
+    done = h.run_one()
+    assert len(list(h.worker.ledger.rows(run_id=run.id))) == 1
+    assert done.status == STATUS_FAILED and done.counts_json["stopped_code"] == sc.STOP_SPEND_CAP
+    assert "cost was not known" in done.error
+
+
+def test_an_uncapped_s1_replay_reads_no_authoring_and_climbs_every_rung(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no cap there is nothing to keep: the author's calls are on its events as before
+    and every rung is tried."""
+    from crb.builders.openai_client import ChatReply
+
+    _paid_author(monkeypatch, ChatReply("no file line", cost_usd=0.03))
+    run = _s1_replay(h)
+    done = h.run_one()
+    assert len(list(h.worker.ledger.rows(run_id=run.id))) == len(LADDER)
+    assert "stopped_code" not in done.counts_json and _stopped(h, run.id) == []
+
+
 # --- the rules ---------------------------------------------------------------------------
 
 
@@ -383,6 +468,23 @@ def test_the_admission_rule_counts_the_reserve_against_what_is_left() -> None:
     # an item's reserve counts one authoring pass at the dearest authoring call so far
     assert sc.item_reserve([0.1], authored, max_rework=0, author_attempts=2) == (0.6, 1)
     assert sc.SpendCap.from_params({"max_cost_usd": 2}) == sc.SpendCap(2.0)
+
+
+def test_an_s1_attempts_authoring_reserve_is_added_and_named_only_when_there_is_one() -> None:
+    """P-775: ``authoring`` adds to an attempt's reserve, whichever stands in for its own,
+    and the payload names it; with none the payload is as it was."""
+    cap = sc.SpendCap(1.0)
+    spent = sc.Spend(0.5, 0.2, dearest_authoring=0.1)
+    assert cap.check(spent, reserve=0.3, authoring=0.2) is None  # 0.5 + 0.3 + 0.2 = 1.0
+    over = cap.check(spent, reserve=0.3, authoring=0.3)
+    assert over is not None and over.payload["reserve_from"] == "attempt_cap"
+    assert over.payload["reserve_usd"] == pytest.approx(0.6)
+    assert over.payload["authoring_reserve_usd"] == pytest.approx(0.3)
+    assert "plus $0.30 for its test author's calls" in over.reason
+    dearest = cap.check(sc.Spend(0.7, 0.2), reserve=0.0, authoring=0.2)
+    assert dearest is not None and dearest.payload["reserve_usd"] == pytest.approx(0.4)
+    plain = cap.check(sc.Spend(0.9, 0.2), reserve=0.3)
+    assert plain is not None and "authoring_reserve_usd" not in plain.payload
 
 
 def test_a_rung_is_priced_when_its_model_has_a_known_price_or_it_is_the_fixture() -> None:
