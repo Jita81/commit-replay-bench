@@ -80,6 +80,7 @@ from crb.core.reading import (
     CELL_ERROR_BUDGET,
     NULL_RATE,
     RULE_LOOK_V1,
+    RULES,
     VERDICT_CEILING,
     VERDICT_DELIVER,
     VERDICT_DESCRIPTIVE,
@@ -799,6 +800,51 @@ def _oracle_clause(out: _Clauses, ora: OracleEvidence, policy: RoutingPolicy) ->
         )
 
 
+def _undecided_reason(v: ArmVerdict) -> str:
+    """What an ``undecided`` reading still is. Its next reachable look needs more commits
+    than its pool holds, so it never delivers within that pool; but while commits of the pool
+    are unread their first attempts may still put its last look out of reach. The verdict
+    carries counts, not outcomes: ``pool_remaining - counted`` is the pool the walk has not
+    read (the first pending commit and every one after it, some perhaps graded already), so
+    those commits are named as still to read, and ``insufficient`` is named as possible only
+    while the misses read so far plus that many could pass the last look's allowance. A
+    blocked arm carries its blocker's look but its own counts, so its words stay
+    conditional. A drifted reading (P-797) names the drift and nothing else."""
+    k, short = v.next_look, v.needed
+    if v.drifted:
+        return (
+            "the reading's pool moved since registration (a pool task was relabelled or removed, "
+            "or its qualification changed: GET /readings lists how), so its rows prove nothing "
+            "and it reads undecided until the pool is restored (P-797)"
+        )
+    tail = "mining further back is the way to reach a look, or leave the class to a person"
+    if v.blocking:
+        return (
+            f"the reading read undecided on {v.blocking}: its pool is {short} short of the "
+            f"next look at {k}, so it never delivers, but it may still read insufficient "
+            f"while {v.blocking} has commits to run — {tail}"
+        )
+    unread = max(v.pool_remaining - v.counted, 0)
+    if not unread:
+        return (
+            f"the reading's pool ended: all {v.counted} of its commits are read and the next "
+            f"look at {k} needs {short} more than it holds — mine further back, or leave the "
+            "class to a person"
+        )
+    looks = RULES.get(v.rule, {})
+    can_fail = not looks or (v.counted - v.clean) + unread > looks[max(looks)]
+    then = (
+        "it may still read insufficient as they run"
+        if can_fail
+        else "whatever they show, it stays undecided"
+    )
+    return (
+        f"the reading's pool cannot reach its next look ({v.counted} read, {unread} still to "
+        f"read, the next look is {k}: the pool is {short} short), so it never delivers; "
+        f"{then} — {tail}"
+    )
+
+
 def _decided_clauses(out: _Clauses, arm: str, verdict: ArmVerdict) -> None:
     """Clauses 10 and 11 (replacing ``point_below_bar`` and ``ci_low_below_bar``): the reading
     decided against, or delivered for an arm that is not the standard."""
@@ -818,11 +864,10 @@ def _decided_clauses(out: _Clauses, arm: str, verdict: ArmVerdict) -> None:
         out.fail(
             REASON_UNDECIDED,
             ROUTE_CALIBRATE,
-            f"the reading's pool ended before a look decided ({verdict.counted} read, the next "
-            f"look is {verdict.next_look}) — mine further back, or leave the class to a person",
+            _undecided_reason(verdict),
             observed=verdict.counted,
             threshold=verdict.next_look,
-            next_act=NEXT_MINE,
+            next_act=NEXT_NONE if verdict.drifted else NEXT_MINE,
             count=verdict.needed,
         )
     if verdict.state == VERDICT_CEILING:

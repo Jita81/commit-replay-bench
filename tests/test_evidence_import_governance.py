@@ -344,6 +344,7 @@ def _run_ledger(env: Env, evdir: Path, factory: Any = None) -> tuple[_RunLedger,
         evdir,
         ctx,
         "local",  # type: ignore[arg-type]
+        worker_id="worker-test",  # the stand-in context carries no claimed run
     )
     return rl, ctx
 

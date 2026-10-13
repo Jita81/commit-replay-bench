@@ -12,9 +12,13 @@ Navigation
 ----------
 What it is:   The store's qualification ledger — append, the latest record per task and
               posture, the projected specs a replay grades against, counts by refusal code,
-              fingerprints for cross-posture pooling, and revocation.
+              fingerprints for cross-posture pooling, revocation, the latest posture of a
+              posture class and records read back by id.
 What it does: Gives the worker's posture gate, the runs route's 409 and the repository
-              posture view one reading of "is this task proven where it will be graded".
+              posture view one reading of "is this task proven where it will be graded";
+              gives a reserved.v1 registration its pool (the latest posture of the reading's
+              class, ``latest_posture_of_class``) and the pool's drift check the records it
+              pinned (``by_ids``, P-797).
 How:          SQLAlchemy 2 selects over ``TaskQualification`` ordered by ``seq``; the record
               is ``Qualification.from_dict(body_json)``; projection joins ``tasks.spec_json``.
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
@@ -24,9 +28,12 @@ Works with:   src/crb/store/models.py (``TaskQualification``, ``Task``),
               src/crb/core/qualify.py (the record), src/crb/server/worker.py (the gate reads
               and writes it), src/crb/server/routes/runs.py (the submit-time 409),
               src/crb/server/routes/repos.py (the posture view),
+              src/crb/server/routes/readings.py (a reserved.v1 pool),
+              src/crb/server/reading_book.py (``pool_drift``: the pinned records),
               src/crb/store/migrations/versions/v0011_task_qualifications.py (the table)
 Tested by:    tests/test_store_qualifications.py, tests/test_store_migrate.py,
-              tests/test_worker.py, tests/test_provision_quarantine.py
+              tests/test_worker.py, tests/test_provision_quarantine.py,
+              tests/test_p792_pool.py (the pinned pool and its drift)
 Touch when:   never for a new repository; a gate needs a new reading of the records (add it
               here, never an UPDATE).
 """
@@ -152,6 +159,35 @@ def latest_posture_for(s: Session, repo: str, *, executor: str = "", image_ref: 
     return row.posture_id if row is not None else ""
 
 
+def latest_posture_of_class(s: Session, repo: str, posture_class: str) -> str:
+    """The posture id most recently recorded for ``repo`` in ``posture_class`` (``""`` when
+    none, legacy rows never) — the posture a reserved.v1 reading of that class pins its pool
+    to (P-797)."""
+    row = s.execute(
+        select(TaskQualification)
+        .where(
+            TaskQualification.repo == repo,
+            TaskQualification.posture_class == posture_class,
+            TaskQualification.state != STATE_LEGACY,
+        )
+        .order_by(TaskQualification.seq.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return row.posture_id if row is not None else ""
+
+
+def by_ids(s: Session, qualification_ids: Iterable[str]) -> dict[str, Qualification]:
+    """qualification id → its record, for the ids the store holds (an id it does not hold is
+    absent) — the records a reserved.v1 reading pinned, read back as they were written."""
+    wanted = sorted({str(i) for i in qualification_ids if i})
+    if not wanted:
+        return {}
+    rows = s.execute(
+        select(TaskQualification).where(TaskQualification.qualification_id.in_(wanted))
+    ).scalars()
+    return {row.qualification_id: Qualification.from_dict(row.body_json) for row in rows}
+
+
 def latest_fingerprints(s: Session, repo: str, classes: Iterable[str]) -> dict[str, dict[str, str]]:
     """posture class → {task id → fingerprint} over the QUALIFIED records in force, the
     latest posture of each class winning — what cross-posture pooling compares
@@ -222,11 +258,13 @@ def revoke_citing(
 
 __all__ = [
     "append",
+    "by_ids",
     "counts_by_code",
     "latest",
     "latest_by_task",
     "latest_fingerprints",
     "latest_posture_for",
+    "latest_posture_of_class",
     "qualified_specs",
     "revoke",
     "revoke_citing",

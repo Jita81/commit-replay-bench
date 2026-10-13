@@ -1202,7 +1202,7 @@ export interface Shortfall {
 /** One arm of a registered reading (`crb.core.reading.ArmReading.to_dict`). */
 export interface ArmReading {
   arm: string
-  /** `deliver`, `insufficient`, `undecided`, `look_pending`, `descriptive`, `stopped`. */
+  /** `deliver`, `insufficient`, `undecided`, `look_pending`, `descriptive`, `waiting` (a later hierarchy arm while the arm before it, `stopped_by`, is still being read), `stopped` (once that arm reads `insufficient` or `undecided`). Neither of the last two is read toward the verdict (FZ-2). */
   state: string
   descriptive: boolean
   stopped_by: string
@@ -1213,11 +1213,28 @@ export interface ArmReading {
   ci_high: number
   next_look: number | null
   needed: number
+  /** P-795: the commits whose row the arm could not read — it does not record the sealed
+   * builder executor (`scope` `unsealed`), or, under reserved.v1, it was built off the
+   * reading's checks arm (`scope` `checks_arm`, RT2B-1). Any one makes the arm `undecided`:
+   * it never delivers, and the commit is never a miss and never re-run. */
+  scope_faults?: string[]
+  /** How many of the arm's rows were dropped because they read unsealed. */
+  unsealed_dropped?: number
+  /** F87-2: how many of the arm's attempts of a decided commit the reading did not read —
+   * every one but the reservation's row under reserved.v1, every one after the deciding row
+   * under the legacy rule. A count for a person; no state or verdict reads it. */
+  duplicate_commits?: number
 }
 
 /** A registered reading evaluated (`crb.core.reading.ReadingOutcome.to_dict`). */
 export interface ReadingOutcome {
   reading_id: string
+  /** The campaign the reading spends under (`cmp_<24 hex>`), `""` for one under none (DL-382). */
+  campaign_id?: string
+  /** How many runs its campaign admitted — only their rows count; `null` under no campaign or unread. */
+  admitted_runs?: number | null
+  /** True only for a campaign-named reading read without its admissions: it then counts no row. */
+  admissions_unread?: boolean
   rule: string
   hierarchy: string[]
   /** `standard`, `ceiling`, `look_pending`, `insufficient`, `undecided`. */
@@ -1232,6 +1249,47 @@ export interface ReadingOutcome {
   pool: number
   pool_sha256: string
   arms: ArmReading[]
+  /** The attempt rule it reads under: `reserved.v1`, or `first_observed.v0` for a legacy reading (GET /readings, P-792). */
+  attempt_rule?: string
+  /** A legacy reading only: `"open on this rule"` — the P-792 channels stay open on it (GET /readings). */
+  p792?: string
+  /** What its attempts are pinned to: the campaign's first reservation and each arm's first; `null` before any, or legacy (GET /readings, P-792). */
+  pinned_treatment?: PinnedTreatment | null
+  /** The commits each arm has reserved of those it enrols; `null` for a legacy reading (GET /readings, P-792). */
+  reserved?: Record<string, number> | null
+  /** Of those reservations, how many settled with no row: charged by the campaign's tally, which then stops on `unplaced_spend`; `null` for a legacy reading (GET /readings, F8). */
+  settled_unrowed?: Record<string, number> | null
+  /** How a reserved.v1 reading's pool moved since registration, one row per change; any row
+   * makes the reading `undecided` with no standard and no ceiling on every reader until the
+   * pool is restored. `[]` when it has not moved, `null` for a legacy reading (GET /readings, P-797). */
+  pool_drift?: PoolDrift[] | null
+}
+
+/** One way a reserved.v1 reading's pool moved since registration (P-797). */
+export interface PoolDrift {
+  /** The pool commit; `""` for a reading pinned to no posture. */
+  task_id: string
+  /** `capability_class`, `size`, `task` (the store no longer holds it), `qualification` or `pool_posture_id`. */
+  field: string
+  /** What registration froze: the cell's class or size, the commit, or the pinned record's id. */
+  registered: string
+  /** What it reads now; `missing` for what is gone. */
+  now: string
+}
+
+/** One half of a reserved.v1 reading's treatment pin, as its reservation stored it (P-792). */
+export interface TreatmentPin {
+  body: Record<string, unknown>
+  /** `deployment_fp` or `arm_fp`. */
+  digest: string
+  /** The `reading.reserved` event that pinned it. */
+  event_id: string
+}
+
+/** A reserved.v1 reading's treatment pins: the deployment half (per campaign and repository) and one per arm. */
+export interface PinnedTreatment {
+  deployment: TreatmentPin | null
+  arms: Record<string, TreatmentPin>
 }
 
 /** A cell's proven context: its standard arm, or `standard: null` — "no proven standard". */
@@ -2570,6 +2628,10 @@ export interface ForwardReadingRequest {
   builder: string
   model: string
   provider: string
+  /** What the reading tests, written before any row is read (1 to 2000 characters; P-787). */
+  hypothesis: string
+  /** The smallest effect that would matter, a share of attempts in (0, 1]. */
+  smallest_effect: number
 }
 
 /** A ceiling's forward reading, as the work type's page serves it. */

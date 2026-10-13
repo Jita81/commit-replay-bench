@@ -36,17 +36,21 @@ What it does: Creates a fresh worktree per attempt, overlays the tests in sighte
               next rung pays — the decision is stamped on the row), keeps every attempt's
               patch before its pack is written, and skips tasks whose gold is known-bad. A
               builder crash is recorded and graded anyway; only a sandbox failure,
-              cancellation or an attempt the ``admit`` hook refuses (the spend cap) stops the
-              run — the last before anything of that attempt exists. A task mined before the
-              miner stamped its change identity gets it here (``change_identity``), so every
-              row names the change it observed; each pack is written through a temporary name
-              of its own process.
-How:          ``run`` iterates tasks (checking ``stop`` and ``gold_clean``) → ``run_task``
-              loops the ladder: ``Workspace.create`` → ``build_fn`` → ``grade`` →
-              ``keep_patch`` → ``escalation_gate`` (not clean) → ``EvidencePack`` →
-              ``write_pack`` → ``ledger.append(row_from(...))`` →
-              ``Workspace.remove`` → ``RunSummary`` with first-pass and any-attempt counts
-              kept separate.
+              cancellation, an attempt the ``admit`` hook refuses (the spend cap) or a first
+              attempt the ``reserve`` hook will not reserve stops the run — the last two before
+              anything the builder does exists. Under a reserved.v1 reading (P-792) each task's
+              ``r1`` is reserved once its worktree is ready and before its build: a commit
+              another attempt holds is skipped (``run.task_skipped``, no build, no row, not one
+              of the run's tasks) and a reservation that raised propagates, never a row. A
+              task mined before the miner stamped its change identity gets it here
+              (``change_identity``), so every row names the change it observed; each pack is
+              written through a temporary name of its own process.
+How:          ``run`` iterates tasks (checking ``stop``; a skipped task is not counted) →
+              ``run_task`` loops the ladder: ``admit`` → ``Workspace.create`` → (``r1``)
+              ``reserve`` → ``build_fn`` → ``grade`` → ``keep_patch`` → ``escalation_gate``
+              (not clean) → ``EvidencePack`` → ``write_pack`` →
+              ``ledger.append(row_from(...))`` → ``Workspace.remove`` → ``RunSummary`` with
+              first-pass and any-attempt counts kept separate.
 Layer:        core — docs/ARCHITECTURE.md#51-a-replay-run-sighted
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0006-zero-raw-retention-and-evidence-packs.md,
@@ -76,7 +80,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from crb.core import version as _version
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack
@@ -123,6 +127,42 @@ class BuildAttempt:
 #: the core and a builder: it edits ``workspace.root`` and reports what it spent. It is
 #: never given the belt scope, the baseline or the grader (ADR-0004).
 BuildFn = Callable[[Workspace, TaskSpec, str, str], BuildAttempt]
+
+#: What :attr:`RunSpec.reserve` answers before a task's ``r1`` build (P-792 reserved.v1).
+ReserveStatus = Literal["ok", "skip", "halt"]
+RESERVE_OK: ReserveStatus = "ok"
+RESERVE_SKIP: ReserveStatus = "skip"
+RESERVE_HALT: ReserveStatus = "halt"
+RESERVE_STATUSES: tuple[ReserveStatus, ...] = (RESERVE_OK, RESERVE_SKIP, RESERVE_HALT)
+
+
+@dataclass(frozen=True)
+class ReserveResult:
+    """The reserver's answer before a task's first attempt is built (P-792 reserved.v1).
+
+    ``ok``: the attempt is reserved — whatever it does from here (a miss, a kill, a cancel,
+    a harness failure, no row at all) is the commit's one attempt. ``skip``: the commit is
+    not this run's to attempt (``reason``: another reservation holds it, or the reading never
+    enrolled it); the run moves to its next task with nothing built and no row. ``halt``: the
+    run may not reserve (``reason``: its treatment is not the pinned one, its arm is not read,
+    its claim is no longer its own, a cancel was asked); it stops before the build and the
+    commit stays pending. ``detail`` is what the halt event carries (a treatment mismatch:
+    both projections). A skip or a halt without a reason would pass or stop silently, and an
+    unknown status would read as neither, so both are refused here."""
+
+    status: ReserveStatus
+    reason: str = ""
+    detail: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.status not in RESERVE_STATUSES:
+            raise ValueError(
+                f"reserve status must be one of {RESERVE_STATUSES}, got {self.status!r}"
+            )
+        if self.status != RESERVE_OK and not self.reason:
+            raise ValueError(f"a reserve {self.status!r} must name its reason")
+        object.__setattr__(self, "detail", dict(self.detail))
+
 
 #: ``context_for(task) -> GradeContext`` — the task's grade context in the run's posture
 #: (ADR-0019 §3): its qualification there, its dependency bindings and the witness. It
@@ -180,6 +220,14 @@ class RunSpec:
     #: it; any other string halts the run there, before a worktree or a builder call, and is
     #: the run's stop reason (the worker's per-run spend cap, F5b). ``None`` admits all.
     admit: Callable[[TaskSpec, int], str] | None = None
+    #: Asked once per task, before its ``r1`` build (P-792 reserved.v1): after ``admit`` and
+    #: once the worktree is ready, before anything the builder does exists. ``ok`` reserves
+    #: the attempt (every exit after it is the commit's one attempt); ``skip`` moves to the
+    #: next task with nothing built and no row (``run.task_skipped``); ``halt`` stops the run
+    #: there (``run.halted`` with the reserver's ``detail``) and leaves the commit pending.
+    #: What it raises propagates — a reservation not written is never a row. ``None`` reserves
+    #: nothing (every run not under a reserved.v1 reading).
+    reserve: Callable[[TaskSpec], ReserveResult] | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in MODES:
@@ -218,9 +266,13 @@ class TaskOutcome:
     rows: tuple[GradeRow, ...]
     packs: tuple[str, ...]  # evidence pack hashes
     duration_s: float
-    #: Why the run halts at this task (``RunSpec.admit`` refused an attempt); ``""`` when
-    #: the ladder ended on its own.
+    #: Why the run halts at this task (``RunSpec.admit`` refused an attempt, or
+    #: ``RunSpec.reserve`` would not reserve its first); ``""`` when the ladder ended on its own.
     halted: str = ""
+    #: Why the task was skipped before its first build (``RunSpec.reserve``: the commit is
+    #: reserved elsewhere, or not enrolled); ``""`` when it was attempted. A skipped task has
+    #: no rows and is not one of the run's tasks.
+    skipped: str = ""
 
 
 @dataclass(frozen=True)
@@ -328,7 +380,7 @@ def run_task(
     assert spec.context_for is not None  # __post_init__ refuses a RunSpec without one
     ctx = spec.context_for(task)
     task = ctx.spec(task)
-    halted = ""
+    halted = skipped = ""
     if is_v2_apparatus(_version.APPARATUS_VERSION) and not task.labels.get(LABEL_CHANGE_ID):
         # mined before the miner stamped it (G-954); a 2.4 replay row must carry it, and a
         # row below 2.4 never does (DL-094 (2)), so it is computed only when it is written
@@ -350,6 +402,27 @@ def run_task(
             # blind: the held-out tests reach the worktree only inside grade()
             if spec.mode == MODE_SIGHTED:
                 ws.overlay_tests(task.test_files)
+            # P-792: the first attempt is reserved once its worktree is ready (a failure making
+            # it leaves the commit pending) and before anything the builder does exists, so
+            # every exit after this point is the commit's one attempt. Outside the builder's
+            # ``except``: a reservation that raised is never recorded as a graded attempt.
+            if i == 1 and spec.reserve is not None:
+                reserved = spec.reserve(task)
+                if reserved.status == RESERVE_SKIP:
+                    skipped = reserved.reason
+                    _emit(on_event, "run.task_skipped", task=task.task_id, reason=skipped)
+                    break
+                if reserved.status == RESERVE_HALT:
+                    halted = reserved.reason
+                    _emit(
+                        on_event,
+                        "run.halted",
+                        task=task.task_id,
+                        trial=trial,
+                        reason=halted,
+                        detail=dict(reserved.detail),
+                    )
+                    break
             _emit(
                 on_event, "build.start", task=task.task_id, trial=trial, rung=rung, mode=spec.mode
             )
@@ -480,6 +553,7 @@ def run_task(
         tuple(packs),
         time.monotonic() - started,
         halted,
+        skipped,
     )
 
 
@@ -516,6 +590,8 @@ def run(
             stopped = f"sandbox unavailable: {exc}"
             _emit(on_event, "run.error", error=stopped)
             break
+        if outcome.skipped:  # reserved elsewhere or not enrolled: not attempted, not counted
+            continue
         if outcome.attempts or not outcome.halted:  # a task halted before it began is not one
             n += 1
         rows += outcome.attempts

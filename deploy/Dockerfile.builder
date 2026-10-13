@@ -78,6 +78,14 @@ RUN set -eu; \
 FROM ${BASE_IMAGE} AS builder
 ARG CLAUDE_CODE_VERSION
 
+# Root for the install steps. The shipped sandbox images end as USER 65534:65534
+# (deploy/sandbox/Dockerfile.go), and a stage inherits its base's user: without this, apt-get
+# and the chmod below fail on the Go base ("List directory /var/lib/apt/lists/partial is
+# missing ... Permission denied"). Numeric, like every USER here (hadolint DL3066). The image
+# still ends non-root (the USER 65534:65534 below); CI builds the Go variant on the freshly
+# built Go sandbox image and runs it as uid 65534 (P-791).
+USER 0:0
+
 # hadolint ignore=DL3008
 RUN set -eu; \
     if command -v apt-get >/dev/null 2>&1; then \
@@ -89,6 +97,9 @@ RUN set -eu; \
 
 COPY --from=claude-cli /claude /usr/local/bin/claude
 
+# grep ends the pipe and fails on empty input, so a CLI that does not answer fails the build
+# without pipefail (the base's /bin/sh may have no such option).
+# hadolint ignore=DL4006
 RUN set -eu; \
     mkdir -p /work; chmod 0755 /work; \
     HOME=/tmp claude --version | grep -F "${CLAUDE_CODE_VERSION}"

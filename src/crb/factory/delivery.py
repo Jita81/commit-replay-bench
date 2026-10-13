@@ -75,7 +75,8 @@ Works with:   src/crb/factory/build.py (``BuildResult`` and its kept workspace),
               (``record_delivery`` / ``record_delivery_updated`` /
               ``record_delivery_refused`` / ``record_delivery_outcome``),
               docs/SECURITY.md#33-credentials
-Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py
+Tested by:    tests/test_factory_delivery.py, tests/test_factory_loop.py,
+              tests/test_factory_loop_route_gate.py, tests/test_factory_loop_signed_cell.py
 Touch when:   onboarding a repository hosted somewhere other than GitHub — add an
               ``open_pr_fn`` + ``comment_pr_fn`` + ``close_pr_fn`` seam (Azure DevOps,
               GitLab) and a credentials provider; NEVER relax ``ALWAYS_PROTECTED_BRANCHES``,

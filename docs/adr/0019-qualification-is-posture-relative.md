@@ -196,7 +196,7 @@ The same flaw cuts the other way for the negative controls. An environment that 
 | `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify` and delete any set it names (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Tasks screen shows how it differs from other postures |
 | `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
-| `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the oracle is not deterministic in this posture |
+| `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed, on green or by passing no target test in common: the oracle is not deterministic in this posture |
 | `QUAL_HEADROOM` | task | the gold needed more than half the wall clock: raise the repository's timeout |
 | `QUAL_TREE_COPY_FAILED` | task | the tree did not fit the copy: raise `work_size`, or choose `sandbox_tree: readonly` |
 | `PROVISION_DISABLED`, `PROVISION_PUBLIC_REGISTRY`, `PROVISION_FETCH_IMAGE_UNPINNED`, `PROVISION_STORE_NOT_VISIBLE`, `PROVISION_UNSUPPORTED_LANGUAGE` | run | a deployment setting; each fix names the setting (DEPLOYMENT §3.4) |

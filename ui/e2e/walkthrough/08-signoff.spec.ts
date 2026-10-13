@@ -165,7 +165,7 @@ test.describe('08 sign-off policy', () => {
     await expect(gate).toHaveAttribute('data-state', 'CLOSED')
     await expect(gateRow(gate, 'Cell is measured')).toContainText(/✓\s*satisfied:/)
     await expect(gateRow(gate, 'false-Q1 = 0')).toContainText(/✓\s*satisfied:/)
-    await expect(gateRow(gate, 'n ≥ 10')).toContainText(/✗\s*not satisfied:/)
+    await expect(gateRow(gate, 'distinct tasks ≥ 10')).toContainText(/✗\s*not satisfied:/)
     await expect(gateRow(gate, /Negative controls passed/)).toContainText(escaped ? /✗\s*not satisfied:/ : /✓\s*satisfied:/)
     await expect(gateRow(gate, 'Route = deliver')).toContainText(/✗\s*not satisfied:/)
     await expect(gateRow(gate, 'The standard arm’s registered reading delivers')).toContainText(/✗\s*not satisfied:/)

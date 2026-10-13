@@ -20,8 +20,10 @@ What it is:   The qualification record, its states and refusal codes, and the pr
               replay path grades against.
 What it does: Holds, for one task in one posture, the state and any refusal code with its
               fix, the dependency bindings, the environment probe, the kind of RED, the
-              two-run baseline (union and flaky set), the gold's facts, a fingerprint of what
-              the oracle rests on, and how it differs from the task's other postures.
+              two-run baseline (union and flaky set), the gold's facts (with the target tests
+              it passed in both runs, which belt 2 requires: ADR-0048 decision 7), a
+              fingerprint of what the oracle rests on, and how it differs from the task's
+              other postures.
 How:          A frozen dataclass with ``to_dict`` / ``from_dict``; ``fingerprint_of`` is a
               SHA-256 over the oracle-relevant facts only; ``project`` returns a
               ``TaskSpec`` via ``TaskSpec.with_``.
@@ -31,7 +33,7 @@ Works with:   src/crb/core/posture.py (the posture a record is keyed to), src/cr
               (the ``TaskSpec`` a record projects), src/crb/core/deps.py (the bindings a
               record carries), src/crb/core/mine.py (discovers the tasks this qualifies),
               src/crb/core/evidence.py (canonical JSON, timestamps)
-Tested by:    tests/test_qualify.py
+Tested by:    tests/test_qualify.py, tests/test_belt2_passes.py
 Touch when:   never for a new repository; a fact the oracle rests on joins the record (add it to the
               fingerprint too); a refusal code is added (``QUAL_TEXT`` and ADR-0019's table
               together).
@@ -152,7 +154,8 @@ QUAL_TEXT: dict[str, str] = {
         "a task with a dirty gold always was"
     ),
     QUAL_TARGET_FLAKY: (
-        "the gold's 2 target runs disagreed: the oracle is not deterministic in this posture"
+        "the gold's 2 target runs disagreed, on green or by passing no target test in "
+        "common: the oracle is not deterministic in this posture"
     ),
     QUAL_HEADROOM: "the gold needed more than half the wall clock: raise the repository's timeout",
     QUAL_TREE_COPY_FAILED: (
@@ -185,23 +188,24 @@ def _sorted_tuple(items: Sequence[str] | None) -> tuple[str, ...]:
 
 def fingerprint_of(q: Qualification) -> str:
     """SHA-256 over the facts the oracle rests on — the kind of RED and its failing ids,
-    the baseline and its flaky set, whether the gold is clean and its lint verdict. Timing,
-    ids, the run and the probe's duration are not part of it: two postures whose
-    fingerprints match judge a patch on the same ground (ADR-0019 §8)."""
+    the baseline and its flaky set, whether the gold is clean and its lint verdict, and the
+    target tests the gold passed when the record carries them (only then, so a record
+    written before them hashes as it always did). Timing, ids, the run and the probe's
+    duration are not part of it: two postures whose fingerprints match judge a patch on the
+    same ground (ADR-0019 §8)."""
     red = dict(q.red)
     gold = dict(q.gold)
-    return sha256_text(
-        canonical_json(
-            {
-                "red_kind": str(red.get("kind", "")),
-                "red_failing": sorted(str(x) for x in red.get("failing") or ()),
-                "baseline_failing": list(q.baseline_failing),
-                "baseline_flaky": list(q.baseline_flaky),
-                "gold_clean": gold.get("clean"),
-                "gold_lint": gold.get("lint"),
-            }
-        )
-    )
+    facts: dict[str, Any] = {
+        "red_kind": str(red.get("kind", "")),
+        "red_failing": sorted(str(x) for x in red.get("failing") or ()),
+        "baseline_failing": list(q.baseline_failing),
+        "baseline_flaky": list(q.baseline_flaky),
+        "gold_clean": gold.get("clean"),
+        "gold_lint": gold.get("lint"),
+    }
+    if gold.get("target_passed") is not None:
+        facts["gold_target_passed"] = sorted(str(x) for x in gold["target_passed"])
+    return sha256_text(canonical_json(facts))
 
 
 @dataclass(frozen=True)
@@ -606,7 +610,10 @@ def qualify_task(
     4. the gold (a fresh worktree with the tests and the commit's sources, the GOLD's
        binding): the target twice and the belt scope once at HALF the wall clock, then
        belt 5 — ``QUAL_GOLD_NOT_GREEN`` / ``QUAL_TARGET_FLAKY`` / ``QUAL_HEADROOM`` /
-       ``QUAL_GOLD_NEW_FAILURES`` / ``QUAL_GOLD_LINT``.
+       ``QUAL_GOLD_NEW_FAILURES`` / ``QUAL_GOLD_LINT``. When the runner reports passes, the
+       target tests that passed in BOTH gold runs are recorded (``gold["target_passed"]``):
+       belt 2 requires a pass for each (ADR-0048 decision 7). Runs that passed target tests
+       but none in both are ``QUAL_TARGET_FLAKY``, as the record would require none.
 
     A tree the executor could not copy is ``QUAL_TREE_COPY_FAILED`` at any step. ``deps``
     may be a provider: its task-scope refusal — or one the runner raises while it prepares
@@ -815,6 +822,19 @@ def qualify_task(
                     return refuse(QUAL_TARGET_FLAKY, gold["note"])
                 gold["note"] = f"gold target not green (rc={reds[0].returncode})"
                 return refuse(QUAL_GOLD_NOT_GREEN, gold["note"])
+            # what belt 2 requires of a patch: the target tests the gold passed both times
+            # (a test that passed only once is not required; F4, ADR-0048 decision 7)
+            first, second = targets[0].passed, targets[1].passed
+            if first is not None and second is not None:
+                if (first | second) and not (first & second):
+                    # passes, but none in both runs: requiring none would leave belt 2 to the
+                    # exit code (a gold that passed nothing in either run still requires none)
+                    gold["note"] = (
+                        "the gold's 2 target runs disagreed: no target test passed in both "
+                        f"({len(first)} and {len(second)} passed)"
+                    )
+                    return refuse(QUAL_TARGET_FLAKY, gold["note"])
+                gold["target_passed"] = sorted(first & second)
             belt = runner.run_belt_for(
                 executor,
                 gws.root,

@@ -18,8 +18,10 @@ Shape (repo ``alpha`` unless noted):
 
 Every native row carries a real :class:`~crb.core.evidence.EvidencePack` whose grade
 matches the row's belts, stored via ``DbLedger.store_pack``; ``append_many`` chains
-the rows. Nothing here bypasses the write path — tests that need a false-Q1 row
-insert one deliberately with the ORM and say so.
+the rows. Every native row records ``builder_executor`` ``host`` (the apparatus executor
+is ``local``), as the ledger requires of a replay row at write (P-795). Nothing here
+bypasses the write path — tests that need a false-Q1 row insert one deliberately with the
+ORM and say so.
 
 Navigation
 ----------
@@ -28,7 +30,8 @@ What it is:   The seeded store behind every domain-route test: a small synthetic
 What it does: Seeds repo ``alpha`` with a deliver cell (40 rows, 38 clean), a thin cell, a
               legacy census-style cell, one harness-error row, a run per status plus oracle,
               controls and probe runs with their events, and repo ``beta`` as the honest-empty
-              case; every native row carries a real evidence pack whose grade matches its belts.
+              case; every native row carries a real evidence pack whose grade matches its belts
+              and records ``builder_executor`` ``host``, as the ledger requires (P-795).
               Nothing bypasses the write path — a test that needs a false-Q1 row inserts one
               with the ORM deliberately and says so. ``assert_rbac`` pins 401/403/allowed per
               role ladder.
@@ -70,7 +73,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, canonical_json, sha256_text
 from crb.core.grade import Belts, GradeResult
-from crb.core.ledger import BELT_SET_V3_LEGACY, GradeRow, grade_row_from_result
+from crb.core.ledger import (
+    BELT_SET_V3_LEGACY,
+    LABEL_BUILDER_EXECUTOR,
+    GradeRow,
+    grade_row_from_result,
+)
 from crb.core.oracle.mutation import mutation_version
 from crb.core.spec import TaskSpec
 from crb.core.version import APPARATUS_VERSION
@@ -356,6 +364,7 @@ def seed(factory: sessionmaker[Session], *, clone_path: str = "") -> SeedInfo:
                 run_id=run_id,
                 trial=trial,
                 actor="worker-1",
+                labels={LABEL_BUILDER_EXECUTOR: "host"},  # P-795: as the worker stamps it
             )
         )
 
@@ -798,12 +807,15 @@ class Env:
 
 
 @contextmanager
-def make_env(tmp_path: Path, *, clone_path: str = "", role: str | None = "admin") -> Iterator[Env]:
-    """Seeded SQLite + users + a running app; logged in as ``role`` (``None`` = anonymous)."""
+def make_env(
+    tmp_path: Path, *, clone_path: str = "", role: str | None = "admin", **settings_overrides: Any
+) -> Iterator[Env]:
+    """Seeded SQLite + users + a running app; logged in as ``role`` (``None`` = anonymous);
+    ``settings_overrides`` reach :func:`make_settings` (``SEALED_SETTINGS``: a sealed one)."""
     factory = make_factory(tmp_path)
     info = seed(factory, clone_path=clone_path)
     add_users(factory)
-    settings = make_settings(tmp_path)
+    settings = make_settings(tmp_path, **settings_overrides)
     with TestClient(create_app(settings, factory)) as client:
         if role is not None:
             login(client, role)

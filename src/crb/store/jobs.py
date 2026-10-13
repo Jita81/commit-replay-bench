@@ -19,7 +19,13 @@ Guarantees
   ``max_reclaims`` a run is ``failed`` (a poison-pill run never loops forever).
 * **A zombie cannot overwrite.** ``progress`` / ``finish`` may be scoped to the
   claiming ``worker_id``; a worker whose claim was reclaimed gets
-  :class:`StaleClaim` instead of clobbering the new owner's state.
+  :class:`StaleClaim` instead of clobbering the new owner's state. Nor can it land a
+  row: :func:`claim_guard` is the guard ``DbLedger.append`` runs under the grades lock,
+  and it refuses (:class:`crb.store.ledger.AttemptSettled`) unless the run is still
+  running on that worker under that claim (the ``reclaims`` counter), so a row never
+  lands after the reclaim that settled its attempt (P-792 C1). The worker runs it on
+  every row of a claimed run, reserved or not, and raises :class:`ClaimLost` on a
+  refusal or once its heartbeat was refused (F87-5).
 * **Cancellation is cooperative, and recorded.** :meth:`request_cancel` on a
   queued run cancels it outright; on a running run it sets ``cancel_requested`` and
   the worker stops between tasks (counts so far are kept). Both cases write a
@@ -37,15 +43,21 @@ Navigation
 What it is:   The job queue — the ``runs`` table driven as a durable, crash-safe work queue.
 What it does: Enqueues runs (or stages them in a caller's own transaction), hands each to
               exactly one worker, measures liveness by heartbeat, re-queues (then abandons)
-              runs whose worker died, refuses a stale worker's writes, and supports
-              cooperative cancellation. Every reclaim and abandonment is recorded as a
-              ``system`` event, never silently.
+              runs whose worker died, refuses a stale worker's writes (and, through
+              ``claim_guard``, any ledger row of a claim that is gone — ``ClaimLost``,
+              F87-5), and supports cooperative
+              cancellation. Every reclaim and abandonment is recorded as a ``system`` event,
+              never silently.
 How:          ``claim_next`` flips ``queued → running`` in one locked transaction (``BEGIN
               IMMEDIATE`` / ``FOR UPDATE SKIP LOCKED``); ``heartbeat`` / ``progress`` refresh
               the stamp; ``reclaim_stale`` compares stamps to a threshold in Python;
               ``finish`` is idempotent on a terminal run; ``stage_queued`` is the enqueue
               inside a caller's transaction (a run and the event that records it commit
-              together).
+              together); ``claim_guard`` reads the run ``FOR UPDATE`` inside the append's
+              transaction. Lock order: the grades (7331) or events (7332) lock first, a
+              ``runs`` row lock after — so ``request_cancel`` and ``reclaim_stale`` commit
+              the run before they write its event, and nothing takes 7331 or 7332 while it
+              holds a ``runs`` row (tests/test_p792_reserved_store.py walks the tree for it).
 Layer:        store — docs/ARCHITECTURE.md#73-data-model-store-p4
 ADRs:         none
 Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns),
@@ -54,9 +66,14 @@ Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns)
               src/crb/server/routes/runs.py (enqueues, lists and cancels over HTTP),
               src/crb/server/worker_main.py (the process that polls this queue),
               src/crb/server/routes/learn.py (``stage_queued`` — a re-measurement's runs
-              and their event in one transaction)
+              and their event in one transaction), src/crb/store/ledger.py
+              (``DbLedger.append`` runs ``claim_guard``; ``AttemptSettled``, which
+              ``ClaimLost`` extends)
 Tested by:    tests/test_store_jobs.py, tests/test_server_routes_runs.py,
-              tests/test_server_routes_learn.py
+              tests/test_server_routes_learn.py, tests/test_p792_reserved_store.py,
+              tests/test_p792_reserved_reservation.py and tests/test_p792_reserved_losses.py
+              (``claim_guard``: a lost claim's append refused end to end),
+              tests/test_worker.py (``ClaimLost``: a worker that lost its claim)
 Touch when:   never for a new repository; adding a run kind means extending ``RUN_KINDS``
               here and the executor table in src/crb/server/worker.py together (and
               docs/API.md); changing the reclaim threshold or ``max_reclaims`` default is an
@@ -67,7 +84,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import func, select, text
@@ -77,6 +94,7 @@ from crb.core.evidence import utc_now_iso
 from crb.core.grade import MODE_BLIND, MODE_SIGHTED
 from crb.observability.events import StepStatus
 from crb.store.events import append_event
+from crb.store.ledger import AttemptSettled
 from crb.store.models import Run
 
 STATUS_QUEUED = "queued"
@@ -125,6 +143,14 @@ RECLAIMS_KEY = "reclaims"
 
 class StaleClaim(RuntimeError):
     """The run is no longer owned by this worker (reclaimed or finished elsewhere)."""
+
+
+class ClaimLost(AttemptSettled):
+    """This worker's claim on a run is gone, so the run appends no more rows (F87-5): its
+    heartbeat was refused (the run was reclaimed, finished or taken by another worker), or
+    :func:`claim_guard` refused a row under the grades lock. The worker's ledger raises it
+    before any append, reserved or not; as an :class:`~crb.store.ledger.AttemptSettled` it
+    ends the run ``run.finish_refused``, and the current claim's record stands."""
 
 
 def new_run_id() -> str:
@@ -191,6 +217,41 @@ def stage_queued(session: Session, run: Run) -> Run:
             setattr(run, attr, [] if attr == "ladder_json" else {})
     session.add(run)
     return run
+
+
+def claim_guard(run_id: str, worker_id: str, claim: int) -> Callable[[Session], None]:
+    """The guard a claimed run's row is appended under — a reserved attempt's (P-792 C1) and,
+    since F87-5, every other row the worker writes for the run: ``DbLedger.append(row,
+    guard=claim_guard(run_id, worker_id, claim))``.
+
+    It locks the run's row (``FOR UPDATE``) in the append's transaction, after the grades
+    lock, and raises :class:`~crb.store.ledger.AttemptSettled` — so the row is not written —
+    unless the run is ``running`` on ``worker_id`` under ``claim`` (its ``reclaims`` count
+    when the worker claimed it). A reclaim moves the count even when the same worker claims
+    the run back, so the claim, not the worker id, names the attempt. The row lock serialises
+    the guard with a reclaim: one waiting on it re-reads the run after the guard's commit, and
+    a guard waiting on a reclaim re-reads the run the reclaim committed. A cancel request does
+    not settle the attempt: cancellation is cooperative, and the task in flight lands its row.
+    """
+
+    def guard(s: Session) -> None:
+        run = s.execute(
+            select(Run)
+            .where(Run.id == run_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if run is None:
+            raise AttemptSettled(f"run {run_id[:8]} does not exist")
+        reclaims = int((run.counts_json or {}).get(RECLAIMS_KEY, 0))
+        if run.status != STATUS_RUNNING or run.worker_id != worker_id or reclaims != claim:
+            raise AttemptSettled(
+                f"run {run_id[:8]}'s attempt under claim {claim} by {worker_id!r} is settled: "
+                f"the run is {run.status}, owned by {run.worker_id or '(nobody)'!r}, "
+                f"at claim {reclaims}"
+            )
+
+    return guard
 
 
 class JobQueue:
@@ -510,9 +571,11 @@ __all__ = [
     "STATUS_RUNNING",
     "STATUS_SUCCEEDED",
     "TERMINAL_STATUSES",
+    "ClaimLost",
     "JobQueue",
     "StaleClaim",
     "age_s",
+    "claim_guard",
     "new_run_id",
     "parse_ts",
     "stage_queued",

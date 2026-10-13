@@ -14,12 +14,14 @@ What it is:   The API's reading of the qualification records — the posture sum
               repository and the submit-time gate.
 What it does: Picks the latest posture recorded for (repository, executor, image); counts
               qualified tasks and refusals by code with their fixes; names why the record is
-              stale (none yet, another apparatus); refuses a build run with nothing qualified.
+              stale (none yet, another apparatus); refuses a build run with nothing qualified;
+              names the posture class a run of a repository would be graded in.
 How:          Store reads (``crb.store.qualifications``) → plain dicts the routes serve.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0019-qualification-is-posture-relative.md
 Works with:   src/crb/store/qualifications.py (the records), src/crb/server/routes/runs.py
-              (the 409), src/crb/server/routes/repos.py (``GET /repos/{name}/posture``),
+              (the 409s: ``posture_unqualified``, ``reading_posture_mismatch``),
+              src/crb/server/routes/repos.py (``GET /repos/{name}/posture``),
               src/crb/core/qualify.py (codes, fixes, deltas), src/crb/server/settings.py (the
               deployment's executor, image and provisioning)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_routes_repos.py
@@ -66,17 +68,18 @@ def deployment_image(settings: Any, repo: Repo | None) -> str:
     return image or str(getattr(settings.sandbox, "image", "") or "")
 
 
-def deployment_posture_class(settings: Any, repo: Repo | None = None) -> str:
+def deployment_posture_class(settings: Any, repo: Repo | None = None, executor: str = "") -> str:
     """The posture class this deployment grades ``repo`` in — ``executor/tree/dependency
     mode`` — from its settings and the repository's own ``sandbox_tree`` (the map's default
     filter; the worker measures the full posture live before every run):
-    :func:`crb.core.posture.expected_posture_class`, the rule the worker uses too."""
+    :func:`crb.core.posture.expected_posture_class`, the rule the worker uses too.
+    ``executor`` is a run's own (``RunCreateRequest.executor``), else the deployment's."""
     tree = ""
     if repo is not None:
         tree = str(dict(repo.config_json or {}).get("sandbox_tree") or "")
     provision = getattr(settings, "provision", None)
     return expected_posture_class(
-        deployment_executor(settings),
+        deployment_executor(settings, executor),
         tree=tree or str(getattr(settings.sandbox, "tree", "") or ""),
         provisioning=bool(getattr(provision, "enabled", False)),
     )

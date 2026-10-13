@@ -15,7 +15,9 @@
  *               gate's check-rows with observed vs threshold, and non-overridable clauses
  *               (false-Q1, oracle unmeasured, attestation missing, same actor) are marked so —
  *               the *Signed by a second person* row is pending (○), not satisfied, until a row
- *               is named, because the attested row is judged only then; the action is
+ *               is named, because the attested row is judged only then; the thin-cell row
+ *               counts distinct tasks, as the server does, with the attempts beside them
+ *               (P-788); the action is
  *               disabled until the preview says `signable` AND the approver has named a
  *               row, ticked "I have read this accepted diff" and written a statement; while
  *               a newly named row's preview loads, the gate is pending and the action
@@ -142,7 +144,9 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
   return [
     { label: 'Cell is measured', ok: ev.measured, detail: `n = ${fmtInt(ev.n)}`, hint: 'gate.signoff.measured' },
     { label: 'false-Q1 = 0', ok: !fam.has('false_q1') && ev.false_q1 === 0, detail: `false_q1 = ${ev.false_q1}`, hint: 'gate.signoff.false_q1' },
-    { label: `n ≥ ${p.n_min}`, ok: !fam.has('thin_cell'), detail: `n = ${fmtInt(ev.n)} · point ${fmtPct(ev.point)} · Wilson lower ${fmtPct(ev.ci_low)}`, hint: 'gate.signoff.thin_cell' },
+    // thin_cell counts distinct tasks, never attempts (P-788); an older server serves no n_tasks
+    // the label claims a distinct-task count only when the server counted one
+    { label: typeof ev.n_tasks === 'number' ? `distinct tasks ≥ ${p.n_min}` : `evidence ≥ ${p.n_min} (distinct tasks not counted)`, ok: !fam.has('thin_cell'), detail: `${typeof ev.n_tasks === 'number' ? `tasks = ${fmtInt(ev.n_tasks)} (n = ${fmtInt(ev.n)} attempts)` : `n = ${fmtInt(ev.n)} attempts — this server does not count distinct tasks`} · point ${fmtPct(ev.point)} · Wilson lower ${fmtPct(ev.ci_low)}`, hint: 'gate.signoff.thin_cell' },
     {
       label: `Negative controls passed, ≤ ${p.max_controls_escapes} escape(s), ≥ ${fmtPct(p.min_constructible_share, 0)} constructible`,
       ok: !fam.has('controls_unmeasured') && !fam.has('controls_failed') && !fam.has('controls_escapes') && !fam.has('controls_thin'),

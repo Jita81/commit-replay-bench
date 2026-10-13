@@ -9,7 +9,9 @@ What it does: Reads ONE reading of the ledger (the current apparatus, sighted, c
               posture classes exit 2), routes each full cell under routing.v2 with the
               registered readings, oracle scores and controls report it is handed, prints
               each cell's shortfalls with their next act, and exits 1 when any cell is
-              ``do_not_ship``. ``--help`` quotes the published bar. ``load_policy`` is also
+              ``do_not_ship``. A reading that names a campaign counts no row here — a file
+              holds no admissions (DL-382) — and is named under ``admissions_unread``.
+              ``--help`` quotes the published bar. ``load_policy`` is also
               what ``crb learn`` uses for its ``--policy-json``.
 How:          ``JsonlLedger.rows`` → ``rows_for_reading`` → ``build_capability_map`` (with a
               ``ReadingBook``) → table / JSON.
@@ -45,7 +47,7 @@ from crb.core.capability import PROJECTION_CELL, ReadingBook, build_capability_m
 from crb.core.checks import ARM_OFF, ARMS
 from crb.core.context_arm import is_arm, mode_admits
 from crb.core.ledger import DEFAULT_READ_ARM, JsonlLedger, rows_for_checks, rows_for_reading
-from crb.core.reading import Reading
+from crb.core.reading import Reading, first_per_id
 from crb.core.routing import DEFAULT_POLICY, ROUTE_DO_NOT_SHIP, RoutingPolicy
 from crb.core.version import APPARATUS_VERSION
 
@@ -172,8 +174,9 @@ def oracle_minimums(spec: str, apparatus: str) -> dict[str, float | None]:
 
 
 def load_readings_file(spec: str) -> list[Reading]:
-    """The readings a ``--readings`` JSON-lines file holds; a record that does not re-hash
-    is refused (a reading licenses nothing it cannot prove)."""
+    """The readings a ``--readings`` JSON-lines file holds, the first record of each
+    ``reading_id`` (``first_per_id``, P-793); a record that does not re-hash is refused (a
+    reading licenses nothing it cannot prove)."""
     if not spec:
         return []
     raw = _read_json(spec, what="--readings")
@@ -184,7 +187,7 @@ def load_readings_file(spec: str) -> list[Reading]:
         if not reading.verify():
             raise CliError(f"--readings: reading {reading.reading_id!r} does not re-hash")
         out.append(reading)
-    return out
+    return first_per_id(out)
 
 
 def cmd_route(args: argparse.Namespace) -> int:
@@ -224,7 +227,10 @@ def cmd_route(args: argparse.Namespace) -> int:
         )
 
         controls = load_controls_export(_read_json(args.controls, what="--controls"))
-    book = ReadingBook.evaluate(load_readings_file(args.readings), every)
+    readings = load_readings_file(args.readings)
+    book = ReadingBook.evaluate(readings, every)
+    # a file holds no campaign admissions: such a reading counted no row (fail closed, DL-382)
+    unread = [r for r in readings if r.admissions_unread]
     scores = oracle_minimums(args.oracle, apparatus)
     cmap = build_capability_map(
         rows,
@@ -245,6 +251,7 @@ def cmd_route(args: argparse.Namespace) -> int:
         "rows": len(rows),
         "rows_by_arm": dict(sorted(by_arm.items())),
         "unmeasured": unmeasured,
+        "admissions_unread": [r.reading_id for r in unread],
         "policy": policy.to_dict(),
         "decisions": [d.to_dict() for d in decisions],
         "summary": {
@@ -298,6 +305,12 @@ def cmd_route(args: argparse.Namespace) -> int:
                 f"routed. The ledger's rows by checks arm: {others}; pass --checks with one of "
                 "them to route it."
             )
+        lines.extend(
+            f"reading {r.reading_id} names campaign {r.campaign_id}: it counts only rows of runs "
+            "admitted under it, and a readings file holds no admissions, so it counted no row "
+            "here (DL-382) — read it on the server (GET /api/v1/readings)."
+            for r in unread
+        )
         lines.append(
             f"{len(decisions)} cell(s) from {len(rows)} rows; policy {policy.version}: "
             f"{policy.describe()} Summary {out['summary']}"

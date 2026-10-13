@@ -245,19 +245,23 @@ class TestCreate:
     def test_seeded_deliver_cell_is_refused_on_the_controls_escape(self, env: Env) -> None:
         """The seed's controls report has one escape: the cell routes ``human`` and the
         policy refuses it — with every failing clause, observed vs threshold, and the
-        refusal on the record. Nothing is written."""
+        refusal on the record. Nothing is written. Its 40 attempts fall on 4 commits, so the
+        cell is thin first: the floor counts distinct tasks, not reruns (P-788)."""
         r = env.post("/signoffs", json=attested_body(env, DELIVER))
         assert r.status_code == 409, r.text
         e = envelope(r)
         assert e["code"] == "signoff_refused"
         d = e["detail"]
-        assert d["code"] == "controls_escapes" and d["threshold"] == 0 and d["observed_value"] == 1
-        assert "1 measurement control(s) graded clean" in e["message"]
-        assert "max_controls_escapes=0" in e["message"]
+        assert d["code"] == "thin_cell" and d["threshold"] == 10 and d["observed_value"] == 4
+        assert "tasks=4 < n_min=10" in e["message"]
+        esc = d["refusals"][1]
+        assert esc["code"] == "controls_escapes" and esc["threshold"] == 0
+        assert esc["observed"] == 1
         assert d["policy_version"] == "signoff-policy.v4" and d["thresholds"] == DEFAULT_THRESHOLDS
         # the map routes the cell under routing.v2: its host rows are not the sealed posture
         # (the route's first clause), and no reading licenses its arm (never overridable)
         assert _codes(d["refusals"]) == [
+            "thin_cell",
             "controls_escapes",
             "oracle_weak",
             "route_not_deliver:posture_unsealed",
@@ -279,7 +283,7 @@ class TestCreate:
         assert d["cell"]["capability_class"] == "bug.fix" and d["repo"] == ALPHA
         assert _signoffs(env) == []
         (ev,) = _events(env, "signoff.refused")
-        assert ev.status == "invalid" and ev.payload_json["code"] == "controls_escapes"
+        assert ev.status == "invalid" and ev.payload_json["code"] == "thin_cell"
         assert ev.payload_json["envelope_code"] == "signoff_refused"
 
     def test_201_once_the_controls_gate_is_clean_and_the_oracle_is_strong(self, env: Env) -> None:
@@ -462,8 +466,9 @@ class TestCreate:
         e = envelope(r)
         assert e["code"] == "signoff_refused"
         d = e["detail"]
-        assert d["code"] == "thin_cell" and d["threshold"] == 10 and d["observed_value"] == 4
-        assert "n=4 < n_min=10" in e["message"]
+        # 4 attempts on 2 commits: the floor counts the distinct tasks (P-788)
+        assert d["code"] == "thin_cell" and d["threshold"] == 10 and d["observed_value"] == 2
+        assert "tasks=2 < n_min=10" in e["message"]
         # the thin cell's tasks: one unscoreable seed score, one never scored → unmeasured
         # routing.v2: host rows never deliver (posture_unsealed), and no reading licenses
         # the arm (not_standard, never overridable)
@@ -1125,19 +1130,23 @@ class TestPreview:
             and d["cell"]["size"] == "S"
         )
         assert d["signable"] is False
+        # 40 attempts on 4 commits: thin by distinct tasks (P-788)
         assert _codes(d["refusals"]) == [
+            "thin_cell",
             "controls_escapes",
             "oracle_weak",
             "route_not_deliver:posture_unsealed",
             "not_standard:reading_unregistered",
             "attestation_missing",
         ]
-        esc = d["refusals"][0]
+        thin = d["refusals"][0]
+        assert thin["threshold"] == 10 and thin["observed"] == 4 and thin["overridable"] is True
+        esc = d["refusals"][1]
         assert esc["threshold"] == 0 and esc["observed"] == 1 and esc["overridable"] is True
-        weak = d["refusals"][1]
+        weak = d["refusals"][2]
         assert weak["threshold"] == 0.8 and weak["observed"] == SEED_ORACLE
-        assert d["refusals"][3]["overridable"] is False
         assert d["refusals"][4]["overridable"] is False
+        assert d["refusals"][5]["overridable"] is False
         # what the approver must see: n / point / Wilson-low / false-Q1 / oracle / split
         ev = d["evidence"]
         assert (
@@ -1230,7 +1239,8 @@ class TestPreview:
         pass_controls(env)  # the deployment grades on the host, where the thin rows were
         d = _preview(env, THIN).json()
         assert d["evidence"]["n"] == 4 and d["refusals"][0]["code"] == "thin_cell"
-        assert d["refusals"][0]["observed"] == 4 and d["refusals"][0]["threshold"] == 10
+        # 4 attempts on 2 commits: the floor counts the distinct tasks (P-788)
+        assert d["refusals"][0]["observed"] == 2 and d["refusals"][0]["threshold"] == 10
         assert d["refusals"][1]["code"] == "oracle_unmeasured"  # the thin cell's tasks: unscored
         assert d["evidence"]["oracle"] == {"strength": None, "scored": 0, "tasks": 2}
         assert d["route"]["reason_code"] == "posture_unsealed"

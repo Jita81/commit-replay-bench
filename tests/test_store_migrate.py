@@ -76,19 +76,34 @@ try:
 except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
     from conftest_store import Backend, backend, grade_row, pg_schema  # noqa: F401
 
-#: The packaged head: 0017, an organisation's class sets and the label table (north-star
-#: Wave 4b, stream CLS reserved it as 0047; the integration numbered it 0017).
-HEAD = "0017"
+#: The packaged head: 0018, the partial unique index that holds one reading reservation
+#: per (reading, arm, commit) (P-792; 0017 before it was an organisation's class sets).
+HEAD = "0018"
+#: Revision 0018's partial index and the predicate each dialect reflects it with: the one
+#: index whose WHERE clause ``compare_metadata`` does not read (risk 3 of the Wave 3 spec).
+RESERVED_INDEX = "uq_events_reading_reserved"
+RESERVED_WHERE = {
+    "sqlite": "action = 'reading.reserved'",
+    "postgresql": "((action)::text = 'reading.reserved'::text)",
+}
 
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 
 
+def _where_text(where: object) -> str:
+    """A reflected index predicate as text (SQLite reflects a ``TextClause``, which has no
+    truth value; PostgreSQL a string); ``""`` for a full index."""
+    return "" if where is None else str(where)
+
+
 def _snapshot(engine: Engine) -> dict[str, Any]:
     """A dialect-neutral, order-insensitive picture of the schema (tables, columns,
-    constraints, indexes) plus the trigger names. ``alembic_version`` excluded."""
+    constraints, indexes — each with its reflected WHERE clause, ``""`` for a full index)
+    plus the trigger names. ``alembic_version`` excluded."""
     insp = inspect(engine)
+    where = f"{engine.dialect.name}_where"
     snap: dict[str, Any] = {}
     for table in sorted(insp.get_table_names()):
         if table == "alembic_version":
@@ -97,7 +112,12 @@ def _snapshot(engine: Engine) -> dict[str, Any]:
         pk = tuple(insp.get_pk_constraint(table)["constrained_columns"])
         uniques = sorted(tuple(u["column_names"]) for u in insp.get_unique_constraints(table))
         indexes = sorted(
-            (str(i["name"]), tuple(i["column_names"]), bool(i["unique"]))
+            (
+                str(i["name"]),
+                tuple(i["column_names"]),
+                bool(i["unique"]),
+                _where_text(i.get("dialect_options", {}).get(where)),
+            )
             for i in insp.get_indexes(table)
         )
         fks = sorted(
@@ -131,7 +151,9 @@ def _canonical_sql(sql: str | None) -> tuple[str, frozenset[str]]:
     set of depth-0 comma-separated definitions. ``ALTER TABLE … ADD COLUMN`` on SQLite
     splices ``, col TYPE`` before the closing parenthesis of the stored text, so byte
     equality with ``create_all`` is unattainable past the initial revision; definition
-    equality is what the schema actually says (column order is checked by the inspector)."""
+    equality is what the schema actually says (column order is checked by the inspector).
+    Whatever follows the closing parenthesis — a partial index's ``WHERE …`` (revision
+    0018) — is kept on the head, so a predicate that differs is a different definition."""
     if not sql:
         return ("", frozenset())
     open_at = sql.find("(")
@@ -140,6 +162,8 @@ def _canonical_sql(sql: str | None) -> tuple[str, frozenset[str]]:
     # SQLite stores a table rebuilt by batch mode's rename as ``CREATE TABLE "t"``; the
     # quoted and bare lower-case names are one identifier, so the head drops the quotes
     head = " ".join(sql[:open_at].replace('"', "").split())
+    tail = " ".join(sql[sql.rfind(")") + 1 :].split())
+    head = f"{head} | {tail}" if tail else head
     body = sql[open_at + 1 : sql.rfind(")")]
     defs: list[str] = []
     depth = 0
@@ -244,6 +268,25 @@ def test_upgrade_head_equals_init_db(backend: Backend, tmp_path: Path) -> None:
 
     assert created == migrated
     assert created["__triggers__"] == sorted(name for _, name in expected_triggers(backend.dialect))
+    # risk 3: ``compare_metadata`` reads an index's name, columns and uniqueness but never its
+    # WHERE clause, so the partial index is pinned here directly, per dialect, on both sides
+    reserved = (
+        RESERVED_INDEX,
+        ("trace_id", "step_id", "task_id"),
+        True,
+        RESERVED_WHERE[backend.dialect],
+    )
+    assert reserved in migrated["events"]["indexes"]
+    assert reserved in created["events"]["indexes"]
+    # every other index of every table is a full one: the predicate is the reservation's only
+    assert [
+        ix[0] for table in Base.metadata.tables for ix in migrated[table]["indexes"] if ix[3]
+    ] == [RESERVED_INDEX]
+    if backend.dialect == "sqlite":
+        (row,) = [r for r in migrated_master if r[1] == RESERVED_INDEX]
+        assert row[3][0] == (
+            f"CREATE UNIQUE INDEX {RESERVED_INDEX} ON events | WHERE {RESERVED_WHERE['sqlite']}"
+        )
 
 
 def test_migration_defines_every_model_table(backend: Backend) -> None:
@@ -383,6 +426,73 @@ def test_head_status_of_an_older_release_create_all_schema(backend: Backend) -> 
     st = migrate.head_status(backend.url)
     assert st.database is None and st.at_head is False
     assert st.unversioned_at == migrate.INITIAL_REVISION and st.matches_models is False
+
+
+def test_head_status_of_a_pre_0018_create_all_schema_and_its_adoption(backend: Backend) -> None:
+    """The 0017 release's ``create_all`` had no reservation index: that schema is unversioned
+    at 0017 (the index is 0018's fingerprint, ``REVISION_INDEXES``), not at head and not
+    matching the models — and ``upgrade`` stamps it at 0017 and applies 0018, which creates
+    the index with its predicate. Without that fingerprint THIS release's ``create_all``
+    would read 0017 as well (``test_head_status_reads_empty_created_migrated_and_behind_stores``
+    fails then); with a fingerprint the 0017 schema also carries, it would read head, and
+    adoption would refuse a schema an older release made."""
+    init_db(backend.engine)
+    with backend.engine.begin() as c:
+        c.execute(text(f"DROP INDEX {RESERVED_INDEX}"))
+    st = migrate.head_status(backend.url)
+    assert st.database is None and st.at_head is False
+    assert st.unversioned_at == "0017" and st.matches_models is False and st.drift == ()
+
+    migrate.upgrade(backend.url)
+
+    assert migrate.current(backend.url) == migrate.head_revision() == HEAD
+    assert _autogen_diff(backend.engine) == []
+    assert migrate.head_status(backend.url) == migrate.HeadStatus(
+        HEAD, HEAD, True, matches_models=True
+    )
+    (ix,) = [i for i in _snapshot(backend.engine)["events"]["indexes"] if i[0] == RESERVED_INDEX]
+    assert ix[2] is True and ix[3] == RESERVED_WHERE[backend.dialect]
+
+
+def _rebuild_reserved_index_without_its_predicate(backend: Backend) -> None:
+    """The reservation index replaced by a FULL unique index of the same name and columns —
+    what a hand-written fix, or a revision that lost its ``*_where``, would leave: it would
+    refuse every second event of a trace that shares an arm and a commit, not only a second
+    reservation, and ``compare_metadata`` reads it as the model's index."""
+    with backend.engine.begin() as c:
+        c.execute(text(f"DROP INDEX {RESERVED_INDEX}"))
+        c.execute(
+            text(f"CREATE UNIQUE INDEX {RESERVED_INDEX} ON events (trace_id, step_id, task_id)")
+        )
+
+
+def test_a_reservation_index_without_its_predicate_is_drift_at_head(backend: Backend) -> None:
+    """Risk 3: a store at head whose reservation index lost its predicate reads as drift that
+    names the index, on both backends — ``compare_metadata`` alone finds nothing (the case
+    the predicate comparison exists for), so ``matches_models`` would otherwise say yes."""
+    migrate.upgrade(backend.url)
+    assert migrate.head_status(backend.url).matches_models is True  # no false positive at head
+    _rebuild_reserved_index_without_its_predicate(backend)
+    assert _autogen_diff(backend.engine) == []  # what alembic sees: nothing
+    st = migrate.head_status(backend.url)
+    assert st.at_head is True and st.matches_models is False
+    assert st.drift == (f"modify_index_where events {RESERVED_INDEX}",), st.drift
+
+
+def test_upgrade_refuses_an_unversioned_schema_whose_reservation_index_is_full(
+    backend: Backend,
+) -> None:
+    """Risk 3 at adoption: an unversioned schema carrying a FULL index under the reservation
+    index's name has every fingerprint up to head, so the walk reads it at head — and the
+    parity check, which compares predicates too, refuses it rather than stamping it."""
+    init_db(backend.engine)
+    _rebuild_reserved_index_without_its_predicate(backend)
+    st = migrate.head_status(backend.url)
+    assert st.unversioned_at == HEAD and st.matches_models is False
+    assert st.drift == (f"modify_index_where events {RESERVED_INDEX}",), st.drift
+    with pytest.raises(migrate.SchemaStateError, match="neither a known release"):
+        migrate.upgrade(backend.url)
+    assert migrate.current(backend.url) is None
 
 
 def test_upgrade_is_idempotent(backend: Backend) -> None:

@@ -26,10 +26,11 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               rate from the decisions (G-536); that reading the three reports queues no run and
               writes nothing; that a registered reading's top-up is its pending commits, queued
               through the submit gate, and a cell with no registered reading — or one this
-              deployment cannot write rows for — queues nothing (G-565, P-602); that queueing
-              enqueues the PLAN's
-              own run bodies, never the caller's, through the submit gate ``POST /runs`` applies
-              (a cell whose builder has no credential is refused whole — P-160), refuses a
+              deployment cannot write rows for — queues nothing (G-565, P-602), and a reading
+              that names a campaign is refused ``campaign_required`` (DL-382); that queueing
+              enqueues the PLAN's own run bodies, never the caller's, through the submit gate
+              ``POST /runs`` applies (a cell whose builder has no credential is refused whole —
+              P-160), refuses a
               what-if plan (P-165) and a cell whose queued runs are unfinished (P-182), even for
               two requests at once, a lost ``seq`` race or a failed insert (P-420), and refuses
               rather than run unlocked when a transaction is already open (P-429), as every
@@ -39,14 +40,20 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               that Learn and the map agree on why a cell is held (P-426); that a
               ``command`` only completes a cut example (P-183); that a note with a line break is
               refused (P-161); that each write refuses a field it does not name; that the reads
-              and writes follow the repository's checks arm (ADR-0024); that a viewer, a
+              and writes follow the repository's checks arm (ADR-0024), a reserved.v1 reading
+              whose checks arm moved listed flagged with no request and never queued (RT2B-1),
+              the route reading the learning-off arm for a reading's top-up on each store
+              (F2), and a reading delivered on the old arm never hiding the new arm's top-up,
+              which queues (R6V1-1); that a viewer, a
               request with no CSRF token and one with another session's token are each refused
               with nothing written; and that the writes hold under concurrency — two queues of
               one cell spend once, a prevention record landing mid-queue costs nothing, two
               decisions at once are both on record, and two first registrations keep both
               items (EI-1, EI-7).
 How:          ``make_env`` over the seed, with ``tests.fixtures.proven``'s qualified tasks and a
-              reading registered through ``POST /readings`` for the top-up; a protocol row
+              reading registered through ``POST /readings`` for the top-up (the store cases on
+              ``tests.conftest_store``'s ``backend`` fixture: SQLite, and PostgreSQL when
+              ``CRB_TEST_POSTGRES_URL`` is set); a protocol row
               appended through ``DbLedger``; the CLI
               invoked over the API's own exports for the parity case; the writes driven through
               ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
@@ -58,6 +65,7 @@ Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py
               tests/test_cli_learn.py (the CLI half of the parity),
               tests/fixtures/server_seed.py (``make_env``, ``assert_rbac``, ``user_id``),
               tests/fixtures/concurrency.py (``pause_after`` / ``at_once`` — the staged races),
+              tests/conftest_store.py (the ``backend`` fixture),
               src/crb/server/factory_state.py (the backlog the register write moves),
               docs/LEARNING-LOOP.md (the contract these writes implement), docs/API.md
 Tested by:    tests/test_server_routes_learn.py
@@ -101,6 +109,7 @@ from fixtures.proven import CELL as PROVEN_CELL
 from fixtures.proven import add_rows as add_proven_rows
 from fixtures.proven import add_tasks as add_proven_tasks
 from fixtures.proven import register_via_api
+from fixtures.readings import format_step_in_force
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -115,6 +124,11 @@ from fixtures.server_seed import (
     task_id,
     user_id,
 )
+
+try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
+    from tests.conftest_store import Backend, backend, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import Backend, backend, pg_schema  # noqa: F401
 
 #: A refusal whose only recorded command was cut by the recorder's 120-character cap: the
 #: class is ``truncated`` and a person must complete the line (``command``).
@@ -143,6 +157,23 @@ def env(tmp_path: Path) -> Iterator[Env]:
     """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
+
+
+@pytest.fixture
+def store_env(backend: Backend, tmp_path: Path) -> Iterator[Env]:
+    """:func:`env` on each store backend — SQLite always, PostgreSQL when
+    ``CRB_TEST_POSTGRES_URL`` is set (``tests.conftest_store``)."""
+    from crb.server.app import create_app
+    from crb.store.db import init_db
+    from fixtures.server_seed import add_users, make_settings, seed
+
+    init_db(backend.engine)
+    info = seed(backend.factory)
+    add_users(backend.factory)
+    settings = make_settings(tmp_path)
+    with TestClient(create_app(settings, backend.factory)) as client:
+        login(client, "admin")
+        yield Env(client=client, factory=backend.factory, info=info, settings=settings)
 
 
 def _add_protocol_row(env: Env, error: str = ERR_NHS, task: str = "f" * 40) -> None:
@@ -847,20 +878,25 @@ READ_CELL = "|".join(PROVEN_CELL.values())
 
 
 def _sealed(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
-    """This deployment grades in the sealed posture the reading counts (docker, copy tree)."""
+    """This deployment grades in the sealed posture the reading counts (docker, copy tree),
+    its builder sealed too: a replayed reading registers only there (P-789)."""
     monkeypatch.setattr(env.settings.sandbox, "executor", "docker")
+    monkeypatch.setattr(env.settings.builder, "executor", "docker")
 
 
 def _add_reading(env: Env, *, graded: int = 0, hierarchy: tuple[str, ...] = ("S3",)) -> Any:
-    """40 qualified commits of :data:`READ_CELL`, a reading registered over them through
-    ``POST /readings``, and a clean sealed first attempt on the first ``graded`` of its seeded
-    order, graded after the registration. Returns the reading as the route served it."""
-    add_proven_tasks(env.factory)
+    """40 qualified commits of :data:`READ_CELL` (each with its qualification record in the
+    sealed posture), a reading registered over them through ``POST /readings`` (reserved.v1,
+    the only rule it registers), and a clean sealed first attempt on the first ``graded`` of
+    its seeded order, each reserved before its build and graded after the registration.
+    Returns the reading as the route served it."""
+    add_proven_tasks(env.factory, qualify=True)
     r = register_via_api(env, hierarchy=hierarchy)
     assert r.status_code == 201, r.text
     reading = r.json()
+    assert reading["attempt_rule"] == "reserved.v1"
     if graded:
-        add_proven_rows(env.factory, reading["pool"][:graded], arm="S3")
+        add_proven_rows(env.factory, reading["pool"][:graded], arm="S3", reading=reading)
     return reading
 
 
@@ -920,6 +956,12 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     (run,) = [env.get(f"/runs/{rid}").json() for rid in d["run_ids"]]
     assert run["status"] == "queued" and run["builder"] == "editblock"
     assert run["task_ids"] == request["task_ids"] and run["mode"] == "sighted"
+    # the one rung the plan priced it at (PW-1: ``RunRequest.rungs``)
+    assert run["ladder"] == ["r1"]
+    # filed under the reading it measures: the worker re-checks the seal at claim (P-789)
+    with env.factory() as s:
+        stored = s.get(Run, d["run_ids"][0])
+        assert stored is not None and stored.params_json["reading_id"] == reading["reading_id"]
     assert env.get("/runs").json()["total"] == before + 1
     (event,) = _queued_events(env)
     assert event.actor == user_id(USERS["admin"])
@@ -927,6 +969,124 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     assert event.payload_json["arm"] == "S3"
     assert event.payload_json["reading_id"] == reading["reading_id"]
     assert event.payload_json["apparatus"] == APPARATUS_VERSION
+
+
+def test_a_readings_top_up_under_a_campaign_is_refused_with_nothing_queued(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DL-382: a reading that names a campaign takes only runs filed under that campaign, and
+    this queue files no run under one — so the cell's top-up is refused 409
+    ``campaign_required`` up front, naming the reading and its campaign, with no run queued
+    and no ``learn.remeasure.queued`` event. The same cell of a reading under no campaign is
+    queued as before (the test above)."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    campaign = env.post(
+        "/campaigns",
+        json={
+            "name": "wave-3",
+            "ceiling_gbp": 80,
+            "released_gbp": 40,
+            "rate_usd_per_gbp": 1.35,
+            "decision": "DECISION 8 (2026-10-11): stage 1 £40 yes",
+        },
+    )
+    assert campaign.status_code == 201, campaign.text
+    cid = campaign.json()["campaign_id"]
+    add_proven_tasks(env.factory, qualify=True)
+    r = register_via_api(env, hierarchy=("S3",), campaign_id=cid)
+    assert r.status_code == 201, r.text
+    reading = r.json()
+    add_proven_rows(env.factory, reading["pool"][:12], arm="S3")
+    cell = _read_cell(env)
+    assert cell["reason"] == "look_pending" and cell["requests"]
+    before = env.get("/runs").json()["total"]
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 409, q.text
+    err = envelope(q)
+    assert err["code"] == "campaign_required"
+    assert err["detail"] == {"reading_id": reading["reading_id"], "campaign_id": cid}
+    assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
+
+
+#: A campaign the Learn tests file a run under (the Wave 3 record's shape).
+WAVE3 = {
+    "name": "wave-3",
+    "ceiling_gbp": 80,
+    "released_gbp": 40,
+    "rate_usd_per_gbp": 1.35,
+    "decision": "DECISION 8 (2026-10-11): stage 1 £40 yes",
+}
+
+
+def _post_campaign_run(env: Env, cid: str, request: dict[str, Any], **extra: Any) -> str:
+    """The plan's ``request`` posted to ``POST /runs`` under campaign ``cid``, as the
+    registration's step 6 does: its body, a cap and the campaign. Returns the run id."""
+    body = {k: v for k, v in request.items() if k != "note"}
+    r = env.post("/runs", json={**body, "max_cost_usd": 5, "campaign_id": cid, **extra})
+    assert r.status_code == 201, r.text
+    return str(r.json()["id"])
+
+
+def _finish(env: Env, run_id: str, status: str = "failed") -> None:
+    with env.factory() as s:
+        run = s.get(Run, run_id)
+        assert run is not None
+        run.status = status
+        s.commit()
+
+
+def test_a_campaigns_live_run_is_in_flight_so_the_plan_holds_its_commits(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F87-2: a campaign-named reading's runs are filed by ``POST /runs`` (this queue refuses
+    them, DL-382), so the plan counts a run the campaign admitted as in flight beside the
+    cell while it is queued or running: the commits it would attempt are not re-requested
+    as if nobody were on them, and the inbox asks nobody to queue them. A live run that
+    writes elsewhere (another mode) is not counted; once the run finishes, nothing is."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    cid = env.post("/campaigns", json=WAVE3).json()["campaign_id"]
+    add_proven_tasks(env.factory, qualify=True)
+    r = register_via_api(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"), campaign_id=cid)
+    assert r.status_code == 201, r.text
+    reading = r.json()
+    cell = _read_cell(env)
+    assert cell["in_flight_run_ids"] == []
+    (request,) = cell["requests"]
+    rid = _post_campaign_run(env, cid, request, reading_id=reading["reading_id"])
+    assert _read_cell(env)["in_flight_run_ids"] == [rid]
+    # a blind run of the reading on the same commits writes S1 rows, never this sighted S3
+    # entry (every campaign run names a reserved.v1 reading and one of its arms, P-792 C19)
+    blind = {**request, "kind": "blind", "mode": "blind", "arm": "S1"}
+    _post_campaign_run(env, cid, blind, reading_id=reading["reading_id"])
+    assert _read_cell(env)["in_flight_run_ids"] == [rid]
+    _finish(env, rid)
+    assert _read_cell(env)["in_flight_run_ids"] == []
+
+
+def test_a_campaign_run_on_a_cells_commits_holds_the_queue_too(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The queue's own guard reads the same runs: a reading under no campaign whose pending
+    commits a campaign's run is replaying is refused 409 ``remeasure_already_queued`` naming
+    that run — its message saying a campaign's run counts, not only the runs a queue filed
+    (R1-4) — with nothing queued and nothing recorded, and is queued once it finishes."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    _add_reading(env)
+    cid = env.post("/campaigns", json=WAVE3).json()["campaign_id"]
+    (request,) = _read_cell(env)["requests"]
+    rid = _post_campaign_run(env, cid, request)
+    total = env.get("/runs").json()["total"]
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 409, q.text
+    assert envelope(q)["code"] == "remeasure_already_queued"
+    assert envelope(q)["detail"]["run_ids"] == [rid]
+    assert "admitted by a campaign on one of its commits" in envelope(q)["message"]
+    assert env.get("/runs").json()["total"] == total and _queued_events(env) == []
+    _finish(env, rid, "succeeded")
+    assert _queue(env, cell=READ_CELL).status_code == 201
 
 
 def test_a_cell_with_no_registered_reading_is_offered_registration_and_queues_nothing(
@@ -961,7 +1121,12 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     and queueing it is refused with nothing queued; an ``S1`` arm is asked for only when the
     deployment's test author is the arm's author."""
     del builder_keys
-    pool = _add_reading(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"))["pool"]
+    # registered on a sealed deployment (P-789), which then grades on the host
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, hierarchy=("S3", f"S1@{PROVEN_AUTHOR}"))
+    pool = reading["pool"]
+    monkeypatch.setattr(env.settings.sandbox, "executor", "local")
+    monkeypatch.setattr(env.settings.builder, "executor", "host")
     host = _read_cell(env)
     assert host["requests"] == [] and host["next_act"] == "runs"
     assert "docker/copy/sealed" in host["note"]
@@ -971,7 +1136,7 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
     # sealed, and the S3 ceiling delivered: the reading waits on S1@<author>
     _sealed(env, monkeypatch)
-    add_proven_rows(env.factory, pool[:20], arm="S3")
+    add_proven_rows(env.factory, pool[:20], arm="S3", reading=reading)
     s1 = _read_cell(env)
     assert s1["requests"] == [] and PROVEN_AUTHOR in s1["note"]  # no author configured
     monkeypatch.setattr(env.settings.factory, "test_author", f"editblock:{PROVEN_AUTHOR}")
@@ -979,6 +1144,16 @@ def test_a_reading_this_deployment_cannot_write_rows_for_queues_nothing(
     (req,) = authored["requests"]
     assert (req["kind"], req["mode"], req["arm"]) == ("blind", "blind", "S1")
     assert req["task_ids"] == pool[:20]
+    # queued, the blind run climbs the one rung the plan priced it at (PW-1: no body names a
+    # ladder, so ``POST /runs`` stores ``["r1"]`` — the pin beside the sighted one above)
+    q = _queue(env, cell=READ_CELL)
+    assert q.status_code == 201, q.text
+    (run,) = [env.get(f"/runs/{rid}").json() for rid in q.json()["run_ids"]]
+    assert (run["kind"], run["mode"], run["ladder"]) == ("blind", "blind", ["r1"])
+    # stored on the arm the plan asked for, so it grades S1@<author> and never A0
+    with env.factory() as s:
+        stored = s.get(Run, run["id"])
+        assert stored is not None and (stored.params_json or {}).get("arm") == "S1"
 
 
 def test_queueing_refuses_a_cell_whose_builder_has_no_credential(
@@ -1572,7 +1747,11 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     # the repository switches belt 6 on: only the belt-6 arm is read, by the reads AND writes
     assert env.put(f"/repos/{ALPHA}", json={"checks": {"api_stable": True}}).status_code == 200
     assert planned() == [STALE_CELL]
-    assert READ_CELL not in cells()  # its reading counts the off arm's rows only
+    # its reserved.v1 reading counts the off arm's rows only and a run of it would halt, so
+    # it is listed flagged with no request — never hidden (RT2B-1)
+    moved = _read_cell(env)
+    assert moved["checks_arm_moved"] == {"frozen": "off", "current": "api"}
+    assert moved["requests"] == [] and moved["next_act"] == "config"
     before = env.get("/runs").json()["total"]
     assert _queue(env, cell=legacy).status_code == 422
     gone = _queue(env, cell=READ_CELL)
@@ -1587,6 +1766,107 @@ def test_the_reports_and_their_writes_read_the_repositorys_own_checks_arm(
     assert unregistered.status_code == 422, unregistered.text
     assert envelope(unregistered)["code"] == "reading_unregistered"
     assert env.get("/runs").json()["total"] == before
+
+
+def test_remeasure_lists_a_reading_whose_checks_arm_moved(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RT2B-1: a reserved.v1 reading's runs halt ``reading_checks_arm_mismatch`` off the checks
+    arm it froze. The plan read readings on the repository's current arm only, so when the arm
+    moved the waiting reading vanished from the list without a word. It is now listed, flagged
+    ``checks_arm_moved`` ``{frozen, current}``, with no request (a run would halt) and next act
+    ``config``; the queue refuses it 422 with nothing queued, and restoring the arm gives the
+    reading its top-up back."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, graded=12)  # registered while every switch is off
+    assert reading["checks_arm"] == "off"
+    assert _read_cell(env).get("checks_arm_moved") is None
+    # the repository's own checks block switches the format step on: its arm reads fmt
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": True}}).status_code == 200
+    listed = {c["label"]: c for c in env.get(f"/learn/remeasure?repo={ALPHA}").json()["cells"]}
+    assert READ_CELL in listed, "a reading whose checks arm moved is listed, never hidden"
+    cell = listed[READ_CELL]
+    assert cell["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    assert cell["requests"] == [] and cell["n_requested"] == 0
+    assert (cell["reason"], cell["next_act"], cell["arm"]) == ("look_pending", "config", "S3")
+    assert cell["reading_id"] == reading["reading_id"]
+    assert (cell["n_current"], cell["n_needed"], cell["short_by"]) == (12, 8, 8)
+    assert "moved from off to fmt" in cell["note"]
+    assert "reading_checks_arm_mismatch" in cell["note"] and "end the stage" in cell["note"]
+    before = env.get("/runs").json()["total"]
+    refused = _queue(env, cell=READ_CELL)
+    assert refused.status_code == 422 and envelope(refused)["code"] == "validation_error"
+    assert envelope(refused)["detail"]["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    assert env.get("/runs").json()["total"] == before and not _queued_events(env)
+    # the arm restored: the entry is the reading's top-up again
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": False}}).status_code == 200
+    back = _read_cell(env)
+    assert back["checks_arm_moved"] is None and back["next_act"] == "replay"
+    assert len(back["requests"]) == 1 and back["n_requested"] == 8
+
+
+def test_remeasure_reads_the_learning_off_arm_for_a_top_up_on_each_store(
+    store_env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2 (round 6): every request the plan composes runs the loop off, so the route hands the
+    plan the arm the team's block alone resolves (``current_checks_arm(..., learning=False)``)
+    for it, and the arm the loop's overlay resolves for a ``+L`` arm's run. No test covered the
+    first: handing it the overlay's arm would flag a reading whose top-up never halts. Here
+    the loop's ``format_step`` change alone moves the arm (the block silent): the ``S3`` entry
+    of a reading frozen on ``off`` is not flagged and keeps its one request; once ``S3``
+    delivers, its ``S3+L`` entry on the same reading — a run under the overlay — is flagged
+    ``{off, fmt}`` with no request."""
+    del builder_keys
+    env = store_env
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, graded=12, hierarchy=("S3", "S3+L"))
+    assert reading["checks_arm"] == "off"
+    format_step_in_force(env.factory, ALPHA)
+    cell = _read_cell(env)
+    assert (cell["arm"], cell["checks_arm_moved"], cell["next_act"]) == ("S3", None, "replay")
+    assert len(cell["requests"]) == 1 and cell["n_requested"] == 8
+    assert cell["reading_id"] == reading["reading_id"]
+    add_proven_rows(env.factory, reading["pool"][12:20], arm="S3", reading=reading)
+    loop = _read_cell(env)
+    assert (loop["arm"], loop["reading_id"]) == ("S3+L", reading["reading_id"])
+    assert loop["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    assert (loop["next_act"], loop["requests"]) == ("config", [])
+
+
+def test_a_delivered_reading_on_the_old_checks_arm_never_hides_the_new_arms_top_up(
+    store_env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6V1-1 (round 6): after the repository's checks arm moved, a reserved.v1 reading of the
+    old arm whose ``S3`` look delivered (a ceiling) still spoke for the cell over the reading
+    registered on the new arm: the plan read the cell ``up_to_date``, listed no top-up, and
+    the queue answered 422 with nothing ``available``. The readings of the current arm now
+    speak first: the new reading's top-up is listed, unflagged, and queued 201."""
+    del builder_keys
+    env = store_env
+    _sealed(env, monkeypatch)
+    old = _add_reading(env, graded=20, hierarchy=("S3",))
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": True}}).status_code == 200
+    add_proven_tasks(
+        env.factory, prefix="later", authored="2026-09-01T12:00:00+00:00", qualify=True
+    )
+    r = register_via_api(env, hierarchy=("S3",), since="2026-08-15T00:00:00+00:00")
+    assert r.status_code == 201, r.text
+    new = r.json()
+    assert (old["checks_arm"], new["checks_arm"]) == ("off", "fmt")
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    assert not [u for u in plan["up_to_date"] if u.startswith(READ_CELL)], plan["up_to_date"]
+    (cell,) = [c for c in plan["cells"] if c["label"] == READ_CELL]
+    assert (cell["reading_id"], cell["next_act"], cell["checks_arm_moved"]) == (
+        new["reading_id"],
+        "replay",
+        None,
+    )
+    assert len(cell["requests"]) == 1 and cell["n_requested"] == 20
+    before = env.get("/runs").json()["total"]
+    queued = _queue(env, cell=READ_CELL)
+    assert queued.status_code == 201, queued.text
+    assert env.get("/runs").json()["total"] > before and len(_queued_events(env)) == 1
 
 
 # ---------------------------------------------------------------------------

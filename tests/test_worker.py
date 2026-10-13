@@ -19,10 +19,18 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               ``env_dir``), docker unavailable or without an image failing closed, oracle and
               controls runs recording their events (a violation failing the gate), unknown repo
               / kind failing cleanly, stale-claim reclaim with event seq resuming, the heartbeat
-              thread, ``run_forever`` processing then stopping and surviving a broken iteration,
+              thread, a worker that lost its claim appending nothing more (F87-5: a row the
+              claim guard refuses or that follows a refused heartbeat raises ``ClaimLost``,
+              ``run.claim_lost`` once, the run loop stopped and no finish written — a reclaim
+              under the same worker id included — and a row naming a real pack after a
+              refused heartbeat storing no pack, where the live claim's stores it; R6V2-2),
+              ``run_forever`` processing then stopping and
+              surviving a broken iteration,
               stage routing, the ``--once`` entrypoint and settings from args / env, that a
               run where every attempt errors is ``failed`` not ``succeeded``, the factory run
-              kind, and the ADR-0019 route gate reading the deployment's posture only; that the
+              kind, a run of a reading refused at claim when unsealed (P-789) or, when its
+              reading names a campaign, never admitted under it (DL-382), and the ADR-0019
+              route gate reading the deployment's posture only; that the
               idle loop calls every idle step under its guard and survives each one raising
               (P-354); and that the production path stops an unsigned deliver cell before any
               spend unless the setting turns the clause off (ADR-0018). The unconfirmed-kill
@@ -49,12 +57,14 @@ Touch when:   never for a new repository (the fixture repository stands in for e
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import os
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import replace as dc_replace
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -71,9 +81,11 @@ from crb.builders.base import (
     BuildBrief,
     BuildOutcome,
 )
-from crb.core.evidence import verify_pack
+from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
+from crb.core.campaign import CAMPAIGN_ADMITTED
+from crb.core.evidence import canonical_json, sha256_text, verify_pack
 from crb.core.execution import LocalExecutor, SandboxUnavailable
-from crb.core.ledger import verify_chain
+from crb.core.ledger import GradeRow, verify_chain
 from crb.core.library import ACTOR_FRESHNESS, LibraryEntry, Provenance
 from crb.core.oracle import controls as nc
 from crb.core.runners.base import SetupResult, SetupStep
@@ -85,18 +97,21 @@ from crb.server import worker as worker_mod
 from crb.server import worker_main
 from crb.server.worker import Worker, WorkerSettings, docker_settings_for, stage_for
 from crb.store import init_db, make_engine, make_session_factory
-from crb.store.events import DbEventSink, read_events
+from crb.store.events import DbEventSink, append_event, read_events
 from crb.store.jobs import (
     STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
+    ClaimLost,
     JobQueue,
 )
 from crb.store.library import DbLibraryLedger, new_act
-from crb.store.models import Event, Repo, Run, Task, WorkerRow
+from crb.store.models import Event, EvidencePackRow, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_row
+from fixtures.proven import write_reading
 from fixtures.proven_cells import every_cell_proven
 
 # --- a scripted builder ----------------------------------------------------------------
@@ -510,6 +525,186 @@ def test_a_queued_run_whose_login_was_recorded_invalid_is_failed_before_any_buil
     assert [e.payload_json["trigger"] for e in refused] == [bl.TRIGGER_CLAIM]
     assert refused[0].payload_json["run_id"] == run.id
     assert any(e.action == "run.refused" for e in h.events(run.id))
+
+
+def test_a_run_filed_under_a_sealed_reading_is_refused_at_claim_on_a_host_builder(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-789: the submit gate refuses a run filed under a reading unless the sandbox and the
+    builder both run on docker — but the executors that grade the run are the WORKER's. A
+    worker whose builder is on the host (the dev default, ``CRB_BUILDER__EXECUTOR`` unset)
+    fails the run at claim, before any builder is constructed: one ``run.refused`` event
+    naming both executors, no ledger row, nothing spent."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    monkeypatch.setattr(h.worker, "settings", dc_replace(h.settings, executor="docker"))
+    built: list[str] = []
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: built.append("fake") or FakeBuilder(behaviour="gold", **cfg),
+    )
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+    run = h.enqueue("replay", params_json={"reading_id": reading.reading_id})
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith("reading_unsealed: "), done.error
+    assert "'docker'" in done.error and "'host'" in done.error
+    refused = [e for e in h.events(run.id) if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].status == StepStatus.ERROR
+    assert refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "reading_unsealed",
+        "reading_id": reading.reading_id,
+        "sandbox_executor": "docker",
+        "builder_executor": "host",
+    }
+    assert built == []  # no builder was constructed
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []  # no row, $0
+    assert not done.counts_json.get("cost_usd")
+
+
+def test_reading_unsealed_admits_docker_executors(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-789: the claim check admits a run filed under a verified reading when both
+    executors are docker — the worker's own setting or ``CRB_BUILDER__EXECUTOR`` as it
+    stands — and never looks at a run filed under no reading; an id that is no verified
+    reading of the repository, or a run asking for the local sandbox, is refused."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+
+    def check(params: dict[str, Any]) -> str | None:
+        run = h.enqueue("replay", params_json=params)
+        return h.worker._reading_unsealed(run, h.worker._emitter(run))
+
+    sealed = dc_replace(h.settings, executor="docker", builder_executor="docker")
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    assert check({"reading_id": reading.reading_id}) is None
+    assert check({}) is None  # filed under no reading: never this check's business
+    unknown = check({"reading_id": "rdg_" + "0" * 24})
+    assert unknown is not None and "no verified reading" in unknown
+    local = check({"reading_id": reading.reading_id, "executor": "local"})
+    assert local is not None and "'local'" in local
+    # the builder's executor read from the environment the container settings read
+    monkeypatch.setattr(h.worker, "settings", dc_replace(sealed, builder_executor=""))
+    monkeypatch.setenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "DOCKER")
+    assert check({"reading_id": reading.reading_id}) is None
+    monkeypatch.setenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "podman")  # anything else: the host
+    other = check({"reading_id": reading.reading_id})
+    assert other is not None and "'host'" in other
+
+
+def test_a_run_of_a_reading_is_refused_at_claim_when_this_worker_grades_another_class(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DL-383: the submit gate compares the API's posture class with the reading's, but the
+    class a run is graded in is the WORKER's — its ``CRB_SANDBOX__TREE`` for a repository with
+    no tree of its own. A sealed worker on the ``readonly`` tree would grade a run of a
+    ``docker/copy/sealed`` reading ``docker/readonly/sealed``, every row of it refused by the
+    reading; it fails the run at claim, before any builder is constructed, with one
+    ``run.refused`` event naming both classes, no ledger row, nothing spent."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    sealed = dc_replace(
+        h.settings, executor="docker", builder_executor="docker", sandbox_tree="readonly"
+    )
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    built: list[str] = []
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: built.append("fake") or FakeBuilder(behaviour="gold", **cfg),
+    )
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+    run = h.enqueue("replay", params_json={"reading_id": reading.reading_id})
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith("reading_posture_mismatch: "), done.error
+    refused = [e for e in h.events(run.id) if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].status == StepStatus.ERROR
+    assert refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "reading_posture_mismatch",
+        "reading_id": reading.reading_id,
+        "reading_posture_class": "docker/copy/sealed",
+        "run_posture_class": "docker/readonly/sealed",
+    }
+    assert built == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert not done.counts_json.get("cost_usd")
+
+    def check(params: dict[str, Any]) -> str | None:
+        queued = h.enqueue("replay", params_json=params)
+        return h.worker._reading_posture_mismatch(queued, h.worker._emitter(queued))
+
+    assert check({}) is None  # filed under no reading: never this check's business
+    # the worker on the reading's tree; and the run's own executor, not the worker's default
+    monkeypatch.setattr(h.worker, "settings", dc_replace(sealed, sandbox_tree="copy"))
+    assert check({"reading_id": reading.reading_id}) is None
+    monkeypatch.setattr(
+        h.worker, "settings", dc_replace(sealed, executor="local", sandbox_tree="copy")
+    )
+    assert check({"reading_id": reading.reading_id, "executor": "docker"}) is None
+    # the repository's own tree wins over the worker's, whichever way it points
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    with h.factory() as s:
+        repo = s.get(Repo, pr.REPO_NAME)
+        assert repo is not None
+        repo.config_json = {**dict(repo.config_json or {}), "sandbox_tree": "copy"}
+        s.commit()
+    assert check({"reading_id": reading.reading_id}) is None
+
+
+def test_a_run_of_a_campaign_named_reading_never_admitted_is_refused_at_claim(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DL-382: ``POST /runs`` refuses a run of a reading that names a campaign unless it is
+    filed under that campaign — but a run can reach the queue without the gate (inserted
+    directly here). On a sealed worker it fails at claim, before any builder is constructed,
+    with one ``run.refused`` event naming the reading and its campaign; a run the campaign's
+    trace admitted, and a run of a reading under no campaign, pass the check."""
+    monkeypatch.delenv(f"{CONTAINER_ENV_PREFIX}EXECUTOR", raising=False)
+    sealed = dc_replace(h.settings, executor="docker", builder_executor="docker")
+    monkeypatch.setattr(h.worker, "settings", sealed)
+    built: list[str] = []
+    monkeypatch.setitem(
+        builders_pkg._REGISTRY,
+        "fake",
+        lambda **cfg: built.append("fake") or FakeBuilder(behaviour="gold", **cfg),
+    )
+    cid = "cmp_" + "c" * 24
+    task = h.pyrepo.feat_task().task_id
+    reading = write_reading(h.factory, [task], repo=pr.REPO_NAME, campaign_id=cid)
+    run = h.enqueue("replay", params_json={"reading_id": reading.reading_id})
+    done = h.run_one()
+    assert done.id == run.id and done.status == STATUS_FAILED
+    assert done.error.startswith("campaign_required: "), done.error
+    refused = [e for e in h.events(run.id) if e.action == "run.refused"]
+    assert len(refused) == 1 and refused[0].error_message == done.error
+    assert refused[0].payload == {
+        "code": "campaign_required",
+        "reading_id": reading.reading_id,
+        "campaign_id": cid,
+    }
+    assert built == [] and list(h.worker.ledger.rows(run_id=run.id)) == []
+
+    def check(reading_id: str, *, admit: bool = False) -> str | None:
+        queued = h.enqueue("replay", params_json={"reading_id": reading_id})
+        if admit:
+            append_event(
+                h.factory,
+                trace_id=cid,
+                stage="system",
+                action=CAMPAIGN_ADMITTED,
+                payload={"campaign_id": cid, "run_id": queued.id},
+            )
+        return h.worker._campaign_unadmitted(queued, h.worker._emitter(queued))
+
+    assert check(reading.reading_id, admit=True) is None
+    assert check(reading.reading_id) is not None  # another run's admission is not this one's
+    legacy = write_reading(h.factory, [task], repo=pr.REPO_NAME)
+    assert check(legacy.reading_id) is None
 
 
 def test_ladder_from_builder_columns_and_task_ids(h: Harness) -> None:
@@ -1211,6 +1406,183 @@ def test_heartbeat_thread_refreshes_liveness(h: Harness) -> None:
     FakeBuilder.hook = observe
     assert h.run_one().status == STATUS_SUCCEEDED
     assert seen[0] and seen[1] and seen[1] > seen[0]
+
+
+# --- F87-5: a worker that lost its claim appends nothing more ---------------------------
+
+#: Far enough ahead that every running run's heartbeat is stale: a reclaim with no sleep.
+_LATER = _dt.datetime(2100, 1, 1, tzinfo=_dt.UTC)
+
+
+def _reclaim(h: Harness, run_id: str, worker_id: str) -> Run:
+    """Reclaim ``run_id`` as stale and claim it again as ``worker_id`` — the queue's own path."""
+    assert [r.id for r in h.queue.reclaim_stale(0.0, now=_LATER)] == [run_id]
+    took = h.queue.claim_next(worker_id)
+    assert took is not None and took.id == run_id and took.worker_id == worker_id
+    return took
+
+
+def _claimed_ledger(
+    h: Harness, run: Run, evidence_dir: Path
+) -> tuple[worker_mod.RunContext, worker_mod._RunLedger]:
+    """The context and ledger ``execute`` gives the claim ``run`` (the run as it was claimed)."""
+    ctx = worker_mod.RunContext(
+        run=run, emitter=h.worker._emitter(run), config=h.pyrepo.config, git=h.pyrepo.repo
+    )
+    ledger = worker_mod._RunLedger(
+        h.worker.ledger, h.factory, evidence_dir, ctx, "pytest", worker_id=run.worker_id
+    )
+    return ctx, ledger
+
+
+def _plain_row(h: Harness, run: Run) -> GradeRow:
+    """A row no reservation names (not clean, no pack): before F87-5 nothing guarded it."""
+    return posture_row(
+        repo=pr.REPO_NAME,
+        task_id=h.pyrepo.feat_task().task_id,
+        run_id=run.id,
+        trial="r1",
+        clean=False,
+        tests_unmodified=True,
+        target_green=False,
+        no_new_failures=True,
+        source_changed=True,
+        builder="fake",
+        model="m",
+        provider="p",
+    )
+
+
+def _claim_lost_events(h: Harness, run_id: str) -> list[Any]:
+    return [e for e in h.events(run_id) if e.action == "run.claim_lost"]
+
+
+def test_a_worker_that_lost_its_claim_stops_appending(h: Harness, tmp_path: Path) -> None:
+    """F87-5: worker A claims a run, worker B reclaims it from A's stale claim, and A's
+    ledger then appends a row no reservation names. Round 5's ``claim_guard`` ran on
+    reserved rows only, so this row landed in B's run; now every row of a claimed run is
+    appended under the guard: ``ClaimLost``, no row, ``run.claim_lost`` once however many
+    rows follow. A's refused heartbeat sets the run's ``claim_lost`` event, which stops the
+    run loop and refuses the next row before the guard is reached."""
+    run = h.enqueue("replay")
+    a = h.queue.claim_next("w-test")
+    assert a is not None and a.worker_id == "w-test"
+    _reclaim(h, run.id, "w-B")
+    ctx, ledger = _claimed_ledger(h, a, tmp_path / "ev")
+    before = h.worker.ledger.count()
+
+    with pytest.raises(ClaimLost, match="owned by 'w-B'"):
+        ledger.append(_plain_row(h, a))
+    assert h.worker.ledger.count() == before
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert ctx.claim_lost.is_set() and h.worker._cancelled(ctx)
+    with pytest.raises(ClaimLost):  # the event now refuses it before the guard is read
+        ledger.append(_plain_row(h, a))
+    assert h.worker.ledger.count() == before
+    (lost,) = _claim_lost_events(h, run.id)
+    assert lost.status == StepStatus.ERROR and "w-test" in lost.error_message
+
+    # the heartbeat, driven directly: refused for A, it sets a fresh claim's event — the
+    # run loop stops, and the next row is refused with no guard and no pack stored
+    ctx2, ledger2 = _claimed_ledger(h, a, tmp_path / "ev2")
+    assert not ctx2.claim_lost.is_set() and not h.worker._cancelled(ctx2)
+    assert h.worker._heartbeat_beat(a, ctx2.claim_lost) is False
+    assert ctx2.claim_lost.is_set() and h.worker._cancelled(ctx2)
+    with pytest.raises(ClaimLost, match="heartbeat was refused"):
+        ledger2.append(_plain_row(h, a))
+    assert h.worker.ledger.count() == before
+    assert len(_claim_lost_events(h, run.id)) == 2  # one per claim context, never per row
+    # B's claim is untouched: still running, on B, at the reclaimed claim
+    now = h.queue.get(run.id)
+    assert now is not None and now.status == STATUS_RUNNING and now.worker_id == "w-B"
+
+
+def _stored_pack(h: Harness, pack_hash: str) -> bool:
+    with h.factory() as s:
+        return s.get(EvidencePackRow, pack_hash) is not None
+
+
+def test_a_packed_row_after_a_lost_claim_stores_no_pack(h: Harness, tmp_path: Path) -> None:
+    """R6V2-2: once A's heartbeat is refused, a row naming a real, verifying evidence pack is
+    refused before the pack is read: ``ClaimLost``, no ``EvidencePackRow``, the ledger's
+    count unchanged. ``append`` checks the lost claim before ``_kept_pack``, which stores
+    the pack it verifies, so a check moved below it would store the lost claim's pack with
+    no row naming it. The control: the live claim's ledger, given the same row, stores the
+    pack and lands the row, so the pack is one ``append`` would keep."""
+    run = h.enqueue("replay")
+    a = h.queue.claim_next("w-test")
+    assert a is not None
+    b = _reclaim(h, run.id, "w-B")
+    ev = tmp_path / "ev"
+    ev.mkdir()
+    body = {"grade": {"duration_s": 1.0}, "note": "R6V2-2"}
+    ph = sha256_text(canonical_json(body))
+    (ev / f"{ph}.json").write_text(json.dumps(body), encoding="utf-8")
+    ctx, lost = _claimed_ledger(h, a, ev)
+    assert h.worker._heartbeat_beat(a, ctx.claim_lost) is False
+    before = h.worker.ledger.count()
+
+    with pytest.raises(ClaimLost, match="heartbeat was refused"):
+        lost.append(GradeRow(**{**_plain_row(h, a).fields(), "evidence_pack_hash": ph}))
+    assert not _stored_pack(h, ph)
+    assert h.worker.ledger.count() == before
+
+    _, live = _claimed_ledger(h, b, ev)
+    landed = live.append(GradeRow(**{**_plain_row(h, b).fields(), "evidence_pack_hash": ph}))
+    assert landed.evidence_pack_hash == ph and _stored_pack(h, ph)
+    assert h.worker.ledger.count() == before + 1
+
+
+def test_a_reclaim_under_the_same_worker_id_still_stops_the_old_claims_rows(
+    h: Harness, tmp_path: Path
+) -> None:
+    """Two processes sharing a worker id: the queue's heartbeat cannot tell the old claim from
+    the new (it checks the id), but the guard reads the claim, so the old claim's plain row
+    raises ``ClaimLost`` while the new claim's row lands."""
+    run = h.enqueue("replay")
+    old = h.queue.claim_next("w-test")
+    assert old is not None
+    new = _reclaim(h, run.id, "w-test")
+    assert h.worker._heartbeat_beat(old, threading.Event()) is True  # the id alone: no refusal
+    _, stale_ledger = _claimed_ledger(h, old, tmp_path / "ev-old")
+    with pytest.raises(ClaimLost, match="at claim 1"):
+        stale_ledger.append(_plain_row(h, old))
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    _, live_ledger = _claimed_ledger(h, new, tmp_path / "ev-new")
+    landed = live_ledger.append(_plain_row(h, new))
+    assert [r.row_hash for r in h.worker.ledger.rows(run_id=run.id)] == [landed.row_hash]
+
+
+def test_execute_writes_no_finish_once_its_claim_is_lost(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run whose heartbeat was refused while it executed ends with ``run.claim_lost`` (once)
+    and ``run.finish_refused``, and no finish: the claim that took it keeps its record. The
+    heartbeat thread is replaced by one beat driven from inside the handler — no sleep."""
+    lost: dict[str, threading.Event] = {}
+
+    def no_thread(run: Run, stop: threading.Event, claim_lost: threading.Event) -> Any:
+        lost["event"] = claim_lost
+        t = threading.Thread(target=lambda: None)
+        t.start()
+        return t
+
+    def handler(ctx: worker_mod.RunContext) -> tuple[str, dict[str, Any], str]:
+        assert ctx.claim_lost is lost["event"]  # the event the heartbeat sets is the run's
+        _reclaim(h, ctx.run.id, "w-B")
+        assert h.worker._heartbeat_beat(ctx.run, lost["event"]) is False
+        assert h.worker._cancelled(ctx)  # the task loop would stop here
+        return STATUS_SUCCEEDED, {"rows": 0}, ""
+
+    monkeypatch.setattr(h.worker, "_heartbeat_thread", no_thread)
+    monkeypatch.setitem(h.worker._handlers, "replay", handler)
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_RUNNING and done.worker_id == "w-B" and done.finished == ""
+    actions = [e.action for e in h.events(run.id)]
+    assert actions.count("run.claim_lost") == 1 and actions.count("run.finish_refused") == 1
+    assert "run.finished" not in actions
+    assert actions.index("run.claim_lost") < actions.index("run.finish_refused")
 
 
 def test_run_forever_processes_then_stops(h: Harness) -> None:

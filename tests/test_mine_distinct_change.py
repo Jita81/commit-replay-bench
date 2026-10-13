@@ -205,7 +205,11 @@ def _gold_spec(
 
 def _apply_gold(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
     pr.apply_gold(ws)
-    return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p", mode="sighted"))
+    # a host build records where it ran, as the adapter stamps every attempt (P-795)
+    return BuildAttempt(
+        BuilderRef(name="fixture", model="m", provider="p", mode="sighted"),
+        labels={lg.LABEL_BUILDER_EXECUTOR: "host"},
+    )
 
 
 def test_a_replay_row_below_2_4_carries_no_change_identity(
@@ -251,7 +255,10 @@ def test_a_replay_of_a_task_mined_before_the_rule_names_its_change_on_the_row(
 
     def build_fn(ws: Workspace, task: TaskSpec, mode: str, rung: str) -> BuildAttempt:
         pr.apply_gold(ws)
-        return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p", mode="sighted"))
+        return BuildAttempt(
+            BuilderRef(name="fixture", model="m", provider="p", mode="sighted"),
+            labels={lg.LABEL_BUILDER_EXECUTOR: "host"},  # P-795: as the adapter stamps it
+        )
 
     spec = RunSpec(
         run_id="run-change",
