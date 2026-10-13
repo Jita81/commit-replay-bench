@@ -22,7 +22,9 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               thread, a worker that lost its claim appending nothing more (F87-5: a row the
               claim guard refuses or that follows a refused heartbeat raises ``ClaimLost``,
               ``run.claim_lost`` once, the run loop stopped and no finish written — a reclaim
-              under the same worker id included), ``run_forever`` processing then stopping and
+              under the same worker id included — and a row naming a real pack after a
+              refused heartbeat storing no pack, where the live claim's stores it; R6V2-2),
+              ``run_forever`` processing then stopping and
               surviving a broken iteration,
               stage routing, the ``--once`` entrypoint and settings from args / env, that a
               run where every attempt errors is ``failed`` not ``succeeded``, the factory run
@@ -81,7 +83,7 @@ from crb.builders.base import (
 )
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.core.campaign import CAMPAIGN_ADMITTED
-from crb.core.evidence import verify_pack
+from crb.core.evidence import canonical_json, sha256_text, verify_pack
 from crb.core.execution import LocalExecutor, SandboxUnavailable
 from crb.core.ledger import GradeRow, verify_chain
 from crb.core.library import ACTOR_FRESHNESS, LibraryEntry, Provenance
@@ -106,7 +108,7 @@ from crb.store.jobs import (
     JobQueue,
 )
 from crb.store.library import DbLibraryLedger, new_act
-from crb.store.models import Event, Repo, Run, Task, WorkerRow
+from crb.store.models import Event, EvidencePackRow, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
 from fixtures.posture import posture_row
 from fixtures.proven import write_reading
@@ -1493,6 +1495,42 @@ def test_a_worker_that_lost_its_claim_stops_appending(h: Harness, tmp_path: Path
     # B's claim is untouched: still running, on B, at the reclaimed claim
     now = h.queue.get(run.id)
     assert now is not None and now.status == STATUS_RUNNING and now.worker_id == "w-B"
+
+
+def _stored_pack(h: Harness, pack_hash: str) -> bool:
+    with h.factory() as s:
+        return s.get(EvidencePackRow, pack_hash) is not None
+
+
+def test_a_packed_row_after_a_lost_claim_stores_no_pack(h: Harness, tmp_path: Path) -> None:
+    """R6V2-2: once A's heartbeat is refused, a row naming a real, verifying evidence pack is
+    refused before the pack is read: ``ClaimLost``, no ``EvidencePackRow``, the ledger's
+    count unchanged. ``append`` checks the lost claim before ``_kept_pack``, which stores
+    the pack it verifies, so a check moved below it would store the lost claim's pack with
+    no row naming it. The control: the live claim's ledger, given the same row, stores the
+    pack and lands the row, so the pack is one ``append`` would keep."""
+    run = h.enqueue("replay")
+    a = h.queue.claim_next("w-test")
+    assert a is not None
+    b = _reclaim(h, run.id, "w-B")
+    ev = tmp_path / "ev"
+    ev.mkdir()
+    body = {"grade": {"duration_s": 1.0}, "note": "R6V2-2"}
+    ph = sha256_text(canonical_json(body))
+    (ev / f"{ph}.json").write_text(json.dumps(body), encoding="utf-8")
+    ctx, lost = _claimed_ledger(h, a, ev)
+    assert h.worker._heartbeat_beat(a, ctx.claim_lost) is False
+    before = h.worker.ledger.count()
+
+    with pytest.raises(ClaimLost, match="heartbeat was refused"):
+        lost.append(GradeRow(**{**_plain_row(h, a).fields(), "evidence_pack_hash": ph}))
+    assert not _stored_pack(h, ph)
+    assert h.worker.ledger.count() == before
+
+    _, live = _claimed_ledger(h, b, ev)
+    landed = live.append(GradeRow(**{**_plain_row(h, b).fields(), "evidence_pack_hash": ph}))
+    assert landed.evidence_pack_hash == ph and _stored_pack(h, ph)
+    assert h.worker.ledger.count() == before + 1
 
 
 def test_a_reclaim_under_the_same_worker_id_still_stops_the_old_claims_rows(
