@@ -254,7 +254,11 @@ def test_the_sealed_posture_provisions_qualifies_replays_and_never_blames_the_mo
 
     def bloat(ws: Workspace) -> None:
         ws.overlay_sources(task.src_files)
-        (ws.root / "app" / "blob.bin").write_bytes(os.urandom(12 << 20))
+        # random, so nothing can shrink it, but with no 0x16 byte: belt 1b reads every
+        # touched file in a Go repository, and a raw 0x16 before "ok" (in about one 12 MB
+        # blob in two) disqualifies it as forged test output before the copy is tried
+        blob = os.urandom(12 << 20).replace(b"\x16", b"\x17")
+        (ws.root / "app" / "blob.bin").write_bytes(blob)
 
     res, witness = graded(small, bloat, "big")
     assert res.disqualified and res.dq_reason.startswith("trial tree: tree_copy_failed"), (
