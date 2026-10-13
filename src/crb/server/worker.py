@@ -213,10 +213,15 @@ Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/te
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
               tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
-              projections and their ratchets; the reserver, the stamped row and the guard,
-              C1-C15 end to end; the claim's ``reading_run_fields`` refusal, C3, C5, C7; the
-              factory reservation, C8 and C16; the checks-arm halt and the team's own
-              ``format_step`` keeping ``A0+L`` on the reading's arm),
+              projections and their ratchets; C3; the factory reservation, C8 and C16),
+              tests/test_p792_reserved_reservation.py (the reserver: once, at r1, before every
+              outcome event; the race, the stamped row and the guard),
+              tests/test_p792_reserved_losses.py (C1, C2, C10, C13, C15 end to end),
+              tests/test_p792_reserved_rows.py (C5, C9, C11, C12, the S1 harness row and the
+              stop at a reading run's first outage or environment row),
+              tests/test_p792_reserved_refusals.py (the claim's ``reading_run_fields`` refusal,
+              C7, the reserver's recheck under the lock, the lint and checks-arm halts and the
+              team's own ``format_step`` keeping ``A0+L`` on the reading's arm),
               tests/test_p792_pool.py (the claim's ``pool_drift`` refusal)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in

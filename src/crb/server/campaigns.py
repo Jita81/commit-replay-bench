@@ -56,6 +56,8 @@ Works with:   src/crb/core/campaign.py (the record, the tally and its refusals),
               src/crb/core/run.py (writes the ``build.done`` an attempt is read by),
               src/crb/server/routes/readings.py (``served_reading``: ``settled_unrowed``)
 Tested by:    tests/test_server_campaigns.py, tests/test_p792_reserved.py,
+              tests/test_p792_reserved_losses.py and tests/test_p792_reserved_reservation.py
+              (``unplaced_attempts``: the settled, unrowed reservation charged and served),
               tests/test_server_routes_learn.py
 Touch when:   never for a new repository; a new kind of spend is recorded outside a run's rows,
               author calls and attempts (count it here and in ``Spend``), ``build.done`` or a

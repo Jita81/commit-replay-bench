@@ -78,7 +78,8 @@ Works with:   src/crb/server/campaigns.py (reads the record, the releases and ea
               src/crb/core/evidence.py (``canonical_json``, ``sha256_text``),
               src/crb/core/context_arm.py (``REPLAY_MODE``, ``LEARN_OFF``, ``MOD_LOOP``: the
               arm vocabulary a run's admission key is spelled in)
-Tested by:    tests/test_campaign.py, tests/test_server_campaigns.py, tests/test_p792_reserved.py
+Tested by:    tests/test_campaign.py, tests/test_server_campaigns.py, tests/test_p792_reserved.py,
+              tests/test_p792_reserved_losses.py (the settled, unrowed reservation charged)
 Touch when:   never for a new repository; the registration's tally or stop rule changes (a
               decision first, then this module's refusals and
               docs/API.md#campaigns-a-campaigns-money-ceiling).

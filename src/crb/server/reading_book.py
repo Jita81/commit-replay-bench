@@ -54,7 +54,7 @@ Works with:   src/crb/server/routes/readings.py (registers readings; re-exports 
               ``reservations_of``: a reserved reading's reservations)
 Tested by:    tests/test_server_readings.py, tests/test_server_routes_runs.py,
               tests/test_worker.py, tests/test_server_campaigns.py, tests/test_p792_reserved.py,
-              tests/test_p792_pool.py
+              tests/test_p792_reserved_reservation.py, tests/test_p792_pool.py
 Touch when:   never for a new repository; a reading's verified set changes (an ADR amending
               ADR-0026 first).
 """

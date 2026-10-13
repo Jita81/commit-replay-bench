@@ -76,7 +76,9 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
 Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py,
-              tests/test_p792_reserved.py (the reserved.v1 submit refusals),
+              tests/test_p792_reserved_refusals.py (the reserved.v1 submit refusals),
+              tests/test_p792_reserved_rows.py and tests/test_p792_reserved.py (C5's
+              ``timeout`` and C3's ``builder_config``, refused at submit),
               tests/test_p792_pool.py (``pool_drift``)
 Touch when:   never for a new repository; a run parameter is added (schema field →
               ``params`` here → the worker reads it → docs/API.md → the UI type); a field

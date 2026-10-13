@@ -107,9 +107,11 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               overlay's checks arm and the repository block's own, RT2B-2),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
 Tested by:    tests/test_server_readings.py (with the overlay refusal on both routes and
-              the forward route's moved-arm refusal, SQLite and PostgreSQL), tests/test_forward_reading_e2e.py,
-              tests/test_p792_reserved.py (the attempt rule registered by default, the pins and
-              the reserved counts, the forward reading's opt-in),
+              the forward route's moved-arm refusal, SQLite and PostgreSQL),
+              tests/test_forward_reading_e2e.py,
+              tests/test_p792_reserved_reservation.py (the attempt rule registered by default,
+              the pins and the reserved counts),
+              tests/test_p792_reserved.py (the forward reading's opt-in),
               tests/test_wave3_registration_rehearsal.py (the Wave 3 record's requests),
               tests/test_p792_pool.py (the pool pinned to its qualification records)
 Touch when:   never for a new repository; the reading's shape or the registration's refusals change

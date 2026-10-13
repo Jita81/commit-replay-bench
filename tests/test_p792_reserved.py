@@ -5,8 +5,15 @@ docs/PREVENTION.md P-792 records the finding: a round-5 enumeration of the Wave 
 found nineteen channels (C1 to C19) through which an operator could choose which commits leave
 a campaign reading, or what an admitted row says. The round-5 design spec for closing them
 names one test per channel, each reproducing the enumeration's probe and failing before its
-fix; this file holds them, and P-792 is closed on them now that ``POST /readings`` registers
-every reading under reserved.v1 (DL-385).
+fix, and P-792 is closed on them now that ``POST /readings`` registers every reading under
+reserved.v1 (DL-385). The channel tests live in five files, split by theme so that each stays
+under CI's per-file time ceiling. This one holds the rigs and helpers the other parts import,
+and the tests of C3, the rule itself, the treatment pin's projections and the factory; the
+worker's tests are in tests/test_p792_reserved_losses.py (an attempt lost before or after its
+reservation), tests/test_p792_reserved_rows.py (the reserved attempt's row decides, whatever
+its kind), tests/test_p792_reserved_refusals.py (a run refused or halted before it reserves)
+and tests/test_p792_reserved_reservation.py (where and how often the worker reserves, and how
+``/readings`` registers and serves it).
 
 C3 (``builder_config``): a run's ``builder_config`` can carry ``extra_args``, which the Claude
 Code builder appends to its argv after the rung's own ``--model`` and ``--max-turns``, and a
@@ -20,11 +27,11 @@ refusal at submit, 422 on ``POST /runs`` with nothing queued.
 The reserved.v1 attempt rule (core): a reading registered under it reads each enrolled
 commit by the one row its reservation wrote. C4 (a lint-off row is a miss, never a
 hit or a leave), C6 (whatever the reserved attempt's exit — a cancel or kill included — later
-rows never change its verdict), C15 (a settled reservation without a row is a miss), C19 (an
-arm counts only its own reservation's row) and C7 (a non-loop run spends on the reading's
-budget profile, refused otherwise) each have a test here, beside the goldens that pin every
-legacy (``first_observed.v0``) reading as it read before and the property that the reserved
-rule's hits are a subset of the legacy rule's.
+rows never change its verdict), C15 (a settled reservation without a row is a miss) and C19
+(an arm counts only its own reservation's row) each have a test here, and C7 (a non-loop run
+spends on the reading's budget profile) one in the refusals part. Beside them are the goldens
+that pin every legacy (``first_observed.v0``) reading as it read before and the property that
+the reserved rule's hits are a subset of the legacy rule's.
 
 The treatment pin's projections (worker helpers): a reservation pins a ``deployment_fp``
 per campaign and repository and an ``arm_fp`` per arm, and a later mismatch halts the run.
@@ -32,166 +39,80 @@ C3 (``extra_args``), C4 (lint off), C5 (``timeout``), C7 (the budget profile) an
 ``RepoConfig`` edit) each move a fingerprint; the ratchets list ``RepoConfig``'s and
 ``BuilderContainerSettings``' own fields, so a new field is pinned or named unpinned.
 
-The worker (fail closed): a replay or blind run filed under a reserved.v1 reading reserves
-each commit before its r1 build, so whatever the attempt does after — a kill (C1), a cancel
-(C2), a gold control that timed out (C5), a clock rolled back (C9), a lost sandbox or a full
-disk (C10), a demoted row (C12), an outage (C13) or no row at all (C15) — is that commit's one
-attempt, and a later run skips it; a configuration edit after the first reservation halts the
-next run before its build (C5, C11), and only a refusal before the reservation (a credential
-gone at claim, C13; a field the reading does not register — ``builder_config``, a ``timeout``,
-another budget profile or ladder — refused at claim, C3, C5, C7) leaves the commit pending.
-Each of these failed on the code before the worker reserved (the claim refusals, before the
-worker checked the run's fields); the legacy reading's run, which never reserves, is green on
-both by design. ``GET /readings`` serves the rule each reading reads under, a reserved.v1
-reading's treatment pins and its reserved commits per arm (C3, C5, C17), and a legacy reading
-as open on its rule.
-
-The submit gate (``POST /runs``): under a reserved.v1 reading the same whitelist refuses a
-body 422 ``reading_run_fields`` before anything is queued (C3(a), C5(a), C7), every request
-field is classified so a new one fails the ratchet until it is (C17), and a run filed under a
-campaign holding a reserved.v1 reading on its repository without naming one is refused 409
-``reading_required`` (C19); both refusals hold again under the events lock where the campaign
-admits the run, and the real step-6 bodies are admitted.
-
 The factory (C8, C16): a forward reading opts in to reserved.v1 on ``POST /readings/forward``
 (``attempt_rule``; ``max_reruns`` 0 only), and a factory run filed under it by ``reading_id``
 is admitted only on the reading's cell — an off-cell run is refused 422 ``reading_run_fields``
 at submit and ``run.refused`` at claim, nothing reserved (C8) — and reserves each ticket's
 first ``S2`` build, so only that attempt decides it, whatever later rows say; an exception
 after the reservation is a miss (C16), and a reservation that cannot be written never blocks
-the build (``build.not_reserved``, the ticket counted by no reading). The legacy forward
-rule's ``_forward_attempt`` goldens stand beside them, unchanged.
+the build (``build.not_reserved``, the ticket counted by no reading).
 
 Navigation
 ----------
-What it is:   The P-792 channel tests — one per channel the round-5 enumeration found, each
-              failing on the code before its fix.
-What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_args`` and
-              ``claude_binary`` when they are set, that the named ``extra_args`` are exactly
-              the argv's tail (the overriding ``--model``), and that a builder with neither
-              set describes itself byte for byte as it did before. The legacy goldens: every
-              registration variant's id and every scenario's outcome, looks and per-commit
-              verdicts, printed from the code before reserved.v1 (the deciding row by its
-              index, since a row hash covers its random ``row_id``), with the one deliberate
-              move beside them (``P795_MOVED``: an unsealed replay row reads ``scope_fault``,
-              its arm ``undecided``). reserved.v1: C4, C6 (every exit, against later rows of
-              other runs, reservations and claims, with the legacy control), C15, C19, an
-              imported copy of a reserved row deciding nothing (R5V3-IMPORT-1, P-321), each
-              check a named miss (replay and forward), a reserved row off the reading's
-              checks arm read ``scope_fault`` (``scope`` ``checks_arm``, the arm
-              ``undecided``, never a miss — RT2B-1), a reserved scope fault outcome ``None``
-              so no look, tally or loop pair counts it a miss (VS1-2), a forward reserved row
-              off the frozen arm a ``scope_fault`` and another attempt of a reserved ticket,
-              graded off the arm, a duplicate (round 6), the registration's ``max_reruns`` 0
-              and budget profile, the ``reading_run_refusal`` whitelist table and the arm
-              each admitted run maps to (C3, C5, C7 at the core), the hypothesis property
-              that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
-              the same look or earlier (with other readings' earlier rows inside the
-              argument's condition), and the condition's counterexample: two readings of one
-              campaign enrolling a commit on one arm. The projections: every pinned
-              ``RepoConfig`` field and every container field and deployment input moves its
-              fingerprint, A0 and A0+L share ``deployment_fp``, a calibrated profile moves
-              only ``arm_fp``, a person's veto or link on the loop's chain moves the ``A0+L``
-              ``arm_fp`` as a level edit does while the loop's own retire does not (C7), and
-              no secret reaches a projection (a credential-shaped input is refused). The worker:
-              C1 (SQLite and PostgreSQL), C2, C5(b, c), C9-C13 and C15 end to end, S3 and A0
-              reserving one commit apart, a reservation only at r1 and before every outcome
-              event, two claims racing for one commit (one wins, on both backends), the
-              reserver's recheck under the lock (a run cancelled, or reclaimed and claimed
-              again by another worker or by one with this one's id, between claim and
-              reserve refused ``cancel_requested`` or ``run_not_owned``, the commit pending),
-              a settled claim's row refused up to ``execute`` (and, F87-5, a reclaimed run's
-              row no reservation names: ``ClaimLost``, no row and no finish, on both
-              backends), a legacy reading's run never
-              reserving, ``POST /readings`` registering reserved.v1 only (DL-385: the bare
-              body reserved.v1, a legacy rule or a re-run refused 422), the claim's
-              ``reading_run_fields`` refusal (C3(b) ``extra_args``, C5 ``timeout``, C7 a budget
-              profile, a two-rung ladder) and ``GET /readings`` serving ``attempt_rule``,
-              ``pinned_treatment`` and ``reserved`` (null before the first reservation; a legacy
-              reading ``first_observed.v0``, ``p792: "open on this rule"``). The submit gate:
-              ``POST /runs`` refusing 422 ``reading_run_fields`` (C3(a) ``extra_args``, C5(a)
-              ``timeout``, C7 the budget profile and learning switch, each with nothing queued
-              or admitted), the request-field ratchet (C17: free, default, refused and factory
-              fields; their stored ``params`` keys are ``RESERVED_RUN_PARAMS``), the pin that
-              ``new_run``'s empty ladder is ``RESERVED_RUN_LADDER``, 409 ``reading_required``
-              (C19), the step-6 re-measure bodies admitted, and both refusals re-checked under
-              the events lock. Lint (P-796): a run of a reading of either rule on a repository
-              whose lint is off refused 409 ``lint_disabled`` at submit and ``run.refused`` at
-              claim (nothing reserved, the commit pending), and lint switched off after the
-              first reservation refused, then switched on as another config halting the next
-              ``reading_treatment_mismatch`` on the repository pin. The checks arm (RT2B-1,
-              round 6): with the loop's ``format_step`` switch in force, an ``A0+L`` run whose
-              checks resolve ``fmt`` against a reading frozen ``off`` halting
-              ``reading_checks_arm_mismatch`` (``{frozen, run}``) before any reservation or
-              build, the commit pending; and, pinned beside it, the team's own
-              ``checks.format_step`` keeping ``A0+L`` on the reading's arm (it reserves and
-              builds). The factory: C8 (the
-              legacy ``_forward_attempt`` golden and its variants; an off-cell factory run
-              refused at submit and at claim, nothing reserved), C16 (a grading exception
-              after the reservation is a miss), the hook never blocking delivery (a store
-              error, a ticket not enrolled), a factory run off the reading's checks arm
-              halting before it reserves (V1-CA-3) and only the reserved attempt counting
-              (both on SQLite and PostgreSQL), a reserved ticket placed by its ``item_id`` in F8's tally and
-              ``settled_unrowed`` (rowed: nothing unplaced; unrowed: one attempt at its
-              hold, the campaign stopped), the ``RESERVED_FACTORY_PARAMS`` ratchet and
-              ``POST /readings/forward`` opting in.
-How:          Builds the builder directly with the worker's ``CRB_CLAUDE_CODE_*`` defaults
-              cleared, and reads its argv for the fixture task from
-              ``fixtures.builders_repo``; no model call, no store. The reading tests build
-              readings, ``Reservation`` values and chained rows in memory (the reading
-              fixture's ``sealed_row`` and the forward suite's ``S2`` row shape) and call the
-              pure core, with no store. The projection tests call the worker's pure helpers on
-              in-memory ``RepoConfig``, ladder and container values. The worker tests use a
-              store and a worker: ``test_worker``'s ``Harness`` (SQLite, or the ``backend``
-              fixture's database) over the pyrepo fixture with a second commit, the fake
-              builder and a local sandbox on the run's cancel token (``_WExec``), every row
-              relabelled as a sealed worker writes it, each run stored as ``POST /runs``
-              stores one the whitelist admits; ``_w_peek`` acts the moment belt 2 reads red.
-              The ``POST /readings`` test runs the app on a seeded SQLite store, and the
-              ``GET /readings`` tests (``_w_served``) the app over the worker rig's store.
-              The submit-gate tests (``_r_stack``) run the app on the ``backend`` fixture's
-              store (SQLite and PostgreSQL) with the Wave 3 rehearsal's campaign and
-              registrations (reserved.v1; a legacy one written as its event, ``_r_legacy``),
-              and settle each admitted run so the
-              campaign's line is free for the next. The factory tests (``_f_rig``) run a
-              factory run on the worker rig over ``test_worker``'s multiply backlog
-              with a calibration grant and held-out tests, every cell a ceiling, under a
-              forward reading appended as its event (``_FRig.register``).
+What it is:   The P-792 channel tests that need no worker run but C3's and the factory's, and
+              the rigs and helpers the other parts import (``_WRig`` and ``_w_*``, the worker
+              rig; ``_r_stack`` and ``_r_*``, the submit-gate stack; ``_FRig``, the factory's).
+What it does: C3: ``POST /runs`` refusing ``builder_config.extra_args`` 422 (a), the claim
+              refusing it ``run.refused`` (b), and ``ClaudeCodeBuilder.describe()`` naming
+              ``extra_args`` and ``claude_binary`` when set, a builder with neither describing
+              itself byte for byte as before (c). The legacy goldens: every registration
+              variant's id and every scenario's outcome, looks and per-commit verdicts, printed
+              from the code before reserved.v1, with the one deliberate move beside them
+              (``P795_MOVED``). reserved.v1: C4, C6 (every exit, against later rows of other
+              runs, with the legacy control), C15, C19, an imported copy of a reserved row
+              deciding nothing (R5V3-IMPORT-1, P-321), each check a named miss, a reserved row
+              off the reading's checks arm a ``scope_fault`` and never a miss (RT2B-1, VS1-2),
+              a forward reserved row off the frozen arm a ``scope_fault`` and another attempt
+              of a reserved ticket a duplicate, the registration's ``max_reruns`` 0 and budget
+              profile, the ``reading_run_refusal`` whitelist table and the arm each admitted
+              run maps to, and a loop arm filing its enrolled commits in the seeded order
+              (NEW-1); the hypothesis property that a reserved hit is a legacy hit and a
+              reserved ``deliver`` a legacy one at the same look or earlier, and its
+              condition's counterexample. The projections: every pinned field and deployment
+              input moves its fingerprint, A0 and A0+L share ``deployment_fp``, a calibrated
+              profile moves only ``arm_fp``, a person on the loop's chain moves the ``A0+L``
+              ``arm_fp``, and no secret reaches a projection. The factory: C8 (the legacy
+              ``_forward_attempt`` golden; an off-cell run refused at submit and at claim),
+              C16, the hook never blocking delivery, a run off the reading's checks arm halting
+              before it reserves (V1-CA-3), only the reserved attempt counting, a reserved
+              ticket placed by its ``item_id`` in F8's tally, the ``RESERVED_FACTORY_PARAMS``
+              ratchet and ``POST /readings/forward`` opting in.
+How:          The reading tests build readings, ``Reservation`` values and chained rows in
+              memory and call the pure core; the projection tests call the worker's pure
+              helpers on in-memory values; C3 reads the builder's argv for
+              ``fixtures.builders_repo``'s task with the worker's ``CRB_CLAUDE_CODE_*``
+              defaults cleared (``_worker_defaults_cleared``, autouse, which each part
+              imports). ``_w_rig`` runs ``test_worker``'s ``Harness`` (SQLite, or the
+              ``backend`` fixture's database) over the pyrepo fixture with a second commit, the
+              fake builder and a local sandbox on the run's cancel token, each row relabelled
+              as a sealed worker writes it; ``_r_stack`` runs the app on the ``backend``
+              store with the Wave 3 rehearsal's campaign; ``_f_rig`` runs a factory run on the
+              worker rig under a forward reading appended as its event (``_FRig.register``).
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0026-the-context-standard.md
-Works with:   src/crb/builders/claude_code.py (``describe`` and ``argv``, under test),
-              tests/test_builders_claude_code.py (the builder's own suite),
-              tests/fixtures/builders_repo.py (the task the argv is built for),
-              src/crb/core/reading.py (the reserved.v1 rule, ``reading_run_refusal`` and the
-              legacy loop, under test), tests/fixtures/readings.py (the registrations and
-              rows the reading tests build on), src/crb/server/worker.py
-              (``deployment_projection``, ``arm_projection``, ``repo_config_digest``, under
-              test), docs/PREVENTION.md (P-792, the row these tests close; P-795, the golden's
-              one deliberate move), tests/test_worker.py (``Harness``, ``FakeBuilder``,
-              ``_multiply_backlog``),
-              src/crb/server/reading_book.py and src/crb/server/campaigns.py
-              (``load_readings`` filling ``reservations_of``; ``treatment_pins``;
-              ``unplaced_attempts``, ``members`` and ``tally``), src/crb/core/prevention.py
-              (``snapshot`` and ``person_acts_digest``, the ``A0+L`` pin's person half),
-              src/crb/store/jobs.py (``claim_guard``, ``reclaim_stale``),
-              src/crb/server/routes/readings.py (the reserved.v1 fields; ``served_reading``: the
-              rule, the pins and the reserved counts), src/crb/server/routes/runs.py
-              (``submit_refusals``: ``reading_run_fields_refusal``, ``reading_lint_refusal``
-              and ``campaign_refusal``, under test), tests/test_wave3_registration_rehearsal.py
-              (the campaign, the registrations and the step-6 bodies the submit-gate tests
-              post), src/crb/factory/build.py and src/crb/factory/loop.py (the reserve hook,
-              ``build.not_reserved``), tests/test_worker_held_out.py (``HELD_OUT`` and
-              ``_every_cell_a_ceiling``), src/crb/server/acceptance.py (``write_held_out``)
+Works with:   src/crb/core/reading.py (the reserved.v1 rule, ``reading_run_refusal`` and the
+              legacy loop, under test), src/crb/server/worker.py (the projections, under
+              test; the reserver the rigs drive), src/crb/builders/claude_code.py
+              (``describe`` and ``argv``, under test), src/crb/factory/build.py and
+              src/crb/factory/loop.py (the reserve hook, ``build.not_reserved``),
+              tests/fixtures/readings.py (the registrations and rows the tests build on),
+              tests/test_worker.py and tests/test_wave3_registration_rehearsal.py
+              (``Harness`` and ``FakeBuilder``; the campaign the submit-gate stack posts to),
+              docs/PREVENTION.md (P-792, the row these tests close; P-795, the golden's move),
+              tests/test_p792_reserved_losses.py and tests/test_p792_reserved_rows.py and
+              tests/test_p792_reserved_refusals.py and tests/test_p792_reserved_reservation.py
+              and tests/test_p792_pool.py (the parts that import the rigs and helpers here)
 Tested by:    tests/test_p792_reserved.py
-Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes here,
-              failing first), or a builder gains a constructor option that shapes its argv
-              (the stamp names it when set, and ``DEFAULT_STAMP`` stays unchanged); the
-              reserved.v1 verdict or the run whitelist changes (its table row here first);
-              a ``RepoConfig`` / ``BuilderContainerSettings`` field or a deployment input is
-              added (its edit in the ratchet's table, which fails until then);
-              never to regenerate ``GOLDEN`` — a legacy reading that moves is a regression,
-              unless a PREVENTION row moves it on purpose (``P795_MOVED``, beside it).
+Touch when:   never for a new repository; a P-792 channel's fix lands (its test goes in the part
+              its theme names, failing first), a rig or helper the parts share changes, or a
+              builder gains a constructor option that shapes its argv (the stamp names it when
+              set, and ``DEFAULT_STAMP`` stays unchanged); the reserved.v1 verdict or the run
+              whitelist changes (its table row here first); a ``RepoConfig`` /
+              ``BuilderContainerSettings`` field or a deployment input is added (its edit in
+              the ratchet's table, which fails until then); never to regenerate ``GOLDEN`` — a
+              legacy reading that moves is a regression, unless a PREVENTION row moves it on
+              purpose (``P795_MOVED``, beside it).
 """
 
 from __future__ import annotations
@@ -202,8 +123,6 @@ import dataclasses
 import inspect
 import json
 import os
-import threading
-import types
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -216,7 +135,6 @@ from hypothesis import strategies as st
 from sqlalchemy import select
 
 import crb.builders as builders_pkg
-import crb.builders.adapter as adapter_mod
 from crb.builders import base
 from crb.builders import claude_code as cc
 from crb.builders.adapter import Preflight
@@ -234,8 +152,6 @@ from crb.core.evidence import canonical_json
 from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.learn import remeasure_plan
 from crb.core.ledger import (
-    AUTHORING_HARNESS_ERROR,
-    FAILURE_HARNESS,
     FAILURE_OUTAGE,
     GENESIS_HASH,
     LABEL_BUILDER_EXECUTOR,
@@ -256,11 +172,7 @@ from crb.core.prevention import (
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     ATTEMPT_RULE_RESERVED,
-    DEFAULT_MAX_RERUNS,
-    HALT_CANCEL_REQUESTED,
     HALT_CHECKS_ARM_MISMATCH,
-    HALT_RUN_NOT_OWNED,
-    HALT_TREATMENT_MISMATCH,
     LABEL_CLAIM,
     LABEL_RESERVATION,
     LABEL_TREATMENT,
@@ -271,7 +183,6 @@ from crb.core.reading import (
     READING_RESERVED_ACTION,
     REASON_SCOPE_FAULT,
     REFUSAL_INVALID,
-    REFUSAL_READING_REQUIRED,
     REFUSAL_RUN_FIELDS,
     RESERVED_RUN_LADDER,
     RESERVED_RUN_PARAMS,
@@ -280,7 +191,6 @@ from crb.core.reading import (
     RULES,
     SCOPE_CHECKS_ARM,
     SCOPE_UNSEALED,
-    SKIP_COMMIT_RESERVED,
     STATE_DELIVER,
     STATE_INSUFFICIENT,
     STATE_LOOK_PENDING,
@@ -300,7 +210,6 @@ from crb.core.reading import (
     with_enrolment,
     with_reservations,
 )
-from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import BELT_AFFECTED_DIRS, Language, RepoConfig
 from crb.core.spend import (
     ESCALATION_ALWAYS,
@@ -317,21 +226,16 @@ from crb.server.posture_view import deployment_posture_class
 from crb.server.reading_book import load_readings
 from crb.server.routes import runs as runs_routes
 from crb.server.routes.learn import deployment_author_model
-from crb.server.schemas import RunCreateRequest
 from crb.store import qualifications as store_q
 from crb.store.db import init_db
 from crb.store.events import append_event
 from crb.store.jobs import (
     STATUS_CANCELLED,
     STATUS_FAILED,
-    STATUS_QUEUED,
-    STATUS_RUNNING,
     STATUS_SUCCEEDED,
-    ClaimLost,
     JobQueue,
-    claim_guard,
 )
-from crb.store.ledger import AttemptSettled, DbLedger, import_stamp
+from crb.store.ledger import DbLedger, import_stamp
 from crb.store.models import Event, Repo, Run, Task
 from fixtures import pyrepo as pr
 from fixtures.builders_repo import make_fixture
@@ -360,8 +264,6 @@ from test_wave3_registration_rehearsal import (
     _a0,
     _refused,
     _runs,
-    _s3_body,
-    a0l_body,
     add_repos_and_tasks,
     campaign_body,
     registration_bodies,
@@ -2741,90 +2643,6 @@ def _w_row_count(rig: _WRig) -> int:
     return len(list(rig.h.worker.ledger.rows()))
 
 
-def test_p792_c1_kill_after_peek_costs_the_commit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """C1, measured: reproduces the enumeration's kill probe (tests/test_zz_enum_kill_probe.py),
-    which killed the worker as soon as belt 2 read red, before the row was written; the run was
-    reclaimed and re-run with a clean builder, and the commit read a hit. Now the kill leaves
-    the reservation: the reclaimed run skips the commit without building it, the commit reads
-    a miss (``unobserved``) once its claim is settled, and a late append by the killed claim is
-    refused under the grades lock."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    rig.state["b"] = "noop"
-
-    def kill(_: Run) -> None:
-        raise _WKilled
-
-    _w_peek(rig, monkeypatch, kill)
-    with pytest.raises(_WKilled):
-        rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    assert (res.step_id, res.task_id) == ("A0", rig.first)
-    assert rig.status(run.id) == STATUS_RUNNING
-    assert rig.rows(run.id) == []
-    # the killed claim is still running: the commit waits for it
-    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
-
-    assert [r.id for r in rig.h.queue.reclaim_stale(0.0)] == [run.id]
-    rig.state["b"] = "gold"
-    again = rig.h.run_one()
-    assert again.id == run.id
-    assert rig.skips(run.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert len(FakeBuilder.briefs) == 1  # the killed attempt's build; the re-run built nothing
-    assert rig.rows(run.id) == []
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
-    assert len(rig.reservations(reading)) == 1
-
-    # the killed claim's row, had it reached the ledger late, is refused and never stored
-    before = _w_row_count(rig)
-    late = sealed_row(
-        rig.first,
-        clean=False,
-        arm="A0",
-        repo=pr.REPO_NAME,
-        labels={LABEL_RESERVATION: res.event_id, LABEL_CLAIM: "0"},
-    )
-    with pytest.raises(AttemptSettled):
-        rig.h.worker.ledger.append(late, guard=claim_guard(run.id, "w-test", 0))
-    assert _w_row_count(rig) == before
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
-
-
-def test_p792_c2_cancel_during_witness_is_a_miss(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C2, measured in round 4: a cancel asked as soon as belt 2 read red reached the gold
-    witness, which the run's cancel token stopped; the row was a harness failure, which the
-    legacy rule passes over, so a second run re-rolled the commit and it read a hit. Now the
-    harness row is the reserved attempt's and decides the commit: a miss (``harness``), and
-    the second run skips the commit without building it."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    rig.state["b"] = "noop"
-    _w_peek(rig, monkeypatch, lambda r: rig.h.queue.request_cancel(r.id, actor="op-1"))
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(run.id)
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert row.failure_kind == "harness"
-    assert row.labels["env_code"] == "GOLD_CONTROL_RED"
-    (control,) = rig.payloads(run.id, "grade.control")
-    assert (control["green"], control["rc"]) == (False, 130)
-    assert rig.status(run.id) not in (STATUS_QUEUED, STATUS_RUNNING)
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
-
-    rig.state["b"] = "gold"
-    second = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(second.id)
-    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
-
-
 def _w_before_reserve(
     rig: _WRig, monkeypatch: pytest.MonkeyPatch, act: Callable[[Run], None]
 ) -> None:
@@ -2848,907 +2666,6 @@ def _w_before_reserve(
     monkeypatch.setattr(w, "_reserver", reserver)
 
 
-@pytest.mark.parametrize("how", ["cancel", "reclaim", "reclaim_same_worker"])
-def test_p792_reserve_rechecks_the_run_under_the_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, how: str
-) -> None:
-    """The reserve transaction re-reads the run under the events lock: a cancel asked, or a
-    reclaim and a claim — by another worker, or by a worker with this one's id (two
-    processes sharing a configured id, or a restart repeating hostname-pid) — landing after
-    the run's own stop check and before the reservation halts the run there —
-    ``cancel_requested``, or ``run_not_owned`` naming the status, the owner, the claim it
-    reserved under and the claim the run is at now — with no ``reading.reserved`` written,
-    nothing built and the commit still pending. Pinned by mutation: without the re-read's
-    cancel check the ``cancel`` case is reserved and built, and without its claim check the
-    ``reclaim_same_worker`` case, whose owner never moves (R3-HON-1). The owner check is
-    pinned only with the claim check: through the queue a run changes owner only by a
-    reclaim, which moves the claim too."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    rig.state["b"] = "gold"
-    owner = rig.h.worker.worker_id if how == "reclaim_same_worker" else "worker-2"
-    if how == "cancel":
-        _w_before_reserve(
-            rig, monkeypatch, lambda r: rig.h.queue.request_cancel(r.id, actor="op-1")
-        )
-    else:
-
-        def steal(r: Run) -> None:
-            assert [x.id for x in rig.h.queue.reclaim_stale(0.0)] == [r.id]
-            other = rig.h.queue.claim_next(owner)
-            assert other is not None and (other.id, other.worker_id) == (r.id, owner)
-
-        _w_before_reserve(rig, monkeypatch, steal)
-    with contextlib.suppress(Exception):
-        rig.h.run_one()
-    (halted,) = rig.payloads(run.id, "run.halted")
-    if how == "cancel":
-        assert halted["reason"] == HALT_CANCEL_REQUESTED
-    else:
-        assert halted["reason"] == HALT_RUN_NOT_OWNED
-        detail = halted["detail"]
-        assert {k: detail[k] for k in ("status", "owner", "claim", "at_claim")} == {
-            "status": STATUS_RUNNING,
-            "owner": owner,
-            "claim": 0,
-            "at_claim": 1,
-        }, detail
-    assert rig.reservations(reading) == []
-    assert "build.start" not in rig.actions(run.id)
-    assert rig.rows(run.id) == []
-    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
-
-
-def test_p792_c5_timeout_refused_and_gold_red_is_a_miss(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C5, measured in round 4: a short timeout turned an honest attempt red, a gold control
-    that timed out (blame ``GOLD_CONTROL_RED``) wrote a harness row the legacy rule passes
-    over, and a later clean row of another run decided the commit; and a ``RepoConfig`` edit
-    moved what later attempts ran under while the reading read on. (a) ``POST /runs`` filed
-    under a reserved.v1 reading with its own ``timeout`` is refused 422 ``reading_run_fields``
-    naming ``timeout``, nothing queued (201 before the route's check), on ``backend``'s
-    store. (b) Now the timed-out control's row is the reserved attempt's: a miss, which a
-    later clean row never changes. (c) A ``runner_opts`` edit after the first reservation
-    halts the next run ``reading_treatment_mismatch`` before ``build.start``, naming the
-    field that moved."""
-    (tmp_path / "submit").mkdir()
-    with _r_stack(backend, tmp_path / "submit", monkeypatch) as w:
-        a0 = _a0(w, ("cobra", "XS"))
-        _r_fields(w, {**a0, "timeout": 1}, ["timeout"])
-        _r_admit(w, a0)
-
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    # (b) the reserved attempt's gold control times out
-    run = rig.enqueue(reading)
-    rig.state["b"] = "noop"
-    _w_peek(rig, monkeypatch, lambda _: rig.state.update(exec="timeout"))
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(run.id)
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert row.labels["env_code"] == "GOLD_CONTROL_RED"
-    assert "gold control red" in row.error
-    miss = rig.verdicts(reading, "A0")[rig.first]
-    assert miss == (False, "harness")
-    # a later clean row of another admitted run, under no reading, changes nothing
-    rig.state.update(b="gold", exec="")
-    other = rig.enqueue(None)
-    rig.h.run_one()
-    (clean,) = rig.rows(other.id)
-    assert clean.clean and LABEL_RESERVATION not in clean.labels
-    assert rig.verdicts(reading, "A0")[rig.first] == miss
-
-    # (c) the repository's runner options move after the first reservation
-    cfg = rig.h.pyrepo.config.to_dict()
-    rig.edit_config(runner_opts={**dict(cfg.get("runner_opts") or {}), "p792_edit": "1"})
-    rig.state["b"] = "multiply"
-    moved = rig.enqueue(reading, rig.second)
-    done = rig.h.run_one()
-    assert done.status == STATUS_FAILED
-    assert done.error == HALT_TREATMENT_MISMATCH
-    (halted,) = rig.payloads(moved.id, "run.halted")
-    assert halted["reason"] == HALT_TREATMENT_MISMATCH
-    detail = halted["detail"]
-    assert detail["half"] == "deployment"
-    assert detail["pinned"] == dict(res.payload_json)["deployment_fp"]
-    assert detail["ours"] != detail["pinned"]
-    assert detail["pinned_by"] == res.event_id
-    assert detail["fields"] == ["repo_config"]
-    assert "build.start" not in rig.actions(moved.id)
-    assert rig.rows(moved.id) == []
-    assert len(rig.reservations(reading)) == 1
-    assert rig.verdicts(reading, "A0")[rig.second] == (None, "pending")
-
-
-def test_p792_claim_refuses_timeout_and_a_budget_profile_mismatch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C5 and C7 at claim (C17: the whitelist is the claim's too, not only the submit's): a
-    run of a reserved.v1 reading inserted past ``POST /runs`` with its own ``timeout`` (C5:
-    a short timeout turns an honest attempt red), or spending on a budget profile other than
-    the reading's (C7), fails at claim with ``run.refused`` ``reading_run_fields`` naming the
-    field — nothing built, nothing reserved, the commit pending. The same run as submit stores
-    it is claimed, builds and reserves, so the refusals are the fields' and nothing else's."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    for params, field in (
-        ({"timeout": 5}, "timeout"),
-        ({"budget_profile": PROFILE_CALIBRATED}, "budget_profile"),
-    ):
-        queued = rig.enqueue(reading, params=params)
-        done = rig.h.run_one()
-        assert (done.id, done.status) == (queued.id, STATUS_FAILED), field
-        (why,) = rig.payloads(queued.id, "run.refused")
-        assert (why["code"], why["fields"], why["arm"]) == (REFUSAL_RUN_FIELDS, [field], "A0")
-        assert field in why["reasons"] and done.error.startswith(REFUSAL_RUN_FIELDS)
-        assert "build.start" not in rig.actions(queued.id) and rig.rows(queued.id) == []
-    assert FakeBuilder.briefs == [] and rig.reservations(reading) == []
-    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
-    run = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "run.refused" not in rig.actions(run.id)
-    (res,) = rig.reservations(reading)
-    assert (res.step_id, res.task_id) == ("A0", rig.first)
-    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
-
-
-def test_a_reading_run_stops_at_its_first_outage_row(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PW-7: a run of a reserved.v1 reading stops at its FIRST outage row. Under the worker's
-    general default (``outage_stop`` 3) one usage-limit episode reserved three commits and
-    wrote three outage rows — three misses under reserved.v1, enough alone to read the arm
-    ``insufficient`` under ``look.v1``. Now the run reserves the first commit, whose refused
-    attempt is its miss (``outage``), and stops ``run.outage_stop`` before it reserves the
-    second, which stays pending, unreserved, for a later run: the arm counts one miss."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register()
-    rig.state["b"] = "outage"
-    run = rig.enqueue(reading, rig.first, rig.second)
-    done = rig.h.run_one()
-    assert (done.id, done.status) == (run.id, STATUS_FAILED)
-    (stop,) = rig.payloads(run.id, "run.outage_stop")
-    assert str(stop["reason"]).startswith("provider outage: 1 consecutive"), stop
-    (res,) = rig.reservations(reading)
-    assert (res.step_id, res.task_id) == ("A0", rig.first)
-    (row,) = rig.rows(run.id)
-    assert row.failure_kind == "outage" and row.labels[LABEL_RESERVATION] == res.event_id
-    assert rig.verdicts(reading, "A0") == {
-        rig.first: (False, "outage"),
-        rig.second: (None, "pending"),
-    }
-    assert rig.look(reading, "A0") == (1, 1)
-
-
-def test_a_reading_run_stops_at_its_first_environment_row(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PW-7: a run of a reserved.v1 reading stops at its FIRST environment row (``env_stop``
-    1; the worker's general default is 2). The first commit's reserved attempt reads red and
-    its gold control times out — an ``environment:`` row (``GOLD_CONTROL_RED``), that
-    commit's miss under reserved.v1 — and the run stops ``run.environment_stop`` before it
-    reserves the second, though the sandbox recovers at once: the second stays pending and
-    unreserved, and the arm counts one miss."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register()
-    rig.state["b"] = "noop"
-    _w_peek(rig, monkeypatch, lambda _: rig.state.update(exec="timeout"))
-    append = rig.h.worker.ledger.append
-
-    def recovered(row: GradeRow, *, guard: Any = None) -> GradeRow:
-        # the sandbox recovers once the row is written, so only the stop knob stops the run
-        try:
-            return append(row, guard=guard)
-        finally:
-            rig.state["exec"] = ""
-
-    monkeypatch.setattr(rig.h.worker.ledger, "append", recovered)
-    run = rig.enqueue(reading, rig.first, rig.second)
-    done = rig.h.run_one()
-    assert (done.id, done.status) == (run.id, STATUS_FAILED)
-    (stop,) = rig.payloads(run.id, "run.environment_stop")
-    assert str(stop["reason"]).startswith("environment: 1 consecutive"), stop
-    (res,) = rig.reservations(reading)
-    assert (res.step_id, res.task_id) == ("A0", rig.first)
-    (row,) = rig.rows(run.id)
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert row.labels["env_code"] == "GOLD_CONTROL_RED" and row.error.startswith("environment:")
-    assert rig.verdicts(reading, "A0") == {
-        rig.first: (False, "harness"),
-        rig.second: (None, "pending"),
-    }
-    assert rig.look(reading, "A0") == (1, 1)
-
-
-def test_a_reading_run_body_naming_outage_stop_3_is_refused(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """PW-7 at submit and at claim: a run of a reserved.v1 reading takes ``outage_stop`` and
-    ``env_stop`` only as 1 (or unset, which the worker defaults to 1 on such a run). On
-    ``backend``'s store ``POST /runs`` naming ``outage_stop`` 3, ``env_stop`` 2 or either at 0
-    is refused 422 ``reading_run_fields`` naming the knob, nothing queued (201 before); the
-    step-6 body with both at 1 is admitted. A row queued past ``POST /runs`` carrying 3, 2,
-    ``null`` or ``true`` fails at claim (``run.refused``), nothing built or reserved."""
-    (tmp_path / "submit").mkdir()
-    with _r_stack(backend, tmp_path / "submit", monkeypatch) as w:
-        a0 = _a0(w, ("cobra", "XS"))
-        for knob, value in (("outage_stop", 3), ("env_stop", 2), ("outage_stop", 0)):
-            reason = _r_fields(w, {**a0, knob: value}, [knob])["reasons"][knob]
-            assert "first outage or environment row" in reason, reason
-        _r_fields(w, {**a0, "outage_stop": 3, "env_stop": 2}, ["env_stop", "outage_stop"])
-        stored = dict(_r_admit(w, {**a0, "outage_stop": 1, "env_stop": 1}).params_json or {})
-        assert (stored["outage_stop"], stored["env_stop"]) == (1, 1)
-
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    for knob, value in (
-        ("outage_stop", 3),
-        ("env_stop", 2),
-        ("outage_stop", None),
-        ("env_stop", True),
-    ):
-        queued = rig.enqueue(reading, params={knob: value})
-        done = rig.h.run_one()
-        assert (done.id, done.status) == (queued.id, STATUS_FAILED), knob
-        (why,) = rig.payloads(queued.id, "run.refused")
-        assert (why["code"], why["fields"], why["arm"]) == (REFUSAL_RUN_FIELDS, [knob], "A0")
-        assert "build.start" not in rig.actions(queued.id) and rig.rows(queued.id) == []
-    assert rig.reservations(reading) == []
-    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
-
-
-def test_p792_c9_reservation_before_registration_is_miss(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C9, from enumeration.md by code reading (no probe ran): a row whose ``created`` does
-    not fall after the registration — a worker clock rolled back — was out of the reading's
-    scope, so the legacy rule passed over it and a later attempt decided the commit. Now the
-    reserved attempt's row decides it even so: a miss (``out_of_scope``), and a second run
-    skips the commit."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    rig.state["created"] = reading.registered_at  # the worker's clock reads the registration
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(run.id)
-    assert row.clean and row.created == reading.registered_at
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "out_of_scope")
-
-    rig.state["created"] = ""
-    second = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(second.id)
-    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "out_of_scope")
-
-
-def test_p792_c10_sandbox_loss_after_reserve_is_miss(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C10, from enumeration.md by code reading (no probe ran): a sandbox lost after the
-    build stopped the run with no row, and a host-side failure inside grading wrote a harness
-    row; the legacy rule read the commit pending, or passed over the harness row, so a later
-    attempt decided it. Now both are the reserved attempt's: the lost sandbox reads
-    ``unobserved`` once the run has failed, and a second run skips the commit; a full disk
-    under the grader is a ``harness`` miss."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.state.update(exec="lost"))
-    done = rig.h.run_one()
-    assert done.status == STATUS_FAILED
-    assert done.error.startswith("sandbox unavailable")
-    assert rig.rows(run.id) == []
-    (res,) = rig.reservations(reading)
-    assert res.task_id == rig.first
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
-
-    monkeypatch.setattr(FakeBuilder, "hook", None)
-    rig.state["exec"] = ""
-    again = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(again.id)
-    assert rig.skips(again.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
-
-    # the second commit's grader fails on the host: a harness row, the reserved attempt's
-    rig.state["b"] = "multiply"
-    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.state.update(exec="disk"))
-    disk = rig.enqueue(reading, rig.second)
-    rig.h.run_one()
-    (row,) = rig.rows(disk.id)
-    assert row.failure_kind == "harness"
-    assert row.labels[LABEL_RESERVATION] == rig.reservations(reading)[1].event_id
-    assert rig.verdicts(reading, "A0")[rig.second] == (False, "harness")
-
-
-def test_p792_c11_inflight_attempt_uses_claim_snapshot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C11, measured: the reading side re-confirmed by tests/test_zz_enum_fwd_lint_probe.py — a
-    ``RepoConfig`` edit changed what later attempts were graded under while the reading read
-    on. Now an attempt in flight when the configuration is edited is graded on the claim's
-    snapshot and decides its commit on the treatment it reserved (a hit), and the next run,
-    which loads the edit, halts ``reading_treatment_mismatch`` before ``build.start``."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    cfg = rig.h.pyrepo.config.to_dict()
-    edit = {**dict(cfg.get("runner_opts") or {}), "p792_edit": "1"}
-    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.edit_config(runner_opts=edit))
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(run.id)
-    assert row.clean
-    assert row.labels[LABEL_TREATMENT] == dict(res.payload_json)["treatment"]
-    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
-
-    monkeypatch.setattr(FakeBuilder, "hook", None)
-    rig.state["b"] = "multiply"
-    later = rig.enqueue(reading, rig.second)
-    done = rig.h.run_one()
-    assert done.error == HALT_TREATMENT_MISMATCH
-    (halted,) = rig.payloads(later.id, "run.halted")
-    assert halted["detail"]["fields"] == ["repo_config"]
-    assert "build.start" not in rig.actions(later.id)
-    assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}
-
-
-def test_p792_c12_demoted_row_is_miss(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """C12, from enumeration.md by code reading (no probe ran): a clean row whose evidence
-    pack could not be kept is demoted to a harness failure, which the legacy rule passed
-    over, so a later attempt decided the commit. Now the demoted row keeps its reservation
-    and decides the commit: a miss (``harness``), and a second run skips it."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    kept = worker._RunLedger._kept_pack
-    monkeypatch.setattr(
-        worker._RunLedger, "_kept_pack", lambda self, row: (None, "the pack store refused it")
-    )
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(run.id)
-    assert not row.clean and row.failure_kind == "harness"
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
-
-    monkeypatch.setattr(worker._RunLedger, "_kept_pack", kept)
-    second = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(second.id)
-    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
-
-
-def test_s1_harness_row_after_reservation_is_a_miss_and_never_rerun(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """F87-1 (round 6): the ``S1`` arm's env-probe harness row is the reserved attempt's,
-    so it decides the commit. The authored test's RED names no test (the run's sandbox times
-    the command out) and the runner's env probe is red under the parent binding, so the author
-    step writes ``authoring: harness error proving RED: the env probe is red ...`` — a
-    ``harness`` row (rule 4b) that REPORTS the fault and buys no retry. Under reserved.v1 it
-    reads ``(False, "harness")``, a miss, and a run re-filed under the reading skips the
-    commit with ``commit_reserved``: the author is never called again and nothing is built
-    (tests/test_replay_s1_arm.py::test_s1_unattributed_red_with_red_env_probe_is_harness
-    pins the adapter half)."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register(hierarchy=("S3", S1))
-    assert reading.author_model == AUTHOR
-    authored: list[str] = []
-    real_arm_of = worker.Worker._s1_arm_of
-
-    def arm_of(self: worker.Worker, ctx: Any, author: Any) -> Any:
-        def write(workspace: Any, subject: str, message: str) -> tuple[str, str]:
-            authored.append(subject)
-            rig.state["exec"] = "timeout"  # the RED under the parent names no test
-            return "tests/test_s1_authored.py", "def test_s1_authored():\n    assert False\n"
-
-        return dataclasses.replace(real_arm_of(self, ctx, author), author=write)
-
-    def red_probe(self: PytestRunner, executor: Any, root: Path, *, timeout: int = 0) -> Any:
-        rig.state["exec"] = ""  # the grade that follows runs as the posture does
-        return ExecResult(1, "missing: attrs==23.2.0 (found None)\n", "")
-
-    monkeypatch.setattr(worker.Worker, "_s1_arm_of", arm_of)
-    monkeypatch.setattr(PytestRunner, "probe_environment", red_probe)
-    s1_run = {"arm": "S1", "test_author": f"fake:{AUTHOR}"}
-    run = rig.enqueue(reading, params=s1_run)
-    rig.h.run_one()
-    assert authored == ["feat: add subtract"]
-    (res,) = rig.reservations(reading)
-    assert (res.step_id, res.task_id) == (S1, rig.first)
-    (row,) = rig.rows(run.id)
-    assert row.error.startswith(f"authoring: {AUTHORING_HARNESS_ERROR} the env probe is red "), (
-        row.error
-    )
-    assert not row.clean and row.failure_kind == FAILURE_HARNESS
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert rig.verdicts(reading, S1)[rig.first] == (False, "harness")
-
-    # the posture is mended and the run is re-filed: the reservation decided the commit
-    monkeypatch.setattr(PytestRunner, "probe_environment", lambda *a, **kw: None)
-    rig.state["b"] = "gold"
-    second = rig.enqueue(reading, params=s1_run)
-    rig.h.run_one()
-    assert authored == ["feat: add subtract"], "the re-filed run authored the commit again"
-    assert "build.start" not in rig.actions(second.id)
-    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.rows(second.id) == []
-    assert len(rig.reservations(reading)) == 1
-    assert rig.verdicts(reading, S1)[rig.first] == (False, "harness")
-
-
-def test_p792_c13_credential_gone_before_reserve_stays_pending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C13, from enumeration.md by code reading (no probe ran): a provider outage row was an
-    outage the legacy rule passed over, so a later attempt decided the commit. Now a refusal
-    before the reservation — the claim's credential check — writes nothing and leaves the
-    commit pending, while an outage after it is the reserved attempt's miss (``outage``),
-    and the next run skips the commit."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    gone = "credential_missing: ANTHROPIC_API_KEY is unset"
-    real = rig.h.worker._credential_gone
-    monkeypatch.setattr(rig.h.worker, "_credential_gone", lambda run: gone)
-    refused = rig.enqueue(reading)
-    done = rig.h.run_one()
-    assert (done.status, done.error) == (STATUS_FAILED, gone)
-    assert "build.start" not in rig.actions(refused.id)
-    assert rig.reservations(reading) == []
-    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
-
-    monkeypatch.setattr(rig.h.worker, "_credential_gone", real)
-    rig.state["b"] = "outage"
-    run = rig.enqueue(reading)
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(run.id)
-    assert row.failure_kind == "outage" and row.labels[LABEL_RESERVATION] == res.event_id
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "outage")
-
-    rig.state["b"] = "gold"
-    third = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(third.id)
-    assert rig.skips(third.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "outage")
-
-
-def test_p792_c15_settled_reservation_without_a_row_is_a_miss(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C15, from enumeration.md by code reading (no probe ran), and its mechanism measured
-    here: on the replay path a discard that fails after the builder raised grades the edits
-    as they are and writes a clean row naming the builder's error in its ``builder_error``
-    label (the ledger refuses only a clean row with an ``error``), not no row as the
-    enumeration read; that row is the reserved attempt's and decides the commit, and a later
-    run skips the commit rather than re-rolling it. What C15's fix needs is that an attempt
-    which ends with no row — here the ledger refusing the write — reads a miss
-    (``unobserved``) once its run has failed, never pending for a later attempt to decide."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-
-    def applied_then_raised(ws: Any, brief: Any) -> None:
-        pr.apply_gold(ws)
-        raise RuntimeError("the builder fell over after editing")
-
-    def undiscardable(*_: Any, **__: Any) -> list[str]:
-        raise OSError(13, "Permission denied")
-
-    monkeypatch.setattr(FakeBuilder, "hook", applied_then_raised)
-    monkeypatch.setattr(adapter_mod, "discard_source_edits", undiscardable)
-    raised = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "builder.discard.error" in rig.actions(raised.id)
-    (res,) = rig.reservations(reading)
-    (row,) = rig.rows(raised.id)
-    assert row.clean and not row.error
-    assert row.labels["builder_error"].startswith("builder raised RuntimeError")
-    assert row.labels[LABEL_RESERVATION] == res.event_id
-    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
-
-    monkeypatch.setattr(FakeBuilder, "hook", None)
-    reroll = rig.enqueue(reading)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(reroll.id)
-    assert rig.skips(reroll.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-
-    # the second commit's row never reaches the ledger: a settled reservation with no row
-    append = rig.h.worker.ledger.append
-
-    def refused(row: GradeRow, *, guard: Any = None) -> GradeRow:
-        if row.task_id == rig.second:
-            raise OSError(28, "No space left on device")
-        return append(row, guard=guard)
-
-    monkeypatch.setattr(rig.h.worker.ledger, "append", refused)
-    rig.state["b"] = "multiply"
-    lost = rig.enqueue(reading, rig.second)
-    done = rig.h.run_one()
-    assert done.status == STATUS_FAILED
-    assert rig.rows(lost.id) == []
-    assert [e.task_id for e in rig.reservations(reading)] == [rig.first, rig.second]
-    assert rig.verdicts(reading, "A0")[rig.second] == (False, "unobserved")
-
-    monkeypatch.setattr(rig.h.worker.ledger, "append", append)
-    again = rig.enqueue(reading, rig.second)
-    rig.h.run_one()
-    assert "build.start" not in rig.actions(again.id)
-    assert rig.skips(again.id) == [(rig.second, SKIP_COMMIT_RESERVED)]
-    assert rig.verdicts(reading, "A0") == {
-        rig.first: (True, ""),
-        rig.second: (False, "unobserved"),
-    }
-
-
-def test_p792_tally_charges_unrowed_reservation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """C1's spend (F8, C19's tally half): a run killed after its reservation and before
-    ``build.done`` leaves the reservation and no row. While its claim is live the attempt is
-    in flight — held under the run's cap and headroom, never charged; once the run is
-    reclaimed past that claim the attempt is settled, and the tally charges it at its
-    reservation's hold and stops the campaign ``unplaced_spend`` (before, it charged nothing
-    and admitted the next run). The reclaimed run skips the commit and ends, and the attempt
-    is still charged once. A settled reservation whose hold is ``None`` (an r1 rung with no
-    cost cap) is a cost the tally cannot know: ``campaign_cost_unknown``."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register()
-    hold: dict[str, float | None] = {"usd": 0.4}
-    real = rig.h.worker._reserver
-    monkeypatch.setattr(
-        rig.h.worker,
-        "_reserver",
-        lambda *a, **kw: real(*a, **{**kw, "hold_usd": hold["usd"]}),
-    )
-
-    def killed(ws: Any, brief: Any) -> None:
-        raise _WKilled
-
-    def admitted(*tasks: str) -> Run:
-        # filed as POST /runs admits it: a $1.00 cap and the $5.00 held before a priced attempt
-        run = rig.enqueue(reading, *tasks, admit=False)
-        append_event(
-            rig.h.factory,
-            trace_id=_W_CID,
-            stage="system",
-            action=CAMPAIGN_ADMITTED,
-            payload={
-                "campaign_id": _W_CID,
-                "run_id": run.id,
-                "cap_usd": 1.0,
-                "s1": False,
-                "commits": 1,
-                "headroom_usd": 5.0,
-            },
-        )
-        return run
-
-    def tallied() -> tuple[list[Any], list[Any]]:
-        with rig.h.factory() as s:
-            ms = campaigns_mod.members(s, _W_CID)
-            return campaigns_mod.unplaced_attempts(s, [m.run_id for m in ms]), ms
-
-    monkeypatch.setattr(FakeBuilder, "hook", killed)
-    run = admitted()
-    with pytest.raises(_WKilled):
-        rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    assert rig.status(run.id) == STATUS_RUNNING
-    assert "build.done" not in rig.actions(run.id) and rig.rows(run.id) == []
-    # in flight: the live claim's run holds its cap and headroom, and nothing is charged
-    unplaced, ms = tallied()
-    assert unplaced == [] and ms[0].spent_usd == 0.0
-    live = tally(54.0, ms)
-    assert live.held_usd == pytest.approx(1.0 + 5.0)
-    assert live.refusal(cap_usd=1.0, s1=False, commits=0) is None
-
-    assert [r.id for r in rig.h.queue.reclaim_stale(0.0)] == [run.id]
-    want = campaigns_mod.UnplacedAttempt(
-        run_id=run.id,
-        task_id=rig.first,
-        trial="r1",
-        rung="",
-        cost_usd=0.4,
-        reservation_event_id=res.event_id,
-        reading_id=reading.reading_id,
-    )
-    unplaced, ms = tallied()
-    assert unplaced == [want]
-    assert ms[0].unrowed_usd == pytest.approx(0.4) and ms[0].spent_usd == pytest.approx(0.4)
-    stop = tally(54.0, ms).refusal(cap_usd=1.0, s1=False, commits=0)
-    assert stop is not None and stop.code == "unplaced_spend"
-    assert stop.detail == {"run_ids": [run.id]}
-
-    # the reclaimed run skips the reserved commit and ends: the attempt is charged once
-    monkeypatch.setattr(FakeBuilder, "hook", None)
-    assert rig.h.run_one().id == run.id
-    assert rig.skips(run.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.status(run.id) not in (STATUS_QUEUED, STATUS_RUNNING)
-    unplaced, ms = tallied()
-    assert unplaced == [want] and ms[0].spent_usd == pytest.approx(0.4)
-
-    # a reservation held at None: settled, its cost unknown — the unknown cost stops first
-    hold["usd"] = None
-    monkeypatch.setattr(FakeBuilder, "hook", killed)
-    second = admitted(rig.second)
-    with pytest.raises(_WKilled):
-        rig.h.run_one()
-    assert [r.id for r in rig.h.queue.reclaim_stale(0.0)] == [second.id]
-    unplaced, ms = tallied()
-    assert [(u.run_id, u.task_id, u.cost_usd) for u in unplaced] == [
-        (run.id, rig.first, 0.4),
-        (second.id, rig.second, None),
-    ]
-    assert ms[1].unknown == 1 and ms[1].unrowed_usd == 0.0
-    stop = tally(54.0, ms).refusal(cap_usd=1.0, s1=False, commits=0)
-    assert stop is not None and stop.code == "campaign_cost_unknown"
-    assert stop.detail == {"run_ids": [second.id]}
-
-
-def test_p792_s3_and_a0_share_commits_without_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The reservation is per (reading, arm, commit): a sighted replay (S3) and a blind run
-    (A0) of the same commit each reserve it on their own arm, neither skips, and each arm's
-    commit is decided by its own reservation's row."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    sighted = rig.enqueue(reading, kind="replay")
-    rig.h.run_one()
-    blind = rig.enqueue(reading, kind="blind")
-    rig.h.run_one()
-    s3, a0 = rig.reservations(reading)
-    assert [(e.step_id, e.task_id) for e in (s3, a0)] == [("S3", rig.first), ("A0", rig.first)]
-    assert rig.skips(sighted.id) == [] and rig.skips(blind.id) == []
-    ((s3_row,), (a0_row,)) = rig.rows(sighted.id), rig.rows(blind.id)
-    assert s3_row.labels[LABEL_RESERVATION] == s3.event_id
-    assert a0_row.labels[LABEL_RESERVATION] == a0.event_id
-    assert rig.verdicts(reading, "S3")[rig.first] == (True, "")
-    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
-    # the arms share the deployment half: the blind run's reservation is pinned by the S3 one
-    assert dict(a0.payload_json)["pinned_by"] == s3.event_id
-    assert dict(a0.payload_json)["deployment_fp"] == dict(s3.payload_json)["deployment_fp"]
-
-
-def test_p792_reserve_only_at_r1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A reserved run reserves before its r1 build only. The claim's whitelist refuses a
-    two-rung ladder before anything is built (``reading_run_fields``, the ladder named); past
-    it — the claim check stubbed, as a run that reached the reserver by another path — a
-    two-rung run whose r1 misses climbs to r2 without a second reservation and is not halted;
-    the r2 row carries no reservation, so it never decides the commit — the r1 miss does."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    rig.state["by_model"] = {"m": "noop", "m2": "gold"}
-    ladder = ["fake:m@p", "fake:m2@p"]
-    refused = rig.enqueue(reading, ladder_json=ladder)
-    assert rig.h.run_one().status == STATUS_FAILED
-    (why,) = rig.payloads(refused.id, "run.refused")
-    assert (why["code"], why["fields"]) == (REFUSAL_RUN_FIELDS, ["ladder"])
-    assert "build.start" not in rig.actions(refused.id) and rig.reservations(reading) == []
-    monkeypatch.setattr(rig.h.worker, "_reading_run_fields", lambda run, emitter: None)
-    run = rig.enqueue(reading, ladder_json=ladder)
-    rig.h.run_one()
-    assert "run.halted" not in rig.actions(run.id)
-    (res,) = rig.reservations(reading)
-    r1, r2 = rig.rows(run.id)
-    assert (r1.trial, r1.clean, r2.trial, r2.clean) == ("r1", False, "r2", True)
-    assert r1.labels[LABEL_RESERVATION] == res.event_id
-    assert LABEL_RESERVATION not in r2.labels
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "miss")
-
-
-def test_p792_reservation_precedes_outcome_events(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C6's companion: the reservation is written before anything the attempt shows — its
-    ``Event.id`` is below the task's ``build.start`` and every ``grade.*`` event of the run,
-    so no outcome can be seen before the commit is spent."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    ids = _w_event_ids(rig, run.id)
-    outcome = [i for action, got in ids.items() if action.startswith("grade.") for i in got]
-    assert ids["build.start"] and outcome
-    assert int(res.id) < min([*ids["build.start"], *outcome])
-
-
-def test_p792_concurrent_reserve_one_wins(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """Two runs of the reading, claimed at once, race to reserve the same (reading, arm,
-    commit) from two threads: one reservation is written and the other run skips the commit
-    — the events lock decides, on SQLite and on PostgreSQL."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register()
-    for _ in range(2):
-        rig.enqueue(reading)
-    w = rig.h.worker
-    task = rig.h.pyrepo.feat_task()
-    reservers = []
-    for _ in range(2):
-        run = rig.h.queue.claim_next(w.worker_id)
-        assert run is not None
-        emitter = w._emitter(run)
-        config, git = w._load_repo(run.repo, emitter, kind=run.kind)
-        reservers.append(
-            w._reserver(
-                worker.RunContext(run=run, emitter=emitter, config=config, git=git),
-                reading.reading_id,
-                arm="A0",
-                checks_arm=reading.checks_arm,
-                deployment={"d": 1},
-                arm_body_for=lambda t: {"a": 1},
-                hold_usd=None,
-                ledger=types.SimpleNamespace(reserved={}),  # type: ignore[arg-type]
-            )
-        )
-    gate = threading.Barrier(2)
-    got: list[Any] = [None, None]
-
-    def race(i: int) -> None:
-        gate.wait()
-        got[i] = reservers[i](task)
-
-    threads = [threading.Thread(target=race, args=(i,)) for i in range(2)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=60)
-    assert sorted((r.status, r.reason) for r in got) == [
-        ("ok", ""),
-        ("skip", SKIP_COMMIT_RESERVED),
-    ]
-    assert len(rig.reservations(reading)) == 1
-
-
-def test_p792_attempt_settled_reaches_execute(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A reserved attempt whose run is reclaimed mid-build reaches the ledger as a claim that
-    is no longer its own: the append raises ``AttemptSettled``, the worker writes neither the
-    row nor the run's finish (``run.finish_refused``; the reclaimed run stays queued for its
-    new claim), and the new claim skips the commit, which reads ``unobserved``."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    run = rig.enqueue(reading)
-    finished: list[tuple[Any, ...]] = []
-    finish = rig.h.worker.queue.finish
-
-    def spy(*a: Any, **kw: Any) -> Any:
-        finished.append(a)
-        return finish(*a, **kw)
-
-    monkeypatch.setattr(rig.h.worker.queue, "finish", spy)
-    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.h.queue.reclaim_stale(0.0))
-    rig.h.run_one()
-    assert "run.finish_refused" in rig.actions(run.id)
-    assert finished == []
-    assert rig.rows(run.id) == []
-    assert rig.status(run.id) == STATUS_QUEUED
-    (res,) = rig.reservations(reading)
-
-    monkeypatch.setattr(FakeBuilder, "hook", None)
-    again = rig.h.run_one()
-    assert again.id == run.id
-    assert rig.skips(run.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
-    assert rig.rows(run.id) == []
-    assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
-    assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
-
-
-def test_p792_a_lost_claims_plain_row_is_refused_end_to_end(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """F87-5, through ``execute`` on SQLite and on PostgreSQL: a run filed under no reading is
-    reclaimed mid-build, so its row is one no reservation names. Round 5 guarded reserved rows
-    only, and this one landed in the reclaimed run; now every row of a claimed run is appended
-    under ``claim_guard``: the append raises ``ClaimLost`` (an ``AttemptSettled``), no row is
-    written, ``run.claim_lost`` is emitted once, and the run's finish is left to its next
-    claim (``run.finish_refused``; the run stays queued)."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    run = rig.h.enqueue("replay", params_json={"task_ids": [rig.first]})
-    finished: list[tuple[Any, ...]] = []
-    finish = rig.h.worker.queue.finish
-    raised: list[BaseException] = []
-    append = worker._RunLedger.append
-
-    def spy(*a: Any, **kw: Any) -> Any:
-        finished.append(a)
-        return finish(*a, **kw)
-
-    def watch(self: worker._RunLedger, row: GradeRow) -> GradeRow:
-        try:
-            return append(self, row)
-        except AttemptSettled as exc:
-            raised.append(exc)
-            raise
-
-    monkeypatch.setattr(rig.h.worker.queue, "finish", spy)
-    monkeypatch.setattr(worker._RunLedger, "append", watch)
-    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.h.queue.reclaim_stale(0.0))
-    rig.h.run_one()
-    assert [(r.task_id, r.trial) for r in rig.rows(run.id)] == []
-    assert [type(e) for e in raised] == [ClaimLost]
-    actions = rig.actions(run.id)
-    assert actions.count("run.claim_lost") == 1 and "run.finish_refused" in actions
-    assert "run.finished" not in actions and finished == []
-    assert rig.status(run.id) == STATUS_QUEUED
-
-
-def test_p792_a_legacy_readings_run_never_reserves(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A run filed under a legacy (``first_observed.v0``) reading reserves nothing: no
-    ``reading.reserved`` event, no reservation label on its row, and a second run builds the
-    commit again, as it always did. Green before the change by design — it pins that the
-    worker's reserver is wired only for a reserved.v1 reading."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register(legacy=True)
-    first = rig.enqueue(reading)
-    rig.h.run_one()
-    second = rig.enqueue(reading)
-    rig.h.run_one()
-    assert rig.reservations(reading) == []
-    rows = [*rig.rows(first.id), *rig.rows(second.id)]
-    assert len(rows) == 2 and all(LABEL_RESERVATION not in r.labels for r in rows)
-    assert "build.start" in rig.actions(second.id)
-    assert rig.skips(first.id) == rig.skips(second.id) == []
-    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
-
-
-def test_p792_post_readings_registers_reserved_only(tmp_path: Path) -> None:
-    """Step 13 of the round-5 spec (DL-385): ``POST /readings`` registers every reading
-    under reserved.v1. A body naming no rule is stored ``attempt_rule`` reserved.v1,
-    ``max_reruns`` 0 and the ``default`` budget profile, with no ``p792`` "open" mark when
-    served; the same body naming the rule outright is the same reading (409
-    ``reading_exists``); a body asking for the legacy rule, or for any re-run, is refused 422
-    ``validation_error`` and writes nothing. Before the flip the bare body registered under
-    the legacy rule, ``first_observed.v0`` with ``max_reruns`` 2."""
-    from fixtures.proven import add_tasks, register_via_api
-    from fixtures.readings import SEALED_SETTINGS, qualify_pool
-    from fixtures.server_seed import ALPHA, envelope, make_env
-
-    def registered(env: Any) -> int:
-        with env.factory() as s:
-            return len(list(s.execute(select(Event).where(Event.action == READING_EVENT_ACTION))))
-
-    with make_env(tmp_path, **SEALED_SETTINGS) as env:
-        qualify_pool(env.factory, ALPHA, add_tasks(env.factory))
-        bare = register_via_api(env)
-        assert bare.status_code == 201, bare.text
-        got = bare.json()
-        assert got["attempt_rule"] == ATTEMPT_RULE_RESERVED, got
-        assert (got["max_reruns"], got["budget_profile"]) == (0, PROFILE_DEFAULT)
-        (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
-        assert served["attempt_rule"] == ATTEMPT_RULE_RESERVED and "p792" not in served
-        named = register_via_api(env, attempt_rule=ATTEMPT_RULE_RESERVED, max_reruns=0)
-        assert named.status_code == 409, named.text
-        assert envelope(named)["detail"] == {"reading_id": got["reading_id"]}
-        before = registered(env)
-        assert before == 1
-        for ask in (
-            {"attempt_rule": ATTEMPT_RULE_LEGACY},
-            {"attempt_rule": ""},
-            {"max_reruns": DEFAULT_MAX_RERUNS},
-            {"attempt_rule": ATTEMPT_RULE_RESERVED, "max_reruns": 1},
-        ):
-            refused = register_via_api(env, hypothesis=f"{ask}", **ask)
-            assert refused.status_code == 422, (ask, refused.text)
-            assert envelope(refused)["code"] == "validation_error", ask
-        assert registered(env) == before
-
-
 def _w_served(rig: _WRig, home: Path) -> dict[str, dict[str, Any]]:
     """``GET /readings`` of the fixture repository over the rig's store, read by a viewer
     (the seed's users added on the first call), keyed by reading id."""
@@ -3768,126 +2685,6 @@ def _w_served(rig: _WRig, home: Path) -> dict[str, dict[str, Any]]:
         got = client.get(f"{API_PREFIX}/readings?repo={pr.REPO_NAME}")
     assert got.status_code == 200, got.text
     return {o["reading_id"]: o for o in got.json()["readings"]}
-
-
-def test_p792_get_readings_serves_the_attempt_rule_and_the_pins(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``GET /readings`` serves a reserved.v1 reading's rule, its treatment pins and its
-    reserved commits per arm (P-792): before any run, ``pinned_treatment`` is null and every
-    arm has reserved none; after the first run the deployment half and its arm are pinned
-    by that run's reservation — the body, the digest and the event, exactly as the
-    reservation stored them — and a second arm's first run pins its own arm half while the
-    deployment half stays the campaign's first."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    before = _w_served(rig, tmp_path / "api")[reading.reading_id]
-    assert before["attempt_rule"] == ATTEMPT_RULE_RESERVED and "p792" not in before
-    assert before["pinned_treatment"] is None
-    assert before["reserved"] == {"S3": 0, "A0": 0}
-
-    rig.enqueue(reading)
-    rig.h.run_one()
-    (a0,) = rig.reservations(reading)
-    p = dict(a0.payload_json or {})
-
-    def pin(half: str, ev: Event) -> dict[str, Any]:
-        body = dict(ev.payload_json or {})
-        return {
-            "body": body["treatment_body"][half],
-            "digest": body[f"{half}_fp"],
-            "event_id": ev.event_id,
-        }
-
-    after = _w_served(rig, tmp_path / "api")[reading.reading_id]
-    assert after["pinned_treatment"] == {
-        "deployment": pin("deployment", a0),
-        "arms": {"A0": pin("arm", a0)},
-    }
-    assert after["pinned_treatment"]["deployment"]["digest"] == p["deployment_fp"]
-    assert after["reserved"] == {"S3": 0, "A0": 1}
-
-    rig.enqueue(reading, kind="replay")
-    rig.h.run_one()
-    _, s3 = rig.reservations(reading)
-    assert s3.step_id == "S3"
-    later = _w_served(rig, tmp_path / "api")[reading.reading_id]
-    assert later["pinned_treatment"] == {
-        "deployment": pin("deployment", a0),
-        "arms": {"A0": pin("arm", a0), "S3": pin("arm", s3)},
-    }
-    assert later["reserved"] == {"S3": 1, "A0": 1}
-
-
-def test_p792_a_legacy_reading_is_served_open_on_this_rule(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A legacy reading (registered under no attempt rule) is served under the rule's name,
-    ``first_observed.v0``, with ``p792: "open on this rule"`` — the channels P-792 closes for
-    a reserved.v1 reading stay open on it — and with no pins and no reserved counts, before
-    and after a run (which reserves nothing). Its id never moves."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    legacy = rig.register(legacy=True)
-    reserved = rig.register()
-    for when in ("before", "after"):
-        served = _w_served(rig, tmp_path / "api")
-        got = served[legacy.reading_id]
-        assert (got["attempt_rule"], got["p792"]) == (ATTEMPT_RULE_LEGACY, "open on this rule")
-        assert got["pinned_treatment"] is None and got["reserved"] is None, when
-        assert served[reserved.reading_id]["attempt_rule"] == ATTEMPT_RULE_RESERVED
-        assert "p792" not in served[reserved.reading_id]
-        if when == "before":
-            rig.enqueue(legacy)
-            rig.h.run_one()
-    assert rig.reservations(legacy) == []
-
-
-def test_p792_settled_unrowed_is_served_per_reading(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """``GET /readings`` serves ``settled_unrowed`` per arm of a reserved.v1 reading: its
-    reservations among the campaign's unplaced attempts (F8) — the same count the tally
-    charges, never a second one. The grade that raised after ``build.done`` (a lost sandbox)
-    is the worker's own path: its run failed with no row, its reservation is settled, and the
-    attempt is charged at the cost the worker's ``build.done`` wrote. A reservation with its
-    row counts nothing; a legacy reading serves null."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    legacy = rig.register(legacy=True)
-    reading = rig.register()
-    served = _w_served(rig, tmp_path / "api")
-    assert served[reading.reading_id]["settled_unrowed"] == {"S3": 0, "A0": 0}
-    assert served[legacy.reading_id]["settled_unrowed"] is None
-
-    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.state.update(exec="lost"))
-    lost = rig.enqueue(reading)
-    assert rig.h.run_one().status == STATUS_FAILED
-    assert "build.done" in rig.actions(lost.id) and rig.rows(lost.id) == []
-    (a0,) = rig.reservations(reading)
-    want = campaigns_mod.UnplacedAttempt(
-        run_id=lost.id,
-        task_id=rig.first,
-        trial="r1",
-        # the rung label the worker resolved trial r1 to, as its build.done names it
-        rung=f"{_W_CELL['builder']}:{_W_CELL['model']}",
-        cost_usd=0.01,
-        reservation_event_id=a0.event_id,
-        reading_id=reading.reading_id,
-    )
-    with rig.h.factory() as s:
-        assert campaigns_mod.unplaced_attempts(s, [lost.id]) == [want]
-
-    monkeypatch.setattr(FakeBuilder, "hook", None)
-    rig.state["exec"] = ""
-    rowed = rig.enqueue(reading, kind="replay")
-    rig.h.run_one()
-    assert len(rig.rows(rowed.id)) == 1
-    with rig.h.factory() as s:
-        assert campaigns_mod.unplaced_attempts(s, [lost.id, rowed.id]) == [want]
-    served = _w_served(rig, tmp_path / "api")
-    after = served[reading.reading_id]
-    assert after["reserved"] == {"S3": 1, "A0": 1}
-    assert after["settled_unrowed"] == {"S3": 0, "A0": 1}
-    assert served[legacy.reading_id]["settled_unrowed"] is None
 
 
 # --- the submit gate (POST /runs): 422 reading_run_fields and 409 reading_required --------
@@ -4040,37 +2837,6 @@ def _r_fields(w: Wave3, body: Mapping[str, Any], fields: list[str]) -> dict[str,
     return detail
 
 
-def test_p792_c7_budget_profile_mismatch_refused(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C7 and C17 at submit, reproducing the probe ``test_in_scope_reads_no_run_parameter``
-    (the reading's scope reads no run parameter, so a run's own profile was counted as the
-    reading's): a non-loop arm spending on a budget profile other than the reading's
-    (``calibrated`` against ``default``), a non-loop arm without ``learning: off``, and the
-    ``+L`` arm naming a budget profile are each refused 422 ``reading_run_fields`` naming
-    what moved, nothing queued (201 before the route's check). ``learning: on`` is the
-    schema's 422 (green before: the loop is opted out, never in). The step-6 ``A0`` and
-    ``A0+L`` bodies are admitted."""
-    with _r_stack(backend, tmp_path, monkeypatch) as w:
-        key = ("cobra", "XS")
-        a0 = _a0(w, key)
-        a0l = a0l_body(a0)
-        s3 = _s3_body(w, key)
-        assert a0["budget_profile"] == w.readings[key]["budget_profile"] == PROFILE_DEFAULT
-        cases: list[tuple[dict[str, Any], list[str], str]] = [
-            ({**a0, "budget_profile": PROFILE_CALIBRATED}, ["budget_profile"], "A0"),
-            ({k: v for k, v in a0.items() if k != "learning"}, ["learning"], "A0"),
-            ({**a0l, "budget_profile": PROFILE_CALIBRATED}, ["budget_profile", "learning"], "A0"),
-            ({**s3, "budget_profile": PROFILE_CALIBRATED}, ["budget_profile"], "S3"),
-        ]
-        for body, fields, arm in cases:
-            assert _r_fields(w, body, fields)["arm"] == arm, fields
-        err = _r_refused(w, {**a0, "learning": "on"}, 422, "validation_error")
-        assert "learning" in json.dumps(err)
-        assert _r_admit(w, a0).params_json["learning"] == "off"
-        assert "learning" not in _r_admit(w, a0l).params_json
-
-
 #: Every ``RunCreateRequest`` field, as a run filed under a reserved.v1 reading may set it
 #: (C17). ``free``: admitted with the value beside it (``{}``: the step-6 ``A0`` body sets
 #: it already). ``default``: admitted at its default (the first body), refused naming it
@@ -4123,146 +2889,6 @@ _R_FACTORY: dict[str, Any] = {
 _R_COLUMNS = frozenset({"repo", "kind", "mode", "builder", "model", "provider", "ladder"})
 
 
-def test_p792_run_fields_ratchet(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C17, the ratchet: every ``RunCreateRequest`` field is classified (``_R_FREE``,
-    ``_R_DEFAULT``, ``_R_REFUSED``, ``_R_FACTORY``), so a field added to the request fails
-    here until it is; the ``params`` keys the admitted classes store are exactly the core's
-    :data:`RESERVED_RUN_PARAMS`, and no refused field's is one. Each class behaves as named
-    on ``POST /runs`` filed under a reserved.v1 reading: a free field admitted, a default
-    field admitted at its default and refused 422 ``reading_run_fields`` naming it
-    otherwise, a refused field refused naming it, a factory field 422 ``validation_error`` —
-    each refusal with nothing queued."""
-    classes = [set(_R_FREE), set(_R_DEFAULT), set(_R_REFUSED), set(_R_FACTORY)]
-    assert sum(len(c) for c in classes) == len(set().union(*classes))  # disjoint
-    assert set(RunCreateRequest.model_fields) == set().union(*classes)
-    assert (set(_R_FREE) | set(_R_DEFAULT)) - _R_COLUMNS == RESERVED_RUN_PARAMS
-    assert RESERVED_RUN_PARAMS.isdisjoint(_R_REFUSED) and RESERVED_RUN_PARAMS.isdisjoint(_R_FACTORY)
-    with _r_stack(backend, tmp_path, monkeypatch) as w:
-        a0 = _a0(w, ("cobra", "XS"))
-        for name, over in _R_FREE.items():
-            assert over or name in a0, name
-            run = _r_admit(w, {**a0, **over})
-            stored = dict(run.params_json or {})
-            assert name in _R_COLUMNS or name in stored, (name, stored)
-        for name, (default, other) in _R_DEFAULT.items():
-            run = _r_admit(w, {**a0, **default})
-            assert run.ladder_json == list(RESERVED_RUN_LADDER), name
-            _r_fields(w, {**a0, **other}, [name])
-        for name, value in _R_REFUSED.items():
-            _r_fields(w, {**a0, name: value}, [name])
-        for name, value in _R_FACTORY.items():
-            err = _r_refused(w, {**a0, name: value}, 422, "validation_error")
-            assert name in err["message"], (name, err)
-
-
-def test_p792_empty_ladder_default_is_what_new_run_stores() -> None:
-    """The one ladder a reserved.v1 reading's run climbs (:data:`RESERVED_RUN_LADDER`) is
-    what ``new_run`` stores for a body naming none, and ``pool``, ``executor`` and
-    ``timeout`` are stored at the defaults the whitelist keeps — so a step-6 body, which
-    names none of them, is the run the whitelist admits. A pin: green before the route's
-    check, it fails if either side's default moves without the other."""
-    for kind in ("replay", "blind"):
-        body = RunCreateRequest(
-            repo="cobra",
-            kind=kind,
-            builder="claude_code",
-            model="claude-sonnet-5",
-            provider="anthropic",
-            task_ids=[],
-        )
-        run = runs_routes.new_run(body, actor="u")
-        assert run.ladder_json == list(RESERVED_RUN_LADDER) == ["r1"], kind
-        params = dict(run.params_json or {})
-        assert {k: params[k] for k in ("pool", "executor", "timeout")} == {
-            "pool": "",
-            "executor": "",
-            "timeout": 0,
-        }
-        assert set(params) <= RESERVED_RUN_PARAMS, params
-
-
-def test_p792_reading_required_for_campaign_runs(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """C19: a run filed under a campaign that holds a reserved.v1 reading on its repository
-    names its reading — without ``reading_id`` it is refused 409 ``reading_required``
-    (``detail: {campaign_id, reading_ids}``) with nothing queued and nothing admitted (201
-    and admitted before the route's check), since it would spend the campaign's line while
-    no reading's gate (``reading_run_fields``, sealed, posture) checked it. A repository
-    whose readings in the campaign are all legacy is admitted as before; a run under no
-    campaign, or under another campaign holding no reading, is unaffected."""
-    legacy = (("click", "XS"), ("click", "S"))
-    with _r_stack(backend, tmp_path, monkeypatch, legacy=legacy) as w:
-        cobra = {k: v for k, v in _a0(w, ("cobra", "XS")).items() if k != "reading_id"}
-        err = _r_refused(w, cobra, 409, REFUSAL_READING_REQUIRED)
-        held = sorted(w.readings[("cobra", s)]["reading_id"] for s in ("XS", "S"))
-        assert err["detail"] == {"campaign_id": w.cid, "reading_ids": held}
-        assert "nothing was queued" in err["message"]
-        click = {k: v for k, v in _a0(w, ("click", "XS")).items() if k != "reading_id"}
-        _r_admit(w, click)
-        outside = {k: v for k, v in cobra.items() if k != "campaign_id"}
-        admitted = _r_admitted(w)
-        _r_admit(w, outside)
-        assert _r_admitted(w) == admitted
-        r = w.send("POST", "/api/v1/campaigns", json={**campaign_body(), "name": "p792-other"})
-        assert r.status_code == 201, r.text
-        other = str(r.json()["campaign_id"])
-        assert other != w.cid
-        r = w.send("POST", "/api/v1/runs", json={**cobra, "campaign_id": other})
-        assert r.status_code == 201, r.text
-
-
-def test_p792_remeasure_bodies_are_admitted(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Spec risk 6, the whitelist against the real step-6 bodies on an opt-in reserved.v1
-    reading: the ``GET /learn/remeasure`` plan's own request plus the three filing fields
-    and the profile (``S3``), and the record's ``A0`` and ``A0+L`` bodies, are each
-    admitted 201 and stored as the record words them; a body asking to ``retain`` its
-    worktrees is refused 422 ``reading_run_fields`` (on purpose: allowing it would be a
-    registration amendment)."""
-    with _r_stack(backend, tmp_path, monkeypatch) as w:
-        key = ("cobra", "XS")
-        a0 = _a0(w, key)
-        runs = [_r_admit(w, b) for b in (_s3_body(w, key), a0, a0l_body(a0))]
-        assert [r.kind for r in runs] == ["replay", "blind", "blind"]
-        assert [dict(r.params_json or {}).get("learning") for r in runs] == ["off", "off", None]
-        assert all(r.ladder_json == list(RESERVED_RUN_LADDER) for r in runs)
-        _r_fields(w, {**a0, "retain": {"worktrees": True}}, ["retain"])
-
-
-def test_p792_admission_rechecks_both_refusals_under_the_lock(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``admit_under_campaign`` re-runs the submit gate under the events write lock, so both
-    new refusals hold there too: when the readings read before the lock are still legacy
-    and the ones read under it are reserved.v1 (an opt-in landing between the two reads),
-    a run setting ``timeout`` is refused 422 ``reading_run_fields`` and a run without
-    ``reading_id`` 409 ``reading_required`` — each with nothing queued and nothing admitted
-    (both 201 before the route's checks)."""
-    real = runs_routes.load_readings
-    calls: list[str] = []
-
-    def first_read_legacy(db: Any, repo: str) -> list[Reading]:
-        got = list(real(db, repo))
-        calls.append(repo)
-        if len(calls) == 1:
-            return [dataclasses.replace(r, attempt_rule="") for r in got]
-        return got
-
-    with _r_stack(backend, tmp_path, monkeypatch) as w:
-        a0 = _a0(w, ("cobra", "XS"))
-        monkeypatch.setattr(runs_routes, "load_readings", first_read_legacy)
-        _r_fields(w, {**a0, "timeout": 1}, ["timeout"])
-        assert len(calls) == 2
-        calls.clear()
-        no_reading = {k: v for k, v in a0.items() if k != "reading_id"}
-        _r_refused(w, no_reading, 409, REFUSAL_READING_REQUIRED)
-        assert len(calls) == 2
-
-
 # --- an operator's lint switch never reshapes what a reading counts (P-796) ------------------
 
 
@@ -4273,86 +2899,6 @@ def _r_lint(w: Wave3, repo: str, lint: dict[str, Any]) -> None:
         assert row is not None
         row.config_json = {**dict(row.config_json or {}), "lint": dict(lint)}
         s.commit()
-
-
-def test_p792_a_run_of_a_reading_on_a_lint_disabled_repo_is_refused(
-    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """P-796 (the Wave 3 red team's F7, by code reading): a row graded with belt 5 switched
-    off lets its commit leave a legacy reading ``lint_disabled`` and is a reserved.v1
-    reading's miss, and the switch is the operator's to throw after outcomes are seen. Now a
-    run filed under a reading of either rule on a repository whose lint is disabled is
-    refused 409 ``lint_disabled`` at submit, nothing queued or admitted (201 before), and a
-    run that reached the queue past the gate is refused at claim — ``run.refused``
-    ``lint_disabled``, failed before any build, nothing reserved, every commit still pending
-    (built and reserved before)."""
-    off = {"disabled": True}
-    (tmp_path / "submit").mkdir()
-    with _r_stack(backend, tmp_path / "submit", monkeypatch, legacy=[("click", "XS")]) as w:
-        for key in (("cobra", "XS"), ("click", "XS")):
-            body = _a0(w, key)
-            _r_lint(w, key[0], off)
-            err = _r_refused(w, body, 409, "lint_disabled")
-            assert err["detail"] == {
-                "reading_id": body["reading_id"],
-                "repo": key[0],
-                "reason": LINT_DISABLED_BY_CONFIG,
-            }, key
-            _r_lint(w, key[0], {})
-            assert _r_admit(w, body).status == STATUS_CANCELLED
-
-    (tmp_path / "claim").mkdir()
-    rig = _w_rig(tmp_path / "claim", monkeypatch)
-    for reading in (rig.register(), rig.register(legacy=True)):
-        rig.edit_config(lint=off)
-        run = rig.enqueue(reading)
-        done = rig.h.run_one()
-        assert done.status == STATUS_FAILED and done.error.startswith("lint_disabled"), done.error
-        (refused,) = rig.payloads(run.id, "run.refused")
-        assert (refused["code"], refused["reading_id"]) == ("lint_disabled", reading.reading_id)
-        assert (refused["repo"], refused["reason"]) == (pr.REPO_NAME, LINT_DISABLED_BY_CONFIG)
-        assert "build.start" not in rig.actions(run.id)
-        assert rig.rows(run.id) == [] and rig.reservations(reading) == []
-        assert rig.verdicts(reading, "A0")[rig.first][0] is None
-        rig.edit_config(lint={})
-
-
-def test_p792_toggling_lint_after_the_first_reservation_halts_the_next(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """P-796 against the treatment pin: once a reserved.v1 reading's first reservation has
-    pinned the repository's configuration, switching belt 5 off refuses the next run at
-    claim (``lint_disabled``, before any reservation — it halted on the pin before the claim
-    check), and switching it back on under another lint block (``{"disabled": false}`` is
-    not the ``{}`` pinned) halts the next ``reading_treatment_mismatch`` on the repository
-    digest, before ``build.start``. The second commit stays pending throughout, and the
-    first keeps the verdict its reservation gave it."""
-    rig = _w_rig(tmp_path, monkeypatch)
-    reading = rig.register()
-    rig.enqueue(reading)
-    rig.h.run_one()
-    (res,) = rig.reservations(reading)
-    assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
-
-    rig.state["b"] = "multiply"
-    rig.edit_config(lint={"disabled": True})
-    off = rig.enqueue(reading, rig.second)
-    done = rig.h.run_one()
-    assert done.status == STATUS_FAILED and done.error.startswith("lint_disabled"), done.error
-    (refused,) = rig.payloads(off.id, "run.refused")
-    assert refused["code"] == "lint_disabled"
-    assert rig.payloads(off.id, "run.halted") == []
-    assert "build.start" not in rig.actions(off.id)
-
-    rig.edit_config(lint={"disabled": False})
-    on = rig.enqueue(reading, rig.second)
-    done = rig.h.run_one()
-    assert done.error == HALT_TREATMENT_MISMATCH
-    (halted,) = rig.payloads(on.id, "run.halted")
-    assert halted["detail"]["fields"] == ["repo_config"]
-    assert "build.start" not in rig.actions(on.id)
-    assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
-    assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}
 
 
 def _w_loop_on(rig: _WRig) -> None:
@@ -4408,51 +2954,6 @@ def _w_loop_pair(rig: _WRig, reading: Reading) -> Any:
     return loop_pair(arm_reading(loaded, "A0", rows), arm_reading(loaded, "A0+L", rows))
 
 
-def test_p792_a0l_on_a0s_misses_alone_is_refused_at_claim(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """NEW-1 (round 5), reproducing the probe end to end: with ``A0`` clean on the first
-    commit of the seeded order and a miss on the second, an ``A0+L`` run filed on ``A0``'s miss
-    alone reserved it, built it clean, and the loop pair read ``b`` 1, ``c`` 0 — ``A0``'s clean
-    commit never a pair. The claim now refuses it (``run.refused`` ``reading_run_fields`` on
-    ``task_ids``, before any reservation or build), and while ``A0+L`` is pending the pair
-    names both commits pending and reads them against the loop (``c`` 1). The record's body —
-    both commits, in the seeded order — is claimed, and the pair reads complete."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register(hierarchy=("S3",), descriptive=(("A0", 2), ("A0+L", 2)))
-    _w_loop_on(rig)  # A0 runs carry learning: off, so they stay A0
-    head, miss = reading.pool
-    for commit, how in ((head, "gold"), (miss, "noop")):
-        rig.state["b"] = how
-        rig.enqueue(reading, commit)
-        rig.h.run_one()
-    assert rig.verdicts(reading, "A0") == {head: (True, ""), miss: (False, "miss")}
-
-    rig.state["b"] = "gold"
-    for tasks in ([miss], [miss, head]):
-        run = _w_a0l(rig, reading, *tasks)
-        done = rig.h.run_one()
-        assert done.status == STATUS_FAILED, (tasks, done.status)
-        (refused,) = rig.payloads(run.id, "run.refused")
-        assert (refused["code"], refused["fields"], refused["arm"]) == (
-            REFUSAL_RUN_FIELDS,
-            ["task_ids"],
-            "A0+L",
-        ), refused
-        assert "build.start" not in rig.actions(run.id)
-        assert [e.step_id for e in rig.reservations(reading)] == ["A0", "A0"]
-    pair = _w_loop_pair(rig, reading)
-    assert pair.pairs == (head, miss) and pair.pending == (head, miss)
-    assert (pair.b, pair.c, pair.complete) == (0, 1, False)
-
-    run = _w_a0l(rig, reading, head, miss)
-    done = rig.h.run_one()
-    assert done.status == STATUS_SUCCEEDED, rig.actions(run.id)[-6:]
-    assert rig.verdicts(reading, "A0+L") == {head: (True, ""), miss: (True, "")}
-    pair = _w_loop_pair(rig, reading)
-    assert (pair.pairs, pair.pending, pair.b, pair.c) == ((head, miss), (), 1, 0)
-
-
 def _w_format_step_in_force(rig: _WRig) -> None:
     """Throw the repository's learning switch to config and put the loop's ``format_step``
     switch (``checks.format_step = true``) in force — the ``applied`` record the core tick
@@ -4487,58 +2988,6 @@ def _w_format_step_in_force(rig: _WRig) -> None:
         store.append(rec("switched", {"auto_apply": AUTO_CONFIG}, "op-1", 0))
         store.append(rec("applied", applied, "loop", 1))
         s.commit()
-
-
-def test_reserver_halts_when_the_runs_checks_arm_differs_from_the_readings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """RT2B-1 (round 6): a reading freezes its checks arm (``off`` here), and the scope rule
-    reads a reserved row on another checks arm as out of the reading's scope — so with the
-    loop's ``format_step`` switch in force and the team's ``checks`` block silent on it, an
-    ``A0+L`` run (the loop on, its body free of ``learning``) resolves ``fmt`` and reserved a
-    commit its row could never count for, burning the attempt. It now halts
-    ``reading_checks_arm_mismatch`` (``{frozen, run}``) before the reservation and before
-    ``build.start``, and the commit stays pending."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register(hierarchy=("S3",), descriptive=(("A0", 2), ("A0+L", 2)))
-    assert reading.checks_arm == "off"
-    _w_format_step_in_force(rig)
-    head, _ = reading.pool
-    rig.state["b"] = "gold"
-    run = _w_a0l(rig, reading, head)
-    done = rig.h.run_one()
-    assert done.status == STATUS_FAILED and done.error == HALT_CHECKS_ARM_MISMATCH, done.error
-    (halted,) = rig.payloads(run.id, "run.halted")
-    assert (halted["reason"], halted["detail"]) == (
-        HALT_CHECKS_ARM_MISMATCH,
-        {"frozen": "off", "run": "fmt"},
-    ), halted
-    assert "build.start" not in rig.actions(run.id)
-    assert rig.reservations(reading) == [] and rig.rows(run.id) == []
-    assert rig.verdicts(reading, "A0+L")[head] == (None, "pending")
-
-
-def test_a_team_set_format_step_keeps_a0l_on_the_readings_arm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
-) -> None:
-    """The pin beside RT2B-1: the team's own ``checks.format_step`` wins over the loop's
-    switch (``config_section`` merges the repository's block over the overlay), so with the
-    same ``format_step`` change on the chain and the team's block setting it ``false``, the
-    change is not in force, an ``A0+L`` run resolves the reading's ``off`` arm, and it
-    reserves and builds."""
-    rig = _w_rig(tmp_path, monkeypatch, backend)
-    reading = rig.register(hierarchy=("S3",), descriptive=(("A0", 2), ("A0+L", 2)))
-    _w_format_step_in_force(rig)
-    rig.edit_config(checks={"format_step": False})
-    head, _ = reading.pool
-    rig.state["b"] = "gold"
-    run = _w_a0l(rig, reading, head)
-    done = rig.h.run_one()
-    assert done.status == STATUS_SUCCEEDED, rig.actions(run.id)[-6:]
-    assert rig.payloads(run.id, "run.halted") == []
-    assert "build.start" in rig.actions(run.id)
-    assert [(e.step_id, e.task_id) for e in rig.reservations(reading)] == [("A0+L", head)]
-    assert rig.verdicts(reading, "A0+L")[head] == (True, "")
 
 
 # --- the factory: a reserved.v1 forward reading reserves each ticket's first build (C8, C16) --

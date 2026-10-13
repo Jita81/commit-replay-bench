@@ -160,6 +160,10 @@ Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
 Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py,
               tests/test_forward_reading.py, tests/test_forward_reading_e2e.py,
               tests/test_p792_reserved.py (reserved.v1 and the legacy goldens),
+              tests/test_p792_reserved_losses.py and tests/test_p792_reserved_rows.py (the
+              reserved.v1 verdict of an attempt lost after its reservation and of each row),
+              tests/test_p792_reserved_refusals.py (``RESERVED_RUN_PARAMS`` and
+              ``RESERVED_RUN_LADDER``, pinned; ``reading_run_refusal`` at submit and claim),
               tests/test_p792_pool.py (the pinned pool, pool_drift, the widened pool_seen)
 Touch when:   never for a new repository; a rule is added (a row in ``RULES`` with its exact
               P(deliver | 0.80) — an ADR amending ADR-0026 item 5 first); the counting rule changes
