@@ -230,6 +230,8 @@ from crb.core.evidence import canonical_json
 from crb.core.execution import Command, ExecResult, LocalExecutor, SandboxUnavailable
 from crb.core.learn import remeasure_plan
 from crb.core.ledger import (
+    AUTHORING_HARNESS_ERROR,
+    FAILURE_HARNESS,
     FAILURE_OUTAGE,
     GENESIS_HASH,
     LABEL_BUILDER_EXECUTOR,
@@ -292,6 +294,7 @@ from crb.core.reading import (
     with_enrolment,
     with_reservations,
 )
+from crb.core.runners.pytest_runner import PytestRunner
 from crb.core.spec import BELT_AFFECTED_DIRS, Language, RepoConfig
 from crb.core.spend import (
     ESCALATION_ALWAYS,
@@ -3074,6 +3077,65 @@ def test_p792_c12_demoted_row_is_miss(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "build.start" not in rig.actions(second.id)
     assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
     assert rig.verdicts(reading, "A0")[rig.first] == (False, "harness")
+
+
+def test_s1_harness_row_after_reservation_is_a_miss_and_never_rerun(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """F87-1 (round 6): the ``S1`` arm's env-probe harness row is the reserved attempt's,
+    so it decides the commit. The authored test's RED names no test (the run's sandbox times
+    the command out) and the runner's env probe is red under the parent binding, so the author
+    step writes ``authoring: harness error proving RED: the env probe is red ...`` — a
+    ``harness`` row (rule 4b) that REPORTS the fault and buys no retry. Under reserved.v1 it
+    reads ``(False, "harness")``, a miss, and a run re-filed under the reading skips the
+    commit with ``commit_reserved``: the author is never called again and nothing is built
+    (tests/test_replay_s1_arm.py::test_s1_unattributed_red_with_red_env_probe_is_harness
+    pins the adapter half)."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register(hierarchy=("S3", S1))
+    assert reading.author_model == AUTHOR
+    authored: list[str] = []
+    real_arm_of = worker.Worker._s1_arm_of
+
+    def arm_of(self: worker.Worker, ctx: Any, author: Any) -> Any:
+        def write(workspace: Any, subject: str, message: str) -> tuple[str, str]:
+            authored.append(subject)
+            rig.state["exec"] = "timeout"  # the RED under the parent names no test
+            return "tests/test_s1_authored.py", "def test_s1_authored():\n    assert False\n"
+
+        return dataclasses.replace(real_arm_of(self, ctx, author), author=write)
+
+    def red_probe(self: PytestRunner, executor: Any, root: Path, *, timeout: int = 0) -> Any:
+        rig.state["exec"] = ""  # the grade that follows runs as the posture does
+        return ExecResult(1, "missing: attrs==23.2.0 (found None)\n", "")
+
+    monkeypatch.setattr(worker.Worker, "_s1_arm_of", arm_of)
+    monkeypatch.setattr(PytestRunner, "probe_environment", red_probe)
+    s1_run = {"arm": "S1", "test_author": f"fake:{AUTHOR}"}
+    run = rig.enqueue(reading, params=s1_run)
+    rig.h.run_one()
+    assert authored == ["feat: add subtract"]
+    (res,) = rig.reservations(reading)
+    assert (res.step_id, res.task_id) == (S1, rig.first)
+    (row,) = rig.rows(run.id)
+    assert row.error.startswith(f"authoring: {AUTHORING_HARNESS_ERROR} the env probe is red "), (
+        row.error
+    )
+    assert not row.clean and row.failure_kind == FAILURE_HARNESS
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert rig.verdicts(reading, S1)[rig.first] == (False, "harness")
+
+    # the posture is mended and the run is re-filed: the reservation decided the commit
+    monkeypatch.setattr(PytestRunner, "probe_environment", lambda *a, **kw: None)
+    rig.state["b"] = "gold"
+    second = rig.enqueue(reading, params=s1_run)
+    rig.h.run_one()
+    assert authored == ["feat: add subtract"], "the re-filed run authored the commit again"
+    assert "build.start" not in rig.actions(second.id)
+    assert rig.skips(second.id) == [(rig.first, SKIP_COMMIT_RESERVED)]
+    assert rig.rows(second.id) == []
+    assert len(rig.reservations(reading)) == 1
+    assert rig.verdicts(reading, S1)[rig.first] == (False, "harness")
 
 
 def test_p792_c13_credential_gone_before_reserve_stays_pending(
