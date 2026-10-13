@@ -1030,7 +1030,7 @@ Posture panel lists each with how many tasks it keeps out.
 | `QUAL_ENV_UNLOADABLE` | task | the parent cannot load its dependencies offline: switch provisioning on if it is off; if it is on, run `crb deps verify --quarantine`, which moves any damaged set aside and revokes what cites it (the next run fetches it again); otherwise fix the module named |
 | `QUAL_NOT_RED`, `QUAL_RED_TIMEOUT`, `QUAL_BASELINE_TIMEOUT`, `QUAL_BASELINE_UNATTRIBUTED` | task | the oracle cannot be proven in this posture; the Posture panel shows how the record differs from other postures |
 | `QUAL_GOLD_NOT_GREEN`, `QUAL_GOLD_NEW_FAILURES`, `QUAL_GOLD_LINT` | task | the humans' own patch does not pass here; the task is excluded, as a task with a dirty gold always was |
-| `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed: the test is not deterministic in this posture |
+| `QUAL_TARGET_FLAKY` | task | the gold's 2 target runs disagreed, on green or by passing no target test in common: the test is not deterministic in this posture |
 | `QUAL_HEADROOM` | task | the gold needed more than half the wall clock: raise the repository's timeout |
 | `QUAL_TREE_COPY_FAILED` | task | the tree did not fit the copy: raise `work_size`, or choose `sandbox_tree: readonly` |
 | `QUAL_ENV_WITNESS_RED` | task | a replay found the gold failing here, so the qualification was revoked: qualify again (the cause is usually provisioning or the image) |

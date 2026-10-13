@@ -328,6 +328,44 @@ def test_a_gold_that_disagrees_with_itself_is_target_flaky(
     assert _qualify(pyrepo, both, tmp_path).code == qmod.QUAL_GOLD_NOT_GREEN
 
 
+def _passed(*ids: str) -> Run:
+    """A green run that reports the tests it passed (``passed``), as pytest and Go do."""
+    return Run(0, frozenset(), "ok", passed=frozenset(ids))
+
+
+@pytest.mark.parametrize(
+    "gold",
+    [(_passed(A), _passed(B)), (_passed(A, B), _passed()), (_passed(), _passed(C))],
+    ids=["disjoint-passes", "second-run-passed-none", "first-run-passed-none"],
+)
+def test_a_gold_whose_runs_pass_no_target_test_in_common_is_target_flaky(
+    pyrepo: pr.PyRepo, tmp_path: Path, gold: tuple[Run, Run]
+) -> None:
+    """Both gold runs green, at least one passing a target test, none passing in both: the
+    tests belt 2 would require (those passed in both runs) are none, and a record requiring
+    none leaves belt 2 to the exit code (CodeRabbit on PR #90). The runs disagreed: refused."""
+    script = [_red(pr.TEST_SUBTRACT), _green(), _green(), *gold, _green()]  # last: gold belt
+    runner = _Scripted(pyrepo.config, script)
+    q = _qualify(pyrepo, runner, tmp_path)
+    assert q.state == qmod.STATE_UNQUALIFIED and q.code == qmod.QUAL_TARGET_FLAKY, q.gold
+    assert "no target test passed in both" in q.message and "not deterministic" in q.fix
+    assert "target_passed" not in q.gold
+    assert len(runner.calls) == 5  # refused before the gold's belt scope ran
+
+
+def test_a_gold_requires_the_tests_it_passed_in_both_runs_and_none_when_it_passed_none(
+    pyrepo: pr.PyRepo, tmp_path: Path
+) -> None:
+    """A test the gold passed once is not required; a gold that passed nothing in either run
+    (every target test skipped) still qualifies, requiring none."""
+    overlap = [_red(pr.TEST_SUBTRACT), _green(), _green(), _passed(A, B), _passed(B, C), _green()]
+    q = _qualify(pyrepo, _Scripted(pyrepo.config, overlap), tmp_path)
+    assert q.is_qualified and q.gold["target_passed"] == [B]
+    vacuous = [_red(pr.TEST_SUBTRACT), _green(), _green(), _passed(), _passed(), _green()]
+    q2 = _qualify(pyrepo, _Scripted(pyrepo.config, vacuous), tmp_path)
+    assert q2.is_qualified and q2.gold["target_passed"] == []
+
+
 def test_the_gold_runs_at_half_the_wall_clock(pyrepo: pr.PyRepo, tmp_path: Path) -> None:
     runner = _Scripted(
         pyrepo.config, [_red(pr.TEST_SUBTRACT), _green(), _green(), _green(), _green(), _green()]

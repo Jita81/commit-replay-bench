@@ -809,8 +809,14 @@ def _undecided_reason(v: ArmVerdict) -> str:
     those commits are named as still to read, and ``insufficient`` is named as possible only
     while the misses read so far plus that many could pass the last look's allowance. A
     blocked arm carries its blocker's look but its own counts, so its words stay
-    conditional."""
+    conditional. A drifted reading (P-797) names the drift and nothing else."""
     k, short = v.next_look, v.needed
+    if v.drifted:
+        return (
+            "the reading's pool moved since registration (a pool task was relabelled or removed, "
+            "or its qualification changed: GET /readings lists how), so its rows prove nothing "
+            "and it reads undecided until the pool is restored (P-797)"
+        )
     tail = "mining further back is the way to reach a look, or leave the class to a person"
     if v.blocking:
         return (
@@ -861,7 +867,7 @@ def _decided_clauses(out: _Clauses, arm: str, verdict: ArmVerdict) -> None:
             _undecided_reason(verdict),
             observed=verdict.counted,
             threshold=verdict.next_look,
-            next_act=NEXT_MINE,
+            next_act=NEXT_NONE if verdict.drifted else NEXT_MINE,
             count=verdict.needed,
         )
     if verdict.state == VERDICT_CEILING:

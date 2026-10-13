@@ -84,8 +84,8 @@ How:          ``append_event_checked`` (lock → ``_refuse_checks_overlay`` →
               ``_qualified_reserved`` →
               ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
-              counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``served_reading``
-              (``treatment_pins``, ``pool_drift``) → ``standard_of``.
+              counted; a pinned pool's ``pool_drift`` read) → ``ReadingBook.evaluate`` over
+              ``DbLedger`` rows → ``served_reading`` (``treatment_pins``) → ``standard_of``.
 Layer:        server — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5 and 8's seam),
               docs/adr/0025-routing-v2.md
@@ -100,8 +100,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               src/crb/server/reading_book.py (``load_readings``, re-exported here: the run
               submit gate and the worker read it below this module; ``treatment_pins``, the
               pins the worker halts a moved treatment by and ``GET /readings`` serves;
-              ``repo_lint``, the lint a registration refuses or hashes; ``pool_drift``, the
-              drift a reserved.v1 reading is served ``undecided`` on),
+              ``repo_lint``, the lint a registration refuses or hashes; ``load_readings``
+              reads a reserved.v1 pool's drift, so every reader evaluates it ``undecided``),
               src/crb/server/posture_view.py and src/crb/server/prevention_state.py (the
               deployment's posture class; ``checks_arm_in`` and ``own_checks_arm_in``: the
               overlay's checks arm and the repository block's own, RT2B-2),
@@ -144,7 +144,6 @@ from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.reading import (
     ATTEMPT_RULE_LEGACY,
     DEFAULT_MAX_RERUNS,
-    OUTCOME_UNDECIDED,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_CHECKS_ARM_MOVED,
@@ -180,7 +179,7 @@ from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
 from crb.server.prevention_state import checks_arm_in, own_checks_arm_in
-from crb.server.reading_book import load_readings, pool_drift, repo_lint, treatment_pins
+from crb.server.reading_book import load_readings, repo_lint, treatment_pins
 from crb.server.routes.repos import get_repo_or_404
 from crb.store import qualifications as store_q
 from crb.store.class_sets import DbClassSets
@@ -824,10 +823,9 @@ def served_reading(session: Session, outcome: ReadingOutcome) -> dict[str, Any]:
             for arm in reading.arms
         },
     )
-    drift = pool_drift(session, reading)
-    out["pool_drift"] = drift
-    if drift:
-        out.update(state=OUTCOME_UNDECIDED, standard=None, ceiling=False)
+    # read once by ``load_readings``, whose drifted reading already evaluates ``undecided``
+    # with no standard — the outcome every other reader reads too (P-797)
+    out["pool_drift"] = [dict(d) for d in reading.pool_drift]
     return out
 
 

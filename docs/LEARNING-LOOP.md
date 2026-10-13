@@ -149,8 +149,12 @@ for it at the current apparatus decides:
 ```json
 {"repo": "cobra", "kind": "replay", "mode": "sighted", "builder": "claude_code",
  "model": "claude-sonnet-5", "provider": "anthropic",
- "task_ids": ["1995054b00…", "…"], "limit": 8, "learning": "off"}
+ "task_ids": ["1995054b00…", "…"], "limit": 8, "learning": "off",
+ "budget_profile": "default"}
 ```
+
+  `budget_profile` is the reading's own: `default` here, the profile `POST /readings`
+  registers when its body names none.
 
   A pending commit that is no longer gold-clean (the worker builds only those) or whose label
   moved out of the cell is left out and `short_by` says so. No request is offered — `next_act`

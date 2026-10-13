@@ -11,8 +11,9 @@ Navigation
 ----------
 What it is:   The documentation ratchet for event action names.
 What it does: Extracts every action literal from the emit call sites in ``src/crb`` — a
-              literal or a module-level string constant passed in its place (P-174) — (emitter
-              ``emit`` / ``error`` / ``timed``, the core's ``_emit(on_event, "…")`` helpers,
+              literal or a module-level string constant passed in its place, the file's own or
+              one imported from ``crb`` (P-174) — (emitter ``emit`` / ``error`` / ``timed``,
+              the core's ``_emit(on_event, "…")`` helpers,
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
               loop's ``self._emit("…", item_id)``, the account trail's
               ``record_user_event(action=…)``, and the builders' ``builder.``-prefixed forms)
@@ -36,6 +37,7 @@ Touch when:   never for a new repository; an action is added or renamed — writ
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from pathlib import Path
 
@@ -60,7 +62,8 @@ EMITTERS = {
     # ``action`` to ``append_system_event``, so its callers name the ``learn.*`` actions (P-431)
     "_learn_step",
     # the decided-under-the-lock writer (src/crb/store/events.py): its callers name the action
-    # (``reading.registered``, ``reading.reserved`` — P-792), so they are read like the rest
+    # (``reading.*`` — P-792; ``campaign.*``; ``acceptance.written``), most by a constant they
+    # import from the core module that owns it, so they are read like the rest
     "append_event_checked",
 }
 #: Functions that forward an ``action`` parameter to an emitter but are only ever handed on
@@ -101,6 +104,35 @@ def _module_constants(tree: ast.Module) -> dict[str, str]:
     return out
 
 
+@functools.cache
+def _constants_of(module: str) -> dict[str, str]:
+    """The module-level string constants of ``crb.x.y`` (``src/crb/x/y.py`` or its package's
+    ``__init__.py``); nothing for a module outside ``src/crb``."""
+    base = SRC.parent.joinpath(*module.split("."))
+    for path in (base.with_suffix(".py"), base / "__init__.py"):
+        if path.is_file():
+            return _module_constants(ast.parse(path.read_text(encoding="utf-8")))
+    return {}
+
+
+def _imported_constants(tree: ast.Module) -> dict[str, str]:
+    """``from crb.x import NAME`` (or ``NAME as ALIAS``) where ``NAME`` is a string constant
+    of ``crb.x`` — a route names an action by its core module's constant (``readings.py``:
+    ``action=READING_EVENT_ACTION``), and while the walker resolved only the file's own
+    constants ``reading.registered`` and the ``campaign.*`` actions escaped the table."""
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
+            continue
+        if node.module != "crb" and not node.module.startswith("crb."):
+            continue
+        consts = _constants_of(node.module)
+        for alias in node.names:
+            if alias.name in consts:
+                out[alias.asname or alias.name] = consts[alias.name]
+    return out
+
+
 def _literal(node: ast.AST, consts: dict[str, str]) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
@@ -124,7 +156,7 @@ def _actions_in(path: Path) -> set[str]:
     out: set[str] = set()
     in_builders = path.parent == SRC / "builders" and path.name != "adapter.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    consts = _module_constants(tree)
+    consts = {**_imported_constants(tree), **_module_constants(tree)}
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -240,6 +272,9 @@ def test_the_walker_sees_every_emit_shape() -> None:
     assert "builder.build.turn" in emitted and "build.turn" in emitted  # a builder's own
     assert "grade.belt" in emitted  # core/grade.py on_event / _emit
     assert "user.created" in emitted  # record_user_event(db, action="user.created", …)
+    assert "reading.reserved" in emitted  # append_event_checked(…, action="reading.reserved")
+    # append_event_checked(…, action=READING_EVENT_ACTION), imported from crb.core.reading
+    assert "reading.registered" in emitted
 
 
 def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
@@ -259,6 +294,27 @@ def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
     )
     # the two module constants resolve; a function-local variable is not a module constant
     assert _actions_in(src) == {"demo.read", "demo.other"}
+
+
+def test_an_action_named_by_an_imported_constant_is_seen(tmp_path: Path) -> None:
+    """A route names the action its core module owns: ``from crb.core.reading import
+    READING_EVENT_ACTION``, then ``action=READING_EVENT_ACTION``. The walker resolved only the
+    file's own constants, so ``reading.registered``, the ``campaign.*`` actions and
+    ``acceptance.written`` were written with no row in the table and the ratchet stayed green
+    (found on the review of the Wave 3 pre-run PR)."""
+    src = tmp_path / "mod.py"
+    src.write_text(
+        "from crb.core.reading import READING_EVENT_ACTION\n"
+        "from crb.core.campaign import CAMPAIGN_RELEASED as RELEASED\n"
+        "def f(factory):\n"
+        "    from crb.core.acceptance import EVENT_ACTION\n"
+        "    append_event_checked(factory, action=READING_EVENT_ACTION)\n"
+        "    append_event_checked(factory, action=RELEASED)\n"
+        "    append_event_checked(factory, action=EVENT_ACTION)\n",
+        encoding="utf-8",
+    )
+    # an import at the top or inside a function, under its own name or an alias
+    assert _actions_in(src) == {"reading.registered", "campaign.released", "acceptance.written"}
 
 
 #: The UI's one plain sentence per action (the live log's explanation).

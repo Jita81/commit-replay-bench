@@ -131,7 +131,9 @@ package no longer compiled. A fixture reproduced a clean grade on exactly that p
    passes (`-rpfE`), as `TestRun.passed`; a test also named failing never counts as passed.
    Qualification records the target tests the gold passed in both of its runs
    (`gold["target_passed"]`, hashed into the fingerprint only when present, so an older
-   record hashes as before), and belt 2 requires a pass from each of them. A record from
+   record hashes as before), and belt 2 requires a pass from each of them. Two gold runs that
+   passed target tests but none in both are refused `QUAL_TARGET_FLAKY`, as the record would
+   require none. A record from
    before that field requires a pass for every id its RED named (a file's id, from a
    collection error, is met by a pass inside the file) and, when the RED named none (a build
    failure, a discovery, the factory's red proof), one pass at least. A runner that reports

@@ -129,7 +129,7 @@ function preview(over: Partial<SignoffPreview> = {}): SignoffPreview {
     repo: 'r',
     cell: { process_step: '*', capability_class: 'bug.fix', size: 'S', language: '*', builder: '*', model: '*', provider: '*' },
     policy: POLICY,
-    evidence: { measured: true, n: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, oracle_strength: 0.5778, oracle: ORACLE_WEAK, apparatus_versions: ['2.1'], belt_sets: ['v4'], model_n: 40, model_point: 0.95, failure_split: { builder_red: 2, budget: 0, protocol: 0, harness: 0, disqualified: 0 } },
+    evidence: { measured: true, n: 40, n_tasks: 40, clean: 38, point: 0.95, ci_low: 0.835, ci_high: 0.985, false_q1: 0, oracle_strength: 0.5778, oracle: ORACLE_WEAK, apparatus_versions: ['2.1'], belt_sets: ['v4'], model_n: 40, model_point: 0.95, failure_split: { builder_red: 2, budget: 0, protocol: 0, harness: 0, disqualified: 0 } },
     route: { route: 'human', reason: 'controls_escapes: 1 measurement control(s) graded clean on this repo', reason_code: 'controls_escapes' },
     controls: ESCAPED,
     refusals: ESCAPE_REFUSALS,
@@ -937,7 +937,7 @@ describe('SignoffPage — the second person’s gate says everything before anyo
     expect(gateRow(gate, 'n ≥ 10')).toBeUndefined()
   })
 
-  it('on a server that does not serve distinct tasks the thin-cell row says so, never a task count of 0', async () => {
+  it('on a server that does not serve distinct tasks the thin-cell row says so in its label and its detail, never a task count of 0 or a distinct-task bar', async () => {
     const older: SignoffPreviewEvidence = { ...preview().evidence, n: 16 }
     delete older.n_tasks
     mockApi(base({ 'GET /signoffs/preview': preview({ evidence: older }) }))
@@ -946,11 +946,14 @@ describe('SignoffPage — the second person’s gate says everything before anyo
     await waitFor(() => expect(screen.getByRole('option', { name: /bug\.fix · S/ })).toBeInTheDocument())
     await user.selectOptions(screen.getByLabelText(/^Cell/), 'bug.fix|S')
     const gate = screen.getByTestId('signoff-gate')
-    await waitFor(() => expect(gateRow(gate, 'distinct tasks ≥ 10')).toBeDefined())
-    const row = gateRow(gate, 'distinct tasks ≥ 10')
+    await waitFor(() => expect(gateRow(gate, 'evidence ≥ 10 (distinct tasks not counted)')).toBeDefined())
+    const row = gateRow(gate, 'evidence ≥ 10 (distinct tasks not counted)')
+    expect(row.textContent).toMatch(/✓\s*satisfied:/)
     expect(row.textContent).toContain('n = 16 attempts')
     expect(row.textContent).toContain('this server does not count distinct tasks')
     expect(row.textContent).not.toContain('tasks = ')
+    // the server's verdict is shown, but no label claims it checked a distinct-task bar
+    expect(gateRow(gate, 'distinct tasks ≥ 10')).toBeUndefined()
   })
 
   it('the gate says whether the evidence was graded in the sealed posture, as advice that never holds the gate (G-480)', async () => {

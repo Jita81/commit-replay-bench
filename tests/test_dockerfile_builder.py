@@ -28,7 +28,7 @@ ADRs:         docs/adr/0012-builder-in-a-sealed-container.md
 Works with:   deploy/Dockerfile.builder (the image), deploy/sandbox/Dockerfile.go (the base that
               ends non-root), .github/workflows/ci.yml (the sandbox-images job),
               deploy/README.md (§9.1, the documented build), docs/PREVENTION.md (P-791)
-Tested by:    (this is a test file)
+Tested by:    tests/test_dockerfile_builder.py
 Touch when:   never for a new repository; the builder Dockerfile's stages or users change; the
               sandbox-images job is restructured or renamed.
 """
