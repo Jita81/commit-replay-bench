@@ -116,20 +116,45 @@ def _constants_of(module: str) -> dict[str, str]:
     return {}
 
 
+#: Comprehensions: each is a scope, whose first iterable the enclosing scope evaluates.
+_COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 #: The nodes that open a scope of their own: a name bound inside one is not the enclosing
 #: scope's name.
-_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda, *_COMPS)
+
+
+def _children(scope: ast.AST) -> list[ast.AST]:
+    """The child nodes ``scope`` evaluates itself: a comprehension's are all but its first
+    iterable."""
+    if isinstance(scope, _COMPS):
+        first, *rest = scope.generators
+        elts = [scope.key, scope.value] if isinstance(scope, ast.DictComp) else [scope.elt]
+        return [*elts, first.target, *first.ifs, *rest]
+    return list(ast.iter_child_nodes(scope))
 
 
 def _own_nodes(scope: ast.AST) -> Iterator[ast.AST]:
-    """The nodes of ``scope`` outside every scope nested in it (a nested function, class or
-    lambda is yielded, never entered)."""
-    stack = list(ast.iter_child_nodes(scope))
+    """The nodes of ``scope`` outside every scope nested in it (a nested function, class,
+    lambda or comprehension is yielded, never entered, but a comprehension's first iterable
+    is ``scope``'s own)."""
+    stack = _children(scope)
     while stack:
         node = stack.pop()
         yield node
-        if not isinstance(node, _SCOPES):
+        if isinstance(node, _COMPS):
+            stack.append(node.generators[0].iter)
+        elif not isinstance(node, _SCOPES):
             stack.extend(ast.iter_child_nodes(node))
+
+
+def _comp_walrus(comp: ast.AST) -> Iterator[str]:
+    """The names a walrus in ``comp``, or in a comprehension nested in it, binds: they are the
+    enclosing function's (PEP 572), never the comprehension's."""
+    for node in _own_nodes(comp):
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            yield node.target.id
+        elif isinstance(node, _COMPS):
+            yield from _comp_walrus(node)
 
 
 def _bindings(scope: ast.AST) -> dict[str, str | None]:
@@ -149,9 +174,15 @@ def _bindings(scope: ast.AST) -> dict[str, str | None]:
         a = scope.args
         params = [*a.posonlyargs, *a.args, *a.kwonlyargs, *filter(None, (a.vararg, a.kwarg))]
         out.update(dict.fromkeys((x.arg for x in params), None))
+    walrus = set(_comp_walrus(scope)) if isinstance(scope, _COMPS) else set()
     for node in _own_nodes(scope):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
-            out.setdefault(node.id, None)
+            if node.id not in walrus:
+                out.setdefault(node.id, None)
+        elif isinstance(node, _COMPS):
+            if not isinstance(scope, _COMPS):  # a comprehension's walrus binds out here
+                for name in _comp_walrus(node):
+                    out.setdefault(name, None)
         elif isinstance(node, _SCOPES[:3]):
             out.setdefault(node.name, None)
         elif isinstance(node, ast.Import):
@@ -409,6 +440,43 @@ def test_a_name_is_read_in_the_scope_of_the_call_that_uses_it(tmp_path: Path) ->
     # demo.other there and in the closure; an argument names nothing; the method and the
     # module read the module's constant, never the class body's
     assert _actions_in(src) == {"acceptance.written", "demo.other", "demo.module"}
+
+
+def test_a_comprehension_is_a_scope_of_its_own(tmp_path: Path) -> None:
+    """A comprehension's loop variable was read as its function's own name, so a loop variable
+    named like a module constant hid that constant from every emit call after the comprehension,
+    and the call's action escaped the table (CodeRabbit on the review-only PR #92). A
+    comprehension is now a scope: its first iterable is read in the enclosing scope, its loop
+    variables only inside it, and a walrus in it binds the enclosing function's name (PEP 572)."""
+    src = tmp_path / "mod.py"
+    src.write_text(
+        'EVENT_ACTION = "demo.module"\n'
+        'OTHER = "demo.other"\n'
+        'FIRST = "demo.first"\n'
+        'HIDDEN = "demo.hidden"\n'
+        'WALRUS = "demo.walrus"\n'
+        'DEEP = "demo.deep"\n'
+        "def after(factory, rows):\n"
+        "    names = [EVENT_ACTION for EVENT_ACTION in rows]\n"
+        "    append_event_checked(factory, action=EVENT_ACTION)\n"
+        "def reads(factory, rows):\n"
+        "    return [append_event_checked(factory, action=OTHER) for r in rows]\n"
+        "def first(factory):\n"
+        "    return [FIRST for FIRST in append_event_checked(factory, action=FIRST)]\n"
+        "def inside(factory, rows):\n"
+        "    return {append_event_checked(factory, action=HIDDEN) for HIDDEN in rows}\n"
+        "def walrus(factory, rows):\n"
+        "    [(WALRUS := r) for r in rows]\n"
+        "    append_event_checked(factory, action=WALRUS)\n"
+        "def deep(factory, rows):\n"
+        "    {k: [(DEEP := y) for y in v] for k, v in rows}\n"
+        "    append_event_checked(factory, action=DEEP)\n",
+        encoding="utf-8",
+    )
+    # after the comprehension and inside it, an unshadowed constant resolves; the first
+    # iterable reads the enclosing scope's name; a loop variable names nothing; a walrus,
+    # in the comprehension or one nested in it, hides the constant in its function
+    assert _actions_in(src) == {"demo.module", "demo.other", "demo.first"}
 
 
 #: The UI's one plain sentence per action (the live log's explanation).
