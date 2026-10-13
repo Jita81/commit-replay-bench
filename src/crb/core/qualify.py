@@ -611,7 +611,8 @@ def qualify_task(
        belt 5 — ``QUAL_GOLD_NOT_GREEN`` / ``QUAL_TARGET_FLAKY`` / ``QUAL_HEADROOM`` /
        ``QUAL_GOLD_NEW_FAILURES`` / ``QUAL_GOLD_LINT``. When the runner reports passes, the
        target tests that passed in BOTH gold runs are recorded (``gold["target_passed"]``):
-       belt 2 requires a pass for each (ADR-0048 decision 7).
+       belt 2 requires a pass for each (ADR-0048 decision 7). Runs that passed target tests
+       but none in both are ``QUAL_TARGET_FLAKY``, as the record would require none.
 
     A tree the executor could not copy is ``QUAL_TREE_COPY_FAILED`` at any step. ``deps``
     may be a provider: its task-scope refusal — or one the runner raises while it prepares
@@ -824,6 +825,14 @@ def qualify_task(
             # (a test that passed only once is not required; F4, ADR-0048 decision 7)
             first, second = targets[0].passed, targets[1].passed
             if first is not None and second is not None:
+                if (first | second) and not (first & second):
+                    # passes, but none in both runs: requiring none would leave belt 2 to the
+                    # exit code (a gold that passed nothing in either run still requires none)
+                    gold["note"] = (
+                        "the gold's 2 target runs disagreed: no target test passed in both "
+                        f"({len(first)} and {len(second)} passed)"
+                    )
+                    return refuse(QUAL_TARGET_FLAKY, gold["note"])
                 gold["target_passed"] = sorted(first & second)
             belt = runner.run_belt_for(
                 executor,

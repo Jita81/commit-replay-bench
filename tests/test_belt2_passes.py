@@ -25,10 +25,11 @@ What it is:   The suite for belt 2's pass requirement (F4).
 What it does: Pins that the Go and pytest parsers report the tests that passed and that the
               pytest command asks for them; that ``relocate_ids`` rewrites the run root only
               as whole path components; that qualification records the target tests the
-              gold passed; and, end to end on real toolchains, that a patch which makes the
-              target exit 0 without its tests passing never grades clean while the honest
-              gold still does, under the record qualification writes and under the older
-              records belt 2 falls back on.
+              gold passed, and refuses a gold whose two runs passed none in common; and, end
+              to end on real toolchains, that a patch which makes the target exit 0 without
+              its tests passing never grades clean while the honest gold still does, under
+              the record qualification writes and under the older records belt 2 falls back
+              on.
 How:          Canned ``go test -json`` streams and pytest outputs for the parsers; ``gorepo``
               and a two-commit Python repository qualified by the real miner, then graded by
               ``grade`` on a ``LocalExecutor`` under a context built from that qualification.
@@ -59,7 +60,7 @@ from crb.core.git import GitRepo
 from crb.core.grade import GradeContext, GradeResult, grade, infra_tampered
 from crb.core.mine import qualify
 from crb.core.posture import Posture
-from crb.core.qualify import Qualification
+from crb.core.qualify import QUAL_TARGET_FLAKY, Qualification
 from crb.core.runners import base as rb
 from crb.core.runners import get_runner
 from crb.core.runners.pytest_runner import PytestRunner
@@ -777,6 +778,45 @@ def test_a_gold_that_passed_no_target_test_requires_none(
     gold itself. Belt 2 then reads the exit code alone (a weak oracle, not a hidden one)."""
     vacuous = _with(py_task.q, target_passed=[])
     assert _graded(py_task, tmp_path / "skip", {_PY_SRC: _PY_SKIP_ALL}, q=vacuous).clean is True
+
+
+# A target test whose id is drawn afresh at each collection: each gold run passes it under
+# another id, so no target test passed in both runs, though each run passed one.
+_PY_VARYING_FEAT = {
+    _PY_SRC: "def sub(a, b):\n    return a - b\n",
+    "tests/test_sub.py": (
+        "import uuid\n\n"
+        "import pytest\n\n"
+        "from pkg.sub import sub\n\n\n"
+        '@pytest.mark.parametrize("a, b, want", [(3, 2, 1)], ids=[uuid.uuid4().hex])\n'
+        "def test_sub(a, b, want):\n    assert sub(a, b) == want\n"
+    ),
+}
+
+
+def test_a_gold_whose_runs_pass_no_target_test_in_common_is_refused(tmp_path: Path) -> None:
+    """CodeRabbit on PR #90: recorded as ``target_passed: []``, such a gold required no pass, so
+    a patch that skips every target test graded clean on its exit code alone. The gold's two
+    runs disagreed on what passed: qualification refuses it ``QUAL_TARGET_FLAKY``, and only a
+    gold that passed nothing in either run requires none (the case above)."""
+    root, feat_sha = two_commit_repo(tmp_path / "repo", _PY_INITIAL, _PY_VARYING_FEAT)
+    repo = GitRepo(root)
+    outcome = qualify(
+        repo,
+        _PY_CONFIG,
+        langs.feat_candidate(repo, _PY_CONFIG, feat_sha),
+        runner=get_runner(_PY_CONFIG),
+        executor=LocalExecutor(),
+        scratch=tmp_path / "scratch",
+    )
+    q = outcome.qualification
+    assert q is not None and q.red["kind"] == "tests_failed"
+    assert q.is_qualified is False and q.code == QUAL_TARGET_FLAKY, (q.code, dict(q.gold))
+    assert q.gold["note"] == (
+        "the gold's 2 target runs disagreed: no target test passed in both (1 and 1 passed)"
+    )
+    assert "target_passed" not in q.gold
+    assert outcome.task is not None and outcome.task.gold_clean is False
 
 
 class _NoPassReport(PytestRunner):
