@@ -157,16 +157,25 @@ rule makes them prospective (item 10).
    stays `harness` after the re-runs the reading allows) leaves the pool with its reason
    recorded before any outcome of it is seen, and the next commit in the seeded order takes its
    place — so, unlike ADR-0025 item 2, an instrument failure is never counted as a miss that
-   could end a reading.
+   could end a reading. That is the legacy rule, `first_observed.v0`. `POST /readings`
+   registers only `reserved.v1` (P-792): a commit's first attempt reserved on an arm after
+   registration alone decides it there, nothing is re-run and no commit leaves the pool, so an
+   instrument failure after the reservation is a miss; a reserved row built off the reading's
+   checks arm reads `scope_fault` instead, its arm `undecided` with no miss (P-795).
 
 3. **The look rule.** An arm of a reading is read only at 20, 30 and 40 distinct commits in the
-   seeded order. It reads `deliver` at 20 of the first 20, 29 of the first 30 or 38 of the first
-   40 clean; `insufficient` at its third miss (38 of 40 is then out of reach); `undecided` if the
-   pool ends before a look decides; otherwise `look_pending` with the commits still needed. The
-   Wilson 95% lower bound at each deliver point is 0.839, 0.833 and 0.835. What the rule does
-   **[measured — n = 40 draws per path, exact enumeration, no sampling, so no interval; method:
-   an exact dynamic programme over 40 Bernoulli draws with the stop at the third miss,
-   reproduced independently by the method verifier; apparatus n/a]**:
+   seeded order. It reads `deliver` at 20 of the first 20, 29 of the first 30 or 38 of the first 40
+   clean; `insufficient` at its third miss (38 of 40 is then out of reach); `undecided` when the
+   pool holds fewer commits than its next reachable look needs, so it never delivers (while some
+   of its commits are still to read, their first attempts may yet read it `insufficient`);
+   otherwise `look_pending` with the commits still needed. The remeasure plan asks for the pending
+   commits among the first `next_look` kept commits as one run, and the worker runs every commit of
+   a run unless the run halts or is cancelled, so below a pool of 40 where the runs end decides
+   `insufficient` against `undecided`; neither is a deliver (PW-4). The Wilson 95% lower bound at
+   each deliver point is 0.839, 0.833 and 0.835. What the rule does **[measured — n = 40 draws per
+   path, exact enumeration, no sampling, so no interval; method: an exact dynamic programme over 40
+   Bernoulli draws with the stop at the third miss, reproduced independently by the method
+   verifier; apparatus n/a]**:
 
    | true first-attempt rate | P(deliver) | expected commits consumed |
    |---|---|---|
@@ -200,7 +209,9 @@ rule makes them prospective (item 10).
    - **`S3` never certifies.** The commit's own tests were written with the change and can
      encode its values and names; a standard found on `S3` alone reads **`ceiling,
      forward-unvalidated`** and admits tickets only as calibration builds (item 8) until the
-     cell's `S2` reading delivers.
+     cell's `S2` reading delivers. A reading whose `S3` delivered reads `ceiling` only once
+     `S1` has read against it (`insufficient` or `undecided`); while `S1` is still being read,
+     the reading reads `look_pending` (`evaluate`, `crb.core.reading`).
    - **Only the `S1` family certifies retrospectively**: `S1` alone, or with context produced
      mechanically before the pool began (`+facts@<drafter>`, `+library@<version>` under item 1's
      conditions). Its test is answer-blind by construction: the author sees the ticket and the
@@ -271,7 +282,8 @@ rule makes them prospective (item 10).
 7. **The leak guard: no context arm carries the answer.** A replay brief is built only from what
    existed at the commit's parent: its message, or its linked ticket as it stood at the parent's
    date (`ctx_ticket` says which; where no ticket is linked the message is a proxy that may name
-   the fix, so `A0` is optimistic against a real ticket **[hypothesis — unmeasured]**); the
+   the fix, so `A0` and `S1`, whose test author and builder both read the message as the
+   ticket, are optimistic against a real ticket **[hypothesis — unmeasured]**); the
    parent tree; learned lines taught by at least two other commits, all older than this one by
    commit date (`playbook.held_out` plus time order); and, for a retrospective arm, only facts or
    library entries produced under item 1's conditions. The test author works in a sealed
@@ -545,9 +557,10 @@ rule makes them prospective (item 10).
   never pooled, and needs its own commits. Authored tests are weakest where the oracle pins
   unstated values, so `S1` may lose most exactly there **[hypothesis — from the upstream
   per-class result on exact-value classes]**.
-- Messages written after the code, and tests written with it, keep `A0` and `S3` optimistic
-  against real tickets **[hypothesis — unmeasured]**; the linked-ticket reader of item 9 is Wave
-  4's.
+- Messages written after the code keep `A0`, `S1` and `S3` optimistic against real tickets,
+  and tests written with it keep `S3` more so: each reads the message as the ticket, and `S1`'s
+  test author does too **[hypothesis — unmeasured]**; the linked-ticket reader of item 9 is
+  Wave 4's.
 - The derivation/confirmation split protects the licence, not the proposer's eye: a person can
   still see confirmation outcomes from earlier readings. The two-person rule and the ticket-time
   rule limit what that person can carve; nothing removes it.

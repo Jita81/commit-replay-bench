@@ -27,13 +27,13 @@ copies it and adds nothing. The choices it leaves open follow the table.
 | apparatus | 2.4; rows of another version are never pooled | ADR-0026 item 13; PLAN, Wave 3 |
 | posture | sealed: the builder in the sealed container, the tests in the docker sandbox. `POST /readings` refuses a replayed arm on a posture class that is not `docker/<tree>/sealed` (`invalid_reading`) | items 2 and 13; `src/crb/server/routes/readings.py` |
 | rung | `r1` only | items 2 and 13 |
-| builder | `claude_code` with `claude-sonnet-5`, provider `anthropic` | item 13 |
+| builder | `claude_code` with `claude-sonnet-5`, provider `anthropic`; under the sealed posture the brief's test commands for `S3`, `A0` and `S1` name the builder's dependency set (`GOMODCACHE=/deps/gomod` for cobra, `PYTHONPATH=/work:/deps/site` for click), and a brief command that would override the session's environment stops the run `SandboxUnavailable` (P-800) | item 13; P-800 |
 | cells | cobra and click, `bug.fix`, XS and S, process step `replay`: cobra XS and cobra S (language `go`), click XS and click S (language `python`) | item 13; PLAN, Wave 3 |
 | readings | one per cell, registered before its first attempt | items 2 and 13 |
 | hierarchy | `S3` then `S1@<author>`, decided in that order; once `S3` reads `insufficient`, `S1` stops. A later arm reads `waiting` while the arm before it is still being read, and `stopped` once that arm reads insufficient or undecided; neither is read toward the verdict (FZ-2) | items 4 and 13 |
 | rule | `look.v1`: `deliver` at 20 of the first 20, 29 of the first 30 or 38 of the first 40 clean; `insufficient` at the third miss | items 3 and 5; the first look at 20 fixed by DL-371 |
 | error budget | 5% per cell, of which `look.v1` spends 2.10%. It is a budget of error, not of money: Wave 3's money is part 2 | item 5; DL-371; HB-14 |
-| descriptive arms | `A0` and `A0+L` on the first 16 commits of each cell's seeded order; they spend no error budget and never certify | items 4 and 13 |
+| descriptive arms | `A0` and `A0+L` on the first 16 commits each arm enrols: the pool in seeded order, less a commit whose registered change repeats an earlier one's (its `commits` on `GET /readings`). Each arm counts its observed commits among its first 16 kept commits; on the first-observed rule the next commit fills a leaving commit's place, and under reserved.v1 none leaves, so the arm reads the first 16 commits it enrols. They spend no error budget and never certify. Under the sealed posture the finish gate's declared check (`go vet ./...` for cobra) runs under the builder's dependency set from 88141819 (P-800); before it, the check was red at every parent and never gated, so no `A0+L` result recorded before that commit is comparable with one after it | items 4 and 13; P-800 |
 | the loop | `learning: off` on every `A0` run; `A0+L` runs with the repository's loop switch on | items 1 and 13 |
 | budget profile | one profile for every arm but `A0+L` | item 13 |
 | pool | chosen by a rule blind to every outcome and frozen with its sha256 at registration; a hand-picked list is refused `pool_not_blind` | item 2; DL-097 |
@@ -43,7 +43,7 @@ copies it and adds nothing. The choices it leaves open follow the table.
 | run fields | repo, kind, mode, builder, model, provider, task_ids or limit, arm, test_author (S1), learning, budget_profile, reading_id, campaign_id, max_cost_usd, qualify_first; the stop knobs outage_stop and env_stop only at 1, the default for a reading run, which halts at its first outage or environment row (PW-7); pool, executor and timeout only at the values `POST /runs` stores when a body leaves them out; an `A0+L` run's task_ids are its enrolled commits it has not reserved, in the seeded order (all, or the first of them); anything else 422 reading_run_fields, refused again at claim | item 2; P-792; DL-386 |
 | treatment | pinned by the campaign's first reservation on each repository (deployment) and each arm's first (arm); served as pinned_treatment on GET /readings; a later mismatch halts the run before any build | item 2; P-792 |
 | qualification | each cell's pool is mined and qualified first, at no model cost | PLAN, Wave 3 |
-| the loop pair | one test on 64 pooled pairs: a pair is each of the first 16 commits of its cell's pool, and a commit pending on either arm reads against the loop; an exact two-sided McNemar test at 0.05, read once, when both arms of every cell are complete (how Q-25 is read, below); it changes no default | item 13; DL-384; DL-386; DL-402 |
+| the loop pair | one test on 64 pooled pairs: a pair is each of the first 16 commits the arm enrols in its cell (the same 16 for `A0` and `A0+L`), a commit pending on either arm reads against the loop, and an infrastructure-decided commit stays in the pair as a miss, with the pair also reported without those (RT2B-5, below); an exact two-sided McNemar test at 0.05, read once, when both arms of every cell are complete (how Q-25 is read, below); it changes no default | item 13; DL-384; DL-386; DL-402 |
 
 **What counts (item 2, amended before step 4, 2026-10-12; P-792, DL-385).** The operator chose
 to fail closed: any cancel, kill, timeout or harness failure after the reservation is a miss,
@@ -74,7 +74,11 @@ at claim; PW-7). The commit in flight is a miss under reserved.v1. The run reser
 more, so its unreserved commits stay pending and are run later. Under the general defaults (3
 and 2) one usage-limit episode would have reserved three commits and missed all three, which
 alone reads `look.v1` `insufficient` **[hypothesis — argued from the code and `look.v1`'s
-third-miss rule; no live episode was measured]**.
+third-miss rule; no live episode was measured]**. In the 2026-09-25 export, `harness` was 15 of
+518 rows (2.9%), 9 of them "builder api key not set" on 2026-09-25, and `outage` was 240 of 518,
+all "model_error: usage limit", 237 of them on 2026-09-14 **[hypothesis — counted over the
+2026-09-25 export for the pre-run power check; method: `scripts/value_baseline.py`'s reader over
+that export's ledger, apparatus 2.2; not re-run here]**.
 
 An attempt refused before its reservation is not an attempt: the commit stays pending in its
 place. A reading run whose resolved checks arm differs from the reading's frozen arm halts
@@ -147,13 +151,21 @@ product computes it at registration and serves the pool in that order (`crb.core
   (b).
 - **(e) The run order.** Item 4 runs the arms in parallel and orders only the decision.
   Recommended: the product's remeasure plan (`GET /learn/remeasure`), which serves `S1`'s request
-  only once `S3` delivers, so no money goes on an `S1` run that a miss of `S3` would stop. `A0`
-  and `A0+L` are queued beside `S3` from the start. How far stage 1 can go is set by part 2.
+  only once `S3` delivers, so no money goes on an `S1` run that a miss of `S3` would stop.
+  Within each cell, `S3`'s run is posted first (and `S1`'s, as the remeasure plan serves it),
+  then `A0`'s, then `A0+L`'s, and each run only once the run before it is terminal; the cells
+  are taken in the cells row's order: cobra XS, cobra S, click XS, click S (F87-4). The readings
+  are not queued ahead of the descriptive arms (DL-403). How far stage 1 can go is set by part 2.
 
-One point is unchecked: whether a change the loop makes at `config` to the repository's `checks`
-block moves `A0+L` rows off the reading's checks arm, so that the reading stops counting them
-**[hypothesis — unchecked in the code]**. Step 6's success condition catches it, because the
-reading must count each run's commits under the arm queued.
+A change the loop makes at `config` to the repository's `checks` block cannot move `A0+L` rows
+off the reading's checks arm unseen. A reading run whose resolved checks arm differs from the
+reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (3d81c23b); a
+reserved row built off the frozen arm all the same reads `scope_fault`, `scope` `checks_arm`
+(fbc361a5); the remeasure plan flags such a reading `checks_arm_moved` and serves it no request
+(41630c0a); and `POST /readings` refuses 409 `reading_checks_overlay` a registration while the
+loop's overlay moves the arm (cee088bc). The formatter lever, the one loop change that moves the
+arm, is held off (Q-31; DL-410; 29ee0835). click's belt-5 plan has a formatter step
+(`ruff-format`, `formatters_for` in `crb.core.formatting`), so the same holds for click.
 
 **Fixed before any data, 2026-10-11 (CRB Project room).** Paul Glover fixed these in the CRB
 Project room on 2026-10-11, before any reading was registered, any run queued or any Wave 3
@@ -257,7 +269,14 @@ the data is in. These fix the statistics first, for 16 commits in each of four c
 pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is observed yet]**:
 
 - **The loop pair.** One test, on the pairs of the four cells pooled. A pair is each of
-  the first 16 commits of its cell's pool. A commit still pending on either arm is read
+  the first 16 commits the arm enrols in its cell, the same 16 for `A0` and `A0+L` (step 6).
+  Under `reserved.v1` a commit is observed in an arm when its reservation decided it, whatever
+  the reason, so an infrastructure-decided commit (reason `harness`, `outage` or `unobserved`,
+  as `GET /readings` serves each commit's `reason` and `scope`: `CommitReading.to_dict`,
+  f5ac7024 and fbc361a5) stays in the pair as a miss. The loop pair is also reported with
+  those pairs removed, and a Q-25 clause that rests on the loop pair holds only if it holds in
+  both versions; the record publishes both, with the count of infrastructure-decided pairs per
+  arm (RT2B-5). DL-402 and DL-404 are unchanged. A commit still pending on either arm is read
   against the loop, failing closed (NEW-1, round 5): pending on `A0` it reads clean there,
   pending on `A0+L` it reads a miss there, and `loop_pair` (`crb.core.reading`, read from
   the per-commit outcomes `GET /readings` serves) names it in `pending`, `complete` false. So no choice of which commits an arm runs, and no gap, can move b above
@@ -278,7 +297,9 @@ pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is ob
   Claude Code computes the test and the comparison from the pairs when the loop pair is read, and
   the report shows the computation.
 - **What the test can find.** The smallest difference it finds 80% of the time is 22–32 points
-  after stage 1 (about 38 pairs) and 18–25 points after stage 2 (about 64 pairs). A loop effect
+  after stage 1 (about 38 pairs) and 18–25 points after stage 2 (about 64 pairs): by the share
+  of pairs that disagree, ψ = 0.25, 0.357, 0.424 and 0.49, it is 22.4, 27.2, 29.8 and 32.0 points
+  at 38 pairs, and 17.7, 21.4, 23.5 and 25.3 points at 64 pairs. A loop effect
   smaller than about 20 points will usually be missed, so a loop that does not clear has not
   been shown to do nothing **[hypothesis — the pre-run power simulation, at the host-posture
   priors]**.
@@ -292,18 +313,20 @@ pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is ob
   rests on the difference, the stage-2 release included.
 - **Noise.** Every Wilson interval this record serves or reports is descriptive (fixed-n, not
   adjusted for the sequential look): the Wilson 95% interval of clean over counted, taken as if the
-  count had been fixed in advance. That includes the `ci_low` and `ci_high` that `GET
-  /api/v1/readings` serves on each arm (`crb.core.reading`); `look.v1` decides a reading, never an
-  interval. Q-25's "noise" is defined against that fixed-n rate. A rate moves by more than noise
-  when it lies outside the fixed-n Wilson 95% interval of the rate it is compared with, in the same
-  cell: the loop's `A0+L` rate against `A0`'s, the test author's `S1@<author>` rate against `A0`'s.
-  For Stop the comparison is one-sided (Q-32; DL-411): the sealed rate, each cell's `A0` rate, has
-  reached the rate taken where the answer was reachable when that rate's lower bound, the lower end
-  of its fixed-n Wilson 95% interval, is at or below the upper end of the sealed rate's own, so a
-  sealed rate above the reachable rate has reached it. The rate taken where the answer was reachable
-  is the value baseline's blind rate for the cell's size, taken in the host posture where the target
-  commit stays in the object store: 56.5% at XS (13 of 23) and 23.3% at S (7 of 30), part 4's tagged
-  prior. Paul confirmed it on 2026-10-12 (Q-34; DL-412).
+  count had been fixed in advance. That includes the `ci_low` and `ci_high` that
+  `GET /api/v1/readings` serves on each arm (`crb.core.reading`); `look.v1` decides a reading,
+  never an interval. With no commit counted (n = 0) the interval is 0 to 1, the whole range
+  (`crb.core.stats.wilson_interval`). Q-25's "noise" is defined against that fixed-n rate. A rate
+  moves by more than noise when it lies outside the fixed-n Wilson 95% interval of the rate it is
+  compared with, in the same cell: the loop's `A0+L` rate against `A0`'s, the test author's
+  `S1@<author>` rate against `A0`'s. For Stop the comparison is one-sided (Q-32; DL-411): the
+  sealed rate, each cell's `A0` rate, has reached the rate taken where the answer was reachable
+  when that rate's lower bound, the lower end of its fixed-n Wilson 95% interval, is at or below
+  the upper end of the sealed rate's own, so a sealed rate above the reachable rate has reached it.
+  The rate taken where the answer was reachable is the value baseline's blind rate for the cell's
+  size, taken in the host posture where the target commit stays in the object store: 56.5% at XS
+  (13 of 23) and 23.3% at S (7 of 30), part 4's tagged prior. Paul confirmed it on 2026-10-12
+  (Q-34; DL-412).
 - **When no branch fires, and how the cells combine (Q-32; DL-411).** The branches are
   read in the order Continue, Change course, Stop. Continue and Change course hold if any cell
   meets them. Stop needs every completed cell to meet its test: nothing moves in it, and the
@@ -315,10 +338,15 @@ pairs at most **[aspiration — the design ADR-0026 item 13 fixes; no pair is ob
   `format_step` is held off, Q-31) may be learned from `A0`'s rows on the same commits the pair
   compares, so b can be inflated; the stage-1 report reads the loop pair with that caveat (K7, part
   2).
-- **Order.** Within each cell, `A0` runs before `A0+L`: a cell's `A0+L` run is queued only
-  after its `A0` run has ended, which narrows choice (e) and leaves `A0` queued beside `S3`
-  from the start. Each run records the levers in force: its apparatus stamp's `extra.learning`
-  (`auto_apply`, `changes`, `overlay`), which the stage-1 report lists per run. Under the
+- **Order.** Within each cell, `A0` runs before `A0+L`: a cell's `A0+L` run is posted only
+  once its `A0` run is terminal, and its `A0` run only once `S3`'s (and `S1`'s, as the
+  remeasure plan serves it) is terminal, as choice (e) sets (F87-4). The loop's switch is set
+  once, at step 5, and not changed during a stage: between step 5 and step 10 no one posts
+  `POST /learn/tick` (the worker ticks the loop after every build run, and those applies are
+  the treatment). Each run records the levers in force: its apparatus stamp's `extra.learning`
+  (`auto_apply`, `changes`, `overlay`), which the stage-1 report lists per run, with the
+  `learn_changes` and `learn_overlay` labels (`LABEL_CHANGES` and `LABEL_OVERLAY`,
+  `crb.core.prevention`) of each `A0+L` run's rows. Under the
   fail-closed attempt rule the operator chose for item 2, which the "what counts" row now
   states (`reserved.v1`), no commit leaves, so none is replaced. If an amendment ever allows
   a replacement, it is queued in both arms.
@@ -403,6 +431,18 @@ campaign, registered once at step 4, before any reading, with an operator sessio
   $0.10 once spent $5.00 on its first attempt (P-261). The headroom below holds that overshoot.
 - An `S1` replay's test-author calls are now in its spend (`Spend.with_authoring`), so its own
   cap reads them, and the campaign's tally does too (P-775).
+- The worker and the campaign each hold a reserve for the test author's calls, and each refuses
+  something different (PW-5). The worker's, before each `S1` attempt (`admit` in
+  `src/crb/server/worker.py`): the run's cap admits the attempt only if its spend, the attempt's
+  own cap and the dearest author call so far times the author's attempts (`DEFAULT_ATTEMPTS`, 2)
+  fit, `cap.check(spent, reserve=attempt_cap, authoring=spent.dearest_authoring * passes)`;
+  otherwise it halts the run (`stopped_code` `spend_cap`, the payload naming
+  `authoring_reserve_usd`) before the reservation, so the commit stays pending. That reserve is 0
+  before the run's first author call. The campaign's, at admission (`Tally.headroom`,
+  `crb.core.campaign`): the dearest attempt the campaign has seen (else $5.00), plus, for an `S1`
+  run, its commits still to run times the dearest author call (else $0.15); a run that does not fit
+  is refused 409 `campaign_ceiling` with nothing queued, and while it is live the larger of its
+  admitted headroom and its headroom now is held.
 - The free-stage chain files no run under a campaign, so it is not used: a run outside the
   campaign spends outside its ceiling, and no Wave 3 reading counts its rows. The Learn
   re-measurement queue (`POST /learn/remeasure/queue`) files none either, and the product
@@ -426,6 +466,17 @@ the stage's line: $54.00 in stage 1, and $108.00 for the campaign in all once st
 released. The product refuses any other run, 409 `campaign_ceiling`. Each run's `max_cost_usd`
 is set to fit. The rule limits how many runs are in flight at once; a worker runs one at a time
 (`Worker.run_forever`, `src/crb/server/worker.py`).
+
+**How a reading's commits are batched (PW-4).** The remeasure plan asks for the pending commits
+among the first `next_look` kept commits as one run (`crb.core.learn`; a relabelled or not-gold
+commit is left out), and the worker runs every commit of a run: it stops early only on a halt,
+a cancel, or PW-7's first outage or environment stop. So below a pool of 40, whether a reading
+that does not deliver reads `insufficient` or `undecided` depends on where the runs end. At θ
+0.90 and a pool of 30, the plan's batches read deliver, insufficient and undecided 21.6%, 39.4%
+and 39.0% of the time, against 21.6%, 0% and 78.4% commit by commit, and a pool of 40 or more
+reads as a pool of 60 does **[hypothesis — the pre-run power check's batch walk, 100k pools per
+point, fixed seeds]**. Step 6 files the plan's request for each look as one run, and the label
+is read on the runs as filed. Neither label is a deliver.
 
 **Stage 1 ends** at the first of these:
 
@@ -474,10 +525,22 @@ needs a proxy on the container's one allowed host that understands the API.
 - spend per cell and per arm, in dollars and in pounds at 1.35, the author calls shown apart, and
   the total against $54.00;
 - for each reading arm: commits counted, clean and missed, and its state (`deliver`,
-  `insufficient`, `look_pending` with the commits still needed, or `undecided`);
-- for each descriptive arm: commits run and clean, labelled "interim, not tested" (the loop
-  pair is tested once, when both arms of every cell are complete; part 1), with the levers in
-  force on each run;
+  `insufficient`, `look_pending` with the commits still needed, or `undecided` — its pool
+  cannot reach its next look, so it never delivers, though it may still read `insufficient`
+  while commits of the pool are still to read; mining further back, in a new reading, is the only
+  way to reach a look), with the runs its looks were read on, since below a pool of 40 the
+  batches decide `insufficient` against `undecided` (PW-4, above);
+- a delivering reading's result labelled "look.v1 deliver; oracle and controls not yet
+  measured", with points 7, 8 and 11 of the evidence checklist in the direction review of
+  2026-10-10 (in the private crb-handbook repository) marked paused;
+- for each descriptive arm: the commits it enrols, up to its fixed count, and the commits observed
+  and clean among them, labelled "interim, not tested" (the loop pair is tested once, when both
+  arms of every cell are complete; part 1), with the levers in force on each run, and for each
+  `A0+L` run its rows' `learn_changes` and `learn_overlay` labels (part 1, "Order");
+- the loop pair's commits decided by infrastructure (reason `harness`, `outage` or
+  `unobserved`), counted per arm (RT2B-5, part 1);
+- every `system/run.reclaimed`, `system/run.abandoned` or `system/run.claim_lost` event, which
+  stops the stage (step 6);
 - every attempt disqualified `nested_model_call`, by run and commit (each counted as a miss above);
 - why stage 1 ended (part 2), which cells still wait on a look, and so whether
   Q-26's rule releases stage 2 (DL-400);
@@ -541,8 +604,11 @@ about it:
     nothing leaves after it. Curation before registration is the review's job, and the pool
     is every qualified commit by rule (choice (c)).
   - **C18, the requalify stall.** A commit whose qualification is revoked after registration
-    stays pending, and its reading stalls at that prefix until it is qualified again: a
-    stall that cannot be skipped, so a cost in power and not a lever.
+    is refused, never skipped: the reading serves it in `pool_drift` and reads `undecided`, and
+    every run of the reading is refused `pool_drift` (409 at submit, `system/run.refused` at
+    claim) before any reservation (P-797), so the commit stays pending. The reading waits; the
+    operator qualifies the commit again or ends the stage. A stall that cannot be skipped, so a
+    cost in power and not a lever.
   - **C3, binary bytes.** A builder binary swapped at the same path keeps the treatment's
     digest. The bytes belong to the sealed posture, not to P-792.
   - **Forward and legacy readings.** A forward reading (`POST /readings/forward`) reads
@@ -584,7 +650,7 @@ about it:
     `env_stop` 1, PW-7), so one episode costs at most the commit in flight, and `GET /readings` serves
     `settled_unrowed` per arm, so a fault-driven `insufficient` can be told apart.
   - **TOFU stalls.** The campaign's first reservation on a repository pins its treatment on
-    first use: a rebuilt image, a `RepoConfig` edit, another executor or a changed worker
+    first use: an image under another tag, a `RepoConfig` edit, another executor or a changed worker
     environment afterwards halts every later reservation there
     (`reading_treatment_mismatch`, naming the half and the fields that differ) until it is
     restored or a new reading is registered. On `A0+L` the arm's pin holds the loop's switch
@@ -604,13 +670,60 @@ about it:
     been reclaimed is a miss for its reading and stops the whole campaign
     (`unplaced_spend`, part 2), an honest fault included: the campaign waits for the
     operator, who reads `settled_unrowed` and follows K4's rules.
+- **K8, what round 6 leaves open (DL-413).** Round 6 is the last review round before the
+  pre-run pull request merges, so what it found and did not change in code is recorded here:
+  - **Red team 2's thin lanes.** The lanes red team 2 read thinly — concurrency and the
+    hash, leakage through caches, the forward arm — were read again by red team 2b on
+    7fc0982c.
+  - **What red team 2b did not read.** No live `~/crb-stack` state: `format_step` in a
+    `RepoConfig`, the loop's chain and switch, `CRB_WORKER_ID` and `CRB_ENV` are read by
+    steps 0, 4 and 5 instead. No PostgreSQL probe was run. Not read in depth:
+    `factory/loop.py`, `factory/build.py`, the forward reading's remeasure plan, and the leak
+    paths through the deps store, golangci-lint's cache and the builders other than Claude
+    Code.
+  - **Campaign spend.** A campaign's spend is the `cost_usd` of every row an admitted run
+    wrote, a row no reading reads included (`duplicate_commits`), plus its `S1`
+    `author.attempt` costs, plus the attempts settled with no row; an imported row is never a
+    run's (`rows_of_runs`, `src/crb/store/ledger.py`; 7ad8097b). So a run filed again after a
+    stop counts toward the stage line.
+  - **The dependency binding (F87-1, P-800).** On Go the test environment (`TEST_ENV`,
+    `crb.provision.go`, with `GOPROXY` off) and the go runner's `_env` set `GOFLAGS`
+    `-count=1 -mod=mod`, and the bound brief's prefix and the builder session's environment
+    carry it; a vendored tree reads `-count=1 -mod=vendor` (`VENDOR_ENV`). `-mod=readonly` is
+    only provisioning's `go mod download`, and the bare `-mod=mod` of `_GO_BASE_ENV` only the
+    readiness `go list`. On Python the binding is generic: click's `S1` RED at the parent gets
+    the parent's binding, the environment probe runs only on a set sealed with a manifest
+    (`env_probe_command` returns `None` otherwise), and in a container the tests run with
+    `PYTHONPATH=/work:/deps/site` and `PYTHONNOUSERSITE=1`.
+  - **Images by tag (KG-3).** The treatment pins each image by its tag (`container.image`),
+    not its Id, so an image rebuilt under the same tag keeps the treatment. Step 0 and each
+    stage start record the Ids instead, and a changed Id stops the stage.
+  - **Link targets.** Beside the deployment's `extra_ro_mounts`, the builder container mounts
+    the harness's symlink targets read-only at their own paths (`ContainerSession.ro_mounts`,
+    `src/crb/builders/container.py`); nothing serves which, so step 0 can check only the
+    deployment's half (KG-2).
+  - **The lint witness is cached (KG-4).** `lint_blame` (`src/crb/core/grade.py`) reads the
+    qualification's cached gold lint verdict (`gold.lint`), and only on a row that is already
+    not clean, with belt 5 its deciding failure. It decides only whether that miss reads
+    `lint_gold_ok` or is an environment row (`gold_lint`, `lint_unwitnessed`), which is
+    decided by infrastructure and halts the reading run (PW-7). A stale witness can move that
+    label, so the "insufficient — infrastructure" label (DL-404) and the loop pair's
+    infrastructure-removed view, but never a verdict toward deliver.
+  - **One checks arm per reading.** A reading freezes one checks arm for all its arms, so the
+    formatter lever is held off by repository config (DL-410) rather than per arm; a checks
+    arm per reading arm is an ADR-0024 follow-up.
+  - **The loop's register reads the pool's rows.** `register_for` still reads `A0`'s rows on
+    the paired commits (K7); the code follow-up is a test that it leaves factory rows out
+    while an `A0+L` reading is open.
+  - **`S3`'s prior.** `S3` priors were measured in the host posture. Wave 3 does not borrow
+    them as the sealed `S3` estimate.
 
 ## 3. The reviews
 
 **The reviewer.** Claude (Claude Code, model `claude-opus-5-5`) reviews Wave 3's clean blind
 patches. Paul Glover gave Claude the task (decision 7, his answer on Wave 3's reviews; DL-371).
 Claude reviews in a fresh session, separate from the builder's and from the session that runs the
-campaign, as that answer asks.
+campaign, as that answer asks, and the agreement report records that session's id.
 
 **What it reviews.** Every clean row of the blind arms — `A0`, `A0+L` and `S1@<author>` — that a
 reading counts. `S3` is sighted and is not reviewed.
@@ -637,7 +750,8 @@ included.
 reviewer is the account that files it, so Claude files under an account of its own that Paul
 creates, and each statement begins "Reviewer: Claude (Claude Code, claude-opus-5-5), tasked by
 Paul Glover (DL-371)". The MCP server offers no tool that files a review: it calls filing one a
-human act (`crb_reviews` only reads them).
+human act (`crb_reviews` only reads them). The `patch_sha256` anchor proves that the patch was
+fetched, not that it was read.
 
 **The scale.** The scale of the value baseline's 13 verdicts ([the value
 baseline](2026-09-25-value-baseline.md), its headline table and "Clean is not working")
@@ -664,7 +778,10 @@ know which of its verdicts Paul will check:
    order; if there are fewer than 10 patches in all, take them all.
 
 **Blinding and order.** Claude's session reads no review before it files its own, and Claude files
-first. Paul then files his 10 without reading Claude's verdicts on them: he reads each patch from
+first. Each patch is read only from `GET /api/v1/grades/{row_hash}/patch`; during a stage no one
+opens the Runs screen's evidence drawer (`EvidenceDrawer`) or its Review tab (`ReviewPanel`) on a
+Wave 3 row, because the drawer shows the row's latest verdict and the tab lists every review of it.
+Paul then files his 10 without reading Claude's verdicts on them: he reads each patch from
 `GET /api/v1/grades/{row_hash}/patch`, which serves the patch alone. The latest review of a row is
 the standing one (`crb.core.review`), so Paul's verdict stands on those 10, and the headline is
 partly a person's, as decision 7 asked. Both records stay in the hash-chained review store.
@@ -673,8 +790,9 @@ partly a person's, as decision 7 asked. Both records stay in the hash-chained re
 7 asks for; not yet computed]**:
 
 - on `mergeable`, the primary measure: the share on which Paul and Claude agree, with its Wilson
-  95% interval, descriptive (fixed-n, not adjusted for the sequential look), and Cohen's κ with a bootstrap percentile interval (10,000 resamples from a fixed
-  seed; resamples where κ is undefined are counted and reported);
+  95% interval, descriptive (fixed-n, not adjusted for the sequential look), and Cohen's κ with a
+  bootstrap percentile interval (10,000 resamples from the fixed seed 20261009, fixed before any
+  data; resamples where κ is undefined are counted and reported);
 - on the headline verdict, the secondary measure: the same two figures over the six verdicts.
 
 At n = 10 both intervals are wide, and the report says so plainly: 9 agreements of 10 give a
@@ -708,7 +826,7 @@ reviewed patches judged mergeable, at n = E, an interval that is descriptive (fi
 adjusted for the sequential look):
 
 ```text
-h = z / (1 + z²/n) × √( p(1 − p)/n + z²/(4n²) ),   z = 1.96
+h = z / (1 + z²/n) × √( p(1 − p)/n + z²/(4n²) ),   z = 1.959964
 ```
 
 Here p is the share judged mergeable in stage 1's reviews, else the value baseline's 4 of 13
@@ -755,18 +873,19 @@ and stops and reports at the first step whose success condition fails.
 
 | # | step | who and how | success condition | state |
 |---|---|---|---|---|
-| 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14). The order and the sealed settings are DEPLOYMENT §1.1's: `source ~/crb-stack/env.sh` before `crb migrate`, the UI rebuilt before `crb doctor`, the worker on `--executor docker`; with both processes stopped across a migration (§6.1) | `crb doctor` has no `fail`; `/health` reads ok once the builder's login is verified, and the worker is up | not yet run |
-| 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos`; then the builder's-account check below (R-13) | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used]; the check passes, and the login's source label and fingerprint are recorded here | not yet run |
+| 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14). The order and the sealed settings are DEPLOYMENT §1.1's: `source ~/crb-stack/env.sh` before `crb migrate`, the UI rebuilt before `crb doctor`, the worker on `--executor docker`; with both processes stopped across a migration (§6.1). Then Paul or Claude Code records here the Id of the builder and sandbox images the deployment names (`docker image inspect --format '{{.Id}}' <image>`), and records them again at each stage start: the treatment pins an image only by its tag (`container.image`), so a changed Id stops the stage (KG-3; red team 2b read `crb-builder-go:local` as `77b43c31…`). The builder container mounts the checkout at `/work`, the sealed set read-only under `/deps` and a `/tmp` tmpfs (`builder_run_args`, `src/crb/builders/container.py`), plus only the deployment's `extra_ro_mounts` and the harness's symlink targets (`ContainerSession.ro_mounts`); step 6 checks the deployment's half, and nothing serves the link targets (KG-2, K8) | `crb doctor` has no `fail`; `/health` reads ok once the builder's login is verified, and exactly one worker is up: in `GET /api/v1/health` the `worker` probe's `data.alive` is 1, and exactly one `data.workers` entry has no `stopped`, with `executor` `docker`, a `worker_id` of the form `<hostname>-<pid>` (`default_worker_id`, `src/crb/server/worker.py`; `CRB_WORKER_ID` overrides it) and that hostname as its `hostname`. A second worker at any later point stops the stage. With one worker, one run executes at a time, claimed in posting order (`Run.created`), so each commit's rows reach the ledger in the order Claude Code posted its runs (F87-2, DL-392) | not yet run |
+| 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos`; then the builder's-account check below (R-13); the sealed `S1` smoke check runs in step 4, once the campaign is registered | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used]; the check passes, and the login's source label and fingerprint are recorded here | not yet run |
 | 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>`, and `<author>` has a known price (else an `S1` run is refused `spend_cap_unpriced`, a stop; K3, part 2) | not yet run |
-| 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click. The parameters are pinned, as values the step-3 amendment records: each mine and qualify body as sent (`pool`, `limit`, `max_candidates`, `ref`, and no `task_ids`), and the `since` and `taxonomy` step 4's bodies leave out (empty: every qualified commit, choice (c), and the global vocabulary); none changes after step 3. From then on: no label run, CLI label edit or 2.4 replay on cobra or click between step 3 and the end of step 11, but the runs step 6 files under the campaign | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here. The step-3 amendment records, for each cell, the qualified-set sha256 (its qualified commits in seeded order, hashed as `pool_sha256` is) and where each label came from (classifier or human), and the result of K1's audit (part 2) | not yet run |
-| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Before the first registration, Claude Code records here, for cobra and for click, the loop's switch and the changes in force — `switch`, `overlay` and each entry's `change` from `GET /api/v1/learn/register?repo=<repo>` — the state step 10 restores; and checks that each repository's own `checks` block sets `format_step: false` (`GET /api/v1/repos/<repo>`, DL-410), setting it with `PUT /api/v1/repos/<repo>` and `{"checks": {"format_step": false}}` if it does not | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, `attempt_rule` `reserved.v1`, `max_reruns` 0 and `budget_profile` `default` (part 1's attempt rule; a body naming another rule or re-run count is refused 422 `validation_error`), the `pool` in seeded order, `pool_sha256`, `pool_rule`, and the `pool_posture_id` and `pool_qualifications` the pool is pinned to (its commits' qualification records from step 3, never the miner's `gold_clean`; P-797); `GET /api/v1/readings?repo=<repo>` lists each with `pool_drift` `[]`, its cell's budget spent at 2.10% of 5%. Each reading's `checks_arm` reads `off`, the arm of the repository's own `checks` block; a reading on any other arm stops the campaign before any spend. A refusal (`campaign_unknown`, `lint_disabled`, `reading_checks_overlay`, `pool_seen` — under `reserved.v1`, any 2.4 replay row on a pool commit or its change, under any arm or test author, P-797 — `budget_spent`, `pool_not_blind`, `invalid_reading`), or a reading served with a `pool_drift` other than `[]` (`state` `undecided`: a pool commit relabelled out of its cell, or a pinned record missing or not qualified, P-797), stops the campaign before any spend; `lint_disabled` (`detail` `{repo, reason}`, nothing written) answers any registration while the repository's lint is switched off, and a `reserved.v1` reading hashes the repository's lint configuration as `lint_digest` (P-796). `reading_checks_overlay` (`detail` `{overlay_arm, repo_arm}`, nothing written) answers a registration while the loop's overlay moves the repository's checks arm off its own block's, so the precondition above did not hold: a reading frozen then would rest on a loop change (RT2B-2). On an unsealed deployment `invalid_reading` names what is unsealed in its `detail`: both executors, `{sandbox_executor, builder_executor}`, when the sandbox is on docker and the builder on the host; the posture class alone, `{posture_class}`, when the sandbox is not on docker, because that refusal comes first. A `409` `reading_exists` (`detail` `{reading_id}`, nothing written, nothing spent) answers a reading already registered, a retried request under any second or actor: it is a retry, not a stop; read the reading back with `GET /api/v1/readings?repo=<repo>`. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | not yet run |
-| 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is the one recorded at step 4 | the Learn page reads `config` for cobra and for click | not yet run |
-| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, after the builder's-account check below passes at the start of each session, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is refused 409 `reading_required` when the campaign holds a reserved.v1 reading on that repository (`detail` `{campaign_id, reading_ids}`, nothing queued) — every body here carries `reading_id` (DL-382; P-792). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`; a reading the plan lists with `checks_arm_moved` `{frozen, current}` has no request, because its run would halt `reading_checks_arm_mismatch`, so the repository's frozen checks arm is restored or the stage ends (RT2B-1). **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 of the reading's pool], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. **`A0+L`**: the same with no `learning` and no `budget_profile`. `A0+L` files its `task_ids` in the seeded order: the commits of the `A0` body it has not reserved yet, first to last, or the first of them; a subset such as `A0`'s misses, another order or a commit outside the first 16 is refused 422 `reading_run_fields` (`detail.fields` `["task_ids"]`, nothing queued), and again at claim (NEW-1, round 5). **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"`. Re-filing a run never re-rolls, because commits already reserved are skipped (`run.task_skipped commit_reserved`). No body names `outage_stop` or `env_stop` other than 1: a reading run halts at its first outage or environment row, its in-flight commit a miss (reserved.v1) and its unreserved commits pending, run later by a re-filed body; any other value is refused 422 `reading_run_fields`, and again at claim (PW-7). Before each run, item 5 of the builder's-account check below. Stop between tasks, never mid-attempt, because a cancel after a reservation costs the commit | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `unplaced_spend` — the campaign is stopped, P-798 — `campaign_arm_in_flight` — a run of the same arm still live on one of its commits, F87-2 — `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_required`, `reading_unknown`, `reading_run_fields` — a field or value the reading does not register, P-792 — `reading_unsealed`, `reading_posture_mismatch`, `lint_disabled` — the repository's lint switched off, P-796 — `pool_drift` — the reading's pool moved since step 4, P-797); a queued run whose repository's lint is switched off, or whose reading's pool drifts or whose live posture is no longer the reading's `pool_posture_id`, after submit ends `failed` before anything is reserved (`system/run.refused`, `code: lint_disabled` or `pool_drift`), its commits still pending; a reading run whose resolved checks arm differs from the reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (`system/run.halted`, `detail` `{frozen, run}`), and the commit stays pending; an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`, or `failed` at its first outage row (`system/run.outage_stop`) or environment row (`system/run.environment_stop`) with one reserved commit missed and the rest pending (PW-7); its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; each counted row carries `reservation` and `treatment` labels; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run; `pinned_treatment` is served after the first run on each repository | not yet run |
+| 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click. The parameters are pinned, as values the step-3 amendment records: each mine and qualify body as sent (`pool`, `limit`, `max_candidates`, `ref`, and no `task_ids`), and the `since` and `taxonomy` step 4's bodies leave out (empty: every qualified commit, choice (c), and the global vocabulary); none changes after step 3. From then on: no label run, CLI label edit or 2.4 replay on cobra or click between step 3 and the end of step 11, but the runs step 6 files under the campaign and step 4's smoke run | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here. The step-3 amendment records, for each cell, the qualified-set sha256 (its qualified commits in seeded order, hashed as `pool_sha256` is) and where each label came from (classifier or human), and the result of K1's audit (part 2) | not yet run |
+| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then the sealed `S1` smoke check below, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Before the first registration, Claude Code records here, for cobra and for click, the loop's switch and the changes in force — `switch`, `overlay` and each entry's `change` from `GET /api/v1/learn/register?repo=<repo>` — the state step 10 restores; and checks that each repository's own `checks` block sets `format_step: false` (`GET /api/v1/repos/<repo>`, DL-410), setting it with `PUT /api/v1/repos/<repo>` and `{"checks": {"format_step": false}}` if it does not. **The sealed `S1` smoke check.** After the campaign is registered and before cobra's first reading, Claude Code files one `S1` run under the campaign with no `reading_id`, on a cobra commit qualified at step 3 that is in no Wave 3 pool (another class or size) and whose change is in none, else that reading would be refused `pool_seen`: `{"repo": "cobra", "kind": "blind", "mode": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "arm": "S1", "task_ids": ["<that commit>"], "learning": "off", "budget_profile": "default", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. It sits here because once a `reserved.v1` reading is on the repository, a campaign run with no `reading_id` is refused 409 `reading_required`; a run with no reading reserves and pins nothing. Its spend counts toward the campaign | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, `attempt_rule` `reserved.v1`, `max_reruns` 0 and `budget_profile` `default` (part 1's attempt rule; a body naming another rule or re-run count is refused 422 `validation_error`), the `pool` in seeded order, `pool_sha256`, `pool_rule`, and the `pool_posture_id` and `pool_qualifications` the pool is pinned to (its commits' qualification records from step 3, never the miner's `gold_clean`; P-797); `GET /api/v1/readings?repo=<repo>` lists each with `pool_drift` `[]`, its cell's budget spent at 2.10% of 5%. Each reading's `checks_arm` reads `off`, the arm of the repository's own `checks` block; a reading on any other arm stops the campaign before any spend. A refusal (`campaign_unknown`, `lint_disabled`, `reading_checks_overlay`, `pool_seen` — under `reserved.v1`, any 2.4 replay row on a pool commit or its change, under any arm or test author, P-797 — `budget_spent`, `pool_not_blind`, `invalid_reading`), or a reading served with a `pool_drift` other than `[]` (`state` `undecided`: a pool commit relabelled out of its cell, or a pinned record missing or not qualified, P-797), stops the campaign before any spend; `lint_disabled` (`detail` `{repo, reason}`, nothing written) answers any registration while the repository's lint is switched off, and a `reserved.v1` reading hashes the repository's lint configuration as `lint_digest` (P-796). `reading_checks_overlay` (`detail` `{overlay_arm, repo_arm}`, nothing written) answers a registration while the loop's overlay moves the repository's checks arm off its own block's, so the precondition above did not hold: a reading frozen then would rest on a loop change (RT2B-2). On an unsealed deployment `invalid_reading` names what is unsealed in its `detail`: both executors, `{sandbox_executor, builder_executor}`, when the sandbox is on docker and the builder on the host; the posture class alone, `{posture_class}`, when the sandbox is not on docker, because that refusal comes first. A `409` `reading_exists` (`detail` `{reading_id}`, nothing written, nothing spent) answers a reading already registered, a retried request under any second or actor: it is a retry, not a stop; read the reading back with `GET /api/v1/readings?repo=<repo>`. The smoke run's row stops the campaign before any reading is registered when its error, after its `authoring:` prefix, reads "the authored test … is not RED at the parent: it timed out" or "… failed without attributable test ids", or starts "harness error proving RED:" (`src/crb/builders/adapter.py`): the sealed posture cannot prove an `S1` test RED there. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | not yet run |
+| 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is the one recorded at step 4. Then Claude Code reads each repository's loop chain (`GET /api/v1/learn/register?repo=<repo>`) for an applied change to `checks.format_step` still in force (RT2B-1), and records the changes in force (each entry's `change`, which each later run stamps as its `extra.learning`) and the repository's factory rows (`total` from `GET /api/v1/grades?repo=<repo>&process_step=factory`), and records both again before each `A0+L` run. From step 5 until step 10 restores the switch, or until the stage is terminal, the only runs on cobra and click are the registered readings' runs: no factory run, calibration build or intake; PLAN's cobra calibration builds run after stage 1 is terminal (RT2B-3) | the Learn page reads `config` for cobra and for click. An applied `checks.format_step` change in force while the repository's own `checks` block does not set the key stops the campaign before any spend (RT2B-1). A factory row or a loop change that no registered reading run made stops the stage (RT2B-3) | not yet run |
+| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, after the builder's-account check below passes at the start of each session, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is refused 409 `reading_required` when the campaign holds a reserved.v1 reading on that repository (`detail` `{campaign_id, reading_ids}`, nothing queued) — every body here carries `reading_id` (DL-382; P-792). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`, each look's request filed as one run, as the plan serves it (PW-4); a reading the plan lists with `checks_arm_moved` `{frozen, current}` has no request, because its run would halt `reading_checks_arm_mismatch`, so the repository's frozen checks arm is restored or the stage ends (RT2B-1). **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 commits the arm enrols], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`; those are the arm's `commits` in `GET /api/v1/readings`, the pool in seeded order less each commit whose registered change an earlier one holds, so a task outside them is skipped `task_not_enrolled`, and `A0+L`'s are among them (RT2B-5). **`A0+L`**: the same with no `learning` and no `budget_profile`. `A0+L` files its `task_ids` in the seeded order: the commits of the `A0` body it has not reserved yet, first to last, or the first of them; a subset such as `A0`'s misses, another order or a commit outside the first 16 is refused 422 `reading_run_fields` (`detail.fields` `["task_ids"]`, nothing queued), and again at claim (NEW-1, round 5). **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"`. Re-filing a run never re-rolls, because commits already reserved are skipped (`run.task_skipped commit_reserved`). Post a run on an arm of a reading only after the last run on that arm of that reading, or of another reading naming one of its commits, has finished: read its status in `GET /api/v1/campaigns/{id}` (`runs[].status`) or `GET /api/v1/runs/{run_id}` first, and never re-post while that run is `queued` or `running`. The product refuses such a re-post 409 `campaign_arm_in_flight`, naming the live run (`detail.run_id`, `detail.status`), and queues nothing (F87-2, DL-392). A run is still `running` until the worker has stopped it, cancelled or not. No body names `outage_stop` or `env_stop` other than 1: a reading run halts at its first outage or environment row, its in-flight commit a miss (reserved.v1) and its unreserved commits pending, run later by a re-filed body; any other value is refused 422 `reading_run_fields`, and again at claim (PW-7). Before each run, item 5 of the builder's-account check below. After each `A0+L` run, every row's `checks` label (of the form `fmt=1:repo;gate=0:default;api=1:run;cfg=<version>`, `crb.core.checks`) reads `fmt=0` and `api=0`, and `GET /api/v1/readings` shows the reading's `checks_arm` unchanged; otherwise the stage stops and Claude Code reports it (RT2B-1). A `system/run.reclaimed`, `system/run.abandoned` or `system/run.claim_lost` event on any run stops the stage, and Claude Code reports it (KG-7). Stop between tasks, never mid-attempt, because a cancel after a reservation costs the commit | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `unplaced_spend` — the campaign is stopped, P-798 — `campaign_arm_in_flight` — a run of the same arm still live on one of its commits, F87-2 — `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_required`, `reading_unknown`, `reading_run_fields` — a field or value the reading does not register, P-792 — `reading_unsealed`, `reading_posture_mismatch`, `lint_disabled` — the repository's lint switched off, P-796 — `pool_drift` — the reading's pool moved since step 4, P-797); a queued run whose repository's lint is switched off, or whose reading's pool drifts or whose live posture is no longer the reading's `pool_posture_id`, after submit ends `failed` before anything is reserved (`system/run.refused`, `code: lint_disabled` or `pool_drift`), its commits still pending; a reading run whose resolved checks arm differs from the reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (`system/run.halted`, `detail` `{frozen, run}`), and the commit stays pending; an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`, or `failed` at its first outage row (`system/run.outage_stop`) or environment row (`system/run.environment_stop`) with one reserved commit missed and the rest pending (PW-7); its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; each counted row carries `reservation` and `treatment` labels; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run; `pinned_treatment` is served after the first run on each repository, and its deployment's `container.extra_ro_mounts` reads `{}`, else the stage stops (KG-2) | not yet run |
 | 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is `null` while the campaign runs, and spent and held stay at or under the stage's line; otherwise part 2's stop, which `stopped` serves as `{code, message, run_ids}` | not yet run |
 | 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the report says why stage 1 ended and whether Q-26's rule releases stage 2; the record is committed under `docs/reviews/` | not yet run |
 | 9 | stage 2 | Claude Code, on decision 9's fixed rule (Q-26; DL-400): when stage 1 ended at its line with any cell still waiting on a look, it files `POST /api/v1/campaigns/{id}/release` (part 2), with no further decision; then the builder's-account check below, and step 6 resumes with the line at $108.00. When stage 1 ended on a stop or with the protocol complete, nothing is released | the release answers `200` with the campaign and is filed before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
 | 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 4 | not yet run |
-| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals | not yet run |
+| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3), reading each patch only from `GET /api/v1/grades/{row_hash}/patch`, and no one opens the Runs screen's evidence drawer or its Review tab on a Wave 3 row (KG-5); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals, the reviewer's session id and the bootstrap seed. The readings do not answer whether a patch is mergeable; the reviews do, and a verdict's `patch_sha256` anchor proves that the patch was fetched, not that it was read (KG-6) | not yet run |
+| 12 | publish the rows | Claude Code, after step 11: the ledger export (`GET /api/v1/ledger/export?format=jsonl`, unfiltered, so it verifies standalone with `verify_chain`) and each repository's readings (`GET /api/v1/readings?repo=<repo>`, which serves each reserved commit's `reason` and `scope`), committed beside the stage records under `docs/reviews/` | the rows and readings every stage record cites are in the repository, and the export's chain verifies | not yet run |
 
 **The builder's account (R-13; DL-405).** The builder runs on its own Anthropic API key, in a
 Workspace of its own whose spend limit sits at the ceiling (the default Workspace takes no

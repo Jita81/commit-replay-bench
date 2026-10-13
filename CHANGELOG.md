@@ -13,15 +13,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a product-held ceiling**
-  (P-787 to P-798, P-800 to P-807, G-957, DL-372 to DL-386, DL-390 to DL-392, DL-400 to DL-405,
+  (P-787 to P-798, P-800 to P-808, G-957, DL-372 to DL-386, DL-390 to DL-392, DL-400 to DL-405,
   DL-410 to DL-413; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
-  `hypothesis`, `smallest_effect` and campaign. Replayed readings register sealed (422
-  `invalid_reading`); runs under any reading need docker (409 `reading_unsealed`) and lint on.
-  P-792 closed: `POST /readings` registers only `reserved.v1`, each commit's reserved first
-  attempt on a pinned pool (409 `pool_drift`). `POST /campaigns` holds a pound ceiling (409
-  `campaign_ceiling`) and one live run per arm; readings count only admitted runs. Learn's `S1`
-  runs keep their arm. Grading disqualifies forged Go test events, pytest-machinery patches and
-  in-build model calls. CI builds the Go image.
+  `hypothesis`, `smallest_effect`, campaign. Sealed, lint-on readings register off the loop's
+  overlay (409 `reading_checks_overlay`), under `reserved.v1`: a commit's reserved first attempt
+  decides it (pinned pool, 409 `pool_drift`). Runs halt at their first outage or environment row,
+  or off the frozen checks arm; an off-arm reserved row reads `scope_fault`; remeasure flags
+  `checks_arm_moved`. Later arms read `waiting`; `duplicate_commits` is served; lost claims write
+  nothing (`run.claim_lost`). Campaigns hold pound ceilings, one live run per arm. Grading
+  disqualifies forged Go events, pytest-machinery patches, in-build model calls.
 
 - **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
   [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off

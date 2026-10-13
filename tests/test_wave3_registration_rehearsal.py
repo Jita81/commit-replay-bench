@@ -222,9 +222,10 @@ def plan_extra(arm: str) -> dict[str, Any]:
 def a0_body(
     repo: str, pool: list[str], reading_id: str, campaign_id: str, cap: float
 ) -> dict[str, Any]:
-    """Step 6's ``A0`` body, filled: ``task_ids`` the first 16 of the reading's pool."""
+    """Step 6's ``A0`` body, filled: ``task_ids`` the first 16 commits the arm enrols (the
+    rehearsal's pool holds no two commits of one change, so those are its first 16)."""
     (raw,) = re.findall(r"\*\*`A0`\*\*: `(\{.*?\})`", _step(6))
-    first = re.search(r"\[the first (\d+) of the reading's pool\]", raw)
+    first = re.search(r"\[the first (\d+) commits the arm enrols\]", raw)
     assert first is not None
     n = int(first.group(1))
     return dict(
