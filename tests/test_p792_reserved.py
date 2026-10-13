@@ -81,8 +81,8 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               checks arm read ``scope_fault`` (``scope`` ``checks_arm``, the arm
               ``undecided``, never a miss — RT2B-1), a reserved scope fault outcome ``None``
               so no look, tally or loop pair counts it a miss (VS1-2), a forward reserved row
-              off the frozen arm a ``scope_fault`` and another attempt of a reserved ticket a
-              duplicate (round 6), the registration's ``max_reruns`` 0
+              off the frozen arm a ``scope_fault`` and another attempt of a reserved ticket,
+              graded off the arm, a duplicate (round 6), the registration's ``max_reruns`` 0
               and budget profile, the ``reading_run_refusal`` whitelist table and the arm
               each admitted run maps to (C3, C5, C7 at the core), the hypothesis property
               that a reserved hit is a legacy hit and a reserved ``deliver`` a legacy one at
@@ -130,8 +130,8 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               refused at submit and at claim, nothing reserved), C16 (a grading exception
               after the reservation is a miss), the hook never blocking delivery (a store
               error, a ticket not enrolled), a factory run off the reading's checks arm
-              halting before it reserves (V1-CA-3), only the reserved attempt counting (SQLite
-              and PostgreSQL), a reserved ticket placed by its ``item_id`` in F8's tally and
+              halting before it reserves (V1-CA-3) and only the reserved attempt counting
+              (both on SQLite and PostgreSQL), a reserved ticket placed by its ``item_id`` in F8's tally and
               ``settled_unrowed`` (rowed: nothing unplaced; unrowed: one attempt at its
               hold, the campaign stopped), the ``RESERVED_FACTORY_PARAMS`` ratchet and
               ``POST /readings/forward`` opting in.
@@ -4939,7 +4939,7 @@ def test_p792_factory_reserve_never_blocks_delivery(
 
 
 def test_p792_factory_reserve_halts_off_the_readings_checks_arm(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """V1-CA-3 (round 6), the factory beside the replay's halt above: a factory run filed
     under a reserved.v1 forward reading hands the reservation hook the arm its own checks
@@ -4950,8 +4950,8 @@ def test_p792_factory_reserve_halts_off_the_readings_checks_arm(
     ``fmt`` against the reading's ``off``: nothing is reserved, the build is a
     ``build.not_reserved`` naming the item, the trial and the halt, and builds on (the hook
     never blocks delivery), its ``r1`` row on ``fmt`` with no reservation, and the ticket
-    stays pending."""
-    rig = _f_rig(tmp_path, monkeypatch)
+    stays pending. On SQLite and PostgreSQL (R6V2-6)."""
+    rig = _f_rig(tmp_path, monkeypatch, store=backend)
     reading = rig.register()
     assert reading.checks_arm == "off"
     rig.enrol()
