@@ -61,6 +61,7 @@ Touch when:   never for a new repository; a reading's verified set changes (an A
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import select
@@ -93,7 +94,8 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
     the runs admitted under it (``with_admissions``, DL-382): it counts only their rows. A
     reserved.v1 reading is filled with its reservations and the ``Event.id`` of its first
     registration (``with_reservations``, P-792): a reservation written before that never
-    decides a commit."""
+    decides a commit. A reading whose pinned pool moved since registration carries its
+    ``pool_drift`` (P-797), and evaluates ``undecided`` with no standard."""
     out: list[Reading] = []
     records: list[HeldOutTests] | None = None
     admissions: dict[str, frozenset[str]] = {}
@@ -115,11 +117,18 @@ def load_readings(session: Session, repo: str) -> list[Reading]:
                     admissions[reading.campaign_id] = admitted_runs(session, reading.campaign_id)
                 reading = with_admissions(reading, admissions[reading.campaign_id])
             out.append(reading)
-    return [
+    loaded = [
         with_reservations(r, reservations_of(session, [r.reading_id]), first_ev[r.reading_id])
         if r.reserved
         else r
         for r in first_per_id(out)
+    ]
+    # a pinned pool's drift is read here, once, so every reader of readings — the factory's
+    # gate, the capability map, Learn, ``GET /readings`` — evaluates a drifted reading
+    # ``undecided`` with no standard (P-797)
+    return [
+        replace(r, pool_drift=tuple(drift)) if (drift := pool_drift(session, r)) else r
+        for r in loaded
     ]
 
 

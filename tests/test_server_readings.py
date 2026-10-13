@@ -66,8 +66,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import select
 
 from crb.server.routes.readings import standard_for
+from crb.store.models import Task
 from fixtures.proven import (
     AUTHOR,
     CELL,
@@ -157,6 +159,51 @@ def test_a_registered_reading_delivers_only_on_the_cells_standard_arm(env: Env) 
     std = standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=SEALED)
     assert std is not None and std.arm == S1 and not std.ceiling
     assert std.reading_id == reading["reading_id"]
+
+
+def test_a_drifted_reading_licenses_nothing_on_any_reader(env: Env) -> None:
+    """P-797, on every reader: a delivered reserved.v1 reading one of whose pool tasks is
+    relabelled out of the cell after registration, no row of the cell's moving with it, reads ``undecided`` with no standard to the
+    factory's gate, the capability map and ``/routes`` — not to ``GET /readings`` alone, which
+    is all that read the drift before (CodeRabbit on the review of #87) — and restoring the
+    label restores the standard."""
+    reading = _proven(env)
+    # a pool task with no rows, so the move takes no row out of the cell: only the drift can
+    # stop the cell delivering
+    moved = reading["pool"][-1]
+
+    def relabel(cls: str) -> None:
+        with env.factory() as s:
+            task = s.execute(
+                select(Task).where(Task.repo == ALPHA, Task.task_id == moved)
+            ).scalar_one()
+            task.capability_class = cls
+            s.commit()
+
+    def gate() -> Any:
+        return standard_for(env.factory, ALPHA, CELL, checks_arm="off", posture_class=SEALED)
+
+    assert gate() is not None
+    relabel("perf")
+    assert gate() is None
+    (cell,) = _cells(env)
+    assert cell["route"] != "deliver" and cell["standard"]["standard"] is None, cell
+    r = env.get(f"/routes?repo={ALPHA}&posture={SEALED}")
+    assert r.status_code == 200, r.text
+    (d,) = [x for x in r.json()["decisions"] if x["cell"]["size"] == "XS"]
+    assert d["route"] != "deliver" and not d["standard"], d
+    assert "moved since registration" in d["reason"], d
+    (got,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    assert (got["state"], got["standard"], got["ceiling"]) == ("undecided", None, False)
+    assert got["pool_drift"] == [
+        {"task_id": moved, "field": "capability_class", "registered": "bug.fix", "now": "perf"}
+    ]
+
+    relabel("bug.fix")
+    std = gate()
+    assert std is not None and std.arm == S1
+    (cell,) = _cells(env)
+    assert cell["route"] == "deliver" and cell["standard"]["standard"] == S1
 
 
 def test_a_cell_with_no_reading_reads_no_proven_standard_and_names_the_next_measurement(

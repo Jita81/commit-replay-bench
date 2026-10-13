@@ -1259,6 +1259,22 @@ export interface ReadingOutcome {
   reserved?: Record<string, number> | null
   /** Of those reservations, how many settled with no row: charged by the campaign's tally, which then stops on `unplaced_spend`; `null` for a legacy reading (GET /readings, F8). */
   settled_unrowed?: Record<string, number> | null
+  /** How a reserved.v1 reading's pool moved since registration, one row per change; any row
+   * makes the reading `undecided` with no standard and no ceiling on every reader until the
+   * pool is restored. `[]` when it has not moved, `null` for a legacy reading (GET /readings, P-797). */
+  pool_drift?: PoolDrift[] | null
+}
+
+/** One way a reserved.v1 reading's pool moved since registration (P-797). */
+export interface PoolDrift {
+  /** The pool commit; `""` for a reading pinned to no posture. */
+  task_id: string
+  /** `capability_class`, `size`, `task` (the store no longer holds it), `qualification` or `pool_posture_id`. */
+  field: string
+  /** What registration froze: the cell's class or size, the commit, or the pinned record's id. */
+  registered: string
+  /** What it reads now; `missing` for what is gone. */
+  now: string
 }
 
 /** One half of a reserved.v1 reading's treatment pin, as its reservation stored it (P-792). */

@@ -145,7 +145,8 @@ function criteriaFor(preview: SignoffPreview | undefined, cellChosen: boolean, a
     { label: 'Cell is measured', ok: ev.measured, detail: `n = ${fmtInt(ev.n)}`, hint: 'gate.signoff.measured' },
     { label: 'false-Q1 = 0', ok: !fam.has('false_q1') && ev.false_q1 === 0, detail: `false_q1 = ${ev.false_q1}`, hint: 'gate.signoff.false_q1' },
     // thin_cell counts distinct tasks, never attempts (P-788); an older server serves no n_tasks
-    { label: `distinct tasks ≥ ${p.n_min}`, ok: !fam.has('thin_cell'), detail: `${typeof ev.n_tasks === 'number' ? `tasks = ${fmtInt(ev.n_tasks)} (n = ${fmtInt(ev.n)} attempts)` : `n = ${fmtInt(ev.n)} attempts — this server does not count distinct tasks`} · point ${fmtPct(ev.point)} · Wilson lower ${fmtPct(ev.ci_low)}`, hint: 'gate.signoff.thin_cell' },
+    // the label claims a distinct-task count only when the server counted one
+    { label: typeof ev.n_tasks === 'number' ? `distinct tasks ≥ ${p.n_min}` : `evidence ≥ ${p.n_min} (distinct tasks not counted)`, ok: !fam.has('thin_cell'), detail: `${typeof ev.n_tasks === 'number' ? `tasks = ${fmtInt(ev.n_tasks)} (n = ${fmtInt(ev.n)} attempts)` : `n = ${fmtInt(ev.n)} attempts — this server does not count distinct tasks`} · point ${fmtPct(ev.point)} · Wilson lower ${fmtPct(ev.ci_low)}`, hint: 'gate.signoff.thin_cell' },
     {
       label: `Negative controls passed, ≤ ${p.max_controls_escapes} escape(s), ≥ ${fmtPct(p.min_constructible_share, 0)} constructible`,
       ok: !fam.has('controls_unmeasured') && !fam.has('controls_failed') && !fam.has('controls_escapes') && !fam.has('controls_thin'),

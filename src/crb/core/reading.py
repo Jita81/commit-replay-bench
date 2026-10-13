@@ -736,6 +736,12 @@ class Reading:
     #: event) means they were never read, and then every commit reads pending, never a hit.
     registered_event_id: int = field(default=0, compare=False)
     reservations: Mapping[tuple[str, str], Reservation] | None = field(default=None, compare=False)
+    #: How a reserved.v1 reading's pool moved since registration (P-797), as
+    #: ``{task_id, field, registered, now}`` rows — READ by the server's one loader
+    #: (``crb.server.reading_book.load_readings`` over ``pool_drift``), never registered or
+    #: hashed. A drifted reading evaluates ``undecided`` with no standard (:func:`evaluate`),
+    #: so no reader — the factory's gate, the map, Learn — licenses a cell from it.
+    pool_drift: tuple[Mapping[str, str], ...] = field(default=(), compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
@@ -2335,7 +2341,8 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     does (P-795); the standard is the leanest certifying arm of the unbroken chain; ``S3``
     alone is a ceiling. Every later arm reads ``waiting`` while that arm is still being read
     and ``stopped`` once it reads insufficient or undecided; neither is read toward the
-    verdict (FZ-2)."""
+    verdict (FZ-2). A reading whose pool drifted (:attr:`Reading.pool_drift`, P-797) reads
+    ``undecided`` with no standard, its arms read as they stand."""
     rs = list(rows)
     arms: dict[str, ArmReading] = {}
     chain: list[str] = []
@@ -2357,7 +2364,11 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
         arms[arm] = arm_reading(reading, arm, rs, limit=n)
     certifying = [a for a in chain if parse_arm(a).certifies]
     standard = certifying[-1] if certifying else ""
-    if standard:
+    if reading.pool_drift:
+        # a pool that moved since registration proves nothing, whatever its rows say, until
+        # it is restored (P-797): every reader of the outcome reads it here
+        standard, state = "", OUTCOME_UNDECIDED
+    elif standard:
         state = OUTCOME_STANDARD
     elif not stopped_at:
         state = OUTCOME_CEILING
@@ -2519,6 +2530,9 @@ class ArmVerdict:
     counted_commits: tuple[str, ...] = ()
     #: Commits of the pool still able to fill the next look (for ``undecided`` / ``mine``).
     pool_remaining: int = 0
+    #: The reading's pool moved since registration (P-797): the arm reads ``undecided`` with
+    #: nothing needed, whatever its rows say, until the pool is restored.
+    drifted: bool = False
 
     @property
     def ci(self) -> Interval:
@@ -2547,7 +2561,8 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
     stopped at a richer arm; ``ceiling`` for a delivering ``S3``; ``leaner_standard`` for a
     delivering certifying arm that is not the cell's standard; else the arm's own look state.
     An arm with a ``scope_fault`` (P-795) is ``undecided`` with nothing needed and no next
-    look — a descriptive one too — and so is every arm it stopped."""
+    look — a descriptive one too — and so is every arm it stopped. Every arm of a reading
+    whose pool drifted (P-797) is ``undecided`` and ``drifted``, with nothing needed."""
     if outcome is None:
         return ArmVerdict(arm, VERDICT_UNREGISTERED)
     r = outcome.reading
@@ -2567,6 +2582,8 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
         "counted_commits": a.counted_commits,
         "pool_remaining": len(kept),
     }
+    if r.pool_drift:
+        return ArmVerdict(arm, STATE_UNDECIDED, drifted=True, **common)
     if a.scope_faults and not a.stopped_by:
         return ArmVerdict(arm, STATE_UNDECIDED, **common)
     if a.descriptive:
