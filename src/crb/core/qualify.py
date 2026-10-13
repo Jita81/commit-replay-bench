@@ -154,7 +154,8 @@ QUAL_TEXT: dict[str, str] = {
         "a task with a dirty gold always was"
     ),
     QUAL_TARGET_FLAKY: (
-        "the gold's 2 target runs disagreed: the oracle is not deterministic in this posture"
+        "the gold's 2 target runs disagreed, on green or by passing no target test in "
+        "common: the oracle is not deterministic in this posture"
     ),
     QUAL_HEADROOM: "the gold needed more than half the wall clock: raise the repository's timeout",
     QUAL_TREE_COPY_FAILED: (

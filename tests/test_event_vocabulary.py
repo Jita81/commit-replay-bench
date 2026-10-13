@@ -11,9 +11,9 @@ Navigation
 ----------
 What it is:   The documentation ratchet for event action names.
 What it does: Extracts every action literal from the emit call sites in ``src/crb`` — a
-              literal or a module-level string constant passed in its place, the file's own or
-              one imported from ``crb`` (P-174) — (emitter ``emit`` / ``error`` / ``timed``,
-              the core's ``_emit(on_event, "…")`` helpers,
+              literal or a string constant passed in its place, assigned or imported from
+              ``crb`` in the call's own scope or an enclosing one (P-174) — (emitter
+              ``emit`` / ``error`` / ``timed``, the core's ``_emit(on_event, "…")`` helpers,
               plain ``on_event("…", …)`` callbacks, ``append_event(action=…)``, the factory
               loop's ``self._emit("…", item_id)``, the account trail's
               ``record_user_event(action=…)``, and the builders' ``builder.``-prefixed forms)
@@ -39,6 +39,7 @@ from __future__ import annotations
 import ast
 import functools
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,9 +76,9 @@ BUILDER_PREFIX = "builder."
 TIMED_SUFFIXES = (".start", ".done", ".error")
 
 
-def _literals(node: ast.AST, consts: dict[str, str] | None = None) -> list[str]:
+def _literals(node: ast.AST, consts: dict[str, str | None] | None = None) -> list[str]:
     """The string(s) an action expression can evaluate to (a constant, a prefixed constant,
-    a module-level string constant named by ``consts``, or either branch of
+    a string constant ``consts`` binds the name to, or either branch of
     ``"a" if x else "b"``)."""
     if isinstance(node, ast.IfExp):
         return _literals(node.body, consts) + _literals(node.orelse, consts)
@@ -115,29 +116,77 @@ def _constants_of(module: str) -> dict[str, str]:
     return {}
 
 
-def _imported_constants(tree: ast.Module) -> dict[str, str]:
-    """``from crb.x import NAME`` (or ``NAME as ALIAS``) where ``NAME`` is a string constant
-    of ``crb.x`` — a route names an action by its core module's constant (``readings.py``:
-    ``action=READING_EVENT_ACTION``), and while the walker resolved only the file's own
-    constants ``reading.registered`` and the ``campaign.*`` actions escaped the table."""
-    out: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
-            continue
-        if node.module != "crb" and not node.module.startswith("crb."):
-            continue
-        consts = _constants_of(node.module)
-        for alias in node.names:
-            if alias.name in consts:
-                out[alias.asname or alias.name] = consts[alias.name]
-    return out
+#: The nodes that open a scope of their own: a name bound inside one is not the enclosing
+#: scope's name.
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
 
-def _literal(node: ast.AST, consts: dict[str, str]) -> str | None:
+def _own_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """The nodes of ``scope`` outside every scope nested in it (a nested function, class or
+    lambda is yielded, never entered)."""
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, _SCOPES):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+def _bindings(scope: ast.AST) -> dict[str, str | None]:
+    """The names ``scope`` binds itself: a string constant (``NAME = "a.b"``,
+    ``NAME: str = "a.b"``, or ``from crb.x import NAME [as ALIAS]`` where ``NAME`` is a string
+    constant of ``crb.x``), else ``None`` — a name bound to anything else (an argument, an
+    assignment, another import) hides an enclosing scope's constant of that name.
+
+    A route names an action by its core module's constant (``readings.py``:
+    ``action=READING_EVENT_ACTION``); while the walker resolved only the file's own constants,
+    ``reading.registered`` and the ``campaign.*`` actions escaped the table. Read per scope,
+    an import in one function never names the action another function binds itself."""
+    out: dict[str, str | None] = {}
+    consts: dict[str, str] = {}
+    assigned: list[tuple[int, int, str, str]] = []  # read in source order: the last one wins
+    if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+        a = scope.args
+        params = [*a.posonlyargs, *a.args, *a.kwonlyargs, *filter(None, (a.vararg, a.kwarg))]
+        out.update(dict.fromkeys((x.arg for x in params), None))
+    for node in _own_nodes(scope):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            out.setdefault(node.id, None)
+        elif isinstance(node, _SCOPES[:3]):
+            out.setdefault(node.name, None)
+        elif isinstance(node, ast.Import):
+            out.update(dict.fromkeys((x.asname or x.name.split(".")[0] for x in node.names), None))
+        elif isinstance(node, ast.ImportFrom):
+            source = (
+                _constants_of(node.module)
+                if node.level == 0
+                and node.module
+                and (node.module == "crb" or node.module.startswith("crb."))
+                else {}
+            )
+            for alias in node.names:
+                name = alias.asname or alias.name
+                out.setdefault(name, None)
+                if alias.name in source:
+                    consts[name] = source[alias.name]
+        if isinstance(node, ast.Assign | ast.AnnAssign):
+            value = node.value
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                assigned += [
+                    (node.lineno, node.col_offset, x.id, value.value)
+                    for x in targets
+                    if isinstance(x, ast.Name)
+                ]
+    consts.update({name: value for *_, name, value in sorted(assigned)})
+    return {**out, **consts}
+
+
+def _literal(node: ast.AST, consts: dict[str, str | None]) -> str | None:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
-    if isinstance(node, ast.Name) and node.id in consts:
-        return consts[node.id]
+    if isinstance(node, ast.Name):
+        return consts.get(node.id)
     # BUILDER_EVENT_PREFIX + "discard"
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         left, right = node.left, node.right
@@ -152,39 +201,50 @@ def _literal(node: ast.AST, consts: dict[str, str]) -> str | None:
 
 
 def _actions_in(path: Path) -> set[str]:
-    """Every action literal an emit call in ``path`` can produce."""
+    """Every action literal an emit call in ``path`` can produce, each name read in the scope
+    of the call that uses it: the call's own function, then each enclosing function, then the
+    module (a class body's names are not its methods')."""
     out: set[str] = set()
     in_builders = path.parent == SRC / "builders" and path.name != "adapter.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    consts = {**_imported_constants(tree), **_module_constants(tree)}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+
+    def walk(scope: ast.AST, outer: dict[str, str | None]) -> None:
+        consts = {**outer, **_bindings(scope)}
+        for node in _own_nodes(scope):
+            if isinstance(node, _SCOPES):
+                walk(node, outer if isinstance(scope, ast.ClassDef) else consts)
+            elif isinstance(node, ast.Call):
+                out.update(_call_actions(node, consts, in_builders))
+
+    walk(ast.parse(path.read_text(encoding="utf-8")), {})
+    return out
+
+
+def _call_actions(node: ast.Call, consts: dict[str, str | None], in_builders: bool) -> set[str]:
+    """The actions one call names, when it is an emit call."""
+    out: set[str] = set()
+    fn = node.func
+    name = fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
+    if name not in EMITTERS:
+        return out
+    candidates: list[ast.AST] = [k.value for k in node.keywords if k.arg == "action"]
+    args = node.args
+    if name in {"emit", "error", "timed"} and isinstance(fn, ast.Attribute) and len(args) >= 2:
+        candidates.append(args[1])  # emitter.emit(stage, action, …)
+    if name in {"_emit", "emit"} and len(args) >= 2 and isinstance(args[0], ast.Name):
+        candidates.append(args[1])  # _emit(on_event, action, …)
+    if name in {"_emit", "on_event", "cb"} and args:
+        candidates.append(args[0])  # self._emit(action, item_id) / on_event(action, payload)
+    for lit in (x for c in candidates for x in _literals(c, consts)):
+        if "." not in lit:
             continue
-        fn = node.func
-        name = (
-            fn.attr if isinstance(fn, ast.Attribute) else fn.id if isinstance(fn, ast.Name) else ""
-        )
-        if name not in EMITTERS:
-            continue
-        candidates: list[ast.AST] = [k.value for k in node.keywords if k.arg == "action"]
-        args = node.args
-        if name in {"emit", "error", "timed"} and isinstance(fn, ast.Attribute) and len(args) >= 2:
-            candidates.append(args[1])  # emitter.emit(stage, action, …)
-        if name in {"_emit", "emit"} and len(args) >= 2 and isinstance(args[0], ast.Name):
-            candidates.append(args[1])  # _emit(on_event, action, …)
-        if name in {"_emit", "on_event", "cb"} and args:
-            candidates.append(args[0])  # self._emit(action, item_id) / on_event(action, payload)
-        for lit in (x for c in candidates for x in _literals(c, consts)):
-            if "." not in lit:
-                continue
-            if name == "timed":
-                out.update(lit + s for s in TIMED_SUFFIXES)
-            elif in_builders and lit.startswith("build."):
-                # a builder's own events reach a replay trace through builder_on_event
-                # (prefixed) and a factory trace through the raw callback (unprefixed)
-                out.update({lit, BUILDER_PREFIX + lit})
-            else:
-                out.add(lit)
+        if name == "timed":
+            out.update(lit + s for s in TIMED_SUFFIXES)
+        elif in_builders and lit.startswith("build."):
+            # a builder's own events reach a replay trace through builder_on_event
+            # (prefixed) and a factory trace through the raw callback (unprefixed)
+            out.update({lit, BUILDER_PREFIX + lit})
+        else:
+            out.add(lit)
     return out
 
 
@@ -289,11 +349,13 @@ def test_an_action_named_by_a_module_constant_is_seen(tmp_path: Path) -> None:
         "    append_system_event(db, trace_id='t', action=READ)\n"
         "    emitter.emit('system', OTHER)\n"
         "    local = 'demo.local'\n"
+        "    append_system_event(db, trace_id='t', action=local)\n"
+        "def g(db, local):\n"
         "    append_system_event(db, trace_id='t', action=local)\n",
         encoding="utf-8",
     )
-    # the two module constants resolve; a function-local variable is not a module constant
-    assert _actions_in(src) == {"demo.read", "demo.other"}
+    # the two module constants resolve, and so does f's own constant; g's argument is not f's
+    assert _actions_in(src) == {"demo.read", "demo.other", "demo.local"}
 
 
 def test_an_action_named_by_an_imported_constant_is_seen(tmp_path: Path) -> None:
@@ -315,6 +377,38 @@ def test_an_action_named_by_an_imported_constant_is_seen(tmp_path: Path) -> None
     )
     # an import at the top or inside a function, under its own name or an alias
     assert _actions_in(src) == {"reading.registered", "campaign.released", "acceptance.written"}
+
+
+def test_a_name_is_read_in_the_scope_of_the_call_that_uses_it(tmp_path: Path) -> None:
+    """The imports of every function were read into one map for the file, so a function that
+    binds a name itself (``EVENT_ACTION = "demo.other"``) was read as the action another
+    function imports under that name, and its own action escaped the table (CodeRabbit on the
+    review-only PR #91). Each name is now read in the call's own scope, then each enclosing
+    function's, then the module's; a class body's names are not its methods'."""
+    src = tmp_path / "mod.py"
+    src.write_text(
+        'EVENT_ACTION = "demo.module"\n'
+        "def imports(factory):\n"
+        "    from crb.core.acceptance import EVENT_ACTION\n"
+        "    append_event_checked(factory, action=EVENT_ACTION)\n"
+        "def assigns(factory):\n"
+        '    EVENT_ACTION = "demo.other"\n'
+        "    append_event_checked(factory, action=EVENT_ACTION)\n"
+        "    def inner():\n"
+        "        append_event_checked(factory, action=EVENT_ACTION)\n"
+        "def takes(factory, EVENT_ACTION):\n"
+        "    append_event_checked(factory, action=EVENT_ACTION)\n"
+        "class Holder:\n"
+        '    EVENT_ACTION = "demo.class"\n'
+        "    def method(self, factory):\n"
+        "        append_event_checked(factory, action=EVENT_ACTION)\n"
+        "append_event_checked(None, action=EVENT_ACTION)\n",
+        encoding="utf-8",
+    )
+    # the import names acceptance.written in its own function only; the assignment names
+    # demo.other there and in the closure; an argument names nothing; the method and the
+    # module read the module's constant, never the class body's
+    assert _actions_in(src) == {"acceptance.written", "demo.other", "demo.module"}
 
 
 #: The UI's one plain sentence per action (the live log's explanation).
