@@ -104,7 +104,8 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
               src/crb/observability/events.py (``Emitter`` for the step events),
               src/crb/server/routes/factory.py (serves the chain and the task view),
               src/crb/server/worker.py (``_factory_reserver`` fills ``FactorySpec.reserve``)
-Tested by:    tests/test_factory_loop.py, tests/test_factory_loop_rework.py,
+Tested by:    tests/test_factory_loop.py, tests/test_factory_loop_route_gate.py,
+              tests/test_factory_loop_signed_cell.py, tests/test_factory_loop_rework.py,
               tests/test_factory_loop_pull_requests.py, tests/test_factory_held_out.py,
               tests/test_p792_reserved.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);

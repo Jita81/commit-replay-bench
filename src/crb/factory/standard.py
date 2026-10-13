@@ -66,7 +66,8 @@ Works with:   src/crb/factory/loop.py (``_assess`` calls ``decide_entry``; ``_de
               src/crb/intake/feedback.py (the ticket's words for each stop),
               src/crb/server/routes/factory.py (the calibration route and the task view),
               src/crb/server/decisions.py (``cell_signed`` decides "sign-off due")
-Tested by:    tests/test_factory_entry_gate.py, tests/test_server_decisions.py
+Tested by:    tests/test_factory_entry_gate.py, tests/test_server_decisions.py,
+              tests/test_factory_loop_signed_cell.py, tests/test_factory_loop_route_gate.py
 Touch when:   never for a new repository; the organisation's validity report lands
               (:func:`points_agreement_passed`); a recorded decision changes ADR-0026 item 8's
               size value; a new stop is added (a code here, a status in loop.py, a sentence in
