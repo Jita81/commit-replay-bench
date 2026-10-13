@@ -72,7 +72,8 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   closed. A run of such a reading carries only :data:`RESERVED_RUN_PARAMS` on the reading's
   own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``), and halts at its
   first outage or environment row (``outage_stop`` and ``env_stop`` unset or
-  :data:`RESERVED_RUN_STOP`, PW-7): the commit in flight is a miss, the rest stay pending. Its pool is pinned
+  :data:`RESERVED_RUN_STOP`, PW-7): the commit in flight is a miss, the rest stay pending.
+  Its pool is pinned
   to qualification records (P-797): the body carries ``pool_posture_id`` and
   ``pool_qualifications`` (task id → the qualification id in force when it froze), both hashed
   into ``pool_sha256`` (:func:`reserved_pool_digest`) and the ``reading_id``; the server reads

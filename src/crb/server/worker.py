@@ -131,7 +131,8 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               labels stamped, records the apparatus, and marks the run succeeded / failed /
               cancelled honestly (all-attempts-errored is a failure; a provider outage streak
               stops the run — a run of a reserved.v1 reading at its first outage or
-              environment row, PW-7; so does a spend cap, before an attempt or item that could pass it
+              environment row, PW-7; so does a spend cap, before an attempt or item that
+              could pass it
               — src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
               skips it). Fetches and fast-forwards the clone's default branch before a factory
               run (refusing the run when it cannot) and syncs delivered pull requests'
