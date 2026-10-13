@@ -46,6 +46,9 @@ What it is:   The runner contract (``TestRunner`` protocol, ``BaseRunner`` plumb
               records every language runner returns: ``TestRun``, ``SetupStep``, ``SetupResult``.
 What it does: Resolves target and belt scopes from the repo config; runs one scope through an
               executor and fails closed when a non-zero exit carries no attributable test id;
+              carries the ids of the tests that passed when the runner reports them (belt 2
+              requires them: ``TestRun.passed``, ADR-0048 decision 7), with the run root inside
+              an id relocated to ``<root>`` as whole path components (``relocate_ids``);
               runs the one network-permitted setup phase on the host (refused under docker) and
               keeps its redacted record; starts and stamps the oracle's services; on the host,
               runs every test command in the runner's declared environment (ADR-0048); runs a
@@ -68,7 +71,7 @@ Works with:   src/crb/core/runners/pytest_runner.py (the reference subclass),
               src/crb/core/lint.py (belt 5 plans), src/crb/core/spec.py (``RepoConfig.belt_scope``
               and ``runner_opts``), src/crb/core/runners/__init__.py (the registry)
 Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_services.py,
-              tests/test_runners_toolenv.py
+              tests/test_runners_toolenv.py, tests/test_belt2_passes.py
 Touch when:   never for a new repository — set ``runner``, ``belt_scope``, ``runner_opts`` and
               ``lint`` in the repo config instead (docs/OPERATOR.md); adding a language means a
               new subclass registered in src/crb/core/runners/__init__.py; changing ``TestRun``
@@ -149,9 +152,16 @@ class TestRun:
     #: verdict about the code: no failing id is attributed, the grader records an
     #: environment failure and the qualifier refuses ``QUAL_TREE_COPY_FAILED``.
     env_error: str = ""
+    #: The ids of the tests that PASSED (never one that also failed), or ``None`` when this
+    #: runner does not report passes. Belt 2 requires a pass for each target test the
+    #: oracle needs, so an exit code of 0 with no failure named is never enough on its own
+    #: (F4; ADR-0048 decision 7). Not part of :meth:`to_dict`: packs stay byte-identical.
+    passed: frozenset[str] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "services", tuple(self.services))
+        if self.passed is not None:
+            object.__setattr__(self, "passed", frozenset(self.passed))
 
     @property
     def green(self) -> bool:
@@ -643,6 +653,7 @@ class BaseRunner:
             result.duration_s,
             parse_error,
             records,
+            passed=run.passed,
         )
 
     def run_for(
@@ -955,3 +966,66 @@ _FAIL_LINE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M)
 def parse_pytest_failures(text: str) -> frozenset[str]:
     """The pytest ``-rfE`` short-summary parser. Shared so every pytest path is identical."""
     return frozenset(m.split(" ")[0] for m in _FAIL_LINE.findall(text))
+
+
+#: One ``-rp`` short-summary line: ``PASSED tests/x.py::test_a``. The id is read as the
+#: failure parser reads it (up to the first space), so the two sets compare.
+_PASS_LINE = re.compile(r"^PASSED\s+(\S+)", re.M)
+
+
+def parse_pytest_passes(text: str) -> frozenset[str]:
+    """The ids the ``-rp`` short summary names PASSED (belt 2's requirement, F4)."""
+    return frozenset(_PASS_LINE.findall(text))
+
+
+#: The edges a root needle must sit between to be whole path components: not preceded by a
+#: character a path component holds (so ``tests/work`` and ``/private/tmp`` are not ``/work``
+#: and ``/tmp``), and followed by ``/`` or by a character no component holds (so
+#: ``/workspace`` and ``/work-2`` are not ``/work``). A ``-`` may precede the root, since pytest
+#: joins several parametrize values with it (``test[1-/work/x]``). Missing a root is the
+#: strict direction — belt 2 refuses an honest gold — so the edges lean that way.
+_ROOT_EDGE = (r"(?<![\w.~+@])", r"(?![\w.~+@-])")
+
+
+def relocate_ids(ids: frozenset[str], root: Path) -> frozenset[str]:
+    """Replace this run's root path, wherever it appears inside a test id as whole path
+    components, with the fixed token ``<root>``, so ids compare across runs rooted at different
+    absolute paths.
+
+    A glob- or ``tmp_path``-parametrized id carries the worktree path in its parametrize value
+    (``tests/t.py::test[/work/data/case1.txt]``, or the host-absolute equivalent). The gold is
+    qualified under one root and a patch graded under another, so the raw ids never match and
+    the honest gold would miss belt 2 (R1-F4-2). ``/work`` is the container mount; ``realpath``
+    covers a root reached through a symlink (``/tmp`` → ``/private/tmp`` on macOS). One pass,
+    longest needle first, so a path that is a prefix of another does not shadow it. A needle
+    matches only as whole path components (:data:`_ROOT_EDGE`): ``tests/workers``,
+    ``github.com/acme/worker``, ``[/workspace/data]`` and a sibling of the root (``/x/trial2``
+    beside ``/x/trial``) keep their text, which a plain substring replacement mangled
+    (R2-REG-2). Only an absolute root other than ``/`` is a needle — a relative root (``.`` in a
+    parser unit test) would rewrite the ``.`` in every ``foo.py`` id, and ``/`` every slash.
+    The node path (``tests/t.py::test``) is already root-relative and left untouched.
+    """
+    needles = {"/work"}
+    if os.path.isabs(str(root)):
+        needles.add(str(root))
+        with contextlib.suppress(OSError):  # realpath on a path is effectively total
+            needles.add(os.path.realpath(root))
+    ordered = sorted((n for n in needles if n and n != "/"), key=len, reverse=True)
+    # one pass over every needle, so a root already replaced is not rescanned (a repo's own
+    # ``work/`` under a host root stays ``<root>/work``, not ``<root><root>``)
+    alternatives = "|".join(re.escape(n) for n in ordered)
+    pattern = re.compile(f"{_ROOT_EDGE[0]}(?:{alternatives}){_ROOT_EDGE[1]}")
+    return frozenset(pattern.sub("<root>", i) for i in ids)
+
+
+_PASS_SUMMARY_LINE = re.compile(r"^PASSED\s+\S+[^\n]*(?:\n|\Z)", re.M)
+#: The short-summary banner with no failure or error under it (an all-pass run's, once its
+#: PASSED lines are gone).
+_BARE_SUMMARY_BANNER = re.compile(r"^=+ short test summary info =+\n(?!(?:FAILED|ERROR)\s)", re.M)
+
+
+def without_pytest_passes(text: str) -> str:
+    """``text`` without the ``-rp`` summary's PASSED lines, or its banner when nothing else is
+    under it: the tail an operator or a builder reads stays what ``-rfE`` printed, so a
+    suite's passes never crowd its failures' tracebacks out of the last lines."""
+    return _BARE_SUMMARY_BANNER.sub("", _PASS_SUMMARY_LINE.sub("", text))

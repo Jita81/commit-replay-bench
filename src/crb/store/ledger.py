@@ -24,12 +24,16 @@ What it is:   The database ledgers — ``DbLedger`` for ``grades`` (+ the ``evid
               and ``DbReviewLedger`` for ``reviews`` — plus ``assert_append_only``, the
               append-only probe of every table for ``/health``, ``crb doctor`` and start-up.
 What it does: Appends hash-chained rows under a per-table write lock, re-asserting the
-              false-Q1 invariant before every insert; reads rows back as the core's
+              false-Q1 invariant before every insert and refusing a replay row that does not
+              record where its builder ran (P-795, write-only); reads rows back as the core's
               dataclasses; imports foreign JSONL rows by re-chaining them, stamped as
               imported inside the hash (``import_stamp``); exports rows that verify
               standalone. Refuses a review whose row
               is unknown, whose pack is not the row's, or which has nothing to anchor to.
-How:          ``append`` = lock → last ``row_hash`` → ``GradeRow.chained`` → insert → commit;
+How:          ``append`` = lock → the caller's ``guard`` → last ``row_hash`` →
+              ``GradeRow.chained`` → insert → commit; the lock order is the grades lock
+              (7331) first, then the guard's ``runs`` row lock (``FOR UPDATE``), and nothing
+              may take 7331 or the events lock (7332) while it holds a ``runs`` row lock;
               ``verify`` re-walks the chain with the core's ``verify_chain``;
               ``DbReviewLedger.append`` resolves the reviewed row and its stored pack, runs
               ``check_review_anchor``, then chains and inserts the same way;
@@ -45,9 +49,12 @@ Works with:   src/crb/core/ledger.py (``GradeRow``, ``verify_chain``, ``GENESIS_
               rule), src/crb/store/models.py (the ``Grade`` / ``Review`` / ``EvidencePackRow``
               columns), src/crb/store/db.py (the triggers that make append-only true at the
               database), src/crb/server/worker.py (the writer), src/crb/server/routes/ledger.py
-              (verify / export over HTTP)
+              (verify / export over HTTP), src/crb/store/jobs.py (``claim_guard``, the guard a
+              reserved attempt's append runs under the lock)
 Tested by:    tests/test_store_ledger.py, tests/test_store_reviews.py, tests/test_store_db.py,
-              tests/test_store_migrate.py
+              tests/test_store_migrate.py, tests/test_p792_reserved_store.py,
+              tests/test_p792_reserved_reservation.py and tests/test_p792_reserved_losses.py
+              (``AttemptSettled``: an append under a lost claim refused)
 Touch when:   never for a new repository; when ``GradeRow`` or ``ReviewRecord`` gains a field
               (the column tuples are derived from the dataclasses, so a new field needs a
               migration and a ``labels``-style exclusion if it is not a column); changing the
@@ -60,7 +67,7 @@ Claims:       A verified chain proves rows were not edited or reordered since th
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +127,25 @@ def rows_in(session: Session, repo: str) -> list[GradeRow]:
     return [_from_model(m) for m in session.execute(q).scalars()]
 
 
+def rows_of_runs(session: Session, run_ids: Iterable[str]) -> list[GradeRow]:
+    """The rows these runs wrote, in chain (``seq``) order, read in the caller's session —
+    what a campaign's tally sums under the events write lock (G-957). An imported row naming
+    one of the runs is not one it wrote (P-321): an admin's import never adds to a run's
+    spend, nor places an attempt its ``build.done`` left without a row (P-798)."""
+    ids = list(run_ids)
+    if not ids:
+        return []
+    q = select(Grade).where(Grade.run_id.in_(ids)).order_by(Grade.seq)
+    rows = (_from_model(m) for m in session.execute(q).scalars())
+    return [r for r in rows if not r.imported]
+
+
+class AttemptSettled(RuntimeError):
+    """The attempt a row belongs to is settled: its run was reclaimed, finished, or claimed
+    by another worker, so the reading may already have read the commit as a miss (P-792 C1).
+    Raised by a ``DbLedger.append`` guard under the grades lock; the row is not written."""
+
+
 class DbLedger:
     """The ``grades`` table as a hash-chained ledger of :class:`GradeRow`, plus the
     content-addressed ``evidence`` packs the rows point at."""
@@ -145,15 +171,24 @@ class DbLedger:
         ).scalar_one_or_none()
         return last or GENESIS_HASH
 
-    def append(self, row: GradeRow) -> GradeRow:
+    def append(self, row: GradeRow, *, guard: Callable[[Session], None] | None = None) -> GradeRow:
         """Chain ``row`` onto the head and insert it; returns the chained copy.
 
         The invariant check runs BEFORE the lock is taken so a false-Q1 row costs nothing
-        but the exception; the database constraint and triggers are the second line.
+        but the exception; the database constraint and triggers are the second line. A
+        replay row that does not record where its builder ran is refused with it (P-795).
+
+        ``guard`` runs in the append's transaction, under the grades lock and before the head
+        is read; it raises (:class:`AttemptSettled` for a settled attempt) to refuse the row,
+        which is then not written. :func:`crb.store.jobs.claim_guard` is the guard of a
+        reserved attempt; it locks the run's row, after the grades lock — the one order.
         """
         row.assert_invariants()
+        row.assert_executor_recorded()  # write-only: a stored row without it still reads
         with self._factory() as s:
             self._lock(s)
+            if guard is not None:
+                guard(s)
             chained = row.chained(self._last_hash(s))
             s.add(_to_model(chained))
             s.commit()
@@ -168,6 +203,7 @@ class DbLedger:
             prev = self._last_hash(s)
             for row in rows:
                 row.assert_invariants()
+                row.assert_executor_recorded()
                 chained = row.chained(prev)
                 s.add(_to_model(chained))
                 prev = chained.row_hash

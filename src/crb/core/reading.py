@@ -16,23 +16,38 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   posture (the builder in the sealed container, the tests in the docker sandbox); for ``S2``
   only on factory rows stamped as graded on held-out acceptance tests. Two commits of one
   change (a cherry-pick, a revert and its original — ``labels.change_id``) count once: the
-  first in the seeded order. A commit with no observed attempt is ``pending`` and the look
-  waits; a commit the instrument cannot grade (no observed attempt after the re-runs the
-  reading allows, gold not clean, or belt 5 switched off by configuration) leaves the pool with
-  its reason recorded, and the next commit in the order takes its place — an instrument
-  failure is never a miss.
+  first in the seeded order. A reading that names a campaign reads only rows of runs its
+  campaign admitted (:func:`with_admissions`, DL-382); a row of any other run is invisible to
+  it, whatever its failure kind, a harness failure or an outage included, so a commit is read
+  by its first admitted attempt. Read without the campaign's admissions, it counts none. A
+  commit with no observed attempt is ``pending`` and the look waits; a commit the
+  instrument cannot grade (no observed attempt after the re-runs the reading allows, gold
+  not clean, or belt 5 switched off by configuration) leaves the pool with its reason
+  recorded, and the next commit in the order takes its place — an instrument failure is
+  never a miss.
 * **The look rule** (:data:`RULES`): an arm is read only at its looks. ``look.v1`` delivers at
   20 of the first 20, 29 of the first 30 or 38 of the first 40 clean, reads ``insufficient``
   at its third miss, ``undecided`` when the pool cannot reach the next look, and
   ``look_pending`` with the commits still needed otherwise. :func:`p_deliver` is the exact
   dynamic programme over Bernoulli draws that gives each rule's operating characteristic.
 * **The hierarchy.** Arms are read in the registered order and reading stops at the first
-  arm that does not deliver; the standard is the leanest certifying arm in the unbroken chain.
+  arm that does not deliver; every later arm reads ``waiting`` while that arm is still being
+  read and ``stopped`` once it reads ``insufficient`` or ``undecided`` (FZ-2), and neither
+  is read toward the verdict. The standard is the leanest certifying arm in the unbroken chain.
   ``S3`` alone is a ``ceiling``; only the ``S1`` family and ``S2`` certify; ``A0`` and
-  ``A0+L`` are descriptive and spend nothing.
+  ``A0+L`` are descriptive and spend nothing. A descriptive arm tallies the commits observed
+  among its first ``n`` (``ArmReading.limit``) and names exactly those as its counted
+  commits, a pending one never among them (P-794); every arm serves each commit it reads
+  with its outcome and row hash, and :func:`loop_pair` reads the ``A0`` / ``A0+L`` pair on
+  every commit in both windows, a pending one read against the loop and named (NEW-1), with
+  the exact two-sided McNemar p (:func:`mcnemar_p`). A run of ``A0+L`` on a reserved.v1
+  reading files its ``task_ids`` in the seeded order, so no run chooses the paired commits.
 * **The budget.** One error budget per (repository, cell key, apparatus, class-set version),
   :data:`CELL_ERROR_BUDGET` unless the operator fixed another value; every registration spends
-  its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend.
+  its rule's P(deliver | 0.80) and is refused ``budget_spent`` when it would overspend. A
+  registration of a reading already registered — a retried request, under any second or
+  actor — is refused ``reading_exists`` before the pool or the budget is read, and every
+  reader keeps the first record of a ``reading_id`` (:func:`first_per_id`, P-793).
 * **The forward reading** (ADR-0026 items 4 and 8, DL-334). :func:`register_forward` registers
   ``S2`` on the factory's cell of a ceiling's class, size and language — refused
   ``not_a_ceiling`` unless the named reading reads ``ceiling`` — spending from the CEILING's
@@ -40,7 +55,32 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   acceptance tests were written after it, in the order written (:func:`with_enrolment`); it
   reads each ticket's first factory attempt after registration, counts it only when it was
   graded on the record that enrolled the ticket and otherwise lets the ticket leave the pool
-  (``not_graded``), and it alone can make a ceiling a standard.
+  (``not_graded``), and it alone can make a ceiling a standard. Under ``reserved.v1`` a
+  factory run names it (``reading_id``) and reserves each ticket's first build before it
+  starts; only that attempt decides the ticket (P-792 C8, C16), and the run carries only
+  :data:`RESERVED_FACTORY_PARAMS` on the reading's cell (:func:`reading_run_refusal`).
+* **The reserved attempt** (``attempt_rule`` ``reserved.v1``, P-792). A reading registered
+  under it (``max_reruns`` 0, a named ``budget_profile``, the repository's ``lint_digest`` —
+  P-796; all hashed, a legacy reading's id unchanged) reads each enrolled commit
+  (:func:`enrolled` — the pool, one commit per change, the first ``n`` of a descriptive
+  arm) by the one ``r1`` row its reservation
+  (:class:`Reservation`, the ``reading.reserved`` event the store loads with
+  :func:`with_reservations`) wrote — that run, that claim, stamped with the reservation's
+  event id. Nothing leaves and nothing is re-run: a harness failure, an outage, belt 5
+  switched off, a disqualification, a treatment other than the one reserved, or a settled
+  reservation with no row is a miss named by its reason (``CommitReading.reason``); fail
+  closed. A run of such a reading carries only :data:`RESERVED_RUN_PARAMS` on the reading's
+  own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``), and halts at its
+  first outage or environment row (``outage_stop`` and ``env_stop`` unset or
+  :data:`RESERVED_RUN_STOP`, PW-7): the commit in flight is a miss, the rest stay pending.
+  Its pool is pinned
+  to qualification records (P-797): the body carries ``pool_posture_id`` and
+  ``pool_qualifications`` (task id → the qualification id in force when it froze), both hashed
+  into ``pool_sha256`` (:func:`reserved_pool_digest`) and the ``reading_id``; the server reads
+  the pins back on every look, submit and claim (``pool_drift``, :data:`REFUSAL_POOL_DRIFT`).
+  Its ``pool_seen`` refuses a commit (or another commit of its change) with any replay row at
+  apparatus 2.4 or later, under any arm or author. The legacy rule (``first_observed.v0``) is
+  the loop above, unchanged.
 
 Navigation
 ----------
@@ -50,37 +90,87 @@ What it is:   The reading — registration (``register`` → a ``Reading`` the c
               change, the hierarchy that finds a cell's standard, and the per-cell budget.
 What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a hand-picked
               list is ``pool_not_blind``); keeps a reading of an organisation's class
-              (``org_class``) a cell, a seeded order and a budget of its own; refuses a
-              registration over commits already graded
-              under its arms at its apparatus (``pool_seen``), beyond the cell's budget
-              (``budget_spent``) or outside the arm rules; evaluates each arm of a reading over
-              the ledger's rows in the seeded order; stops the hierarchy at the first arm that
-              does not deliver; names the standard, a ceiling or no proven standard, and the
-              commits still needed; registers a ceiling's forward reading and enrols its
-              calibration builds.
+              (``org_class``) a cell, a seeded order and a budget of its own; names, from
+              birth, the campaign whose ceiling every run of a reading spends from
+              (``campaign_id``, hashed when present — DL-382) and reads only rows of runs
+              admitted under it (``with_admissions``; none when unread; a row of any other
+              run is invisible to it); refuses a campaign on the factory's cell
+              (``campaign_unsupported_reading``), a reading already registered
+              (``reading_exists`` — a retry writes nothing), a repository whose lint the
+              operator switched off (``lint_refusal`` → ``lint_disabled`` at registration,
+              submit and claim — P-796), a registration over commits already graded under
+              its arms at its apparatus (``pool_seen``), beyond
+              the cell's budget (``budget_spent``) or outside the arm rules; evaluates each
+              arm of a reading over the ledger's rows in the seeded order; stops the
+              hierarchy at the first arm that does not deliver (a later arm ``waiting`` while
+              that arm is still being read, ``stopped`` once it decided against — FZ-2, a
+              label only); names the standard, a ceiling
+              or no proven standard, and the commits still needed; names a descriptive arm's
+              counted commits as those observed among its first n (P-794), serves every
+              commit an arm reads and pairs ``A0`` with ``A0+L`` (``loop_pair``, the exact
+              McNemar p, a commit pending on either arm read against the loop and named in
+              ``pending`` — NEW-1); registers a ceiling's forward reading and enrols its calibration
+              builds. Under ``reserved.v1``
+              (``attempt_rule``, P-792) reads each enrolled commit by its reservation's row
+              alone (``with_reservations``, ``enrolled``, ``_reserved_verdict``; every
+              failure a named miss, none a leave; unread reservations read pending; in any
+              row order, so of two admitted attempts of one commit the first admitted
+              decides — F87-2); counts on each arm the attempts of a decided commit it did
+              not read (``duplicate_commits``, a display count never read toward a verdict;
+              the legacy rule counts the rows after the one that decided); names
+              the commits whose rows a sealed reading could not read because they do not
+              record a sealed executor (``scope_faults`` — ``scope_fault``, the arm
+              ``undecided``, never pending, never re-rolled — P-795) or, under
+              ``reserved.v1``, because the reserved row was built off the reading's checks
+              arm (``scope`` ``checks_arm`` — RT2B-1, replay or forward); a scope fault reads
+              outcome ``None`` under either rule — never a miss in a look, a tally or the
+              loop pair (which reads it pending, against the loop) — and
+              refuses a run that could steer a reserved attempt (``reading_run_refusal``:
+              the param whitelist, the default pool, executor, timeout and ladder, the
+              reading's cell and arms, the loop off on the reading's budget profile, an
+              ``A0+L`` run's ``task_ids`` its unreserved enrolled commits in the seeded
+              order — NEW-1; a forward reading's sighted factory runs on ``S2`` alone — C8); pins
+              a reserved pool to its posture and qualification ids (``pool_posture_id``,
+              ``pool_qualifications``, ``reserved_pool_digest`` — P-797), widens its
+              ``pool_seen`` to any replay row at apparatus 2.4 or later, and names the unit a
+              row's attempt is reserved by (``reservation_unit`` — a factory row's ticket,
+              else its commit).
 How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_reading`` walks it,
               taking each commit's first observed ``r1`` attempt this deployment graded after
-              registration on the reading's checks arm (never an imported row) →
+              registration on the reading's checks arm (never an imported row) — or, under
+              ``reserved.v1``, the one row stamped with the commit's reservation that this
+              deployment graded (never an imported copy), wherever it falls in the ledger →
               ``look_state`` applies the rule → ``evaluate`` reads the hierarchy →
               ``standard_of`` answers the factory's gate on one checks arm and posture class.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 6),
               docs/adr/0025-routing-v2.md (items 1, 2 and 8 as ADR-0026 amends them)
 Works with:   src/crb/core/context_arm.py (the arms a hierarchy names),
+              src/crb/core/lint.py (``lint_disabled``, the operator's belt 5 switch),
               src/crb/core/acceptance.py (the held-out records a forward reading enrols and
               the one rule for a held-out-graded row),
               src/crb/core/ledger.py (the rows; ``GradeRow.context_arm``, ``taxonomy``,
               ``change_id``, ``sealed``), src/crb/core/routing.py (routes a cell on its
               reading), src/crb/core/capability.py (serves every arm's reading),
               src/crb/core/signoff.py (a sign-off stamps the reading's id),
+              src/crb/store/events.py and src/crb/store/models.py (``READING_RESERVED_ACTION``,
+              the one reservation per reading, arm and commit),
               src/crb/server/routes/readings.py (the events store and ``POST /readings``),
               src/crb/cli/commands/reading.py (``crb reading register``)
 Tested by:    tests/test_reading.py, tests/test_routing_v2.py, tests/test_server_readings.py,
-              tests/test_forward_reading.py, tests/test_forward_reading_e2e.py
+              tests/test_forward_reading.py, tests/test_forward_reading_e2e.py,
+              tests/test_p792_reserved.py (reserved.v1 and the legacy goldens),
+              tests/test_p792_reserved_losses.py and tests/test_p792_reserved_rows.py (the
+              reserved.v1 verdict of an attempt lost after its reservation and of each row),
+              tests/test_p792_reserved_refusals.py (``RESERVED_RUN_PARAMS`` and
+              ``RESERVED_RUN_LADDER``, pinned; ``reading_run_refusal`` at submit and claim),
+              tests/test_p792_pool.py (the pinned pool, pool_drift, the widened pool_seen)
 Touch when:   never for a new repository; a rule is added (a row in ``RULES`` with its exact
               P(deliver | 0.80) — an ADR amending ADR-0026 item 5 first); the counting rule changes
               (an apparatus bump); the operator fixes another budget
-              (``CRB_READING__CELL_ERROR_BUDGET``); never for a new repository.
+              (``CRB_READING__CELL_ERROR_BUDGET``); a run gains a param (it is refused on a
+              reserved.v1 reading until ``RESERVED_RUN_PARAMS`` names it — and only if it
+              cannot steer an attempt); never for a new repository.
 Claims:       A reading bounds the chance of certifying a cell whose true first-attempt rate is
               0.80 by its rule's P(deliver | 0.80); it says nothing about correctness or
               working software (docs/EVIDENCE-AND-CLAIMS.md).
@@ -90,6 +180,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
+import math
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -103,15 +194,26 @@ from crb.core.acceptance import (
     held_out_graded,
     held_out_result,
 )
-from crb.core.context_arm import BASE_S2, parse_arm
+from crb.core.context_arm import (
+    BASE_A0,
+    BASE_S1,
+    BASE_S2,
+    BASE_S3,
+    LEARN_OFF,
+    ContextArm,
+    parse_arm,
+)
 from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.ledger import (
     CELL_FIELDS,
     FAILURE_HARNESS,
     FAILURE_OUTAGE,
     PROCESS_FACTORY,
+    PROCESS_REPLAY,
     lint_could_change,
+    parse_apparatus_version,
 )
+from crb.core.lint import LINT_DISABLED_BY_CONFIG, lint_disabled
 from crb.core.stats import Interval, wilson_interval
 
 if TYPE_CHECKING:
@@ -120,6 +222,10 @@ if TYPE_CHECKING:
 READING_SCHEMA = "crb.reading.v1"
 #: The event a registration is written as (stage ``system``).
 READING_EVENT_ACTION = "reading.registered"
+#: The event that reserves one commit on one arm of a reading (stage ``system``; trace = the
+#: reading id, ``step_id`` = the arm, ``task_id`` = the commit). The store holds at most one
+#: per (reading, arm, commit): revision 0018's partial unique index (P-792).
+READING_RESERVED_ACTION = "reading.reserved"
 #: The prefix of the seeded order's preimage (ADR-0026 item 2).
 SEED_PREFIX = "crb.reading.v1|"
 
@@ -146,14 +252,58 @@ BUDGET_ENV = "CRB_READING__CELL_ERROR_BUDGET"
 #: the commit leaves the pool (``harness``) instead of waiting for ever.
 DEFAULT_MAX_RERUNS = 2
 
+# --- the attempt rule (P-792) ---------------------------------------------------------
+#: The legacy rule: a commit is read by its first OBSERVED attempt, a harness row is re-run
+#: up to ``max_reruns``, and a commit the instrument cannot grade leaves the pool. Its name is
+#: never hashed — a reading registered under it is stored with ``attempt_rule`` ``""``, so a
+#: legacy reading's id never moves.
+ATTEMPT_RULE_LEGACY = "first_observed.v0"
+#: The reserved rule: a commit is read by the ONE attempt reserved for it on an arm (a
+#: ``reading.reserved`` event written before the build), whatever that attempt's exit. A
+#: harness failure, an outage, a disabled linter, a cancel, a kill or a run that ended
+#: without a row is a miss, never a leave and never a re-run, so nothing chosen after the
+#: reservation can choose which commits the reading reads (fail closed). It is hashed.
+ATTEMPT_RULE_RESERVED = "reserved.v1"
+ATTEMPT_RULES: tuple[str, ...] = (ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED)
+#: Why a run skips a commit without reserving it: another reservation holds it, or a forward
+#: reading never enrolled the ticket. A skipped commit stays pending.
+SKIP_COMMIT_RESERVED = "commit_reserved"
+SKIP_TASK_NOT_ENROLLED = "task_not_enrolled"
+RESERVE_SKIPS: tuple[str, ...] = (SKIP_COMMIT_RESERVED, SKIP_TASK_NOT_ENROLLED)
+#: Why a run halts before reserving: its treatment is not the one the reading pinned, its
+#: arm is not one the reading reads, its resolved checks arm is not the one the reading
+#: froze (a row on another checks arm is out of the reading's scope, so the attempt could
+#: never count), its claim is no longer its own, or a cancel was asked.
+HALT_TREATMENT_MISMATCH = "reading_treatment_mismatch"
+HALT_ARM_UNKNOWN = "reading_arm_unknown"
+HALT_CHECKS_ARM_MISMATCH = "reading_checks_arm_mismatch"
+HALT_RUN_NOT_OWNED = "run_not_owned"
+HALT_CANCEL_REQUESTED = "cancel_requested"
+RESERVE_HALTS: tuple[str, ...] = (
+    HALT_TREATMENT_MISMATCH,
+    HALT_ARM_UNKNOWN,
+    HALT_CHECKS_ARM_MISMATCH,
+    HALT_RUN_NOT_OWNED,
+    HALT_CANCEL_REQUESTED,
+)
+#: The labels the worker stamps on a reserved ``r1`` row (inside the hashed body): the
+#: reservation's event id, the treatment digest it reserved under, and the run's claim.
+LABEL_RESERVATION = "reservation"
+LABEL_TREATMENT = "treatment"
+LABEL_CLAIM = "claim"
+
 # --- arm states -----------------------------------------------------------------
 STATE_DELIVER = "deliver"
 STATE_INSUFFICIENT = "insufficient"
 STATE_UNDECIDED = "undecided"
 STATE_LOOK_PENDING = "look_pending"
 STATE_DESCRIPTIVE = "descriptive"
-#: A hierarchy arm that is never read because a richer arm did not deliver.
+#: A hierarchy arm that is never read because a richer arm decided against: the arm before
+#: it reads ``insufficient`` or ``undecided``.
 STATE_STOPPED = "stopped"
+#: A hierarchy arm behind a richer arm that is still being read (``look_pending``): it keeps
+#: its own look numbers, and like a stopped arm it is not read toward the verdict (FZ-2).
+STATE_WAITING = "waiting"
 ARM_STATES: tuple[str, ...] = (
     STATE_DELIVER,
     STATE_INSUFFICIENT,
@@ -161,6 +311,7 @@ ARM_STATES: tuple[str, ...] = (
     STATE_LOOK_PENDING,
     STATE_DESCRIPTIVE,
     STATE_STOPPED,
+    STATE_WAITING,
 )
 # --- a reading's outcome (the cell's) -------------------------------------------
 OUTCOME_STANDARD = "standard"
@@ -186,6 +337,23 @@ LEFT_HELD_OUT_ERROR = "held_out_error"
 #: scope. Decided without reading its result, so it leaves the pool rather than holding the
 #: reading open for an attempt that can never come (DL-334, P-694).
 LEFT_NOT_GRADED = "not_graded"
+#: A commit whose row is in every way the arm's but its builder's executor: graded in the
+#: reading's sealed posture class without recording ``builder_executor`` ``docker``, so it
+#: reads unsealed (P-795) — or, on a reserved.v1 reading, whose reserved row was built off
+#: the checks arm the reading froze (:data:`SCOPE_CHECKS_ARM`, RT2B-1). Never a leave and
+#: never a miss (outcome ``None`` under either rule): the commit cannot be read and the arm
+#: is ``undecided`` (``ArmReading.scope_faults``), never pending and never re-rolled.
+#: ``CommitReading.scope`` names which.
+REASON_SCOPE_FAULT = "scope_fault"
+#: :func:`_scope_miss`'s answer for a row that fails only on its executor.
+SCOPE_UNSEALED = "unsealed"
+#: :func:`_scope_miss`'s answer for a row that is the arm's in every way it checks before
+#: the checks arm (posture class, or held-out grading for ``S2``) but was graded on another
+#: checks arm than the one the reading froze (ADR-0024). The legacy rule drops it as another
+#: reading's row; a reserved.v1 reading's reserved row carries this reading's reservation,
+#: so it is no other reading's — the reading names it a ``scope_fault`` (RT2B-1), never a
+#: miss and never a re-run.
+SCOPE_CHECKS_ARM = "checks_arm"
 
 # --- registration refusals ---------------------------------------------------------
 REFUSAL_POOL_SEEN = "pool_seen"
@@ -195,13 +363,85 @@ REFUSAL_INVALID = "invalid_reading"
 REFUSAL_POOL_NOT_BLIND = "pool_not_blind"
 #: A forward reading names a reading that does not read ``ceiling`` (DL-334).
 REFUSAL_NOT_A_CEILING = "not_a_ceiling"
+#: A reading on the factory's cell names a campaign (DL-382): its runs are factory runs,
+#: which no submit gate requires to be filed under a campaign (a factory run names a
+#: ``reading_id`` only under a reserved.v1 forward reading, which reserves the ticket's first
+#: build itself, P-792 C8) — the reading's evidence would rest on a filing habit. One rule
+#: for ``POST /readings`` and ``POST /readings/forward``.
+REFUSAL_CAMPAIGN_UNSUPPORTED = "campaign_unsupported_reading"
+#: A registration of a reading already registered (P-793): the same ``reading_id``, or the
+#: same registration under another second or another actor (:func:`registered_twin`). A
+#: retried request writes nothing and spends nothing; the caller reads the reading back.
+REFUSAL_EXISTS = "reading_exists"
+#: A registration, or a run of a reading of either rule, on a repository whose operator
+#: switched belt 5 off (``RepoConfig.lint = {"disabled": true}``, :func:`lint_refusal`) —
+#: 409 at ``POST /readings``, ``POST /readings/forward`` and ``POST /runs``, and
+#: ``run.refused`` at claim (P-796). The switch is the operator's, thrown at any time, and a
+#: row graded with it off leaves a legacy reading's pool (:data:`LEFT_LINT_DISABLED`), so
+#: while it is off nothing a reading counts is registered or built.
+REFUSAL_LINT_DISABLED = "lint_disabled"
+#: A registration whose checks arm the prevention loop's overlay moves (RT2B-2): an applied
+#: ``checks`` change in force, on a key the repository's own block does not set, makes the arm
+#: a run resolves differ from the block's own arm. A reading frozen on the overlay's arm would
+#: rest on a loop change any revert or supersede moves, so ``POST /readings`` and
+#: ``POST /readings/forward`` refuse it 409 with ``detail: {overlay_arm, repo_arm}`` and write
+#: nothing; the operator sets the key in the repository's block (DL-410) and registers again.
+REFUSAL_CHECKS_OVERLAY = "reading_checks_overlay"
+#: A forward registration whose ceiling was frozen on another checks arm than the one the
+#: factory's runs resolve now (V2-CA-1): the forward reading freezes the ceiling's arm
+#: (:func:`register_forward`), and a factory run cannot opt out of the loop, so it resolves the
+#: overlay's arm. When the repository's block moved after the ceiling registered, every ticket's
+#: reservation would halt ``reading_checks_arm_mismatch`` and no row could count, so
+#: ``POST /readings/forward`` refuses it 409 with ``detail: {overlay_arm, ceiling_arm,
+#: repo_arm}`` and writes nothing; the operator puts the block back on the ceiling's arm, or
+#: registers a ceiling on the arm the repository runs now.
+REFUSAL_CHECKS_ARM_MOVED = "reading_checks_arm_moved"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
     REFUSAL_INVALID,
     REFUSAL_POOL_NOT_BLIND,
     REFUSAL_NOT_A_CEILING,
+    REFUSAL_CAMPAIGN_UNSUPPORTED,
+    REFUSAL_EXISTS,
+    REFUSAL_LINT_DISABLED,
+    REFUSAL_CHECKS_OVERLAY,
+    REFUSAL_CHECKS_ARM_MOVED,
 )
+#: A run of a reserved.v1 reading that carries a field the reading does not allow
+#: (:func:`reading_run_refusal`): refused at submit (422) and again at claim.
+REFUSAL_RUN_FIELDS = "reading_run_fields"
+#: A run that must name its reading and does not (409, at submit).
+REFUSAL_READING_REQUIRED = "reading_required"
+#: A run of a reserved.v1 reading whose pool moved since registration (P-797,
+#: :data:`POOL_DRIFT_FIELDS`): a pool commit's live class or size is no longer the cell's, a
+#: pinned qualification record is missing or not qualified, or the posture the run would grade
+#: in is not the one the pool was qualified in — 409 at submit, ``run.refused`` at claim and
+#: before admission, ``undecided`` on ``GET /readings``. Nothing is reserved, so every commit
+#: stays pending: a stall, never a skip.
+REFUSAL_POOL_DRIFT = "pool_drift"
+#: The refusals of a RUN of a reading, beside the registration refusals above.
+RUN_REFUSAL_CODES: tuple[str, ...] = (
+    REFUSAL_RUN_FIELDS,
+    REFUSAL_READING_REQUIRED,
+    REFUSAL_POOL_DRIFT,
+)
+#: What a pool drift names (``{task_id, field, registered, now}`` rows): the cell's class or
+#: size on the live task, the pinned qualification record, or the posture it was pinned in.
+POOL_DRIFT_FIELDS: tuple[str, ...] = (
+    "capability_class",
+    "size",
+    "task",
+    "qualification",
+    "pool_posture_id",
+)
+#: The first apparatus whose replay rows make a commit seen for a reserved.v1 reading (P-797):
+#: any such row, under any arm or test author, refuses ``pool_seen`` — a legacy reading reads
+#: only its own hierarchy's arms at its own apparatus.
+POOL_SEEN_FROM: tuple[int, int] = (2, 4)
+#: The fields of a reading's body that say who registered it and when, not what it reads:
+#: a retried registration differs from the first only in these (P-793).
+PROVENANCE_FIELDS: tuple[str, ...] = ("registered_at", "actor")
 
 # --- the pool rule (DL-097) --------------------------------------------------------------
 #: Every qualified commit of the cell.
@@ -382,6 +622,38 @@ def _parse_ts(ts: str) -> _dt.datetime | None:
 
 
 @dataclass(frozen=True)
+class Reservation:
+    """One ``reading.reserved`` event as the store loads it: the attempt reserved for one
+    commit (``task_id`` — a forward reading's ticket, its ``item_id``) on one arm of a
+    reserved.v1 reading, before its build. Only the row that attempt wrote can decide the
+    commit (:func:`arm_reading`)."""
+
+    arm: str
+    task_id: str
+    run_id: str
+    #: The event's id: the reserved row carries it as ``labels.reservation``.
+    event_id: str
+    #: The event's ``Event.id``: it counts only when written after the registration's.
+    event_seq_id: int
+    #: The run's claim (its ``reclaims``) when it reserved: the row carries it as
+    #: ``labels.claim``, so a later claim's row of the same run never decides the commit.
+    claim: int
+    #: The treatment digest the run reserved under: the row carries it as ``labels.treatment``.
+    treatment: str
+    hold_usd: float | None
+    #: The run is terminal, or reclaimed past ``claim``: a reservation with no row is a miss.
+    settled: bool
+
+
+def reservation_unit(row: GradeRow) -> str:
+    """What a reservation names ``row``'s attempt by (its ``task_id``): a factory row's ticket
+    — its ``item_id`` label; the row's own ``task_id`` is the build's id — else the commit.
+    The worker stamps a reserved row by it and F8's ``unplaced_attempts`` places a row against
+    its reservation by it, so the two never key one attempt two ways."""
+    return row.labels.get("item_id", "") if row.process_step == PROCESS_FACTORY else row.task_id
+
+
+@dataclass(frozen=True)
 class Reading:
     """One registered reading — the ``reading.registered`` event's payload."""
 
@@ -416,14 +688,73 @@ class Reading:
     #: cell key whose ONE error budget it spends from (ADR-0026 item 5) — hashed when present.
     promotes: str = ""
     budget_cell: str = ""
+    #: What the reading tests, and the smallest effect (a share of attempts, in (0, 1]) that
+    #: would matter — written before any row is read (Wave 3 pre-run, Q-24), hashed when
+    #: present so a legacy reading's id never moves and an edited hypothesis fails ``verify``.
+    hypothesis: str = ""
+    smallest_effect: float | None = None
+    #: The campaign whose money ceiling every run of this reading spends from (G-957, DL-382):
+    #: named at registration, never bound later, so no run queued before a binding could
+    #: escape the ceiling. ``POST /runs`` refuses a run filed under the reading that does not
+    #: carry the same campaign, and a row counts only when its run was admitted under it
+    #: (``admitted``). ``""`` for a reading under no campaign — hashed when present, so a
+    #: legacy reading's id never moves and an edited campaign fails ``verify``.
+    campaign_id: str = ""
+    #: How a commit is read (P-792): ``""`` — the legacy first-observed rule
+    #: (:data:`ATTEMPT_RULE_LEGACY`), never hashed so a legacy id never moves — or
+    #: :data:`ATTEMPT_RULE_RESERVED`, hashed, under which only the attempt reserved for a
+    #: commit decides it, ``max_reruns`` is 0, and every run spends on ``budget_profile``
+    #: (hashed only with the rule).
+    attempt_rule: str = ""
+    budget_profile: str = ""
+    #: The sha256 of the repository's canonical lint configuration when the reading was
+    #: registered (:func:`lint_config_digest`, P-796) — hashed only with the attempt rule and
+    #: only when present, so a legacy reading's id never moves and a reserved.v1 reading names
+    #: the belt 5 its commits are graded under.
+    lint_digest: str = ""
+    #: A reserved.v1 reading's pool pinned to the qualification records that admitted it
+    #: (P-797): the posture the pool was qualified in and, per pool commit, the id of its
+    #: record in force there at registration. Hashed into ``pool_sha256``
+    #: (:func:`reserved_pool_digest`) and the id only with the attempt rule and never on a
+    #: forward reading, whose pool is enrolled later (:attr:`pins_pool`) — so a legacy
+    #: reading's id never moves; the server reads the pool's drift from them
+    #: (``crb.server.reading_book.pool_drift``).
+    pool_posture_id: str = ""
+    pool_qualifications: Mapping[str, str] = field(default_factory=dict)
     #: A forward reading's enrolled records, ``(item_id, record_id)`` in enrolment order —
     #: READ from the held-out records (:func:`with_enrolment`), never registered or hashed. A
     #: row counts only when it was graded on the record that enrolled its ticket (P-694).
     enrolled: tuple[tuple[str, str], ...] = field(default=(), compare=False)
+    #: The runs admitted under ``campaign_id`` (a ``campaign.admitted`` event names each) —
+    #: READ from the campaign's trace (:func:`with_admissions`), never registered or hashed.
+    #: A campaign-named reading counts a row only when its ``run_id`` is here; ``None`` means
+    #: the admissions were never read, and then it counts NO row (fail closed, DL-382).
+    admitted: frozenset[str] | None = field(default=None, compare=False)
+    #: A reserved.v1 reading's registration event (its ``Event.id``) and its reservations,
+    #: the first per ``(arm, task_id)`` — READ from the reading's trace
+    #: (:func:`with_reservations`), never registered or hashed. ``None`` (or no registration
+    #: event) means they were never read, and then every commit reads pending, never a hit.
+    registered_event_id: int = field(default=0, compare=False)
+    reservations: Mapping[tuple[str, str], Reservation] | None = field(default=None, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cell", dict(self.cell))
         object.__setattr__(self, "changes", dict(self.changes))
+        if self.attempt_rule == ATTEMPT_RULE_LEGACY:
+            object.__setattr__(self, "attempt_rule", "")  # the legacy rule is never hashed
+        if not self.attempt_rule:
+            object.__setattr__(self, "budget_profile", "")
+            object.__setattr__(self, "lint_digest", "")
+        object.__setattr__(
+            self,
+            "pool_qualifications",
+            {str(c): str(q) for c, q in dict(self.pool_qualifications).items()},
+        )
+        if not self.pins_pool:
+            object.__setattr__(self, "pool_posture_id", "")
+            object.__setattr__(self, "pool_qualifications", {})
+        if self.reservations is not None:
+            object.__setattr__(self, "reservations", dict(self.reservations))
         object.__setattr__(self, "hierarchy", tuple(self.hierarchy))
         object.__setattr__(self, "pool", tuple(self.pool))
         object.__setattr__(
@@ -444,6 +775,30 @@ class Reading:
         reading, the cell of the ceiling it promotes, so a forward reading spends from the
         same budget as the reading that found the ceiling, never a fresh one."""
         return (self.repo, self.budget_cell or self.cell_key, self.apparatus, self.taxonomy)
+
+    @property
+    def admissions_unread(self) -> bool:
+        """The reading names a campaign and its admissions were never read: it counts no row
+        until they are (:func:`with_admissions`) — a reader that cannot know which runs the
+        campaign admitted counts none of them, never all (DL-382)."""
+        return bool(self.campaign_id) and self.admitted is None
+
+    @property
+    def reserved(self) -> bool:
+        """The reading counts reserved attempts (:data:`ATTEMPT_RULE_RESERVED`)."""
+        return self.attempt_rule == ATTEMPT_RULE_RESERVED
+
+    @property
+    def pins_pool(self) -> bool:
+        """The pool is pinned to its qualification records (P-797): a reserved.v1 reading of
+        a pool frozen at registration — never a legacy one, never a forward one."""
+        return _pins_pool(self.attempt_rule, self.pool_rule)
+
+    @property
+    def reservations_unread(self) -> bool:
+        """A reserved.v1 reading whose reservations, or whose registration event, were never
+        read (:func:`with_reservations`): it reads every commit pending until they are."""
+        return self.reserved and (self.reservations is None or self.registered_event_id <= 0)
 
     @property
     def prospective(self) -> bool:
@@ -484,6 +839,27 @@ class Reading:
             **({"org_class": self.org_class} if self.org_class else {}),
             **({"promotes": self.promotes} if self.promotes else {}),
             **({"budget_cell": self.budget_cell} if self.budget_cell else {}),
+            **({"hypothesis": self.hypothesis} if self.hypothesis else {}),
+            **(
+                {"smallest_effect": self.smallest_effect}
+                if self.smallest_effect is not None
+                else {}
+            ),
+            **({"campaign_id": self.campaign_id} if self.campaign_id else {}),
+            **(
+                {"attempt_rule": self.attempt_rule, "budget_profile": self.budget_profile}
+                if self.attempt_rule
+                else {}
+            ),
+            **({"lint_digest": self.lint_digest} if self.attempt_rule and self.lint_digest else {}),
+            **(
+                {
+                    "pool_posture_id": self.pool_posture_id,
+                    "pool_qualifications": dict(sorted(self.pool_qualifications.items())),
+                }
+                if self.pins_pool
+                else {}
+            ),
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -516,12 +892,33 @@ class Reading:
             org_class=str(d.get("org_class", "") or ""),
             promotes=str(d.get("promotes", "") or ""),
             budget_cell=str(d.get("budget_cell", "") or ""),
+            hypothesis=str(d.get("hypothesis", "") or ""),
+            smallest_effect=(
+                None if d.get("smallest_effect") is None else float(d["smallest_effect"])
+            ),
+            campaign_id=str(d.get("campaign_id", "") or ""),
+            attempt_rule=str(d.get("attempt_rule", "") or ""),
+            budget_profile=str(d.get("budget_profile", "") or ""),
+            lint_digest=str(d.get("lint_digest", "") or ""),
+            pool_posture_id=str(d.get("pool_posture_id", "") or ""),
+            pool_qualifications={
+                str(c): str(q) for c, q in dict(d.get("pool_qualifications") or {}).items()
+            },
         )
 
+    def pool_hash(self) -> str:
+        """The pool hash the body gives: :func:`pool_digest` of the pool, or — a pinned pool
+        (:attr:`pins_pool`, P-797) — :func:`reserved_pool_digest` of the pool, the posture it
+        was qualified in and each commit's qualification record."""
+        if self.pins_pool:
+            return reserved_pool_digest(self.pool, self.pool_posture_id, self.pool_qualifications)
+        return pool_digest(self.pool)
+
     def verify(self) -> bool:
-        """The stored id and pool hash are the ones its body gives."""
+        """The stored id and pool hash are the ones its body gives (:meth:`pool_hash`: the
+        pool alone, or a pinned pool with its posture and records)."""
         fresh = replace(self, reading_id="")
-        return fresh.reading_id == self.reading_id and self.pool_sha256 == pool_digest(self.pool)
+        return fresh.reading_id == self.reading_id and self.pool_sha256 == self.pool_hash()
 
 
 def pool_by_rule(authored: Mapping[str, str], *, since: str = "") -> tuple[list[str], str]:
@@ -561,6 +958,36 @@ def pool_digest(pool: Sequence[str]) -> str:
     return sha256_text(canonical_json(list(pool)))
 
 
+def reserved_pool_digest(
+    pool: Sequence[str], posture_id: str, qualifications: Mapping[str, str]
+) -> str:
+    """SHA-256 of a reserved.v1 reading's pinned pool (P-797) as canonical JSON: the pool in
+    the seeded order, the posture it was qualified in and each commit's qualification record —
+    so a reading whose pins were edited no longer re-hashes."""
+    return sha256_text(
+        canonical_json(
+            {
+                "pool": list(pool),
+                "pool_posture_id": posture_id,
+                "pool_qualifications": dict(sorted(qualifications.items())),
+            }
+        )
+    )
+
+
+def _pins_pool(attempt_rule: str, pool_rule: str) -> bool:
+    """A reading under ``attempt_rule`` and ``pool_rule`` pins its pool to qualification
+    records (P-797): reserved.v1 on a pool frozen at registration."""
+    return attempt_rule == ATTEMPT_RULE_RESERVED and pool_rule != POOL_RULE_CALIBRATION
+
+
+def _seen_by_reserved(row: GradeRow) -> bool:
+    """A row that makes its commit seen for a reserved.v1 registration (P-797): a replay row
+    at apparatus :data:`POOL_SEEN_FROM` or later, under any arm or test author."""
+    version = parse_apparatus_version(row.apparatus_version)
+    return row.process_step == PROCESS_REPLAY and version is not None and version >= POOL_SEEN_FROM
+
+
 def cell_error_budget(env: Mapping[str, str] | None = None) -> float:
     """The per-cell budget in force: :data:`CELL_ERROR_BUDGET`, or a tighter value the
     operator set (``CRB_READING__CELL_ERROR_BUDGET``). A looser or malformed value is refused
@@ -581,9 +1008,55 @@ def cell_error_budget(env: Mapping[str, str] | None = None) -> float:
     return value
 
 
+def first_per_id(readings: Iterable[Reading]) -> list[Reading]:
+    """``readings`` with the first record of each ``reading_id`` kept, in order (P-793): a
+    store that holds a registration twice — a retried request written before the refusal
+    existed — reads, lists and spends it once."""
+    seen: set[str] = set()
+    out: list[Reading] = []
+    for r in readings:
+        if r.reading_id not in seen:
+            seen.add(r.reading_id)
+            out.append(r)
+    return out
+
+
 def budget_spent(readings: Iterable[Reading], key: tuple[str, str, str, str]) -> float:
-    """What the readings already registered on the cell ``key`` have spent."""
-    return sum(r.spend for r in readings if r.budget_key == key)
+    """What the readings already registered on the cell ``key`` have spent — each
+    ``reading_id`` once (:func:`first_per_id`)."""
+    return sum(r.spend for r in first_per_id(readings) if r.budget_key == key)
+
+
+def registration_content(reading: Reading) -> dict[str, Any]:
+    """What ``reading`` registers, without who registered it or when
+    (:data:`PROVENANCE_FIELDS`) and without its pool's list (a forward reading's pool is
+    filled on read; ``pool_sha256`` keeps the registered pool)."""
+    drop = {*PROVENANCE_FIELDS, "pool"}
+    return {k: v for k, v in reading.body().items() if k not in drop}
+
+
+def registered_twin(reading: Reading, existing: Iterable[Reading]) -> Reading | None:
+    """The reading in ``existing`` that ``reading`` repeats, or ``None`` (P-793): one with the
+    same ``reading_id``, or one that registers the same content (:func:`registration_content`)
+    — the id hashes ``registered_at`` and ``actor``, so a retry a second later or by another
+    operator has a new id and would otherwise be a second reading spending the budget twice."""
+    content = registration_content(reading)
+    for r in existing:
+        if r.reading_id == reading.reading_id or registration_content(r) == content:
+            return r
+    return None
+
+
+def _refuse_twin(reading: Reading, existing: Iterable[Reading]) -> None:
+    """Raise ``reading_exists`` when ``reading`` is already registered (:func:`registered_twin`)."""
+    twin = registered_twin(reading, existing)
+    if twin is not None:
+        raise ReadingRefused(
+            f"reading {twin.reading_id} is already registered — a retried registration "
+            "writes nothing and spends nothing; read it back with GET /readings",
+            code=REFUSAL_EXISTS,
+            detail={"reading_id": twin.reading_id},
+        )
 
 
 def _validate(
@@ -638,6 +1111,82 @@ def _validate(
     return ""
 
 
+def _attempt_rule_of(attempt_rule: str, *, max_reruns: int, budget_profile: str) -> tuple[str, str]:
+    """The ``(attempt_rule, budget_profile)`` a registration stores, or
+    :class:`ReadingRefused` ``invalid_reading``: the legacy rule is stored as ``""`` with no
+    profile (so its id never moves); reserved.v1 re-runs nothing (``max_reruns`` 0 — a
+    harness row is the reserved attempt's miss, never a second draw) and names the budget
+    profile every non-loop run of it spends on (P-792 channel C7); any other rule is
+    refused."""
+    rule = attempt_rule.strip()
+    if rule in ("", ATTEMPT_RULE_LEGACY):
+        return "", ""
+    if rule != ATTEMPT_RULE_RESERVED:
+        raise ReadingRefused(
+            f"unknown attempt rule {attempt_rule!r}; expected one of {list(ATTEMPT_RULES)}",
+            code=REFUSAL_INVALID,
+        )
+    profile = budget_profile.strip()
+    if max_reruns != 0 or not profile:
+        raise ReadingRefused(
+            f"a {ATTEMPT_RULE_RESERVED} reading reads one reserved attempt per commit, so it "
+            f"re-runs nothing (max_reruns 0, not {max_reruns}) and names the budget profile "
+            f"its runs spend on (budget_profile {budget_profile!r}) — P-792",
+            code=REFUSAL_INVALID,
+            detail={"max_reruns": max_reruns, "budget_profile": budget_profile},
+        )
+    return rule, profile
+
+
+def campaign_unsupported(process_step: str) -> str:
+    """Why a reading on a cell of ``process_step`` may not name a campaign, or ``""`` (DL-382).
+
+    The rule, one for ``POST /readings`` and ``POST /readings/forward``: a reading on the
+    factory's cell may name no campaign. Its runs are factory runs, and no submit gate
+    requires a factory run to be filed under a campaign — one names a ``reading_id`` only
+    under a reserved.v1 forward reading, which reserves the ticket's first build itself
+    (P-792 C8), and a legacy one is tied to its runs by nothing at all — so the reading's
+    evidence would rest on a filing habit. A
+    replay or blind reading may name one, because a run filed under it by ``reading_id`` is
+    held to the campaign (409 ``campaign_required``, P-789) and any row counts only when the
+    campaign admitted its run."""
+    if process_step != PROCESS_FACTORY:
+        return ""
+    return (
+        "a reading on the factory's cell names no campaign: it counts factory runs, and no "
+        "submit gate requires a factory run to be filed under a campaign — its evidence would "
+        "rest on a filing habit; register it without campaign_id (DL-382)"
+    )
+
+
+def lint_config_digest(lint: Mapping[str, Any] | None) -> str:
+    """The sha256 of a repository's canonical lint configuration (``RepoConfig.lint``, P-796).
+
+    ``{}`` and ``None`` hash alike — both mean belt 5 runs its default plan. A reserved.v1
+    reading hashes this as ``lint_digest``, so an edited lint makes a different reading."""
+    return sha256_text(canonical_json(dict(lint or {})))
+
+
+def lint_refusal(repo: str, lint: Mapping[str, Any] | None) -> str:
+    """Why nothing a reading counts may be registered or built on ``repo``, or ``""`` (P-796).
+
+    One rule for registration (``POST /readings``, ``POST /readings/forward``), submit
+    (``POST /runs`` naming a reading) and claim: while the operator's switch has belt 5 off
+    (:func:`crb.core.lint.lint_disabled`), a row graded then never counts the same as one
+    graded with it on — a legacy reading drops it (:data:`LEFT_LINT_DISABLED`) and a reserved
+    one would bind it as a failure — so the switch, thrown after outcomes are seen, could
+    reshape what a reading counts. Refusing while it is off keeps the counted set the
+    registration named; restoring the lint it ran under resumes it."""
+    if not lint_disabled(lint):
+        return ""
+    return (
+        f"lint is disabled on {repo} (RepoConfig.lint {{'disabled': true}}): a row graded "
+        f"with belt 5 off never counts as one graded with it on, so nothing a reading counts "
+        f"is registered or built while the switch is off — re-enable lint first (P-796, "
+        f"reason {LINT_DISABLED_BY_CONFIG})"
+    )
+
+
 def register(
     *,
     repo: str,
@@ -660,14 +1209,36 @@ def register(
     now: str = "",
     pool_rule: str = "",
     org_class: str = "",
+    hypothesis: str = "",
+    smallest_effect: float | None = None,
+    campaign_id: str = "",
+    attempt_rule: str = "",
+    budget_profile: str = "",
+    lint_digest: str = "",
+    pool_posture_id: str = "",
+    pool_qualifications: Mapping[str, str] | None = None,
 ) -> Reading:
     """Register a reading, or raise :class:`ReadingRefused`.
 
-    Refused ``pool_seen`` when any pool commit — or another commit of the same change — already
+    Refused ``reading_exists`` first, when ``existing`` already holds it — the same id, or the
+    same registration under another second or actor (:func:`registered_twin`, P-793), so a
+    retried request is answered before any rule reads the pool or the budget;
+    ``pool_seen`` when any pool commit — or another commit of the same change — already
     has a graded row under an arm of the hierarchy at this apparatus, whatever class-set version
-    graded it;
+    graded it (under ``reserved.v1``: any replay row at apparatus :data:`POOL_SEEN_FROM` or
+    later, under any arm or test author — P-797);
     ``budget_spent`` when the cell's spend plus this rule's P(deliver | 0.80) would exceed
-    the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules. The
+    the budget; ``invalid_reading`` when the shape breaks item 1's or item 4's rules;
+    ``campaign_unsupported_reading`` when it names a campaign on the factory's cell
+    (:func:`campaign_unsupported`); a replay or blind reading may name one. ``attempt_rule``
+    :data:`ATTEMPT_RULE_RESERVED` needs ``max_reruns`` 0 and a ``budget_profile``
+    (``invalid_reading`` otherwise, as is an unknown rule; :func:`_attempt_rule_of`), and
+    hashes ``lint_digest`` (:func:`lint_config_digest` of the repository's lint, P-796) — the
+    caller refuses a repository whose lint is disabled first (:func:`lint_refusal`). A
+    reserved.v1 pool is pinned to the qualification records that admitted it (P-797):
+    ``pool_posture_id`` and ``pool_qualifications`` (commit → record id, kept for pool
+    commits only) are hashed into ``pool_sha256`` (:func:`reserved_pool_digest`) and the id;
+    pins that name no posture or leave a pool commit out are ``invalid_reading``. The
     caller writes the returned reading as a ``reading.registered`` event before any attempt.
     """
     cell_d = {str(k): str(v) for k, v in cell.items()}
@@ -686,45 +1257,37 @@ def register(
         why = str(exc)
     if why:
         raise ReadingRefused(why, code=REFUSAL_INVALID)
+    attempt, profile = _attempt_rule_of(
+        attempt_rule, max_reruns=max_reruns, budget_profile=budget_profile
+    )
+    step = cell_d.get("process_step", "")
+    unsupported = campaign_unsupported(step) if campaign_id else ""
+    if unsupported:
+        raise ReadingRefused(
+            unsupported,
+            code=REFUSAL_CAMPAIGN_UNSUPPORTED,
+            detail={"campaign_id": campaign_id, "process_step": step},
+        )
     authors = {parse_arm(a).author for a in hier if parse_arm(a).author}
     author = author_model or (next(iter(authors)) if authors else "")
     key = reading_cell_key(cell_d, org_class)
     ordered = seeded_order(repo, key, pool)
-    arms = set(hier)
-    pool_set = set(ordered)
-    pool_changes = {v for c, v in (changes or {}).items() if c in pool_set and v}
-    seen = sorted(
-        {
-            r.task_id
-            for r in rows
-            if r.repo == repo
-            and r.apparatus_version == apparatus
-            and r.context_arm in arms
-            and (r.task_id in pool_set or (r.change_id and r.change_id in pool_changes))
-        }
-    )
-    if seen:
-        raise ReadingRefused(
-            f"{len(seen)} pool commit(s) already have a graded row under an arm of this reading "
-            f"at apparatus {apparatus} — a reading counts only commits it has not seen "
-            "(ADR-0026 item 2); register a pool of commits no arm has graded",
-            code=REFUSAL_POOL_SEEN,
-            detail={"commits": seen[:20], "n": len(seen)},
-        )
+    pinned = _pins_pool(attempt, pool_rule)
+    pins = {
+        str(c): str(q) for c, q in (pool_qualifications or {}).items() if c in set(ordered) and q
+    }
+    if pinned and (pool_posture_id or pins):
+        unpinned = [c for c in ordered if c not in pins]
+        if not pool_posture_id or unpinned:
+            raise ReadingRefused(
+                "a reserved.v1 pool is pinned to the qualification records that admitted it: "
+                "name the posture it was qualified in and one record for every pool commit",
+                code=REFUSAL_INVALID,
+                detail={"pool_posture_id": pool_posture_id, "unpinned": unpinned[:20]},
+            )
     cap = cell_error_budget() if budget is None else budget
     spend = rule_spend(rule)
-    prior = list(existing)
-    budget_key = (repo, key, apparatus, taxonomy)
-    spent = budget_spent(prior, budget_key)
-    if spent + spend > cap + 1e-12:
-        raise ReadingRefused(
-            f"the cell's error budget is {cap:.2%}; {spent:.2%} is spent and {rule} would spend "
-            f"{spend:.2%} more — no further reading can be registered on this cell at "
-            f"apparatus {apparatus} and class-set version {taxonomy}",
-            code=REFUSAL_BUDGET_SPENT,
-            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
-        )
-    return Reading(
+    reading = Reading(
         repo=repo,
         cell=cell_d,
         apparatus=apparatus,
@@ -738,14 +1301,65 @@ def register(
         budget=cap,
         author_model=author,
         pool=tuple(ordered),
-        pool_sha256=pool_digest(ordered),
+        pool_sha256=(
+            reserved_pool_digest(ordered, pool_posture_id, pins) if pinned else pool_digest(ordered)
+        ),
         changes={c: v for c, v in (changes or {}).items() if c in set(ordered)},
         max_reruns=max_reruns,
         registered_at=now or utc_now_iso(),
         actor=actor,
         pool_rule=pool_rule,
         org_class=org_class,
+        hypothesis=hypothesis,
+        smallest_effect=smallest_effect,
+        campaign_id=campaign_id,
+        attempt_rule=attempt,
+        budget_profile=profile,
+        lint_digest=lint_digest,
+        pool_posture_id=pool_posture_id,
+        pool_qualifications=pins,
     )
+    prior = list(existing)
+    _refuse_twin(reading, prior)
+    arms = set(hier)
+    pool_set = set(ordered)
+    pool_changes = {v for c, v in (changes or {}).items() if c in pool_set and v}
+    seen = sorted(
+        {
+            r.task_id
+            for r in rows
+            if r.repo == repo
+            and (
+                _seen_by_reserved(r)
+                if reading.reserved
+                else r.apparatus_version == apparatus and r.context_arm in arms
+            )
+            and (r.task_id in pool_set or (r.change_id and r.change_id in pool_changes))
+        }
+    )
+    if seen:
+        where = (
+            f"a replay row at apparatus {'.'.join(map(str, POOL_SEEN_FROM))} or later, under "
+            "any arm or test author"
+            if reading.reserved
+            else f"a graded row under an arm of this reading at apparatus {apparatus}"
+        )
+        raise ReadingRefused(
+            f"{len(seen)} pool commit(s) already have {where} — a reading counts only commits "
+            "it has not seen (ADR-0026 item 2); register a pool of commits no arm has graded",
+            code=REFUSAL_POOL_SEEN,
+            detail={"commits": seen[:20], "n": len(seen)},
+        )
+    spent = budget_spent(prior, reading.budget_key)
+    if spent + spend > cap + 1e-12:
+        raise ReadingRefused(
+            f"the cell's error budget is {cap:.2%}; {spent:.2%} is spent and {rule} would spend "
+            f"{spend:.2%} more — no further reading can be registered on this cell at "
+            f"apparatus {apparatus} and class-set version {taxonomy}",
+            code=REFUSAL_BUDGET_SPENT,
+            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
+        )
+    return reading
 
 
 def register_forward(
@@ -759,6 +1373,12 @@ def register_forward(
     rule: str = RULE_LOOK_V1,
     budget: float | None = None,
     now: str = "",
+    hypothesis: str = "",
+    smallest_effect: float | None = None,
+    attempt_rule: str = "",
+    budget_profile: str = "",
+    lint_digest: str = "",
+    max_reruns: int | None = None,
 ) -> Reading:
     """Register the FORWARD reading of a ceiling (ADR-0026 items 4, 5 and 8; DL-334), or raise
     :class:`ReadingRefused`.
@@ -768,9 +1388,20 @@ def register_forward(
     of the same class, size and language, built by ``builder`` / ``model`` / ``provider``; it
     inherits the ceiling's apparatus, class-set version, posture class and checks arm, so the
     factory's gate reads the two in one scope, and it spends its rule's P(deliver | 0.80) from
-    the CEILING's cell budget (``budget_spent`` when that cannot cover it). Its pool is the
+    the CEILING's cell budget (``budget_spent`` when that cannot cover it; ``reading_exists``
+    before that when ``existing`` already holds it — :func:`registered_twin`). Its pool is the
     rule :data:`POOL_RULE_CALIBRATION`: the calibration builds whose held-out tests are
-    written after it — no ticket is chosen by a person, and none exists yet."""
+    written after it — no ticket is chosen by a person, and none exists yet. It names no
+    campaign (DL-382, :func:`campaign_unsupported`): its builds are factory runs, which no
+    submit gate requires to be filed under a campaign — ``POST /readings/forward`` refuses a
+    ``campaign_id``. Under the legacy rule nothing ties a factory run to the reading: each
+    ticket is read by its first ``r1`` factory row after registration. Under
+    ``attempt_rule`` :data:`ATTEMPT_RULE_RESERVED` a factory run names the reading
+    (``reading_id``) and reserves each ticket's first build before it starts (P-792 C8), so
+    the ticket is read by that attempt alone; the reading re-runs nothing (``max_reruns``
+    defaults to 0, and any other value is refused ``invalid_reading`` by
+    :func:`_attempt_rule_of`), names its ``budget_profile`` and hashes ``lint_digest``, as
+    :func:`register` does. ``max_reruns`` left ``None`` is the rule's default."""
     if ceiling.state != OUTCOME_CEILING:
         raise ReadingRefused(
             f"a forward reading promotes a ceiling; reading {ceiling.reading.reading_id} reads "
@@ -798,18 +1429,14 @@ def register_forward(
     )
     if why:
         raise ReadingRefused(why, code=REFUSAL_INVALID)
+    if max_reruns is None:
+        max_reruns = 0 if attempt_rule.strip() == ATTEMPT_RULE_RESERVED else DEFAULT_MAX_RERUNS
+    attempt, profile = _attempt_rule_of(
+        attempt_rule, max_reruns=max_reruns, budget_profile=budget_profile
+    )
     cap = cell_error_budget() if budget is None else budget
     spend = rule_spend(rule)
-    spent = budget_spent(list(existing), base.budget_key)
-    if spent + spend > cap + 1e-12:
-        raise ReadingRefused(
-            f"the ceiling's cell has an error budget of {cap:.2%}; {spent:.2%} is spent and "
-            f"{rule} would spend {spend:.2%} more — a forward reading spends from the same "
-            "budget as the reading that found the ceiling (ADR-0026 item 5)",
-            code=REFUSAL_BUDGET_SPENT,
-            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
-        )
-    return Reading(
+    reading = Reading(
         repo=base.repo,
         cell=cell,
         apparatus=base.apparatus,
@@ -827,7 +1454,25 @@ def register_forward(
         pool_rule=POOL_RULE_CALIBRATION,
         promotes=base.reading_id,
         budget_cell=base.budget_key[1],
+        hypothesis=hypothesis,
+        smallest_effect=smallest_effect,
+        max_reruns=max_reruns,
+        attempt_rule=attempt,
+        budget_profile=profile,
+        lint_digest=lint_digest,
     )
+    prior = list(existing)
+    _refuse_twin(reading, prior)
+    spent = budget_spent(prior, base.budget_key)
+    if spent + spend > cap + 1e-12:
+        raise ReadingRefused(
+            f"the ceiling's cell has an error budget of {cap:.2%}; {spent:.2%} is spent and "
+            f"{rule} would spend {spend:.2%} more — a forward reading spends from the same "
+            "budget as the reading that found the ceiling (ADR-0026 item 5)",
+            code=REFUSAL_BUDGET_SPENT,
+            detail={"budget": cap, "spent": round(spent, 6), "spend": round(spend, 6)},
+        )
+    return reading
 
 
 def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading:
@@ -860,6 +1505,76 @@ def with_enrolment(reading: Reading, records: Iterable[HeldOutTests]) -> Reading
     return replace(reading, pool=tuple(items), enrolled=tuple(enrolled))
 
 
+def with_admissions(reading: Reading, run_ids: Iterable[str]) -> Reading:
+    """``reading`` with the runs admitted under its campaign (``run_ids``: the ``run_id`` of
+    each ``campaign.admitted`` event on the campaign's trace) — READ, never registered or
+    hashed, so the id is unchanged. A campaign-named reading reads only rows of these runs
+    (DL-382); a row of any other run is invisible to it, whatever its failure kind, a harness
+    failure or an outage included. A run posted without the campaign's ``campaign_id`` is
+    queued outside the campaign and the reading never sees its rows. A run posted with the
+    ``campaign_id`` is admitted and spends under the ceiling; without a ``reading_id`` it
+    skips every reading gate (``reading_unknown``, ``reading_unsealed`` and
+    ``reading_posture_mismatch`` at submit, and the worker's claim checks), and its rows count
+    only when graded in the reading's scope: its cell, the sealed posture class, rung ``r1``,
+    after registration. Every Wave 3 body carries ``reading_id``. A reading that names no
+    campaign is returned as it is — it counts its rows by its own rule, whatever run wrote
+    them."""
+    if not reading.campaign_id:
+        return reading
+    return replace(reading, admitted=frozenset(str(r) for r in run_ids if r))
+
+
+def with_reservations(
+    reading: Reading, reservations: Iterable[Reservation], registered_event_id: int
+) -> Reading:
+    """A reserved.v1 ``reading`` with its ``reading.reserved`` events and the ``Event.id`` of
+    its ``reading.registered`` event — READ from the reading's trace, never registered or
+    hashed, so the id is unchanged. The first reservation per ``(arm, task_id)`` by
+    ``event_seq_id`` is the one that counts (the store's unique index holds at most one; this
+    keeps the rule without it). Any other reading is returned unchanged."""
+    if not reading.reserved:
+        return reading
+    first: dict[tuple[str, str], Reservation] = {}
+    for res in reservations:
+        key = (res.arm, res.task_id)
+        if key not in first or res.event_seq_id < first[key].event_seq_id:
+            first[key] = res
+    return replace(reading, reservations=first, registered_event_id=int(registered_event_id))
+
+
+def _descriptive_count(reading: Reading, arm: str, limit: int) -> int:
+    """A descriptive arm's fixed count (``limit`` when the caller gives it), or 0 for a
+    hierarchy arm."""
+    return limit or (0 if arm in reading.hierarchy else dict(reading.descriptive).get(arm, 0))
+
+
+def _enrolled(reading: Reading, arm: str, limit: int = 0) -> tuple[str, ...]:
+    """:func:`enrolled`, with a descriptive arm's count given (``limit``) or taken from the
+    reading's descriptive arms."""
+    if arm not in reading.arms:
+        return ()
+    out: list[str] = []
+    seen: set[str] = set()
+    for commit in reading.pool:
+        change = reading.changes.get(commit) or commit
+        if change in seen:
+            continue
+        seen.add(change)
+        out.append(commit)
+    n = _descriptive_count(reading, arm, limit)
+    return tuple(out[:n]) if n else tuple(out)
+
+
+def enrolled(reading: Reading, arm: str) -> tuple[str, ...]:
+    """The commits ``arm`` of a reserved.v1 ``reading`` reads, in order, fixed at
+    registration and blind to every outcome: the pool in the seeded order (a forward
+    reading's enrolled tickets, in enrolment order), less each commit whose change — by the
+    REGISTERED ``changes``, never a row's label — repeats an earlier commit's; a descriptive
+    arm reads the first of these up to its fixed count. ``()`` for an arm the reading does
+    not read. Nothing a run does after registration moves a commit in or out."""
+    return _enrolled(reading, arm)
+
+
 # ---------------------------------------------------------------------------
 # Counting one arm
 # ---------------------------------------------------------------------------
@@ -871,9 +1586,17 @@ class CommitReading:
 
     commit: str
     change: str
-    outcome: bool | None  # clean / miss / pending
+    outcome: bool | None  # clean / miss / pending or scope_fault (never a miss)
     left: str = ""  # why it left the pool ("" = it did not)
-    row_hash: str = ""  # the first observed attempt
+    row_hash: str = ""  # the first observed attempt (reserved.v1: the reserved attempt's row)
+    #: reserved.v1: why the reserved attempt is not a hit (``"miss"``, ``"harness"``,
+    #: ``"unobserved"``, …) or ``"pending"``; ``""`` for a hit and on the legacy rule, but for
+    #: ``"scope_fault"`` (either rule — its row reads unsealed, P-795; reserved.v1 also when
+    #: its reserved row is off the reading's checks arm, RT2B-1).
+    reason: str = ""
+    #: Why a ``scope_fault`` commit's row could not be read — :data:`SCOPE_UNSEALED` or
+    #: :data:`SCOPE_CHECKS_ARM`; ``""`` for every other reason.
+    scope: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -882,6 +1605,8 @@ class CommitReading:
             "outcome": self.outcome,
             "left": self.left,
             "row_hash": self.row_hash,
+            "reason": self.reason,
+            "scope": self.scope,
         }
 
 
@@ -893,18 +1618,50 @@ class ArmReading:
     look: LookState
     commits: tuple[CommitReading, ...]
     descriptive: bool = False
+    #: The richer arm the hierarchy stopped at, when this arm comes after it (``""`` else).
     stopped_by: str = ""
+    #: ``stopped_by``'s arm is still being read (``look_pending``), so this arm reads
+    #: ``waiting``, not ``stopped`` (FZ-2). A label only: neither is read toward the verdict.
+    waiting: bool = False
+    #: A descriptive arm's fixed count ``n``: it tallies the commits observed among its first
+    #: ``limit`` commits in the pool. ``0`` for a hierarchy arm.
+    limit: int = 0
+    #: The commits whose rows the arm could not read (``scope_fault``, P-795): each is in the
+    #: arm's scope but for its executor (or, reserved.v1, its checks arm — RT2B-1), and reads
+    #: outcome ``None``, never a miss. Any one makes the arm ``undecided`` — its look
+    #: cannot be read, so it never delivers and nothing is mined or re-rolled for it.
+    scope_faults: tuple[str, ...] = ()
+    #: How many rows of the arm's commits were dropped because they read unsealed.
+    unsealed_dropped: int = 0
+    #: How many of the arm's attempts the reading did not read on a commit it had decided
+    #: (F87-2): rows in the arm's scope, of an admitted run — under reserved.v1, on a commit
+    #: read hit, miss or scope fault, every one but the reservation's row; under the legacy
+    #: rule every one after the row that decided the commit (its first observed attempt, or
+    #: the row that made it leave). A pending commit counts none. Shown to a person only: no
+    #: state, look or verdict reads it.
+    duplicate_commits: int = 0
 
     @property
     def state(self) -> str:
+        """``waiting`` while the richer arm the hierarchy stopped at is still being read, and
+        ``stopped`` once it reads insufficient or undecided (FZ-2); else ``undecided`` when a
+        row could not be read (P-795, a descriptive arm too); else descriptive; else the
+        look's state."""
         if self.stopped_by:
-            return STATE_STOPPED
+            return STATE_WAITING if self.waiting else STATE_STOPPED
+        if self.scope_faults:
+            return STATE_UNDECIDED
         return STATE_DESCRIPTIVE if self.descriptive else self.look.state
 
     @property
     def counted_commits(self) -> tuple[str, ...]:
-        """The commits the look read (the prefix), in order."""
+        """The commits the arm counted, in order: a hierarchy arm's look reads the prefix up
+        to its first pending commit; a descriptive arm tallies each commit observed among its
+        first ``limit``, so a pending one is never named and an observed one after it is
+        (P-794)."""
         kept = [c for c in self.commits if not c.left]
+        if self.limit:
+            return tuple(c.commit for c in kept[: self.limit] if c.outcome is not None)
         return tuple(c.commit for c in kept[: self.look.counted])
 
     @property
@@ -921,34 +1678,77 @@ class ArmReading:
             "look_state": self.look.state,
             "left": [c.to_dict() for c in self.left],
             "counted_commits": list(self.counted_commits),
+            "scope_faults": list(self.scope_faults),
+            "unsealed_dropped": self.unsealed_dropped,
+            "duplicate_commits": self.duplicate_commits,
+            # every commit the arm reads, in the seeded order: what the loop pair is read on
+            "commits": [c.to_dict() for c in self.commits],
         }
 
 
-def _counts_for(reading: Reading, arm: str, row: GradeRow) -> bool:
-    """Is ``row`` one of the rows ``arm`` of ``reading`` may count (before first-attempt)?
-    Its repository, cell, apparatus, class-set version, checks arm and context arm are the
-    reading's; it is a rung ``r1`` attempt this deployment graded (never an imported row, whose
-    labels were set elsewhere — P-321); it was graded strictly AFTER the registration (whole
-    seconds, so a row of the same second does not count); and it was graded in the sealed
-    posture class the reading names — or, for ``S2``, on held-out acceptance tests."""
+def _admitted_run(reading: Reading, row: GradeRow) -> bool:
+    """Was ``row`` written by a run the reading may count — any run for a reading under no
+    campaign; for a campaign-named one, only a run admitted under that campaign (DL-382), and
+    none at all when the admissions were never read (``admissions_unread``)."""
+    if not reading.campaign_id:
+        return True
+    return reading.admitted is not None and row.run_id in reading.admitted
+
+
+def _scope_miss(reading: Reading, arm: str, row: GradeRow) -> str:
+    """Why ``row`` is not one of the rows ``arm`` of ``reading`` reads (before
+    first-attempt), by every check but its run's admission (:func:`_admitted_run`) — ``""``
+    when it is one. Its repository, cell, apparatus, class-set version, checks arm and
+    context arm are the reading's; it is a rung ``r1`` attempt this deployment graded (never
+    an imported row, whose labels were set elsewhere — P-321); it was graded strictly AFTER
+    the registration (whole seconds, so a row of the same second does not count); and it was
+    graded in the sealed posture class the reading names, its builder in the sealed
+    container — or, for ``S2``, on held-out acceptance tests.
+
+    ``unsealed`` (:data:`SCOPE_UNSEALED`) is the one answer that is not the row being
+    another reading's: every other check holds and the posture class is the reading's, but
+    the row does not record ``builder_executor`` ``docker``. That is a row the writer
+    failed to label (P-795), so a reading names it a ``scope_fault`` rather than dropping it
+    and reading its commit pending.
+
+    ``checks_arm`` (:data:`SCOPE_CHECKS_ARM`) is a row that passes every check up to and
+    including the posture class (``S2``: its held-out grading) but was graded on another
+    checks arm than the reading's. It is checked after them, so a row failing an earlier
+    check keeps that earlier answer, and before an ``S2`` row is let in, so a held-out row
+    off the arm is never in scope. The legacy rule drops it as another reading's row; a
+    reserved.v1 reading names its reserved row a ``scope_fault`` (:func:`_reserved_verdict`,
+    RT2B-1)."""
+    if row.imported:
+        return "imported"
     if (
-        row.imported
-        or row.repo != reading.repo
+        row.repo != reading.repo
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
         or row.taxonomy != reading.taxonomy
-        or row.checks_arm != reading.checks_arm
         or row.cell.to_dict() != reading.cell
         or row.trial.strip().lower() != RUNG_R1
     ):
-        return False
+        return "other_reading"
     registered = reading.registered
     created = _parse_ts(row.created)
     if registered is None or created is None or created <= registered:
-        return False  # graded before (or as) the reading was registered: never counts
-    if parse_arm(arm).prospective_only:
-        return held_out_graded(row.labels)
-    return row.posture_class == reading.posture_class and row.sealed
+        return "before_registration"  # graded before (or as) the registration: never counts
+    prospective = parse_arm(arm).prospective_only
+    if prospective:
+        if not held_out_graded(row.labels):
+            return "not_held_out"
+    elif row.posture_class != reading.posture_class:
+        return "posture"
+    if row.checks_arm != reading.checks_arm:
+        return SCOPE_CHECKS_ARM  # after every earlier check, before an S2 row is let in
+    return "" if prospective or row.sealed else SCOPE_UNSEALED
+
+
+def _in_scope(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` one of the rows ``arm`` of ``reading`` reads (:func:`_scope_miss` names
+    none)? :func:`arm_reading` reads a row only when it is in scope AND its run was admitted
+    (:func:`_admitted_run`)."""
+    return not _scope_miss(reading, arm, row)
 
 
 def _forward_attempt(reading: Reading, row: GradeRow) -> bool:
@@ -964,13 +1764,11 @@ def _forward_attempt(reading: Reading, row: GradeRow) -> bool:
     return registered is not None and created is not None and created > registered
 
 
-def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
-    """Is ``row`` one a FORWARD reading's ``arm`` may count? A factory ``S2`` row graded on
-    held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`), rung ``r1``, on
-    the reading's repository, apparatus, class-set version and checks arm, graded after the
-    registration and never imported. The ticket (``labels.item_id``) is the pool's unit; its
-    class, size and language were fixed when it was enrolled, and a builder, model or
-    provider other than the cell's makes it leave the pool (:data:`LEFT_OTHER_CELL`)."""
+def _forward_miss(reading: Reading, arm: str, row: GradeRow) -> str:
+    """Why ``row`` is not one a FORWARD reading's ``arm`` may count — ``""`` when it is
+    (:func:`_counts_forward`); :data:`SCOPE_CHECKS_ARM` when it passes every other check but
+    was graded on another checks arm than the reading's (checked last, so a row failing an
+    earlier check keeps that answer); ``"not_counted"`` for every other answer."""
     if (
         row.imported
         or row.repo != reading.repo
@@ -978,14 +1776,27 @@ def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
         or row.context_arm != arm
         or row.apparatus_version != reading.apparatus
         or row.taxonomy != reading.taxonomy
-        or row.checks_arm != reading.checks_arm
         or row.trial.strip().lower() != RUNG_R1
         or not held_out_graded(row.labels)
     ):
-        return False
+        return "not_counted"
     registered = reading.registered
     created = _parse_ts(row.created)
-    return registered is not None and created is not None and created > registered
+    if registered is None or created is None or created <= registered:
+        return "not_counted"
+    return SCOPE_CHECKS_ARM if row.checks_arm != reading.checks_arm else ""
+
+
+def _counts_forward(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` one a FORWARD reading's ``arm`` may count? A factory ``S2`` row graded on
+    held-out acceptance tests (:func:`crb.core.acceptance.held_out_graded`), rung ``r1``, on
+    the reading's repository, apparatus, class-set version and checks arm, graded after the
+    registration and never imported (:func:`_forward_miss`). The ticket (``labels.item_id``)
+    is the pool's unit; its class, size and language were fixed when it was enrolled, and a
+    builder, model or provider other than the cell's makes it leave the pool
+    (:data:`LEFT_OTHER_CELL`). Which runs' rows the reading sees is :func:`_arm_forward`'s
+    choice, before this check."""
+    return not _forward_miss(reading, arm, row)
 
 
 def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmReading:
@@ -997,13 +1808,27 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
     held-out tests are run once, so there is no re-run: an attempt the instrument could not
     observe (``harness``, ``outage``) or whose held-out tests could not be run (``error``)
     leaves the pool with its reason, never a miss; ``fail`` is a miss; ``pass`` on a clean
-    build is clean. A ticket with no attempt yet is pending."""
+    build is clean, unless belt 5 was switched off by configuration — then the ticket leaves
+    (``lint_disabled``), as a replayed commit does (P-342), since belt 5 could have changed it.
+    A ticket with no attempt yet is pending.
+
+    A forward reading may name no campaign (``campaign_unsupported_reading``, DL-382). If one
+    does (a record written by hand), it reads as a replay reading does: only rows of runs its
+    campaign admitted (:func:`_admitted_run`) are seen, so a ticket is read by its first
+    ADMITTED attempt, and a row of any other run neither decides a ticket nor makes it
+    leave. Each admitted attempt of a ticket after its first is never read: the arm counts
+    them in ``ArmReading.duplicate_commits`` (F87-2), for a person to see, never toward a
+    look."""
     first: dict[str, GradeRow] = {}
+    duplicates = 0  # a later attempt of a ticket its first already decided (F87-2)
     pool = set(reading.pool)
     for r in rows:
         item = r.labels.get("item_id", "")
-        if item in pool and item not in first and _forward_attempt(reading, r):
-            first[item] = r
+        if item in pool and _forward_attempt(reading, r) and _admitted_run(reading, r):
+            if item in first:
+                duplicates += 1
+            else:
+                first[item] = r
     by_item = dict(reading.enrolled)
     fields = ("builder", "model", "provider")
     out: list[CommitReading] = []
@@ -1025,11 +1850,207 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
             out.append(CommitReading(item, item, None, LEFT_UNOBSERVED, r.row_hash))
         elif held_out_result(r.labels) == RESULT_ERROR:
             out.append(CommitReading(item, item, None, LEFT_HELD_OUT_ERROR, r.row_hash))
+        elif lint_could_change(r) and held_out_result(r.labels) == RESULT_PASS:
+            # belt 5 off: the replay loop's rule (P-342, P-792 channel C4). It leaves only an
+            # attempt belt 5 could have changed; a factory row's ``clean`` leaves out its
+            # held-out result, so a held-out ``fail`` is the miss it is whatever the linter says
+            out.append(CommitReading(item, item, None, LEFT_LINT_DISABLED, r.row_hash))
         else:
             clean = r.clean and not r.disqualified and held_out_result(r.labels) == RESULT_PASS
             out.append(CommitReading(item, item, clean, "", r.row_hash))
     kept = [c.outcome for c in out if not c.left]
-    return ArmReading(arm, look_state(kept, reading.rule, open_pool=True), tuple(out))
+    look = look_state(kept, reading.rule, open_pool=True)
+    return ArmReading(arm, look, tuple(out), duplicate_commits=duplicates)
+
+
+def _row_unit(reading: Reading, row: GradeRow) -> str:
+    """The pool unit ``row`` attempts: a forward reading's ticket (``labels.item_id``), or
+    the commit (``task_id``)."""
+    return row.labels.get("item_id", "") if reading.prospective else row.task_id
+
+
+def _reserved_candidates(
+    reading: Reading, res: Reservation, rows: Iterable[GradeRow]
+) -> list[GradeRow]:
+    """The rows ``res``'s attempt wrote: its run, its commit, rung ``r1``, stamped with its
+    event id and its claim. A row of another run, of another reservation (another arm's,
+    another reading's) or of a later claim of the same run is never one of them, and nor is
+    an imported row, whatever labels it carries (P-321): an admin's import of a copy of the
+    reserved row is neither a second row (``duplicate``) nor, while the attempt is in
+    flight, its row (``out_of_scope``) — it is never counted, so it can decide nothing."""
+    return [
+        r
+        for r in rows
+        if not r.imported
+        and r.run_id == res.run_id
+        and _row_unit(reading, r) == res.task_id
+        and r.trial.strip().lower() == RUNG_R1
+        and res.event_id
+        and r.labels.get(LABEL_RESERVATION, "") == res.event_id
+        and r.labels.get(LABEL_CLAIM, "") == str(res.claim)
+    ]
+
+
+def _reserved_verdict(
+    reading: Reading, arm: str, res: Reservation | None, rows: Sequence[GradeRow]
+) -> tuple[bool | None, str, str]:
+    """The verdict of one commit on ``arm`` of a reserved.v1 reading, with its scope:
+    ``(True, "", "")`` a hit, ``(False, reason, "")`` a miss, ``(None, "pending", "")`` not
+    yet decided, ``(None, "scope_fault", scope)`` a row the arm cannot read. The reserved
+    attempt's row alone decides it, whatever any other row says (P-792, fail closed):
+
+    * no reservation, or the reading's reservations (or admissions) never read — pending;
+    * no reserved row (:func:`_reserved_candidates`; an imported row is never one, P-321) —
+      a miss (``unobserved``) once the run is settled (terminal, or reclaimed past the
+      reserving claim), pending until then; two rows — ``duplicate``;
+    * the one row is a hit only when its run was admitted, it is in the arm's scope
+      (:func:`_in_scope`; for a forward reading :func:`_counts_forward` on the record that
+      enrolled the ticket — ``not_graded`` otherwise; ``out_of_scope`` for every answer of
+      :func:`_scope_miss` but the two below), its reservation was written after the
+      registration, it is not a harness failure or an outage, its gold is not red, belt 5 could
+      not have changed it, it was built on the treatment it reserved, it is clean and not
+      disqualified — and, forward, its held-out tests passed on the reading's builder, model
+      and provider. Each failed check is a miss named by its reason, never a leave and never
+      a re-run: an instrument failure after the reservation is the reading's cost.
+
+    A row that is the arm's but for its executor (:data:`SCOPE_UNSEALED`, P-795), or but for
+    its checks arm (:data:`SCOPE_CHECKS_ARM`, RT2B-1 — replay or forward), carries this
+    reading's reservation, so it is no other reading's: it reads ``scope_fault`` with outcome
+    ``None``, as the legacy rule reads an unsealed row — no hit, no miss, never counted by a
+    look, a tally or the loop pair (``NEW-1`` reads it pending, against the loop) — and its
+    arm is ``undecided`` (``ArmReading.scope_faults``)."""
+    if res is None or reading.reservations_unread or reading.admissions_unread:
+        return None, "pending", ""
+    found = _reserved_candidates(reading, res, rows)
+    if not found:
+        return (False, "unobserved", "") if res.settled else (None, "pending", "")
+    if len(found) > 1:
+        return False, "duplicate", ""
+    r = found[0]
+    if not _admitted_run(reading, r):
+        return False, "not_admitted", ""
+    if reading.prospective:
+        by_item = dict(reading.enrolled)
+        if r.labels.get(LABEL_ACCEPTANCE_ID, "") != by_item.get(res.task_id, ""):
+            return False, LEFT_NOT_GRADED, ""
+        if miss := _forward_miss(reading, arm, r):
+            if miss == SCOPE_CHECKS_ARM:
+                return None, REASON_SCOPE_FAULT, miss  # off the frozen arm alone (RT2B-1)
+            return False, LEFT_NOT_GRADED, ""
+    elif miss := _scope_miss(reading, arm, r):
+        # a row the writer did not label sealed, or built off the checks arm the reading
+        # froze, is the arm's fault, not another reading's (P-795, RT2B-1)
+        if miss in (SCOPE_UNSEALED, SCOPE_CHECKS_ARM):
+            return None, REASON_SCOPE_FAULT, miss
+        return False, "out_of_scope", ""
+    checks: tuple[tuple[bool, str], ...] = (
+        (res.event_seq_id > reading.registered_event_id, "before_registration"),
+        (r.failure_kind != FAILURE_HARNESS, "harness"),
+        (r.failure_kind != FAILURE_OUTAGE, "outage"),
+        (r.gold_clean is not False, "gold_red"),
+        (not lint_could_change(r), "lint_disabled"),
+        (
+            bool(res.treatment) and r.labels.get(LABEL_TREATMENT, "") == res.treatment,
+            "treatment_mismatch",
+        ),
+        (not r.disqualified, "disqualified"),
+        (r.clean, "miss"),
+    )
+    for ok, reason in checks:
+        if not ok:
+            return False, reason, ""
+    if reading.prospective:
+        if held_out_result(r.labels) != RESULT_PASS:
+            return False, "held_out", ""
+        if any(getattr(r, f) != reading.cell.get(f, "") for f in ("builder", "model", "provider")):
+            return False, LEFT_OTHER_CELL, ""
+    return True, "", ""
+
+
+def _arm_attempt(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` an attempt ``arm`` of a reserved.v1 ``reading`` could have read — of an
+    admitted run (:func:`_admitted_run`) and in the arm's scope (:func:`_in_scope`), or for
+    a forward reading a ticket's factory attempt (:func:`_forward_attempt`)? What
+    ``ArmReading.duplicate_commits`` counts, less the row that decided its commit; never
+    read toward a verdict."""
+    if not _admitted_run(reading, row):
+        return False
+    if reading.prospective:
+        return _forward_attempt(reading, row)
+    return _in_scope(reading, arm, row)
+
+
+def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: int) -> ArmReading:
+    """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
+    by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
+    commits as they stand; a descriptive arm tallies its fixed count (``ArmReading.limit``).
+    A commit read ``scope_fault`` (outcome ``None``: no hit and no miss, so the look stops
+    at it, a tally leaves it out and the loop pair reads it pending) is named in
+    ``ArmReading.scope_faults`` (P-795), with why in its ``CommitReading.scope``
+    (:func:`_scope_miss` on its reserved row: unsealed, or off the reading's checks arm —
+    RT2B-1; forward, off the checks arm alone, :func:`_forward_miss`); ``unsealed_dropped``
+    counts the unsealed ones only.
+
+    The ORDER of ``rows`` is never read: the reservation's row decides its commit wherever
+    it falls, so two admitted attempts of one commit are read by the one the reservation
+    names — the attempt admitted first, since a second run on a reserved commit skips it
+    (``commit_reserved``) — even when the other's row was written first (F87-2).
+    ``duplicate_commits`` counts, on each decided commit (a hit, a miss or a scope fault),
+    the arm's other attempts (:func:`_arm_attempt`) the reading did not read."""
+    reservations = reading.reservations or {}
+    events = {res.event_id for res in reservations.values() if res.event_id}
+    stamped: dict[str, list[GradeRow]] = {}
+    for r in rows:
+        ev = r.labels.get(LABEL_RESERVATION, "")
+        if ev in events:
+            stamped.setdefault(ev, []).append(r)
+    enrolled = _enrolled(reading, arm, limit)
+    units = set(enrolled)
+    attempts: dict[str, list[GradeRow]] = {}
+    for r in rows:
+        unit = _row_unit(reading, r)
+        if unit in units and _arm_attempt(reading, arm, r):
+            attempts.setdefault(unit, []).append(r)
+    out: list[CommitReading] = []
+    duplicates = 0
+    for commit in enrolled:
+        res = reservations.get((arm, commit))
+        mine = stamped.get(res.event_id, []) if res is not None else []
+        outcome, reason, scope = _reserved_verdict(reading, arm, res, mine)
+        found = _reserved_candidates(reading, res, mine) if res is not None else []
+        # decided — a hit, a miss, or a scope fault on its reserved row: never pending
+        decided = reason != "pending"
+        if decided:
+            read = {id(r) for r in found}
+            duplicates += sum(1 for r in attempts.get(commit, []) if id(r) not in read)
+        out.append(
+            CommitReading(
+                commit,
+                reading.changes.get(commit) or commit,
+                outcome,
+                "",
+                found[0].row_hash if len(found) == 1 and decided else "",
+                reason,
+                scope,
+            )
+        )
+    outcomes = [c.outcome for c in out]
+    faults = tuple(c.commit for c in out if c.reason == REASON_SCOPE_FAULT)
+    n = _descriptive_count(reading, arm, limit)
+    if n:
+        look = _descriptive_look(outcomes, n)
+    else:
+        look = look_state(outcomes, reading.rule, open_pool=reading.prospective)
+    return ArmReading(
+        arm,
+        look,
+        tuple(out),
+        descriptive=bool(n),
+        limit=n,
+        scope_faults=faults,
+        unsealed_dropped=sum(c.scope == SCOPE_UNSEALED for c in out),
+        duplicate_commits=duplicates,
+    )
 
 
 def arm_reading(
@@ -1041,17 +2062,59 @@ def arm_reading(
     after registration: the first eligible row whose failure kind is not ``harness``. Two
     commits of one change count once (the first in the order). A commit without an observed
     attempt is pending; one the instrument cannot grade leaves the pool with its reason before
-    its outcome is read. ``limit`` caps a descriptive arm at its fixed count. A forward
-    reading's arm is read by ticket (:func:`_arm_forward`)."""
+    its outcome is read. ``limit`` caps a descriptive arm at its fixed count: the arm keeps it
+    (``ArmReading.limit``) and counts the commits observed among its first ``limit``, a
+    pending one never among them (P-794). A forward reading's arm is read by ticket
+    (:func:`_arm_forward`).
+
+    A campaign-named reading reads only rows of runs its campaign admitted (DL-382): a row is
+    read when it is in the arm's scope (:func:`_in_scope`) and its run was admitted
+    (:func:`_admitted_run`). A row of any other run is invisible to it, whatever its failure
+    kind: it is not a first attempt, not a harness re-run toward ``max_reruns``, not an
+    outage and not ``gold_not_clean``. A commit is read by its first admitted attempt, so a
+    filing outside the campaign cannot choose the admitted draw: a row outside it neither
+    decides a commit nor makes it leave, and a commit with none holds the prefix pending. An
+    admitted ``harness`` row still counts toward ``max_reruns``, so an operator who induces
+    one on an admitted run can choose which commits leave (P-792, open). A
+    campaign-named reading whose admissions were never read counts nothing: every commit
+    waits.
+
+    A reserved.v1 reading reads each enrolled commit by its reserved attempt alone
+    (:func:`_arm_reserved`, :func:`_reserved_verdict`): no commit leaves, nothing is re-run,
+    and this loop is never entered.
+
+    The rows after the one that decided a commit (its first observed attempt, or the row
+    that made it leave) are never read: ``ArmReading.duplicate_commits`` counts them, for a
+    person to see, never toward a look (F87-2). This rule reads them in LEDGER order, which
+    is finish order: it is not reordered by admission (a known gap — POST /readings
+    registers reserved.v1 only, and one live run per campaign arm on a commit, DL-392,
+    makes the two orders one per arm).
+
+    A row in every way the arm's but for its executor (:data:`SCOPE_UNSEALED` — its writer
+    did not record the sealed container, P-795) is never dropped in silence: its commit reads
+    ``scope_fault`` (outcome ``None``, no other row standing in for it) and is named in
+    ``ArmReading.scope_faults``, which makes the arm ``undecided``."""
+    if reading.reserved:
+        return _arm_reserved(reading, arm, rows, limit)
+    if reading.admissions_unread:
+        rows = ()  # fail closed: which runs the campaign admitted is unknown here
     if reading.prospective:
         return _arm_forward(reading, arm, rows)
     by_commit: dict[str, list[GradeRow]] = {}
+    unsealed: dict[str, list[GradeRow]] = {}
     pool = set(reading.pool)
     for r in rows:
-        if r.task_id in pool and _counts_for(reading, arm, r):
+        if r.task_id not in pool or not _admitted_run(reading, r):
+            continue
+        miss = _scope_miss(reading, arm, r)
+        if not miss:
             by_commit.setdefault(r.task_id, []).append(r)
+        elif miss == SCOPE_UNSEALED:
+            unsealed.setdefault(r.task_id, []).append(r)  # the writer's fault, never dropped
     out: list[CommitReading] = []
+    faults: list[str] = []
     seen_changes: set[str] = set()
+    duplicates = 0
     for commit in reading.pool:
         rs = by_commit.get(commit, [])
         change = reading.changes.get(commit) or next(
@@ -1061,11 +2124,21 @@ def arm_reading(
             out.append(CommitReading(commit, change, None, LEFT_SAME_CHANGE))
             continue
         seen_changes.add(change)
+        if commit in unsealed:
+            # its attempt cannot be read, so no later row may stand in for it (P-795)
+            faults.append(commit)
+            first = unsealed[commit][0].row_hash
+            out.append(
+                CommitReading(commit, change, None, "", first, REASON_SCOPE_FAULT, SCOPE_UNSEALED)
+            )
+            continue
         observed = None
         unobserved: list[str] = []
+        read = 0
         for r in rs:
             if len(unobserved) > reading.max_reruns:
                 break  # it has left the pool: a later row can never bring it back
+            read += 1
             if r.gold_clean is False:
                 unobserved = [LEFT_GOLD] * (reading.max_reruns + 1)
                 break
@@ -1078,6 +2151,9 @@ def arm_reading(
             # the builder's miss, never the instrument's, so it is read, not re-run
             observed = r
             break
+        # the rows after the one that decided the commit, never read (F87-2); a pending
+        # commit has read every row it has, so it counts none
+        duplicates += len(rs) - read
         if observed is not None:
             # belt 5 off lets an attempt leave only when belt 5 could have changed it: one
             # that passed every other belt. A miss (a red target, a disqualified build) is
@@ -1094,11 +2170,22 @@ def arm_reading(
         else:
             out.append(CommitReading(commit, change, None))
     kept = [c.outcome for c in out if not c.left]
+    dropped = sum(len(v) for v in unsealed.values())
     if limit:
         kept = kept[:limit]
-        descriptive_look = _descriptive_look(kept, limit)
-        return ArmReading(arm, descriptive_look, tuple(out), descriptive=True)
-    return ArmReading(arm, look_state(kept, reading.rule), tuple(out))
+        look = _descriptive_look(kept, limit)
+    else:
+        look = look_state(kept, reading.rule)
+    return ArmReading(
+        arm,
+        look,
+        tuple(out),
+        descriptive=bool(limit),
+        limit=limit,
+        scope_faults=tuple(faults),
+        unsealed_dropped=dropped,
+        duplicate_commits=duplicates,
+    )
 
 
 def _descriptive_look(outcomes: Sequence[bool | None], limit: int) -> LookState:
@@ -1109,6 +2196,76 @@ def _descriptive_look(outcomes: Sequence[bool | None], limit: int) -> LookState:
     return LookState(
         STATE_DESCRIPTIVE, len(resolved), clean, len(resolved) - clean, limit, pending, None
     )
+
+
+def mcnemar_p(b: int, c: int) -> float:
+    """The exact two-sided McNemar p for ``b`` and ``c`` discordant pairs: under no
+    difference each discordant pair falls either way with chance ½, so
+    ``p = min(1, 2·P(X ≤ min(b, c)))`` for ``X ~ Bin(b + c, ½)`` — ``1.0`` with no discordant
+    pair."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, k) for k in range(min(b, c) + 1))
+    return min(1.0, 2 * tail / (1 << n))
+
+
+@dataclass(frozen=True)
+class LoopPair:
+    """The loop pair of a reading: ``A0`` and ``A0+L`` on every commit both arms read, each
+    commit still pending on either arm read against the loop."""
+
+    #: The paired commits — each commit both arms read among their first ``n`` — in ``A0``'s
+    #: order.
+    pairs: tuple[str, ...]
+    #: Pairs clean under ``A0+L`` and a miss under ``A0``; a pending pair is never one.
+    b: int
+    #: Pairs clean under ``A0`` and a miss under ``A0+L``, a pending ``A0`` attempt read clean
+    #: and a pending ``A0+L`` attempt a miss.
+    c: int
+    #: The pairs not yet observed on both arms, in ``A0``'s order, each read against the loop
+    #: (NEW-1): the pair is complete only when this is empty.
+    pending: tuple[str, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        return not self.pending
+
+    @property
+    def p(self) -> float:
+        return mcnemar_p(self.b, self.c)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pairs": list(self.pairs),
+            "pending": list(self.pending),
+            "complete": self.complete,
+            "b": self.b,
+            "c": self.c,
+            "p": self.p,
+        }
+
+
+def _pair_window(arm: ArmReading) -> list[CommitReading]:
+    """The commits ``arm`` reads for the loop pair: a descriptive arm's first ``limit`` kept
+    commits, observed or pending; a hierarchy arm's counted prefix."""
+    kept = [c for c in arm.commits if not c.left]
+    return kept[: arm.limit] if arm.limit else kept[: arm.look.counted]
+
+
+def loop_pair(a0: ArmReading, a0l: ArmReading) -> LoopPair:
+    """``a0`` (``A0``) paired with ``a0l`` (``A0+L``) on each commit both arms read — for a
+    descriptive arm, among its first ``n`` — with ``b`` the pairs clean under ``A0+L`` alone
+    and ``c`` those clean under ``A0`` alone. A commit left on either arm is not a pair. One
+    still pending on either arm fails closed (NEW-1): read clean under ``A0`` and a miss under
+    ``A0+L`` and named in ``pending``, so no gap, subset or early stop can raise ``b`` or
+    lower ``c``. (Read as no pair, ``A0+L`` filed on ``A0``'s misses alone read ``c`` 0.)"""
+    right = {c.commit: c.outcome for c in _pair_window(a0l)}
+    read = [(c.commit, c.outcome, right[c.commit]) for c in _pair_window(a0) if c.commit in right]
+    pending = tuple(commit for commit, lo, ro in read if lo is None or ro is None)
+    b = sum(1 for _, lo, ro in read if ro is True and lo is False)
+    c_ = sum(1 for _, lo, ro in read if lo is not False and ro is not True)
+    return LoopPair(tuple(commit for commit, _, _ in read), b, c_, pending)
 
 
 # ---------------------------------------------------------------------------
@@ -1140,7 +2297,7 @@ class ReadingOutcome:
     def needed(self) -> int:
         """The commits still needed to the next look of the arm the cell waits on."""
         b = self.blocking
-        return b.look.needed if b is not None and b.look.state == STATE_LOOK_PENDING else 0
+        return b.look.needed if b is not None and b.state == STATE_LOOK_PENDING else 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1157,14 +2314,28 @@ class ReadingOutcome:
             "registered_at": self.reading.registered_at,
             "pool": len(self.reading.pool),
             "pool_sha256": self.reading.pool_sha256,
+            "hypothesis": self.reading.hypothesis,
+            "smallest_effect": self.reading.smallest_effect,
+            "campaign_id": self.reading.campaign_id,
+            # the runs the reading may count under its campaign (DL-382): ``None`` when it
+            # names none; ``admissions_unread`` when they were never read (it counts none)
+            "admitted_runs": (
+                len(self.reading.admitted)
+                if self.reading.campaign_id and self.reading.admitted is not None
+                else None
+            ),
+            "admissions_unread": self.reading.admissions_unread,
             "arms": [a.to_dict() for a in self.arms.values()],
         }
 
 
 def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     """Read every arm of ``reading`` and its hierarchy (ADR-0026 item 4): stop at the first
-    arm that does not deliver; the standard is the leanest certifying arm of the unbroken
-    chain; ``S3`` alone is a ceiling."""
+    arm that does not deliver — an arm with a ``scope_fault`` reads ``undecided``, so it never
+    does (P-795); the standard is the leanest certifying arm of the unbroken chain; ``S3``
+    alone is a ceiling. Every later arm reads ``waiting`` while that arm is still being read
+    and ``stopped`` once it reads insufficient or undecided; neither is read toward the
+    verdict (FZ-2)."""
     rs = list(rows)
     arms: dict[str, ArmReading] = {}
     chain: list[str] = []
@@ -1172,8 +2343,12 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     for arm in reading.hierarchy:
         a = arm_reading(reading, arm, rs)
         if stopped_at:
-            a = replace(a, stopped_by=stopped_at)
-        elif a.look.state == STATE_DELIVER:
+            # the arm before it decided against (a scope-faulted one reads undecided), or it
+            # is still being read and this arm waits on it: a label, never the verdict (FZ-2)
+            blocker = arms[stopped_at].state
+            waiting = blocker not in (STATE_INSUFFICIENT, STATE_UNDECIDED)
+            a = replace(a, stopped_by=stopped_at, waiting=waiting)
+        elif a.state == STATE_DELIVER:  # a scope-faulted arm never delivers (P-795)
             chain.append(arm)
         else:
             stopped_at = arm
@@ -1187,7 +2362,7 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     elif not stopped_at:
         state = OUTCOME_CEILING
     else:
-        blocked = arms[stopped_at].look.state
+        blocked = arms[stopped_at].state
         if chain and blocked in (STATE_INSUFFICIENT, STATE_UNDECIDED):
             state = OUTCOME_CEILING
         else:
@@ -1370,7 +2545,9 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
     """The router's reading of ``arm`` (ADR-0026 items 4 and 6): unregistered when no reading
     names it; descriptive for ``A0`` / ``A0+L``; the blocking arm's state when the hierarchy
     stopped at a richer arm; ``ceiling`` for a delivering ``S3``; ``leaner_standard`` for a
-    delivering certifying arm that is not the cell's standard; else the arm's own look state."""
+    delivering certifying arm that is not the cell's standard; else the arm's own look state.
+    An arm with a ``scope_fault`` (P-795) is ``undecided`` with nothing needed and no next
+    look — a descriptive one too — and so is every arm it stopped."""
     if outcome is None:
         return ArmVerdict(arm, VERDICT_UNREGISTERED)
     r = outcome.reading
@@ -1390,15 +2567,18 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
         "counted_commits": a.counted_commits,
         "pool_remaining": len(kept),
     }
+    if a.scope_faults and not a.stopped_by:
+        return ArmVerdict(arm, STATE_UNDECIDED, **common)
     if a.descriptive:
         return ArmVerdict(arm, VERDICT_DESCRIPTIVE, **common)
     if a.stopped_by:
         b = outcome.arms[a.stopped_by]
+        faulted = bool(b.scope_faults)
         return ArmVerdict(
             arm,
-            b.look.state,
-            needed=b.look.needed,
-            next_look=b.look.next_look,
+            b.state,
+            needed=0 if faulted else b.look.needed,
+            next_look=None if faulted else b.look.next_look,
             blocking=a.stopped_by,
             **common,
         )
@@ -1409,6 +2589,268 @@ def verdict_for(outcome: ReadingOutcome | None, arm: str) -> ArmVerdict:
             return ArmVerdict(arm, VERDICT_LEANER, **common)
         return ArmVerdict(arm, VERDICT_DELIVER, **common)
     return ArmVerdict(arm, a.look.state, needed=a.look.needed, next_look=a.look.next_look, **common)
+
+
+# ---------------------------------------------------------------------------
+# The runs of a reserved.v1 reading
+# ---------------------------------------------------------------------------
+
+#: The only ``params`` keys a run of a reserved.v1 reading may carry (P-792 channels C3, C5
+#: and C7): none of them can steer how an attempt is built or graded once it is reserved — no
+#: ``builder_config``, ``budget``, ``checks``, ``preflight``, ``escalation``, ``retain``,
+#: ``taxonomy`` or ``ladder`` key.
+RESERVED_RUN_PARAMS: frozenset[str] = frozenset(
+    {
+        "task_ids",
+        "limit",
+        "pool",
+        "executor",
+        "timeout",
+        "max_cost_usd",
+        "budget_profile",
+        "learning",
+        "arm",
+        "test_author",
+        "reading_id",
+        "campaign_id",
+        "outage_stop",
+        "env_stop",
+        "qualify_first",
+    }
+)
+#: The only ``params`` keys a factory run of a reserved.v1 FORWARD reading may carry (P-792
+#: C8): the replay whitelist without its replay-only keys — no ``budget_profile`` or
+#: ``learning`` (the factory's ``S2`` arm has no loop twin), no ``arm`` (a forward reading
+#: reads ``S2`` alone) and no ``campaign_id`` (it names no campaign, DL-382) — plus the
+#: factory's own: the ``backlog_hash`` and ``evolutions_hash`` ``POST /runs`` pins, and
+#: ``deliver`` and ``max_rework``, which act after the reserved ``r1`` attempt is graded.
+RESERVED_FACTORY_PARAMS: frozenset[str] = frozenset(
+    {
+        "task_ids",
+        "limit",
+        "pool",
+        "executor",
+        "timeout",
+        "max_cost_usd",
+        "test_author",
+        "reading_id",
+        "outage_stop",
+        "env_stop",
+        "qualify_first",
+        "backlog_hash",
+        "evolutions_hash",
+        "deliver",
+        "max_rework",
+    }
+)
+#: The one ladder a run of a reserved.v1 reading climbs: what ``POST /runs`` stores for a
+#: run that names none (``new_run``: ``ladder or ["r1"]``) — one rung, the reading's own cell.
+RESERVED_RUN_LADDER: tuple[str, ...] = (RUNG_R1,)
+#: The ``params`` a reserved run keeps at the value ``POST /runs`` stores when it is unset.
+_RESERVED_RUN_DEFAULTS: Mapping[str, Any] = {"pool": "", "executor": "", "timeout": 0}
+#: Where a run of a reserved.v1 reading stops (PW-7): at its FIRST outage row
+#: (``outage_stop``) or environment row (``env_stop``). Under the reserved attempt the commit
+#: in flight is a miss, so a halted run must reserve nothing more — a usage-limit episode
+#: under the worker's general defaults (3 and 2) would write three missed rows, enough alone
+#: to make ``look.v1`` read insufficient. The worker defaults both knobs to it on such a run;
+#: a run that names either with any other value (``True``, 0, ``null`` or 2 alike) is refused.
+#: Unreserved commits stay pending and are run later.
+RESERVED_RUN_STOP: int = 1
+_RESERVED_RUN_STOPS: tuple[str, ...] = ("env_stop", "outage_stop")
+#: The run kinds a reserved.v1 reading reads (``crb.store.jobs`` ``KIND_REPLAY`` and
+#: ``KIND_BLIND``; core never imports the store), the mode each runs in, and its arm's base.
+_RESERVED_RUN_KINDS: Mapping[str, tuple[str, str]] = {
+    "replay": ("sighted", BASE_S3),
+    "blind": ("blind", BASE_A0),
+}
+#: The run kind a reserved.v1 FORWARD reading reads (``crb.store.jobs`` ``KIND_FACTORY``), the
+#: mode it runs in and the one arm it reads.
+_RESERVED_FACTORY_KIND: tuple[str, str, str] = (PROCESS_FACTORY, "sighted", BASE_S2)
+
+
+def _test_author_model(test_author: str) -> str:
+    """The model a ``test_author`` (``builder:model[:provider]``) names, as an ``S1`` arm
+    names its author: lower case, without an ``@`` version or a ``vendor/`` prefix. A dated
+    model id is not mapped to its alias here (core holds no pricing table), so it does not
+    match the reading's author and is refused."""
+    parts = test_author.split(":")
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip().lower().split("@", 1)[0].rsplit("/", 1)[-1]
+
+
+def _run_shape_reasons(
+    reading: Reading,
+    allowed: frozenset[str],
+    *,
+    builder: str,
+    model: str,
+    provider: str,
+    ladder: Sequence[Any],
+    params: Mapping[str, Any],
+) -> dict[str, str]:
+    """What a run of the reserved.v1 ``reading`` sets that it may not, whatever its kind:
+    a ``params`` key outside ``allowed``; ``pool``, ``executor`` or ``timeout`` off the
+    default ``POST /runs`` stores; ``outage_stop`` or ``env_stop`` named with any value but
+    the int :data:`RESERVED_RUN_STOP` (PW-7); a ladder other than :data:`RESERVED_RUN_LADDER`; a
+    builder, model or provider other than the reading's cell — as ``{field: why}``."""
+    rule = ATTEMPT_RULE_RESERVED
+    reasons: dict[str, str] = {}
+    for key in sorted(set(params) - allowed):
+        reasons[key] = f"a run of a {rule} reading carries no {key!r}: it could steer an attempt"
+    for key, default in _RESERVED_RUN_DEFAULTS.items():
+        if params.get(key, default) not in (default, None):
+            reasons[key] = f"a run of a {rule} reading keeps {key} at its default {default!r}"
+    for key in _RESERVED_RUN_STOPS:
+        value = params.get(key, RESERVED_RUN_STOP)
+        if key in params and not (type(value) is int and value == RESERVED_RUN_STOP):
+            reasons[key] = (
+                f"a run of a {rule} reading stops at its first outage or environment row: "
+                f"{key} is {RESERVED_RUN_STOP} or unset"
+            )
+    if [*ladder] != [*RESERVED_RUN_LADDER]:
+        reasons["ladder"] = (
+            f"a run of a {rule} reading climbs the one ladder {list(RESERVED_RUN_LADDER)}, "
+            "the reading's own cell"
+        )
+    for name, value in (("builder", builder), ("model", model), ("provider", provider)):
+        if (value or "") != reading.cell.get(name, ""):
+            reasons[name] = f"the reading's cell is built by {name} {reading.cell.get(name)!r}"
+    return reasons
+
+
+def _loop_order_reason(reading: Reading, arm: str, params: Mapping[str, Any]) -> str:
+    """Why a run of the loop arm ``arm`` of the reserved.v1 ``reading`` may not file its
+    ``task_ids`` — ``""`` when it may (NEW-1, round 5). The loop learns from each attempt, so
+    the order is part of the arm's treatment: the run names its commits, each one ``arm``
+    enrols, and those it has not reserved are, in order, the first of its enrolled commits it
+    has not reserved — the whole list, a prefix of it, or a re-file of it (a reserved commit is
+    skipped, ``commit_reserved``). A subset chosen after another arm's outcomes, or another
+    order, is refused, so no run picks the commits the loop pair is read on."""
+    tasks = [str(t) for t in params.get("task_ids") or []]
+    order = enrolled(reading, arm)
+    reserved = {c for (a, c) in (reading.reservations or {}) if a == arm}
+    todo = [c for c in order if c not in reserved]
+    rest = [t for t in tasks if t not in reserved]
+    if tasks and set(tasks) <= set(order) and rest == todo[: len(rest)]:
+        return ""
+    return (
+        f"a run of the loop arm {arm} files its task_ids in the seeded order: its enrolled "
+        f"commits, those it has not reserved first to last ({len(todo)} of {len(order)} "
+        "left), so no run chooses the commits the loop pair is read on"
+    )
+
+
+def _refused(reasons: Mapping[str, str], arm: str) -> tuple[str, dict[str, Any]]:
+    if not reasons:
+        return "", {}
+    return REFUSAL_RUN_FIELDS, {"fields": sorted(reasons), "reasons": dict(reasons), "arm": arm}
+
+
+def reading_run_refusal(
+    reading: Reading,
+    *,
+    kind: str,
+    mode: str,
+    builder: str,
+    model: str,
+    provider: str,
+    ladder: Sequence[Any],
+    params: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Why a run of ``reading`` may not reserve its commits — ``("", {})`` when it may — as
+    ``(REFUSAL_RUN_FIELDS, {"fields": [...], "reasons": {field: why}, "arm": arm})``. The pure
+    whitelist, one rule for ``POST /runs`` and the worker's claim (P-792): a reserved attempt
+    can be steered by nothing a run chooses, so a run of a reserved.v1 reading
+
+    * carries only the :data:`RESERVED_RUN_PARAMS` keys, with ``pool``, ``executor`` and
+      ``timeout`` at their defaults and ``outage_stop`` and ``env_stop`` unset or
+      :data:`RESERVED_RUN_STOP` (it halts at its first outage or environment row, PW-7), and
+      climbs :data:`RESERVED_RUN_LADDER` (``ladder`` is the ladder as stored);
+    * builds on the reading's own builder, model and provider;
+    * runs an arm the reading reads: a sighted replay ``S3``, a blind run ``A0``, a blind run
+      with ``arm: S1`` the reading's ``S1@<author>`` (a ``test_author``, when named, names that
+      author); with neither ``learning`` nor ``budget_profile`` the arm is its ``+L`` twin;
+    * on a non-loop arm, runs with the loop off (``learning: off``) on the reading's budget
+      profile (C7), so no run spends on another profile;
+    * on the loop arm (``A0+L``), files ``task_ids`` in the seeded order: every id enrolled on
+      the arm, and those it has not reserved the first of its unreserved enrolled commits, in
+      order (:func:`_loop_order_reason`, NEW-1), so no run chooses the commits the loop pair
+      is read on.
+
+    A reserved.v1 FORWARD reading (``prospective``) reads factory runs alone (C8): a sighted
+    ``factory`` run on the reading's cell and the one ladder, carrying only the
+    :data:`RESERVED_FACTORY_PARAMS` keys (``pool``, ``executor`` and ``timeout`` at their
+    defaults, the stop knobs unset or :data:`RESERVED_RUN_STOP` — a factory run reads neither
+    knob today) — its arm is ``S2``, the factory's reserving each ticket's first build under it;
+    a replay or blind run of it is refused ``kind``. A ``factory`` run of any other reserved.v1
+    reading is refused ``kind``. A legacy reading is never refused by it."""
+    if not reading.reserved:
+        return "", {}
+
+    def shape_reasons(allowed: frozenset[str]) -> dict[str, str]:
+        return _run_shape_reasons(
+            reading,
+            allowed,
+            builder=builder,
+            model=model,
+            provider=provider,
+            ladder=ladder,
+            params=params,
+        )
+
+    rule = ATTEMPT_RULE_RESERVED
+    if reading.prospective:
+        reasons = shape_reasons(RESERVED_FACTORY_PARAMS)
+        factory_kind, factory_mode, factory_arm = _RESERVED_FACTORY_KIND
+        if kind != factory_kind:
+            reasons["kind"] = f"a {rule} forward reading reads {factory_kind!r} runs alone"
+        elif mode != factory_mode:
+            reasons["mode"] = f"a factory run of a {rule} forward reading runs {factory_mode}"
+        arm = "" if reasons.keys() & {"kind", "mode"} else factory_arm
+        if arm and arm not in reading.arms:
+            reasons["arm"] = f"the run's arm {arm!r} is not one the reading reads"
+        return _refused(reasons, arm)
+    reasons = shape_reasons(RESERVED_RUN_PARAMS)
+    shape = _RESERVED_RUN_KINDS.get(kind)
+    if shape is None:
+        reasons["kind"] = f"a {rule} reading reads {sorted(_RESERVED_RUN_KINDS)} runs"
+    elif mode != shape[0]:
+        reasons["mode"] = f"a {kind} run of a {rule} reading runs {shape[0]}"
+    named = str(params.get("arm", "") or "")
+    s1 = named == BASE_S1
+    if named not in ("", BASE_S1) or (s1 and kind != "blind"):
+        reasons["arm"] = "a run names arm S1 on a blind run, or no arm"
+    test_author = str(params.get("test_author", "") or "")
+    if test_author and (not s1 or _test_author_model(test_author) != reading.author_model):
+        reasons["test_author"] = (
+            f"a test author is named only on the S1 arm, as the reading's "
+            f"{reading.author_model or 'no author'}"
+        )
+    loop = "learning" not in params and "budget_profile" not in params
+    if not loop:
+        if params.get("learning") != LEARN_OFF:
+            reasons["learning"] = f"a non-loop arm runs with learning {LEARN_OFF!r}"
+        if params.get("budget_profile") != reading.budget_profile:
+            reasons["budget_profile"] = (
+                f"a non-loop arm spends on the reading's budget profile {reading.budget_profile!r}"
+            )
+    arm = ""
+    if shape is not None and not reasons.keys() & {"kind", "mode", "arm", "test_author"}:
+        try:
+            base = (
+                ContextArm(BASE_S1, reading.author_model) if s1 else ContextArm(shape[1])
+            ).with_loop(loop)
+            arm = base.id
+        except ValueError:
+            arm = ""
+        if arm not in reading.arms:
+            reasons["arm"] = f"the run's arm {arm!r} is not one the reading reads"
+        elif loop:
+            why = _loop_order_reason(reading, arm, params)
+            if why:
+                reasons["task_ids"] = why
+    return _refused(reasons, arm)
 
 
 def describe_rules() -> str:
@@ -1422,21 +2864,56 @@ def describe_rules() -> str:
 
 __all__ = [
     "ARM_STATES",
+    "ATTEMPT_RULES",
+    "ATTEMPT_RULE_LEGACY",
+    "ATTEMPT_RULE_RESERVED",
     "CELL_ERROR_BUDGET",
+    "HALT_ARM_UNKNOWN",
+    "HALT_CANCEL_REQUESTED",
+    "HALT_CHECKS_ARM_MISMATCH",
+    "HALT_RUN_NOT_OWNED",
+    "HALT_TREATMENT_MISMATCH",
+    "LABEL_CLAIM",
+    "LABEL_RESERVATION",
+    "LABEL_TREATMENT",
     "LEFT_HELD_OUT_ERROR",
     "LEFT_NOT_GRADED",
     "LEFT_OTHER_CELL",
+    "POOL_DRIFT_FIELDS",
     "POOL_RULE_ALL",
     "POOL_RULE_CALIBRATION",
     "POOL_RULE_SINCE",
+    "POOL_SEEN_FROM",
+    "PROVENANCE_FIELDS",
     "READING_EVENT_ACTION",
+    "READING_RESERVED_ACTION",
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
+    "REFUSAL_CAMPAIGN_UNSUPPORTED",
+    "REFUSAL_CHECKS_ARM_MOVED",
+    "REFUSAL_CHECKS_OVERLAY",
+    "REFUSAL_EXISTS",
+    "REFUSAL_LINT_DISABLED",
     "REFUSAL_NOT_A_CEILING",
+    "REFUSAL_POOL_DRIFT",
     "REFUSAL_POOL_NOT_BLIND",
     "REFUSAL_POOL_SEEN",
+    "REFUSAL_READING_REQUIRED",
+    "REFUSAL_RUN_FIELDS",
+    "RESERVED_FACTORY_PARAMS",
+    "RESERVED_RUN_LADDER",
+    "RESERVED_RUN_PARAMS",
+    "RESERVED_RUN_STOP",
+    "RESERVE_HALTS",
+    "RESERVE_SKIPS",
     "RULES",
     "RULE_LOOK_V1",
+    "RUN_REFUSAL_CODES",
+    "SCOPE_CHECKS_ARM",
+    "SKIP_COMMIT_RESERVED",
+    "SKIP_TASK_NOT_ENROLLED",
+    "STATE_STOPPED",
+    "STATE_WAITING",
     "VERDICT_CEILING",
     "VERDICT_DELIVER",
     "VERDICT_DESCRIPTIVE",
@@ -1451,26 +2928,38 @@ __all__ = [
     "Reading",
     "ReadingOutcome",
     "ReadingRefused",
+    "Reservation",
     "Standard",
     "arm_reading",
     "budget_spent",
+    "campaign_unsupported",
     "canonical_cell_key",
     "cell_error_budget",
+    "enrolled",
     "evaluate",
+    "first_per_id",
     "latest_outcome",
+    "lint_config_digest",
+    "lint_refusal",
     "look_state",
     "outcomes_for_cell",
     "p_deliver",
     "pool_by_rule",
     "pool_digest",
     "reading_cell_key",
+    "reading_run_refusal",
     "refuse_unless_blind",
     "register",
     "register_forward",
+    "registered_twin",
+    "registration_content",
+    "reserved_pool_digest",
     "rule_spend",
     "seed_of",
     "seeded_order",
     "standard_of",
     "verdict_for",
+    "with_admissions",
     "with_enrolment",
+    "with_reservations",
 ]

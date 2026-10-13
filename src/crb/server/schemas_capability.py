@@ -173,7 +173,17 @@ class ShortfallOut(BaseModel):
 class ArmReadingOut(BaseModel):
     """One arm of a registered reading (``crb.core.reading.ArmReading.to_dict``): its state
     under the look rule, the distinct commits read in the seeded order, clean, the Wilson
-    interval, the next look and the commits still needed."""
+    interval, the next look and the commits still needed — and the commits whose row it
+    could not read (``scope_faults``, which make it ``undecided``): a row graded unsealed in
+    the reading's posture class (P-795), or a reserved.v1 row built off the checks arm the
+    reading froze (RT2B-1). Each ``left`` entry's ``scope`` names which (``unsealed`` or
+    ``checks_arm``; ``""`` otherwise). ``state`` is one of ``crb.core.reading.ARM_STATES``:
+    a later hierarchy arm reads ``waiting`` while the arm before it (``stopped_by``) is still
+    being read, and ``stopped`` once that arm reads insufficient or undecided; neither is read
+    toward the verdict (FZ-2). ``duplicate_commits`` counts the arm's attempts of a commit
+    the reading had decided that it did not read — every one but the reservation's row
+    under reserved.v1, every one after the deciding row under the legacy rule (F87-2) — a
+    count for a person, never read toward a state or the verdict."""
 
     arm: str
     state: str
@@ -190,6 +200,9 @@ class ArmReadingOut(BaseModel):
     look_state: str = ""
     left: list[dict[str, Any]] = Field(default_factory=list)
     counted_commits: list[str] = Field(default_factory=list)
+    scope_faults: list[str] = Field(default_factory=list)
+    unsealed_dropped: int = 0
+    duplicate_commits: int = 0
 
 
 class ReadingOut(BaseModel):

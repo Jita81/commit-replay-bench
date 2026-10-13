@@ -54,6 +54,7 @@ import { SelectField, TextArea, TextField } from '../../components/Field'
 import { Hint } from '../../components/Hint'
 import { Pill } from '../../components/Pill'
 import { BackLink, InsetText, Kicker, Lede, PageTitle, SecondaryButton, StartButton, Tag, type TagTone, WarningButton } from '../../components/govuk'
+import { readAmount } from '../../lib/amount'
 import { useAuth } from '../../lib/auth'
 import { type LibraryAct, useLibrary, useLibraryAct, useLibraryMine, useRegisterForward, useWorkTypePage } from './useLibrary'
 
@@ -149,13 +150,26 @@ function ForwardForm({ repo, size, std }: { repo: string; size: string; std: Lib
   const [builder, setBuilder] = useState('')
   const [model, setModel] = useState('')
   const [provider, setProvider] = useState('')
+  const [hypothesis, setHypothesis] = useState('')
+  const [effect, setEffect] = useState('')
   const [done, setDone] = useState('')
+  // a share above 0 and at most 1, read as typed (P-273): never a number input, which reads `1e` as blank
+  const effectRead = readAmount(effect, { min: 0, above: true })
+  const effectOk = effectRead.kind === 'ok' && effectRead.value <= 1
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (register.isPending) return
+    if (register.isPending || !effectOk) return
     setDone('')
     register.mutate(
-      { repo, promotes: std.reading_id, builder: builder.trim(), model: model.trim(), provider: provider.trim() },
+      {
+        repo,
+        promotes: std.reading_id,
+        builder: builder.trim(),
+        model: model.trim(),
+        provider: provider.trim(),
+        hypothesis: hypothesis.trim(),
+        smallest_effect: effectRead.value,
+      },
       { onSuccess: (r) => setDone(`Registered ${r.reading_id}. It counts the calibration builds whose held-out tests are written from now on.`) },
     )
   }
@@ -169,6 +183,8 @@ function ForwardForm({ repo, size, std }: { repo: string; size: string; std: Lib
       <TextField label="Builder" value={builder} onChange={(e) => setBuilder(e.target.value)} required hint="field.library.forward_builder" description="As the factory run’s ladder names it, for example claude_code." />
       <TextField label="Model" value={model} onChange={(e) => setModel(e.target.value)} required hint="field.library.forward_model" description="For example claude-sonnet-5." />
       <TextField label="Provider" value={provider} onChange={(e) => setProvider(e.target.value)} required hint="field.library.forward_provider" description="The provider the model is served by, for example anthropic." />
+      <TextField label="Hypothesis" value={hypothesis} onChange={(e) => setHypothesis(e.target.value)} required maxLength={2000} hint="field.library.forward_hypothesis" description="What this reading tests, written before any build is read." />
+      <TextField label="Smallest effect" value={effect} onChange={(e) => setEffect(e.target.value)} required inputMode="decimal" error={effect.trim() === '' || effectOk ? undefined : 'Enter a share above 0 and at most 1, for example 0.1.'} hint="field.library.forward_smallest_effect" description="The smallest effect that would matter, as a share of attempts above 0 and at most 1, for example 0.1." />
       <WarningButton type="submit" pending={register.isPending} hint="button.library.register_forward">
         Register the forward reading
       </WarningButton>

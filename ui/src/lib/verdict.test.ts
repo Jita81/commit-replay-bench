@@ -20,7 +20,8 @@
  *               docs/API.md (the vocabulary table), tests/test_event_vocabulary.py (the
  *               server-side half of the same ratchet)
  * Tested by:    ui/src/lib/verdict.test.ts
- * Touch when:   a route, band, gate or event action is added on the server.
+ * Touch when:   never for a new repository; a route, band, gate or event action is added on
+ *               the server.
  */
 import { describe, expect, it } from 'vitest'
 import apiDoc from '../../../docs/API.md?raw'
@@ -140,6 +141,13 @@ describe('actionHelp', () => {
     expect(actionHelp('delivery.withheld')).toBe('Built clean, but the map does not route deliver for this cell: no branch, no pull request; the measured route is on the chain.')
     expect(actionHelp('build.turn')).toBe('One builder turn (a model call and its tool calls).')
     expect(actionHelp('grade.tamper')).toBe('A test file was changed; the row is disqualified, not counted.')
+  })
+
+  it('a run refused at claim names both causes: a dead builder login, or executors that are not docker for a sealed reading (P-789)', () => {
+    const s = actionHelp('run.refused')
+    expect(s).toMatch(/refused it before it started/)
+    expect(s).toMatch(/builder login/)
+    expect(s).toMatch(/not docker for the sealed reading/)
   })
 
   it('an unknown action gets a generic sentence naming the action, and a builder.* event its family', () => {

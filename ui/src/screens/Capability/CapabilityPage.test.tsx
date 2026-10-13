@@ -18,7 +18,9 @@
  *               viewer, as the About block and the button's hint say (G-102), and says what
  *               it downloaded or names the error with Retry (G-101); that no `?repo=` shows
  *               the most recently updated repository (G-977); and that `?cell=` opens that
- *               cell's detail on arrival and a projection change drops it (G-253).
+ *               cell's detail on arrival and a projection change drops it (G-253); and that a
+ *               later hierarchy arm whose blocker is still being read reads "waiting", naming
+ *               that arm with its hover help, never "not read" (FZ-2).
  * How:          `mockApi` answers `GET /capability-map` with hand-built maps; `renderApp` at
  *               `/capability?repo=…`; assertions on the `cell-*`, `tile-*`, `kind-*` and
  *               `controls-*` test ids; `qc.refetchQueries()` for a refetch; the page's own
@@ -597,6 +599,53 @@ describe('CapabilityPage — controls verdict + failure split (A2)', () => {
     ).toContain('text-[24px]')
     expect(screen.getByTestId('cell-shortfalls').textContent).toContain('register')
     expect(screen.getByTestId('cell-readings').textContent).toContain('No reading is registered')
+  })
+
+  it('reads a later arm as waiting while the arm before it is still being read, never as stopped (FZ-2)', async () => {
+    const S1 = 'S1@claude-opus-5'
+    const reading = {
+      reading_id: 'rdg_0123456789abcdef01234567',
+      rule: 'look.v1',
+      hierarchy: ['S3', S1],
+      state: 'look_pending',
+      standard: null,
+      ceiling: false,
+      chain: [],
+      stopped_at: 'S3',
+      needed: 20,
+      spend: 0.004,
+      registered_at: '2026-09-27T10:00:00+00:00',
+      pool: 40,
+      pool_sha256: 'a'.repeat(64),
+      arms: [
+        { arm: 'S3', state: 'look_pending', descriptive: false, stopped_by: '', counted: 0, clean: 0, misses: 0, ci_low: 0, ci_high: 1, next_look: 20, needed: 20 },
+        { arm: S1, state: 'waiting', descriptive: false, stopped_by: 'S3', counted: 20, clean: 20, misses: 0, ci_low: 0.839, ci_high: 1, next_look: null, needed: 0 },
+      ],
+    }
+    const waitingCell = cell({
+      route: 'calibrate',
+      context_arm: S1,
+      look_state: 'look_pending',
+      counted: 20,
+      counted_clean: 20,
+      counted_ci_low: 0.839,
+      counted_ci_high: 1,
+      reading,
+      standard: { standard: null, ceiling: false, label: 'no proven standard', next: 'replay', next_count: 20, budget: 0.05, spent: 0.004 },
+      shortfalls: [],
+    })
+    mockApi({
+      'GET /auth/me': PRINCIPAL,
+      'GET /repos': { items: [{ name: 'sqlalchemy' }], total: 1, limit: 50, offset: 0 },
+      'GET /capability-map': { ...MAP, cells: [waitingCell], arm: 'standard', arms: ['S3', S1] },
+    })
+    renderApp(<CapabilityPage />, { route: '/capability?repo=sqlalchemy' })
+    await waitFor(() => expect(screen.getByTestId('cell-measured')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('cell-measured'))
+    const [, s1Row] = screen.getAllByTestId('cell-reading-arm')
+    expect(s1Row).toHaveTextContent('waiting — the arm before it is still being read (S3)')
+    expect(s1Row).not.toHaveTextContent('not read')
+    expect(s1Row!.querySelector('[data-hint="text.capability.arm_waiting"]')).not.toBeNull()
   })
 
   it('the page reads every query only through currentData', () => {

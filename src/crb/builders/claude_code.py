@@ -4,8 +4,8 @@ Runs ``claude -p`` (headless) in the worktree with ``--output-format stream-json
 and parses the event stream for turns, tool uses, usage and cost. The tool set
 is restricted (``--tools`` + ``--allowedTools``) and pre-approved under
 ``--permission-mode dontAsk`` so nothing can prompt, with deny rules for git
-archaeology and network fetches (``--disallowedTools``). ``--bare`` (default)
-makes authentication strictly ``ANTHROPIC_API_KEY`` (never the operator's
+archaeology, network fetches and the claude CLI itself (``--disallowedTools``).
+``--bare`` (default) makes authentication strictly ``ANTHROPIC_API_KEY`` (never the operator's
 keychain or OAuth profile), skips the target repo's ``CLAUDE.md`` (a
 prompt-injection vector) and hooks, and — as the CLI's simple mode — exposes
 exactly ``Read/Edit/Bash`` (:data:`BARE_TOOLS`); ``bare=False`` restores the
@@ -60,7 +60,10 @@ output. The same :class:`TestFileGuard` is applied **post hoc** (diff the
 worktree: a protected test changed → ``errors += tamper:``; the grader DQs
 anyway) and every Bash command seen in the transcript is checked by
 :class:`GitArchaeologyGuard` (a violation is recorded fail-closed even if the
-CLI's deny rule refused it).
+CLI's deny rule refused it). Every string in every tool call's input also goes
+through the nested-model-call tripwire (:func:`~crb.builders.base.nested_model_call_input`):
+a hit is a ``network: nested_model_call:`` violation — the attempt reads as a miss,
+never as harness — and the run is stopped there, since that spend is unmetered.
 
 Model ids come from the ``claude-api`` skill (never guessed): ``claude-sonnet-5``
 (default — the census's measured path), ``claude-opus-5``, ``claude-haiku-4-5``,
@@ -78,17 +81,21 @@ What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude 
               ``crb doctor``, the admin route and the run preflight use.
 What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
               set, deny rules, a minimal child environment and no session persistence;
-              meters turns, tool uses, tokens and reported cost from the stream; applies the
-              test-file and shell guards post hoc (a hit is a recorded ``tamper:`` /
-              ``archaeology:`` / ``network:`` error, never silently dropped); stops early on
-              an authentication failure the CLI would otherwise retry for minutes.
+              meters turns, tool uses, tokens and reported cost from the stream (usage once
+              per ``message.id``, not once per content-block event); applies the
+              test-file and shell guards and the nested-model-call tripwire (every tool
+              input) post hoc (a hit is a recorded ``tamper:`` / ``archaeology:`` /
+              ``network:`` error, never silently dropped); stops early on a nested model
+              call and on an authentication failure the CLI would otherwise retry for
+              minutes.
               ``verify_login`` proves a login works in either auth mode (one no-tool Haiku
               turn) and ``login_resolution`` names where a build would take it without a
               model call — the run preflight's two inputs (pilot D1).
 How:          ``argv`` (prompt + flags) → ``env`` (``api_key``: key required and forwarded;
               ``cli``: the operator's login via env / secrets file / keychain) → ``spawn`` →
-              ``StreamStats.feed`` per line (usage, tool uses, bash commands through the
-              guard, container-path translation) → ``finish``: tamper scan → outcome.
+              ``StreamStats.feed`` per line (usage, tool uses, every tool input through the
+              tripwire, bash commands through the guard, container-path translation) →
+              ``finish``: tamper scan → outcome.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
               docs/adr/0012-builder-in-a-sealed-container.md
@@ -100,7 +107,9 @@ Works with:   src/crb/builders/base.py (brief, budget, outcome and the two guard
               src/crb/server/routes/admin.py (the verify-login route),
               src/crb/server/builder_login.py (the run preflight and the verification cache)
 Tested by:    tests/test_builders_claude_code.py, tests/test_builders_container.py,
-              tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py
+              tests/test_execution_post_kill.py, tests/test_post_kill_wait_ratchet.py,
+              tests/test_p792_reserved.py (the stamp names the argv overrides),
+              tests/test_nested_model_call.py (the deny rules and credential names)
 Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are per-run or
               per-worker settings — docs/OPERATOR.md); a new CLI flag or a changed stream
               event shape is a change to ``argv``/``StreamStats.feed`` with a canned-stream
@@ -129,6 +138,7 @@ from typing import Any, Protocol
 
 from crb.builders.base import (
     CREDENTIAL_REFUSED_STATUSES,
+    NESTED_MODEL_CALL,
     STOP_DONE,
     STOP_MAX_COST,
     STOP_MAX_TURNS,
@@ -141,6 +151,7 @@ from crb.builders.base import (
     GitArchaeologyGuard,
     TestFileGuard,
     emit,
+    nested_model_call_input,
 )
 from crb.builders.budget import CostMeter, price_for
 from crb.core.execution import (
@@ -268,7 +279,14 @@ DENY_RULES: tuple[str, ...] = (
     "Bash(go get:*)",
     "Bash(cargo add:*)",
     "Bash(gh:*)",
+    # a model call from inside the build (F5): the CLI by name and at its image path;
+    # the transcript tripwire (``nested_model_call``) is the belt for every other form
+    "Bash(claude:*)",
+    "Bash(/usr/local/bin/claude:*)",
 )
+
+#: How a nested-model-call reason starts (``crb.builders.base.nested_model_call``).
+_NESTED_PREFIX = f"network: {NESTED_MODEL_CALL}:"
 
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -544,12 +562,13 @@ class StreamStats:
         self.git_guard = git_guard
         self.guard = guard
         self.workdir_alias = workdir_alias.rstrip("/")
-        self.assistant_messages = 0
         self.tool_uses = 0
         self.tool_names: list[str] = []
-        self.tokens_in = 0
-        self.tokens_out = 0
-        self.cached_in = 0
+        #: ``(tokens_in, tokens_out, cached_in)`` of each assistant message, keyed by its
+        #: ``message.id`` (P-806): the CLI streams one event per content block, each repeating
+        #: the whole message's usage, so a message counts once and its last event wins; an
+        #: event with no id is a message of its own
+        self.usage_by_message: dict[str, tuple[int, int, int]] = {}
         self.result: dict[str, Any] | None = None
         self.init: dict[str, Any] = {}
         self.last_text = ""
@@ -561,6 +580,8 @@ class StreamStats:
         self.parse_errors = 0
         self.api_retries: list[int] = []
         self.auth_failed = False
+        #: the first nested-model-call reason seen (F5); ``build`` stops the run on it
+        self.nested_model_call = ""
 
     def feed(self, line: str, *, keep: bool) -> dict[str, Any] | None:
         """Consume one stream-json line; returns a small summary event (or ``None`` for a
@@ -592,9 +613,8 @@ class StreamStats:
             if code in CREDENTIAL_REFUSED_STATUSES:
                 self.auth_failed = True
         elif kind == "assistant":
-            self.assistant_messages += 1
             msg = ev.get("message") or {}
-            self._usage(msg.get("usage"))
+            self._usage(msg.get("id"), msg.get("usage"))
             names: list[str] = []
             for block in msg.get("content") or []:
                 if not isinstance(block, dict):
@@ -641,17 +661,24 @@ class StreamStats:
         self.events.append(summary)
         return summary
 
-    def _usage(self, usage: Any) -> None:
-        """Accumulate one message's ``usage`` block."""
+    def _usage(self, msg_id: Any, usage: Any) -> None:
+        """Record one assistant event's ``usage`` block under its ``message.id`` (the last
+        event of a message replaces the earlier ones); an event with no id gets a key of
+        its own, so it is summed as before. A block that is not a mapping records the
+        message with nothing spent, never clearing a usage already seen."""
+        seen = self.usage_by_message
+        key = msg_id if isinstance(msg_id, str) and msg_id else f"\x00{len(seen)}"
         if not isinstance(usage, dict):
+            seen.setdefault(key, (0, 0, 0))
             return
         # cache CREATION is real input (billed at a premium); cache READS are recorded
         # separately so "tokens in" is never a misleading 50 for a 60k-token session.
-        self.tokens_in += int(usage.get("input_tokens", 0) or 0) + int(
-            usage.get("cache_creation_input_tokens", 0) or 0
+        seen[key] = (
+            int(usage.get("input_tokens", 0) or 0)
+            + int(usage.get("cache_creation_input_tokens", 0) or 0),
+            int(usage.get("output_tokens", 0) or 0),
+            int(usage.get("cache_read_input_tokens", 0) or 0),
         )
-        self.tokens_out += int(usage.get("output_tokens", 0) or 0)
-        self.cached_in += int(usage.get("cache_read_input_tokens", 0) or 0)
 
     def host_view(self, text: str) -> str:
         """``text`` with the container alias replaced by the guard's host root (only
@@ -662,12 +689,13 @@ class StreamStats:
         return re.sub(rf"{re.escape(self.workdir_alias)}(?=/|$|[\s'\"`;&|)])", root, text)
 
     def _inspect_tool_use(self, name: str, inp: Any, summary: dict[str, Any] | None) -> None:
-        """Run the guards over a tool call as the CLI reports it: Bash commands through the
-        shell guard (recorded as a violation even when the CLI's deny rule refused them),
-        file-writing tools through the path guard; paths translated from the container
-        alias first."""
+        """Run the guards over a tool call as the CLI reports it: every string in the input
+        through the nested-model-call tripwire, Bash commands through the shell guard
+        (recorded as a violation even when the CLI's deny rule refused them), file-writing
+        tools through the path guard; paths translated from the container alias first."""
         if not isinstance(inp, dict):
             return
+        nested, excerpt = nested_model_call_input(inp)
         if name == "Bash":
             cmd = str(inp.get("command", "") or "")
             self.bash_commands.append(cmd)
@@ -676,7 +704,16 @@ class StreamStats:
             reason = self.git_guard.check_shell(self.host_view(cmd))
             if reason:
                 self.violations.append(f"{reason} (attempted: {cmd[:120]})")
-        elif name in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:
+                if reason.startswith(_NESTED_PREFIX):
+                    # the shell guard runs the same tripwire: recorded once, with the command
+                    self.nested_model_call = self.nested_model_call or reason
+                    return
+        if nested:
+            # any tool, any field: a written script or an edit that calls a model counts
+            # as much as running one (the attempt is what the rules forbid)
+            self.nested_model_call = self.nested_model_call or nested
+            self.violations.append(f"{nested} (attempted: {name}: {excerpt[:120]})")
+        if name in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:
             path = str(inp.get("file_path", "") or inp.get("path", "") or "")
             self.write_paths.append(path)
             if summary is not None:
@@ -704,7 +741,8 @@ class StreamStats:
     # --- totals ---------------------------------------------------------------
     def totals(self) -> tuple[int, int, int]:
         """``(tokens_in, tokens_out, cached_in)`` — the result event's totals when it has
-        them (authoritative), else the running sums from the per-message usage."""
+        them (authoritative), else the sum over :attr:`usage_by_message`, once per
+        ``message.id``: what a killed, timed-out or crashed run is costed from."""
         r = self.result or {}
         usage = r.get("usage")
         if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
@@ -714,7 +752,8 @@ class StreamStats:
                 int(usage.get("output_tokens", 0) or 0),
                 int(usage.get("cache_read_input_tokens", 0) or 0),
             )
-        return self.tokens_in, self.tokens_out, self.cached_in
+        rows = self.usage_by_message.values()
+        return sum(r[0] for r in rows), sum(r[1] for r in rows), sum(r[2] for r in rows)
 
     def reported_cost(self) -> float | None:
         """The CLI's own ``total_cost_usd`` from the result event, if it gave one."""
@@ -725,12 +764,13 @@ class StreamStats:
         return None
 
     def turns(self) -> int:
-        """``num_turns`` from the result event, else the assistant messages counted."""
+        """``num_turns`` from the result event, else the assistant messages counted (once
+        per ``message.id``, not once per content-block event)."""
         r = self.result or {}
         v = r.get("num_turns")
         if isinstance(v, int) and not isinstance(v, bool) and v > 0:
             return v
-        return self.assistant_messages
+        return len(self.usage_by_message)
 
     def claim(self) -> tuple[bool, str]:
         """``(done, summary)`` from structured output, else the result text, else the
@@ -829,8 +869,11 @@ class ClaudeCodeBuilder:
         self.workdir_alias = workdir_alias.rstrip("/")
 
     def describe(self) -> dict[str, Any]:
-        """The apparatus stamp: model, tool set, effort, ``bare``/``auth`` posture."""
-        d = {
+        """The apparatus stamp: model, tool set, effort, ``bare``/``auth`` posture, and the
+        argv overrides when set (``extra_args`` follow the rung's own ``--model`` in the argv,
+        so a stamp that hid them would name a model the CLI did not run; P-792). With neither
+        set, the stamp is what it always was."""
+        d: dict[str, Any] = {
             "builder": self.name,
             "model": self.model,
             "provider": self.provider,
@@ -841,6 +884,10 @@ class ClaudeCodeBuilder:
         }
         if self.workdir_alias:
             d["container_workdir"] = self.workdir_alias
+        if self.extra_args:
+            d["extra_args"] = list(self.extra_args)
+        if self.claude_binary:
+            d["claude_binary"] = self.claude_binary
         return d
 
     def _binary(self) -> str:
@@ -1015,6 +1062,11 @@ class ClaudeCodeBuilder:
                     )
                     handle.kill()
                     break
+                if stats.nested_model_call:
+                    # a model called from inside the build is spend the run never meters:
+                    # stop at the first sight of it; the recorded violation decides the row
+                    handle.kill()
+                    break
                 if stats.tool_uses > budget.max_tool_calls * 2 and not over_cap:
                     # the CLI has no tool-call cap; --max-turns bounds it, this is the belt
                     over_cap = True
@@ -1029,13 +1081,15 @@ class ClaudeCodeBuilder:
 
         timed_out = bool(handle.timed_out)
         rc = handle.returncode
+        # stopped on purpose: the kill, not the CLI, ended the stream
+        stopped = stats.auth_failed or bool(stats.nested_model_call)
         if timed_out:
             errors.append(f"wall_clock: killed after {budget.wall_clock_s}s")
-        elif rc not in (0, None) and stats.result is None and not stats.auth_failed:
+        elif rc not in (0, None) and stats.result is None and not stopped:
             errors.append(
                 f"model_error: claude exited rc={rc}: {redact_and_cap(handle.stderr_tail, max_chars=500)}"
             )
-        if stats.result is None and not timed_out and not stats.auth_failed:
+        if stats.result is None and not timed_out and not stopped:
             errors.append("model_error: no result event in stream")
         elif stats.result is not None and stats.result.get("is_error"):
             said = redact_and_cap(

@@ -33,11 +33,20 @@ What it does: Validates a ``RunCreateRequest`` (kind, ladder, budget, builder_co
               queued ``Run`` row, refusing at submit (422 ``builder_credential_missing``,
               presence only) a run whose builder auth has no credential, and (422
               ``builder_provider_mismatch``) one whose OpenAI-compatible rung or test author
-              names a provider the configured endpoint is not — through
+              names a provider the configured endpoint is not, and (409) a run filed under a
+              reading that would not be graded sealed in the reading's posture class, and (422
+              ``reading_run_fields``) a run of a reserved.v1 reading that sets a field the
+              reading does not register, and (409 ``reading_required``) a campaign run naming
+              no reading while its campaign holds a reserved.v1 one on the repository (P-792),
+              and (409 ``lint_disabled``) a run of a reading while the repository's lint is
+              off (P-796), and (409 ``pool_drift``) a run of a reserved.v1 reading whose pool
+              moved since registration (P-797), and (422 ``validation_error``) a factory run
+              naming any reading but a reserved.v1 forward one (P-792 C8) — through
               ``submit_refusals``, the one gate every route that queues a run calls; serves
-              run views with counts re-derived from the ledger when the worker wrote none; streams
-              events as SSE with resume-by-seq; cancellation is a flag the worker honours;
-              lifting the sign-off clause for one run is refused at enqueue and granted only
+              run views with counts re-derived from the ledger when the worker wrote none;
+              streams events as SSE with resume-by-seq; cancellation is a flag the worker
+              honours; lifting the sign-off clause for one run is refused at enqueue and
+              granted only
               by an approver who did not queue the run, as an event (GOV-4, ADR-0003
               amendment 2026-09-27) — it never lifts the route gate (ADR-0026 item 8);
               and owns the out-of-band ``system`` event writers the other routes share
@@ -53,12 +62,24 @@ Works with:   src/crb/server/schemas.py (RunCreateRequest, RunOut, RunCounts, Ru
               mirrored by ui/src/api/types.ts), src/crb/store/jobs.py (enqueue; cancel with
               the operator as actor), src/crb/store/events.py (``lock_event_writes`` — the
               one lock every ``seq`` allocator takes), src/crb/server/worker.py (what a
-              queued run becomes; the counts shapes per kind), src/crb/store/models.py
-              (Run, Grade, Event, User — the override's display name resolved at read),
+              queued run becomes; the counts shapes per kind; its claim re-runs the reserved.v1
+              run whitelist this module runs at submit, ``reading_run_refusal`` in
+              src/crb/core/reading.py, P-792), src/crb/server/campaigns.py
+              (``campaign_tally``: a run filed under a campaign is admitted under its money
+              ceiling, G-957; ``live_on_arm``: refused 409 ``campaign_arm_in_flight`` while
+              the campaign has a run queued or running on the same arm of the same reading,
+              or naming a commit this run names, F87-2; a run of a reading that names a
+              campaign is refused 409 ``campaign_required`` unless filed under it, DL-382),
+              src/crb/store/models.py (Run, Grade, Event, User — the override's display name
+              resolved at read),
               docs/API.md#runs (the ``counts`` shapes per kind, queue position, the
               factory posture),
               ui/src/screens/Runs/RunsPage.tsx and ui/src/screens/Runs/RunDetailPage.tsx (the screens)
-Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py
+Tested by:    tests/test_server_routes_runs.py, tests/test_server_app.py,
+              tests/test_p792_reserved_refusals.py (the reserved.v1 submit refusals),
+              tests/test_p792_reserved_rows.py and tests/test_p792_reserved.py (C5's
+              ``timeout`` and C3's ``builder_config``, refused at submit),
+              tests/test_p792_pool.py (``pool_drift``)
 Touch when:   never for a new repository; a run parameter is added (schema field →
               ``params`` here → the worker reads it → docs/API.md → the UI type); a field
               is added to ``RunOut`` (the UI type first); a run kind is added (decide in
@@ -94,17 +115,51 @@ from crb.builders.claude_code import default_auth as claude_code_default_auth
 from crb.builders.claude_code import default_model as claude_code_default_model
 from crb.builders.openai_client import ProviderMismatch, resolve_endpoint, resolved_endpoint
 from crb.builders.openai_client import credential_missing as openai_credential_missing
+from crb.core.campaign import (
+    CAMPAIGN_ADMITTED,
+    REFUSAL_CAP_REQUIRED,
+    REFUSAL_REQUIRED,
+    REFUSAL_S1_UNBOUNDED,
+    REFUSAL_UNKNOWN,
+    arm_in_flight,
+    planned_commits,
+)
 from crb.core.evidence import sha256_text
 from crb.core.grade import BELT_NAMES
+from crb.core.lint import LINT_DISABLED_BY_CONFIG
+from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
+    REFUSAL_LINT_DISABLED,
+    REFUSAL_POOL_DRIFT,
+    REFUSAL_READING_REQUIRED,
+    REFUSAL_RUN_FIELDS,
+    Reading,
+    lint_refusal,
+    reading_run_refusal,
+)
 from crb.core.taxonomy import GLOBAL_CLASS_SET, is_class_set_version
 from crb.factory.author import author_from_label
 from crb.observability.events import StepEvent, StepStatus
 from crb.server.auth import ApproverDep, OperatorDep, ViewerDep, require_role_now
 from crb.server.builder_login import login_refusal
+from crb.server.campaigns import (
+    campaign_of,
+    campaign_tally,
+    live_on_arm,
+    run_arm,
+    run_commits,
+    run_reading,
+)
 from crb.server.class_set_state import verdict_for as class_set_verdict
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.factory_state import FactoryHome
-from crb.server.posture_view import deployment_executor, deployment_image, refuse_unqualified
+from crb.server.posture_view import (
+    deployment_executor,
+    deployment_image,
+    deployment_posture_class,
+    refuse_unqualified,
+)
+from crb.server.reading_book import load_readings, pool_drift, repo_lint
 from crb.server.schemas import (
     BUILD_KINDS,
     TERMINAL_STATUSES,
@@ -126,8 +181,8 @@ from crb.server.schemas import (
 from crb.server.secrets import secrets_dir_for
 from crb.server.spend_cap import unpriced_rungs
 from crb.store.db import make_session_factory
-from crb.store.events import lock_event_writes
-from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED
+from crb.store.events import append_event_checked, lock_event_writes
+from crb.store.jobs import KIND_FACTORY, STATUS_QUEUED, stage_queued
 from crb.store.models import Event, Grade, Repo, Run, Task, User
 
 log = logging.getLogger("crb.server.runs")
@@ -665,7 +720,10 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
     ``ladder_json`` keeps the ladder as declared (labels as written, object rungs as
     ``{builder, model, provider?, budget?}`` with only the budget fields that were set);
     ``params.budget`` keeps only the run-level caps the request set — the worker overlays
-    them on the builder's defaults, and a rung's own budget on top of those."""
+    them on the builder's defaults, and a rung's own budget on top of those. A blind run on
+    the ``S1`` arm keeps ``params.arm`` and its test author here, so every path that builds
+    a run from a request stores the arm it asked for: the Learn queue's ``S1`` run once
+    stored none and would have graded ``A0``."""
     builder, model, provider = body.builder, body.model, body.provider
     if body.kind in BUILD_KINDS and not builder:
         first = next(e for e in body.ladder if isinstance(e, LadderRung))
@@ -707,6 +765,15 @@ def new_run(body: RunCreateRequest, *, actor: str) -> Run:
         params["learning"] = body.learning
     if body.taxonomy:
         params["taxonomy"] = body.taxonomy
+    if body.reading_id is not None:
+        params["reading_id"] = body.reading_id
+    if body.campaign_id is not None:
+        params["campaign_id"] = body.campaign_id
+    if body.arm is not None:
+        # set before the refusals: the credential check names the S1 test author's builder
+        params["arm"] = body.arm
+        if body.test_author is not None:
+            params["test_author"] = body.test_author.strip()
     ladder: list[Any] = body.stored_ladder()
     return Run(
         id=uuid.uuid4().hex,
@@ -922,6 +989,323 @@ def provider_refusal(run: Run, settings: Any, test_author: str | None = None) ->
         return
 
 
+#: The refusals of a run filed under a reading (P-789): the id is no verified reading of
+#: the repository (422 at submit), the run would not be graded sealed, or it would be graded
+#: in a posture class other than the one the reading counts (409 at submit; the worker's
+#: ``run.refused`` code at claim).
+READING_UNKNOWN_CODE = "reading_unknown"
+READING_UNSEALED_CODE = "reading_unsealed"
+READING_POSTURE_MISMATCH_CODE = "reading_posture_mismatch"
+
+
+def factory_reading_refusal(db: Session, body: RunCreateRequest) -> None:
+    """P-792 C8 at submit: a ``factory`` run may name only a reserved.v1 FORWARD reading of
+    its repository — its ticket's first build is then reserved under that reading and the
+    reserved.v1 whitelist binds the run (:func:`reading_run_fields_refusal`). Any other
+    ``reading_id`` on a factory run (a legacy forward reading, a replay reading, an unknown
+    one) is refused 422 ``validation_error`` as the request model refuses one on a kind no
+    reading measures (``RunCreateRequest``), so nothing is queued and no other refusal reads
+    the run first. Every other kind passes untouched."""
+    if body.kind != KIND_FACTORY or not body.reading_id:
+        return
+    if any(
+        r.reading_id == body.reading_id and r.reserved and r.prospective
+        for r in load_readings(db, body.repo)
+    ):
+        return
+    why = (
+        "reading_id applies to replay and blind runs only, and to a factory run filed under "
+        "a reserved.v1 forward reading"
+    )
+    raise ApiError(
+        422,
+        "validation_error",
+        f"{why}: {body.reading_id!r} is not a reserved.v1 forward reading of "
+        f"{body.repo!r} — nothing was queued",
+        detail={"reading_id": body.reading_id, "why": why},
+    )
+
+
+def reading_refusal(db: Session, settings: Any, body: RunCreateRequest) -> Reading:
+    """The refusals of a run filed under a reading (P-789, DL-382, DL-383): 422
+    ``reading_unknown`` when ``body.reading_id`` is not a verified reading of ``body.repo``;
+    409 ``campaign_required`` when the reading names a campaign and the run is not filed
+    under that same campaign — a run filed under the reading spends only under the ceiling
+    its campaign holds, whatever route queues it (the Learn re-measurement queue included);
+    a run posted without ``reading_id`` passes no reading gate here or at claim — with the
+    campaign's ``campaign_id`` it is refused 409 ``reading_required`` when the campaign holds a
+    reserved.v1 reading on the repository (:func:`campaign_refusal`), and otherwise admitted to
+    spend under the ceiling, its rows counting only when graded in the reading's scope (its
+    cell, the sealed posture class, rung ``r1``, after registration); without it the reading
+    never sees its rows; every Wave 3 body carries ``reading_id``; 409 ``reading_unsealed``
+    when the run's sandbox executor or the deployment's builder executor is not ``docker`` —
+    a replayed reading registers only on a sealed deployment, and a forward one (no such
+    check at ``POST /readings/forward``) is held to it here, run by run; 409
+    ``reading_posture_mismatch`` when the posture class the run would be graded in (the
+    run's executor with the repository's ``sandbox_tree``, else the deployment's) is not the
+    one the reading counts — its tree changed since the registration, or the reading named
+    another class. A run graded anywhere but the reading's class would be another posture's
+    rows, every one of them spent and none of them the reading's measurement. Returns the
+    reading, for :func:`reading_run_fields_refusal`."""
+    reading = next(
+        (r for r in load_readings(db, body.repo) if r.reading_id == body.reading_id), None
+    )
+    if reading is None:
+        raise ApiError(
+            422,
+            READING_UNKNOWN_CODE,
+            f"no verified reading {body.reading_id!r} in {body.repo!r}",
+            detail={"reading_id": body.reading_id},
+        )
+    if reading.campaign_id and body.campaign_id != reading.campaign_id:
+        raise ApiError(
+            409,
+            REFUSAL_REQUIRED,
+            f"reading {body.reading_id!r} spends under campaign {reading.campaign_id!r}: a run "
+            f"of it is filed under that campaign (campaign_id {reading.campaign_id!r} and a "
+            "max_cost_usd) — nothing was queued",
+            detail={"reading_id": body.reading_id, "campaign_id": reading.campaign_id},
+        )
+    sandbox = deployment_executor(settings, body.executor)
+    builder = str(settings.posture()["builder_executor"])
+    if sandbox != "docker" or builder != "docker":
+        raise ApiError(
+            409,
+            READING_UNSEALED_CODE,
+            f"a run filed under reading {body.reading_id!r} needs the sandbox and the builder "
+            f"both on docker (sandbox {sandbox!r}, builder {builder!r})",
+            detail={
+                "reading_id": body.reading_id,
+                "sandbox_executor": sandbox,
+                "builder_executor": builder,
+            },
+        )
+    graded = deployment_posture_class(settings, db.get(Repo, body.repo), body.executor)
+    if graded != reading.posture_class:
+        raise ApiError(
+            409,
+            READING_POSTURE_MISMATCH_CODE,
+            f"reading {body.reading_id!r} counts rows graded in {reading.posture_class!r}; "
+            f"this run would be graded in {graded!r} (the repository's sandbox_tree, else the "
+            "deployment's), so none of its rows could count — nothing was queued",
+            detail={
+                "reading_id": body.reading_id,
+                "reading_posture_class": reading.posture_class,
+                "run_posture_class": graded,
+            },
+        )
+    return reading
+
+
+def reading_lint_refusal(db: Session, reading: Reading) -> None:
+    """P-796 at submit: 409 ``lint_disabled`` when a run names ``reading`` (either attempt
+    rule) on a repository whose lint the operator switched off — a row graded with belt 5 off
+    never counts as one graded with it on (a legacy reading drops it, a reserved one would
+    bind it as a miss), so nothing a reading counts is built while the switch is off
+    (:func:`crb.core.reading.lint_refusal`; the worker re-checks at claim,
+    ``Worker._reading_lint_disabled``). ``detail`` is ``{reading_id, repo, reason}``."""
+    reason = lint_refusal(reading.repo, repo_lint(db, reading.repo))
+    if not reason:
+        return
+    raise ApiError(
+        409,
+        REFUSAL_LINT_DISABLED,
+        f"a run of reading {reading.reading_id!r}: {reason} — nothing was queued",
+        detail={
+            "reading_id": reading.reading_id,
+            "repo": reading.repo,
+            "reason": LINT_DISABLED_BY_CONFIG,
+        },
+    )
+
+
+def reading_pool_drift_refusal(db: Session, reading: Reading) -> None:
+    """P-797 at submit: 409 ``pool_drift`` when a run names the reserved.v1 ``reading`` and
+    its pool moved since registration (:func:`~crb.server.reading_book.pool_drift`): a pool
+    commit's live class or size is no longer the cell's, or a record the pool was pinned to is
+    missing or not qualified — the reading would count commits it did not register, so nothing
+    is queued and nothing reserved (the worker re-checks at claim,
+    ``Worker._reading_pool_drift``). ``detail`` is ``{reading_id, drift}``, ``drift`` the
+    ``{task_id, field, registered, now}`` rows. A legacy reading is never refused by it."""
+    drift = pool_drift(db, reading) if reading.reserved else []
+    if not drift:
+        return
+    raise ApiError(
+        409,
+        REFUSAL_POOL_DRIFT,
+        f"a run of {ATTEMPT_RULE_RESERVED} reading {reading.reading_id!r}: its pool moved since "
+        f"registration ({len(drift)} drift row(s)) — restore the task or register a new reading; "
+        "nothing was queued",
+        detail={"reading_id": reading.reading_id, "drift": drift},
+    )
+
+
+def reading_run_fields_refusal(reading: Reading, run: Run) -> None:
+    """P-792 channels C3, C5, C7 and C17 at submit: 422 ``reading_run_fields`` when ``run``,
+    filed under the reserved.v1 ``reading``, sets a field the reading does not register — the
+    pure whitelist :func:`~crb.core.reading.reading_run_refusal` over the run AS IT WILL BE
+    STORED (its columns, its stored ladder and its ``params``), the same call the worker makes
+    at claim (``Worker._reading_run_fields``), so a body is refused here for exactly what the
+    claim would fail it for: a ``builder_config`` (``extra_args`` can override the rung's
+    ``--model``, C3), a ``timeout`` (C5), another budget profile or learning switch on a
+    non-loop arm (C7), a non-default ``pool``/``executor``, an ``outage_stop`` or ``env_stop``
+    other than 1 (PW-7), another ladder, cell, kind, mode or arm, or any field outside :data:`~crb.core.reading.RESERVED_RUN_PARAMS` (C17). ``detail``
+    is ``{reading_id, fields, reasons, arm}``. A legacy reading is never refused by it."""
+    code, detail = reading_run_refusal(
+        reading,
+        kind=run.kind,
+        mode=run.mode or "",
+        builder=run.builder or "",
+        model=run.model or "",
+        provider=run.provider or "",
+        ladder=list(run.ladder_json or []),
+        params=dict(run.params_json or {}),
+    )
+    if not code:
+        return
+    fields = list(detail.get("fields") or [])
+    raise ApiError(
+        422,
+        REFUSAL_RUN_FIELDS,
+        f"a run of {ATTEMPT_RULE_RESERVED} reading {reading.reading_id!r} sets "
+        f"{', '.join(fields)}, which the reading does not register: a reserved attempt is "
+        "steered by nothing a run chooses — nothing was queued",
+        detail={"reading_id": reading.reading_id, **detail},
+    )
+
+
+def campaign_refusal(db: Session, body: RunCreateRequest) -> None:
+    """G-957 — what a run filed under a campaign must name, and the campaign itself. 422
+    ``campaign_cap_required``: no ``max_cost_usd``, so nothing could be held for it; 422
+    ``campaign_s1_unbounded``: an ``S1`` run naming neither ``task_ids`` nor ``limit``, whose
+    author headroom (per commit) could not be counted; 404 ``campaign_unknown``: no verified
+    campaign has that id; 409 ``reading_required`` (P-792 C19): no ``reading_id`` while the
+    campaign holds a reserved.v1 reading on ``body.repo`` — such a run would spend the
+    campaign's line with no reading gate (``reading_run_fields``, sealed, posture) checking
+    it, so it names its reading (``detail.reading_ids``, sorted); a campaign whose readings on
+    the repository are all legacy admits it as before. The tally itself is read where the run
+    is admitted (:func:`admit_under_campaign`), under the events write lock."""
+    if body.campaign_id is None:
+        return
+    detail = {"campaign_id": body.campaign_id}
+    if body.max_cost_usd is None:
+        raise ApiError(
+            422,
+            REFUSAL_CAP_REQUIRED,
+            "a run filed under a campaign names its max_cost_usd: the campaign holds the "
+            "run's cap plus its headroom until it finishes, so a run without one cannot be held",
+            detail=detail,
+        )
+    if body.arm is not None and planned_commits(list(body.task_ids), body.limit) is None:
+        raise ApiError(
+            422,
+            REFUSAL_S1_UNBOUNDED,
+            "an S1 run filed under a campaign names task_ids or a limit: its test author's "
+            "headroom is held per commit, so its commits must be counted",
+            detail=detail,
+        )
+    if campaign_of(db, body.campaign_id) is None:
+        raise ApiError(
+            404, REFUSAL_UNKNOWN, f"no verified campaign {body.campaign_id!r}", detail=detail
+        )
+    if body.reading_id is not None:
+        return
+    held = sorted(
+        r.reading_id
+        for r in load_readings(db, body.repo)
+        if r.reserved and r.campaign_id == body.campaign_id
+    )
+    if held:
+        raise ApiError(
+            409,
+            REFUSAL_READING_REQUIRED,
+            f"campaign {body.campaign_id!r} holds {ATTEMPT_RULE_RESERVED} readings on "
+            f"{body.repo!r} ({', '.join(held)}): a run filed under it names its reading "
+            "(reading_id), so the reading's gate checks what it spends — nothing was queued",
+            detail={"campaign_id": body.campaign_id, "reading_ids": held},
+        )
+
+
+def admit_under_campaign(
+    factory: sessionmaker[Session], settings: Any, body: RunCreateRequest, run: Run, *, actor: str
+) -> Run:
+    """Queue ``run`` under its campaign only while the campaign holds it (G-957): under the
+    events write lock, every submit refusal again but the login check (which ran before the
+    lock, P-729), then the campaign's tally — its runs' rows, test-author calls and settled
+    attempts with no row spent, the unspent cap and headroom of every run still queued or
+    running held — and, when this run's cap plus its headroom still fits under the released
+    line, the run is staged and its ``campaign.admitted`` event written in ONE transaction.
+    Refused 409 ``campaign_ceiling`` (it would pass the line), ``campaign_cost_unknown``,
+    ``campaign_overrun`` or ``unplaced_spend`` (the campaign is stopped), then
+    ``campaign_arm_in_flight`` while a run of the campaign on the same repository and the same
+    requested arm is queued or running, filed under the same reading or either under none, or
+    naming a commit this run names or either naming none (F87-2: one live run per arm, the live
+    one named) — before anything is queued or spent; two submits cannot both take the last of
+    the line, nor both start one arm on one commit."""
+    campaign_id = str(body.campaign_id)
+    s1 = body.arm is not None
+    commits = planned_commits(list(body.task_ids), body.limit) or 0
+    cap = float(body.max_cost_usd or 0.0)
+    # keyed by the reader that keys every stored run, so the two sides never differ
+    arm, reading_id, named = run_arm(run), run_reading(run), run_commits(run)
+
+    def build(s: Session) -> dict[str, Any]:
+        submit_refusals(s, settings, body, run, login=False)
+        campaign = campaign_of(s, campaign_id)
+        if campaign is None:  # pragma: no cover — submit_refusals refused it just above
+            raise ApiError(404, REFUSAL_UNKNOWN, f"no verified campaign {campaign_id!r}")
+        now = campaign_tally(s, campaign)
+        refused = now.refusal(cap_usd=cap, s1=s1, commits=commits)
+        if refused is not None:
+            raise ApiError(
+                409,
+                refused.code,
+                str(refused),
+                detail={"campaign_id": campaign_id, **refused.detail},
+            )
+        # read under the same lock as the tally: a second submit on the arm waits for this one
+        # to commit, then finds its run live and is refused (F87-2)
+        live = live_on_arm(
+            s, campaign_id, repo=body.repo, arm=arm, reading_id=reading_id, commits=named
+        )
+        if live is not None:
+            busy = arm_in_flight(
+                arm=arm,
+                repo=body.repo,
+                reading_id=reading_id,
+                run_id=live.id,
+                status=live.status,
+            )
+            raise ApiError(
+                409, busy.code, str(busy), detail={"campaign_id": campaign_id, **busy.detail}
+            )
+        headroom = now.headroom(s1=s1, commits_left=commits)
+        staged = stage_queued(s, run)
+        return {
+            "campaign_id": campaign_id,
+            "run_id": staged.id,
+            "repo": staged.repo,
+            "kind": staged.kind,
+            "cap_usd": round(cap, 6),
+            "s1": s1,
+            "commits": commits,
+            "headroom_usd": headroom,
+            **now.to_dict(),
+            "left_usd_after": round(now.left_usd - cap - headroom, 6),
+        }
+
+    append_event_checked(
+        factory,
+        trace_id=campaign_id,
+        stage="system",
+        action=CAMPAIGN_ADMITTED,
+        build=build,
+        actor=actor,
+        repo=body.repo,
+    )
+    return run
+
+
 def submit_refusals(
     db: Session, settings: Any, body: RunCreateRequest, run: Run, *, login: bool = True
 ) -> None:
@@ -931,6 +1315,10 @@ def submit_refusals(
     ``POST /runs``). ``tests/test_server_routes_runs.py`` fails when a function that
     enqueues a run does not call this.
 
+    * 422 ``validation_error`` — FIRST, a ``factory`` run naming a ``reading_id`` that is not
+      a reserved.v1 FORWARD reading of the repository: a factory run's build is a reading's
+      measurement only when that reading reserves its first attempt (P-792 C8;
+      :func:`factory_reading_refusal`), so no other reading is spent on;
     * 422 ``builder_credential_missing`` — a builder this run would call has no credential
       (P-003; presence only);
     * 422 ``spend_cap_unpriced`` — a spend cap over a model with no known price, a factory
@@ -940,6 +1328,35 @@ def submit_refusals(
     * 409 ``posture_unqualified`` — the ADR-0019 §3 refusal: ``qualify_first: false`` on a
       build with nothing qualified where it would be graded can only fail
       ``POSTURE_UNQUALIFIED`` on the worker (a database read, so it costs nothing);
+    * 422 ``reading_unknown`` — ``reading_id`` names no verified reading of the repository;
+    * 409 ``reading_unsealed`` — a run filed under a reading whose sandbox executor or the
+      deployment's builder executor is not ``docker``: its rows could never be the reading's
+      sealed measurement (P-789; the worker re-checks at claim);
+    * 409 ``reading_posture_mismatch`` — a run filed under a reading that would be graded in
+      a posture class other than the one the reading counts (the repository's
+      ``sandbox_tree`` moved, or the reading named another class): every row it spent on
+      would be refused by the reading (DL-383; the worker re-checks at claim with its tree);
+    * 409 ``campaign_required`` — a run of a reading that names a campaign, not filed under
+      that same campaign: the reading's runs spend only under its campaign's ceiling (DL-382;
+      the worker refuses an un-admitted one at claim);
+    * 422 ``campaign_cap_required`` / ``campaign_s1_unbounded``, 404 ``campaign_unknown`` —
+      a run filed under a campaign without a cap, an ``S1`` one without counted commits, or
+      under no verified campaign (G-957; :func:`campaign_refusal` — the campaign's tally is
+      read where the run is admitted, :func:`admit_under_campaign`);
+    * 409 ``reading_required`` — a run filed under a campaign that holds a reserved.v1
+      reading on the repository, naming no ``reading_id``: it would spend the campaign's line
+      with no reading gate checking it (P-792 C19; :func:`campaign_refusal`);
+    * 422 ``reading_run_fields`` — a run filed under a reserved.v1 reading that sets a field
+      the reading does not register (``builder_config``, ``timeout``, another budget profile,
+      ladder, cell or arm…): nothing a run chooses may steer a reserved attempt (P-792 C3, C5,
+      C7, C17; :func:`reading_run_fields_refusal`; the worker re-checks at claim);
+    * 409 ``lint_disabled`` — a run filed under a reading of either rule on a repository whose
+      lint the operator switched off: nothing a reading counts is built while belt 5 is off
+      (P-796; :func:`reading_lint_refusal`; the worker re-checks at claim);
+    * 409 ``pool_drift`` — a run filed under a reserved.v1 reading whose pool moved since
+      registration: a pool task relabelled out of the cell, or a pinned qualification record
+      missing or not qualified (P-797; :func:`reading_pool_drift_refusal`; the worker
+      re-checks at claim);
     * 422 ``builder_login_invalid`` — a builder this run would call (the same list the
       presence check reads, an ``S1`` test author included) has a login whose last
       verification failed; one that is not fresh is verified once first — LAST, after every
@@ -952,6 +1369,7 @@ def submit_refusals(
     login and record it on a second connection, which would wait on the lock the caller's
     own transaction holds (P-729).
     """
+    factory_reading_refusal(db, body)
     credential_refusal(run, settings)
     factory_settings = getattr(settings, "factory", None)
     spend_cap_refusal(
@@ -971,6 +1389,12 @@ def submit_refusals(
             executor=deployment_executor(settings, body.executor),
             image_ref=deployment_image(settings, repo_row),
         )
+    campaign_refusal(db, body)
+    if body.reading_id is not None:
+        reading = reading_refusal(db, settings, body)
+        reading_lint_refusal(db, reading)
+        reading_run_fields_refusal(reading, run)
+        reading_pool_drift_refusal(db, reading)
     if not login:
         return
     # last: the only refusal that can cost a verify turn (P-462)
@@ -1030,13 +1454,6 @@ def create_run(
     refuse_class_set(db, body)
     api = require_jobs()
     run = new_run(body, actor=operator.id)
-    if s1:
-        # set before the refusals: the credential check names the S1 test author's builder
-        run.params_json = {
-            **dict(run.params_json or {}),
-            "arm": body.arm,
-            **({"test_author": body.test_author.strip()} if body.test_author is not None else {}),
-        }
     submit_refusals(db, settings, body, run)
     if body.kind == KIND_FACTORY:
         # Pin the backlog the run will work at ENQUEUE time — the frozen hash AND the
@@ -1059,7 +1476,11 @@ def create_run(
             # that is also a rung on the ladder before anything is built
             params["test_author"] = body.test_author.strip()
         run.params_json = params
-    run = api.enqueue(factory, run)
+    if body.campaign_id is not None:
+        # G-957: the campaign's tally is read and the run staged under one lock
+        run = admit_under_campaign(factory, settings, body, run, actor=operator.id)
+    else:
+        run = api.enqueue(factory, run)
     stored = db.get(Run, run.id)
     return run_out(db, stored if stored is not None else run)
 
@@ -1140,7 +1561,10 @@ def get_run(run_id: str, viewer: ViewerDep, db: DbDep) -> RunOut:
 )
 def cancel_run(run_id: str, operator: OperatorDep, db: DbDep, factory: SessionFactoryDep) -> RunOut:
     """A queued run is cancelled outright, a running one is flagged; either way the
-    queue writes ``run.cancel_requested`` naming THIS operator (J-TEL-7)."""
+    queue writes ``run.cancel_requested`` naming THIS operator (J-TEL-7). On a run filed
+    under a reserved.v1 reading, a cancel after a reservation costs that commit: the attempt
+    it stops is the commit's one attempt, a miss no later run re-rolls (P-792); a cancel
+    before the reservation halts the run with the commit still pending."""
     run = _get_run(db, run_id)
     if run.status in TERMINAL_STATUSES:
         raise ApiError(
@@ -1349,7 +1773,9 @@ __all__ = [
     "SSE_PAGE",
     "SSE_POLL_S",
     "JobsApi",
+    "admit_under_campaign",
     "append_system_event",
+    "campaign_refusal",
     "derive_counts",
     "event_stream",
     "event_to_dict",

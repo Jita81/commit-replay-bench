@@ -717,7 +717,8 @@ class RunCreateRequest(BaseModel):
     retain: RunRetention = Field(default_factory=RunRetention)
     #: Provider circuit breaker for build kinds: stop the run after this many consecutive
     #: attempts the provider refused (``failure_kind: outage``); ``0`` disables; ``None`` =
-    #: the worker's default (3). Stored as ``params.outage_stop`` only when set.
+    #: the worker's default (3; 1 for a run of a reserved.v1 reading, which may name only 1 —
+    #: PW-7). Stored as ``params.outage_stop`` only when set.
     outage_stop: int | None = Field(default=None, ge=0, le=1000)
     #: ADR-0019 — build and grading kinds: qualify every task that has no record in the
     #: posture that will grade it before any builder call (no model spend). ``false`` makes
@@ -726,7 +727,8 @@ class RunCreateRequest(BaseModel):
     qualify_first: bool | None = None
     #: ADR-0019 — stop a build run after this many consecutive attempts whose failure the
     #: gold also showed in the posture (environment rows); ``0`` disables; ``None`` = the
-    #: worker's default (2). Stored as ``params.env_stop`` only when set.
+    #: worker's default (2; 1 for a run of a reserved.v1 reading, which may name only 1 —
+    #: PW-7). Stored as ``params.env_stop`` only when set.
     env_stop: int | None = Field(default=None, ge=0, le=1000)
     #: Belt-5 pre-flight for build kinds (``crb.builders.adapter.Preflight``): ``true`` =
     #: apply the repository's own fixers then one bounded repair turn; an object sets
@@ -790,6 +792,38 @@ class RunCreateRequest(BaseModel):
     #: The author rung and the build rung are never the same rung: a label that is also on
     #: this run's ladder is refused before anything is built.
     test_author: str | None = Field(default=None, max_length=200)
+    #: ``replay`` and ``blind`` runs, and a ``factory`` run filed under a reserved.v1 FORWARD
+    #: reading (its ticket's first build reserved, C8 — any other reading on a factory run is
+    #: 422 ``validation_error``): the registered reading this run is filed under
+    #: (``rdg_<24 hex>``). Refused 422 ``reading_unknown`` unless it is a verified reading
+    #: of the repository, 409 ``reading_unsealed`` unless the run's sandbox executor and
+    #: the deployment's builder executor are both ``docker``, and 409
+    #: ``reading_posture_mismatch`` unless the run would be graded in the reading's posture
+    #: class (DL-383); the worker re-checks both at claim and fails the run (``run.refused``)
+    #: before any builder call. Under a reserved.v1 reading, a run setting a field the
+    #: reading does not register (``builder_config``, ``timeout``, another budget profile,
+    #: ladder or arm…) is refused 422 ``reading_run_fields`` (``detail.fields``), at submit
+    #: and again at claim (P-792).
+    #: A reading that names a campaign takes only runs filed under that same campaign: 409
+    #: ``campaign_required`` otherwise, and at claim for a run no ``campaign.admitted`` event
+    #: names (DL-382). A run posted without ``reading_id`` is not checked against a reading
+    #: — refused 409 ``reading_required`` when its ``campaign_id`` names a campaign holding a
+    #: reserved.v1 reading on the repository (P-792) — and such a reading never counts its
+    #: rows unless its campaign admitted it (DL-382). Stored as ``params.reading_id`` only
+    #: when set.
+    reading_id: str | None = Field(default=None, pattern=r"^rdg_[0-9a-f]{24}$")
+    #: Build runs only: the campaign this run is filed under (``cmp_<24 hex>``, G-957). The
+    #: run must name ``max_cost_usd`` (422 ``campaign_cap_required``) and, on ``arm: S1``,
+    #: ``task_ids`` or ``limit`` (422 ``campaign_s1_unbounded``); it is refused 404
+    #: ``campaign_unknown`` unless the campaign verifies, and 409 ``campaign_ceiling`` /
+    #: ``campaign_cost_unknown`` / ``campaign_overrun`` / ``unplaced_spend`` when the
+    #: campaign's tally cannot hold it, then 409 ``campaign_arm_in_flight`` while a run the
+    #: campaign admitted on the same repository and requested arm, that could attempt one of
+    #: its commits, is queued or running (F87-2) — read and decided under the events write
+    #: lock, before anything is queued; 409 ``reading_required`` when it names no
+    #: ``reading_id`` and the campaign holds a reserved.v1 reading on the repository (P-792).
+    #: Stored as ``params.campaign_id`` only when set.
+    campaign_id: str | None = Field(default=None, pattern=r"^cmp_[0-9a-f]{24}$")
 
     @field_validator("kind")
     @classmethod
@@ -917,6 +951,17 @@ class RunCreateRequest(BaseModel):
             raise ValueError(
                 f"max_cost_usd applies to build runs only ({sorted(BUILD_KINDS)}): a "
                 f"{self.kind!r} run makes no builder attempt"
+            )
+        if self.reading_id is not None and self.kind not in ("replay", "blind", "factory"):
+            raise ValueError(
+                "reading_id applies to replay and blind runs only, and to a factory run filed "
+                f"under a reserved.v1 forward reading: a {self.kind!r} run is not a reading's "
+                "measurement"
+            )
+        if self.campaign_id is not None and self.kind not in BUILD_KINDS:
+            raise ValueError(
+                f"campaign_id applies to build runs only ({sorted(BUILD_KINDS)}): a "
+                f"{self.kind!r} run spends nothing a campaign holds"
             )
         return self
 

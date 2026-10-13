@@ -547,6 +547,10 @@ export const HINTS = {
     'The model the calibration builds run on. A ticket built by another model leaves the forward reading instead of counting.',
   'field.library.forward_provider':
     'The provider that serves the model, as the factory records it on each row. A ticket built through another provider leaves the forward reading instead of counting.',
+  'field.library.forward_hypothesis':
+    'What this reading tests, in your words, written before any build is read. It is stored with the reading and hashed into its id, so it cannot be changed after the results are in.',
+  'field.library.forward_smallest_effect':
+    'The smallest effect that would matter, as a share of attempts: above 0 and at most 1. It is stored with the reading and hashed into its id, so the effect a result is read against is fixed before the first build.',
   'button.library.register_forward':
     'Register the forward reading now, under your name. It spends from this cell’s one error budget and cannot be withdrawn; it counts only calibration builds whose held-out tests are written after this moment.',
   'col.library.characteristic':
@@ -759,7 +763,7 @@ export const HINTS = {
   'gate.signoff.false_q1':
     'No row in the cell is credited clean against its own belts. This clause cannot be relaxed.',
   'gate.signoff.thin_cell':
-    'The cell has at least the policy’s minimum attempts, with its point and Wilson lower bound shown. A thin cell is refused however good its rate.',
+    'The cell has graded at least the policy’s minimum of distinct tasks — reruns of one commit count once — with its point and Wilson lower bound shown. A thin cell is refused however good its rate.',
   'gate.signoff.controls':
     'The latest controls run passed, with no more escapes than the policy allows and at least the required share constructible; the run and its date are named. Never run is a refusal.',
   'gate.signoff.oracle':
@@ -1730,6 +1734,10 @@ export const HINTS = {
     'Distinct commits the reading has read on this arm, each by its first attempt in the sealed posture, in the seeded order, with the Wilson 95% interval and the commits still needed to the next look.',
   'tile.capability.readings':
     'Every arm of the reading registered on this cell: its state under the look rule, clean over distinct commits read, the interval, and the commits still needed.',
+  'text.capability.arm_waiting':
+    'This arm comes after the named arm in the hierarchy, and that arm is still being read. Its own numbers are shown, but it is not read toward the verdict while it waits.',
+  'text.capability.arm_stopped':
+    'This arm comes after the named arm in the hierarchy, and that arm read insufficient or undecided. It is never read toward the verdict of this reading.',
   'tile.capability.shortfalls':
     'Every clause this cell fails, in the rule’s order, with the next measurement and how many; replays and calibration builds cost model money.',
   'tile.capability.provenance':
@@ -1891,13 +1899,13 @@ export const HINTS = {
   'stat.learn.needed':
     'Commits the registered readings still need before their next looks, summed over the readings waiting on a look (routing.v2). A cell with no registered reading is not counted here: it needs a reading registered first.',
   'stat.learn.remeasure_cost':
-    'Each cell’s own mean row cost times the commits its runs ask for, times up to 3 attempts per commit for a blind cell (the ladder’s rungs), summed over the cells with a known cost. A dash means no cost is known.',
+    'Each cell’s own mean row cost times the commits its runs ask for, one attempt per commit blind or sighted (a queued run climbs one rung), summed over the cells with a known cost. A dash means no cost is known.',
   'col.learn_remeasure.cell':
     'The cell: its process step, class, size, language, builder, model and provider, then the mode and the context arm it is about. Two arms are never pooled.',
   'col.learn_remeasure.counts':
     'Rows on older apparatus versions (named); the distinct commits read so far (by the registered reading, or, with none, the commits with a first attempt); and how many more commits are needed, with the reason and what to do next under it.',
   'col.learn_remeasure.cost':
-    'The cell’s mean row cost times the commits its runs ask for (times up to 3 for a blind cell). It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
+    'The cell’s mean row cost times the commits its runs ask for (one attempt each, blind or sighted). It says not known when no row of the cell recorded a cost, and a dash when nothing can be queued.',
   'col.learn_remeasure.runs':
     'How many run requests the plan lists to close the gap.',
   'link.learn.oracle':
@@ -2009,9 +2017,13 @@ export const HINTS = {
   'button.learn.queue_remeasure':
     'Shows what queueing this cell would run and cost before anything is sent.',
   'link.learn.remeasure_in_flight':
-    'The runs already queued for this cell and not yet finished. Queue comes back once they have graded, so the same estimate is never spent twice.',
+    'The runs in flight on this cell’s commits and not yet finished: those an earlier Queue put on the queue, and a campaign’s runs that would attempt one of the commits it asks for. Queue comes back once they have graded, so the same estimate is never spent twice and no commit is requested while a run is still attempting it.',
   'text.learn.remeasure_register':
     'This cell has rows but no registered reading at this apparatus. Rows graded before a reading is registered never count, so nothing is queued here: register a reading of the cell first (crb reading register, or POST /readings).',
+  'text.learn.remeasure_checks_arm_moved':
+    'The repository’s checks arm is no longer the one this reading froze when it was registered. Any run of the reading would halt before its first build, so nothing can be queued for it until the arm is restored or the stage is ended.',
+  'text.learn.remeasure_restore_arm':
+    'Nothing can be queued for this reading: its runs would halt, here or by hand, because the repository’s checks arm moved. Restore the checks arm the reading froze, or end the stage.',
   'link.learn.remeasure_by_hand':
     'The runs page for this repository. The reading waits on an arm this plan cannot compose a replay for (another test author, the loop switch, a factory arm or another posture), so the run is queued there by hand.',
   'link.learn.remeasure_mine':
