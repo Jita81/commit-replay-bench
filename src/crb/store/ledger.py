@@ -52,7 +52,9 @@ Works with:   src/crb/core/ledger.py (``GradeRow``, ``verify_chain``, ``GENESIS_
               (verify / export over HTTP), src/crb/store/jobs.py (``claim_guard``, the guard a
               reserved attempt's append runs under the lock)
 Tested by:    tests/test_store_ledger.py, tests/test_store_reviews.py, tests/test_store_db.py,
-              tests/test_store_migrate.py, tests/test_p792_reserved_store.py
+              tests/test_store_migrate.py, tests/test_p792_reserved_store.py,
+              tests/test_p792_reserved_reservation.py and tests/test_p792_reserved_losses.py
+              (``AttemptSettled``: an append under a lost claim refused)
 Touch when:   never for a new repository; when ``GradeRow`` or ``ReviewRecord`` gains a field
               (the column tuples are derived from the dataclasses, so a new field needs a
               migration and a ``labels``-style exclusion if it is not a column); changing the

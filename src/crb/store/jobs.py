@@ -71,6 +71,8 @@ Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns)
               ``ClaimLost`` extends)
 Tested by:    tests/test_store_jobs.py, tests/test_server_routes_runs.py,
               tests/test_server_routes_learn.py, tests/test_p792_reserved_store.py,
+              tests/test_p792_reserved_reservation.py and tests/test_p792_reserved_losses.py
+              (``claim_guard``: a lost claim's append refused end to end),
               tests/test_worker.py (``ClaimLost``: a worker that lost its claim)
 Touch when:   never for a new repository; adding a run kind means extending ``RUN_KINDS``
               here and the executor table in src/crb/server/worker.py together (and
