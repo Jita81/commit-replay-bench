@@ -118,7 +118,8 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               event names (P-789, DL-382, DL-383), or a run of a reserved.v1 reading that sets
               a field the reading does not register (``_reading_run_fields`` over
               ``reading_run_refusal``: ``builder_config``, ``timeout``, another budget profile
-              or ladder, a factory run off a forward reading's cell; P-792 C3, C5, C7, C8),
+              or ladder, a factory run off a forward reading's cell, an ``outage_stop`` or
+              ``env_stop`` other than 1; P-792 C3, C5, C7, C8, PW-7),
               or a run of a reading of either rule while the
               repository's lint is switched off (``_reading_lint_disabled``, P-796), or a run
               of a reserved.v1 reading whose pool moved since registration
@@ -129,7 +130,8 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               StepEvents, writes grade rows through the append-only ledger with the run's
               labels stamped, records the apparatus, and marks the run succeeded / failed /
               cancelled honestly (all-attempts-errored is a failure; a provider outage streak
-              stops the run; so does a spend cap, before an attempt or item that could pass it
+              stops the run — a run of a reserved.v1 reading at its first outage or
+              environment row, PW-7; so does a spend cap, before an attempt or item that could pass it
               — src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
               skips it). Fetches and fast-forwards the clone's default branch before a factory
               run (refusing the run when it cannot) and syncs delivered pull requests'
@@ -329,6 +331,7 @@ from crb.core.reading import (
     LABEL_TREATMENT,
     REFUSAL_LINT_DISABLED,
     REFUSAL_POOL_DRIFT,
+    RESERVED_RUN_STOP,
     SKIP_COMMIT_RESERVED,
     SKIP_TASK_NOT_ENROLLED,
     Reading,
@@ -486,7 +489,8 @@ from crb.store.library import DbLibraryLedger
 from crb.store.models import Event, EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
-#: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
+#: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables. A run of a
+#: reserved.v1 reading defaults to (and may only name) ``RESERVED_RUN_STOP``, 1 (PW-7).
 DEFAULT_OUTAGE_STOP = 3
 
 #: How often the idle loop re-derives every repository's decisions inbox and stamps the clock
@@ -1958,8 +1962,9 @@ class Worker:
         path that skipped ``POST /runs`` (inserted directly, or queued by a route the gate
         missed) still cannot steer the attempt it would reserve: a ``builder_config`` whose
         ``extra_args`` override the rung's ``--model`` (C3), a ``timeout`` (C5), another
-        budget profile (C7), another ladder, cell, kind or mode, or an arm the reading does not
-        read. A factory run under a reserved.v1 forward reading is held to the factory
+        budget profile (C7), another ladder, cell, kind or mode, an arm the reading does not
+        read, or an ``outage_stop`` or ``env_stop`` other than 1 that would let it reserve past
+        its first outage or environment row (PW-7). A factory run under a reserved.v1 forward reading is held to the factory
         whitelist (``RESERVED_FACTORY_PARAMS``) on the reading's cell, sighted, arm ``S2``
         (C8): an off-cell run is refused here, before it can reserve. Nothing is reserved,
         so every enrolled commit or ticket stays pending. ``None`` for a run
@@ -3576,8 +3581,13 @@ class Worker:
         # Circuit breaker: a provider that refuses the call (usage limit, 429, dead
         # credential) refuses every call; 263 of the first 534 rows on the dev stack were
         # such `outage` rows written in seconds (2026-09-15). After `outage_stop` consecutive
-        # refused attempts the run stops with the reason instead of burning the queue.
-        outage_stop = int(p.get("outage_stop", DEFAULT_OUTAGE_STOP) or 0)
+        # refused attempts the run stops with the reason instead of burning the queue. A run
+        # of a reserved.v1 reading stops at the FIRST (PW-7): its in-flight commit is a miss,
+        # so it must reserve no more; the claim refused any other value it named.
+        outage_stop = int(
+            p.get("outage_stop", RESERVED_RUN_STOP if reading is not None else DEFAULT_OUTAGE_STOP)
+            or 0
+        )
         streak: dict[str, Any] = {"n": 0, "last": ""}
         inner_build = build_fn
 
@@ -3607,8 +3617,11 @@ class Worker:
             return outage_stop > 0 and streak["n"] >= outage_stop
 
         # ADR-0019: two environment rows in a row mean the posture, not the tasks, is
-        # broken — stop before paying for more (``params.env_stop``; 0 disables)
-        env_stop = int(p.get("env_stop", DEFAULT_ENV_STOP) or 0)
+        # broken — stop before paying for more (``params.env_stop``; 0 disables). A run of a
+        # reserved.v1 reading stops at the first (PW-7), as it does at the first outage.
+        env_stop = int(
+            p.get("env_stop", RESERVED_RUN_STOP if reading is not None else DEFAULT_ENV_STOP) or 0
+        )
 
         def env_tripped() -> bool:
             if env_stop <= 0:

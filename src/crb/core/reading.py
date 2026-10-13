@@ -68,7 +68,9 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   switched off, a disqualification, a treatment other than the one reserved, or a settled
   reservation with no row is a miss named by its reason (``CommitReading.reason``); fail
   closed. A run of such a reading carries only :data:`RESERVED_RUN_PARAMS` on the reading's
-  own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``). Its pool is pinned
+  own cell and arms (:func:`reading_run_refusal`, ``reading_run_fields``), and halts at its
+  first outage or environment row (``outage_stop`` and ``env_stop`` unset or
+  :data:`RESERVED_RUN_STOP`, PW-7): the commit in flight is a miss, the rest stay pending. Its pool is pinned
   to qualification records (P-797): the body carries ``pool_posture_id`` and
   ``pool_qualifications`` (task id → the qualification id in force when it froze), both hashed
   into ``pool_sha256`` (:func:`reserved_pool_digest`) and the ``reading_id``; the server reads
@@ -2524,6 +2526,15 @@ RESERVED_FACTORY_PARAMS: frozenset[str] = frozenset(
 RESERVED_RUN_LADDER: tuple[str, ...] = (RUNG_R1,)
 #: The ``params`` a reserved run keeps at the value ``POST /runs`` stores when it is unset.
 _RESERVED_RUN_DEFAULTS: Mapping[str, Any] = {"pool": "", "executor": "", "timeout": 0}
+#: Where a run of a reserved.v1 reading stops (PW-7): at its FIRST outage row
+#: (``outage_stop``) or environment row (``env_stop``). Under the reserved attempt the commit
+#: in flight is a miss, so a halted run must reserve nothing more — a usage-limit episode
+#: under the worker's general defaults (3 and 2) would write three missed rows, enough alone
+#: to make ``look.v1`` read insufficient. The worker defaults both knobs to it on such a run;
+#: a run that names either with any other value (``True``, 0, ``null`` or 2 alike) is refused.
+#: Unreserved commits stay pending and are run later.
+RESERVED_RUN_STOP: int = 1
+_RESERVED_RUN_STOPS: tuple[str, ...] = ("env_stop", "outage_stop")
 #: The run kinds a reserved.v1 reading reads (``crb.store.jobs`` ``KIND_REPLAY`` and
 #: ``KIND_BLIND``; core never imports the store), the mode each runs in, and its arm's base.
 _RESERVED_RUN_KINDS: Mapping[str, tuple[str, str]] = {
@@ -2558,7 +2569,8 @@ def _run_shape_reasons(
 ) -> dict[str, str]:
     """What a run of the reserved.v1 ``reading`` sets that it may not, whatever its kind:
     a ``params`` key outside ``allowed``; ``pool``, ``executor`` or ``timeout`` off the
-    default ``POST /runs`` stores; a ladder other than :data:`RESERVED_RUN_LADDER`; a
+    default ``POST /runs`` stores; ``outage_stop`` or ``env_stop`` named with any value but
+    the int :data:`RESERVED_RUN_STOP` (PW-7); a ladder other than :data:`RESERVED_RUN_LADDER`; a
     builder, model or provider other than the reading's cell — as ``{field: why}``."""
     rule = ATTEMPT_RULE_RESERVED
     reasons: dict[str, str] = {}
@@ -2567,6 +2579,13 @@ def _run_shape_reasons(
     for key, default in _RESERVED_RUN_DEFAULTS.items():
         if params.get(key, default) not in (default, None):
             reasons[key] = f"a run of a {rule} reading keeps {key} at its default {default!r}"
+    for key in _RESERVED_RUN_STOPS:
+        value = params.get(key, RESERVED_RUN_STOP)
+        if key in params and not (type(value) is int and value == RESERVED_RUN_STOP):
+            reasons[key] = (
+                f"a run of a {rule} reading stops at its first outage or environment row: "
+                f"{key} is {RESERVED_RUN_STOP} or unset"
+            )
     if [*ladder] != [*RESERVED_RUN_LADDER]:
         reasons["ladder"] = (
             f"a run of a {rule} reading climbs the one ladder {list(RESERVED_RUN_LADDER)}, "
@@ -2623,8 +2642,9 @@ def reading_run_refusal(
     can be steered by nothing a run chooses, so a run of a reserved.v1 reading
 
     * carries only the :data:`RESERVED_RUN_PARAMS` keys, with ``pool``, ``executor`` and
-      ``timeout`` at their defaults, and climbs :data:`RESERVED_RUN_LADDER` (``ladder`` is the
-      ladder as stored);
+      ``timeout`` at their defaults and ``outage_stop`` and ``env_stop`` unset or
+      :data:`RESERVED_RUN_STOP` (it halts at its first outage or environment row, PW-7), and
+      climbs :data:`RESERVED_RUN_LADDER` (``ladder`` is the ladder as stored);
     * builds on the reading's own builder, model and provider;
     * runs an arm the reading reads: a sighted replay ``S3``, a blind run ``A0``, a blind run
       with ``arm: S1`` the reading's ``S1@<author>`` (a ``test_author``, when named, names that
@@ -2639,7 +2659,8 @@ def reading_run_refusal(
     A reserved.v1 FORWARD reading (``prospective``) reads factory runs alone (C8): a sighted
     ``factory`` run on the reading's cell and the one ladder, carrying only the
     :data:`RESERVED_FACTORY_PARAMS` keys (``pool``, ``executor`` and ``timeout`` at their
-    defaults) — its arm is ``S2``, the factory's reserving each ticket's first build under it;
+    defaults, the stop knobs unset or :data:`RESERVED_RUN_STOP` — a factory run reads neither
+    knob today) — its arm is ``S2``, the factory's reserving each ticket's first build under it;
     a replay or blind run of it is refused ``kind``. A ``factory`` run of any other reserved.v1
     reading is refused ``kind``. A legacy reading is never refused by it."""
     if not reading.reserved:
@@ -2759,6 +2780,7 @@ __all__ = [
     "RESERVED_FACTORY_PARAMS",
     "RESERVED_RUN_LADDER",
     "RESERVED_RUN_PARAMS",
+    "RESERVED_RUN_STOP",
     "RESERVE_HALTS",
     "RESERVE_SKIPS",
     "RULES",

@@ -1367,8 +1367,8 @@ _RUN_OK: dict[str, Any] = {
     "budget_profile": PROFILE,
     "reading_id": "rdg_x",
     "campaign_id": "camp-w",
-    "outage_stop": 3,
-    "env_stop": 3,
+    "outage_stop": 1,
+    "env_stop": 1,
     "qualify_first": False,
 }
 _NO_LOOP_KEYS = {k: v for k, v in _RUN_OK.items() if k not in ("learning", "budget_profile")}
@@ -1409,6 +1409,21 @@ _RUN_TABLE: list[tuple[str, dict[str, Any], dict[str, Any], str, list[str]]] = [
         }.items()
     ),
     ("timeout", {}, {**_RUN_OK, "timeout": 1}, "", ["timeout"]),
+    # PW-7: a reading run halts at its first outage or environment row — a stop knob is 1
+    # or unset; True, 0 (off), null, 2 and 3 would each let it reserve past an outage
+    ("stops_unset", {}, {k: v for k, v in _RUN_OK.items() if not k.endswith("_stop")}, "S3", []),
+    *(
+        (f"{k}_{v!r}", {}, {**_RUN_OK, k: v}, "", [k])
+        for k in ("outage_stop", "env_stop")
+        for v in (True, 0, None, 2, 3, "1", 1.0)
+    ),
+    (
+        "both_stops",
+        {},
+        {**_RUN_OK, "outage_stop": 3, "env_stop": 2},
+        "",
+        ["env_stop", "outage_stop"],
+    ),
     ("pool", {}, {**_RUN_OK, "pool": "since:2026-09-01"}, "", ["pool"]),
     ("executor", {}, {**_RUN_OK, "executor": "local"}, "", ["executor"]),
     ("ladder_rung", {"ladder": ["claude_code:claude-opus-5"]}, _RUN_OK, "", ["ladder"]),
@@ -1511,6 +1526,9 @@ def test_p792_reading_run_refusal_names_the_whitelist() -> None:
     )
     assert whitelist == RESERVED_RUN_PARAMS
     assert RESERVED_RUN_LADDER == ("r1",)
+    from crb.core.reading import RESERVED_RUN_STOP
+
+    assert RESERVED_RUN_STOP == 1  # PW-7: the first outage or environment row halts it
     reading = _reserved_reading(commits(3, prefix="w"), descriptive=(("A0", 2), ("A0+L", 2)))
     for name, run, params, arm, refused in _RUN_TABLE:
         if refused:
@@ -2349,6 +2367,15 @@ class _WRig:
         rows = list(self.h.worker.ledger.rows())
         return {c.commit: (c.outcome, c.reason) for c in arm_reading(loaded, arm, rows).commits}
 
+    def look(self, reading: Reading, arm: str) -> tuple[int, int]:
+        """``arm``'s look as the server reads it, as ``(counted, misses)``."""
+        with self.h.factory() as s:
+            loaded = next(
+                r for r in load_readings(s, pr.REPO_NAME) if r.reading_id == reading.reading_id
+            )
+        look = arm_reading(loaded, arm, list(self.h.worker.ledger.rows())).look
+        return look.counted, look.misses
+
     def actions(self, run_id: str) -> list[str]:
         return [e.action for e in self.h.events(run_id)]
 
@@ -2748,6 +2775,111 @@ def test_p792_claim_refuses_timeout_and_a_budget_profile_mismatch(
     (res,) = rig.reservations(reading)
     assert (res.step_id, res.task_id) == ("A0", rig.first)
     assert rig.verdicts(reading, "A0")[rig.first] == (True, "")
+
+
+def test_a_reading_run_stops_at_its_first_outage_row(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PW-7: a run of a reserved.v1 reading stops at its FIRST outage row. Under the worker's
+    general default (``outage_stop`` 3) one usage-limit episode reserved three commits and
+    wrote three outage rows — three misses under reserved.v1, enough alone to read the arm
+    ``insufficient`` under ``look.v1``. Now the run reserves the first commit, whose refused
+    attempt is its miss (``outage``), and stops ``run.outage_stop`` before it reserves the
+    second, which stays pending, unreserved, for a later run: the arm counts one miss."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register()
+    rig.state["b"] = "outage"
+    run = rig.enqueue(reading, rig.first, rig.second)
+    done = rig.h.run_one()
+    assert (done.id, done.status) == (run.id, STATUS_FAILED)
+    (stop,) = rig.payloads(run.id, "run.outage_stop")
+    assert str(stop["reason"]).startswith("provider outage: 1 consecutive"), stop
+    (res,) = rig.reservations(reading)
+    assert (res.step_id, res.task_id) == ("A0", rig.first)
+    (row,) = rig.rows(run.id)
+    assert row.failure_kind == "outage" and row.labels[LABEL_RESERVATION] == res.event_id
+    assert rig.verdicts(reading, "A0") == {
+        rig.first: (False, "outage"),
+        rig.second: (None, "pending"),
+    }
+    assert rig.look(reading, "A0") == (1, 1)
+
+
+def test_a_reading_run_stops_at_its_first_environment_row(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PW-7: a run of a reserved.v1 reading stops at its FIRST environment row (``env_stop``
+    1; the worker's general default is 2). The first commit's reserved attempt reads red and
+    its gold control times out — an ``environment:`` row (``GOLD_CONTROL_RED``), that
+    commit's miss under reserved.v1 — and the run stops ``run.environment_stop`` before it
+    reserves the second, though the sandbox recovers at once: the second stays pending and
+    unreserved, and the arm counts one miss."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    reading = rig.register()
+    rig.state["b"] = "noop"
+    _w_peek(rig, monkeypatch, lambda _: rig.state.update(exec="timeout"))
+    append = rig.h.worker.ledger.append
+
+    def recovered(row: GradeRow, *, guard: Any = None) -> GradeRow:
+        # the sandbox recovers once the row is written, so only the stop knob stops the run
+        try:
+            return append(row, guard=guard)
+        finally:
+            rig.state["exec"] = ""
+
+    monkeypatch.setattr(rig.h.worker.ledger, "append", recovered)
+    run = rig.enqueue(reading, rig.first, rig.second)
+    done = rig.h.run_one()
+    assert (done.id, done.status) == (run.id, STATUS_FAILED)
+    (stop,) = rig.payloads(run.id, "run.environment_stop")
+    assert str(stop["reason"]).startswith("environment: 1 consecutive"), stop
+    (res,) = rig.reservations(reading)
+    assert (res.step_id, res.task_id) == ("A0", rig.first)
+    (row,) = rig.rows(run.id)
+    assert row.labels[LABEL_RESERVATION] == res.event_id
+    assert row.labels["env_code"] == "GOLD_CONTROL_RED" and row.error.startswith("environment:")
+    assert rig.verdicts(reading, "A0") == {
+        rig.first: (False, "harness"),
+        rig.second: (None, "pending"),
+    }
+    assert rig.look(reading, "A0") == (1, 1)
+
+
+def test_a_reading_run_body_naming_outage_stop_3_is_refused(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PW-7 at submit and at claim: a run of a reserved.v1 reading takes ``outage_stop`` and
+    ``env_stop`` only as 1 (or unset, which the worker defaults to 1 on such a run). On
+    ``backend``'s store ``POST /runs`` naming ``outage_stop`` 3, ``env_stop`` 2 or either at 0
+    is refused 422 ``reading_run_fields`` naming the knob, nothing queued (201 before); the
+    step-6 body with both at 1 is admitted. A row queued past ``POST /runs`` carrying 3, 2,
+    ``null`` or ``true`` fails at claim (``run.refused``), nothing built or reserved."""
+    (tmp_path / "submit").mkdir()
+    with _r_stack(backend, tmp_path / "submit", monkeypatch) as w:
+        a0 = _a0(w, ("cobra", "XS"))
+        for knob, value in (("outage_stop", 3), ("env_stop", 2), ("outage_stop", 0)):
+            reason = _r_fields(w, {**a0, knob: value}, [knob])["reasons"][knob]
+            assert "first outage or environment row" in reason, reason
+        _r_fields(w, {**a0, "outage_stop": 3, "env_stop": 2}, ["env_stop", "outage_stop"])
+        stored = dict(_r_admit(w, {**a0, "outage_stop": 1, "env_stop": 1}).params_json or {})
+        assert (stored["outage_stop"], stored["env_stop"]) == (1, 1)
+
+    rig = _w_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    for knob, value in (
+        ("outage_stop", 3),
+        ("env_stop", 2),
+        ("outage_stop", None),
+        ("env_stop", True),
+    ):
+        queued = rig.enqueue(reading, params={knob: value})
+        done = rig.h.run_one()
+        assert (done.id, done.status) == (queued.id, STATUS_FAILED), knob
+        (why,) = rig.payloads(queued.id, "run.refused")
+        assert (why["code"], why["fields"], why["arm"]) == (REFUSAL_RUN_FIELDS, [knob], "A0")
+        assert "build.start" not in rig.actions(queued.id) and rig.rows(queued.id) == []
+    assert rig.reservations(reading) == []
+    assert rig.verdicts(reading, "A0")[rig.first] == (None, "pending")
 
 
 def test_p792_c9_reservation_before_registration_is_miss(
@@ -3645,8 +3777,6 @@ _R_FREE: dict[str, dict[str, Any]] = {
     "limit": {"limit": 16},
     "arm": {"arm": "S1"},
     "test_author": {"arm": "S1", "test_author": TEST_AUTHOR},
-    "outage_stop": {"outage_stop": 3},
-    "env_stop": {"env_stop": 3},
     "qualify_first": {"qualify_first": True},
 }
 _R_DEFAULT: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
@@ -3654,6 +3784,9 @@ _R_DEFAULT: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     "executor": ({"executor": ""}, {"executor": "docker"}),
     "timeout": ({"timeout": None}, {"timeout": 1}),
     "ladder": ({"ladder": ["r1"]}, {"ladder": ["claude_code:claude-sonnet-5"]}),
+    # PW-7: a reading run halts at its first outage or environment row
+    "outage_stop": ({"outage_stop": 1}, {"outage_stop": 3}),
+    "env_stop": ({"env_stop": 1}, {"env_stop": 2}),
 }
 _R_REFUSED: dict[str, Any] = {
     "budget": {"max_turns": 3},
@@ -4631,8 +4764,8 @@ def test_p792_reserved_factory_params_ratchet() -> None:
         "max_rework": 1,
         "test_author": "fake:author",
         "reading_id": fwd.reading_id,
-        "outage_stop": 3,
-        "env_stop": 3,
+        "outage_stop": 1,
+        "env_stop": 1,
         "qualify_first": True,
         "max_cost_usd": 1.0,
     }
@@ -4650,6 +4783,9 @@ def test_p792_reserved_factory_params_ratchet() -> None:
         ({"params": {**params, "budget_profile": PROFILE_DEFAULT}}, ["budget_profile"]),
         ({"params": {**params, "learning": "off"}}, ["learning"]),
         ({"params": {**params, "timeout": 1}}, ["timeout"]),
+        # PW-7, the one rule for every reserved.v1 run (a factory run reads neither knob)
+        ({"params": {**params, "outage_stop": 3}}, ["outage_stop"]),
+        ({"params": {**params, "env_stop": 2}}, ["env_stop"]),
         ({"ladder": ["r1", "r2"]}, ["ladder"]),
         ({"model": "other"}, ["model"]),
         ({"mode": "blind"}, ["mode"]),

@@ -717,7 +717,8 @@ class RunCreateRequest(BaseModel):
     retain: RunRetention = Field(default_factory=RunRetention)
     #: Provider circuit breaker for build kinds: stop the run after this many consecutive
     #: attempts the provider refused (``failure_kind: outage``); ``0`` disables; ``None`` =
-    #: the worker's default (3). Stored as ``params.outage_stop`` only when set.
+    #: the worker's default (3; 1 for a run of a reserved.v1 reading, which may name only 1 —
+    #: PW-7). Stored as ``params.outage_stop`` only when set.
     outage_stop: int | None = Field(default=None, ge=0, le=1000)
     #: ADR-0019 — build and grading kinds: qualify every task that has no record in the
     #: posture that will grade it before any builder call (no model spend). ``false`` makes
@@ -726,7 +727,8 @@ class RunCreateRequest(BaseModel):
     qualify_first: bool | None = None
     #: ADR-0019 — stop a build run after this many consecutive attempts whose failure the
     #: gold also showed in the posture (environment rows); ``0`` disables; ``None`` = the
-    #: worker's default (2). Stored as ``params.env_stop`` only when set.
+    #: worker's default (2; 1 for a run of a reserved.v1 reading, which may name only 1 —
+    #: PW-7). Stored as ``params.env_stop`` only when set.
     env_stop: int | None = Field(default=None, ge=0, le=1000)
     #: Belt-5 pre-flight for build kinds (``crb.builders.adapter.Preflight``): ``true`` =
     #: apply the repository's own fixers then one bounded repair turn; an object sets

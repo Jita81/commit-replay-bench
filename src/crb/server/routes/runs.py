@@ -1146,8 +1146,8 @@ def reading_run_fields_refusal(reading: Reading, run: Run) -> None:
     at claim (``Worker._reading_run_fields``), so a body is refused here for exactly what the
     claim would fail it for: a ``builder_config`` (``extra_args`` can override the rung's
     ``--model``, C3), a ``timeout`` (C5), another budget profile or learning switch on a
-    non-loop arm (C7), a non-default ``pool``/``executor``, another ladder, cell, kind, mode or
-    arm, or any field outside :data:`~crb.core.reading.RESERVED_RUN_PARAMS` (C17). ``detail``
+    non-loop arm (C7), a non-default ``pool``/``executor``, an ``outage_stop`` or ``env_stop``
+    other than 1 (PW-7), another ladder, cell, kind, mode or arm, or any field outside :data:`~crb.core.reading.RESERVED_RUN_PARAMS` (C17). ``detail``
     is ``{reading_id, fields, reasons, arm}``. A legacy reading is never refused by it."""
     code, detail = reading_run_refusal(
         reading,
