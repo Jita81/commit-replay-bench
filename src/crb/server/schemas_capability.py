@@ -177,7 +177,10 @@ class ArmReadingOut(BaseModel):
     could not read (``scope_faults``, which make it ``undecided``): a row graded unsealed in
     the reading's posture class (P-795), or a reserved.v1 row built off the checks arm the
     reading froze (RT2B-1). Each ``left`` entry's ``scope`` names which (``unsealed`` or
-    ``checks_arm``; ``""`` otherwise)."""
+    ``checks_arm``; ``""`` otherwise). ``state`` is one of ``crb.core.reading.ARM_STATES``:
+    a later hierarchy arm reads ``waiting`` while the arm before it (``stopped_by``) is still
+    being read, and ``stopped`` once that arm reads insufficient or undecided; neither is read
+    toward the verdict (FZ-2)."""
 
     arm: str
     state: str

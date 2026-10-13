@@ -195,6 +195,8 @@ rule makes them prospective (item 10).
    true rate is at or below 0.80 must itself deliver for any error to occur. Phase 1's hierarchy
    is `S3` then `S1`. The arms run in parallel on the same commits; only the decision is ordered.
    Once `S3` reads `insufficient`, `S1` stops too: no leaner arm can become the standard.
+   A later arm reads `waiting` while the arm before it is still being read, and `stopped`
+   once that arm reads insufficient or undecided; neither is read toward the verdict (FZ-2).
    - **`S3` never certifies.** The commit's own tests were written with the change and can
      encode its values and names; a standard found on `S3` alone reads **`ceiling,
      forward-unvalidated`** and admits tickets only as calibration builds (item 8) until the

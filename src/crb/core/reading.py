@@ -31,7 +31,9 @@ qualified commits with its SHA-256. Only rows graded after registration count.
   ``look_pending`` with the commits still needed otherwise. :func:`p_deliver` is the exact
   dynamic programme over Bernoulli draws that gives each rule's operating characteristic.
 * **The hierarchy.** Arms are read in the registered order and reading stops at the first
-  arm that does not deliver; the standard is the leanest certifying arm in the unbroken chain.
+  arm that does not deliver; every later arm reads ``waiting`` while that arm is still being
+  read and ``stopped`` once it reads ``insufficient`` or ``undecided`` (FZ-2), and neither
+  is read toward the verdict. The standard is the leanest certifying arm in the unbroken chain.
   ``S3`` alone is a ``ceiling``; only the ``S1`` family and ``S2`` certify; ``A0`` and
   ``A0+L`` are descriptive and spend nothing. A descriptive arm tallies the commits observed
   among its first ``n`` (``ArmReading.limit``) and names exactly those as its counted
@@ -99,7 +101,9 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               its arms at its apparatus (``pool_seen``), beyond
               the cell's budget (``budget_spent``) or outside the arm rules; evaluates each
               arm of a reading over the ledger's rows in the seeded order; stops the
-              hierarchy at the first arm that does not deliver; names the standard, a ceiling
+              hierarchy at the first arm that does not deliver (a later arm ``waiting`` while
+              that arm is still being read, ``stopped`` once it decided against — FZ-2, a
+              label only); names the standard, a ceiling
               or no proven standard, and the commits still needed; names a descriptive arm's
               counted commits as those observed among its first n (P-794), serves every
               commit an arm reads and pairs ``A0`` with ``A0+L`` (``loop_pair``, the exact
@@ -283,8 +287,12 @@ STATE_INSUFFICIENT = "insufficient"
 STATE_UNDECIDED = "undecided"
 STATE_LOOK_PENDING = "look_pending"
 STATE_DESCRIPTIVE = "descriptive"
-#: A hierarchy arm that is never read because a richer arm did not deliver.
+#: A hierarchy arm that is never read because a richer arm decided against: the arm before
+#: it reads ``insufficient`` or ``undecided``.
 STATE_STOPPED = "stopped"
+#: A hierarchy arm behind a richer arm that is still being read (``look_pending``): it keeps
+#: its own look numbers, and like a stopped arm it is not read toward the verdict (FZ-2).
+STATE_WAITING = "waiting"
 ARM_STATES: tuple[str, ...] = (
     STATE_DELIVER,
     STATE_INSUFFICIENT,
@@ -292,6 +300,7 @@ ARM_STATES: tuple[str, ...] = (
     STATE_LOOK_PENDING,
     STATE_DESCRIPTIVE,
     STATE_STOPPED,
+    STATE_WAITING,
 )
 # --- a reading's outcome (the cell's) -------------------------------------------
 OUTCOME_STANDARD = "standard"
@@ -1587,7 +1596,11 @@ class ArmReading:
     look: LookState
     commits: tuple[CommitReading, ...]
     descriptive: bool = False
+    #: The richer arm the hierarchy stopped at, when this arm comes after it (``""`` else).
     stopped_by: str = ""
+    #: ``stopped_by``'s arm is still being read (``look_pending``), so this arm reads
+    #: ``waiting``, not ``stopped`` (FZ-2). A label only: neither is read toward the verdict.
+    waiting: bool = False
     #: A descriptive arm's fixed count ``n``: it tallies the commits observed among its first
     #: ``limit`` commits in the pool. ``0`` for a hierarchy arm.
     limit: int = 0
@@ -1600,10 +1613,12 @@ class ArmReading:
 
     @property
     def state(self) -> str:
-        """Stopped by a richer arm; else ``undecided`` when a row could not be read (P-795,
-        a descriptive arm too); else descriptive; else the look's state."""
+        """``waiting`` while the richer arm the hierarchy stopped at is still being read, and
+        ``stopped`` once it reads insufficient or undecided (FZ-2); else ``undecided`` when a
+        row could not be read (P-795, a descriptive arm too); else descriptive; else the
+        look's state."""
         if self.stopped_by:
-            return STATE_STOPPED
+            return STATE_WAITING if self.waiting else STATE_STOPPED
         if self.scope_faults:
             return STATE_UNDECIDED
         return STATE_DESCRIPTIVE if self.descriptive else self.look.state
@@ -2217,7 +2232,9 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     """Read every arm of ``reading`` and its hierarchy (ADR-0026 item 4): stop at the first
     arm that does not deliver — an arm with a ``scope_fault`` reads ``undecided``, so it never
     does (P-795); the standard is the leanest certifying arm of the unbroken chain; ``S3``
-    alone is a ceiling."""
+    alone is a ceiling. Every later arm reads ``waiting`` while that arm is still being read
+    and ``stopped`` once it reads insufficient or undecided; neither is read toward the
+    verdict (FZ-2)."""
     rs = list(rows)
     arms: dict[str, ArmReading] = {}
     chain: list[str] = []
@@ -2225,7 +2242,11 @@ def evaluate(reading: Reading, rows: Iterable[GradeRow]) -> ReadingOutcome:
     for arm in reading.hierarchy:
         a = arm_reading(reading, arm, rs)
         if stopped_at:
-            a = replace(a, stopped_by=stopped_at)
+            # the arm before it decided against (a scope-faulted one reads undecided), or it
+            # is still being read and this arm waits on it: a label, never the verdict (FZ-2)
+            blocker = arms[stopped_at].state
+            waiting = blocker not in (STATE_INSUFFICIENT, STATE_UNDECIDED)
+            a = replace(a, stopped_by=stopped_at, waiting=waiting)
         elif a.state == STATE_DELIVER:  # a scope-faulted arm never delivers (P-795)
             chain.append(arm)
         else:
@@ -2789,6 +2810,8 @@ __all__ = [
     "SCOPE_CHECKS_ARM",
     "SKIP_COMMIT_RESERVED",
     "SKIP_TASK_NOT_ENROLLED",
+    "STATE_STOPPED",
+    "STATE_WAITING",
     "VERDICT_CEILING",
     "VERDICT_DELIVER",
     "VERDICT_DESCRIPTIVE",

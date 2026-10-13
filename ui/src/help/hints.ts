@@ -1734,6 +1734,10 @@ export const HINTS = {
     'Distinct commits the reading has read on this arm, each by its first attempt in the sealed posture, in the seeded order, with the Wilson 95% interval and the commits still needed to the next look.',
   'tile.capability.readings':
     'Every arm of the reading registered on this cell: its state under the look rule, clean over distinct commits read, the interval, and the commits still needed.',
+  'text.capability.arm_waiting':
+    'This arm comes after the named arm in the hierarchy, and that arm is still being read. Its own numbers are shown, but it is not read toward the verdict while it waits.',
+  'text.capability.arm_stopped':
+    'This arm comes after the named arm in the hierarchy, and that arm read insufficient or undecided. It is never read toward the verdict of this reading.',
   'tile.capability.shortfalls':
     'Every clause this cell fails, in the rule’s order, with the next measurement and how many; replays and calibration builds cost model money.',
   'tile.capability.provenance':

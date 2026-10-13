@@ -1202,7 +1202,7 @@ export interface Shortfall {
 /** One arm of a registered reading (`crb.core.reading.ArmReading.to_dict`). */
 export interface ArmReading {
   arm: string
-  /** `deliver`, `insufficient`, `undecided`, `look_pending`, `descriptive`, `stopped`. */
+  /** `deliver`, `insufficient`, `undecided`, `look_pending`, `descriptive`, `waiting` (a later hierarchy arm while the arm before it, `stopped_by`, is still being read), `stopped` (once that arm reads `insufficient` or `undecided`). Neither of the last two is read toward the verdict (FZ-2). */
   state: string
   descriptive: boolean
   stopped_by: string

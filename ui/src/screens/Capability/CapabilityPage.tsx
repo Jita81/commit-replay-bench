@@ -60,7 +60,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
-import { NOT_YET_MEASURED, type CapabilityMap, type CellField } from '../../api/types'
+import { NOT_YET_MEASURED, type ArmReading, type CapabilityMap, type CellField } from '../../api/types'
 import { LinkButton } from '../../components/Button'
 import { Card } from '../../components/Card'
 import { CiBar } from '../../components/CiBar'
@@ -312,7 +312,34 @@ const ARM_STATE_TEXT: Record<string, string> = {
   undecided: 'undecided — the pool cannot reach its next look',
   look_pending: 'waiting for its next look',
   descriptive: 'descriptive — never a licence',
-  stopped: 'not read — a richer arm did not deliver',
+  waiting: 'waiting — the arm before it is still being read',
+  stopped: 'not read — the arm before it read insufficient or undecided',
+}
+
+/**
+ * One arm's state cell: a later hierarchy arm names the arm it waits on or was stopped by,
+ * with hover help (FZ-2) — neither is read toward the verdict.
+ */
+function ArmStateText({ arm }: { arm: ArmReading }) {
+  const text = ARM_STATE_TEXT[arm.state] ?? arm.state
+  const by = arm.stopped_by ? ` (${arm.stopped_by})` : ''
+  if (arm.state === 'waiting') {
+    return (
+      <Hint as="span" id="text.capability.arm_waiting">
+        {text}
+        {by}
+      </Hint>
+    )
+  }
+  if (arm.state === 'stopped') {
+    return (
+      <Hint as="span" id="text.capability.arm_stopped">
+        {text}
+        {by}
+      </Hint>
+    )
+  }
+  return <>{text}</>
 }
 
 /**
@@ -366,7 +393,9 @@ function CellStandardBlock({ cell }: { cell: CapabilityCell }) {
               {reading.arms.map((a) => (
                 <tr key={a.arm} data-testid="cell-reading-arm">
                   <td className="font-mono">{a.arm}</td>
-                  <td>{ARM_STATE_TEXT[a.state] ?? a.state}</td>
+                  <td>
+                    <ArmStateText arm={a} />
+                  </td>
                   <td className="num">
                     {fmtInt(a.clean)} / {fmtInt(a.counted)}
                   </td>

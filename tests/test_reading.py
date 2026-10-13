@@ -24,8 +24,11 @@ What it does: Reproduces ADR-0026's table from the in-code programme; reads 20 o
               once; and (P-795) an S1 authoring miss of a sealed run read as the arm's miss,
               and a row unsealed but in every other way the arm's read as a ``scope_fault`` on
               both attempt rules — the arm, the outcome and the router ``undecided``, nothing
-              needed or re-rolled, ``/learn/remeasure``'s ``audit``.
-How:          Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
+              needed or re-rolled, ``/learn/remeasure``'s ``audit``; and (FZ-2) a later
+              hierarchy arm reading ``waiting`` while the arm before it is still being read
+              and ``stopped`` once that arm reads insufficient or undecided, neither read
+              toward the verdict.
+How:         Sealed 2.4 rows from ``tests.fixtures.readings``; no model, no docker.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md (items 2 to 5)
 Works with:   src/crb/core/reading.py (the code under test),
@@ -949,3 +952,61 @@ def test_an_unsealed_row_of_an_admitted_run_makes_the_arm_undecided_scope_fault(
     resealed = [replace(r, labels={**r.labels, "builder_executor": "docker"}) for r in rows]
     sealed = evaluate(reading, resealed).arms["S3"]
     assert sealed.scope_faults == () and sealed.state == STATE_DELIVER
+
+
+# --- the hierarchy: a later arm waits on the arm before it, then stops (FZ-2) ---------------
+
+
+@pytest.mark.parametrize("attempt_rule", [ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED])
+def test_a_later_arm_reads_waiting_while_its_blocker_is_still_running(attempt_rule: str) -> None:
+    """FZ-2 (the verdict fuzz): every arm after the first one that did not deliver read
+    ``stopped``, so ``S1`` read stopped while ``S3`` was still ``look_pending``. REG:32 and
+    ADR-0026 stop an arm only once the arm before it has decided against. With ``S1`` 20 of 20
+    clean and no ``S3`` row yet, ``S1`` reads ``waiting`` on ``S3`` and keeps its own look
+    numbers. It is a label only: the reading, its needed count and the router's verdict all
+    read ``S3``'s look, as before. The served word is pinned as the UI keys on it."""
+    reading, rows = _first_attempts(_registered(attempt_rule), {S1: [True] * 20})
+    out = evaluate(reading, rows)
+    s3, s1 = out.arms["S3"], out.arms[S1]
+    assert s3.state == STATE_LOOK_PENDING and out.stopped_at == "S3"
+    assert (s1.state, s1.stopped_by) == ("waiting", "S3")
+    assert (s1.look.state, s1.look.counted, s1.look.clean) == (STATE_DELIVER, 20, 20)
+    served = {a["arm"]: a for a in out.to_dict()["arms"]}[S1]
+    assert (served["state"], served["stopped_by"], served["look_state"]) == (
+        "waiting",
+        "S3",
+        STATE_DELIVER,
+    )
+    # never read toward the verdict: the reading waits on S3 and nothing is a standard
+    assert (out.state, out.standard, out.chain, out.needed) == (STATE_LOOK_PENDING, "", (), 20)
+    v = verdict_for(out, S1)
+    assert (v.state, v.blocking, v.needed, v.next_look) == (STATE_LOOK_PENDING, "S3", 20, 20)
+
+
+@pytest.mark.parametrize("attempt_rule", [ATTEMPT_RULE_LEGACY, ATTEMPT_RULE_RESERVED])
+def test_a_later_arm_reads_stopped_once_its_blocker_reads_insufficient(attempt_rule: str) -> None:
+    """FZ-2's pin: once the arm before it has decided against, a later arm reads ``stopped``
+    — ``S3`` insufficient at its third miss, or ``S3`` undecided because a row could not be
+    read (a ``scope_fault``, P-795). ``S1``'s 20 clean commits are never read toward the
+    verdict either way: the reading reads ``S3``'s state and names no standard."""
+    reading, rows = _first_attempts(_registered(attempt_rule), {"S3": [False] * 3, S1: [True] * 20})
+    out = evaluate(reading, rows)
+    s1 = out.arms[S1]
+    assert out.arms["S3"].state == STATE_INSUFFICIENT
+    assert (s1.state, s1.stopped_by, s1.look.state) == ("stopped", "S3", STATE_DELIVER)
+    assert {a["arm"]: a for a in out.to_dict()["arms"]}[S1]["state"] == "stopped"
+    assert (out.state, out.standard, out.chain) == (STATE_INSUFFICIENT, "", ())
+    assert verdict_for(out, S1).state == STATE_INSUFFICIENT
+    # S3 undecided by a scope fault (its other 19 commits clean): S1 reads stopped too
+    reading, rows = _first_attempts(_registered(attempt_rule), {"S3": [True] * 20, S1: [True] * 20})
+    faulted = reading.pool[4]
+    rows = [
+        replace(r, labels={**r.labels, "builder_executor": "host"})
+        if (r.task_id, r.context_arm) == (faulted, "S3")
+        else r
+        for r in rows
+    ]
+    out = evaluate(reading, rows)
+    assert out.arms["S3"].state == STATE_UNDECIDED and out.state == STATE_UNDECIDED
+    assert (out.arms[S1].state, out.arms[S1].stopped_by) == ("stopped", "S3")
+    assert verdict_for(out, S1).state == STATE_UNDECIDED

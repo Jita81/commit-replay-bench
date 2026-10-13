@@ -30,7 +30,7 @@ copies it and adds nothing. The choices it leaves open follow the table.
 | builder | `claude_code` with `claude-sonnet-5`, provider `anthropic` | item 13 |
 | cells | cobra and click, `bug.fix`, XS and S, process step `replay`: cobra XS and cobra S (language `go`), click XS and click S (language `python`) | item 13; PLAN, Wave 3 |
 | readings | one per cell, registered before its first attempt | items 2 and 13 |
-| hierarchy | `S3` then `S1@<author>`, decided in that order; once `S3` reads `insufficient`, `S1` stops | items 4 and 13 |
+| hierarchy | `S3` then `S1@<author>`, decided in that order; once `S3` reads `insufficient`, `S1` stops. A later arm reads `waiting` while the arm before it is still being read, and `stopped` once that arm reads insufficient or undecided; neither is read toward the verdict (FZ-2) | items 4 and 13 |
 | rule | `look.v1`: `deliver` at 20 of the first 20, 29 of the first 30 or 38 of the first 40 clean; `insufficient` at the third miss | items 3 and 5; the first look at 20 fixed by DL-371 |
 | error budget | 5% per cell, of which `look.v1` spends 2.10%. It is a budget of error, not of money: Wave 3's money is part 2 | item 5; DL-371; HB-14 |
 | descriptive arms | `A0` and `A0+L` on the first 16 commits of each cell's seeded order; they spend no error budget and never certify | items 4 and 13 |
