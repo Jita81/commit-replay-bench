@@ -2024,15 +2024,15 @@ def remeasure_plan(
 
     ``readings`` are the repository's registered readings, evaluated over the ledger
     (``ReadingBook.evaluate(...).outcomes``); the caller passes those of its own scope (checks
-    arm, class-set version — a reserved.v1 reading whatever its checks arm,
-    :func:`holds_its_checks_arm`). Per cell the reading that speaks (``latest_outcome``)
-    decides — among the readings of the current checks arm (``checks_arm``; all of them when
-    none is given), so a reserved.v1 reading frozen on another arm, which ranks above a
-    waiting one (a ceiling over ``look_pending``), never hides a reading of the current arm
-    and its top-up (R6V1-1). Such a reading speaks only for a cell no reading of the current
-    arm reads: listed as below (a waiting arm flagged ``checks_arm_moved``), never
-    ``up_to_date`` (its standard is another arm's), and never hiding the register entries of
-    the cell's rows:
+    arm, class-set version — a reserved.v1 reading of a frozen pool whatever its checks arm,
+    never a forward one: :func:`holds_its_checks_arm`). Per cell the reading that speaks
+    (``latest_outcome``) decides — among the readings of the current checks arm
+    (``checks_arm``; all of them when none is given), so a reserved.v1 reading frozen on
+    another arm, which ranks above a waiting one (a ceiling over ``look_pending``), never
+    hides a reading of the current arm and its top-up (R6V1-1). Such a reading speaks only
+    for a cell no reading of the current arm reads: listed as below (a waiting arm flagged
+    ``checks_arm_moved``), never ``up_to_date`` (its standard is another arm's), and never
+    hiding the register entries of the cell's rows:
 
     * **waiting on its look** → a ``look_pending`` entry for the arm the hierarchy stopped at:
       ``n_current`` the commits its look has read, ``n_needed`` the commits still needed before

@@ -63,11 +63,13 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               refused and served with those runs, so money is never spent twice (P-182); a
               cell with no request (no commit left it has not graded) is refused with the
               plan's own reason, so nothing is queued that would repeat a commit. The plan
-              reads a reserved.v1 reading whatever the repository's checks arm is now: when a
-              run of its entry would resolve another arm than the reading froze (the team's
-              block for a learning-off request, the loop's overlay for a ``+L`` arm) the
-              entry is listed flagged ``checks_arm_moved``, with no request, and its queue is
-              refused 422 — the run would halt ``reading_checks_arm_mismatch`` (RT2B-1).
+              reads a reserved.v1 reading of a frozen pool whatever the repository's checks
+              arm is now: when a run of its entry would resolve another arm than the reading
+              froze (the team's block for a learning-off request, the loop's overlay for a
+              ``+L`` arm) the entry is listed flagged ``checks_arm_moved``, with no request,
+              and its queue is refused 422 — the run would halt ``reading_checks_arm_mismatch``
+              (RT2B-1); a forward reading, like a legacy one, is read on the current arm only
+              (R6V3-H1).
 How:          ``DbLedger.rows(repo)`` → ``triage_refusals`` | ``build_capability_map`` +
               ``strengthening_backlog`` (scores from the events table) | ``remeasure_plan``;
               the writes go through ``apply_triage`` / ``FactoryHome.register_*`` (under
@@ -362,8 +364,9 @@ def derive_remeasure(
     checks = current_checks_arm(factory, repo)
     # every reading evaluated over every row (the hierarchy reads its arms together); the
     # plan reads those of this checks arm and the global class set — the rows it plans on —
-    # and a reserved.v1 reading whatever its checks arm: its runs halt off the arm it froze,
-    # so it is listed flagged (``checks_arm_moved``), never hidden (RT2B-1)
+    # and a reserved.v1 reading of a frozen pool whatever its checks arm: its runs halt off the
+    # arm it froze, so it is listed flagged (``checks_arm_moved``), never hidden (RT2B-1); a
+    # forward reading, like a legacy one, only on this arm (``holds_its_checks_arm``, R6V3-H1)
     book = reading_book(db, repo, every)
     outcomes = [
         o

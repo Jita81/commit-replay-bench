@@ -33,7 +33,10 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               registering on the block's own arm once the block sets the key (RT2B-2); and
               ``POST /readings/forward`` refusing 409 ``reading_checks_arm_moved``
               (``{overlay_arm, ceiling_arm, repo_arm}``, nothing written) when the block moved
-              off the arm the ceiling froze, then registering once it is back (V2-CA-1).
+              off the arm the ceiling froze, then registering once it is back (V2-CA-1); and a
+              forward reserved.v1 reading read by ``GET /learn/remeasure`` on the current
+              checks arm only — listed while the block holds the arm it froze, named nowhere
+              in the plan once the block moves, listed again once it is back (R6V3-H1).
 How:          ``make_env`` with ``tests.fixtures.proven`` adding qualified tasks, sealed rows
               (each reserved for its commit first, as the worker reserves it), scores and a
               controls report; a legacy reading written as a store holds one; the race on each
@@ -44,6 +47,7 @@ Works with:   src/crb/server/routes/readings.py (``POST`` and ``GET /readings``,
               src/crb/server/routes/capability.py (the map and ``/routes`` per arm),
               src/crb/server/routes/value.py (per-arm cells and the readings on ``/value``),
               src/crb/server/routes/ledger.py (the CSV export's arm and class-set columns),
+              src/crb/server/routes/learn.py (``GET /learn/remeasure`` reading a forward one),
               src/crb/server/prevention_state.py (``checks_arm_in``, ``own_checks_arm_in``),
               tests/fixtures/proven.py (a proven cell in the seeded store),
               tests/fixtures/readings.py (``format_step_in_force``, the loop's overlay)
@@ -1205,3 +1209,64 @@ def test_a_forward_reading_is_refused_when_the_block_moved_off_the_ceilings_arm(
         assert fwd.status_code == 201, fwd.text
         assert (fwd.json()["checks_arm"], fwd.json()["attempt_rule"]) == ("off", "reserved.v1")
         assert _registered_events(env) == 2
+
+
+def test_a_forward_reading_leaves_the_remeasure_plan_while_the_block_is_off_its_arm(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """R6V3-H1 (round 6): ``GET /learn/remeasure`` lists a reserved.v1 reading of a frozen pool
+    whatever the checks arm is now, flagged ``checks_arm_moved`` — never a forward one
+    (``holds_its_checks_arm``), which, like a legacy reading, it reads on the repository's
+    current arm only. API.md and P-792 said every reserved.v1 reading whose arm moved was
+    listed, never hidden, and no test pinned the exclusion either way. Pinned here: the forward
+    reading is listed (``S2``, unflagged) while the block holds the arm it froze, is named
+    nowhere in the plan once the block moves (its factory runs would halt
+    ``reading_checks_arm_mismatch``) while ``GET /readings`` still serves it, and is listed
+    again once the block is back — on SQLite and PostgreSQL alike."""
+    from fixtures.server_seed import BUILDER, MODEL, PROVIDER
+
+    with _api_on(backend, tmp_path / "home") as env:
+        add_tasks(env.factory, qualify=True)
+        r = register_via_api(env)
+        assert r.status_code == 201, r.text
+        first = r.json()["pool"][:20]
+        add_rows(env.factory, first, arm="S3", reading=r.json())
+        add_rows(env.factory, first[:3], arm=S1, clean=False, reading=r.json())
+        add_rows(env.factory, first[3:], arm=S1, reading=r.json())
+        add_oracle_and_controls(env.factory, first)
+        body = {
+            "repo": ALPHA,
+            "promotes": r.json()["reading_id"],
+            "builder": BUILDER,
+            "model": MODEL,
+            "provider": PROVIDER,
+            "hypothesis": HYPOTHESIS,
+            "smallest_effect": SMALLEST_EFFECT,
+            "attempt_rule": "reserved.v1",
+        }
+        fwd = env.post("/readings/forward", json=body)
+        assert fwd.status_code == 201, fwd.text
+        assert (fwd.json()["checks_arm"], fwd.json()["attempt_rule"]) == ("off", "reserved.v1")
+        fid = fwd.json()["reading_id"]
+
+        def plan() -> Any:
+            p = env.get(f"/learn/remeasure?repo={ALPHA}")
+            assert p.status_code == 200, p.text
+            return p
+
+        def entries() -> list[tuple[str, Any, str]]:
+            cells = plan().json()["cells"]
+            return [
+                (c["arm"], c["checks_arm_moved"], c["next_act"])
+                for c in cells
+                if c["reading_id"] == fid
+            ]
+
+        assert entries() == [("S2", None, "runs")]
+        _set_checks(env, {"format_step": True})
+        moved = plan()
+        assert fid not in moved.text, "a forward reading is read on the current arm only"
+        served = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+        assert fid in {o["reading_id"] for o in served}
+        _set_checks(env, {"format_step": False})
+        assert entries() == [("S2", None, "runs")]
