@@ -15,12 +15,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a product-held ceiling**
   (P-787 to P-798, P-800 to P-808, G-957, DL-372 to DL-386, DL-390 to DL-392, DL-400 to DL-405,
   DL-410 to DL-413; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
-  `hypothesis`, `smallest_effect`, campaign. Sealed, lint-on readings register off the loop's
-  overlay (409 `reading_checks_overlay`), under `reserved.v1`: a commit's reserved first attempt
-  decides it (pinned pool, 409 `pool_drift`). Runs halt at their first outage or environment row,
-  or off the frozen checks arm; an off-arm reserved row reads `scope_fault`; remeasure flags
-  `checks_arm_moved`. Later arms read `waiting`; `duplicate_commits` is served; lost claims write
-  nothing (`run.claim_lost`). Campaigns hold pound ceilings, one live run per arm. Grading
+  `hypothesis`, `smallest_effect`, campaign. Sealed, lint-on readings register overlay-free (409
+  `reading_checks_overlay`) under `reserved.v1`: a commit's reserved first attempt decides it
+  (pinned pool, 409 `pool_drift`). Runs halt at an outage or environment row, or off the
+  frozen checks arm; an off-arm reserved row reads `scope_fault`, never a miss; remeasure flags
+  `checks_arm_moved`. Later arms read `waiting`; `duplicate_commits` is served; lost claims append
+  no ledger row (`run.claim_lost`). Campaigns cap pounds, one live run per arm. Grading
   disqualifies forged Go events, pytest-machinery patches, in-build model calls.
 
 - **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;

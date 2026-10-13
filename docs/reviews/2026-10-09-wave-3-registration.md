@@ -161,11 +161,14 @@ A change the loop makes at `config` to the repository's `checks` block cannot mo
 off the reading's checks arm unseen. A reading run whose resolved checks arm differs from the
 reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (3d81c23b); a
 reserved row built off the frozen arm all the same reads `scope_fault`, `scope` `checks_arm`
-(fbc361a5); the remeasure plan flags such a reading `checks_arm_moved` and serves it no request
-(41630c0a); and `POST /readings` refuses 409 `reading_checks_overlay` a registration while the
-loop's overlay moves the arm (cee088bc). The formatter lever, the one loop change that moves the
-arm, is held off (Q-31; DL-410; 29ee0835). click's belt-5 plan has a formatter step
-(`ruff-format`, `formatters_for` in `crb.core.formatting`), so the same holds for click.
+(fbc361a5), and reads outcome `None` on either rule, so no look, tally or loop pair counts it a
+miss (VS1-2); the remeasure plan flags such a reading `checks_arm_moved` and serves it no request
+(41630c0a), and a reading frozen on the old arm, delivered or not, never hides a cell's reading on
+the current arm from the plan (R6V1-1); and `POST /readings` refuses 409
+`reading_checks_overlay` a registration while the loop's overlay moves the arm (cee088bc). The
+formatter lever, the one loop change that moves the arm, is held off (Q-31; DL-410; 29ee0835).
+click's belt-5 plan has a formatter step (`ruff-format`, `formatters_for` in
+`crb.core.formatting`), so the same holds for click.
 
 **Fixed before any data, 2026-10-11 (CRB Project room).** Paul Glover fixed these in the CRB
 Project room on 2026-10-11, before any reading was registered, any run queued or any Wave 3
@@ -746,12 +749,13 @@ included.
 
 **How a verdict is filed.** `POST /api/v1/reviews`, as an operator, with the row's
 `grade_row_hash`, a statement, the findings, `mergeable`, and `patch_sha256` from
-`GET /api/v1/grades/{row_hash}/patch`, so each verdict is anchored to the patch that was read. The
+`GET /api/v1/grades/{row_hash}/patch`, so each verdict names the patch it is about. The
 reviewer is the account that files it, so Claude files under an account of its own that Paul
 creates, and each statement begins "Reviewer: Claude (Claude Code, claude-opus-5-5), tasked by
 Paul Glover (DL-371)". The MCP server offers no tool that files a review: it calls filing one a
-human act (`crb_reviews` only reads them). The `patch_sha256` anchor proves that the patch was
-fetched, not that it was read.
+human act (`crb_reviews` only reads them). The `patch_sha256` anchor proves only that the reviewer
+named the pack's diff hash, which `GET /api/v1/grades/{row_hash}/retained` also serves: not that
+the patch was fetched, nor that it was read (KG-6).
 
 **The scale.** The scale of the value baseline's 13 verdicts ([the value
 baseline](2026-09-25-value-baseline.md), its headline table and "Clean is not working")
@@ -884,7 +888,7 @@ and stops and reports at the first step whose success condition fails.
 | 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the report says why stage 1 ended and whether Q-26's rule releases stage 2; the record is committed under `docs/reviews/` | not yet run |
 | 9 | stage 2 | Claude Code, on decision 9's fixed rule (Q-26; DL-400): when stage 1 ended at its line with any cell still waiting on a look, it files `POST /api/v1/campaigns/{id}/release` (part 2), with no further decision; then the builder's-account check below, and step 6 resumes with the line at $108.00. When stage 1 ended on a stop or with the protocol complete, nothing is released | the release answers `200` with the campaign and is filed before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
 | 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 4 | not yet run |
-| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3), reading each patch only from `GET /api/v1/grades/{row_hash}/patch`, and no one opens the Runs screen's evidence drawer or its Review tab on a Wave 3 row (KG-5); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals, the reviewer's session id and the bootstrap seed. The readings do not answer whether a patch is mergeable; the reviews do, and a verdict's `patch_sha256` anchor proves that the patch was fetched, not that it was read (KG-6) | not yet run |
+| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3), reading each patch only from `GET /api/v1/grades/{row_hash}/patch`, and no one opens the Runs screen's evidence drawer or its Review tab on a Wave 3 row (KG-5); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals, the reviewer's session id and the bootstrap seed. The readings do not answer whether a patch is mergeable; the reviews do, and a verdict's `patch_sha256` anchor proves only that the reviewer named the pack's diff hash (which `GET /grades/{row_hash}/retained` serves too), not that the patch was fetched or read (KG-6) | not yet run |
 | 12 | publish the rows | Claude Code, after step 11: the ledger export (`GET /api/v1/ledger/export?format=jsonl`, unfiltered, so it verifies standalone with `verify_chain`) and each repository's readings (`GET /api/v1/readings?repo=<repo>`, which serves each reserved commit's `reason` and `scope`), committed beside the stage records under `docs/reviews/` | the rows and readings every stage record cites are in the repository, and the export's chain verifies | not yet run |
 
 **The builder's account (R-13; DL-405).** The builder runs on its own Anthropic API key, in a
