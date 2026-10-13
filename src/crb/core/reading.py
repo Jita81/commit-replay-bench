@@ -383,6 +383,15 @@ REFUSAL_LINT_DISABLED = "lint_disabled"
 #: ``POST /readings/forward`` refuse it 409 with ``detail: {overlay_arm, repo_arm}`` and write
 #: nothing; the operator sets the key in the repository's block (DL-410) and registers again.
 REFUSAL_CHECKS_OVERLAY = "reading_checks_overlay"
+#: A forward registration whose ceiling was frozen on another checks arm than the one the
+#: factory's runs resolve now (V2-CA-1): the forward reading freezes the ceiling's arm
+#: (:func:`register_forward`), and a factory run cannot opt out of the loop, so it resolves the
+#: overlay's arm. When the repository's block moved after the ceiling registered, every ticket's
+#: reservation would halt ``reading_checks_arm_mismatch`` and no row could count, so
+#: ``POST /readings/forward`` refuses it 409 with ``detail: {overlay_arm, ceiling_arm,
+#: repo_arm}`` and writes nothing; the operator puts the block back on the ceiling's arm, or
+#: registers a ceiling on the arm the repository runs now.
+REFUSAL_CHECKS_ARM_MOVED = "reading_checks_arm_moved"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
@@ -393,6 +402,7 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_EXISTS,
     REFUSAL_LINT_DISABLED,
     REFUSAL_CHECKS_OVERLAY,
+    REFUSAL_CHECKS_ARM_MOVED,
 )
 #: A run of a reserved.v1 reading that carries a field the reading does not allow
 #: (:func:`reading_run_refusal`): refused at submit (422) and again at claim.
@@ -2876,6 +2886,7 @@ __all__ = [
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
     "REFUSAL_CAMPAIGN_UNSUPPORTED",
+    "REFUSAL_CHECKS_ARM_MOVED",
     "REFUSAL_CHECKS_OVERLAY",
     "REFUSAL_EXISTS",
     "REFUSAL_LINT_DISABLED",

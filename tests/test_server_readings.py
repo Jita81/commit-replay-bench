@@ -30,7 +30,10 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               (P-796); both routes refusing 409 ``reading_checks_overlay`` (``{overlay_arm,
               repo_arm}``, nothing written) while the loop's ``format_step`` change moves the
               checks arm off the repository block's own, on SQLite and PostgreSQL, and
-              registering on the block's own arm once the block sets the key (RT2B-2).
+              registering on the block's own arm once the block sets the key (RT2B-2); and
+              ``POST /readings/forward`` refusing 409 ``reading_checks_arm_moved``
+              (``{overlay_arm, ceiling_arm, repo_arm}``, nothing written) when the block moved
+              off the arm the ceiling froze, then registering once it is back (V2-CA-1).
 How:          ``make_env`` with ``tests.fixtures.proven`` adding qualified tasks, sealed rows
               (each reserved for its commit first, as the worker reserves it), scores and a
               controls report; a legacy reading written as a store holds one; the race on each
@@ -1152,4 +1155,53 @@ def test_a_forward_reading_is_refused_while_the_loop_overlay_moves_the_checks_ar
         fwd = env.post("/readings/forward", json=body)
         assert fwd.status_code == 201, fwd.text
         assert fwd.json()["checks_arm"] == "off"
+        assert _registered_events(env) == 2
+
+
+CEILING_ARM_MOVED = {"overlay_arm": "fmt", "ceiling_arm": "off", "repo_arm": "fmt"}
+
+
+def test_a_forward_reading_is_refused_when_the_block_moved_off_the_ceilings_arm(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """V2-CA-1 (round 6): a forward reading freezes the ceiling's checks arm, and its factory
+    runs resolve the overlay's. With no loop change in force but the team's block moved to
+    ``format_step: true`` after the ceiling registered on ``off``, the overlay and the block
+    agree (``fmt``), so the RT2B-2 refusal passed and a reserved.v1 forward reading was
+    written on ``off`` (201) — every ticket's reservation would then halt
+    ``reading_checks_arm_mismatch``. It is now refused 409 ``reading_checks_arm_moved``
+    naming the three arms, nothing written, and registers once the block is back on the
+    ceiling's arm — on SQLite and PostgreSQL alike."""
+    from fixtures.server_seed import BUILDER, MODEL, PROVIDER
+
+    with _api_on(backend, tmp_path / "home") as env:
+        add_tasks(env.factory, qualify=True)
+        r = register_via_api(env)
+        assert r.status_code == 201, r.text
+        assert r.json()["checks_arm"] == "off"
+        first = r.json()["pool"][:20]
+        add_rows(env.factory, first, arm="S3", reading=r.json())
+        add_rows(env.factory, first[:3], arm=S1, clean=False, reading=r.json())
+        add_rows(env.factory, first[3:], arm=S1, reading=r.json())
+        add_oracle_and_controls(env.factory, first)
+        body = {
+            "repo": ALPHA,
+            "promotes": r.json()["reading_id"],
+            "builder": BUILDER,
+            "model": MODEL,
+            "provider": PROVIDER,
+            "hypothesis": HYPOTHESIS,
+            "smallest_effect": SMALLEST_EFFECT,
+            "attempt_rule": "reserved.v1",
+        }
+        _set_checks(env, {"format_step": True})
+        fwd = env.post("/readings/forward", json=body)
+        assert fwd.status_code == 409, fwd.text
+        err = envelope(fwd)
+        assert (err["code"], err["detail"]) == ("reading_checks_arm_moved", CEILING_ARM_MOVED)
+        assert _registered_events(env) == 1
+        _set_checks(env, {"format_step": False})
+        fwd = env.post("/readings/forward", json=body)
+        assert fwd.status_code == 201, fwd.text
+        assert (fwd.json()["checks_arm"], fwd.json()["attempt_rule"]) == ("off", "reserved.v1")
         assert _registered_events(env) == 2

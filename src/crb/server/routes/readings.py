@@ -11,8 +11,10 @@ a cell's budget; it is refused ``409 reading_exists`` when the reading is alread
 retried request, under any second or actor, names it in ``detail.reading_id`` and writes nothing
 — P-793), ``409 lint_disabled`` while the repository's lint is switched off (P-796), ``409
 reading_checks_overlay`` (``detail: {overlay_arm, repo_arm}``) when the prevention loop's
-overlay moves the repository's checks arm off its own block's (RT2B-2: the reading freezes the
-block's own arm, read under the lock), ``409
+overlay moves the repository's checks arm off its own block's (RT2B-2: ``POST /readings``
+freezes the block's own arm, read under the lock; a forward reading freezes its ceiling's, so
+``POST /readings/forward`` also refuses ``409 reading_checks_arm_moved`` when the arm its
+factory runs would resolve is not that one, V2-CA-1), ``409
 pool_seen`` when a pool commit already has a graded row under an arm of the hierarchy at this
 apparatus (a reserved.v1 reading: any replay row at apparatus 2.4 or later, under any arm or
 test author — P-797), ``422 pool_not_blind`` when the caller names a pool the rule does not
@@ -63,7 +65,9 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               reading already registered (``reading_exists``, P-793), any registration
               while the repository's lint is off (``lint_disabled``, P-796) and any whose
               checks arm the loop's overlay moves (``reading_checks_overlay``, RT2B-2: both
-              routes; the reading freezes the block's own arm), and writes the
+              routes; ``POST /readings`` freezes the block's own arm, a forward reading its
+              ceiling's, refused ``reading_checks_arm_moved`` when its factory runs would
+              resolve another, V2-CA-1), and writes the
               event — every ``POST /readings`` reading under ``reserved.v1`` (``max_reruns``
               0, the ``default`` budget profile; any other rule or count 422, P-792), hashing
               the repository's ``lint_digest``; on ``POST /readings/forward`` only when asked
@@ -102,8 +106,8 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               deployment's posture class; ``checks_arm_in`` and ``own_checks_arm_in``: the
               overlay's checks arm and the repository block's own, RT2B-2),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
-Tested by:    tests/test_server_readings.py (with the overlay refusal on both routes,
-              SQLite and PostgreSQL), tests/test_forward_reading_e2e.py,
+Tested by:    tests/test_server_readings.py (with the overlay refusal on both routes and
+              the forward route's moved-arm refusal, SQLite and PostgreSQL), tests/test_forward_reading_e2e.py,
               tests/test_p792_reserved.py (the attempt rule registered by default, the pins and
               the reserved counts, the forward reading's opt-in),
               tests/test_wave3_registration_rehearsal.py (the Wave 3 record's requests),
@@ -141,6 +145,7 @@ from crb.core.reading import (
     OUTCOME_UNDECIDED,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
+    REFUSAL_CHECKS_ARM_MOVED,
     REFUSAL_CHECKS_OVERLAY,
     REFUSAL_INVALID,
     REFUSAL_LINT_DISABLED,
@@ -422,6 +427,27 @@ def _refuse_checks_overlay(s: Session, repo: str) -> str:
     return own
 
 
+def _refuse_ceiling_arm_moved(s: Session, repo: str, ceiling: Reading, own: str) -> None:
+    """409 ``reading_checks_arm_moved`` (``detail: {overlay_arm, ceiling_arm, repo_arm}``)
+    when the arm a factory run resolves now is not the arm the named ceiling froze, before
+    anything is written (V2-CA-1). A forward reading freezes its ceiling's arm
+    (:func:`crb.core.reading.register_forward`), and a factory run cannot opt out of the loop,
+    so it resolves the overlay's arm (:func:`checks_arm_in`); :func:`_refuse_checks_overlay`
+    has already held the overlay to the block's own arm (``own``), so this refuses the block
+    moving since the ceiling registered — every ticket's reservation would halt
+    ``reading_checks_arm_mismatch`` and no row could count. Read under the same events lock."""
+    overlay = checks_arm_in(s, repo)
+    if overlay != ceiling.checks_arm:
+        raise ReadingRefused(
+            f"{repo}'s checks arm is {overlay!r} now, but the ceiling {ceiling.reading_id} was "
+            f"frozen on {ceiling.checks_arm!r}: no factory run could count toward a forward "
+            "reading of it — put the repository's checks block back on the ceiling's arm, or "
+            "register a ceiling on the arm it runs now",
+            code=REFUSAL_CHECKS_ARM_MOVED,
+            detail={"overlay_arm": overlay, "ceiling_arm": ceiling.checks_arm, "repo_arm": own},
+        )
+
+
 def _refuse(exc: ReadingRefused) -> ApiError:
     shape = (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND, REFUSAL_CAMPAIGN_UNSUPPORTED)
     code = 422 if exc.code in shape else 409
@@ -631,6 +657,9 @@ def register_forward_reading(
     repository's lint is switched off (P-796), **409** ``reading_checks_overlay``
     (``detail: {overlay_arm, repo_arm}``) while the prevention loop's overlay moves the
     repository's checks arm (RT2B-2, :func:`_refuse_checks_overlay`), **409**
+    ``reading_checks_arm_moved`` (``detail: {overlay_arm, ceiling_arm, repo_arm}``) when the
+    arm the factory's runs resolve is not the one the named ceiling froze, which the forward
+    reading freezes too (V2-CA-1, :func:`_refuse_ceiling_arm_moved`), **409**
     ``budget_spent`` when the ceiling's cell budget cannot cover the rule, **404** for a
     reading the repository does not have, **422** ``campaign_unsupported_reading`` for any
     ``campaign_id`` — before anything is read or written: its calibration builds are factory
@@ -652,11 +681,12 @@ def register_forward_reading(
 
     def build(s: Session) -> dict[str, Any]:
         lint = _refuse_lint_disabled(s, body.repo)
-        _refuse_checks_overlay(s, body.repo)
+        own = _refuse_checks_overlay(s, body.repo)
         readings = load_readings(s, body.repo)
         named = next((r for r in readings if r.reading_id == body.promotes), None)
         if named is None:
             raise ApiError(404, "not_found", f"no reading {body.promotes!r} on {body.repo!r}")
+        _refuse_ceiling_arm_moved(s, body.repo, named, own)
         reading = register_forward(
             ceiling=evaluate(named, rows),
             builder=body.builder,
