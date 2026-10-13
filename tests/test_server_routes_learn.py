@@ -41,15 +41,19 @@ What it does: Pins RBAC and 404, refusals empty then one after a protocol row la
               ``command`` only completes a cut example (P-183); that a note with a line break is
               refused (P-161); that each write refuses a field it does not name; that the reads
               and writes follow the repository's checks arm (ADR-0024), a reserved.v1 reading
-              whose checks arm moved listed flagged with no request and never queued (RT2B-1);
-              that a viewer, a
+              whose checks arm moved listed flagged with no request and never queued (RT2B-1),
+              the route reading the learning-off arm for a reading's top-up on each store
+              (F2), and a reading delivered on the old arm never hiding the new arm's top-up,
+              which queues (R6V1-1); that a viewer, a
               request with no CSRF token and one with another session's token are each refused
               with nothing written; and that the writes hold under concurrency — two queues of
               one cell spend once, a prevention record landing mid-queue costs nothing, two
               decisions at once are both on record, and two first registrations keep both
               items (EI-1, EI-7).
 How:          ``make_env`` over the seed, with ``tests.fixtures.proven``'s qualified tasks and a
-              reading registered through ``POST /readings`` for the top-up; a protocol row
+              reading registered through ``POST /readings`` for the top-up (the store cases on
+              ``tests.conftest_store``'s ``backend`` fixture: SQLite, and PostgreSQL when
+              ``CRB_TEST_POSTGRES_URL`` is set); a protocol row
               appended through ``DbLedger``; the CLI
               invoked over the API's own exports for the parity case; the writes driven through
               ``env.post`` and checked against ``GET /factory/{repo}/backlog``, ``GET /runs`` and
@@ -61,6 +65,7 @@ Works with:   src/crb/server/routes/learn.py (under test), src/crb/core/learn.py
               tests/test_cli_learn.py (the CLI half of the parity),
               tests/fixtures/server_seed.py (``make_env``, ``assert_rbac``, ``user_id``),
               tests/fixtures/concurrency.py (``pause_after`` / ``at_once`` — the staged races),
+              tests/conftest_store.py (the ``backend`` fixture),
               src/crb/server/factory_state.py (the backlog the register write moves),
               docs/LEARNING-LOOP.md (the contract these writes implement), docs/API.md
 Tested by:    tests/test_server_routes_learn.py
@@ -104,6 +109,7 @@ from fixtures.proven import CELL as PROVEN_CELL
 from fixtures.proven import add_rows as add_proven_rows
 from fixtures.proven import add_tasks as add_proven_tasks
 from fixtures.proven import register_via_api
+from fixtures.readings import format_step_in_force
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -118,6 +124,11 @@ from fixtures.server_seed import (
     task_id,
     user_id,
 )
+
+try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
+    from tests.conftest_store import Backend, backend, pg_schema
+except ImportError:  # pragma: no cover — rootdir-relative import (pytest default)
+    from conftest_store import Backend, backend, pg_schema  # noqa: F401
 
 #: A refusal whose only recorded command was cut by the recorder's 120-character cap: the
 #: class is ``truncated`` and a person must complete the line (``command``).
@@ -146,6 +157,23 @@ def env(tmp_path: Path) -> Iterator[Env]:
     """The seeded environment, logged in as admin, torn down after the test."""
     with make_env(tmp_path) as e:
         yield e
+
+
+@pytest.fixture
+def store_env(backend: Backend, tmp_path: Path) -> Iterator[Env]:
+    """:func:`env` on each store backend — SQLite always, PostgreSQL when
+    ``CRB_TEST_POSTGRES_URL`` is set (``tests.conftest_store``)."""
+    from crb.server.app import create_app
+    from crb.store.db import init_db
+    from fixtures.server_seed import add_users, make_settings, seed
+
+    init_db(backend.engine)
+    info = seed(backend.factory)
+    add_users(backend.factory)
+    settings = make_settings(tmp_path)
+    with TestClient(create_app(settings, backend.factory)) as client:
+        login(client, "admin")
+        yield Env(client=client, factory=backend.factory, info=info, settings=settings)
 
 
 def _add_protocol_row(env: Env, error: str = ERR_NHS, task: str = "f" * 40) -> None:
@@ -1776,6 +1804,69 @@ def test_remeasure_lists_a_reading_whose_checks_arm_moved(
     back = _read_cell(env)
     assert back["checks_arm_moved"] is None and back["next_act"] == "replay"
     assert len(back["requests"]) == 1 and back["n_requested"] == 8
+
+
+def test_remeasure_reads_the_learning_off_arm_for_a_top_up_on_each_store(
+    store_env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F2 (round 6): every request the plan composes runs the loop off, so the route hands the
+    plan the arm the team's block alone resolves (``current_checks_arm(..., learning=False)``)
+    for it, and the arm the loop's overlay resolves for a ``+L`` arm's run. No test covered the
+    first: handing it the overlay's arm would flag a reading whose top-up never halts. Here
+    the loop's ``format_step`` change alone moves the arm (the block silent): the ``S3`` entry
+    of a reading frozen on ``off`` is not flagged and keeps its one request; once ``S3``
+    delivers, its ``S3+L`` entry on the same reading — a run under the overlay — is flagged
+    ``{off, fmt}`` with no request."""
+    del builder_keys
+    env = store_env
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, graded=12, hierarchy=("S3", "S3+L"))
+    assert reading["checks_arm"] == "off"
+    format_step_in_force(env.factory, ALPHA)
+    cell = _read_cell(env)
+    assert (cell["arm"], cell["checks_arm_moved"], cell["next_act"]) == ("S3", None, "replay")
+    assert len(cell["requests"]) == 1 and cell["n_requested"] == 8
+    assert cell["reading_id"] == reading["reading_id"]
+    add_proven_rows(env.factory, reading["pool"][12:20], arm="S3", reading=reading)
+    loop = _read_cell(env)
+    assert (loop["arm"], loop["reading_id"]) == ("S3+L", reading["reading_id"])
+    assert loop["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    assert (loop["next_act"], loop["requests"]) == ("config", [])
+
+
+def test_a_delivered_reading_on_the_old_checks_arm_never_hides_the_new_arms_top_up(
+    store_env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6V1-1 (round 6): after the repository's checks arm moved, a reserved.v1 reading of the
+    old arm whose ``S3`` look delivered (a ceiling) still spoke for the cell over the reading
+    registered on the new arm: the plan read the cell ``up_to_date``, listed no top-up, and
+    the queue answered 422 with nothing ``available``. The readings of the current arm now
+    speak first: the new reading's top-up is listed, unflagged, and queued 201."""
+    del builder_keys
+    env = store_env
+    _sealed(env, monkeypatch)
+    old = _add_reading(env, graded=20, hierarchy=("S3",))
+    assert env.put(f"/repos/{ALPHA}", json={"checks": {"format_step": True}}).status_code == 200
+    add_proven_tasks(
+        env.factory, prefix="later", authored="2026-09-01T12:00:00+00:00", qualify=True
+    )
+    r = register_via_api(env, hierarchy=("S3",), since="2026-08-15T00:00:00+00:00")
+    assert r.status_code == 201, r.text
+    new = r.json()
+    assert (old["checks_arm"], new["checks_arm"]) == ("off", "fmt")
+    plan = env.get(f"/learn/remeasure?repo={ALPHA}").json()
+    assert not [u for u in plan["up_to_date"] if u.startswith(READ_CELL)], plan["up_to_date"]
+    (cell,) = [c for c in plan["cells"] if c["label"] == READ_CELL]
+    assert (cell["reading_id"], cell["next_act"], cell["checks_arm_moved"]) == (
+        new["reading_id"],
+        "replay",
+        None,
+    )
+    assert len(cell["requests"]) == 1 and cell["n_requested"] == 20
+    before = env.get("/runs").json()["total"]
+    queued = _queue(env, cell=READ_CELL)
+    assert queued.status_code == 201, queued.text
+    assert env.get("/runs").json()["total"] > before and len(_queued_events(env)) == 1
 
 
 # ---------------------------------------------------------------------------

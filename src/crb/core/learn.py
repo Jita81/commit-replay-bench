@@ -60,7 +60,9 @@ What it does: Groups every ``protocol`` row's guard refusals by (reason, command
               profile, so the body passes ``reading_run_fields``) and what it costs, and every
               cell with rows but no reading as needing one registered first; a reserved.v1
               reading whose run would resolve another checks arm than it froze is listed
-              flagged ``checks_arm_moved`` ({frozen, current}) with no request.
+              flagged ``checks_arm_moved`` ({frozen, current}) with no request, and the
+              readings frozen on the current arm speak for their cell first: one frozen on
+              another arm speaks only where its cell has none, never up to date (R6V1-1).
               Writes only what a named human decided (``apply_triage``, under a lock on the
               corpus directory; a supplied command only completes a cut example) and queues
               nothing.
@@ -1993,6 +1995,18 @@ def _checks_arm_moved(
     return None if now == reading.checks_arm else (reading.checks_arm, now)
 
 
+def _off_the_checks_arm(reading: Reading, checks_arm: str | None) -> bool:
+    """Is ``reading`` a reserved.v1 reading (:func:`holds_its_checks_arm`) frozen on another
+    checks arm than ``checks_arm`` — the arm a run with the loop off resolves now, the one
+    ``POST /readings`` would freeze? Never with no ``checks_arm`` given, never for a reading
+    the caller already scoped to the current arm (a legacy or forward one)."""
+    return (
+        checks_arm is not None
+        and holds_its_checks_arm(reading)
+        and reading.checks_arm != checks_arm
+    )
+
+
 def remeasure_plan(
     rows: Iterable[GradeRow],
     *,
@@ -2012,7 +2026,13 @@ def remeasure_plan(
     (``ReadingBook.evaluate(...).outcomes``); the caller passes those of its own scope (checks
     arm, class-set version — a reserved.v1 reading whatever its checks arm,
     :func:`holds_its_checks_arm`). Per cell the reading that speaks (``latest_outcome``)
-    decides:
+    decides — among the readings of the current checks arm (``checks_arm``; all of them when
+    none is given), so a reserved.v1 reading frozen on another arm, which ranks above a
+    waiting one (a ceiling over ``look_pending``), never hides a reading of the current arm
+    and its top-up (R6V1-1). Such a reading speaks only for a cell no reading of the current
+    arm reads: listed as below (a waiting arm flagged ``checks_arm_moved``), never
+    ``up_to_date`` (its standard is another arm's), and never hiding the register entries of
+    the cell's rows:
 
     * **waiting on its look** → a ``look_pending`` entry for the arm the hierarchy stopped at:
       ``n_current`` the commits its look has read, ``n_needed`` the commits still needed before
@@ -2052,12 +2072,16 @@ def remeasure_plan(
     gold = frozenset(gold_clean_tasks) if gold_clean_tasks is not None else None
     first_look = min(rule_looks(policy.rule))
     stale_rows = sum(1 for r in rs if _version_key(r.apparatus_version) < cur)
-    # the reading that speaks for each (repo, cell) at this apparatus
+    # the reading that speaks for each (repo, cell) at this apparatus: one of the current
+    # checks arm first; a reserved.v1 reading frozen on another arm only when none is (R6V1-1)
     by_cell: dict[tuple[str, str], list[ReadingOutcome]] = {}
+    off_arm: dict[tuple[str, str], list[ReadingOutcome]] = {}
     for o in readings:
         if o.reading.apparatus == current_apparatus:
-            by_cell.setdefault((o.reading.repo, o.reading.cell_key), []).append(o)
+            held = off_arm if _off_the_checks_arm(o.reading, checks_arm) else by_cell
+            held.setdefault((o.reading.repo, o.reading.cell_key), []).append(o)
     speaking = {k: latest_outcome(v) for k, v in by_cell.items()}
+    stranded = {k: latest_outcome(v) for k, v in off_arm.items() if k not in by_cell}
     plan: list[RemeasureCell] = []
     delivered: list[str] = []
     beyond: list[CannotClear] = []
@@ -2069,13 +2093,15 @@ def remeasure_plan(
             [r.latency_s for r in same if r.latency_s > 0],
         )
 
-    for (repo, _cell_key), outcome in sorted(speaking.items()):
+    for (repo, cell_key), outcome in sorted({**speaking, **stranded}.items()):
         if outcome is None:
             continue
         reading = outcome.reading
         cell = CellKey(**{f: str(reading.cell.get(f, "")) for f in CELL_FIELDS})
         blocking = outcome.blocking
         if blocking is None or blocking.state == STATE_DELIVER:
+            if (repo, cell_key) in stranded:
+                continue  # a standard on another checks arm licenses nothing on this one
             arm = outcome.standard or (outcome.chain[-1] if outcome.chain else "")
             delivered.append(f"{cell.label}|{arm}")
             continue
@@ -2237,6 +2263,7 @@ def remeasure_plan(
         repos = sorted({r.repo for r in group})
         if any((repo, cell.label) in speaking for repo in repos):
             continue  # the cell's reading speaks for it, whichever arm these rows are
+        # (a reading frozen on another checks arm never does: ``stranded`` hides nothing)
         stale = [r for r in group if _version_key(r.apparatus_version) < cur]
         current = [r for r in group if _version_key(r.apparatus_version) >= cur]
         costs = [r.cost_usd for r in group if r.cost_known]

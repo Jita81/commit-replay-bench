@@ -19,7 +19,9 @@ What it does: Shows a cell with rows and no reading offered ``register`` with no
               a reserved.v1 reading's top-up on the reading's own budget profile, admitted by
               the submit gate's whitelist (P-792 C7); a reserved.v1 reading whose run would
               resolve another checks arm than it froze flagged ``checks_arm_moved`` with no
-              request (RT2B-1); unknown cost, and a blind top-up priced
+              request (RT2B-1), and a reading delivered on another checks arm never hiding
+              the cell's current-arm reading or reading up to date (R6V1-1); unknown cost,
+              and a blind top-up priced
               at the one rung its run climbs; determinism; and the CLI rendering.
 How:          Sealed 2.4 rows and readings from ``tests.fixtures.readings``; rows of an older
               apparatus from ``tests.fixtures.posture``; no model, no docker, no store.
@@ -45,13 +47,18 @@ from crb.core.capability import ReadingBook
 from crb.core.ledger import GradeRow
 from crb.core.reading import (
     ATTEMPT_RULE_RESERVED,
+    OUTCOME_CEILING,
     REFUSAL_POOL_SEEN,
     STATE_INSUFFICIENT,
     STATE_UNDECIDED,
     ReadingRefused,
+    Reservation,
     evaluate,
+    register,
     verdict_for,
+    with_reservations,
 )
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from fixtures.posture import posture_row
 from fixtures.readings import (
     AUTHOR,
@@ -451,6 +458,80 @@ def test_a_reserved_reading_off_its_checks_arm_is_flagged_and_asked_nothing() ->
     (lc,) = _plan([], legacy, checks_arm="fmt", checks_arm_loop="fmt").cells
     assert lc.checks_arm_moved is None and lc.requests
     assert learn.holds_its_checks_arm(reserved) and not learn.holds_its_checks_arm(legacy)
+
+
+def _delivered_off_arm() -> tuple[Any, list[GradeRow]]:
+    """A reserved.v1 ``S3`` reading frozen on ``off`` whose 20 reserved attempts were clean —
+    its first look delivered — with its reservations loaded, and those 20 rows."""
+    old = _reserved(commits(40, "old"))
+    reservations = [
+        Reservation(
+            arm="S3",
+            task_id=c,
+            run_id=f"run-{i}",
+            event_id=f"ev-{i}",
+            event_seq_id=11 + i,
+            claim=0,
+            treatment="treat-1",
+            hold_usd=0.5,
+            settled=False,
+        )
+        for i, c in enumerate(old.pool[:20])
+    ]
+    rows = [
+        sealed_row(
+            res.task_id,
+            run_id=res.run_id,
+            labels={"reservation": res.event_id, "treatment": res.treatment, "claim": "0"},
+        )
+        for res in reservations
+    ]
+    return with_reservations(old, reservations, 10), rows
+
+
+def test_a_delivered_reading_on_another_checks_arm_never_hides_the_current_arms() -> None:
+    """R6V1-1 (round 6): the plan let the latest delivered reading speak for a cell whatever
+    checks arm it froze, so after the arm moved a reserved.v1 reading of the old arm that
+    delivered (a ceiling ranks above ``look_pending``) hid the reading registered on the
+    current arm: the cell read ``up_to_date``, the new reading's top-up was never listed, and
+    the queue answered 422 with nothing available. The readings of the current checks arm
+    now speak first. One frozen on another arm speaks only where none does: never
+    ``up_to_date`` (its standard is another arm's), and never hiding the cell's register
+    entries."""
+    old, rows = _delivered_off_arm()
+    assert _book(old, rows=rows).outcomes[0].state == OUTCOME_CEILING
+    new = register(
+        repo=REPO,
+        cell=CELL,
+        hierarchy=("S3",),
+        pool=commits(40, "new"),
+        apparatus=CUR,
+        taxonomy=GLOBAL_CLASS_SET,
+        posture_class=SEALED,
+        checks_arm="fmt",
+        actor="op-1",
+        now="2026-09-28T10:00:00+00:00",
+        attempt_rule=ATTEMPT_RULE_RESERVED,
+        max_reruns=0,
+        budget_profile="default",
+    )
+    plan = _plan(rows, old, new, checks_arm="fmt", checks_arm_loop="fmt")
+    assert plan.up_to_date == ()
+    (c,) = plan.cells
+    assert (c.reading_id, c.reason, c.next_act) == (
+        new.reading_id,
+        learn.REASON_PENDING,
+        learn.NEXT_REPLAY,
+    )
+    assert c.checks_arm_moved is None and c.requests[0].task_ids == new.pool[:20]
+    # the old arm's reading alone: not delivered here, and the cell's rows ask to register
+    (alone,) = _plan(rows, old, checks_arm="fmt", checks_arm_loop="fmt").cells
+    assert (alone.next_act, alone.requests) == (learn.NEXT_REGISTER, ())
+    assert _plan(rows, old, checks_arm="fmt", checks_arm_loop="fmt").up_to_date == ()
+    # on its own arm, or with no arm given (the host's CLI), it is delivered as before
+    for kw in ({"checks_arm": "off", "checks_arm_loop": "off"}, {}):
+        on = _plan(rows, old, **kw)
+        assert on.up_to_date == (f"{LABEL}|S3",) and on.cells == (), kw
 
 
 def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_at_its_one_rung() -> None:
