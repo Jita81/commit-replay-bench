@@ -357,6 +357,13 @@ REFUSAL_EXISTS = "reading_exists"
 #: row graded with it off leaves a legacy reading's pool (:data:`LEFT_LINT_DISABLED`), so
 #: while it is off nothing a reading counts is registered or built.
 REFUSAL_LINT_DISABLED = "lint_disabled"
+#: A registration whose checks arm the prevention loop's overlay moves (RT2B-2): an applied
+#: ``checks`` change in force, on a key the repository's own block does not set, makes the arm
+#: a run resolves differ from the block's own arm. A reading frozen on the overlay's arm would
+#: rest on a loop change any revert or supersede moves, so ``POST /readings`` and
+#: ``POST /readings/forward`` refuse it 409 with ``detail: {overlay_arm, repo_arm}`` and write
+#: nothing; the operator sets the key in the repository's block (DL-410) and registers again.
+REFUSAL_CHECKS_OVERLAY = "reading_checks_overlay"
 REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_POOL_SEEN,
     REFUSAL_BUDGET_SPENT,
@@ -366,6 +373,7 @@ REFUSAL_CODES: tuple[str, ...] = (
     REFUSAL_CAMPAIGN_UNSUPPORTED,
     REFUSAL_EXISTS,
     REFUSAL_LINT_DISABLED,
+    REFUSAL_CHECKS_OVERLAY,
 )
 #: A run of a reserved.v1 reading that carries a field the reading does not allow
 #: (:func:`reading_run_refusal`): refused at submit (422) and again at claim.
@@ -2739,6 +2747,7 @@ __all__ = [
     "READING_SCHEMA",
     "REFUSAL_BUDGET_SPENT",
     "REFUSAL_CAMPAIGN_UNSUPPORTED",
+    "REFUSAL_CHECKS_OVERLAY",
     "REFUSAL_EXISTS",
     "REFUSAL_LINT_DISABLED",
     "REFUSAL_NOT_A_CEILING",

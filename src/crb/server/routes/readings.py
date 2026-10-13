@@ -10,6 +10,9 @@ event under the events store's write lock, so two registrations can never both s
 a cell's budget; it is refused ``409 reading_exists`` when the reading is already registered (a
 retried request, under any second or actor, names it in ``detail.reading_id`` and writes nothing
 — P-793), ``409 lint_disabled`` while the repository's lint is switched off (P-796), ``409
+reading_checks_overlay`` (``detail: {overlay_arm, repo_arm}``) when the prevention loop's
+overlay moves the repository's checks arm off its own block's (RT2B-2: the reading freezes the
+block's own arm, read under the lock), ``409
 pool_seen`` when a pool commit already has a graded row under an arm of the hierarchy at this
 apparatus (a reserved.v1 reading: any replay row at apparatus 2.4 or later, under any arm or
 test author — P-797), ``422 pool_not_blind`` when the caller names a pool the rule does not
@@ -57,8 +60,10 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               verify (``campaign_unknown``, DL-382) and any campaign on a reading of the
               factory's cell, the forward reading included (``campaign_unsupported_reading``),
               reads the rows and the readings already registered under the lock, refuses a
-              reading already registered (``reading_exists``, P-793) and any registration
-              while the repository's lint is off (``lint_disabled``, P-796), and writes the
+              reading already registered (``reading_exists``, P-793), any registration
+              while the repository's lint is off (``lint_disabled``, P-796) and any whose
+              checks arm the loop's overlay moves (``reading_checks_overlay``, RT2B-2: both
+              routes; the reading freezes the block's own arm), and writes the
               event — every ``POST /readings`` reading under ``reserved.v1`` (``max_reruns``
               0, the ``default`` budget profile; any other rule or count 422, P-792), hashing
               the repository's ``lint_digest``; on ``POST /readings/forward`` only when asked
@@ -71,7 +76,8 @@ What it does: Registers a reading (operator): freezes the pool by rule from the 
               drifted reading reads ``undecided``);
               answers a cell's proven standard on one checks arm and posture class (or
               ``None``).
-How:          ``append_event_checked`` (lock → ``_qualified_reserved`` →
+How:          ``append_event_checked`` (lock → ``_refuse_checks_overlay`` →
+              ``_qualified_reserved`` →
               ``crb.core.reading.register`` → insert) →
               ``load_readings`` (verified events; a record that does not re-hash is skipped and
               counted) → ``ReadingBook.evaluate`` over ``DbLedger`` rows → ``served_reading``
@@ -92,9 +98,12 @@ Works with:   src/crb/core/reading.py (the rules a registration and a reading fo
               pins the worker halts a moved treatment by and ``GET /readings`` serves;
               ``repo_lint``, the lint a registration refuses or hashes; ``pool_drift``, the
               drift a reserved.v1 reading is served ``undecided`` on),
-              src/crb/server/posture_view.py (the deployment's posture class),
+              src/crb/server/posture_view.py and src/crb/server/prevention_state.py (the
+              deployment's posture class; ``checks_arm_in`` and ``own_checks_arm_in``: the
+              overlay's checks arm and the repository block's own, RT2B-2),
               docs/API.md#capability-routing-forecast-sign-off (the two routes documented)
-Tested by:    tests/test_server_readings.py, tests/test_forward_reading_e2e.py,
+Tested by:    tests/test_server_readings.py (with the overlay refusal on both routes,
+              SQLite and PostgreSQL), tests/test_forward_reading_e2e.py,
               tests/test_p792_reserved.py (the attempt rule registered by default, the pins and
               the reserved counts, the forward reading's opt-in),
               tests/test_wave3_registration_rehearsal.py (the Wave 3 record's requests),
@@ -132,6 +141,7 @@ from crb.core.reading import (
     OUTCOME_UNDECIDED,
     READING_EVENT_ACTION,
     REFUSAL_CAMPAIGN_UNSUPPORTED,
+    REFUSAL_CHECKS_OVERLAY,
     REFUSAL_INVALID,
     REFUSAL_LINT_DISABLED,
     REFUSAL_NOT_A_CEILING,
@@ -162,7 +172,7 @@ from crb.server.campaigns import campaign_of, unplaced_attempts
 from crb.server.class_set_state import report_for, verdict_for
 from crb.server.deps import ApiError, DbDep, ErrorEnvelope, SessionFactoryDep, SettingsDep
 from crb.server.posture_view import deployment_posture_class
-from crb.server.prevention_state import current_checks_arm
+from crb.server.prevention_state import checks_arm_in, own_checks_arm_in
 from crb.server.reading_book import load_readings, pool_drift, repo_lint, treatment_pins
 from crb.server.routes.repos import get_repo_or_404
 from crb.store import qualifications as store_q
@@ -388,6 +398,30 @@ def _refuse_lint_disabled(s: Session, repo: str) -> dict[str, Any]:
     return lint
 
 
+def _refuse_checks_overlay(s: Session, repo: str) -> str:
+    """The repository block's own checks arm, read under the events lock — or 409
+    ``reading_checks_overlay`` (``detail: {overlay_arm, repo_arm}``) when the prevention loop's
+    overlay moves it, before anything is written (RT2B-2). While the two differ, the arm a
+    run resolves depends on whether it learns: the re-measurement plan's runs opt out
+    (``learning: off``, the block's own arm, :func:`own_checks_arm_in`) and any other run reads
+    the overlay's (:func:`checks_arm_in`), so whichever arm the reading froze, some of its runs
+    would halt ``reading_checks_arm_mismatch`` — and a revert or supersede of the loop's change
+    moves the overlay's arm under it. The operator sets the key in the repository's block
+    (DL-410), where it wins over the overlay, and registers again. Read under the lock the loop
+    appends under, so no applied change lands between this read and the event."""
+    overlay = checks_arm_in(s, repo)
+    own = own_checks_arm_in(s, repo)
+    if overlay != own:
+        raise ReadingRefused(
+            f"the prevention loop's overlay moves {repo}'s checks arm from {own!r} (the "
+            f"repository's own block) to {overlay!r}: a reading frozen now would rest on a loop "
+            "change — set the key in the repository's checks block, then register",
+            code=REFUSAL_CHECKS_OVERLAY,
+            detail={"overlay_arm": overlay, "repo_arm": own},
+        )
+    return own
+
+
 def _refuse(exc: ReadingRefused) -> ApiError:
     shape = (REFUSAL_INVALID, REFUSAL_POOL_NOT_BLIND, REFUSAL_CAMPAIGN_UNSUPPORTED)
     code = 422 if exc.code in shape else 409
@@ -440,7 +474,6 @@ def register_reading(
                 "builder_executor": deployment["builder_executor"],
             },
         )
-    checks = current_checks_arm(factory, body.repo)
     try:
         budget = cell_error_budget()
     except ValueError as exc:
@@ -457,6 +490,7 @@ def register_reading(
 
     def build(s: Session) -> dict[str, Any]:
         lint = _refuse_lint_disabled(s, body.repo)
+        checks = _refuse_checks_overlay(s, body.repo)
         _refuse_unknown_campaign(s, body.campaign_id)
         qualified, pool_posture_id, pins = _qualified_reserved(s, body.repo, body.cell, posture)
         if org:
@@ -594,10 +628,13 @@ def register_forward_reading(
     acceptance tests. Refused **409** ``not_a_ceiling`` when the named reading does not read
     ``ceiling`` now, **409** ``reading_exists`` when the same forward reading is already
     registered (a retry writes nothing — P-793), **409** ``lint_disabled`` while the
-    repository's lint is switched off (P-796), **409** ``budget_spent`` when the ceiling's
-    cell budget cannot cover the rule, **404** for a reading the repository does not have, **422**
-    ``campaign_unsupported_reading`` for any ``campaign_id`` — before anything is read or
-    written: its calibration builds are factory runs, which no submit gate requires to be
+    repository's lint is switched off (P-796), **409** ``reading_checks_overlay``
+    (``detail: {overlay_arm, repo_arm}``) while the prevention loop's overlay moves the
+    repository's checks arm (RT2B-2, :func:`_refuse_checks_overlay`), **409**
+    ``budget_spent`` when the ceiling's cell budget cannot cover the rule, **404** for a
+    reading the repository does not have, **422** ``campaign_unsupported_reading`` for any
+    ``campaign_id`` — before anything is read or written: its calibration builds are factory
+    runs, which no submit gate requires to be
     filed under a campaign (DL-382, :func:`crb.core.reading.campaign_unsupported`), and
     **422** ``invalid_reading`` (``detail: {max_reruns, budget_profile}``, nothing written)
     for a reserved.v1 body asking for re-runs or naming no budget profile. With
@@ -615,6 +652,7 @@ def register_forward_reading(
 
     def build(s: Session) -> dict[str, Any]:
         lint = _refuse_lint_disabled(s, body.repo)
+        _refuse_checks_overlay(s, body.repo)
         readings = load_readings(s, body.repo)
         named = next((r for r in readings if r.reading_id == body.promotes), None)
         if named is None:

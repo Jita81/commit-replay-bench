@@ -18,7 +18,10 @@ What it does: Step 4: logs in as an operator, registers the record's campaign (2
               5%), refuses a registration without its question (422) and meets the refusals the
               record names (``campaign_unknown``, ``pool_not_blind``, ``pool_seen``,
               ``budget_spent``, ``invalid_reading`` naming both executors on a host builder and
-              the posture class with the sandbox off docker); a retried registration is
+              the posture class with the sandbox off docker); with the loop's ``format_step``
+              change in force and the repository's block silent, the record's body is refused
+              409 ``reading_checks_overlay``, and registers on ``checks_arm`` ``off`` once the
+              block sets the key (DL-410, RT2B-2); a retried registration is
               refused 409 ``reading_exists`` naming the first reading, which lists once; every
               reading registers under ``reserved.v1`` (``max_reruns`` 0, the ``default``
               budget profile, its pool pinned to its qualification records) — a bare body as
@@ -55,6 +58,7 @@ Works with:   docs/reviews/2026-10-09-wave-3-registration.md (the record rehears
               src/crb/server/routes/readings.py (the registration and ``GET /readings``),
               src/crb/server/routes/runs.py (``submit_refusals``, ``admit_under_campaign``),
               src/crb/server/routes/learn.py (the remeasure plan and its queue),
+              src/crb/server/routes/repos.py (DL-410's config edit, ``PUT /repos/{name}``),
               tests/test_server_campaigns.py (the campaign routes' own suite),
               tests/test_server_readings.py (the readings routes' own suite)
 Tested by:    this file
@@ -86,7 +90,13 @@ from crb.server.routes import runs as runs_routes
 from crb.server.routes.learn import deployment_author_model
 from crb.store.ledger import DbLedger
 from crb.store.models import Event, Repo, Run, Task
-from fixtures.readings import SEALED_SETTINGS, qualify_pool, reserve_for, sealed_row
+from fixtures.readings import (
+    SEALED_SETTINGS,
+    format_step_in_force,
+    qualify_pool,
+    reserve_for,
+    sealed_row,
+)
 from fixtures.server_seed import Env, envelope, login, make_env
 
 RECORD = Path(__file__).resolve().parents[1] / "docs/reviews/2026-10-09-wave-3-registration.md"
@@ -616,6 +626,30 @@ def test_step4_a_retried_registration_is_the_same_reading_once(stack: Wave3) -> 
     (cell,) = [b for b in served["budgets"] if b["cell"]["size"] == "XS"]
     assert f"{cell['spent']:.2%}" == "2.10%" and cell["readings"] == 1
     assert "`reading_exists`" in _step(4)
+
+
+def test_step4_a_reading_is_never_frozen_through_the_loops_overlay(stack: Wave3) -> None:
+    """Step 4's precondition (DL-410, RT2B-2): while the loop's ``format_step`` change is in
+    force on cobra and cobra's own ``checks`` block is silent on the key, the record's body is
+    refused 409 ``reading_checks_overlay`` naming both arms, with nothing written; once the
+    block sets ``format_step: false`` (``PUT /api/v1/repos/cobra``, DL-410's config edit) the
+    same body registers, and its ``checks_arm`` reads ``off``, as the record requires."""
+    w = stack
+    cid = w.send("POST", "/api/v1/campaigns", json=campaign_body()).json()["campaign_id"]
+    body = registration_bodies(cid, deployment_author_model(w.env.settings))[("cobra", "XS")]
+    format_step_in_force(w.env.factory, "cobra")
+    err = _refused(w.send("POST", "/api/v1/readings", json=body), 409, "reading_checks_overlay")
+    assert err["detail"] == {"overlay_arm": "fmt", "repo_arm": "off"}, err
+    assert _registered(w.env) == 0
+    assert "`reading_checks_overlay`" in _step(4)
+    assert "`format_step: false`" in _step(4)
+    r = w.send("PUT", "/api/v1/repos/cobra", json={"checks": {"format_step": False}})
+    assert r.status_code == 200, r.text
+    r = w.send("POST", "/api/v1/readings", json=body)
+    assert r.status_code == 201, r.text
+    assert r.json()["checks_arm"] == "off", r.json()
+    assert "`checks_arm` reads `off`" in _step(4)
+    assert _registered(w.env) == 1
 
 
 @pytest.mark.parametrize(

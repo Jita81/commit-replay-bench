@@ -27,7 +27,10 @@ What it does: Registers a reading through ``POST /readings`` (operator; refused 
               holding a reading twice listing and spending it once (P-793); both routes
               refusing 409 ``lint_disabled`` while the repository's lint is off, and a
               reserved.v1 id hashing the repository's lint config while a legacy id does not
-              (P-796).
+              (P-796); both routes refusing 409 ``reading_checks_overlay`` (``{overlay_arm,
+              repo_arm}``, nothing written) while the loop's ``format_step`` change moves the
+              checks arm off the repository block's own, on SQLite and PostgreSQL, and
+              registering on the block's own arm once the block sets the key (RT2B-2).
 How:          ``make_env`` with ``tests.fixtures.proven`` adding qualified tasks, sealed rows
               (each reserved for its commit first, as the worker reserves it), scores and a
               controls report; a legacy reading written as a store holds one; the race on each
@@ -38,13 +41,16 @@ Works with:   src/crb/server/routes/readings.py (``POST`` and ``GET /readings``,
               src/crb/server/routes/capability.py (the map and ``/routes`` per arm),
               src/crb/server/routes/value.py (per-arm cells and the readings on ``/value``),
               src/crb/server/routes/ledger.py (the CSV export's arm and class-set columns),
-              tests/fixtures/proven.py (a proven cell in the seeded store)
+              src/crb/server/prevention_state.py (``checks_arm_in``, ``own_checks_arm_in``),
+              tests/fixtures/proven.py (a proven cell in the seeded store),
+              tests/fixtures/readings.py (``format_step_in_force``, the loop's overlay)
 Tested by:    this file
 Touch when:   never for a new repository; a served field of the readings or the map changes.
 """
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import os
@@ -65,7 +71,14 @@ from fixtures.proven import (
     commit,
     register_via_api,
 )
-from fixtures.readings import HYPOTHESIS, SEALED, SEALED_SETTINGS, SMALLEST_EFFECT, qualify_pool
+from fixtures.readings import (
+    HYPOTHESIS,
+    SEALED,
+    SEALED_SETTINGS,
+    SMALLEST_EFFECT,
+    format_step_in_force,
+    qualify_pool,
+)
 from fixtures.server_seed import ALPHA, Env, envelope, login, logout, make_env
 
 try:  # the store backends: SQLite always, PostgreSQL when CRB_TEST_POSTGRES_URL is set
@@ -1018,3 +1031,118 @@ def test_a_reserved_reading_id_hashes_the_lint_config(
         assert not Reading.from_dict(moved).verify()
         dropped = {k: v for k, v in reserved.items() if k != "lint_digest"}
         assert not Reading.from_dict(dropped).verify()
+
+
+# --- a reading is never frozen through the loop's overlay (RT2B-2, round 6) ------------------
+
+
+@contextlib.contextmanager
+def _api_on(backend: Backend, home: Path) -> Iterator[Env]:
+    """The app on ``backend``'s store: sealed (P-789), seeded, an operator logged in."""
+    from fastapi.testclient import TestClient
+
+    from crb.server.app import create_app
+    from crb.store.db import init_db
+    from fixtures.server_seed import add_users, make_settings, seed
+
+    home.mkdir(exist_ok=True)
+    init_db(backend.engine)
+    info = seed(backend.factory)
+    add_users(backend.factory)
+    settings = make_settings(home, **SEALED_SETTINGS)
+    with TestClient(create_app(settings, backend.factory)) as client:
+        login(client, "operator")
+        yield Env(client=client, factory=backend.factory, info=info, settings=settings)
+
+
+def _set_checks(env: Env, checks: dict[str, Any]) -> None:
+    """ALPHA's own ``checks`` block set through ``PUT /repos/{name}`` (operator) — DL-410's
+    config edit before step 4: a key the team sets wins over the loop's overlay."""
+    r = env.put(f"/repos/{ALPHA}", json={"checks": dict(checks)})
+    assert r.status_code == 200, r.text
+
+
+OVERLAY_MOVED = {"overlay_arm": "fmt", "repo_arm": "off"}
+
+
+def test_post_readings_refuses_when_the_loop_overlay_moves_the_checks_arm(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """RT2B-2 (round 6): with the learning switch at config, the loop's ``format_step`` change
+    in force and the repository's ``checks`` block silent on the key, the arm a run that
+    learns resolves is ``fmt`` while the re-measurement plan's runs (``learning: off``)
+    resolve the block's own ``off``. ``POST /readings`` froze the overlay's ``fmt`` (201), so
+    every S3, A0 and S1 run of the plan would halt ``reading_checks_arm_mismatch``. It is now
+    refused 409 ``reading_checks_overlay`` naming both arms, and nothing is written — on
+    SQLite and PostgreSQL alike."""
+    with _api_on(backend, tmp_path / "home") as env:
+        add_tasks(env.factory, qualify=True)
+        format_step_in_force(env.factory, ALPHA)
+        r = register_via_api(env)
+        assert r.status_code == 409, r.text
+        err = envelope(r)
+        assert (err["code"], err["detail"]) == ("reading_checks_overlay", OVERLAY_MOVED), err
+        assert _registered_events(env) == 0
+        assert env.get(f"/readings?repo={ALPHA}").json()["readings"] == []
+
+
+def test_a_reading_registers_on_the_blocks_own_arm_when_the_overlay_does_not_move_it(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """The pins beside RT2B-2: with no loop change in force the reading freezes the block's
+    own arm, ``off`` by default and ``fmt`` when the team's block sets ``format_step`` (the
+    refusal reads a difference, never an arm); and with the loop's change in force, the team's
+    block setting ``format_step: false`` (DL-410) wins over the overlay, so the two arms agree
+    and the reading registers on ``off``."""
+    with _api_on(backend, tmp_path / "home") as env:
+        add_tasks(env.factory, qualify=True)
+        _set_checks(env, {"format_step": True})
+        r = register_via_api(env)
+        assert r.status_code == 201, r.text
+        assert r.json()["checks_arm"] == "fmt"
+        _set_checks(env, {"format_step": False})
+        format_step_in_force(env.factory, ALPHA)
+        r = register_via_api(env, hypothesis=f"{HYPOTHESIS}, on the block's off arm")
+        assert r.status_code == 201, r.text
+        assert r.json()["checks_arm"] == "off"
+        assert _registered_events(env) == 2
+
+
+def test_a_forward_reading_is_refused_while_the_loop_overlay_moves_the_checks_arm(
+    backend: Backend, tmp_path: Path
+) -> None:
+    """``POST /readings/forward`` freezes the ceiling's checks arm, and the factory runs it
+    counts resolve the overlay's: it is refused 409 ``reading_checks_overlay`` while the loop's
+    change moves the arm, nothing written, and registers once the team's block sets the key."""
+    from fixtures.server_seed import BUILDER, MODEL, PROVIDER
+
+    with _api_on(backend, tmp_path / "home") as env:
+        add_tasks(env.factory, qualify=True)
+        r = register_via_api(env)
+        assert r.status_code == 201, r.text
+        assert r.json()["checks_arm"] == "off"
+        first = r.json()["pool"][:20]
+        add_rows(env.factory, first, arm="S3", reading=r.json())
+        add_rows(env.factory, first[:3], arm=S1, clean=False, reading=r.json())
+        add_rows(env.factory, first[3:], arm=S1, reading=r.json())
+        add_oracle_and_controls(env.factory, first)
+        body = {
+            "repo": ALPHA,
+            "promotes": r.json()["reading_id"],
+            "builder": BUILDER,
+            "model": MODEL,
+            "provider": PROVIDER,
+            "hypothesis": HYPOTHESIS,
+            "smallest_effect": SMALLEST_EFFECT,
+        }
+        format_step_in_force(env.factory, ALPHA)
+        fwd = env.post("/readings/forward", json=body)
+        assert fwd.status_code == 409, fwd.text
+        err = envelope(fwd)
+        assert (err["code"], err["detail"]) == ("reading_checks_overlay", OVERLAY_MOVED), err
+        assert _registered_events(env) == 1
+        _set_checks(env, {"format_step": False})
+        fwd = env.post("/readings/forward", json=body)
+        assert fwd.status_code == 201, fwd.text
+        assert fwd.json()["checks_arm"] == "off"
+        assert _registered_events(env) == 2

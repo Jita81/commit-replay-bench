@@ -15,11 +15,14 @@ What it does: ``sealed_row`` stamps the posture class ``docker/copy/sealed``, th
               read from and pinned to (P-797); ``reserve_for`` writes the ``reading.reserved``
               event the worker writes before a reserved attempt's r1 build (P-792), over the
               ``TEST_DEPLOYMENT`` half and ``arm_half_for``'s arm half, and returns the
-              ``reservation``, ``treatment`` and ``claim`` labels the attempt's row carries.
+              ``reservation``, ``treatment`` and ``claim`` labels the attempt's row carries;
+              ``format_step_in_force`` puts the loop's ``format_step`` change in force on a
+              repository's chain (the overlay a registration refuses, RT2B-2).
 How:          Thin wrappers over ``tests.fixtures.posture.posture_row``,
               ``crb.core.reading.register``, ``crb.store.qualifications.append`` and
               ``crb.store.events.append_event_checked`` (the worker's ``fingerprint`` and
-              ``treatment_digest`` over the two halves).
+              ``treatment_digest`` over the two halves); ``EventsPreventionStore.append`` (the
+              loop's chain).
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0026-the-context-standard.md, docs/adr/0025-routing-v2.md
 Works with:   src/crb/core/reading.py (``register`` — the readings built here),
@@ -256,6 +259,44 @@ def reserve_for(
         step_id=arm,
     )
     return {LABEL_RESERVATION: ev.event_id, LABEL_TREATMENT: treatment, LABEL_CLAIM: str(claim)}
+
+
+def format_step_in_force(factory: sessionmaker[Session], repo: str) -> None:
+    """Throw ``repo``'s learning switch to config and put the prevention loop's ``format_step``
+    change (``checks.format_step = true``) in force — the ``switched`` and ``applied`` records
+    the core tick's chain holds after one gofmt-only first attempt with the switch at config.
+    With the repository's own ``checks`` block silent on the key, a run that learns resolves
+    ``fmt`` while the block's own arm stays ``off`` (RT2B-2)."""
+    from crb.core.prevention import AUTO_CONFIG, PreventionRecord
+    from crb.server.prevention_state import EventsPreventionStore
+
+    def rec(kind: str, payload: dict[str, Any], actor: str, i: int) -> PreventionRecord:
+        return PreventionRecord(
+            kind,
+            repo,
+            payload,
+            actor=actor,
+            on_behalf_of="op-1",
+            reason="the loop's formatter switch",
+            created=f"2026-10-12T00:00:{i:02d}+00:00",
+        )
+
+    applied = {
+        "change_id": "fmt-1",
+        "lever_id": "format_step",
+        "family": "config",
+        "level": "construction",
+        "targets": ["format:gofmt"],
+        "stratum": {"mode": "blind"},
+        "key": "2.2|fake|m0|crb.prevention.sig.v1",
+        "what": {"section": "checks", "key": "format_step", "value": True},
+        "before": {"format:gofmt": {"k0": 1, "n0": 1, "decisive_n": 3}},
+    }
+    with factory() as s:
+        store = EventsPreventionStore(s, repo)
+        store.append(rec("switched", {"auto_apply": AUTO_CONFIG}, "op-1", 0))
+        store.append(rec("applied", applied, "loop", 1))
+        s.commit()
 
 
 def commits(n: int, prefix: str = "c") -> list[str]:
