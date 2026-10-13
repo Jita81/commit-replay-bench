@@ -17,12 +17,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   DL-410 to DL-413; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
   `hypothesis`, `smallest_effect`, campaign. Sealed, lint-on readings register overlay-free (409
   `reading_checks_overlay`; forward, `reading_checks_arm_moved`) under `reserved.v1`: a commit's
-  reserved first attempt decides it (pinned pool; a drifted one licenses nothing anywhere, 409
-  `pool_drift`). Replays halt at an outage or environment row, or off the frozen checks arm; off-arm
-  reserved rows read `scope_fault`, not misses; remeasure flags `checks_arm_moved`. Later arms read
-  `waiting`; `duplicate_commits` is served; lost claims append no ledger row (`run.claim_lost`).
-  Campaigns cap pounds, one live run per arm. Grading disqualifies forged Go events,
-  pytest-machinery patches, in-build model calls.
+  reserved first attempt decides it (pinned pool; drift licenses nothing, 409 `pool_drift`). Replays
+  halt at an outage or environment row, or off the frozen checks arm; off-arm reserved rows read
+  `scope_fault`, not misses; remeasure flags `checks_arm_moved`. Later arms read `waiting`;
+  `duplicate_commits` served; lost claims stop writing (`run.claim_lost`). Campaigns cap pounds, one
+  live run per arm. Grading disqualifies forged Go events, pytest-machinery patches, in-build model
+  calls.
 
 - **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
   [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off
