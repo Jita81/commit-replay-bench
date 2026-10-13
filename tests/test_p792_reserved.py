@@ -129,8 +129,9 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               legacy ``_forward_attempt`` golden and its variants; an off-cell factory run
               refused at submit and at claim, nothing reserved), C16 (a grading exception
               after the reservation is a miss), the hook never blocking delivery (a store
-              error, a ticket not enrolled), only the reserved attempt counting (SQLite and
-              PostgreSQL), a reserved ticket placed by its ``item_id`` in F8's tally and
+              error, a ticket not enrolled), a factory run off the reading's checks arm
+              halting before it reserves (V1-CA-3), only the reserved attempt counting (SQLite
+              and PostgreSQL), a reserved ticket placed by its ``item_id`` in F8's tally and
               ``settled_unrowed`` (rowed: nothing unplaced; unrowed: one attempt at its
               hold, the campaign stopped), the ``RESERVED_FACTORY_PARAMS`` ratchet and
               ``POST /readings/forward`` opting in.
@@ -347,6 +348,7 @@ from fixtures.readings import (
     SEALED_SETTINGS,
     SMALLEST_EFFECT,
     commits,
+    format_step_in_force,
     register_reading,
     rows_for,
     sealed_row,
@@ -4931,6 +4933,41 @@ def test_p792_factory_reserve_never_blocks_delivery(
     else:
         assert SKIP_TASK_NOT_ENROLLED in event.error_message
         assert rig.verdicts(reading) == {}
+
+
+def test_p792_factory_reserve_halts_off_the_readings_checks_arm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """V1-CA-3 (round 6), the factory beside the replay's halt above: a factory run filed
+    under a reserved.v1 forward reading hands the reservation hook the arm its own checks
+    resolved (``checks.arm``), and the hook halts ``reading_checks_arm_mismatch`` when that
+    is not the arm the reading froze. No test held it: handing the hook the reading's own arm
+    instead reserved a ticket whose row, on another arm, the reading could never count. With
+    the loop's ``format_step`` change in force (the team's block silent) the run resolves
+    ``fmt`` against the reading's ``off``: nothing is reserved, the build is a
+    ``build.not_reserved`` naming the item, the trial and the halt, and builds on (the hook
+    never blocks delivery), its ``r1`` row on ``fmt`` with no reservation, and the ticket
+    stays pending."""
+    rig = _f_rig(tmp_path, monkeypatch)
+    reading = rig.register()
+    assert reading.checks_arm == "off"
+    rig.enrol()
+    format_step_in_force(rig.h.factory, pr.REPO_NAME)
+    run = rig.enqueue(reading)
+    done = rig.h.run_one()
+    assert done.status == STATUS_SUCCEEDED, (done.status, done.error)
+    assert rig.reservations(reading) == []
+    (event,) = rig.events(run.id, "build.not_reserved")
+    assert {k: dict(event.payload or {}).get(k) for k in ("item", "trial")} == {
+        "item": "I-1",
+        "trial": "r1",
+    }
+    assert HALT_CHECKS_ARM_MISMATCH in event.error_message
+    assert "build.start" in rig.actions(run.id)
+    assert [
+        (r.trial, r.checks_arm, r.labels.get(LABEL_RESERVATION, "")) for r in rig.rows(run.id)
+    ] == [("r1", "fmt", "")]
+    assert rig.verdicts(reading) == {"I-1": (None, "pending")}
 
 
 def test_p792_forward_reserved_counts_only_the_reserved_attempt(
