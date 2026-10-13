@@ -473,7 +473,10 @@ is set to fit. The rule limits how many runs are in flight at once; a worker run
 **How a reading's commits are batched (PW-4).** The remeasure plan asks for the pending commits
 among the first `next_look` kept commits as one run (`crb.core.learn`; a relabelled or not-gold
 commit is left out), and the worker runs every commit of a run: it stops early only on a halt,
-a cancel, or PW-7's first outage or environment stop. So below a pool of 40, whether a reading
+a cancel, PW-7's first outage or environment stop, or a failure (the sandbox unavailable, or
+any other error), which ends the run `failed` with the commits it did not reserve still
+pending. A worker whose claim is lost (a refused heartbeat, F87-5) stops at its next check,
+and the run goes on under its current claim. So below a pool of 40, whether a reading
 that does not deliver reads `insufficient` or `undecided` depends on where the runs end. At θ
 0.90 and a pool of 30, the plan's batches read deliver, insufficient and undecided 21.6%, 39.4%
 and 39.0% of the time, against 21.6%, 0% and 78.4% commit by commit, and a pool of 40 or more

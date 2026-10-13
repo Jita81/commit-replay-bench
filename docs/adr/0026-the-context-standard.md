@@ -170,7 +170,9 @@ rule makes them prospective (item 10).
    of its commits are still to read, their first attempts may yet read it `insufficient`);
    otherwise `look_pending` with the commits still needed. The remeasure plan asks for the pending
    commits among the first `next_look` kept commits as one run, and the worker runs every commit of
-   a run unless the run halts or is cancelled, so below a pool of 40 where the runs end decides
+   a run unless the run halts, is cancelled or fails (the sandbox unavailable, or any other
+   error; the commits it did not reserve stay pending) — a worker whose claim is lost stops, and
+   the run goes on under its current claim — so below a pool of 40 where the runs end decides
    `insufficient` against `undecided`; neither is a deliver (PW-4). The Wilson 95% lower bound at
    each deliver point is 0.839, 0.833 and 0.835. What the rule does **[measured — n = 40 draws per
    path, exact enumeration, no sampling, so no interval; method: an exact dynamic programme over 40
