@@ -180,7 +180,10 @@ class ArmReadingOut(BaseModel):
     ``checks_arm``; ``""`` otherwise). ``state`` is one of ``crb.core.reading.ARM_STATES``:
     a later hierarchy arm reads ``waiting`` while the arm before it (``stopped_by``) is still
     being read, and ``stopped`` once that arm reads insufficient or undecided; neither is read
-    toward the verdict (FZ-2)."""
+    toward the verdict (FZ-2). ``duplicate_commits`` counts the arm's attempts of a commit
+    the reading had decided that it did not read — every one but the reservation's row
+    under reserved.v1, every one after the deciding row under the legacy rule (F87-2) — a
+    count for a person, never read toward a state or the verdict."""
 
     arm: str
     state: str
@@ -199,6 +202,7 @@ class ArmReadingOut(BaseModel):
     counted_commits: list[str] = Field(default_factory=list)
     scope_faults: list[str] = Field(default_factory=list)
     unsealed_dropped: int = 0
+    duplicate_commits: int = 0
 
 
 class ReadingOut(BaseModel):

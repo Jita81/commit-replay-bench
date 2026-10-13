@@ -38,7 +38,7 @@ copies it and adds nothing. The choices it leaves open follow the table.
 | budget profile | one profile for every arm but `A0+L` | item 13 |
 | pool | chosen by a rule blind to every outcome and frozen with its sha256 at registration; a hand-picked list is refused `pool_not_blind` | item 2; DL-097 |
 | order | the seeded order, below: one order per cell, shared by every arm | item 2 |
-| what counts | a commit's attempt on an arm is the first attempt reserved for it on that arm after registration, and that attempt alone decides the commit; anything else is a miss and is never run again — but a reserved row built off the reading's checks arm (or graded unsealed in its posture class) reads `scope_fault`: its arm undecided, no hit, never a miss and never a re-run (RT2B-1, P-795). A reading run halts at its first outage or environment row: its in-flight commit is a miss (reserved.v1), and its unreserved commits stay pending and are run later (PW-7). The rule in full, amended before step 4, follows this table | item 2; P-792 |
+| what counts | a commit's attempt on an arm is the first attempt reserved for it on that arm after registration, and that attempt alone decides the commit; anything else is a miss and is never run again — but a reserved row built off the reading's checks arm (or graded unsealed in its posture class) reads `scope_fault`: its arm undecided, no hit, never a miss and never a re-run (RT2B-1, P-795). A reading run halts at its first outage or environment row: its in-flight commit is a miss (reserved.v1), and its unreserved commits stay pending and are run later (PW-7). Each arm's `duplicate_commits` shows the rows of a decided commit the reading did not read; it never changes a verdict (F87-2). The rule in full, amended before step 4, follows this table | item 2; P-792 |
 | attempt rule | reserved.v1; max_reruns 0; no re-run, no leave | item 2; P-792 |
 | run fields | repo, kind, mode, builder, model, provider, task_ids or limit, arm, test_author (S1), learning, budget_profile, reading_id, campaign_id, max_cost_usd, qualify_first; the stop knobs outage_stop and env_stop only at 1, the default for a reading run, which halts at its first outage or environment row (PW-7); pool, executor and timeout only at the values `POST /runs` stores when a body leaves them out; an `A0+L` run's task_ids are its enrolled commits it has not reserved, in the seeded order (all, or the first of them); anything else 422 reading_run_fields, refused again at claim | item 2; P-792; DL-386 |
 | treatment | pinned by the campaign's first reservation on each repository (deployment) and each arm's first (arm); served as pinned_treatment on GET /readings; a later mismatch halts the run before any build | item 2; P-792 |
@@ -84,6 +84,13 @@ undecided with no hit, the row is never a miss, and nothing is re-run (RT2B-1). 
 bodies carry the registered fields, with the registered values, may reserve. The pool and its
 order are fixed at registration. No commit leaves the pool. A look reads the prefix of decided
 commits and waits at the first pending one.
+
+The reservation's row decides its commit wherever it falls in the ledger: the reading never
+reads row order. When a campaign admits a second run on a commit, the first admitted holds the
+reservation and the second skips the commit (`commit_reserved`), so a row it wrote all the
+same, even one written first, decides nothing. Each arm serves `duplicate_commits`: the rows of a decided
+commit that the reading did not read (every row in the arm's scope, of an admitted run, but the
+reservation's). It is a count for a person and never changes a verdict (F87-2).
 
 **Why this is strictly more conservative** than the first-observed rule the row replaces
 **[hypothesis — an argument from the code, not a measurement; method: the steps below,

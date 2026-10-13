@@ -1220,6 +1220,10 @@ export interface ArmReading {
   scope_faults?: string[]
   /** How many of the arm's rows were dropped because they read unsealed. */
   unsealed_dropped?: number
+  /** F87-2: how many of the arm's attempts of a decided commit the reading did not read —
+   * every one but the reservation's row under reserved.v1, every one after the deciding row
+   * under the legacy rule. A count for a person; no state or verdict reads it. */
+  duplicate_commits?: number
 }
 
 /** A registered reading evaluated (`crb.core.reading.ReadingOutcome.to_dict`). */

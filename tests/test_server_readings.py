@@ -413,7 +413,8 @@ def test_an_unsealed_row_of_the_standard_arm_is_served_as_a_scope_fault(env: Env
     delivered on a miss it never read. Now the map serves the arm ``undecided`` with the
     commit in ``scope_faults``, and the cell's only proven arm is the ``S3`` ceiling. Under
     reserved.v1 the unsealed row is the commit's reserved attempt, and the stand-in — a
-    later clean row of a run that reserved nothing — is invisible to the reading (P-792)."""
+    later clean row of a run that reserved nothing — is invisible to the reading (P-792):
+    the arm serves it as its one ``duplicate_commits`` (F87-2), on the map's schema too."""
     add_tasks(env.factory, qualify=True)
     r = register_via_api(env)
     assert r.status_code == 201, r.text
@@ -429,6 +430,12 @@ def test_an_unsealed_row_of_the_standard_arm_is_served_as_a_scope_fault(env: Env
     assert arms[S1]["state"] == "undecided", arms[S1]
     assert (arms[S1]["scope_faults"], arms[S1]["unsealed_dropped"]) == ([first[0]], 1)
     assert (arms["S3"]["scope_faults"], arms["S3"]["unsealed_dropped"]) == ([], 0)
+    # F87-2: the stand-in is the one row of a decided commit the reading did not read —
+    # served on the map and on GET /readings, and it moves no state
+    assert (arms[S1]["duplicate_commits"], arms["S3"]["duplicate_commits"]) == (1, 0)
+    (served,) = env.get(f"/readings?repo={ALPHA}").json()["readings"]
+    by_arm = {a["arm"]: a for a in served["arms"]}
+    assert (by_arm[S1]["duplicate_commits"], by_arm[S1]["state"]) == (1, "undecided")
     assert cell["standard"]["ceiling"] is True and cell["standard"]["standard"] == "S3"
     assert cell["route"] != "deliver"
 

@@ -821,12 +821,19 @@ def test_p792_legacy_reading_ids_and_verdicts_unchanged() -> None:
     hashes to the id it hashed to before, and every scenario of the first-observed loop —
     replay, campaign admissions read and unread, forward — reads the same outcome, the
     same looks and the same per-commit verdicts and rows; the one exception is the P-795
-    move (:data:`P795_MOVED`), whose commit is named a scope fault."""
+    move (:data:`P795_MOVED`), whose commit is named a scope fault. Beside those verdicts each
+    arm counts the rows after the one that decided a commit (``duplicate_commits``, F87-2):
+    the forward ticket whose passing first attempt decided it has a failing second one."""
     assert _g_snapshot() == _golden_after_p795()
     reading, rows = _g_replay()
     s3 = evaluate(reading, rows).arms["S3"]
     assert s3.scope_faults == (reading.pool[5],)
     assert s3.commits[5].reason == REASON_SCOPE_FAULT
+    dups = {
+        name: {arm: a.duplicate_commits for arm, a in evaluate(*scenario).arms.items()}
+        for name, scenario in {"replay": (reading, rows), "forward": _g_forward()}.items()
+    }
+    assert dups == {"replay": {"S3": 0, S1: 0, "A0": 0}, "forward": {"S2": 1}}
 
 
 # --- reserved.v1: the reserved attempt alone decides its commit (C4, C6, C7, C15, C19) ---
@@ -1109,6 +1116,64 @@ def test_p792_c19_counts_only_its_own_reservation() -> None:
     # two rows of one reservation: neither is chosen
     dup = [*own, _reserved_row(r1, clean=False)]
     assert _verdicts(loaded, S1, dup)[0] == (False, "duplicate")
+
+
+def test_two_admitted_attempts_of_one_commit_the_first_admitted_decides() -> None:
+    """F87-2 (round 6): two runs a campaign admitted attempt one commit on one arm. ``A``,
+    admitted first, holds the commit's ``reading.reserved`` event; ``B``, admitted second,
+    carries none (a second run on a reserved commit skips it, ``commit_reserved`` — the
+    worker's half is ``test_p792_c2_cancel_during_witness_is_a_miss`` and
+    ``test_p792_concurrent_reserve_one_wins``), yet its row is written BEFORE ``A``'s. The
+    commit is read by ``A``'s row, hit or miss, wherever it falls in the ledger — a pin:
+    reserved.v1 never read row order — and the arm serves ``duplicate_commits`` 1, the row
+    of a decided commit it did not read; it read no such count before. A row of a run the
+    campaign never admitted, and a row on a commit still pending, are not counted, and the
+    count moves no verdict. The legacy control reads the same rows in LEDGER order: ``B``'s
+    row decides, ``A``'s is the one it did not read — the legacy rule is not reordered (a
+    known gap: POST /readings registers reserved.v1 only)."""
+    pool = commits(3, prefix="fa")
+    reading = _reserved_reading(pool, hierarchy=("S3",), campaign_id="camp-fa")
+    c, other = reading.pool[0], reading.pool[1]
+    res = _res("S3", c, run="run-A")
+    loaded = _read(with_admissions(reading, ["run-A", "run-B"]), [res])
+    legacy = with_admissions(
+        register_reading(pool, hierarchy=("S3",), budget=0.05, campaign_id="camp-fa"),
+        ["run-A", "run-B"],
+    )
+    for a_clean in (True, False):
+        row_b = sealed_row(c, clean=not a_clean, run_id="run-B")  # admitted second, unreserved
+        row_a = _reserved_row(res, clean=a_clean)  # admitted first, the reservation's row
+        rows = _g_chain(
+            [
+                row_b,
+                row_a,
+                sealed_row(c, clean=not a_clean, run_id="run-C"),  # never admitted
+                sealed_row(other, run_id="run-B"),  # a commit nothing reserved: pending
+            ]
+        )
+        arm = arm_reading(loaded, "S3", rows)
+        got = arm.commits[0]
+        assert (got.commit, got.outcome, got.reason) == (c, a_clean, "" if a_clean else "miss")
+        assert got.row_hash == rows[1].row_hash  # A's row, though B's was written first
+        assert arm.commits[1].outcome is None
+        assert arm.duplicate_commits == 1
+        assert arm.to_dict()["duplicate_commits"] == 1
+        # the reservation's row alone: the same verdicts, nothing it did not read
+        alone = arm_reading(loaded, "S3", [rows[1]])
+        assert [(x.outcome, x.reason) for x in alone.commits] == [
+            (x.outcome, x.reason) for x in arm.commits
+        ]
+        assert (alone.duplicate_commits, alone.look, alone.state) == (0, arm.look, arm.state)
+        # the legacy control: ledger order, so B's row decides and A's is not read
+        old = arm_reading(legacy, "S3", rows)
+        (lc,) = [x for x in old.commits if x.commit == c]
+        assert (lc.outcome, lc.row_hash) == (not a_clean, rows[0].row_hash)
+        assert old.duplicate_commits == 1
+        without_a = arm_reading(legacy, "S3", [r for r in rows if r is not rows[1]])
+        assert [(x.outcome, x.left) for x in without_a.commits] == [
+            (x.outcome, x.left) for x in old.commits
+        ]
+        assert (without_a.duplicate_commits, without_a.look) == (0, old.look)
 
 
 def _imported_copy(row: GradeRow) -> GradeRow:

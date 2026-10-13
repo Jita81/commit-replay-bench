@@ -112,7 +112,11 @@ What it does: Freezes a pool by a rule blind to outcomes (``pool_by_rule``; a ha
               builds. Under ``reserved.v1``
               (``attempt_rule``, P-792) reads each enrolled commit by its reservation's row
               alone (``with_reservations``, ``enrolled``, ``_reserved_verdict``; every
-              failure a named miss, none a leave; unread reservations read pending); names
+              failure a named miss, none a leave; unread reservations read pending; in any
+              row order, so of two admitted attempts of one commit the first admitted
+              decides — F87-2); counts on each arm the attempts of a decided commit it did
+              not read (``duplicate_commits``, a display count never read toward a verdict;
+              the legacy rule counts the rows after the one that decided); names
               the commits whose rows a sealed reading could not read because they do not
               record a sealed executor (``scope_faults`` — ``scope_fault``, the arm
               ``undecided``, never pending, never re-rolled — P-795) or, under
@@ -132,7 +136,7 @@ How:          ``seeded_order`` sorts the pool by its SHA-256 preimage; ``arm_rea
               taking each commit's first observed ``r1`` attempt this deployment graded after
               registration on the reading's checks arm (never an imported row) — or, under
               ``reserved.v1``, the one row stamped with the commit's reservation that this
-              deployment graded (never an imported copy) →
+              deployment graded (never an imported copy), wherever it falls in the ledger →
               ``look_state`` applies the rule → ``evaluate`` reads the hierarchy →
               ``standard_of`` answers the factory's gate on one checks arm and posture class.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -1610,6 +1614,13 @@ class ArmReading:
     scope_faults: tuple[str, ...] = ()
     #: How many rows of the arm's commits were dropped because they read unsealed.
     unsealed_dropped: int = 0
+    #: How many of the arm's attempts the reading did not read on a commit it had decided
+    #: (F87-2): rows in the arm's scope, of an admitted run — under reserved.v1, on a commit
+    #: read hit or miss, every one but the reservation's row; under the legacy rule every
+    #: one after the row that decided the commit (its first observed attempt, or the row
+    #: that made it leave). A pending commit counts none. Shown to a person only: no state,
+    #: look or verdict reads it.
+    duplicate_commits: int = 0
 
     @property
     def state(self) -> str:
@@ -1650,6 +1661,7 @@ class ArmReading:
             "counted_commits": list(self.counted_commits),
             "scope_faults": list(self.scope_faults),
             "unsealed_dropped": self.unsealed_dropped,
+            "duplicate_commits": self.duplicate_commits,
             # every commit the arm reads, in the seeded order: what the loop pair is read on
             "commits": [c.to_dict() for c in self.commits],
         }
@@ -1775,18 +1787,19 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
     does (a record written by hand), it reads as a replay reading does: only rows of runs its
     campaign admitted (:func:`_admitted_run`) are seen, so a ticket is read by its first
     ADMITTED attempt, and a row of any other run neither decides a ticket nor makes it
-    leave."""
+    leave. Each admitted attempt of a ticket after its first is never read: the arm counts
+    them in ``ArmReading.duplicate_commits`` (F87-2), for a person to see, never toward a
+    look."""
     first: dict[str, GradeRow] = {}
+    duplicates = 0  # a later attempt of a ticket its first already decided (F87-2)
     pool = set(reading.pool)
     for r in rows:
         item = r.labels.get("item_id", "")
-        if (
-            item in pool
-            and item not in first
-            and _forward_attempt(reading, r)
-            and _admitted_run(reading, r)
-        ):
-            first[item] = r
+        if item in pool and _forward_attempt(reading, r) and _admitted_run(reading, r):
+            if item in first:
+                duplicates += 1
+            else:
+                first[item] = r
     by_item = dict(reading.enrolled)
     fields = ("builder", "model", "provider")
     out: list[CommitReading] = []
@@ -1817,7 +1830,8 @@ def _arm_forward(reading: Reading, arm: str, rows: Sequence[GradeRow]) -> ArmRea
             clean = r.clean and not r.disqualified and held_out_result(r.labels) == RESULT_PASS
             out.append(CommitReading(item, item, clean, "", r.row_hash))
     kept = [c.outcome for c in out if not c.left]
-    return ArmReading(arm, look_state(kept, reading.rule, open_pool=True), tuple(out))
+    look = look_state(kept, reading.rule, open_pool=True)
+    return ArmReading(arm, look, tuple(out), duplicate_commits=duplicates)
 
 
 def _row_unit(reading: Reading, row: GradeRow) -> str:
@@ -1915,6 +1929,19 @@ def _reserved_verdict(
     return True, ""
 
 
+def _arm_attempt(reading: Reading, arm: str, row: GradeRow) -> bool:
+    """Is ``row`` an attempt ``arm`` of a reserved.v1 ``reading`` could have read — of an
+    admitted run (:func:`_admitted_run`) and in the arm's scope (:func:`_in_scope`), or for
+    a forward reading a ticket's factory attempt (:func:`_forward_attempt`)? What
+    ``ArmReading.duplicate_commits`` counts, less the row that decided its commit; never
+    read toward a verdict."""
+    if not _admitted_run(reading, row):
+        return False
+    if reading.prospective:
+        return _forward_attempt(reading, row)
+    return _in_scope(reading, arm, row)
+
+
 def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: int) -> ArmReading:
     """``arm`` of a reserved.v1 reading: each enrolled commit (:func:`enrolled`), in order,
     by :func:`_reserved_verdict`. No commit leaves the pool, so the look reads the enrolled
@@ -1922,7 +1949,14 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
     A commit read ``scope_fault`` is named in ``ArmReading.scope_faults`` (P-795), with
     why in its ``CommitReading.scope`` (:func:`_scope_miss` on its reserved row: unsealed,
     or off the reading's checks arm — RT2B-1); ``unsealed_dropped`` counts the unsealed
-    ones only."""
+    ones only.
+
+    The ORDER of ``rows`` is never read: the reservation's row decides its commit wherever
+    it falls, so two admitted attempts of one commit are read by the one the reservation
+    names — the attempt admitted first, since a second run on a reserved commit skips it
+    (``commit_reserved``) — even when the other's row was written first (F87-2).
+    ``duplicate_commits`` counts, on each decided commit, the arm's other attempts
+    (:func:`_arm_attempt`) the reading did not read."""
     reservations = reading.reservations or {}
     events = {res.event_id for res in reservations.values() if res.event_id}
     stamped: dict[str, list[GradeRow]] = {}
@@ -1930,12 +1964,23 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
         ev = r.labels.get(LABEL_RESERVATION, "")
         if ev in events:
             stamped.setdefault(ev, []).append(r)
+    enrolled = _enrolled(reading, arm, limit)
+    units = set(enrolled)
+    attempts: dict[str, list[GradeRow]] = {}
+    for r in rows:
+        unit = _row_unit(reading, r)
+        if unit in units and _arm_attempt(reading, arm, r):
+            attempts.setdefault(unit, []).append(r)
     out: list[CommitReading] = []
-    for commit in _enrolled(reading, arm, limit):
+    duplicates = 0
+    for commit in enrolled:
         res = reservations.get((arm, commit))
         mine = stamped.get(res.event_id, []) if res is not None else []
         outcome, reason = _reserved_verdict(reading, arm, res, mine)
         found = _reserved_candidates(reading, res, mine) if res is not None else []
+        if outcome is not None:
+            read = {id(r) for r in found}
+            duplicates += sum(1 for r in attempts.get(commit, []) if id(r) not in read)
         faulted = reason == REASON_SCOPE_FAULT and len(found) == 1
         out.append(
             CommitReading(
@@ -1963,6 +2008,7 @@ def _arm_reserved(reading: Reading, arm: str, rows: Sequence[GradeRow], limit: i
         limit=n,
         scope_faults=faults,
         unsealed_dropped=sum(c.scope == SCOPE_UNSEALED for c in out),
+        duplicate_commits=duplicates,
     )
 
 
@@ -1996,6 +2042,13 @@ def arm_reading(
     (:func:`_arm_reserved`, :func:`_reserved_verdict`): no commit leaves, nothing is re-run,
     and this loop is never entered.
 
+    The rows after the one that decided a commit (its first observed attempt, or the row
+    that made it leave) are never read: ``ArmReading.duplicate_commits`` counts them, for a
+    person to see, never toward a look (F87-2). This rule reads them in LEDGER order, which
+    is finish order: it is not reordered by admission (a known gap — POST /readings
+    registers reserved.v1 only, and one live run per campaign arm on a commit, DL-392,
+    makes the two orders one per arm).
+
     A row in every way the arm's but for its executor (:data:`SCOPE_UNSEALED` — its writer
     did not record the sealed container, P-795) is never dropped in silence: its commit reads
     ``scope_fault`` (outcome ``None``, no other row standing in for it) and is named in
@@ -2020,6 +2073,7 @@ def arm_reading(
     out: list[CommitReading] = []
     faults: list[str] = []
     seen_changes: set[str] = set()
+    duplicates = 0
     for commit in reading.pool:
         rs = by_commit.get(commit, [])
         change = reading.changes.get(commit) or next(
@@ -2039,9 +2093,11 @@ def arm_reading(
             continue
         observed = None
         unobserved: list[str] = []
+        read = 0
         for r in rs:
             if len(unobserved) > reading.max_reruns:
                 break  # it has left the pool: a later row can never bring it back
+            read += 1
             if r.gold_clean is False:
                 unobserved = [LEFT_GOLD] * (reading.max_reruns + 1)
                 break
@@ -2054,6 +2110,9 @@ def arm_reading(
             # the builder's miss, never the instrument's, so it is read, not re-run
             observed = r
             break
+        # the rows after the one that decided the commit, never read (F87-2); a pending
+        # commit has read every row it has, so it counts none
+        duplicates += len(rs) - read
         if observed is not None:
             # belt 5 off lets an attempt leave only when belt 5 could have changed it: one
             # that passed every other belt. A miss (a red target, a disqualified build) is
@@ -2084,6 +2143,7 @@ def arm_reading(
         limit=limit,
         scope_faults=tuple(faults),
         unsealed_dropped=dropped,
+        duplicate_commits=duplicates,
     )
 
 
