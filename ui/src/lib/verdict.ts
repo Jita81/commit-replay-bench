@@ -236,7 +236,7 @@ export const ACTION_HELP: Record<string, string> = {
   'run.environment_stop': 'The run stopped after consecutive attempts failed on the posture, not the patch; their qualifications are revoked.',
   'run.halted': 'The run did not start its next attempt because a rule it runs under refused it, so no builder was called and no row was written; under a reserved reading the commit stays pending for an honest run.',
   'run.task_skipped': 'The run passed over this commit without building it, because another attempt already holds its one reservation or the reading never enrolled it; no row was written and the run went on.',
-  'reading.reserved': 'The run claimed the one attempt this commit gets on its arm of the reading before building it, so whatever happens next, a kill, a cancel or a failed grade included, is the result for that commit.',
+  'reading.reserved': 'The run claimed the one attempt this commit gets on its arm of the reading before building it, so that attempt decides the commit: its graded row if one is written, and a miss (unobserved) if the run settles with no row — a kill, a cancel or a grade that never finished — never a re-run.',
   'run.spend_cap': 'The run stopped itself at its spend cap, before an attempt or item that could have taken its spend past it; what it made is graded and kept.',
   'qualify.task': 'A task was measured in this posture — RED, a two-run baseline and the gold — with no model spend; the record says whether it qualified and, if not, why.',
   'qualify.done': 'The qualify run finished: how many tasks are proven in this posture and why the others are not.',
