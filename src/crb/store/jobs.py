@@ -23,7 +23,9 @@ Guarantees
   row: :func:`claim_guard` is the guard ``DbLedger.append`` runs under the grades lock,
   and it refuses (:class:`crb.store.ledger.AttemptSettled`) unless the run is still
   running on that worker under that claim (the ``reclaims`` counter), so a row never
-  lands after the reclaim that settled its attempt (P-792 C1).
+  lands after the reclaim that settled its attempt (P-792 C1). The worker runs it on
+  every row of a claimed run, reserved or not, and raises :class:`ClaimLost` on a
+  refusal or once its heartbeat was refused (F87-5).
 * **Cancellation is cooperative, and recorded.** :meth:`request_cancel` on a
   queued run cancels it outright; on a running run it sets ``cancel_requested`` and
   the worker stops between tasks (counts so far are kept). Both cases write a
@@ -42,7 +44,8 @@ What it is:   The job queue — the ``runs`` table driven as a durable, crash-sa
 What it does: Enqueues runs (or stages them in a caller's own transaction), hands each to
               exactly one worker, measures liveness by heartbeat, re-queues (then abandons)
               runs whose worker died, refuses a stale worker's writes (and, through
-              ``claim_guard``, a settled attempt's ledger row), and supports cooperative
+              ``claim_guard``, any ledger row of a claim that is gone — ``ClaimLost``,
+              F87-5), and supports cooperative
               cancellation. Every reclaim and abandonment is recorded as a ``system`` event,
               never silently.
 How:          ``claim_next`` flips ``queued → running`` in one locked transaction (``BEGIN
@@ -64,9 +67,11 @@ Works with:   src/crb/store/models.py (the ``Run`` row and its liveness columns)
               src/crb/server/worker_main.py (the process that polls this queue),
               src/crb/server/routes/learn.py (``stage_queued`` — a re-measurement's runs
               and their event in one transaction), src/crb/store/ledger.py
-              (``DbLedger.append`` runs ``claim_guard``; ``AttemptSettled``)
+              (``DbLedger.append`` runs ``claim_guard``; ``AttemptSettled``, which
+              ``ClaimLost`` extends)
 Tested by:    tests/test_store_jobs.py, tests/test_server_routes_runs.py,
-              tests/test_server_routes_learn.py, tests/test_p792_reserved_store.py
+              tests/test_server_routes_learn.py, tests/test_p792_reserved_store.py,
+              tests/test_worker.py (``ClaimLost``: a worker that lost its claim)
 Touch when:   never for a new repository; adding a run kind means extending ``RUN_KINDS``
               here and the executor table in src/crb/server/worker.py together (and
               docs/API.md); changing the reclaim threshold or ``max_reclaims`` default is an
@@ -138,6 +143,14 @@ class StaleClaim(RuntimeError):
     """The run is no longer owned by this worker (reclaimed or finished elsewhere)."""
 
 
+class ClaimLost(AttemptSettled):
+    """This worker's claim on a run is gone, so the run appends no more rows (F87-5): its
+    heartbeat was refused (the run was reclaimed, finished or taken by another worker), or
+    :func:`claim_guard` refused a row under the grades lock. The worker's ledger raises it
+    before any append, reserved or not; as an :class:`~crb.store.ledger.AttemptSettled` it
+    ends the run ``run.finish_refused``, and the current claim's record stands."""
+
+
 def new_run_id() -> str:
     """A fresh 32-hex run id (also the run's ``trace_id`` in the event stream)."""
     return uuid.uuid4().hex
@@ -205,7 +218,8 @@ def stage_queued(session: Session, run: Run) -> Run:
 
 
 def claim_guard(run_id: str, worker_id: str, claim: int) -> Callable[[Session], None]:
-    """The guard a reserved attempt's row is appended under: ``DbLedger.append(row,
+    """The guard a claimed run's row is appended under — a reserved attempt's (P-792 C1) and,
+    since F87-5, every other row the worker writes for the run: ``DbLedger.append(row,
     guard=claim_guard(run_id, worker_id, claim))``.
 
     It locks the run's row (``FOR UPDATE``) in the append's transaction, after the grades
@@ -555,6 +569,7 @@ __all__ = [
     "STATUS_RUNNING",
     "STATUS_SUCCEEDED",
     "TERMINAL_STATUSES",
+    "ClaimLost",
     "JobQueue",
     "StaleClaim",
     "age_s",

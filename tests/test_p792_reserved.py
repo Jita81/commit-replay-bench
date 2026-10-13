@@ -97,7 +97,9 @@ What it does: C3(c): pins that ``ClaudeCodeBuilder.describe()`` names ``extra_ar
               reserver's recheck under the lock (a run cancelled, or reclaimed and claimed
               again by another worker or by one with this one's id, between claim and
               reserve refused ``cancel_requested`` or ``run_not_owned``, the commit pending),
-              a settled claim's row refused up to ``execute``, a legacy reading's run never
+              a settled claim's row refused up to ``execute`` (and, F87-5, a reclaimed run's
+              row no reservation names: ``ClaimLost``, no row and no finish, on both
+              backends), a legacy reading's run never
               reserving, ``POST /readings`` registering reserved.v1 only (DL-385: the bare
               body reserved.v1, a legacy rule or a re-run refused 422), the claim's
               ``reading_run_fields`` refusal (C3(b) ``extra_args``, C5 ``timeout``, C7 a budget
@@ -316,6 +318,7 @@ from crb.store.jobs import (
     STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
+    ClaimLost,
     JobQueue,
     claim_guard,
 )
@@ -3433,6 +3436,45 @@ def test_p792_attempt_settled_reaches_execute(
     assert rig.rows(run.id) == []
     assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
     assert rig.verdicts(reading, "A0")[rig.first] == (False, "unobserved")
+
+
+def test_p792_a_lost_claims_plain_row_is_refused_end_to_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: Backend
+) -> None:
+    """F87-5, through ``execute`` on SQLite and on PostgreSQL: a run filed under no reading is
+    reclaimed mid-build, so its row is one no reservation names. Round 5 guarded reserved rows
+    only, and this one landed in the reclaimed run; now every row of a claimed run is appended
+    under ``claim_guard``: the append raises ``ClaimLost`` (an ``AttemptSettled``), no row is
+    written, ``run.claim_lost`` is emitted once, and the run's finish is left to its next
+    claim (``run.finish_refused``; the run stays queued)."""
+    rig = _w_rig(tmp_path, monkeypatch, backend)
+    run = rig.h.enqueue("replay", params_json={"task_ids": [rig.first]})
+    finished: list[tuple[Any, ...]] = []
+    finish = rig.h.worker.queue.finish
+    raised: list[BaseException] = []
+    append = worker._RunLedger.append
+
+    def spy(*a: Any, **kw: Any) -> Any:
+        finished.append(a)
+        return finish(*a, **kw)
+
+    def watch(self: worker._RunLedger, row: GradeRow) -> GradeRow:
+        try:
+            return append(self, row)
+        except AttemptSettled as exc:
+            raised.append(exc)
+            raise
+
+    monkeypatch.setattr(rig.h.worker.queue, "finish", spy)
+    monkeypatch.setattr(worker._RunLedger, "append", watch)
+    monkeypatch.setattr(FakeBuilder, "hook", lambda ws, brief: rig.h.queue.reclaim_stale(0.0))
+    rig.h.run_one()
+    assert [(r.task_id, r.trial) for r in rig.rows(run.id)] == []
+    assert [type(e) for e in raised] == [ClaimLost]
+    actions = rig.actions(run.id)
+    assert actions.count("run.claim_lost") == 1 and "run.finish_refused" in actions
+    assert "run.finished" not in actions and finished == []
+    assert rig.status(run.id) == STATUS_QUEUED
 
 
 def test_p792_a_legacy_readings_run_never_reserves(

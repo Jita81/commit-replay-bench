@@ -222,6 +222,7 @@ export const ACTION_HELP: Record<string, string> = {
   'run.executor': 'The run states which test executor it uses (docker or local); only docker counts as evidence.',
   'run.error': 'The run stopped on an error; nothing already graded is lost.',
   'run.finish_refused': 'The run could not be marked finished because its state had changed underneath it.',
+  'run.claim_lost': 'This worker lost its claim on the run (another worker took it over, or the run ended), so it wrote no more rows and left the run to its current claim.',
   'run.credential_refused': 'The worker checked the builder’s credential again when it picked the run up and found it gone, so nothing was built and nothing was spent.',
   'run.finished': 'The run reached its final status with its counts and duration.',
   'run.refused': 'A worker took the run from the queue and refused it before it started, so nothing was built or spent: a builder login it would use was found dead after it was queued, or its executors are not docker for the sealed reading it measures.',

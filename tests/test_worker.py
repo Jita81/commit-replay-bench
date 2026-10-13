@@ -19,7 +19,11 @@ What it does: Pins a replay run end to end (and blind), not-clean plus the ladde
               ``env_dir``), docker unavailable or without an image failing closed, oracle and
               controls runs recording their events (a violation failing the gate), unknown repo
               / kind failing cleanly, stale-claim reclaim with event seq resuming, the heartbeat
-              thread, ``run_forever`` processing then stopping and surviving a broken iteration,
+              thread, a worker that lost its claim appending nothing more (F87-5: a row the
+              claim guard refuses or that follows a refused heartbeat raises ``ClaimLost``,
+              ``run.claim_lost`` once, the run loop stopped and no finish written — a reclaim
+              under the same worker id included), ``run_forever`` processing then stopping and
+              surviving a broken iteration,
               stage routing, the ``--once`` entrypoint and settings from args / env, that a
               run where every attempt errors is ``failed`` not ``succeeded``, the factory run
               kind, a run of a reading refused at claim when unsealed (P-789) or, when its
@@ -51,6 +55,7 @@ Touch when:   never for a new repository (the fixture repository stands in for e
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -78,7 +83,7 @@ from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
 from crb.core.campaign import CAMPAIGN_ADMITTED
 from crb.core.evidence import verify_pack
 from crb.core.execution import LocalExecutor, SandboxUnavailable
-from crb.core.ledger import verify_chain
+from crb.core.ledger import GradeRow, verify_chain
 from crb.core.library import ACTOR_FRESHNESS, LibraryEntry, Provenance
 from crb.core.oracle import controls as nc
 from crb.core.runners.base import SetupResult, SetupStep
@@ -97,11 +102,13 @@ from crb.store.jobs import (
     STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
+    ClaimLost,
     JobQueue,
 )
 from crb.store.library import DbLibraryLedger, new_act
 from crb.store.models import Event, Repo, Run, Task, WorkerRow
 from fixtures import pyrepo as pr
+from fixtures.posture import posture_row
 from fixtures.proven import write_reading
 from fixtures.proven_cells import every_cell_proven
 
@@ -1397,6 +1404,147 @@ def test_heartbeat_thread_refreshes_liveness(h: Harness) -> None:
     FakeBuilder.hook = observe
     assert h.run_one().status == STATUS_SUCCEEDED
     assert seen[0] and seen[1] and seen[1] > seen[0]
+
+
+# --- F87-5: a worker that lost its claim appends nothing more ---------------------------
+
+#: Far enough ahead that every running run's heartbeat is stale: a reclaim with no sleep.
+_LATER = _dt.datetime(2100, 1, 1, tzinfo=_dt.UTC)
+
+
+def _reclaim(h: Harness, run_id: str, worker_id: str) -> Run:
+    """Reclaim ``run_id`` as stale and claim it again as ``worker_id`` — the queue's own path."""
+    assert [r.id for r in h.queue.reclaim_stale(0.0, now=_LATER)] == [run_id]
+    took = h.queue.claim_next(worker_id)
+    assert took is not None and took.id == run_id and took.worker_id == worker_id
+    return took
+
+
+def _claimed_ledger(
+    h: Harness, run: Run, evidence_dir: Path
+) -> tuple[worker_mod.RunContext, worker_mod._RunLedger]:
+    """The context and ledger ``execute`` gives the claim ``run`` (the run as it was claimed)."""
+    ctx = worker_mod.RunContext(
+        run=run, emitter=h.worker._emitter(run), config=h.pyrepo.config, git=h.pyrepo.repo
+    )
+    ledger = worker_mod._RunLedger(
+        h.worker.ledger, h.factory, evidence_dir, ctx, "pytest", worker_id=run.worker_id
+    )
+    return ctx, ledger
+
+
+def _plain_row(h: Harness, run: Run) -> GradeRow:
+    """A row no reservation names (not clean, no pack): before F87-5 nothing guarded it."""
+    return posture_row(
+        repo=pr.REPO_NAME,
+        task_id=h.pyrepo.feat_task().task_id,
+        run_id=run.id,
+        trial="r1",
+        clean=False,
+        tests_unmodified=True,
+        target_green=False,
+        no_new_failures=True,
+        source_changed=True,
+        builder="fake",
+        model="m",
+        provider="p",
+    )
+
+
+def _claim_lost_events(h: Harness, run_id: str) -> list[Any]:
+    return [e for e in h.events(run_id) if e.action == "run.claim_lost"]
+
+
+def test_a_worker_that_lost_its_claim_stops_appending(h: Harness, tmp_path: Path) -> None:
+    """F87-5: worker A claims a run, worker B reclaims it from A's stale claim, and A's
+    ledger then appends a row no reservation names. Round 5's ``claim_guard`` ran on
+    reserved rows only, so this row landed in B's run; now every row of a claimed run is
+    appended under the guard: ``ClaimLost``, no row, ``run.claim_lost`` once however many
+    rows follow. A's refused heartbeat sets the run's ``claim_lost`` event, which stops the
+    run loop and refuses the next row before the guard is reached."""
+    run = h.enqueue("replay")
+    a = h.queue.claim_next("w-test")
+    assert a is not None and a.worker_id == "w-test"
+    _reclaim(h, run.id, "w-B")
+    ctx, ledger = _claimed_ledger(h, a, tmp_path / "ev")
+    before = h.worker.ledger.count()
+
+    with pytest.raises(ClaimLost, match="owned by 'w-B'"):
+        ledger.append(_plain_row(h, a))
+    assert h.worker.ledger.count() == before
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    assert ctx.claim_lost.is_set() and h.worker._cancelled(ctx)
+    with pytest.raises(ClaimLost):  # the event now refuses it before the guard is read
+        ledger.append(_plain_row(h, a))
+    assert h.worker.ledger.count() == before
+    (lost,) = _claim_lost_events(h, run.id)
+    assert lost.status == StepStatus.ERROR and "w-test" in lost.error_message
+
+    # the heartbeat, driven directly: refused for A, it sets a fresh claim's event — the
+    # run loop stops, and the next row is refused with no guard and no pack stored
+    ctx2, ledger2 = _claimed_ledger(h, a, tmp_path / "ev2")
+    assert not ctx2.claim_lost.is_set() and not h.worker._cancelled(ctx2)
+    assert h.worker._heartbeat_beat(a, ctx2.claim_lost) is False
+    assert ctx2.claim_lost.is_set() and h.worker._cancelled(ctx2)
+    with pytest.raises(ClaimLost, match="heartbeat was refused"):
+        ledger2.append(_plain_row(h, a))
+    assert h.worker.ledger.count() == before
+    assert len(_claim_lost_events(h, run.id)) == 2  # one per claim context, never per row
+    # B's claim is untouched: still running, on B, at the reclaimed claim
+    now = h.queue.get(run.id)
+    assert now is not None and now.status == STATUS_RUNNING and now.worker_id == "w-B"
+
+
+def test_a_reclaim_under_the_same_worker_id_still_stops_the_old_claims_rows(
+    h: Harness, tmp_path: Path
+) -> None:
+    """Two processes sharing a worker id: the queue's heartbeat cannot tell the old claim from
+    the new (it checks the id), but the guard reads the claim, so the old claim's plain row
+    raises ``ClaimLost`` while the new claim's row lands."""
+    run = h.enqueue("replay")
+    old = h.queue.claim_next("w-test")
+    assert old is not None
+    new = _reclaim(h, run.id, "w-test")
+    assert h.worker._heartbeat_beat(old, threading.Event()) is True  # the id alone: no refusal
+    _, stale_ledger = _claimed_ledger(h, old, tmp_path / "ev-old")
+    with pytest.raises(ClaimLost, match="at claim 1"):
+        stale_ledger.append(_plain_row(h, old))
+    assert list(h.worker.ledger.rows(run_id=run.id)) == []
+    _, live_ledger = _claimed_ledger(h, new, tmp_path / "ev-new")
+    landed = live_ledger.append(_plain_row(h, new))
+    assert [r.row_hash for r in h.worker.ledger.rows(run_id=run.id)] == [landed.row_hash]
+
+
+def test_execute_writes_no_finish_once_its_claim_is_lost(
+    h: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run whose heartbeat was refused while it executed ends with ``run.claim_lost`` (once)
+    and ``run.finish_refused``, and no finish: the claim that took it keeps its record. The
+    heartbeat thread is replaced by one beat driven from inside the handler — no sleep."""
+    lost: dict[str, threading.Event] = {}
+
+    def no_thread(run: Run, stop: threading.Event, claim_lost: threading.Event) -> Any:
+        lost["event"] = claim_lost
+        t = threading.Thread(target=lambda: None)
+        t.start()
+        return t
+
+    def handler(ctx: worker_mod.RunContext) -> tuple[str, dict[str, Any], str]:
+        assert ctx.claim_lost is lost["event"]  # the event the heartbeat sets is the run's
+        _reclaim(h, ctx.run.id, "w-B")
+        assert h.worker._heartbeat_beat(ctx.run, lost["event"]) is False
+        assert h.worker._cancelled(ctx)  # the task loop would stop here
+        return STATUS_SUCCEEDED, {"rows": 0}, ""
+
+    monkeypatch.setattr(h.worker, "_heartbeat_thread", no_thread)
+    monkeypatch.setitem(h.worker._handlers, "replay", handler)
+    run = h.enqueue("replay")
+    done = h.run_one()
+    assert done.status == STATUS_RUNNING and done.worker_id == "w-B" and done.finished == ""
+    actions = [e.action for e in h.events(run.id)]
+    assert actions.count("run.claim_lost") == 1 and actions.count("run.finish_refused") == 1
+    assert "run.finished" not in actions
+    assert actions.index("run.claim_lost") < actions.index("run.finish_refused")
 
 
 def test_run_forever_processes_then_stops(h: Harness) -> None:

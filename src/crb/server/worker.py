@@ -31,7 +31,10 @@ bound to ``trace_id = run.id`` into a :class:`~crb.observability.events.MultiSin
 of :class:`~crb.store.events.DbEventSink` (the API's SSE source) and a
 :class:`~crb.observability.events.JsonlSink` under ``<home>/events/<run_id>.jsonl``
 (the operator's local copy). A heartbeat thread refreshes the run's liveness
-while it executes; a stale heartbeat lets another worker reclaim it.
+while it executes; a stale heartbeat lets another worker reclaim it. A refused
+heartbeat sets the run's ``claim_lost`` event: the task loop stops at its next check,
+the next row raises :class:`~crb.store.jobs.ClaimLost` before it is appended, and the
+run's finish is left to its current claim (``run.claim_lost``, F87-5).
 
 Honesty properties
 ------------------
@@ -168,7 +171,12 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               row with the reservation, treatment and claim, and appends it under
               ``claim_guard``; a row whose claim was
               reclaimed or settled is refused (``AttemptSettled``) and the run's finish is
-              not written (``run.finish_refused``).
+              not written (``run.finish_refused``). Every other row of a claimed run is
+              appended under the same guard, at the claim the run was claimed with, and a
+              refused heartbeat sets the run's ``claim_lost`` event: either way the next
+              row raises ``ClaimLost`` before it is written, ``run.claim_lost`` is emitted
+              once, the task loop stops (``_cancelled`` reads the event) and the run's
+              finish is not written (F87-5).
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -480,6 +488,7 @@ from crb.store.jobs import (
     STATUS_QUEUED,
     STATUS_RUNNING,
     STATUS_SUCCEEDED,
+    ClaimLost,
     JobQueue,
     StaleClaim,
     claim_guard,
@@ -938,12 +947,32 @@ class RunContext:
     #: The task the run is on (set by each kind's task loop) — the ``task_id`` an
     #: executor-level report (``run.kill_unconfirmed`` from the grade stage) is filed under.
     task_id: str = ""
+    #: Set once this worker's claim on the run is gone — its heartbeat was refused, or a
+    #: row's ``claim_guard`` refused it (F87-5). The heartbeat thread only sets it; the run
+    #: loop's ``_cancelled`` reads it and ``_RunLedger.append`` raises ``ClaimLost`` on it.
+    claim_lost: threading.Event = field(default_factory=threading.Event)
     _runner: BaseRunner | None = None
     _executor: Executor | None = None
+    _claim_lost_noted: bool = field(default=False, init=False, repr=False)
 
     @property
     def params(self) -> Mapping[str, Any]:
         return dict(self.run.params_json or {})
+
+    @property
+    def claim(self) -> int:
+        """The claim the run was claimed under: its ``reclaims`` count when this worker
+        took it (a reclaim moves it, even back to a worker with the same id)."""
+        return int((self.run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0)
+
+    def note_claim_lost(self, why: str) -> None:
+        """Mark this worker's claim on the run lost and emit ``run.claim_lost`` the first
+        time only (F87-5). Called from the run's own thread; the heartbeat thread sets
+        :attr:`claim_lost` and nothing else."""
+        self.claim_lost.set()
+        if not self._claim_lost_noted:
+            self._claim_lost_noted = True
+            self.emit("system", "run.claim_lost", status=StepStatus.ERROR, error=why)
 
     @property
     def timeout(self) -> int:
@@ -983,8 +1012,15 @@ class _RunLedger:
     a replay row's commit, a factory row's ``item_id`` label — once
     :meth:`Worker._unit_reserver` wrote its ``reading.reserved`` event: its row is stamped with the
     reservation, the treatment and the claim, and appended under :func:`claim_guard`, so a row
-    written after its run was reclaimed or settled raises :class:`AttemptSettled` and is never
-    stored (C1, C11). Every other row is appended exactly as before.
+    written after its run was reclaimed or settled is never stored (C1, C11).
+
+    Every other row of a claimed run is appended under the same guard, at the claim the run
+    was claimed with (F87-5): before any append, reserved or not, a run whose ``claim_lost``
+    event is set (its heartbeat was refused) raises :class:`ClaimLost`, and a row the guard
+    refuses raises it too — ``run.claim_lost`` is emitted once, nothing more is appended, and
+    :meth:`Worker.execute` leaves the run's finish to its current claim. A context with no
+    claimed run (a stand-in with no ``run``, or a run no worker claimed) has no claim to
+    guard: its rows are appended as before.
     """
 
     def __init__(
@@ -1004,7 +1040,12 @@ class _RunLedger:
         self._ctx = ctx
         self._runner_name = runner_name
         self._trial_labels = {k: dict(v) for k, v in (trial_labels or {}).items()}
-        self._worker_id = worker_id or ctx.run.worker_id
+        # a stand-in context (tests/test_evidence_import_governance.py) carries no run
+        run: Run | None = getattr(ctx, "run", None)
+        self._worker_id = worker_id or (run.worker_id if run is not None else "")
+        #: the claim every row of this run is appended under (F87-5); ``None`` for a context
+        #: with no claimed run, whose rows have no claim to guard
+        self._claim: int | None = ctx.claim if run is not None and run.worker_id else None
         #: ``(unit, trial) → {reservation, treatment, claim}`` for each reserved attempt — the
         #: unit a commit, or a factory ticket's item id (:meth:`_unit`)
         self.reserved: dict[tuple[str, str], dict[str, str]] = {}
@@ -1114,20 +1155,35 @@ class _RunLedger:
             }
         )
 
+    def _claim_lost(self, why: str) -> ClaimLost:
+        """Note the run's claim lost (``run.claim_lost``, once) and the error to raise."""
+        self._ctx.note_claim_lost(why)
+        return ClaimLost(why)
+
     def append(self, row: GradeRow) -> GradeRow:
         reserved = self.reserved.get((self._unit(row), row.trial))
+        # the claim the reservation named (P-792 C1), else the one the run was claimed with
+        claim = int(reserved[LABEL_CLAIM]) if reserved is not None else self._claim
+        if claim is not None and self._ctx.claim_lost.is_set():
+            # F87-5: the heartbeat was refused — nothing more is appended, not even a pack
+            raise self._claim_lost(
+                f"run {self._ctx.run.id[:8]}'s claim {claim} by {self._worker_id!r} is lost "
+                "(its heartbeat was refused); the row was not written"
+            )
         row = self._stamp(row)
         body, why = self._kept_pack(row) if row.evidence_pack_hash else (None, "")
         if row.clean and body is None:
             row = self._demoted(row, why)  # keeps the labels: a demoted reserved row decides
-        if reserved is None:
+        if claim is None:
             chained = self._ledger.append(row)
         else:
-            # the claim the reservation named, checked under the grades lock (P-792 C1)
-            chained = self._ledger.append(
-                row,
-                guard=claim_guard(self._ctx.run.id, self._worker_id, int(reserved[LABEL_CLAIM])),
-            )
+            # the claim, checked under the grades lock, for every row of a claimed run (F87-5)
+            try:
+                chained = self._ledger.append(
+                    row, guard=claim_guard(self._ctx.run.id, self._worker_id, claim)
+                )
+            except AttemptSettled as exc:
+                raise self._claim_lost(f"{exc}; the row was not written") from exc
         grade = dict(body.get("grade") or {}) if body else {}
         metrics.record_grade(
             repo=row.repo,
@@ -1632,16 +1688,29 @@ class Worker:
             start=last_seq(self.factory, run.id),
         )
 
-    def _heartbeat_thread(self, run: Run, stop: threading.Event) -> threading.Thread:
+    def _heartbeat_beat(self, run: Run, claim_lost: threading.Event) -> bool:
+        """One heartbeat of ``run``: ``False`` once the queue refused it — the run was
+        reclaimed, finished or taken by another worker — after setting ``claim_lost``, so
+        the run loop stops and its next row raises ``ClaimLost`` (F87-5). A beat that
+        failed to reach the store is logged and the thread beats again: only a refusal
+        says the claim is gone."""
+        try:
+            if not self.queue.heartbeat(run.id, worker_id=self.worker_id):
+                _LOG.warning("heartbeat refused for run %s (reclaimed?)", run.id[:8])
+                claim_lost.set()
+                return False
+        except Exception:
+            _LOG.exception("heartbeat failed for run %s", run.id[:8])
+        self.checkin(current_run_id=run.id)
+        return True
+
+    def _heartbeat_thread(
+        self, run: Run, stop: threading.Event, claim_lost: threading.Event
+    ) -> threading.Thread:
         def loop() -> None:
             while not stop.wait(self.settings.heartbeat_s):
-                try:
-                    if not self.queue.heartbeat(run.id, worker_id=self.worker_id):
-                        _LOG.warning("heartbeat refused for run %s (reclaimed?)", run.id[:8])
-                        return
-                except Exception:
-                    _LOG.exception("heartbeat failed for run %s", run.id[:8])
-                self.checkin(current_run_id=run.id)
+                if not self._heartbeat_beat(run, claim_lost):
+                    return
 
         t = threading.Thread(target=loop, name=f"crb-heartbeat-{run.id[:8]}", daemon=True)
         t.start()
@@ -1653,7 +1722,9 @@ class Worker:
         emitter.emit("system", "run.claimed", worker=self.worker_id, kind=run.kind, mode=run.mode)
         self.checkin(current_run_id=run.id)
         hb_stop = threading.Event()
-        hb = self._heartbeat_thread(run, hb_stop)
+        # F87-5: set when this worker's claim is gone (a refused heartbeat, a refused row)
+        claim_lost = threading.Event()
+        hb = self._heartbeat_thread(run, hb_stop, claim_lost)
         ctx: RunContext | None = None
         status, error = STATUS_FAILED, ""
         counts: dict[str, Any] = {}
@@ -1688,7 +1759,9 @@ class Worker:
                 if handler is None:
                     raise ValueError(f"unknown run kind {run.kind!r}")
                 config, git = self._load_repo(run.repo, emitter, kind=run.kind)
-                ctx = RunContext(run=run, emitter=emitter, config=config, git=git)
+                ctx = RunContext(
+                    run=run, emitter=emitter, config=config, git=git, claim_lost=claim_lost
+                )
                 status, counts, error = handler(ctx)
         except AttemptSettled as exc:
             # P-792: a reserved attempt's row reached the ledger after its run was reclaimed
@@ -1721,6 +1794,21 @@ class Worker:
             hb_stop.set()
             hb.join(timeout=5)
             self.checkin()
+        if claim_lost.is_set():
+            # F87-5: the claim went while the run executed (a refused heartbeat, or a row its
+            # guard refused that a loop recorded as an item error): the current claim's record
+            # stands, so this one writes no finish — even under the same worker id
+            why = (
+                f"run {run.id[:8]}'s claim by {self.worker_id!r} was lost while it executed; "
+                "its finish is left to its current claim"
+            )
+            _LOG.warning("run %s claim lost: %s", run.id[:8], why)
+            if ctx is not None:
+                ctx.note_claim_lost(why)
+            else:
+                emitter.emit("system", "run.claim_lost", status=StepStatus.ERROR, error=why)
+            emitter.emit("system", "run.finish_refused", status=StepStatus.ERROR, error=why)
+            return
         if ctx is not None and ctx.notes:  # whatever the status: never a quiet unconfirmed kill
             error = "; ".join([error, *ctx.notes] if error else ctx.notes)[:2000]
         try:
@@ -2524,7 +2612,9 @@ class Worker:
         self.queue.progress(ctx.run.id, done, total, ctx.counts, worker_id=self.worker_id)
 
     def _cancelled(self, ctx: RunContext) -> bool:
-        return self.queue.is_cancel_requested(ctx.run.id)
+        """Stop the run between tasks: a cancel was requested, or this worker's claim on the
+        run is gone (``claim_lost``, F87-5 — its next row would be refused anyway)."""
+        return ctx.claim_lost.is_set() or self.queue.is_cancel_requested(ctx.run.id)
 
     # --- tasks -------------------------------------------------------------------
     def _select_tasks(self, ctx: RunContext, *, include_dirty: bool = False) -> list[TaskSpec]:
