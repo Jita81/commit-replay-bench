@@ -72,7 +72,9 @@ How:          ``grade_row_from_result`` reduces a ``GradeResult`` + pack hash to
               every row, ``lint_reason`` and ``change_id``) → ``GradeRow.__post_init__``
               asserts the invariants (a 2.4 row without its own classification is refused;
               a row below 2.4 is read by the rule frozen at 2.3) → ``JsonlLedger.append``
-              chains on the last row's hash and fsyncs the line → ``verify_chain`` re-hashes
+              refuses a replay row that does not record where its builder ran (write-only,
+              ``assert_executor_recorded`` — P-795), chains on the last row's hash and fsyncs
+              the line → ``verify_chain`` re-hashes
               every row in order →
               ``failure_split`` / ``cell_stats`` group eligible rows by ``CellKey``.
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -1175,6 +1177,29 @@ class GradeRow:
             self.builder_executor == BUILDER_EXECUTOR_SEALED
         )
 
+    def assert_executor_recorded(self) -> None:
+        """At write only (P-795): a measured replay row of 2.4 or later that this deployment
+        graded records where its builder ran (``builder_executor`` — ``docker`` or ``host``).
+        Without it the row reads unsealed (:attr:`sealed` fails closed), and a reading that
+        would otherwise count the row names it a ``scope_fault``: its commit is never pending
+        or re-rolled, and the arm reads undecided. A row stored before the guard still reads:
+        this is never called from :meth:`assert_invariants`, which every read runs. An
+        imported row (somebody else's record) and a factory row (no replay builder; P-795's
+        residual) are not refused."""
+        if (
+            self.process_step != PROCESS_REPLAY
+            or not self.carries_classification
+            or self.imported
+            or LABEL_BUILDER_EXECUTOR in self.labels
+        ):
+            return
+        raise LedgerIntegrityError(
+            f"ledger refuses row {self.task_id[:10]} ({self.repo}) of {self.apparatus_version}: "
+            "no builder_executor label — a replay row records where its builder ran (docker "
+            "or host), or it reads unsealed and a reading names it a scope_fault, its arm "
+            "undecided (P-795)"
+        )
+
     @property
     def failure_kind(self) -> str:
         """Why the row is not clean (``""`` when it is) — see :func:`derive_failure_kind`.
@@ -1553,8 +1578,10 @@ class JsonlLedger:
         return row_hash
 
     def append(self, row: GradeRow) -> GradeRow:
-        """Chain, validate and append. Returns the chained row (with hashes)."""
+        """Chain, validate and append. Returns the chained row (with hashes). A replay row
+        that does not record where its builder ran is refused here (P-795)."""
         row.assert_invariants()
+        row.assert_executor_recorded()
         with jsonl_append_lock(self.path):
             chained = row.chained(self._last_hash())
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -1566,8 +1593,12 @@ class JsonlLedger:
         return chained
 
     def append_many(self, rows: Iterable[GradeRow]) -> list[GradeRow]:
-        """Append in order; each row chains on the one before it."""
-        return [self.append(r) for r in rows]
+        """Append in order; each row chains on the one before it. Every row's executor is
+        checked before the first is written, so a refused row writes none (P-795)."""
+        batch = list(rows)
+        for r in batch:
+            r.assert_executor_recorded()
+        return [self.append(r) for r in batch]
 
     def rows(self) -> Iterator[GradeRow]:
         """Every row in file order (each re-validated by ``from_dict``); nothing for

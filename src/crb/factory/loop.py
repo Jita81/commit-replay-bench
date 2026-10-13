@@ -76,12 +76,15 @@ What it does: Sequences readiness and the entry gate (ADR-0026 item 8: an item i
               earlier run opened is updated on ``accept`` and closed, naming the verdict, on
               anything else; ``run_backlog`` requires a frozen, verifying backlog and records
               a blocked item explicitly when a dependency was not accepted. Emits a
-              ``factory``-stage ``StepEvent`` per step.
+              ``factory``-stage ``StepEvent`` per step. Under a reserved.v1 forward reading
+              an item's first build is reserved just before its r1 rung (never a rework's);
+              a reservation that fails never blocks the build (``build.not_reserved``).
 How:          ``FactorySpec`` carries every collaborator; ``FactoryLoop.run_item`` walks the
               private ``_assess`` / ``_oracle`` / ``_prove`` / ``_build`` / ``_review`` /
               ``_deliver`` steps under a ``_Stop`` exception that maps to a status;
               ``_open_delivery`` reads the chain for the item's open pull request and
-              ``_withdraw`` closes it.
+              ``_withdraw`` closes it; ``_build`` hands ``FactorySpec.reserve`` to the ladder
+              only on the ``r`` trial prefix.
 Layer:        factory — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0005-fail-closed-docker-sandbox.md,
               docs/adr/0004-builder-registry-sighted-and-blind.md,
@@ -99,9 +102,12 @@ Works with:   src/crb/factory/evidence.py (every arrow appends), src/crb/factory
               + src/crb/factory/testfirst.py + src/crb/factory/build.py +
               src/crb/factory/review.py + src/crb/factory/delivery.py (the steps, in order),
               src/crb/observability/events.py (``Emitter`` for the step events),
-              src/crb/server/routes/factory.py (serves the chain and the task view)
-Tested by:    tests/test_factory_loop.py, tests/test_factory_loop_rework.py,
-              tests/test_factory_loop_pull_requests.py, tests/test_factory_held_out.py
+              src/crb/server/routes/factory.py (serves the chain and the task view),
+              src/crb/server/worker.py (``_factory_reserver`` fills ``FactorySpec.reserve``)
+Tested by:    tests/test_factory_loop.py, tests/test_factory_loop_route_gate.py,
+              tests/test_factory_loop_signed_cell.py, tests/test_factory_loop_rework.py,
+              tests/test_factory_loop_pull_requests.py, tests/test_factory_held_out.py,
+              tests/test_p792_reserved.py
 Touch when:   never for a new repository (delivery is switched on per run, not per repo);
               adding a status means ``STATUSES`` here, the UI's factory screen and
               docs/API.md#factory-phase-p6; adding a clause to the gate means a
@@ -405,6 +411,11 @@ class FactorySpec:
     #: Keep every graded attempt's patch under ``<evidence_dir>/patches`` (crb.core.patches);
     #: ``False`` when the deployment keeps no code (``retention.patches`` off).
     keep_patches: bool = True
+    #: Under a reserved.v1 forward reading (crb.core.reading), the worker's hook that writes
+    #: the reservation for an item's first standard-arm build — called with the item and the
+    #: arm just before that build's r1 rung, never on a rework. It may raise: the build
+    #: still runs and no reading counts it (``build.not_reserved``). ``None``: nothing reserves.
+    reserve: Callable[[BacklogItem, str], None] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ladder", tuple(self.ladder))
@@ -1028,6 +1039,7 @@ class FactoryLoop:
         rung only; that grading is on the chain (``acceptance.graded``, naming ``grant``) as
         soon as the first rung is graded."""
         s = self.spec
+        reserve_fn = s.reserve
 
         def recorded(res: BuildResult) -> None:
             s.evidence.record_build(
@@ -1086,6 +1098,10 @@ class FactoryLoop:
             author_stamp=self._author_stamp(proof),
             held_out=held_out,
             on_result=recorded,
+            # a reading reserves the first build only (trial r1), never a rework's
+            reserve=(lambda: reserve_fn(item, arm))
+            if reserve_fn is not None and trial_prefix == "r"
+            else None,
         )
 
     def _delivered_cell_sign_off(

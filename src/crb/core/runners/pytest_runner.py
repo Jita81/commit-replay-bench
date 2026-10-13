@@ -25,12 +25,13 @@ Navigation
 ----------
 What it is:   The Python runner — ``PytestRunner`` — and the reference implementation every
               other language runner mirrors.
-What it does: Builds a deterministic ``python -m pytest -rfE`` command for a scope, parses the
-              short summary into failing ids (a session that stopped early or printed no
-              result is unattributed), checks a target file really defines tests
-              (malformed-oracle guard), installs the repository's test dependencies into a venv
-              under ``env_dir`` (the network phase), declares the tools a test may run on the
-              host (the interpreter, git and the basics; ADR-0048), and detects ruff for belt 5.
+What it does: Builds a deterministic ``python -m pytest -rpfE`` command for a scope, parses
+              the short summary into failing ids and the ids that passed (a session that
+              stopped early or printed no result is unattributed), checks a target file really
+              defines tests (malformed-oracle guard), installs the repository's test
+              dependencies into a venv under ``env_dir`` (the network phase), declares the
+              tools a test may run on the host (the interpreter, git and the basics;
+              ADR-0048), and detects ruff for belt 5.
 How:          ``command``: resolve the interpreter (opts → venv → crb's own) → pin ``PYTHONPATH``
               to the worktree (``/work`` under docker) → pytest argv. ``setup``: venv → install
               (``runner_opts.pip`` / fallback, else ``-e .[test]``) → uninstall the repo's own
@@ -44,7 +45,8 @@ Works with:   src/crb/core/runners/base.py (the contract and the setup records),
               src/crb/core/runners/__init__.py (registered as ``"pytest"``),
               tests/fixtures/pyrepo.py (the fixture repository the tests drive it on)
 Tested by:    tests/test_runners_parsers.py, tests/test_runners_setup.py, tests/test_lint.py,
-              tests/test_runners_toolenv.py, tests/test_runners_early_exit.py
+              tests/test_runners_toolenv.py, tests/test_runners_early_exit.py,
+              tests/test_belt2_passes.py
 Touch when:   a Python repository needs a different install recipe — prefer ``runner_opts``
               (``pip``, ``pip_fallback``, ``uninstall``, ``python``, ``env``, ``tools``,
               ``dist_info_stubs``; docs/OPERATOR.md) over editing this file; a new pytest
@@ -74,7 +76,10 @@ from crb.core.runners.base import (
     TestRun,
     host_check,
     parse_pytest_failures,
+    parse_pytest_passes,
+    relocate_ids,
     tail_of,
+    without_pytest_passes,
 )
 from crb.core.runners.toolenv import POSIX_BASICS, ToolSpec
 
@@ -234,9 +239,11 @@ class PytestRunner(BaseRunner):
     def command(
         self, root: Path, scope: Sequence[str], *, executor: Executor, timeout: int
     ) -> Command:
-        """``python -m pytest -q -rfE … <scope>`` with the repository's ``addopts`` and
+        """``python -m pytest -q -rpfE … <scope>`` with the repository's ``addopts`` and
         random-ordering plugins neutralised, so two runs of the same tree produce the
-        same summary and the parser sees exactly the ``-rfE`` shape it expects."""
+        same summary and the parser sees exactly the ``-rpfE`` shape it expects: the
+        passes first, then the failures and errors (``parse`` keeps the passes out of the
+        tail)."""
         # Under docker the image's interpreter must be used; the host venv is not mounted.
         host_default = self.python_for(root, self.env_dir) if executor.name != "docker" else None
         python = executor.tool("python", host_default)
@@ -246,7 +253,7 @@ class PytestRunner(BaseRunner):
             "pytest",
             "-q",
             "--no-header",
-            "-rfE",
+            "-rpfE",  # the passes too: belt 2 requires them (F4)
             "-p",
             "no:cacheprovider",
             "-p",
@@ -317,15 +324,17 @@ class PytestRunner(BaseRunner):
         return Command((python, "-c", script), Path(root), env=dict(base.env), timeout=timeout)
 
     def parse(self, result: ExecResult, root: Path) -> TestRun:
-        """Failing ids from the ``-rfE`` short summary; the base ``run`` adds the
-        fail-closed ``parse_error`` when rc≠0 and nothing was parsed. A session that did not
-        run to its end is UNATTRIBUTED whatever it names (stream Q2's verifiers): the summary
-        lists only the failures so far — the baselined ones — and every later test is
-        unobserved. That is an exit code other than 0 or 1, a stop banner
-        (``KeyboardInterrupt``, ``pytest.exit``, ``stopping after``), or exit 0 with no
-        result line at all (``os._exit(0)``)."""
+        """Failing ids from the ``-rpfE`` short summary, and the ids it names PASSED (never
+        one that also failed, as a test that passed and errored in teardown has); the base
+        ``run`` adds the fail-closed ``parse_error`` when rc≠0 and nothing was parsed. A
+        session that did not run to its end is UNATTRIBUTED whatever it names (stream Q2's
+        verifiers): the summary lists only the failures so far — the baselined ones — and
+        every later test is unobserved. That is an exit code other than 0 or 1, a stop
+        banner (``KeyboardInterrupt``, ``pytest.exit``, ``stopping after``), or exit 0 with
+        no result line at all (``os._exit(0)``). The tail leaves the PASSED lines out, so it
+        reads as the ``-rfE`` tail did."""
         text = result.combined
-        failing = parse_pytest_failures(text)
+        failing = relocate_ids(parse_pytest_failures(text), root)
         parse_error = ""
         stop = _PYTEST_STOP.search(text)
         if stop:
@@ -346,9 +355,10 @@ class PytestRunner(BaseRunner):
         return TestRun(
             result.returncode,
             failing,
-            tail_of(text),
+            tail_of(without_pytest_passes(text)),  # the tail -rfE printed: passes crowd it
             duration_s=result.duration_s,
             parse_error=parse_error,
+            passed=relocate_ids(parse_pytest_passes(text), root) - failing,
         )
 
     def is_valid_oracle(self, root: Path, test_file: str) -> bool:

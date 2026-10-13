@@ -14,8 +14,10 @@ run's spend past it:
   else the dearest attempt the run has made so far (a guard, not a guarantee: nothing
   bounds a first attempt with no cost cap, G-938). A factory item is reserved at every
   rung, once and again for each rework, and at one authoring pass;
-* **a factory run's test author** spends too, and writes no row: each model call's cost is
-  on its ``author.attempt`` event, summed by :meth:`Spend.with_authoring`;
+* **a test author** spends too, and writes no row — a factory run's, and an ``S1`` blind
+  replay's, which writes a test before each attempt (P-775): each model call's cost is on
+  its ``author.attempt`` event, summed by :meth:`Spend.with_authoring`, and an ``S1``
+  attempt is reserved at one authoring pass more (``check``'s ``authoring``);
 * a run whose last attempt or item passed its cap ends ``failed`` the same way
   (:meth:`SpendCap.passed`), never ``succeeded`` in silence;
 * the attempt is admitted while ``spent + reserve <= cap``; otherwise the run stops before
@@ -136,10 +138,14 @@ class SpendCap:
         reserve: float,
         unit: str = "attempt",
         attempts: int = 1,
+        authoring: float = 0.0,
     ) -> Halt | None:
         """``None`` admits the next ``unit``; a :class:`Halt` refuses it. For an attempt,
         ``reserve`` is its own cost cap (``0`` when it has none, and then the dearest attempt
-        so far stands in); for an item, the caller's reserve over its ``attempts``."""
+        so far stands in); for an item, the caller's reserve over its ``attempts``.
+        ``authoring`` is what the test author may spend before an ``S1`` attempt (its calls
+        at the dearest authoring call so far; P-775), added to the reserve and named in the
+        payload as ``authoring_reserve_usd``."""
         payload: dict[str, Any] = {
             "cap_usd": self.cap_usd,
             "spent_usd": round(spend.spent, 6),
@@ -163,6 +169,10 @@ class SpendCap:
         else:
             source = unit
             why = f"up to {_usd(reserve)} ({attempts} attempts: every rung, once more per rework)"
+        if authoring > 0:
+            reserve += authoring
+            why += f", plus {_usd(authoring)} for its test author's calls"
+            payload["authoring_reserve_usd"] = round(authoring, 6)
         if spend.spent + reserve <= self.cap_usd + _EPSILON:
             return None
         reason = (

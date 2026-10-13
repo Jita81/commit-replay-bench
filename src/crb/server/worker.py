@@ -31,7 +31,10 @@ bound to ``trace_id = run.id`` into a :class:`~crb.observability.events.MultiSin
 of :class:`~crb.store.events.DbEventSink` (the API's SSE source) and a
 :class:`~crb.observability.events.JsonlSink` under ``<home>/events/<run_id>.jsonl``
 (the operator's local copy). A heartbeat thread refreshes the run's liveness
-while it executes; a stale heartbeat lets another worker reclaim it.
+while it executes; a stale heartbeat lets another worker reclaim it. A refused
+heartbeat sets the run's ``claim_lost`` event: the task loop stops at its next check,
+the next row raises :class:`~crb.store.jobs.ClaimLost` before it is appended, and the
+run's finish is left to its current claim (``run.claim_lost``, F87-5).
 
 Honesty properties
 ------------------
@@ -112,12 +115,27 @@ Navigation
 What it is:   The worker process — the only thing that executes a run (the API never does).
 What it does: Polls the job queue, claims one run — re-checking a build run's builder
               credential by presence when it claims it, and failing it before any attempt with
-              the submit check's code when it is gone (P-050) — dispatches by kind (setup,
-              probe, mine, label, replay, blind, oracle, controls, factory), streams
+              the submit check's code when it is gone (P-050), and a run of a reading this
+              worker cannot grade sealed, would grade in a posture class the reading does not
+              count, or, when the reading names a campaign, that no ``campaign.admitted``
+              event names (P-789, DL-382, DL-383), or a run of a reserved.v1 reading that sets
+              a field the reading does not register (``_reading_run_fields`` over
+              ``reading_run_refusal``: ``builder_config``, ``timeout``, another budget profile
+              or ladder, a factory run off a forward reading's cell, an ``outage_stop`` or
+              ``env_stop`` other than 1; P-792 C3, C5, C7, C8, PW-7),
+              or a run of a reading of either rule while the
+              repository's lint is switched off (``_reading_lint_disabled``, P-796), or a run
+              of a reserved.v1 reading whose pool moved since registration
+              (``_reading_pool_drift`` over ``pool_drift``; at build, a live posture other than
+              the one the pool was qualified in — P-797) —
+              dispatches by kind (setup, probe, mine, label, replay, blind, oracle, controls,
+              factory), streams
               StepEvents, writes grade rows through the append-only ledger with the run's
               labels stamped, records the apparatus, and marks the run succeeded / failed /
               cancelled honestly (all-attempts-errored is a failure; a provider outage streak
-              stops the run; so does a spend cap, before an attempt or item that could pass it
+              stops the run — a run of a reserved.v1 reading at its first outage or
+              environment row, PW-7; so does a spend cap, before an attempt or item that
+              could pass it
               — src/crb/server/spend_cap.py, ADR-0030; a harness error on one mined candidate
               skips it). Fetches and fast-forwards the clone's default branch before a factory
               run (refusing the run when it cannot) and syncs delivered pull requests'
@@ -133,6 +151,32 @@ What it does: Polls the job queue, claims one run — re-checking a build run's 
               next free stage (``_chain_next_stage``, ``FREE_CHAIN``, DL-315) under the
               person who switched it on — only when the finished stage's own pass fact
               holds, once per finished run, and never a kind that spends model money.
+              Projects a reserved attempt's treatment for a reading's pin, as plain JSON with
+              no secret (``deployment_projection``, ``arm_projection``, ``repo_config_digest``
+              under ``REPO_CONFIG_UNPINNED``, ``fingerprint``, ``treatment_digest``; P-792):
+              A0 and A0+L share the deployment, the loop's overlay and the budget profile are
+              a non-loop arm's, a person's vetoes and links on the loop's chain the +L arm's.
+              For a replay or blind run filed under a reserved.v1 reading,
+              reserves each commit before its r1 build (``_replay_reserver`` → ``_reserver``
+              → ``_unit_reserver``: one ``reading.reserved`` event under the events lock, or
+              a skip, or a halt before ``build.start`` — the run not owned, a cancel asked, a
+              treatment that is not the pinned one, the pins read by ``treatment_pins``, or a
+              resolved checks arm that is not the one the reading froze,
+              ``reading_checks_arm_mismatch``, since a row on another checks arm is out of
+              the reading's scope); for
+              a factory run filed under a reserved.v1 forward reading, each ticket's first
+              ``S2`` build the same way, keyed on its item id (``_factory_reserver``, the
+              loop's ``FactorySpec.reserve``; anything but ``ok`` is ``build.not_reserved``
+              and the build runs on — C8). Stamps the reserved
+              row with the reservation, treatment and claim, and appends it under
+              ``claim_guard``; a row whose claim was
+              reclaimed or settled is refused (``AttemptSettled``) and the run's finish is
+              not written (``run.finish_refused``). Every other row of a claimed run is
+              appended under the same guard, at the claim the run was claimed with, and a
+              refused heartbeat sets the run's ``claim_lost`` event: either way the next
+              row raises ``ClaimLost`` before it is written, ``run.claim_lost`` is emitted
+              once, the task loop stops (``_cancelled`` reads the event) and the run's
+              finish is not written (F87-5).
 How:          ``Worker.run_once`` → ``JobQueue.claim`` → a ``RunContext`` (git, config,
               emitter) → the kind's ``_run_*`` method → core functions (``mine``, ``run``,
               ``score_task``, ``run_controls``, ``FactoryLoop``) → ``_RunLedger`` wraps every
@@ -152,7 +196,8 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               ``params.test_author``), src/crb/core/mine.py (mining; the oracle
               and controls kinds call their core modules the same way),
               src/crb/server/factory_state.py (forward mode's files and ``sync_outcomes``,
-              which runs first; the loop itself is src/crb/factory/loop.py),
+              which runs first; the loop itself is src/crb/factory/loop.py, whose
+              ``FactorySpec.reserve`` src/crb/factory/build.py calls before an item's r1),
               src/crb/server/intake.py (the idle loop's tracker poll — the watched column
               of every repository whose listener an operator switched on, ADR-0017),
               src/crb/server/github_app.py (installation tokens for clone, fetch,
@@ -160,17 +205,34 @@ Works with:   src/crb/store/jobs.py (the queue: claim, heartbeat, reclaim, finis
               queue and the bounded pass behind ``run.kill_reaped`` / ``run.kill_reap_failed``),
               src/crb/store/library.py (``mark_stale`` — the library's staleness after a mine),
               src/crb/server/routes/runs.py (``new_run`` and ``submit_refusals`` — a chained
-              run is made and refused exactly as ``POST /runs`` makes one)
+              run is made and refused exactly as ``POST /runs`` makes one),
+              src/crb/server/reading_book.py (``load_readings``; ``treatment_pins``, the pins
+              ``GET /readings`` serves too)
 Tested by:    tests/test_worker.py, tests/test_worker_budget_ladder.py, tests/test_worker_label.py,
               tests/test_worker_spend.py, tests/test_worker_chain.py,
               tests/test_worker_clone.py, tests/test_worker_fetch.py, tests/test_store_jobs.py,
               tests/test_worker_test_author.py, tests/test_intake_worker.py,
-              tests/test_observability_metrics.py
+              tests/test_observability_metrics.py, tests/test_p792_reserved.py (the treatment
+              projections and their ratchets; C3; the factory reservation, C8 and C16),
+              tests/test_p792_reserved_reservation.py (the reserver: once, at r1, before every
+              outcome event; the race, the stamped row and the guard),
+              tests/test_p792_reserved_losses.py (C1, C2, C10, C13, C15 end to end),
+              tests/test_p792_reserved_rows.py (C5, C9, C11, C12, the S1 harness row and the
+              stop at a reading run's first outage or environment row),
+              tests/test_p792_reserved_refusals.py (the claim's ``reading_run_fields`` refusal,
+              C7, the reserver's recheck under the lock, the lint and checks-arm halts and the
+              team's own ``format_step`` keeping ``A0+L`` on the reading's arm),
+              tests/test_p792_pool.py (the claim's ``pool_drift`` refusal)
 Touch when:   never for a new repository — repository behaviour lives in the runner and the
               repo config; a run kind is added (register it in ``_handlers``, ``RUN_KINDS`` in
               src/crb/store/jobs.py and src/crb/server/schemas.py, docs/API.md); a row label
               every run must carry is added (``_RunLedger._stamp``); an idle-loop step is
-              added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``).
+              added (a name in ``IDLE_STEPS``, never a bare call in ``run_forever``); a
+              ``BuilderContainerSettings`` field or another input an attempt runs under is
+              added (a named field of ``deployment_projection``; a ``RepoConfig`` field is
+              pinned unless named in ``REPO_CONFIG_UNPINNED`` — the ratchets fail first); a
+              run kind reserves under a reading (pass the arm its checks resolved as
+              ``checks_arm``, so ``_unit_reserver`` holds it to the reading's frozen one).
 Claims:       Nothing here decides a verdict: the grader does; the worker only sequences,
               stamps and records (docs/EVIDENCE-AND-CLAIMS.md).
 
@@ -187,6 +249,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import asdict as dataclass_asdict
 from dataclasses import dataclass, field
 from dataclasses import replace as dataclass_replace
 from pathlib import Path
@@ -204,21 +267,24 @@ from crb.builders.adapter import (
     build_fn_for,
     container_settings_from_env,
     ladder_labels,
+    loop_on,
+    run_arm_for,
     rungs_from_entries,
 )
 from crb.builders.base import Budget, Builder, EscalationLadder, Rung
 from crb.builders.brief import ARM_S1, S1Arm
 from crb.builders.budget import budget_for_rung
 from crb.builders.container import ENV_PREFIX as CONTAINER_ENV_PREFIX
-from crb.builders.container import UnconfirmedKill
+from crb.builders.container import BuilderContainerSettings, UnconfirmedKill
 from crb.builders.labeller import make_labeller
+from crb.core.campaign import REFUSAL_REQUIRED
 from crb.core.capability import PROJECTION_CLASS_SIZE, CapabilityMap
 from crb.core.checks import ARM_OFF, RepoChecks
 from crb.core.checks import resolve as resolve_checks
 from crb.core.classify import DEFAULT_MIN_CONFIDENCE, commit_evidence, label_summary
-from crb.core.context_arm import BASE_S1, REPLAY_MODE
+from crb.core.context_arm import BASE_S1, BASE_S2, REPLAY_MODE, parse_arm
 from crb.core.deps import DepsProvider, ProvisionRefused
-from crb.core.evidence import utc_now_iso
+from crb.core.evidence import canonical_json, sha256_text, utc_now_iso
 from crb.core.execution import (
     TREE_COPY,
     DockerExecutor,
@@ -247,6 +313,7 @@ from crb.core.ledger import (
     rows_for_checks,
 )
 from crb.core.library import ACTOR_FRESHNESS, files_cited
+from crb.core.lint import LINT_DISABLED_BY_CONFIG
 from crb.core.mine import MineOutcome, mine
 from crb.core.oracle.controls import (
     CONTROLS,
@@ -266,14 +333,44 @@ from crb.core.patches import PatchStore
 from crb.core.posture import expected_posture_class
 from crb.core.prevention import K_SECTION, W_SECTION, LearningSnapshot, empty_snapshot
 from crb.core.qualify import Qualification
-from crb.core.redact import redact_and_cap
+from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
+    HALT_ARM_UNKNOWN,
+    HALT_CANCEL_REQUESTED,
+    HALT_CHECKS_ARM_MISMATCH,
+    HALT_RUN_NOT_OWNED,
+    HALT_TREATMENT_MISMATCH,
+    LABEL_CLAIM,
+    LABEL_RESERVATION,
+    LABEL_TREATMENT,
+    REFUSAL_LINT_DISABLED,
+    REFUSAL_POOL_DRIFT,
+    RESERVED_RUN_STOP,
+    SKIP_COMMIT_RESERVED,
+    SKIP_TASK_NOT_ENROLLED,
+    Reading,
+    enrolled,
+    lint_refusal,
+    reading_run_refusal,
+    reservation_unit,
+)
+from crb.core.redact import redact, redact_and_cap
 from crb.core.routing import ROUTE_DELIVER
-from crb.core.run import BuildAttempt, RunSpec, RunSummary
+from crb.core.run import (
+    RESERVE_HALT,
+    RESERVE_OK,
+    RESERVE_SKIP,
+    BuildAttempt,
+    ReserveResult,
+    RunSpec,
+    RunSummary,
+)
 from crb.core.run import run as core_run
 from crb.core.runners import get_runner
 from crb.core.runners.base import BARE, BaseRunner, SetupResult, SetupStep
 from crb.core.secrets_file import SecretsStore
 from crb.core.spec import POOL_HARD, POOL_STANDARD, UNCLASSIFIED, RepoConfig, TaskSpec
+from crb.core.spend import resolve_policy
 from crb.core.stats import mean
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION, __version__
@@ -328,6 +425,7 @@ from crb.server.intake import (
 )
 from crb.server.posture_gate import DEFAULT_ENV_STOP, PostureGate, resolve_run_posture
 from crb.server.prevention_state import current_checks_arm, learning_snapshot, learning_tick
+from crb.server.reading_book import load_readings, pool_drift, repo_lint, treatment_pins
 from crb.server.reaper import STATE_FILENAME, ContainerReaper, ReapResult, by_hand
 from crb.server.routes.capability import (
     CHECKS_CURRENT,
@@ -343,13 +441,15 @@ from crb.server.routes.grades import pack_verified
 from crb.server.routes.oracle import latest_controls_verdict
 from crb.server.routes.repos import confined_clone_path
 from crb.server.routes.runs import (
+    READING_POSTURE_MISMATCH_CODE,
+    READING_UNSEALED_CODE,
     append_system_event,
     credential_refusal,
     new_run,
     submit_refusals,
     system_trace_id,
 )
-from crb.server.schemas import BUILD_KINDS, RunCreateRequest
+from crb.server.schemas import BUILD_KINDS, BUILDER_CONFIG_SECRET_MARKERS, RunCreateRequest
 from crb.server.settings import (
     ALLOW_UNSEALED_PROD_ENV,
     ROLE_RANK,
@@ -368,7 +468,13 @@ from crb.server.spend_cap import (
 )
 from crb.store import qualifications as store_qualifications
 from crb.store.db import init_db, make_engine, make_session_factory
-from crb.store.events import DbEventSink, events_of_action, last_seq
+from crb.store.events import (
+    DbEventSink,
+    ReservationExists,
+    append_event_checked,
+    events_of_action,
+    last_seq,
+)
 from crb.store.jobs import (
     ACTIVE_STATUSES,
     KIND_BLIND,
@@ -381,20 +487,25 @@ from crb.store.jobs import (
     KIND_QUALIFY,
     KIND_REPLAY,
     KIND_SETUP,
+    RECLAIMS_KEY,
     STATUS_CANCELLED,
     STATUS_FAILED,
     STATUS_QUEUED,
+    STATUS_RUNNING,
     STATUS_SUCCEEDED,
+    ClaimLost,
     JobQueue,
     StaleClaim,
+    claim_guard,
     stage_queued,
 )
-from crb.store.ledger import DbLedger
+from crb.store.ledger import AttemptSettled, DbLedger
 from crb.store.library import DbLibraryLedger
 from crb.store.models import Event, EvidencePackRow, Repo, Run, Task, User, WorkerRow
 
 #: Stop a build run after this many consecutive attempts the provider refused
-#: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables.
+#: (``failure_kind == outage``); ``params.outage_stop`` overrides, 0 disables. A run of a
+#: reserved.v1 reading defaults to (and may only name) ``RESERVED_RUN_STOP``, 1 (PW-7).
 DEFAULT_OUTAGE_STOP = 3
 
 #: How often the idle loop re-derives every repository's decisions inbox and stamps the clock
@@ -485,6 +596,163 @@ def budget_tier(budget: Budget) -> str:
     if budget.max_cost_usd:
         tier += f"/usd={budget.max_cost_usd:g}"
     return tier
+
+
+# ---------------------------------------------------------------------------
+# The treatment pin (P-792, reserved.v1): what a reservation's two fingerprints hash
+# ---------------------------------------------------------------------------
+
+#: ``RepoConfig`` fields outside the pinned repository digest: where the clone lives, how far
+#: mining walks and whether the free stages chain — none changes what an attempt runs under.
+#: Every other field, a new one included, is pinned (the ratchet in
+#: tests/test_p792_reserved.py lists the dataclass's own fields).
+REPO_CONFIG_UNPINNED: frozenset[str] = frozenset({"path", "mining", "auto_stages"})
+
+
+def repo_config_digest(config: RepoConfig) -> str:
+    """The sha256 of ``canonical_json(config.to_dict())`` without :data:`REPO_CONFIG_UNPINNED`.
+    Switching the lint belt off or editing the runner options after a campaign's first
+    reservation moves it, and so the deployment fingerprint (C4, C11)."""
+    body = {k: v for k, v in config.to_dict().items() if k not in REPO_CONFIG_UNPINNED}
+    return sha256_text(canonical_json(body))
+
+
+def _refuse_secrets(where: str, value: Any, *, keys: bool) -> None:
+    """Fail closed on anything credential-shaped in a treatment projection, which is stored
+    on a reservation event and served: with ``keys``, a mapping key carrying a
+    :data:`BUILDER_CONFIG_SECRET_MARKERS` marker; always, a key or string the redactor would
+    rewrite. The error names the path, never the value."""
+    if isinstance(value, Mapping):
+        for k, v in value.items():
+            key = str(k)
+            if redact(key) != key:
+                raise ValueError(f"{where} has a secret-shaped key: a treatment is never a secret")
+            if keys and any(marker in key.lower() for marker in BUILDER_CONFIG_SECRET_MARKERS):
+                raise ValueError(
+                    f"{where}.{key} is credential-shaped: a treatment is never a secret"
+                )
+            _refuse_secrets(f"{where}.{key}", v, keys=keys)
+    elif isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            _refuse_secrets(f"{where}[{i}]", item, keys=keys)
+    elif isinstance(value, str) and redact(value) != value:
+        raise ValueError(f"{where} holds a secret-shaped value: a treatment is never a secret")
+
+
+def _container_projection(container: BuilderContainerSettings | None) -> dict[str, Any] | None:
+    """Every :class:`BuilderContainerSettings` field by name (``describe()`` omits three and
+    folds a fourth), or ``None`` for a builder on the host. Read from the settings, never
+    from the environment they came from, so nothing else under ``CRB_BUILDER__`` rides in."""
+    if container is None:
+        return None
+    return {
+        "image": container.image,
+        "proxy_image": container.proxy_image,
+        "allow_hosts": list(container.allow_hosts),
+        "egress_network": container.egress_network,
+        "memory": container.memory,
+        "cpus": container.cpus,
+        "pids_limit": container.pids_limit,
+        "tmp_size": container.tmp_size,
+        "user": container.user,
+        "docker_binary": container.docker_binary,
+        "extra_ro_mounts": dict(container.extra_ro_mounts),
+    }
+
+
+def deployment_projection(
+    *,
+    ladder: EscalationLadder,
+    budget: Budget,
+    builder_overrides: Mapping[str, Any],
+    container: BuilderContainerSettings | None,
+    executor: str,
+    timeout: int,
+    preflight: Preflight | None,
+    escalation: str,
+    posture_class: str,
+    config: RepoConfig,
+    s1_author: str,
+) -> dict[str, Any]:
+    """The deployment half of a reserved attempt's treatment: what its r1 attempt runs under
+    that every arm of the campaign on one repository shares, as plain JSON with no secret.
+
+    It holds the r1 rung's builder, model, provider and config (the budget fields of that
+    config are in the budget), the run's ``builder_config`` overrides (C3), the builder
+    container by named field, the executor, ``RunSpec.timeout`` (C5), the r1 budget as
+    :func:`budget_for_rung` makes it from the run's ``budget`` — profile-independent: a
+    calibrated per-task cap is the arm's (:func:`arm_projection`), never passed here — the
+    pre-flight, the escalation policy, ``APPARATUS_VERSION``, the posture class, the
+    :func:`repo_config_digest` (C4, C11) and the S1 test author's label (``""`` off S1).
+    ``escalation`` is the policy resolved from the run's params over the repository's own
+    ``spend`` block, without the loop's overlay: the overlay is the ``+L`` arm's treatment,
+    and A0 and A0+L share this projection. A credential-shaped override or rung key, a
+    secret-shaped value anywhere, or a value JSON cannot hold raises ``ValueError`` /
+    ``TypeError`` (fail closed: nothing is dropped and nothing is hashed)."""
+    r1 = ladder.rungs[0]
+    rung_config = {k: v for k, v in r1.config.items() if k not in Budget.__dataclass_fields__}
+    _refuse_secrets("rung.config", rung_config, keys=True)
+    _refuse_secrets("builder_overrides", builder_overrides, keys=True)
+    projection = {
+        "rung": {
+            "builder": r1.builder,
+            "model": r1.model,
+            "provider": r1.provider,
+            "config": rung_config,
+        },
+        "builder_overrides": dict(builder_overrides),
+        "container": _container_projection(container),
+        "executor": executor,
+        "timeout": int(timeout),
+        "budget": budget_for_rung(r1, budget).to_dict(),
+        "preflight": None if preflight is None else dataclass_asdict(preflight),
+        "escalation": escalation,
+        "apparatus_version": APPARATUS_VERSION,
+        "posture_class": posture_class,
+        "repo_config": repo_config_digest(config),
+        "s1_author": s1_author,
+    }
+    _refuse_secrets("deployment", projection, keys=False)
+    plain: dict[str, Any] = json.loads(canonical_json(projection))
+    return plain
+
+
+def arm_projection(
+    arm: str, learning: LearningSnapshot, budget_profile: str, resolved_r1_budget: Budget
+) -> dict[str, Any]:
+    """The arm half of a reserved attempt's treatment: always ``{arm, learn}``. A non-loop arm
+    adds the loop overlay's digest, its resolved ``budget_profile`` and the r1 budget that
+    profile (or calibration) resolved to (C7); the ``+L`` arm omits all three, because what
+    the loop learns between commits is the treatment it measures, and adds ``person`` — the
+    digest of a person's vetoes and links on the loop's chain (``LearningSnapshot.person``),
+    which reshape what the loop gives without being the loop's own act. An arm outside the
+    grammar, or one whose ``+L`` disagrees with the loop switch it ran under, raises
+    ``ValueError``."""
+    loop = parse_arm(arm).loop
+    if loop != loop_on(learning):
+        raise ValueError(
+            f"arm {arm!r} disagrees with the loop switch it ran under "
+            f"(learn={learning.auto_apply!r}, opted out={learning.opted_out})"
+        )
+    out: dict[str, Any] = {"arm": arm, "learn": learning.auto_apply}
+    if loop:
+        return {**out, "person": learning.person}
+    return {
+        **out,
+        "overlay": learning.overlay_digest,
+        "budget_profile": budget_profile,
+        "budget": resolved_r1_budget.to_dict(),
+    }
+
+
+def fingerprint(projection: Mapping[str, Any]) -> str:
+    """``deployment_fp`` / ``arm_fp``: the sha256 of a projection's canonical JSON."""
+    return sha256_text(canonical_json(projection))
+
+
+def treatment_digest(deployment_fp: str, arm_fp: str) -> str:
+    """The ``treatment`` label a reserved row carries: ``sha256(deployment_fp|arm_fp)``."""
+    return sha256_text(f"{deployment_fp}|{arm_fp}")
 
 
 def default_worker_id() -> str:
@@ -684,12 +952,32 @@ class RunContext:
     #: The task the run is on (set by each kind's task loop) — the ``task_id`` an
     #: executor-level report (``run.kill_unconfirmed`` from the grade stage) is filed under.
     task_id: str = ""
+    #: Set once this worker's claim on the run is gone — its heartbeat was refused, or a
+    #: row's ``claim_guard`` refused it (F87-5). The heartbeat thread only sets it; the run
+    #: loop's ``_cancelled`` reads it and ``_RunLedger.append`` raises ``ClaimLost`` on it.
+    claim_lost: threading.Event = field(default_factory=threading.Event)
     _runner: BaseRunner | None = None
     _executor: Executor | None = None
+    _claim_lost_noted: bool = field(default=False, init=False, repr=False)
 
     @property
     def params(self) -> Mapping[str, Any]:
         return dict(self.run.params_json or {})
+
+    @property
+    def claim(self) -> int:
+        """The claim the run was claimed under: its ``reclaims`` count when this worker
+        took it (a reclaim moves it, even back to a worker with the same id)."""
+        return int((self.run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0)
+
+    def note_claim_lost(self, why: str) -> None:
+        """Mark this worker's claim on the run lost and emit ``run.claim_lost`` the first
+        time only (F87-5). Called from the run's own thread; the heartbeat thread sets
+        :attr:`claim_lost` and nothing else."""
+        self.claim_lost.set()
+        if not self._claim_lost_noted:
+            self._claim_lost_noted = True
+            self.emit("system", "run.claim_lost", status=StepStatus.ERROR, error=why)
 
     @property
     def timeout(self) -> int:
@@ -703,6 +991,17 @@ class RunContext:
         self.emitter.emit(stage, action, **payload)
 
 
+class _ReserveRefused(Exception):
+    """A ``reading.reserved`` build that refused before anything was written: it carries the
+    skip or halt :meth:`Worker._unit_reserver` answers, raised out of the locked transaction so
+    the event is never inserted (P-792). A factory build's reserve hook raises it too, for any
+    answer but ``ok``: the build runs on and no reading counts it (``build.not_reserved``)."""
+
+    def __init__(self, result: ReserveResult) -> None:
+        super().__init__(result.reason)
+        self.result = result
+
+
 class _RunLedger:
     """``RunSpec.ledger`` for a DB run: mirror the pack, record metrics, append.
 
@@ -713,6 +1012,20 @@ class _RunLedger:
     not clean, ``harness``, the reason in ``error`` — never clean (EI-3, 2026-09-27: it
     used to emit the event and append the clean row anyway). A forged body is never
     stored: the table is content-addressed and first write wins.
+
+    A reserved.v1 attempt (P-792) is named in ``reserved`` by its ``(unit, trial)`` — the unit
+    a replay row's commit, a factory row's ``item_id`` label — once
+    :meth:`Worker._unit_reserver` wrote its ``reading.reserved`` event: its row is stamped with the
+    reservation, the treatment and the claim, and appended under :func:`claim_guard`, so a row
+    written after its run was reclaimed or settled is never stored (C1, C11).
+
+    Every other row of a claimed run is appended under the same guard, at the claim the run
+    was claimed with (F87-5): before any append, reserved or not, a run whose ``claim_lost``
+    event is set (its heartbeat was refused) raises :class:`ClaimLost`, and a row the guard
+    refuses raises it too — ``run.claim_lost`` is emitted once, nothing more is appended, and
+    :meth:`Worker.execute` leaves the run's finish to its current claim. A context with no
+    claimed run (a stand-in with no ``run``, or a run no worker claimed) has no claim to
+    guard: its rows are appended as before.
     """
 
     def __init__(
@@ -724,6 +1037,7 @@ class _RunLedger:
         runner_name: str,
         *,
         trial_labels: Mapping[str, Mapping[str, str]] | None = None,
+        worker_id: str = "",
     ) -> None:
         self._ledger = ledger
         self._factory = factory
@@ -731,20 +1045,40 @@ class _RunLedger:
         self._ctx = ctx
         self._runner_name = runner_name
         self._trial_labels = {k: dict(v) for k, v in (trial_labels or {}).items()}
+        # a stand-in context (tests/test_evidence_import_governance.py) carries no run
+        run: Run | None = getattr(ctx, "run", None)
+        self._worker_id = worker_id or (run.worker_id if run is not None else "")
+        #: the claim every row of this run is appended under (F87-5); ``None`` for a context
+        #: with no claimed run, whose rows have no claim to guard
+        self._claim: int | None = ctx.claim if run is not None and run.worker_id else None
+        #: ``(unit, trial) → {reservation, treatment, claim}`` for each reserved attempt — the
+        #: unit a commit, or a factory ticket's item id (:meth:`_unit`)
+        self.reserved: dict[tuple[str, str], dict[str, str]] = {}
+
+    @staticmethod
+    def _unit(row: GradeRow) -> str:
+        """What a reservation names a row's attempt by: a factory row's ticket (its
+        ``item_id`` label — its ``task_id`` is the build's own id), else its commit — the
+        one ``reservation_unit`` F8's ``unplaced_attempts`` places rows by."""
+        return reservation_unit(row)
 
     def _stamp(self, row: GradeRow) -> GradeRow:
         """Add the run-declared labels for this row's trial (``budget_tier``,
-        ``rung_index`` — see :func:`trial_labels_for`) BEFORE the row is chained, so the
+        ``rung_index`` — see :func:`trial_labels_for`) and, for a reserved attempt, its
+        reservation, treatment and claim (``reserved``) BEFORE the row is chained, so the
         hash commits to them. Only labels change: the verdict fields are copied verbatim
         and :class:`GradeRow` re-runs its invariants on the copy, so a stamp can never
-        turn a red row clean. A trial the ladder does not know is left untouched."""
+        turn a red row clean. A trial the ladder does not know, of an attempt not reserved,
+        is left untouched."""
         extra = self._trial_labels.get(row.trial)
-        if not extra:
+        reserved = self.reserved.get((self._unit(row), row.trial))
+        if not extra and not reserved:
             return row
-        labels = {**row.labels, **extra}
-        if LABEL_BUDGET_PROFILE in row.labels and LABEL_BUDGET_TIER in row.labels:
+        labels = {**row.labels, **(extra or {})}
+        if extra and LABEL_BUDGET_PROFILE in row.labels and LABEL_BUDGET_TIER in row.labels:
             # a calibrated attempt ran under its own caps: its tier is the record
             labels[LABEL_BUDGET_TIER] = row.labels[LABEL_BUDGET_TIER]
+        labels.update(reserved or {})
         return GradeRow(**{**row.fields(), "labels": labels})
 
     def _pack_body(self, pack_hash: str) -> dict[str, Any] | None:
@@ -826,12 +1160,35 @@ class _RunLedger:
             }
         )
 
+    def _claim_lost(self, why: str) -> ClaimLost:
+        """Note the run's claim lost (``run.claim_lost``, once) and the error to raise."""
+        self._ctx.note_claim_lost(why)
+        return ClaimLost(why)
+
     def append(self, row: GradeRow) -> GradeRow:
+        reserved = self.reserved.get((self._unit(row), row.trial))
+        # the claim the reservation named (P-792 C1), else the one the run was claimed with
+        claim = int(reserved[LABEL_CLAIM]) if reserved is not None else self._claim
+        if claim is not None and self._ctx.claim_lost.is_set():
+            # F87-5: the heartbeat was refused — nothing more is appended, not even a pack
+            raise self._claim_lost(
+                f"run {self._ctx.run.id[:8]}'s claim {claim} by {self._worker_id!r} is lost "
+                "(its heartbeat was refused); the row was not written"
+            )
         row = self._stamp(row)
         body, why = self._kept_pack(row) if row.evidence_pack_hash else (None, "")
         if row.clean and body is None:
-            row = self._demoted(row, why)
-        chained = self._ledger.append(row)
+            row = self._demoted(row, why)  # keeps the labels: a demoted reserved row decides
+        if claim is None:
+            chained = self._ledger.append(row)
+        else:
+            # the claim, checked under the grades lock, for every row of a claimed run (F87-5)
+            try:
+                chained = self._ledger.append(
+                    row, guard=claim_guard(self._ctx.run.id, self._worker_id, claim)
+                )
+            except AttemptSettled as exc:
+                raise self._claim_lost(f"{exc}; the row was not written") from exc
         grade = dict(body.get("grade") or {}) if body else {}
         metrics.record_grade(
             repo=row.repo,
@@ -1336,16 +1693,29 @@ class Worker:
             start=last_seq(self.factory, run.id),
         )
 
-    def _heartbeat_thread(self, run: Run, stop: threading.Event) -> threading.Thread:
+    def _heartbeat_beat(self, run: Run, claim_lost: threading.Event) -> bool:
+        """One heartbeat of ``run``: ``False`` once the queue refused it — the run was
+        reclaimed, finished or taken by another worker — after setting ``claim_lost``, so
+        the run loop stops and its next row raises ``ClaimLost`` (F87-5). A beat that
+        failed to reach the store is logged and the thread beats again: only a refusal
+        says the claim is gone."""
+        try:
+            if not self.queue.heartbeat(run.id, worker_id=self.worker_id):
+                _LOG.warning("heartbeat refused for run %s (reclaimed?)", run.id[:8])
+                claim_lost.set()
+                return False
+        except Exception:
+            _LOG.exception("heartbeat failed for run %s", run.id[:8])
+        self.checkin(current_run_id=run.id)
+        return True
+
+    def _heartbeat_thread(
+        self, run: Run, stop: threading.Event, claim_lost: threading.Event
+    ) -> threading.Thread:
         def loop() -> None:
             while not stop.wait(self.settings.heartbeat_s):
-                try:
-                    if not self.queue.heartbeat(run.id, worker_id=self.worker_id):
-                        _LOG.warning("heartbeat refused for run %s (reclaimed?)", run.id[:8])
-                        return
-                except Exception:
-                    _LOG.exception("heartbeat failed for run %s", run.id[:8])
-                self.checkin(current_run_id=run.id)
+                if not self._heartbeat_beat(run, claim_lost):
+                    return
 
         t = threading.Thread(target=loop, name=f"crb-heartbeat-{run.id[:8]}", daemon=True)
         t.start()
@@ -1357,7 +1727,9 @@ class Worker:
         emitter.emit("system", "run.claimed", worker=self.worker_id, kind=run.kind, mode=run.mode)
         self.checkin(current_run_id=run.id)
         hb_stop = threading.Event()
-        hb = self._heartbeat_thread(run, hb_stop)
+        # F87-5: set when this worker's claim is gone (a refused heartbeat, a refused row)
+        claim_lost = threading.Event()
+        hb = self._heartbeat_thread(run, hb_stop, claim_lost)
         ctx: RunContext | None = None
         status, error = STATUS_FAILED, ""
         counts: dict[str, Any] = {}
@@ -1375,13 +1747,35 @@ class Worker:
                 status, error = STATUS_FAILED, refused
             elif (dead := self._dead_login(run, emitter)) is not None:
                 status, error = STATUS_FAILED, dead
+            elif (unsealed := self._reading_unsealed(run, emitter)) is not None:
+                status, error = STATUS_FAILED, unsealed
+            elif (moved := self._reading_posture_mismatch(run, emitter)) is not None:
+                status, error = STATUS_FAILED, moved
+            elif (unadmitted := self._campaign_unadmitted(run, emitter)) is not None:
+                status, error = STATUS_FAILED, unadmitted
+            elif (lint_off := self._reading_lint_disabled(run, emitter)) is not None:
+                status, error = STATUS_FAILED, lint_off
+            elif (unregistered := self._reading_run_fields(run, emitter)) is not None:
+                status, error = STATUS_FAILED, unregistered
+            elif (drifted := self._reading_pool_drift(run, emitter)) is not None:
+                status, error = STATUS_FAILED, drifted
             else:
                 handler = self._handlers.get(run.kind)
                 if handler is None:
                     raise ValueError(f"unknown run kind {run.kind!r}")
                 config, git = self._load_repo(run.repo, emitter, kind=run.kind)
-                ctx = RunContext(run=run, emitter=emitter, config=config, git=git)
+                ctx = RunContext(
+                    run=run, emitter=emitter, config=config, git=git, claim_lost=claim_lost
+                )
                 status, counts, error = handler(ctx)
+        except AttemptSettled as exc:
+            # P-792: a reserved attempt's row reached the ledger after its run was reclaimed
+            # or settled — the row was not written, and this claim's record is not ours to
+            # write either (the reservation already costs the commit). ``finally`` still
+            # stops the heartbeat; ``queue.finish`` below is never reached.
+            _LOG.warning("run %s attempt settled: %s", run.id[:8], exc)
+            emitter.emit("system", "run.finish_refused", status=StepStatus.ERROR, error=str(exc))
+            return
         except SandboxUnavailable as exc:
             status = STATUS_FAILED
             error = redact_and_cap(f"sandbox unavailable: {exc}", max_chars=1000)
@@ -1405,6 +1799,21 @@ class Worker:
             hb_stop.set()
             hb.join(timeout=5)
             self.checkin()
+        if claim_lost.is_set():
+            # F87-5: the claim went while the run executed (a refused heartbeat, or a row its
+            # guard refused that a loop recorded as an item error): the current claim's record
+            # stands, so this one writes no finish — even under the same worker id
+            why = (
+                f"run {run.id[:8]}'s claim by {self.worker_id!r} was lost while it executed; "
+                "its finish is left to its current claim"
+            )
+            _LOG.warning("run %s claim lost: %s", run.id[:8], why)
+            if ctx is not None:
+                ctx.note_claim_lost(why)
+            else:
+                emitter.emit("system", "run.claim_lost", status=StepStatus.ERROR, error=why)
+            emitter.emit("system", "run.finish_refused", status=StepStatus.ERROR, error=why)
+            return
         if ctx is not None and ctx.notes:  # whatever the status: never a quiet unconfirmed kill
             error = "; ".join([error, *ctx.notes] if error else ctx.notes)[:2000]
         try:
@@ -1476,6 +1885,257 @@ class Worker:
             code=LOGIN_INVALID_CODE,
             builder=login.builder,
             auth=login.auth,
+        )
+        return error
+
+    def _reading_unsealed(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading
+        (``params.reading_id``) this worker cannot measure sealed — the submit gate's rule
+        (P-789) applied again at claim, because the executors that grade it are this
+        worker's, not the API's: the id is no verified reading of the repository, the run's
+        sandbox executor is not ``docker``, or the builder's is not (``""`` reads
+        ``CRB_BUILDER__EXECUTOR`` as it stands; anything but ``docker`` is the host). ``None``
+        for a run filed under no reading, or one this worker can measure sealed."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        sandbox = run_executor_kind(params, self.settings).strip().lower()
+        builder = (
+            (
+                self.settings.builder_executor
+                or os.environ.get(f"{CONTAINER_ENV_PREFIX}EXECUTOR", "")
+            )
+            .strip()
+            .lower()
+        )
+        builder = "docker" if builder == "docker" else "host"
+        with self.factory() as s:
+            known = reading_id in {r.reading_id for r in load_readings(s, run.repo)}
+        if known and sandbox == "docker" and builder == "docker":
+            return None
+        why = (
+            f"no verified reading {reading_id!r} in {run.repo!r}"
+            if not known
+            else f"the sandbox executor is {sandbox!r} and the builder's is {builder!r}; a "
+            "run filed under a reading is graded with both on docker"
+        )
+        error = f"{READING_UNSEALED_CODE}: {why}"
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=READING_UNSEALED_CODE,
+            reading_id=reading_id,
+            sandbox_executor=sandbox,
+            builder_executor=builder,
+        )
+        return error
+
+    def _reading_posture_mismatch(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading
+        (``params.reading_id``) that counts rows of a posture class other than the one this
+        worker would grade it in — the submit gate's ``reading_posture_mismatch`` (DL-383)
+        applied again at claim, because the class is this worker's: its executor for the run
+        with the repository's ``sandbox_tree``, else this worker's ``CRB_SANDBOX__TREE``
+        (:meth:`_deployment_posture_class`). A run graded in another class spends and every
+        row it writes is refused by the reading. ``None`` for a run filed under no reading,
+        under one this repository has no verified record of (:meth:`_reading_unsealed`
+        refuses it), or one this worker grades in the reading's class."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+        if reading is None:
+            return None
+        graded = self._deployment_posture_class(
+            run.repo, run_executor_kind(params, self.settings).strip().lower()
+        )
+        if graded == reading.posture_class:
+            return None
+        error = (
+            f"{READING_POSTURE_MISMATCH_CODE}: reading {reading_id!r} counts rows graded in "
+            f"{reading.posture_class!r} and this worker would grade the run in {graded!r}; "
+            "nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=READING_POSTURE_MISMATCH_CODE,
+            reading_id=reading_id,
+            reading_posture_class=reading.posture_class,
+            run_posture_class=graded,
+        )
+        return error
+
+    def _campaign_unadmitted(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading
+        (``params.reading_id``) that names a campaign, and no ``campaign.admitted`` event on
+        that campaign's trace names this run — the submit gate's ``campaign_required``
+        (DL-382) applied again at claim, so a run that reached the queue by a path that
+        skipped the gate (inserted directly, or queued by a route the gate missed) never
+        spends outside the ceiling its reading spends under. ``None`` for a run under no
+        reading, under a reading that names no campaign, or admitted under its campaign."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+        campaign_id = reading.campaign_id if reading is not None else ""
+        if reading is None or not campaign_id:
+            return None
+        # ``load_readings`` read the campaign's admissions into the reading (DL-382)
+        if run.id in (reading.admitted or frozenset()):
+            return None
+        error = (
+            f"{REFUSAL_REQUIRED}: reading {reading_id!r} spends under campaign "
+            f"{campaign_id!r}, and no campaign.admitted event of it names this run"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_REQUIRED,
+            reading_id=reading_id,
+            campaign_id=campaign_id,
+        )
+        return error
+
+    def _reading_lint_disabled(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reading of
+        either rule (``params.reading_id``) and the operator switched the repository's lint
+        off since submit (P-796, :func:`~crb.core.reading.lint_refusal` — the rule ``POST
+        /runs`` refuses 409 ``lint_disabled`` by): a row graded with belt 5 off never counts as
+        one graded with it on, so the switch, thrown after outcomes are seen, could reshape
+        what the reading counts. Refused before the reservation, so the commit stays pending;
+        restoring the lint it ran under resumes it (another lint halts a reserved.v1 reading
+        ``reading_treatment_mismatch`` on its pin). ``None`` for a run under no reading, under one
+        this repository has no verified record of (:meth:`_reading_unsealed` refuses it), or
+        while lint is on."""
+        reading_id = str(dict(run.params_json or {}).get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+            reason = lint_refusal(run.repo, repo_lint(s, run.repo)) if reading else ""
+        if not reason:
+            return None
+        error = (
+            f"{REFUSAL_LINT_DISABLED}: a run of reading {reading_id!r}: {reason}; nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_LINT_DISABLED,
+            reading_id=reading_id,
+            repo=run.repo,
+            reason=LINT_DISABLED_BY_CONFIG,
+        )
+        return error
+
+    def _reading_run_fields(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reserved.v1
+        reading (``params.reading_id``) and sets a field the reading does not register — the
+        pure whitelist :func:`~crb.core.reading.reading_run_refusal` (P-792 channels C3, C5
+        and C7) applied at claim to the run as stored, so a run that reached the queue by a
+        path that skipped ``POST /runs`` (inserted directly, or queued by a route the gate
+        missed) still cannot steer the attempt it would reserve: a ``builder_config`` whose
+        ``extra_args`` override the rung's ``--model`` (C3), a ``timeout`` (C5), another
+        budget profile (C7), another ladder, cell, kind or mode, an arm the reading does not
+        read, or an ``outage_stop`` or ``env_stop`` other than 1 that would let it reserve past
+        its first outage or environment row (PW-7). A factory run under a reserved.v1 forward reading is held to the factory
+        whitelist (``RESERVED_FACTORY_PARAMS``) on the reading's cell, sighted, arm ``S2``
+        (C8): an off-cell run is refused here, before it can reserve. Nothing is reserved,
+        so every enrolled commit or ticket stays pending. ``None`` for a run
+        under no reading, under one this repository has no verified record of
+        (:meth:`_reading_unsealed` refuses it), or under a legacy reading, which no whitelist
+        binds."""
+        params = dict(run.params_json or {})
+        reading_id = str(params.get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+        if reading is None or not reading.reserved:
+            return None
+        code, detail = reading_run_refusal(
+            reading,
+            kind=run.kind,
+            mode=run.mode or "",
+            builder=run.builder or "",
+            model=run.model or "",
+            provider=run.provider or "",
+            ladder=list(run.ladder_json or []),
+            params=params,
+        )
+        if not code:
+            return None
+        fields = list(detail.get("fields") or [])
+        error = (
+            f"{code}: a run of {ATTEMPT_RULE_RESERVED} reading {reading_id!r} sets "
+            f"{', '.join(fields)}, which the reading does not register; nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=code,
+            reading_id=reading_id,
+            fields=fields,
+            reasons=dict(detail.get("reasons") or {}),
+            arm=str(detail.get("arm") or ""),
+        )
+        return error
+
+    def _reading_pool_drift(self, run: Run, emitter: Emitter) -> str | None:
+        """The error that fails ``run`` before any build when it is filed under a reserved.v1
+        reading (``params.reading_id``) whose pool moved since registration (P-797,
+        :func:`~crb.server.reading_book.pool_drift` — the rule ``POST /runs`` refuses 409
+        ``pool_drift`` by): a pool commit relabelled out of the cell, or a pinned qualification
+        record missing or not qualified, after submit or on a run that skipped ``POST /runs``.
+        Refused before the reservation, so every commit stays pending (a stall, never a skip).
+        ``None`` for a run under no reading, under one this repository has no verified record
+        of (:meth:`_reading_unsealed` refuses it), under a legacy reading, or with no drift."""
+        reading_id = str(dict(run.params_json or {}).get("reading_id") or "")
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next(
+                (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+            )
+            drift = pool_drift(s, reading) if reading is not None and reading.reserved else []
+        if not drift:
+            return None
+        error = (
+            f"{REFUSAL_POOL_DRIFT}: a run of {ATTEMPT_RULE_RESERVED} reading {reading_id!r}: its "
+            f"pool moved since registration ({len(drift)} drift row(s)); nothing was built"
+        )
+        emitter.emit(
+            "system",
+            "run.refused",
+            status=StepStatus.ERROR,
+            error=error,
+            code=REFUSAL_POOL_DRIFT,
+            reading_id=reading_id,
+            drift=drift,
         )
         return error
 
@@ -1881,10 +2541,11 @@ class Worker:
             actor=ctx.run.actor,
         )
 
-    def _deployment_posture_class(self, repo: str = "") -> str:
+    def _deployment_posture_class(self, repo: str = "", executor: str = "") -> str:
         """This worker's posture class for ``repo`` from its settings and the repository's
         own ``sandbox_tree`` (the map's reading when no run has measured one) —
-        :func:`crb.core.posture.expected_posture_class`, the rule the API uses too."""
+        :func:`crb.core.posture.expected_posture_class`, the rule the API uses too.
+        ``executor`` is a run's own kind (:func:`run_executor_kind`), else the worker's."""
         tree = ""
         if repo:
             with self.factory() as s:
@@ -1897,7 +2558,9 @@ class Worker:
                 else self.settings.sandbox_tree
             )
         return expected_posture_class(
-            self.settings.executor, tree=tree, provisioning=self.settings.provision.enabled
+            executor or self.settings.executor,
+            tree=tree,
+            provisioning=self.settings.provision.enabled,
         )
 
     def _stamp(self, ctx: RunContext, **extra: Any) -> None:
@@ -1954,7 +2617,9 @@ class Worker:
         self.queue.progress(ctx.run.id, done, total, ctx.counts, worker_id=self.worker_id)
 
     def _cancelled(self, ctx: RunContext) -> bool:
-        return self.queue.is_cancel_requested(ctx.run.id)
+        """Stop the run between tasks: a cancel was requested, or this worker's claim on the
+        run is gone (``claim_lost``, F87-5 — its next row would be refused anyway)."""
+        return ctx.claim_lost.is_set() or self.queue.is_cancel_requested(ctx.run.id)
 
     # --- tasks -------------------------------------------------------------------
     def _select_tasks(self, ctx: RunContext, *, include_dirty: bool = False) -> list[TaskSpec]:
@@ -2424,6 +3089,349 @@ class Worker:
         """The run-level budget: the builder's defaults overlaid with ``params.budget``."""
         return Budget.from_dict(dict(ctx.params.get("budget") or {}))
 
+    def _reserver(
+        self,
+        ctx: RunContext,
+        reading_id: str,
+        *,
+        arm: str,
+        checks_arm: str,
+        deployment: Mapping[str, Any],
+        arm_body_for: Callable[[TaskSpec], Mapping[str, Any]],
+        hold_usd: float | None,
+        ledger: _RunLedger,
+    ) -> Callable[[TaskSpec], ReserveResult]:
+        """``RunSpec.reserve`` for a replay run filed under the reserved.v1 reading
+        ``reading_id`` (P-792): :meth:`_unit_reserver` keyed on the task's commit, with the
+        task's spec and ``arm_body_for(task)`` — a calibrated r1 budget is per task."""
+        unit = self._unit_reserver(
+            ctx,
+            reading_id,
+            arm=arm,
+            checks_arm=checks_arm,
+            deployment=deployment,
+            hold_usd=hold_usd,
+            ledger=ledger,
+        )
+        return lambda task: unit(task.task_id, task.to_dict(), arm_body_for(task))
+
+    def _unit_reserver(
+        self,
+        ctx: RunContext,
+        reading_id: str,
+        *,
+        arm: str,
+        checks_arm: str,
+        deployment: Mapping[str, Any],
+        hold_usd: float | None,
+        ledger: _RunLedger,
+    ) -> Callable[[str, Mapping[str, Any], Mapping[str, Any]], ReserveResult]:
+        """The reservation for one unit of a run filed under the reserved.v1 reading
+        ``reading_id`` (P-792) — a replay task's commit, or a factory ticket's item id —
+        called with the unit, the spec it is built from and its arm half: before the unit's
+        ``r1`` build, one ``reading.reserved`` event on the reading's trace (``step_id`` the
+        arm, ``task_id`` the unit), its payload decided under the events lock — or a skip or
+        a halt that writes nothing.
+
+        Under the lock it re-reads the reading and its reservations, then: a reading not
+        registered reserved.v1 here, or an arm it does not read, halts ``reading_arm_unknown``;
+        a run whose resolved checks arm (``checks_arm``, ADR-0024 — the team's ``checks``
+        block over the loop's overlay, under the run's own switches) differs from the one the
+        reading froze halts ``reading_checks_arm_mismatch`` with both (``{frozen, run}``),
+        since the reading reads a row on another checks arm as out of its scope and the
+        attempt could never count; a unit the arm does not enrol is skipped; a run no longer
+        ``running`` on this worker under the claim it was claimed with halts
+        ``run_not_owned``, one asked to cancel halts ``cancel_requested``; a unit this arm
+        already reserved is skipped (the database's index is the backstop,
+        :class:`ReservationExists`). The first reservation of the
+        campaign on this repository (of the reading, without one) pins the deployment half,
+        and the reading's first on this arm pins the arm half; an attempt whose half differs
+        halts ``reading_treatment_mismatch`` with both fingerprints (trust on first use, C3-C5,
+        C11). On ``ok`` the attempt's row is named in ``ledger.reserved`` by its unit — stamped
+        with the reservation, the treatment and the claim, and appended under
+        :func:`claim_guard`.
+
+        No row lock is taken here: the run's row is read plainly, and the guard on the row's
+        append is the one that decides whether the attempt still counts."""
+        run = ctx.run
+        claim = int((run.counts_json or {}).get(RECLAIMS_KEY, 0) or 0)
+        deployment_body = dict(deployment)
+        deployment_fp = fingerprint(deployment_body)
+
+        def halt(reason: str, **detail: Any) -> _ReserveRefused:
+            return _ReserveRefused(ReserveResult(RESERVE_HALT, reason, detail))
+
+        def reserve(
+            unit: str, spec_body: Mapping[str, Any], arm_half: Mapping[str, Any]
+        ) -> ReserveResult:
+            arm_body = dict(arm_half)
+            arm_fp = fingerprint(arm_body)
+            treatment = treatment_digest(deployment_fp, arm_fp)
+
+            def build(s: Session) -> dict[str, Any]:
+                reading = next(
+                    (r for r in load_readings(s, run.repo) if r.reading_id == reading_id), None
+                )
+                if reading is None or not reading.reserved:
+                    raise halt(
+                        HALT_ARM_UNKNOWN,
+                        reading_id=reading_id,
+                        why=f"no reserved.v1 reading {reading_id!r} is registered on {run.repo}",
+                    )
+                if arm not in reading.arms or len(arm) > 64:
+                    raise halt(
+                        HALT_ARM_UNKNOWN,
+                        reading_id=reading_id,
+                        why=f"the reading does not read arm {arm[:80]!r}",
+                    )
+                if checks_arm != reading.checks_arm:
+                    raise halt(HALT_CHECKS_ARM_MISMATCH, frozen=reading.checks_arm, run=checks_arm)
+                if unit not in enrolled(reading, arm):
+                    raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_TASK_NOT_ENROLLED))
+                now = s.execute(
+                    select(Run).where(Run.id == run.id).execution_options(populate_existing=True)
+                ).scalar_one_or_none()
+                reclaims = int((now.counts_json or {}).get(RECLAIMS_KEY, 0) or 0) if now else -1
+                if (
+                    now is None
+                    or now.status != STATUS_RUNNING
+                    or now.worker_id != self.worker_id
+                    or reclaims != claim
+                ):
+                    raise halt(
+                        HALT_RUN_NOT_OWNED,
+                        run_id=run.id,
+                        status=now.status if now else "",
+                        owner=now.worker_id if now else "",
+                        claim=claim,
+                        at_claim=reclaims,
+                    )
+                if now.cancel_requested:
+                    raise halt(HALT_CANCEL_REQUESTED, run_id=run.id)
+                if (arm, unit) in (reading.reservations or {}):
+                    raise _ReserveRefused(ReserveResult(RESERVE_SKIP, SKIP_COMMIT_RESERVED))
+                pinned_by = ""
+                for half, ev in self._treatment_pins(s, reading, arm):
+                    body = dict(ev.payload_json or {})
+                    pinned = str(body.get(f"{half}_fp") or "")
+                    ours = deployment_fp if half == "deployment" else arm_fp
+                    if pinned != ours:
+                        theirs = dict((body.get("treatment_body") or {}).get(half) or {})
+                        mine = deployment_body if half == "deployment" else arm_body
+                        raise halt(
+                            HALT_TREATMENT_MISMATCH,
+                            half=half,
+                            pinned=pinned,
+                            ours=ours,
+                            pinned_by=ev.event_id,
+                            fields=sorted(
+                                k for k in {*theirs, *mine} if theirs.get(k) != mine.get(k)
+                            ),
+                        )
+                    if half == "deployment":
+                        pinned_by = ev.event_id
+                return {
+                    "v": 1,
+                    "reading_id": reading.reading_id,
+                    "campaign_id": reading.campaign_id,
+                    "run_id": run.id,
+                    "arm": arm,
+                    "trial": "r1",
+                    "worker_id": self.worker_id,
+                    "claim": claim,
+                    "task_spec_sha256": sha256_text(canonical_json(dict(spec_body))),
+                    "hold_usd": hold_usd,
+                    "deployment_fp": deployment_fp,
+                    "arm_fp": arm_fp,
+                    "treatment": treatment,
+                    "treatment_body": {"deployment": deployment_body, "arm": arm_body},
+                    "pinned_by": pinned_by or "self",
+                }
+
+            try:
+                ev = append_event_checked(
+                    self.factory,
+                    trace_id=reading_id,
+                    stage="system",
+                    action="reading.reserved",
+                    task_id=unit,
+                    step_id=arm,
+                    repo=run.repo,
+                    actor=self.worker_id,
+                    build=build,
+                )
+            except _ReserveRefused as refused:
+                return refused.result
+            except ReservationExists:  # the index's backstop: another writer reserved first
+                return ReserveResult(RESERVE_SKIP, SKIP_COMMIT_RESERVED)
+            ledger.reserved[(unit, "r1")] = {
+                LABEL_RESERVATION: ev.event_id,
+                LABEL_TREATMENT: treatment,
+                LABEL_CLAIM: str(claim),
+            }
+            return ReserveResult(RESERVE_OK)
+
+        return reserve
+
+    @staticmethod
+    def _treatment_pins(s: Session, reading: Reading, arm: str) -> list[tuple[str, Event]]:
+        """The reservations that pin a reserved attempt's treatment (P-792, trust on first
+        use): ``("deployment", e)`` for the first ``reading.reserved`` event on the reading's
+        repository under its campaign (under the reading itself when it names none), and
+        ``("arm", e)`` for the reading's first on ``arm``. Either is absent before its first
+        reservation. The rule is :func:`~crb.server.reading_book.treatment_pins`, the one
+        ``GET /readings`` serves the pins by."""
+        deployment, arms = treatment_pins(s, reading)
+        return [
+            (half, ev)
+            for half, ev in (("deployment", deployment), ("arm", arms.get(arm)))
+            if ev is not None
+        ]
+
+    def _reserved_reading(self, repo: str, reading_id: str) -> Reading | None:
+        """The reserved.v1 reading a run is filed under (``params.reading_id``), or ``None``
+        for a run filed under none, or under a reading that counts the first observation."""
+        if not reading_id:
+            return None
+        with self.factory() as s:
+            reading = next((r for r in load_readings(s, repo) if r.reading_id == reading_id), None)
+        return reading if reading is not None and reading.reserved else None
+
+    def _replay_reserver(
+        self,
+        ctx: RunContext,
+        reading: Reading,
+        *,
+        mode: str,
+        ladder: EscalationLadder,
+        budget: Budget,
+        learning: LearningSnapshot,
+        spend: SpendHooks,
+        container: BuilderContainerSettings | None,
+        preflight: Preflight | None,
+        s1_author: TestAuthor | None,
+        checks_arm: str,
+        ledger: _RunLedger,
+    ) -> Callable[[TaskSpec], ReserveResult]:
+        """:meth:`_reserver` for a replay run under ``reading``, its treatment projected from
+        what the run's r1 attempt runs under (``checks_arm`` is the arm the run's checks
+        resolved, which the reservation holds to the reading's frozen one): the deployment
+        half once (the run's ladder, budget, overrides, container, executor, timeout,
+        pre-flight, escalation policy, posture and repository configuration — shared by
+        every arm, so the S1 author is the arm's), the arm half per task (:func:`arm_projection`, with the r1 budget calibration
+        gives that task, and the S1 author's label on the S1 arm). The hold is the r1 rung's
+        cost cap (``None`` when the rung has none)."""
+        p = ctx.params
+        kind = run_executor_kind(p, self.settings).strip().lower()
+        r1 = ladder.rungs[0]
+        base = budget_for_rung(r1, budget)
+        arm = run_arm_for(
+            mode,
+            learning=learning,
+            s1_author_model=(canonical_model(s1_author.model) or s1_author.model)
+            if s1_author is not None
+            else None,
+        )
+        deployment = deployment_projection(
+            ladder=ladder,
+            budget=budget,
+            builder_overrides=dict(p.get("builder_config") or {}),
+            container=container,
+            executor=kind,
+            timeout=ctx.timeout,
+            preflight=preflight,
+            escalation=resolve_policy(p, ctx.config.spend).escalation,
+            posture_class=self._deployment_posture_class(ctx.run.repo, kind),
+            config=ctx.config,
+            s1_author="",
+        )
+
+        def arm_body_for(task: TaskSpec) -> Mapping[str, Any]:
+            r1_budget = (
+                spend.budget_for_task(task, mode, r1, base)[0]
+                if spend.budget_for_task is not None
+                else base
+            )
+            body = arm_projection(arm, learning, spend.policy.budget_profile, r1_budget)
+            if s1_author is not None:
+                body["s1_author"] = author_label(s1_author)
+            return body
+
+        return self._reserver(
+            ctx,
+            reading.reading_id,
+            arm=arm,
+            checks_arm=checks_arm,
+            deployment=deployment,
+            arm_body_for=arm_body_for,
+            hold_usd=base.max_cost_usd or None,
+            ledger=ledger,
+        )
+
+    def _factory_reserver(
+        self,
+        ctx: RunContext,
+        reading: Reading,
+        *,
+        ladder: EscalationLadder,
+        budget: Budget,
+        checks_arm: str,
+        ledger: _RunLedger,
+    ) -> Callable[[BacklogItem, str], None]:
+        """``FactorySpec.reserve`` for a factory run filed under the reserved.v1 forward
+        ``reading`` (P-792 C8): :meth:`_unit_reserver` keyed on the ticket's item id, called
+        by the build just before an item's first standard-arm attempt (trial ``r1``), held to
+        the reading's frozen checks arm by ``checks_arm``, the arm the run's checks resolved.
+        The deployment half is projected as a replay's (the run's ladder, budget, overrides,
+        executor, timeout, escalation policy, posture and repository configuration; no
+        container and no pre-flight — factory builders run on the host); the arm half is
+        ``S2`` with no loop overlay and the reading's ``budget_profile`` over the r1 rung's
+        budget. The hold is the r1 rung's cost cap.
+
+        It raises for anything but ``ok`` — :class:`_ReserveRefused` carrying the skip or
+        halt, ``ValueError`` for an arm other than ``S2`` — and the build catches it, runs on
+        and emits ``build.not_reserved``: the hook never blocks delivery, and an attempt it
+        did not reserve is counted by no reading (``ledger.reserved`` names none)."""
+        p = ctx.params
+        kind = run_executor_kind(p, self.settings).strip().lower()
+        deployment = deployment_projection(
+            ladder=ladder,
+            budget=budget,
+            builder_overrides=dict(p.get("builder_config") or {}),
+            container=None,
+            executor=kind,
+            timeout=ctx.timeout,
+            preflight=None,
+            escalation=resolve_policy(p, ctx.config.spend).escalation,
+            posture_class=self._deployment_posture_class(ctx.run.repo, kind),
+            config=ctx.config,
+            s1_author="",
+        )
+        r1_budget = budget_for_rung(ladder.rungs[0], budget)
+        arm_body = arm_projection(
+            BASE_S2, empty_snapshot(ctx.run.repo), reading.budget_profile, r1_budget
+        )
+        unit = self._unit_reserver(
+            ctx,
+            reading.reading_id,
+            arm=BASE_S2,
+            checks_arm=checks_arm,
+            deployment=deployment,
+            hold_usd=r1_budget.max_cost_usd or None,
+            ledger=ledger,
+        )
+
+        def reserve(item: BacklogItem, arm: str) -> None:
+            if arm != BASE_S2:
+                raise ValueError(
+                    f"the reading reserves the {BASE_S2} arm only; this build's arm is {arm!r}"
+                )
+            result = unit(item.id, item.to_dict(), arm_body)
+            if result.status != RESERVE_OK:
+                raise _ReserveRefused(result)
+
+        return reserve
+
     def _run_replay(self, ctx: RunContext, *, mode: str) -> tuple[str, dict[str, Any], str]:
         run = ctx.run
         p = ctx.params
@@ -2443,6 +3451,37 @@ class Worker:
         executor = self._executor(ctx)
         # ADR-0019: nothing is built for a task not qualified in the posture that grades it
         gate = self._posture_gate(ctx, runner, executor)
+        reading = self._reserved_reading(run.repo, str(p.get("reading_id") or ""))
+        if (
+            reading is not None
+            and reading.pins_pool
+            and reading.pool_posture_id != gate.posture.posture_id
+        ):
+            # P-797: a reserved.v1 pool was qualified in one posture; graded in another, its
+            # records no longer say the commits are proven where they are graded. Refused
+            # before anything is qualified or reserved, so every commit stays pending.
+            moved = (
+                f"{REFUSAL_POOL_DRIFT}: reserved.v1 reading {reading.reading_id!r} pinned its "
+                f"pool to posture {reading.pool_posture_id!r}; this run would grade in "
+                f"{gate.posture.posture_id!r}; nothing was built"
+            )
+            ctx.emit(
+                "system",
+                "run.refused",
+                status=StepStatus.ERROR,
+                error=moved,
+                code=REFUSAL_POOL_DRIFT,
+                reading_id=reading.reading_id,
+                drift=[
+                    {
+                        "task_id": "",
+                        "field": "pool_posture_id",
+                        "registered": reading.pool_posture_id,
+                        "now": gate.posture.posture_id,
+                    }
+                ],
+            )
+            return STATUS_FAILED, dict(ctx.counts), moved
         decision = gate.prepare(
             tasks,
             qualify_first=bool(p.get("qualify_first", True)),
@@ -2471,6 +3510,7 @@ class Worker:
             ctx,
             runner.name,
             trial_labels=rungs,
+            worker_id=self.worker_id,
         )
         # belt-5 pre-flight (adapter.Preflight): OFF unless the run asks; a run with it on is
         # a different arm (builder '<name>+preflight') and the apparatus stamp says so
@@ -2493,11 +3533,28 @@ class Worker:
         # F5b — the run's own spend cap, asked before every attempt (``RunSpec.admit``)
         cap = SpendCap.from_params(p)
         halted: list[Halt] = []
+        # P-775 — an S1 run's test author writes a test before every attempt and no row: its
+        # calls are the run's spend (a first claim's on the run's events, this claim's on the
+        # author, built with the arm below), and each attempt is reserved at one more pass
+        s1_author: TestAuthor | None = None
+        authored_before = (
+            self._authored_before(run.id)
+            if cap is not None and str(p.get("arm") or "") == ARM_S1
+            else []
+        )
+
+        def spent_now() -> Spend:
+            spent = Spend.of_rows(self.ledger.rows(run_id=run.id))
+            if s1_author is None:
+                return spent
+            return spent.with_authoring([*authored_before, *getattr(s1_author, "calls", ())])
 
         def admit(task: TaskSpec, rung_index: int) -> str:
             assert cap is not None
             attempt_cap = budget_for_rung(ladder.rungs[rung_index - 1], budget).max_cost_usd
-            halt = cap.check(Spend.of_rows(self.ledger.rows(run_id=run.id)), reserve=attempt_cap)
+            spent = spent_now()
+            passes = int(getattr(s1_author, "attempts", 1) or 0) if s1_author is not None else 0
+            halt = cap.check(spent, reserve=attempt_cap, authoring=spent.dearest_authoring * passes)
             if halt is not None:
                 halted.append(halt)
             return halt.reason if halt is not None else ""
@@ -2556,6 +3613,33 @@ class Worker:
             admit=admit if cap is not None else None,
         )
         self.queue.set_apparatus(run.id, spec.apparatus().to_dict(), worker_id=self.worker_id)
+        s1_author = self._s1_author(ctx, ladder, mode)
+        # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023): read once, so
+        # the builder runs in the container a reserved attempt's treatment names
+        container = container_settings_from_env(
+            {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
+            if self.settings.builder_executor
+            else None
+        )
+        if reading is not None:
+            # P-792: under a reserved.v1 reading each task's r1 is reserved before its build
+            spec = dataclass_replace(
+                spec,
+                reserve=self._replay_reserver(
+                    ctx,
+                    reading,
+                    mode=mode,
+                    ladder=ladder,
+                    budget=budget,
+                    learning=learning,
+                    spend=spend,
+                    container=container,
+                    preflight=preflight,
+                    s1_author=s1_author,
+                    checks_arm=checks.arm,
+                    ledger=run_ledger,
+                ),
+            )
         build_fn = build_fn_for(
             ladder,
             budget=budget,
@@ -2570,12 +3654,7 @@ class Worker:
                 else None
             ),
             builder_overrides=dict(p.get("builder_config") or {}),
-            # CRB_BUILDER__EXECUTOR=docker (ADR-0012), defaulted per env (ADR-0023)
-            container=container_settings_from_env(
-                {**os.environ, f"{CONTAINER_ENV_PREFIX}EXECUTOR": self.settings.builder_executor}
-                if self.settings.builder_executor
-                else None
-            ),
+            container=container,
             preflight=preflight,
             on_kill_unconfirmed=lambda task_id, kill: self._kill_unconfirmed(ctx, task_id, kill),
             # ADR-0019 (amends ADR-0012): a sealed builder reads the task's PARENT set
@@ -2584,7 +3663,7 @@ class Worker:
             # absent label = every switch OFF under the default block (rows as before)
             checks=checks if checks.any_on or not checks.repo.is_default else None,
             learning=learning,
-            s1=self._s1_arm(ctx, ladder, mode),
+            s1=self._s1_arm_of(ctx, s1_author) if s1_author is not None else None,
         )
         self._progress(ctx, 0, total)
 
@@ -2598,8 +3677,13 @@ class Worker:
         # Circuit breaker: a provider that refuses the call (usage limit, 429, dead
         # credential) refuses every call; 263 of the first 534 rows on the dev stack were
         # such `outage` rows written in seconds (2026-09-15). After `outage_stop` consecutive
-        # refused attempts the run stops with the reason instead of burning the queue.
-        outage_stop = int(p.get("outage_stop", DEFAULT_OUTAGE_STOP) or 0)
+        # refused attempts the run stops with the reason instead of burning the queue. A run
+        # of a reserved.v1 reading stops at the FIRST (PW-7): its in-flight commit is a miss,
+        # so it must reserve no more; the claim refused any other value it named.
+        outage_stop = int(
+            p.get("outage_stop", RESERVED_RUN_STOP if reading is not None else DEFAULT_OUTAGE_STOP)
+            or 0
+        )
         streak: dict[str, Any] = {"n": 0, "last": ""}
         inner_build = build_fn
 
@@ -2629,8 +3713,11 @@ class Worker:
             return outage_stop > 0 and streak["n"] >= outage_stop
 
         # ADR-0019: two environment rows in a row mean the posture, not the tasks, is
-        # broken — stop before paying for more (``params.env_stop``; 0 disables)
-        env_stop = int(p.get("env_stop", DEFAULT_ENV_STOP) or 0)
+        # broken — stop before paying for more (``params.env_stop``; 0 disables). A run of a
+        # reserved.v1 reading stops at the first (PW-7), as it does at the first outage.
+        env_stop = int(
+            p.get("env_stop", RESERVED_RUN_STOP if reading is not None else DEFAULT_ENV_STOP) or 0
+        )
 
         def env_tripped() -> bool:
             if env_stop <= 0:
@@ -2657,7 +3744,7 @@ class Worker:
         self._learning_tick(run.repo)
         if cap is not None and not halted and not self._cancelled(ctx):
             # the last attempt had no cost cap of its own and may have passed the run's
-            over = cap.passed(Spend.of_rows(self.ledger.rows(run_id=run.id)))
+            over = cap.passed(spent_now())
             if over is not None:
                 halted.append(over)
         if halted and not self._cancelled(ctx):
@@ -2680,7 +3767,8 @@ class Worker:
             counts["stopped_reason"] = reason
             ctx.emit("system", "run.environment_stop", status=StepStatus.ERROR, reason=reason)
             return STATUS_FAILED, counts, reason
-        if summary.stopped_reason == "cancelled":
+        # a cancel the reserver read before a reservation is a cancel, not a failure
+        if summary.stopped_reason in ("cancelled", HALT_CANCEL_REQUESTED):
             return STATUS_CANCELLED, counts, ""
         if summary.stopped_reason:
             return STATUS_FAILED, counts, summary.stopped_reason
@@ -2698,6 +3786,13 @@ class Worker:
         grades on the commit's held-out tests, so it runs blind; it needs a test author; and
         the author's model is never a build rung's (DL-050, DL-059 C3 — the same identity
         check the factory applies)."""
+        author = self._s1_author(ctx, ladder, mode)
+        return self._s1_arm_of(ctx, author) if author is not None else None
+
+    def _s1_author(self, ctx: RunContext, ladder: EscalationLadder, mode: str) -> TestAuthor | None:
+        """The ``S1`` arm's test author, refused as :meth:`_s1_arm` says, or ``None`` when
+        the run is not on the arm. The replay keeps it: its ``calls`` are the run's spend
+        (P-775)."""
         if str(ctx.params.get("arm") or "") != ARM_S1:
             return None
         if mode != REPLAY_MODE[BASE_S1]:
@@ -2713,6 +3808,10 @@ class Worker:
         label = author_label(author)
         for i, rung in enumerate(ladder.rungs, start=1):
             assert_distinct_identity(label, rung.label, role=f"build rung {i}")
+        return author
+
+    def _s1_arm_of(self, ctx: RunContext, author: TestAuthor) -> S1Arm:
+        """The ``S1`` arm around ``author``: it writes one test in the sealed checkout."""
         config = ctx.config
 
         def write(workspace: Any, subject: str, message: str) -> tuple[str, str]:
@@ -3118,7 +4217,10 @@ class Worker:
         as ``delivery_failed`` when asked for); ``max_rework`` (default 1); ``test_author``
         (a rung label, or ``none``; default the deployment's ``CRB_FACTORY__TEST_AUTHOR``)
         — the rung that writes the failing test for an item nobody authored an oracle for,
-        refused when it is a rung on this run's own ladder."""
+        refused when it is a rung on this run's own ladder; ``reading_id`` (P-792 C8) — a
+        reserved.v1 forward reading's, which the claim admitted only on the reading's cell:
+        each item's first standard-arm attempt is reserved before it is built
+        (:meth:`_factory_reserver`), and a reservation that fails never stops the build."""
         run = ctx.run
         p = ctx.params
         if self.settings.refuse_unsealed:
@@ -3194,7 +4296,11 @@ class Worker:
             ctx,
             runner.name,
             trial_labels=rungs,
+            worker_id=self.worker_id,
         )
+        # P-792 C8 — a run filed under a reserved.v1 forward reading reserves each item's
+        # first build; the claim already refused one off the reading's cell
+        reading = self._reserved_reading(run.repo, str(p.get("reading_id") or ""))
         self._stamp(
             ctx,
             backlog_hash=backlog.backlog_hash,
@@ -3297,6 +4403,17 @@ class Worker:
                 on_event=ctx.on_event,
             ),
             keep_patches=self.settings.store_patches,
+            # P-792 C8 — the reservation for an item's first build; never blocks it
+            reserve=self._factory_reserver(
+                ctx,
+                reading,
+                ladder=ladder,
+                budget=budget,
+                checks_arm=checks.arm,
+                ledger=run_ledger,
+            )
+            if reading is not None and reading.prospective
+            else None,
         )
         loop = FactoryLoop(spec, ctx.git, emitter=ctx.emitter)
         total = len(backlog.ordered())
@@ -3321,18 +4438,7 @@ class Worker:
         halted: list[Halt] = []
         # the test author's model calls are the run's spend too, though they write no row:
         # the ones a first claim made are on its events, this claim's on the author
-        authored_before = (
-            [
-                {
-                    **e.payload,
-                    "action": e.action,
-                    "cost_usd": e.cost_usd if e.cost_usd is not None else e.payload.get("cost_usd"),
-                }
-                for e in events_of_action(self.factory, run.id, AUTHOR_ATTEMPT)
-            ]
-            if cap is not None
-            else []
-        )
+        authored_before = self._authored_before(run.id) if cap is not None else []
 
         def spent_now() -> Spend:
             calls = list(getattr(test_author, "calls", ()) or ())
@@ -3420,6 +4526,19 @@ class Worker:
             "system", "run.spend_cap", status=StepStatus.SKIPPED, reason=halt.reason, **halt.payload
         )
         return STATUS_FAILED, counts, halt.reason
+
+    def _authored_before(self, run_id: str) -> list[dict[str, Any]]:
+        """The run's ``author.attempt`` events so far, each with its cost, for
+        :meth:`Spend.with_authoring`: the calls a first claim's test author made are on the
+        run's events, not on the author a reclaim builds, so they are read back."""
+        return [
+            {
+                **e.payload,
+                "action": e.action,
+                "cost_usd": e.cost_usd if e.cost_usd is not None else e.payload.get("cost_usd"),
+            }
+            for e in events_of_action(self.factory, run_id, AUTHOR_ATTEMPT)
+        ]
 
     def _test_author(self, ctx: RunContext, ladder: EscalationLadder) -> TestAuthor | None:
         """The run's test author, or ``None`` when this deployment has none.

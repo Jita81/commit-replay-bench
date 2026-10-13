@@ -4,9 +4,11 @@ A cell is licensed only by a reading registered before its first attempt: the ce
 hierarchy of context arms (richest first), the look rule, the share of the cell's error budget
 it spends, the test author's model and the frozen pool of qualified commits. The CLI writes it
 as one JSON line to ``<workdir>/readings.jsonl`` (``--readings`` elsewhere) — the file ``crb
-route --readings`` reads — refusing it ``pool_seen`` when a pool commit already has a graded
-row under an arm of the hierarchy at this apparatus, and ``budget_spent`` when the cell's
-budget cannot cover it. ``crb reading list`` prints what is registered.
+route --readings`` reads — refusing it ``reading_exists`` when the file already holds it (a
+retried registration, under any second or actor, writes nothing — P-793), ``pool_seen`` when
+a pool commit already has a graded row under an arm of the hierarchy at this apparatus, and
+``budget_spent`` when the cell's budget cannot cover it. ``crb reading list`` prints what is
+registered, each ``reading_id`` once.
 
 Navigation
 ----------
@@ -14,9 +16,12 @@ What it is:   ``crb reading register | list`` — the file workdir's twin of ``P
 What it does: Builds the full cell from its flags, freezes the pool by rule — every
               gold-checked task of the cell's class, size and language on file, or every one
               authored since ``--since`` (never a list, DL-097) — refuses an unsealed posture
-              for a replayed arm, registers through ``crb.core.reading.register`` against the
-              JSONL ledger and the readings already on file, and appends the record; lists the
-              registered readings with their spend.
+              for a replayed arm and a ``--campaign`` whose ``--campaign-record`` does not
+              verify (``campaign_unknown``, DL-382), registers through
+              ``crb.core.reading.register`` against the JSONL ledger and the readings already
+              on file (a reading already on file is ``reading_exists``: exit 2, nothing
+              appended), and appends the record; lists the registered readings with their
+              spend, keeping the first record of each ``reading_id`` (P-793).
 How:          ``Workdir.load_tasks`` → ``register`` (the core's rules, unchanged) → one JSON
               line appended with ``fsync``.
 Layer:        cli — docs/ARCHITECTURE.md#44-outer-layers
@@ -33,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +51,7 @@ from crb.cli.commands import (
     table,
     workdir_of,
 )
+from crb.core.campaign import REFUSAL_UNKNOWN, Campaign
 from crb.core.context_arm import BASE_S2, parse_arm
 from crb.core.ledger import (
     CELL_FIELDS,
@@ -53,13 +60,22 @@ from crb.core.ledger import (
     is_sealed_class,
     jsonl_append_lock,
 )
-from crb.core.reading import RULE_LOOK_V1, RULES, Reading, ReadingRefused, pool_by_rule
+from crb.core.reading import (
+    RULE_LOOK_V1,
+    RULES,
+    Reading,
+    ReadingRefused,
+    first_per_id,
+    pool_by_rule,
+)
 from crb.core.reading import register as register_reading
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 
 #: The file a workdir's readings live in (one JSON object per line).
 READINGS_FILE = "readings.jsonl"
+#: A campaign id, as ``POST /readings`` takes one (DL-382).
+_CAMPAIGN_ID = re.compile(r"^cmp_[0-9a-f]{24}$")
 
 
 def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -86,6 +102,26 @@ def register(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     reg.add_argument("--rule", default=RULE_LOOK_V1, choices=sorted(RULES))
     reg.add_argument("--posture-class", required=True, help="the sealed class the reading counts")
     reg.add_argument("--author-model", default="")
+    reg.add_argument(
+        "--hypothesis", required=True, help="what the reading tests, written before any row"
+    )
+    reg.add_argument(
+        "--smallest-effect",
+        required=True,
+        type=float,
+        help="the smallest effect that would matter: a share of attempts in (0, 1]",
+    )
+    reg.add_argument(
+        "--campaign",
+        default="",
+        help="the campaign every run of the reading spends under (cmp_<24 hex>; DL-382)",
+    )
+    reg.add_argument(
+        "--campaign-record",
+        default="",
+        help="the campaign's record as GET /api/v1/campaigns/{id} serves it: it must verify "
+        "and carry --campaign's id (a file workdir holds no campaigns)",
+    )
     reg.add_argument("--checks", default="off")
     reg.add_argument("--path", default="", help="ledger path (default <workdir>/ledger.jsonl)")
     reg.add_argument("--readings", default="", help=f"default <workdir>/{READINGS_FILE}")
@@ -113,7 +149,8 @@ def readings_path(args: argparse.Namespace) -> Path:
 
 
 def load_readings(path: Path) -> list[Reading]:
-    """Every reading on file; one that does not re-hash is refused, never skipped quietly."""
+    """Every reading on file, the first record of each ``reading_id`` (``first_per_id``,
+    P-793); one that does not re-hash is refused, never skipped quietly."""
     if not path.is_file():
         return []
     out: list[Reading] = []
@@ -124,12 +161,38 @@ def load_readings(path: Path) -> list[Reading]:
         if not reading.verify():
             raise CliError(f"{path}:{n}: reading {reading.reading_id!r} does not re-hash")
         out.append(reading)
-    return out
+    return first_per_id(out)
+
+
+def campaign_named(campaign_id: str, record: str) -> str:
+    """The campaign a reading names, once its record verifies (DL-382): ``""`` for none; a
+    malformed id, a missing record, or a record that does not verify or carries another id is
+    refused ``campaign_unknown`` — the code ``POST /readings`` and ``POST /runs`` answer —
+    before anything is read or written."""
+    if not campaign_id:
+        if record:
+            raise CliError("--campaign-record is the record of --campaign: name both or neither")
+        return ""
+    if not _CAMPAIGN_ID.match(campaign_id):
+        raise CliError(f"{REFUSAL_UNKNOWN}: --campaign is a cmp_<24 hex> id; got {campaign_id!r}")
+    if not record:
+        raise CliError(
+            f"{REFUSAL_UNKNOWN}: a file workdir holds no campaigns — name --campaign-record, "
+            f"the record GET /api/v1/campaigns/{campaign_id} serves"
+        )
+    try:
+        campaign = Campaign.from_dict(json.loads(Path(record).expanduser().read_text("utf-8")))
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        raise CliError(f"{REFUSAL_UNKNOWN}: {record}: not a campaign record ({exc})") from exc
+    if not campaign.verify() or campaign.campaign_id != campaign_id:
+        raise CliError(f"{REFUSAL_UNKNOWN}: {record} is no verified record of {campaign_id!r}")
+    return campaign_id
 
 
 def cmd_register(args: argparse.Namespace) -> int:
     """Register one reading and append it; refusals exit 2 with their code."""
     wd = workdir_of(args)
+    campaign_id = campaign_named(args.campaign.strip(), args.campaign_record.strip())
     cell = {
         "process_step": args.step,
         "capability_class": args.capability_class,
@@ -140,6 +203,13 @@ def cmd_register(args: argparse.Namespace) -> int:
         "provider": args.provider,
     }
     assert set(cell) == set(CELL_FIELDS)
+    hypothesis = args.hypothesis.strip()
+    if not hypothesis or len(hypothesis) > 2000:
+        raise CliError("--hypothesis must say what the reading tests (1 to 2000 characters)")
+    if not 0 < args.smallest_effect <= 1:
+        raise CliError(
+            f"--smallest-effect must be a share of attempts in (0, 1]; got {args.smallest_effect}"
+        )
     hierarchy = [a.strip() for a in args.hierarchy.split(",") if a.strip()]
     try:
         replayed = [a for a in hierarchy if parse_arm(a).base != BASE_S2]
@@ -189,6 +259,9 @@ def cmd_register(args: argparse.Namespace) -> int:
                 author_model=args.author_model,
                 changes={c: str(tasks[c].labels.get(LABEL_CHANGE_ID, "")) for c in pool},
                 pool_rule=pool_rule,
+                hypothesis=hypothesis,
+                smallest_effect=args.smallest_effect,
+                campaign_id=campaign_id,
             )
         except ReadingRefused as exc:
             raise CliError(f"{exc.code}: {exc}") from exc

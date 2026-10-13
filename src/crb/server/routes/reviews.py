@@ -4,8 +4,8 @@ The 2026-09-13 critical-friend review (§5 plays 05/07, action #3) found that a
 reviewer's finding on an accepted patch had nowhere to live. It lives here: the
 ``reviews`` table is append-only and hash-chained on its own (``prev_hash`` = the
 previous review's ``row_hash``; ``row_hash`` over the canonical row), every record
-names the graded row it is about (``grade_row_hash``) and is ANCHORED to the exact
-bytes the reviewer read:
+names the graded row it is about (``grade_row_hash``) and is ANCHORED to the hash of
+the patch that row's pack records:
 
 ``POST /reviews`` (operator or above; CSRF as every write):
 
@@ -14,8 +14,10 @@ bytes the reviewer read:
    findings by the core's one rule and a client-sent ``verdict`` must agree; every
    construction error is **422 validation_error**;
 3. applies the patch-hash anchor (:func:`crb.core.review.check_patch_anchor`): the
-   body's ``patch_sha256`` — the hash of the patch the reviewer LOADED through
-   ``GET /grades/{row_hash}/patch`` — must equal the pack's ``diff_sha256``, else
+   body's ``patch_sha256`` — the hash of the patch ``GET /grades/{row_hash}/patch``
+   serves — must equal the pack's ``diff_sha256``. That proves only that the reviewer
+   named the pack's diff hash, which ``GET /grades/{row_hash}/retained`` serves too, not
+   that the patch was fetched or read (the registration's KG-6). Otherwise
    **422 review_refused** with ``detail.code`` (``patch_hash_mismatch`` /
    ``patch_hash_missing`` / ``no_diff_in_pack``), ``detail.expected`` and
    ``detail.observed``; nothing is written and the refusal is a
@@ -33,11 +35,12 @@ Navigation
 What it is:   The ``/reviews`` route module — a human's post-hoc verdict on ONE graded row,
               written as its own hash-chained ledger row.
 What it does: Resolves the graded row and its stored pack, derives the verdict from the
-              findings (a client-sent verdict must agree), anchors the review to the exact
-              patch bytes the reviewer loaded (``patch_sha256`` must equal the pack's
-              ``diff_sha256`` — else 422 ``review_refused`` and a ``review.refused`` event,
-              nothing written), then chains and inserts through ``DbReviewLedger``. Reads
-              serve rows column by column; ``verify`` re-checks every hash and anchor.
+              findings (a client-sent verdict must agree), anchors the review to the
+              pack's patch hash, never proof the patch was fetched or read (``patch_sha256``
+              must equal the pack's ``diff_sha256`` — else 422 ``review_refused`` and a
+              ``review.refused`` event, nothing written), then chains and inserts through
+              ``DbReviewLedger``. Reads serve rows column by column; ``verify`` re-checks
+              every hash and anchor.
 How:          ``POST`` = lookup → ``Finding`` / ``derive_verdict`` → ``ReviewRecord`` →
               ``DbReviewLedger.append(record, pack=…)`` → ``review.created`` event;
               ``stats`` joins the standing verdict per row onto the capability projection.

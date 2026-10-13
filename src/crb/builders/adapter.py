@@ -12,6 +12,9 @@ one place that knows both sides:
   from and ``POST /runs`` refuses at submit with;
 * :func:`ladder_labels` is the inverse — the labels the orchestrator will hand
   back, disambiguated so two rungs never share one;
+* :func:`run_arm_for` is the one arm every attempt of a run carries (``A0`` / ``S3`` /
+  ``S1@<author>``, ``+L`` with the loop on) — the closure stamps it, and a caller outside
+  the closure can name it before the build;
 * :func:`build_fn_for` builds the callable: rung label → builder instance
   (cached per rung), :class:`~crb.builders.base.BuildBrief` from the task, one
   ``builder.build(...)`` call, and a :class:`~crb.core.run.BuildAttempt` back.
@@ -46,6 +49,14 @@ Honesty properties
   which the unchanged grader then grades. A sandbox that cannot be provided is
   :class:`~crb.core.execution.SandboxUnavailable` and propagates — the run stops —
   rather than becoming a recorded attempt on the host.
+* **The sealed session's set binds what the builder is told and what the gate re-runs**
+  (F87-1). A sealed attempt renders the brief's test commands under the builder's
+  dependency binding — the set its container mounts — and runs the finish gate's
+  declared commands, baseline and re-run, under the same set. A brief command that would
+  still assign a session env key a different value (``GOMODCACHE=/tmp/gomod`` over the
+  mounted ``/deps/gomod``) is :class:`~crb.core.execution.SandboxUnavailable` — the run
+  stops, no row, no retry — never a brief that tells the builder to empty its own module
+  cache.
 
 Navigation
 ----------
@@ -58,18 +69,24 @@ What it does: Per attempt: resolves the rung, refuses the attempt before any bui
               mode; the context arm and its provenance on the row; learned lines held out and
               time-ordered, and any line naming a token the commit introduced refused), on arm
               ``S1`` first has the test author write a test in a sealed checkout of the parent and
-              proves it RED (removing it before the grade; an author whose provider refused the
-              call is recorded ``model_error:`` so the ledger reads an outage — P-293), stamps
-              every attempt with the run's one arm (P-295), runs one ``builder.build`` — on the host
-              or against a sealed checkout in a container — writes the redacted transcript to a
-              file, maps the outcome to a ``BuildAttempt`` and discards the source edits of any
-              errored attempt so it can never grade clean-with-error. A sealed attempt whose
-              container kill went UNCONFIRMED (cancel / wall clock; the daemon never reported it
-              stopped) is never silent: the outcome's errors and ``extra`` say so, the attempt's
-              pack notes carry ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the
-              container to the caller (the worker records it and reaps it).
+              proves it RED under the parent's dependency binding, on a test it defines (removing
+              it before the grade; an author whose provider refused the call is recorded
+              ``model_error:`` so the ledger reads an outage — P-293; a RED naming no test while
+              the env probe is red under that binding is ``harness`` — P-800), stamps every
+              attempt with the run's one arm (``run_arm_for``, module level so a caller outside
+              the closure names the same arm — P-295) and, on every exit, where its builder ran
+              (``builder_executor``, never replaced by the calibrated budget profile's labels —
+              P-795), runs one ``builder.build`` — on the host or against a sealed checkout in a
+              container — writes the redacted transcript to a file, maps the outcome to a
+              ``BuildAttempt`` and discards the source edits of any errored attempt so it can
+              never grade clean-with-error. A sealed attempt whose container kill went
+              UNCONFIRMED (cancel / wall clock; the daemon never reported it stopped) is never
+              silent: the outcome's errors and ``extra`` say so, the attempt's pack notes carry
+              ``kill_confirmed: false``, and ``on_kill_unconfirmed`` hands the container to the
+              caller (the worker records it and reaps it).
 How:          ``ladder_from_spec`` → ``rung_index`` → ``build``: ``sighted_test_command``
-              (services up, env prefix) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
+              (services up, env prefix; sealed, under the builder's binding and checked by
+              ``session_env_overrides``) → ``BuildBrief.from_task`` → ``budget_for_rung`` →
               ``builder.build`` / ``sealed_build`` (``SealedCheckout`` + ``ContainerSession``
               + ``copy_back``) → ``attempt_error`` → ``discard``.
 Layer:        builders — docs/ARCHITECTURE.md#44-outer-layers
@@ -79,13 +96,17 @@ ADRs:         docs/adr/0004-builder-registry-sighted-and-blind.md,
 Works with:   src/crb/core/run.py (defines ``BuildFn``/``BuildAttempt`` and calls this),
               src/crb/builders/base.py (brief, budget, outcome), src/crb/builders/__init__.py
               (``builder_for_rung``), src/crb/builders/container.py (the sealed path;
-              ``ContainerSession.unconfirmed_kills``), src/crb/server/reaper.py (what the
-              worker does with an ``UnconfirmedKill``),
+              ``ContainerSession.unconfirmed_kills``; ``builder_deps_view``, the env the
+              session's set gives the container, which the brief's commands and the finish
+              gate's ``command_baseline`` / ``verify`` are rendered and run under),
+              src/crb/server/reaper.py (what the worker does with an ``UnconfirmedKill``),
               src/crb/builders/budget.py (per-rung budget), src/crb/core/ledger.py (why an
               errored attempt must not carry a patch), src/crb/server/worker.py (the caller
               that supplies ``container`` from the environment)
 Tested by:    tests/test_builders_adapter.py, tests/test_builders_container.py, tests/test_run.py,
-              tests/test_builders_finish_gate.py
+              tests/test_builders_finish_gate.py, tests/test_reading.py (an S1 authoring miss
+              under docker read as the arm's miss), tests/test_replay_s1_arm.py (the S1 step),
+              tests/test_builders_sealed_deps.py, tests/test_ratchet_sealed_deps.py (F87-1)
 Touch when:   never for a new repository (the sighted test command comes from the runner);
               a new builder that must run sealed is added to ``SEALABLE_BUILDERS`` in
               src/crb/builders/container.py; a new attempt error kind must keep its prefix on
@@ -97,6 +118,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import re
 import shlex
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -138,11 +160,12 @@ from crb.builders.container import (
     SealedCheckout,
     SessionFactory,
     UnconfirmedKill,
+    builder_deps_view,
 )
 from crb.builders.openai_client import ModelCallError
 from crb.builders.toolcheck import runner_tool_missing
 from crb.core.checks import LABEL_CHECKS, CheckCommand, ResolvedChecks
-from crb.core.deps import TaskDeps
+from crb.core.deps import DepsBinding, TaskDeps
 from crb.core.evidence import BuilderRef
 from crb.core.execution import Command, Executor, SandboxUnavailable
 from crb.core.finish_gate import (
@@ -170,7 +193,7 @@ from crb.core.playbook import taught_before
 from crb.core.prevention import AUTO_OFF, LearningSnapshot
 from crb.core.redact import redact_and_cap_head
 from crb.core.run import BuildAttempt, BuildFn
-from crb.core.runners.base import BaseRunner
+from crb.core.runners.base import BaseRunner, tail_of
 from crb.core.spec import RepoConfig, TaskSpec
 from crb.core.workspace import Workspace
 
@@ -194,6 +217,112 @@ EXTRA_CONTAINER = "container"
 #: An ``S1`` attempt whose test author produced no RED test (ADR-0026 item 1): the row's
 #: failure kind is ``authoring`` — against the arm, never the builder, never ``harness``.
 AUTHORING_PREFIX = "authoring: "
+
+#: The top-level tests ``go test`` runs that an authored Go file can define (a parameter
+#: may be unnamed): ``func TestX(t *testing.T)``, ``func FuzzX(f *testing.F)`` (its seed
+#: corpus fails as ``FuzzX/seed#0``) and ``func ExampleX()`` (run when it has an
+#: ``// Output:`` comment). ``TestMain`` takes ``*testing.M`` and is never one.
+_GO_TEST_FUNCS = (
+    re.compile(r"^func\s+(Test\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?T\s*\)", re.M),
+    re.compile(r"^func\s+(Fuzz\w*)\s*\(\s*(?:\w+\s+)?\*\s*(?:\w+\.)?F\s*\)", re.M),
+    re.compile(r"^func\s+(Example\w*)\s*\(\s*\)", re.M),
+)
+#: A Go comment or string literal (interpreted, raw or rune), matched left to right so a
+#: ``"/*"`` opens no comment: :func:`authored_red` blanks each one before it reads a func,
+#: so a draft kept in a block comment or a raw string declares no test.
+_GO_NOT_CODE = re.compile(
+    r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\\n])*\"|`[^`]*`|'(?:\\.|[^'\\\n])*'", re.S
+)
+
+
+def _go_code(src: str) -> str:
+    """``src`` with each comment and string literal blanked to spaces, its newlines kept so a
+    ``^func`` still matches only at the start of a real line."""
+    return _GO_NOT_CODE.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), src)
+
+
+#: A ``func`` named as a test, anywhere and with any signature: read in the OTHER test files
+#: beside the authored one (:func:`_go_tests_beside`). Not anchored to a line's start — go
+#: accepts ``/* c */ func TestX``, an indented one and ``func /* c */ TestX`` (gofmt keeps
+#: the last), none of which opens its line with ``func`` (REDFIX-FIXCHECK-R2-2).
+_GO_TEST_NAMED = re.compile(r"\bfunc\s+((?:Test|Fuzz|Example)\w*)")
+
+
+def _go_tests_beside(test_file: Path) -> frozenset[str]:
+    """The test names the other ``*_test.go`` files in ``test_file``'s directory declare. A
+    name is not unique in a package's test binary: a ``package calc`` and a
+    ``package calc_test`` file may each declare ``FuzzOld``, and both report
+    ``<pkg>::FuzzOld`` (R6A-LASTFIX-R1-2). Read loosely — the raw text and its code with
+    comments blanked (so ``func /* c */ FuzzOld`` reads too), any signature, a func in a
+    comment, a string or a build-tagged file included — so it over-counts and only ever
+    refuses more."""
+    names: set[str] = set()
+    for other in sorted(test_file.parent.glob("*_test.go")):
+        if other.name != test_file.name and other.is_file():
+            text = other.read_text("utf-8", errors="replace")
+            names.update(_GO_TEST_NAMED.findall(text + "\n" + _go_code(text)))
+    return frozenset(names)
+
+
+#: What a Go RED is counted by, as the ``S1`` refusal states it (:func:`authored_red`).
+GO_RED_RULE = (
+    "a Go test counts by a top-level Test, Fuzz or Example func the file declares, "
+    "never by a name another test file in its directory declares too, "
+    "nor by a suite method that a runner in another file runs"
+)
+
+
+def authored_red(
+    runner_name: str,
+    path: str,
+    content: str,
+    failing: frozenset[str],
+    baseline: Sequence[str],
+    *,
+    beside: frozenset[str] = frozenset(),
+) -> frozenset[str] | None:
+    """The ids failing at the parent that the ``S1`` author's test at ``path`` defines, less
+    the task's ``baseline`` — the only RED the S1 step accepts (F87-1 part 3). A RED from a
+    test already failing beside it never proves the authored test discriminates anything.
+
+    * ``go``: ``<pkg>::<name>`` for each top-level test func in ``content`` —
+      ``func TestX(t *testing.T)``, ``func FuzzX(f *testing.F)`` or ``func ExampleX()`` — a
+      subtest (``TestX/sub``, ``FuzzX/seed#0``) counting as its test — read from the file's
+      code alone: a draft in a block comment or a raw string declares nothing
+      (R6A-LASTFIX-R1-1) — and never a name in ``beside``, the names the parent's other
+      test files in that directory declare (:func:`_go_tests_beside`): an external
+      ``package calc_test`` file may redeclare an internal test's name, and both report one
+      id (R6A-LASTFIX-R1-2). The RED scope is the whole package, so an old test that fails
+      there is the reason this rule exists. A testify suite method (``func (s *S) TestY()``)
+      counts only under a runner the file defines, by that runner's name; one that a runner
+      in another file runs is refused (:data:`GO_RED_RULE`, the arm's ``authoring`` miss):
+      its id's second segment is any subtest's name, which an old test's
+      ``t.Run("TestY", …)`` or another suite's method carries too, so it cannot attribute a
+      RED to this file — and a method on another file's suite is a reference to another
+      test file, which the author is told never to make. A limit that only ever refuses,
+      never admits (P-800).
+    * ``pytest``: a node id in ``path`` (``path::test_x``, or ``path`` itself for a
+      collection error), read from the root or from a ``rootdir`` nearer the file. The scope
+      is the file already; the rule takes out the baseline of a file the author overwrote.
+
+    ``None`` — this runner's ids name neither the file nor its tests (jest, vitest and mocha
+    report titles, cargo a module path inside one binary, surefire a class name), so any
+    failing id stands, as it always has: no ``S1`` reading runs those runners yet."""
+    if runner_name == "go":
+        code = _go_code(content)
+        names = {name for pattern in _GO_TEST_FUNCS for name in pattern.findall(code)} - beside
+        own = {f for f in failing if f.partition("::")[2].split("/", 1)[0] in names}
+    elif runner_name == "pytest":
+
+        def in_file(fid: str) -> bool:
+            f = fid.split("::", 1)[0]
+            return f == path or path.endswith("/" + f) or f.endswith("/" + path)
+
+        own = {f for f in failing if in_file(f)}
+    else:
+        return None
+    return frozenset(own - set(baseline))
+
 
 #: ``shas -> {sha: sortable commit-date key}`` — the time-order rule's reader.
 CommitDatesFn = Callable[[Sequence[str]], Mapping[str, str]]
@@ -219,6 +348,21 @@ def git_commit_dates(repo: Any, shas: Sequence[str]) -> dict[str, str]:
 def loop_on(learning: LearningSnapshot | None) -> bool:
     """Whether the repository's loop switch is part of this run's arm (``+L``)."""
     return learning is not None and not learning.opted_out and learning.auto_apply != AUTO_OFF
+
+
+def run_arm_for(
+    mode: str, *, learning: LearningSnapshot | None, s1_author_model: str | None
+) -> str:
+    """The arm EVERY attempt of a run is stamped with (ADR-0026 item 1): ``S1@<author>`` on
+    the ``S1`` arm (``s1_author_model`` set), else the run's own arm — blind ``A0``, sighted
+    ``S3`` — each with ``+L`` when the repository's loop switch is on for the run. One answer
+    per run, so an authoring failure or a harness refusal lands in the same arm as a success
+    (docs/PREVENTION.md P-295). :func:`build_fn_for`'s closure stamps it; at module level a
+    caller outside the closure names the arm the run's rows will carry."""
+    if s1_author_model is not None:
+        return context_arm_for(base=ARM_S1, author=s1_author_model, plus_l=loop_on(learning))
+    base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
+    return context_arm_for(base=base, plus_l=loop_on(learning))
 
 
 #: The HTTP statuses that mean the provider refused the key itself: nothing was observed.
@@ -552,6 +696,7 @@ def sighted_test_command(
     target_tests: Sequence[str],
     *,
     authored: str | None = None,
+    deps: DepsBinding | None,
 ) -> str:
     """A human-readable command for the target tests (sighted briefs only).
 
@@ -563,10 +708,22 @@ def sighted_test_command(
     the grader gets the MESH sandbox, so the builder must too — otherwise it reaches
     for ``docker`` / ``curl localhost:8701`` itself and the sealed posture refuses it
     (mesh-client, 2 of 4 sighted attempts, 2026-09-15).
+
+    ``deps`` is the task's BUILDER binding when the builder runs in a sealed container
+    session (``None`` otherwise, and the command is what it always was). The command is
+    rendered under it and the session's own view of it (:func:`builder_deps_view`) laid
+    over, so the prefix the builder copies points its toolchain at the set the container
+    mounted: unbound, the Go runner's ``GOMODCACHE=/tmp/gomod`` overrode ``/deps/gomod``
+    inside the container and no module resolved (F87-1). A binding that is not the
+    builder's, or a prefix that would still differ from that view
+    (:func:`session_env_overrides`), is :class:`SandboxUnavailable`: the run stops, and
+    nothing is recorded against the builder.
     """
+    view = builder_deps_view(deps)[1] if deps is not None else {}
     try:
         timeout = int(runner.opts.get("timeout", runner.default_timeout))
-        cmd = runner.command(root, tuple(target_tests), executor=executor, timeout=timeout)
+        with runner.deps_bound(deps) if deps is not None else contextlib.nullcontext():
+            cmd = runner.command(root, tuple(target_tests), executor=executor, timeout=timeout)
         env = dict(cmd.env)
         if runner.has_services():
             runner.ensure_services(executor, root, authored=authored)
@@ -576,9 +733,40 @@ def sighted_test_command(
     # The runner's environment (PYTHONPATH, GOFLAGS, NODE_PATH …) is part of the command:
     # without it a builder sees ImportErrors and reaches for `pip install`, which the
     # no-network rule then refuses — measured on pallets/click (5/5 attempts errored).
+    # The session's dependency env is last: inside the container it is the one that holds.
+    env.update(view)
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in sorted(env.items()))
     argv = " ".join(shlex.quote(a) for a in cmd.argv)
-    return f"{env_prefix} {argv}".strip()
+    rendered = f"{env_prefix} {argv}".strip()
+    clash = session_env_overrides(rendered, view)
+    if clash:
+        raise SandboxUnavailable(
+            "the brief's test command would override the sealed session's dependency env: "
+            + ", ".join(clash)
+        )
+    return rendered
+
+
+def session_env_overrides(command: str, view: Mapping[str, str]) -> list[str]:
+    """``KEY=value`` assignments leading ``command`` that differ from the sealed session's
+    dependency env ``view`` (:func:`builder_deps_view`) — each one, run as written inside
+    the container, points the toolchain away from the mounted set. ``[]`` when none does
+    (or ``view`` is empty: no sealed session); a command that cannot be split is read as
+    overriding every key of ``view``."""
+    if not view:
+        return []
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return sorted(view)
+    out: list[str] = []
+    for word in words:
+        key, eq, value = word.partition("=")
+        if not eq or not key.isidentifier():
+            break  # the first word that is not an assignment is the command itself
+        if key in view and value != view[key]:
+            out.append(f"{key}={value} (the session sets {view[key]})")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -633,12 +821,16 @@ class Preflight:
 @dataclass(frozen=True)
 class _Gate:
     """The finish gate for one attempt, set up before the build: the plan and declared
-    commands it re-runs, the checklist the brief carries, the commands' parent verdicts."""
+    commands it re-runs, the checklist the brief carries, the commands' parent verdicts and
+    the binding they ran under."""
 
     plan: LintPlan | None
     commands: tuple[CheckCommand, ...]
     lines: tuple[str, ...]
     baseline: Mapping[str, bool | None]
+    #: the binding the commands run under, baseline and re-run alike — the builder's set
+    #: when its session mounts one (``None``: unbound, as on the host)
+    deps: DepsBinding | None
 
 
 def _repair_budget(rung_budget: Budget) -> Budget:
@@ -709,13 +901,15 @@ def build_fn_for(
         exists for tests.
     deps_for:
         ``task → TaskDeps`` (ADR-0019): when it returns one, the sealed container mounts
-        the task's BUILDER set — the parent's, never the gold's — read-only. ``None`` (the
-        default) mounts nothing.
+        the task's BUILDER set — the parent's, never the gold's — read-only, and the ``S1``
+        step proves its authored test RED under the PARENT binding. ``None`` (the default)
+        mounts and binds nothing.
     budget_for_task:
         ``(task, mode, rung, rung_budget) -> (budget, labels)`` — the calibrated budget
         profile (:func:`crb.core.spend.calibrate`, bound by the worker). The attempt runs
         under the returned budget and ``labels`` go on its row (``budget_profile``,
-        ``budget_calibration``, ``budget_tier``). ``None`` = the rung's budget as declared.
+        ``budget_calibration``, ``budget_tier``) beside ``builder_executor``, which is the
+        adapter's own and never one of them (P-795). ``None`` = the rung's budget as declared.
     on_kill_unconfirmed:
         Receives ``(task_id, UnconfirmedKill)`` for every sealed container whose
         enforced kill the daemon did not confirm — after the attempt, whether the
@@ -750,6 +944,16 @@ def build_fn_for(
     """
     index = rung_index(ladder)
     dates_cache: dict[str, str] = {}
+
+    def executor_of(rung_label: str) -> str:
+        """Where ``rung_label``'s builder runs — ``docker`` (its sealed container) when the
+        run is sealed and the rung's builder is sealable, else ``host``: decided once per
+        attempt, before its first exit, so every row of the attempt records it (P-795). An
+        unknown rung under a container reads the run's posture: no builder ran, and its row
+        names no builder a reading's cell does."""
+        rung = index.get(rung_label)
+        sealable = rung is None or rung.builder in SEALABLE_BUILDERS
+        return BUILDER_EXECUTOR_SEALED if container is not None and sealable else "host"
 
     def dates_of(repo: Any, shas: Sequence[str]) -> dict[str, str]:
         """Commit dates for the time-order rule, read once per sha for the run."""
@@ -800,14 +1004,22 @@ def build_fn_for(
         emit(on_event, BUILDER_EVENT_PREFIX + "author_test.removed", path=path)
 
     def author_s1(
-        ws: Workspace, task: TaskSpec, rung_label: str, mode: str
+        ws: Workspace,
+        task: TaskSpec,
+        rung_label: str,
+        mode: str,
+        *,
+        deps: TaskDeps | None = None,
     ) -> tuple[str, str] | BuildAttempt:
         """The ``S1`` arm's author step (ADR-0026 items 1 and 7): the configured test author
         writes ONE failing test in a sealed one-commit checkout of the parent — in every
         posture — from the message and the parent's example tests; it must be RED at the
-        parent here. Any failure is an ``authoring:`` attempt, never the builder's: it counts
-        against the arm unless the provider refused the author (``outage``) or the instrument
-        failed (``harness``: rule 4b, DL-360)."""
+        parent here, under the task's PARENT binding (``deps``, ADR-0019), and the RED must
+        be a test it defines (:func:`authored_red`). Any failure is an ``authoring:``
+        attempt, never the builder's: it counts against the arm unless the provider refused
+        the author (``outage``) or the instrument failed (``harness``: rule 4b, DL-360) — a
+        RED that names no test while the runner's env probe is red under the same binding
+        is the instrument's too. That label reports the fault; it never buys a retry."""
         assert s1 is not None
         rung = index.get(rung_label)
         ref = BuilderRef(
@@ -818,6 +1030,9 @@ def build_fn_for(
         )
         stamp = {
             LABEL_CONTEXT_ARM: run_arm(mode),
+            # the authoring miss is the arm's row in the reading's cell: it records where
+            # the builder would have run, or a sealed run's miss reads unsealed (P-795)
+            LABEL_BUILDER_EXECUTOR: executor_of(rung_label),
             **({LABEL_CTX_AUTHOR: s1.author_stamp} if s1.author_stamp else {}),
         }
 
@@ -854,45 +1069,93 @@ def build_fn_for(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         authored_in[str(ws.root)] = (path, original)
+        # RED under the PARENT's binding, as qualification proves the held-out tests RED
+        # (ADR-0019): unbound, a sealed posture's Go runner reads an empty /tmp/gomod with
+        # the network off, nothing builds, and every authored test is "not RED" (F87-1)
+        parent = deps.parent if deps is not None else None
+        timeout = int(runner.opts.get("timeout", runner.default_timeout))
         try:
+            # the names the parent's other test files there declare: one may share the
+            # authored test's id, so it never attributes the RED (R6A-LASTFIX-R1-2)
+            beside = _go_tests_beside(target) if runner.name == "go" else frozenset()
             valid = runner.is_valid_oracle(ws.root, path)
-            red = runner.run(executor, ws.root, runner.target_scope([path])) if valid else None
+            red = (
+                runner.run_for(
+                    executor,
+                    ws.root,
+                    runner.target_scope([path]),
+                    authored=task.authored,
+                    deps=parent,
+                )
+                if valid
+                else None
+            )
         except SandboxUnavailable:
             raise
         except Exception as exc:
             remove_authored(ws)
             return fail(f"{AUTHORING_HARNESS_ERROR} {type(exc).__name__}: {exc}")
-        if red is None or red.timed_out or red.green or red.parse_error or not red.failing:
+        if red is None or red.green:
             remove_authored(ws)
-            why = (
-                "defines no test"
-                if red is None
-                else "timed out"
-                if red.timed_out
-                else "passes at the parent"
-                if red.green
-                else "failed without attributable test ids"
-            )
+            why = "defines no test" if red is None else "passes at the parent"
             return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+        if red.env_error or red.timed_out or red.parse_error or not red.failing:
+            # unattributed: nothing names the authored test. Its file comes out FIRST, so the
+            # probe measures the parent's posture and never the author's own imports
+            remove_authored(ws)
+            fault = f"the tree could not be prepared: {red.env_error}" if red.env_error else ""
+            if not fault:
+                try:
+                    with (
+                        runner.deps_bound(parent)
+                        if parent is not None
+                        else contextlib.nullcontext()
+                    ):
+                        probe = runner.probe_environment(executor, ws.root, timeout=timeout)
+                except SandboxUnavailable:
+                    raise
+                except Exception as exc:
+                    fault = f"the env probe raised {type(exc).__name__}: {exc}"
+                else:
+                    if probe is not None and (not probe.ok or probe.env_error):
+                        fault = "the env probe is red under the parent binding: " + tail_of(
+                            probe.combined, 4
+                        )
+            if fault:
+                # The label REPORTS an instrument fault (rule 4b): the tree could not be
+                # copied, or this posture cannot load the parent, so the author was never
+                # judged. It is not a retry and nothing here re-runs: on this branch a
+                # harness row may still be re-run; once a reservation decides the commit
+                # (reserved.v1) a harness row after it is a miss like any other.
+                return fail(f"{AUTHORING_HARNESS_ERROR} {fault}")
+            why = "timed out" if red.timed_out else "failed without attributable test ids"
+            return fail(f"the authored test {path!r} is not RED at the parent: it {why}")
+        own = authored_red(
+            runner.name, path, content, red.failing, task.baseline_failing, beside=beside
+        )
+        if own is not None and not own:
+            remove_authored(ws)
+            shown = ", ".join(sorted(red.failing)[:3])
+            rule = f"; {GO_RED_RULE}" if runner.name == "go" else ""
+            return fail(
+                f"the authored test {path!r} is not RED at the parent: no test it defines "
+                f"fails there{rule} (failing: {shown})"
+            )
         return path, content
 
-    def arm_of(mode: str) -> str:
-        """The run's own arm: blind ``A0``, sighted ``S3``, with ``+L`` when the repository's
-        loop switch is on for the run (ADR-0026 item 1)."""
-        base = ARM_S3 if mode == MODE_SIGHTED else ARM_A0
-        return context_arm_for(base=base, plus_l=loop_on(learning))
-
     def run_arm(mode: str) -> str:
-        """The arm EVERY attempt of this run is stamped with — ``S1@<author>`` (with ``+L``
-        when the loop is on) on the ``S1`` arm, else :func:`arm_of` — worked out once, so an
-        authoring failure or a harness refusal lands in the same arm as a success
-        (docs/PREVENTION.md P-295)."""
-        if s1 is not None:
-            return context_arm_for(base=ARM_S1, author=s1.author_model, plus_l=loop_on(learning))
-        return arm_of(mode)
+        """The arm EVERY attempt of this run is stamped with: :func:`run_arm_for` over this
+        run's loop snapshot and ``S1`` author (docs/PREVENTION.md P-295)."""
+        return run_arm_for(
+            mode, learning=learning, s1_author_model=s1.author_model if s1 is not None else None
+        )
 
-    #: the finish gate's parent verdicts per (task, mode, commands) — see ``baseline_for``
-    baselines: dict[tuple[str, str, tuple[CheckCommand, ...]], dict[str, bool | None]] = {}
+    #: the finish gate's parent verdicts per (task, mode, commands, binding) — see
+    #: ``baseline_for``; the binding is its (scheme, key), ``None`` when unbound
+    baselines: dict[
+        tuple[str, str, tuple[CheckCommand, ...], tuple[str, str] | None],
+        dict[str, bool | None],
+    ] = {}
     overrides = dict(builder_overrides or {})
     builders: dict[int, Builder] = {}
     tdir = Path(transcript_dir) if transcript_dir else None
@@ -1021,11 +1284,16 @@ def build_fn_for(
 
     def build(ws: Workspace, task: TaskSpec, mode: str, rung_label: str) -> BuildAttempt:
         """The ``BuildFn``: one attempt of ``task`` on ``rung_label`` in ``mode``. The ONE
-        exit every attempt leaves by, so the ``checks`` stamp and the run's context arm are
-        on each of them — a refusal before spend, a builder that could not be built or
-        raised, and an error the core would otherwise record unstamped (ADR-0024 §5 and §6,
-        ADR-0026 item 1: a row's arm is read from the stamp, so an unstamped row of a
-        checks-on run would join arm ``off``, and an unstamped S1 row no arm at all)."""
+        exit every attempt leaves by, so the ``checks`` stamp, the run's context arm and
+        where the builder ran are on each of them — a refusal before spend, an authoring
+        failure, a builder that could not be built or raised, and an error the core would
+        otherwise record unstamped (ADR-0024 §5 and §6, ADR-0026 item 1: a row's arm is read
+        from the stamp, so an unstamped row of a checks-on run would join arm ``off``, and an
+        unstamped S1 row no arm at all; ADR-0026 item 2: a row that does not record its
+        executor reads unsealed, and a reading names it a ``scope_fault`` — its commit never
+        pending or re-rolled, its arm undecided — P-795).
+        The executor is this exit's, whatever an earlier stamp said."""
+        where = executor_of(rung_label)
         try:
             attempt = attempt_of(ws, task, mode, rung_label)
         except SandboxUnavailable:
@@ -1043,6 +1311,8 @@ def build_fn_for(
             # a refusal before compose is still this run's attempt: the arm's row, never
             # an unstamped one a per-arm reading drops (P-295)
             stamps[LABEL_CONTEXT_ARM] = run_arm(mode)
+        if attempt.labels.get(LABEL_BUILDER_EXECUTOR) != where:
+            stamps[LABEL_BUILDER_EXECUTOR] = where
         if checks is not None and LABEL_CHECKS not in attempt.labels:
             stamps[LABEL_CHECKS] = checks.label()
         if not stamps:
@@ -1060,25 +1330,33 @@ def build_fn_for(
         if missing:
             emit(on_event, BUILDER_EVENT_PREFIX + "refused", task=task.task_id, error=missing)
             return _failed_attempt(rung_label, mode, missing)
-        sealed = container is not None and rung.builder in SEALABLE_BUILDERS
+        sealed = executor_of(rung_label) == BUILDER_EXECUTOR_SEALED
         try:
             builder = instantiate(rung)
         except Exception as exc:
             return _failed_attempt(
                 rung_label, mode, f"builder unavailable: {type(exc).__name__}: {exc}"
             )
+        # the set the sealed session mounts: the commands the brief shows and the finish
+        # gate's checks run under it, as the builder's own calls inside the session do
+        session_deps = session_set(task) if sealed else None
         test_command = (
             sighted_test_command(
-                runner, executor, ws.root, task.target_tests, authored=task.authored
+                runner,
+                executor,
+                ws.root,
+                task.target_tests,
+                authored=task.authored,
+                deps=session_deps,
             )
             if mode == MODE_SIGHTED
             else ""
         )
         # the harness command without a scope discloses the environment, never the oracle
         harness_command = sighted_test_command(
-            runner, executor, ws.root, (), authored=task.authored
+            runner, executor, ws.root, (), authored=task.authored, deps=session_deps
         )
-        gate = _gate_setup(ws, task, mode, test_command or harness_command)
+        gate = _gate_setup(ws, task, mode, test_command or harness_command, session_deps)
         if isinstance(gate, str):
             return _failed_attempt(rung_label, mode, gate)
         texts, _ids, dropped, id_of = context_lines(ws, task)
@@ -1097,7 +1375,9 @@ def build_fn_for(
         )
         s1_test: tuple[str, str] | None = None
         if s1 is not None:
-            authored = author_s1(ws, task, rung_label, mode)
+            authored = author_s1(
+                ws, task, rung_label, mode, deps=deps_for(task) if deps_for is not None else None
+            )
             if isinstance(authored, BuildAttempt):
                 return authored
             s1_test = authored
@@ -1117,7 +1397,7 @@ def build_fn_for(
                 test_files=(s1_path,),
                 target_tests=s1_scope,
                 test_command=sighted_test_command(
-                    runner, executor, ws.root, s1_scope, authored=task.authored
+                    runner, executor, ws.root, s1_scope, authored=task.authored, deps=session_deps
                 ),
                 harness_command=harness_command,
                 finish_checks=gate.lines if gate is not None else (),
@@ -1127,9 +1407,9 @@ def build_fn_for(
                 retrospective=True,
                 root=str(ws.root),
             )
-        else:
+        else:  # no S1 author here, so run_arm is the run's own A0 / S3 arm
             composed = compose(
-                arm_of(mode),
+                run_arm(mode),
                 ticket,
                 repo=task.repo,
                 language=task.language,
@@ -1155,13 +1435,13 @@ def build_fn_for(
             )
         rung_budget = budget_for_rung(rung, budget)
         # where the builder ran: with the posture class it says whether the row was graded in
-        # the SEALED posture a registered reading counts (ADR-0026 item 2); kept from 2.4
-        spend_labels: dict[str, str] = {
-            LABEL_BUILDER_EXECUTOR: BUILDER_EXECUTOR_SEALED if sealed else "host"
-        }
+        # the SEALED posture a registered reading counts (ADR-0026 item 2); kept from 2.4.
+        # The calibrated profile's labels join it and never replace it (P-795)
+        executor_label = {LABEL_BUILDER_EXECUTOR: executor_of(rung_label)}
+        spend_labels: dict[str, str] = dict(executor_label)
         if budget_for_task is not None:
             rung_budget, calibrated = budget_for_task(task, mode, rung, rung_budget)
-            spend_labels = dict(calibrated)
+            spend_labels = {**calibrated, **executor_label}
         try:
             if sealed:
                 outcome = sealed_build(ws, task, rung, brief, rung_budget)
@@ -1213,12 +1493,21 @@ def build_fn_for(
         )
         return discard(ws, task, attempt)
 
+    def session_set(task: TaskSpec) -> DepsBinding | None:
+        """The builder set a sealed session mounts for ``task`` (``builder_run_args`` mounts
+        one only when it is sealed), else ``None``: the commands run unbound, as before."""
+        task_deps = deps_for(task) if deps_for is not None else None
+        if task_deps is None or not task_deps.builder.sealed:
+            return None
+        return task_deps.builder
+
     def _gate_setup(
-        ws: Workspace, task: TaskSpec, mode: str, test_command: str
+        ws: Workspace, task: TaskSpec, mode: str, test_command: str, deps: DepsBinding | None
     ) -> _Gate | str | None:
         """The finish gate's pre-build half: the checklist the brief carries and the
-        declared commands' verdicts on the untouched worktree. ``None`` — the gate is off;
-        a ``str`` — the checklist would name the oracle (refused before any spend)."""
+        declared commands' verdicts on the untouched worktree, under ``deps`` (the sealed
+        session's set, or ``None``). ``None`` — the gate is off; a ``str`` — the checklist
+        would name the oracle (refused before any spend)."""
         if checks is None or not checks.finish_gate:
             return None
         try:
@@ -1235,19 +1524,25 @@ def build_fn_for(
                 assert_no_oracle(lines, (*task.test_files, *task.target_tests))
             except OracleLeak as exc:
                 return f"finish gate refused: {exc}"
-        return _Gate(plan, commands, lines, baseline_for(ws, task, mode, commands))
+        return _Gate(plan, commands, lines, baseline_for(ws, task, mode, commands, deps), deps)
 
     def baseline_for(
-        ws: Workspace, task: TaskSpec, mode: str, commands: tuple[CheckCommand, ...]
+        ws: Workspace,
+        task: TaskSpec,
+        mode: str,
+        commands: tuple[CheckCommand, ...],
+        deps: DepsBinding | None,
     ) -> dict[str, bool | None]:
-        """The commands' verdicts at the parent, measured once per task, mode and command
-        list: every rung and retry starts from the same untouched worktree, so re-running
-        up to 8 commands before each build only spent unbudgeted time."""
+        """The commands' verdicts at the parent, measured once per task, mode, command
+        list and binding: every rung and retry starts from the same untouched worktree, so
+        re-running up to 8 commands before each build only spent unbudgeted time. A rung
+        that runs sealed and one that does not are measured apart (unbound, ``go vet``
+        resolves no module with the network off: F87-1)."""
         if not commands:
             return {}
-        key = (task.task_id, mode, commands)
+        key = (task.task_id, mode, commands, (deps.scheme, deps.key) if deps else None)
         if key not in baselines:
-            baselines[key] = command_baseline(commands, executor, ws.root)
+            baselines[key] = command_baseline(commands, executor, ws.root, deps=deps)
         return dict(baselines[key])
 
     def run_checks(  # noqa: PLR0917 — one step of the build, many collaborators
@@ -1345,6 +1640,7 @@ def build_fn_for(
                 ws.root,
                 _changed_source_files(ws, config),
                 baseline=gate.baseline,
+                deps=gate.deps,
             )
 
         run = check()
@@ -1585,9 +1881,11 @@ __all__ = [
     "ladder_labels",
     "note_unconfirmed_kills",
     "parse_rung_label",
+    "run_arm_for",
     "rung_from_object",
     "rung_index",
     "rungs_from_entries",
+    "session_env_overrides",
     "sighted_test_command",
     "unconfirmed_kill_error",
 ]

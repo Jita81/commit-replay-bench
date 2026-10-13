@@ -28,7 +28,8 @@ pure and standard-library only:
    switch is off, nothing new when run twice over the same state.
 7. **The snapshot** (:func:`snapshot`): what one run is given — the overlay the loop's
    switches add under the team's own configuration, and the lines, held out by task and
-   leak-gated at injection.
+   leak-gated at injection — and the digest of a person's vetoes and links on the chain
+   (:func:`person_acts_digest`), which a reserved ``+L`` attempt pins (P-792 C7).
 8. **A finding to its re-measurement** (:func:`finding_to_remeasure`): each class's first
    sighting paired with the first ``decided`` record of a change that targets it — the learn
    stream's own lead time (G-536).
@@ -52,7 +53,7 @@ How:          ``signatures`` (failure kind → family table) → ``build_registe
               aggregates, stratum, key, actionable, folds of the chain → ``choose_lever`` →
               ``measure`` → status) → ``tick`` (``due_decisions`` → ``reverted`` → apply /
               propose with a frozen ``before_window``) → ``snapshot`` (``in_force`` → overlay
-              + lines → labels).
+              + lines → labels; ``person_acts_digest`` → ``person``).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
 ADRs:         docs/adr/0020-a-bug-is-closed-by-prevention.md,
               docs/adr/0002-append-only-hash-chained-ledger.md,
@@ -68,7 +69,8 @@ Works with:   src/crb/core/ledger.py (the rows, the failure rule the signatures 
 Tested by:    tests/test_prevention_signatures.py, tests/test_prevention_store.py,
               tests/test_prevention_rule.py, tests/test_prevention_gaming.py,
               tests/test_prevention_register_seam.py, tests/test_playbook_leakage.py,
-              tests/test_worker_learning.py, tests/test_server_routes_prevention.py
+              tests/test_worker_learning.py, tests/test_server_routes_prevention.py,
+              tests/test_p792_reserved.py (the ``person`` digest a ``+L`` arm pins)
 Touch when:   never for a new repository; a new failure kind or a new belt needs a family
               row here and a bump of ``SIGNATURE_RULES`` (the golden fixture fails
               otherwise); a new process mechanism (stream W or K) enters ``WRITABLE`` and the
@@ -3366,6 +3368,11 @@ class LearningSnapshot:
     lines: tuple[PlaybookLine, ...] = ()
     overlay: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     opted_out: bool = False
+    #: What a person did to the loop on the repository's chain that the loop obeys — each
+    #: veto revert and each link (:func:`person_acts_digest`), ``""`` when none. The loop's
+    #: own acts move the overlay and the lines; a person's are pinned in a reserved ``+L``
+    #: attempt's arm half (``crb.server.worker.arm_projection``, C7).
+    person: str = ""
 
     @property
     def overlay_digest(self) -> str:
@@ -3444,6 +3451,19 @@ class LearningSnapshot:
         }
 
 
+def person_acts_digest(records: Iterable[PreventionRecord]) -> str:
+    """The digest of a person's acts on the chain the loop obeys: each ``reverted`` not the
+    loop's own (a veto — the change leaves force and is never re-applied) and each ``linked``
+    (classes tied to a fix made outside the loop), their record ids in chain order; ``""``
+    when there are none. A level edit (``switched``) is the snapshot's ``auto_apply``."""
+    ids = [
+        r.record_id
+        for r in records
+        if r.kind == "linked" or (r.kind == "reverted" and str(r.payload.get("by", "")) != "loop")
+    ]
+    return _digest(ids) if ids else ""
+
+
 def empty_snapshot(repo: str, *, opted_out: bool = False) -> LearningSnapshot:
     """``learn: off`` — what a run gets when the loop is off, opted out or unreadable."""
     return LearningSnapshot(repo=repo, opted_out=opted_out)
@@ -3474,6 +3494,7 @@ def snapshot(
         changes=live,
         lines=lines[:MAX_LINES],
         overlay=overlay_of(live),
+        person=person_acts_digest(recs),
     )
 
 
@@ -3663,6 +3684,7 @@ __all__ = [
     "observable",
     "overlay_of",
     "overridden",
+    "person_acts_digest",
     "primary_signature",
     "proposals",
     "retired_levers",
