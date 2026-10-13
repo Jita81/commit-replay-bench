@@ -13,9 +13,12 @@ What it does: Pins that the argv is headless, tool-restricted and uses the skill
               the operator's own login, never forwarded); the token-source precedence (env >
               secrets file > CLI login; an insecure secrets file fails closed), ``verify_login``
               killing at the first 401 retry, ``auth_status`` naming the source; that usage falls
-              back to summed messages and priced cost; that tampering is detected post hoc and
+              back to messages summed once per ``message.id`` (never once per content-block
+              event) and priced cost; that tampering is detected post hoc and
               the grader disqualifies; that archaeology or network in the transcript is a
-              violation; wall-clock timeout, missing result, max turns, auth failure and a
+              violation, and a nested model call (a Bash command or a written file) a
+              ``nested_model_call`` one that stops the run and reads as a protocol miss;
+              wall-clock timeout, missing result, max turns, auth failure and a
               missing binary as recorded outcomes. The ``live`` cases spend real tokens.
 How:          ``FakeSpawn`` replays canned stream-json lines and optionally edits the worktree
               like the real CLI; a throwaway ``CRB_HOME`` for the secrets cases;
@@ -79,25 +82,25 @@ def ev_init(model: str = "claude-opus-5") -> str:
     )
 
 
-def ev_assistant(*blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0) -> str:
+def ev_assistant(
+    *blocks: dict[str, Any], tin: int = 100, tout: int = 30, cached: int = 0, msg_id: str = ""
+) -> str:
     """One ``assistant`` line carrying ``blocks`` and a usage record (input / output / cached
-    tokens).
+    tokens); ``msg_id`` sets ``message.id``, which the real CLI repeats on each content-block
+    event of one API message.
     """
-    return json.dumps(
-        {
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "content": list(blocks),
-                "usage": {
-                    "input_tokens": tin,
-                    "output_tokens": tout,
-                    "cache_read_input_tokens": cached,
-                },
-            },
-            "session_id": "s1",
-        }
-    )
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": list(blocks),
+        "usage": {
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "cache_read_input_tokens": cached,
+        },
+    }
+    if msg_id:
+        message["id"] = msg_id
+    return json.dumps({"type": "assistant", "message": message, "session_id": "s1"})
 
 
 def text(t: str) -> dict[str, Any]:
@@ -305,6 +308,7 @@ def test_argv_is_headless_restricted_and_uses_skill_model_ids(tmp_path: Path) ->
     )
     deny = argv[argv.index("--disallowedTools") + 1]
     assert "Bash(git log:*)" in deny and "WebFetch" in deny and "Bash(curl:*)" in deny
+    assert "Bash(claude:*)" in deny.split(",") and "Bash(/usr/local/bin/claude:*)" in deny
     sysprompt = argv[argv.index("--append-system-prompt") + 1]
     assert (
         "NEVER modify" in sysprompt
@@ -799,6 +803,86 @@ def test_usage_falls_back_to_summed_messages_and_priced_cost(tmp_path: Path) -> 
     ws.remove()
 
 
+def _split(msg_id: str, *blocks: dict[str, Any], **usage: int) -> list[str]:
+    """One API message as the CLI streams it: an ``assistant`` event per content block, each
+    carrying the same ``message.id`` and the message's whole usage."""
+    return [ev_assistant(b, msg_id=msg_id, **usage) for b in blocks]
+
+
+def test_usage_counts_one_message_once_across_its_content_block_events() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    for line in _split(
+        "msg_1",
+        text("Reading"),
+        tool_use("Read", file_path="/wt/a.py"),
+        tool_use("Read", file_path="/wt/b.py"),
+        tin=1000,
+        tout=100,
+        cached=500,
+    ):
+        st.feed(line, keep=False)
+    # three events, one API message: billed once, and one turn (F6)
+    assert st.totals() == (1000, 100, 500) and st.turns() == 1
+    assert st.tool_uses == 2  # the blocks themselves are all still read
+
+
+def test_usage_sums_distinct_messages_and_keeps_each_ones_last_usage() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    lines = [
+        *_split("msg_1", text("a"), tool_use("Read", file_path="/wt/a.py"), tin=1000, tout=100),
+        *_split("msg_2", text("b"), tool_use("Read", file_path="/wt/b.py"), tin=2000, tout=200),
+        # a later event of a message replaces its earlier usage (the last value wins)
+        ev_assistant(text("b, longer"), msg_id="msg_2", tin=2000, tout=250, cached=40),
+    ]
+    for line in lines:
+        st.feed(line, keep=False)
+    assert st.totals() == (3000, 350, 40) and st.turns() == 2
+
+
+def test_a_run_without_a_result_is_costed_once_per_message(tmp_path: Path) -> None:
+    lines = [
+        ev_init(),
+        *_split(
+            "msg_1", text("hi"), tool_use("Read", file_path="/wt/pkg/calc.py"), tin=1000, tout=100
+        ),
+        ev_user(),
+        *_split(
+            "msg_2",
+            text("again"),
+            tool_use("Read", file_path="/wt/pkg/calc.py"),
+            tool_use("Read", file_path="/wt/tests/test_calc.py"),
+            tin=2000,
+            tout=200,
+            cached=500,
+        ),
+    ]
+    # the watchdog kills it: no result event, so the cost is table-priced from the stream
+    _fx, ws, out = _setup(
+        tmp_path, FakeSpawn(lines, timed_out=True, returncode=-9), model="claude-opus-5"
+    )
+    assert out.stop_reason == base.STOP_WALL_CLOCK
+    assert out.tokens_in == 3500 and out.tokens_cached == 500 and out.tokens_out == 300
+    assert out.turns == 2 and out.tool_calls == 3
+    expected = (3500 - 500) * 5e-6 + 300 * 25e-6 + 500 * 0.5e-6  # opus 5 list prices
+    assert out.cost_usd == pytest.approx(expected) and out.cost_known
+    ws.remove()
+
+
+def test_a_run_with_a_result_still_reports_the_clis_cost_and_totals(tmp_path: Path) -> None:
+    lines = [
+        ev_init(),
+        *_split(
+            "msg_1", text("hi"), tool_use("Read", file_path="/wt/pkg/calc.py"), tin=1000, tout=100
+        ),
+        ev_user(),
+        ev_result(num_turns=1, cost=0.0456, tin=700, tout=90, structured={"done": False}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-opus-5")
+    assert out.cost_usd == pytest.approx(0.0456) and out.cost_known
+    assert out.tokens_in == 700 and out.tokens_out == 90 and out.turns == 1
+    ws.remove()
+
+
 def test_tamper_is_detected_post_hoc_and_grader_disqualifies(tmp_path: Path) -> None:
     lines = [
         ev_init(),
@@ -857,6 +941,119 @@ def test_archaeology_and_network_in_transcript_are_violations(tmp_path: Path) ->
     assert len(arch) == 2 and len(net) == 1 and out.violated
     assert out.extra["refused"] and "git log" in out.extra["refused"][0]
     assert out.done  # the claim stands as a claim; the orchestrator DQs on `violated`
+    ws.remove()
+
+
+def test_a_nested_model_call_is_a_violation_and_stops_the_run(tmp_path: Path) -> None:
+    """F5: an agent that runs the claude CLI inside its build is disqualified with reason
+    ``nested_model_call``; the stream is killed at that event (the next tool use is never
+    read, so no misleading "no result" error is added), and the row reads as a protocol
+    miss: not harness, not an outage, so it is read and never re-run."""
+    from crb.builders.adapter import attempt_error
+    from crb.core.ledger import FAILURE_PROTOCOL, derive_failure_kind
+
+    lines = [
+        ev_init(),
+        ev_assistant(tool_use("Bash", command="python -m pytest -q")),
+        ev_user(),
+        ev_assistant(tool_use("Bash", command='claude -p "fix the failing test"')),
+        ev_user(),
+        ev_assistant(tool_use("Bash", command="python -m pytest -q")),
+        ev_user(),
+        ev_result(structured={"done": True, "summary": "ok"}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines, side_effect=_fix_calc))
+    nested = [e for e in out.errors if e.startswith("network: nested_model_call:")]
+    assert len(nested) == 1 and "(attempted: claude -p" in nested[0] and out.violated
+    assert out.tool_calls == 2 and not out.done  # stopped at the nested call
+    assert not any(e.startswith("model_error") for e in out.errors)
+    error = attempt_error(out)
+    assert error.startswith("protocol violation: network: nested_model_call:")
+    kind = derive_failure_kind(clean=False, disqualified=False, builder_error=error)
+    assert kind == FAILURE_PROTOCOL
+    ws.remove()
+
+
+def test_a_written_script_that_calls_a_model_is_a_violation(tmp_path: Path) -> None:
+    """The tripwire reads every tool input, not only Bash: a file written to call the SDK
+    is caught at the write, before anything runs it."""
+    lines = [
+        ev_init(),
+        ev_assistant(
+            tool_use("Write", file_path="/work/solve.py", content="import anthropic\nprint(1)\n")
+        ),
+        ev_user(),
+        ev_result(structured={"done": True, "summary": "ok"}),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), workdir_alias="/work")
+    nested = [e for e in out.errors if e.startswith("network: nested_model_call:")]
+    assert len(nested) == 1 and "anthropic SDK" in nested[0]
+    assert "(attempted: Write: import anthropic" in nested[0] and out.violated
+    ws.remove()
+
+
+@pytest.mark.parametrize(
+    ("lines_fn", "attempted"),
+    [
+        (
+            lambda: [
+                ev_init(),
+                ev_assistant(
+                    tool_use(
+                        "Write",
+                        file_path="/work/run.sh",
+                        content="#!/bin/sh\ntimeout 600 claude -p 'fix the failing test'\n",
+                    )
+                ),
+                ev_user(),
+                ev_assistant(tool_use("Bash", command="sh run.sh")),
+                ev_user(),
+                ev_result(structured={"done": True, "summary": "ok"}),
+            ],
+            "Write",
+        ),
+        (
+            lambda: [
+                ev_init(),
+                ev_assistant(
+                    tool_use(
+                        "Write",
+                        file_path="/work/fix.py",
+                        content="import os\nos.system('claude -p \"fix the bug\"')\n",
+                    )
+                ),
+                ev_user(),
+                ev_assistant(tool_use("Bash", command="python fix.py")),
+                ev_user(),
+                ev_result(structured={"done": True, "summary": "ok"}),
+            ],
+            "Write",
+        ),
+        (
+            lambda: [
+                ev_init(),
+                ev_assistant(
+                    tool_use("Bash", command="echo 'timeout 9 claude -p hi' > f.sh; sh f.sh")
+                ),
+                ev_user(),
+                ev_result(structured={"done": True, "summary": "ok"}),
+            ],
+            "echo",
+        ),
+    ],
+    ids=["written-sh-then-run", "written-py-then-run", "echo-to-file-then-run"],
+)
+def test_a_model_call_written_to_a_script_and_run_is_a_violation(
+    tmp_path: Path, lines_fn: Any, attempted: str
+) -> None:
+    """HON-R1-F5-1: the shell parse cannot look inside a script FILE, so a ``claude -p``
+    written to ``run.sh``/``fix.py`` (or echoed into a file) and then run through
+    ``sh``/``python`` is caught only by the tripwire reading the write — which now matches
+    ``claude`` at an argument position, not just at a command position (F5 widening)."""
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines_fn()), workdir_alias="/work")
+    nested = [e for e in out.errors if e.startswith("network: nested_model_call:")]
+    assert len(nested) == 1 and "claude CLI" in nested[0]
+    assert f"(attempted: {attempted}" in nested[0] and out.violated
     ws.remove()
 
 

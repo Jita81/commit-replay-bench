@@ -155,6 +155,15 @@ measure next. The core stays standard-library only (ADR-0008).
    its original; DL-093) — never the commit id. The commit census found click `bug.fix` × S
    holding two cherry-picks of one change with opposite outcomes: counted by commit they were
    two readings of one change. A row without a `change_id` (below 2.4) is its own change.
+   Routing counts a row's own `change_id`, else its task id (`change_of`, `crb.core.ledger`).
+   A reading (ADR-0026 item 2) takes each pool commit's change from a map frozen at
+   registration, the `change_id` its qualified task carries. Under `reserved.v1` it reads that
+   map alone (`reading.changes.get(commit) or commit` in `_enrolled` and `_arm_reserved`,
+   `crb.core.reading`), so a commit the map gives no change is its own; a row's `change_id`
+   there only refuses a registration `pool_seen` when it names a pool commit's change. The
+   legacy `arm_reading` (`first_observed.v0`) reads the map first, else the `change_id` of the
+   first of the commit's rows that carries one, else the commit, so there a row's `change_id`
+   can give a commit a change the map does not hold.
 
    **The sealed posture.** A replayed arm's first attempt counts toward a reading only when it
    was graded in the sealed posture: the tests in the docker sandbox's sealed mode (a

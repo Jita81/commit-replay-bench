@@ -258,7 +258,8 @@ class TestExport:
         first = dict(zip(header, body[0], strict=True))
         assert first["clean"] == "true" and first["source_changed"] == "true"
         # the whole mapping, exactly: the seed's rung, the posture labels (ADR-0019) and the
-        # labels every 2.4 row carries (ADR-0025 items 6 and 13, ADR-0026 items 1 and 9)
+        # labels every 2.4 row carries (ADR-0025 items 6 and 13, ADR-0026 items 1, 2 and 9;
+        # where the builder ran — P-795)
         assert json.loads(first["labels"]) == {
             "rung": "r1",
             "posture_id": TEST_POSTURE_ID,
@@ -269,6 +270,7 @@ class TestExport:
             "lint_reason": "none_detected",
             "context_arm": "S3",
             "taxonomy": "global/classes@v1",
+            "builder_executor": "host",
         }
         assert (first["context_arm"], first["taxonomy"]) == ("S3", "global/classes@v1")
         assert first["builder"] and first["model"]

@@ -69,7 +69,7 @@ from crb.store.events import DbEventSink
 from crb.store.models import Repo
 from fixtures import pyrepo as pr
 from fixtures.proven import CELL, LATER, add_oracle_and_controls, add_rows, add_tasks
-from fixtures.readings import SEALED
+from fixtures.readings import QUESTION, SEALED, SEALED_SETTINGS
 from fixtures.server_seed import (
     ALPHA,
     BUILDER,
@@ -102,9 +102,9 @@ CAP_USD = 0.25
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path) as e:
-        # the deployment grades in the sealed posture: only sealed rows license (ADR-0025)
-        e.settings.sandbox.executor = "docker"
+    # the deployment grades in the sealed posture: only sealed rows license (ADR-0025), and a
+    # replayed reading registers only on a sealed deployment (P-789)
+    with make_env(tmp_path, **SEALED_SETTINGS) as e:
         yield e
 
 
@@ -115,7 +115,7 @@ def _prove(
     ``S1@t1``), then one sealed first attempt per commit on each arm in the reading's seeded
     order — the first five from a run the operator queued (the two-person rule's second
     person), the rest from a worker — and the oracle and controls at 2.4. Returns the rows."""
-    ids = add_tasks(env.factory, 40, prefix=prefix, cell=cell, authored=AUTHORED)
+    ids = add_tasks(env.factory, 40, prefix=prefix, cell=cell, authored=AUTHORED, qualify=True)
     login(env.client, "operator")
     r = env.post(
         "/readings",
@@ -128,10 +128,13 @@ def _prove(
             # the pool rule: every qualified commit of the cell authored since this date —
             # this test's own, never the seed's (whose rows a reading may not count)
             "since": AUTHORED,
+            **QUESTION,
         },
     )
     assert r.status_code == 201, r.text
-    pool = list(r.json()["pool"])
+    reading = r.json()
+    assert reading["attempt_rule"] == "reserved.v1"
+    pool = list(reading["pool"])
     assert sorted(pool) == sorted(ids)
     rows: list[GradeRow] = []
     for arm, outcomes in (("S3", s3), (S1, s1)):
@@ -144,6 +147,7 @@ def _prove(
                 clean=clean,
                 run_id=RUN_IDS["succeeded"] if k < 5 else f"{prefix}-{arm}-{k // 4}",
                 actor="worker-1",
+                reading=reading,
             )
     add_oracle_and_controls(env.factory, pool[:FIRST_LOOK])
     return rows

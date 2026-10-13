@@ -5,19 +5,24 @@ Navigation
 What it is:   The store-side builder of a cell whose standard arm delivers under routing.v2 —
               what the server tests of the map, ``/routes``, ``/readings``, ``/value`` and the
               sign-off write path read.
-What it does: ``add_tasks`` writes qualified tasks (gold checked, a change id each) of one cell;
-              ``register_via_api`` registers a reading through ``POST /readings`` and
-              ``write_reading`` writes the same event for a role that may not register;
-              ``add_rows`` appends sealed 2.4 rows for the first commits of the reading's
-              seeded order on each arm; ``add_oracle_and_controls`` writes ``mutation.v2``
-              scores and a complete controls report at 2.4 as events.
-How:          ``Task`` rows and ``DbLedger.append_many``; ``append_event`` for the scores and the
-              report; rows are stamped a far-future ``created`` so they are graded after any
-              registration a test makes.
+What it does: ``add_tasks`` writes qualified tasks (gold checked, a change id each) of one cell,
+              and, when asked, a qualification record each in the sealed posture;
+              ``register_via_api`` registers a reading through ``POST /readings``, which
+              registers every reading under ``reserved.v1`` (P-792), and ``write_reading``
+              writes a legacy (first-observed) reading's event, for a role that may not
+              register or a test of the legacy rule; ``add_rows`` appends sealed 2.4 rows for
+              the first commits of the reading's seeded order on each arm — each reserved for
+              its commit first when the reading is reserved.v1; ``add_oracle_and_controls``
+              writes ``mutation.v2`` scores and a complete controls report at 2.4 as events.
+How:          ``Task`` rows, ``qualify_pool`` and ``DbLedger.append_many``; ``reserve_for`` (the
+              worker's ``reading.reserved``) before a reserved.v1 reading's row;
+              ``append_event`` for the scores and the report; rows are stamped a far-future
+              ``created`` so they are graded after any registration a test makes.
 Layer:        tests — docs/ARCHITECTURE.md#44-outer-layers
 ADRs:         docs/adr/0025-routing-v2.md, docs/adr/0026-the-context-standard.md
 Works with:   tests/fixtures/server_seed.py (the store it adds to), tests/fixtures/readings.py
-              (the sealed rows), src/crb/server/routes/readings.py (``POST /readings``)
+              (the sealed rows, ``qualify_pool``, ``reserve_for``),
+              src/crb/server/routes/readings.py (``POST /readings``)
 Tested by:    tests/test_server_readings.py
 Touch when:   never for a new repository; the sealed posture's labels, the score payload or the
               report payload change.
@@ -33,14 +38,27 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from crb.core.evidence import canonical_json, sha256_text
 from crb.core.ledger import GradeRow
-from crb.core.reading import READING_EVENT_ACTION, RULE_LOOK_V1, Reading, register
+from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
+    READING_EVENT_ACTION,
+    RULE_LOOK_V1,
+    Reading,
+    register,
+)
 from crb.core.spec import TaskSpec
 from crb.core.taxonomy import GLOBAL_CLASS_SET
 from crb.core.version import APPARATUS_VERSION
 from crb.store.events import append_event
 from crb.store.ledger import DbLedger
 from crb.store.models import EvidencePackRow, Task
-from fixtures.readings import SEALED, sealed_row
+from fixtures.readings import (
+    HYPOTHESIS,
+    SEALED,
+    SMALLEST_EFFECT,
+    qualify_pool,
+    reserve_for,
+    sealed_row,
+)
 from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, Env
 
 #: A cell the default seed does not hold (the seed's deliver cell is bug.fix × S).
@@ -70,9 +88,13 @@ def add_tasks(
     prefix: str = "proven",
     cell: Mapping[str, str] = CELL,
     authored: str = "2026-08-01T12:00:00+00:00",
+    qualify: bool = False,
 ) -> list[str]:
     """``n`` qualified tasks of ``cell`` (default :data:`CELL`) on ``alpha``, each its own
-    change, authored at ``authored``."""
+    change, authored at ``authored`` — and, with ``qualify``, a qualification record each in
+    the sealed posture (:func:`~fixtures.readings.qualify_pool`), which is where
+    ``POST /readings`` freezes a reserved.v1 pool from (P-797). Without it no record is
+    written: for a test that writes its own records, or tests a store that holds none."""
     ids = [commit(i, prefix) for i in range(n)]
     cls, size, language = cell["capability_class"], cell["size"], cell["language"]
     with factory() as s:
@@ -110,11 +132,16 @@ def add_tasks(
                 )
             )
         s.commit()
+    if qualify:
+        qualify_pool(factory, ALPHA, ids)
     return ids
 
 
 def register_via_api(env: Env, *, hierarchy: Sequence[str] = ("S3", S1), **kw: Any) -> Any:
-    """``POST /readings`` for :data:`CELL` in the sealed posture class."""
+    """``POST /readings`` for :data:`CELL` in the sealed posture class, stating its
+    hypothesis and smallest effect (P-787) unless the caller names them."""
+    kw.setdefault("hypothesis", HYPOTHESIS)
+    kw.setdefault("smallest_effect", SMALLEST_EFFECT)
     body = {
         "repo": ALPHA,
         "cell": CELL,
@@ -134,15 +161,39 @@ def add_rows(
     clean: bool = True,
     labels: dict[str, str] | None = None,
     cell: Mapping[str, str] = CELL,
+    reading: Mapping[str, Any] | None = None,
+    run_id: str = "",
     **kw: Any,
 ) -> list[GradeRow]:
     """One sealed 2.4 first attempt per commit on ``arm`` in ``cell``; the chained rows. A
     clean row's evidence pack is STORED and re-hashes to its name, as the worker keeps it
-    (EI-3): a row measured here is never clean without the pack an approver reads."""
+    (EI-3): a row measured here is never clean without the pack an approver reads.
+
+    With a reserved.v1 ``reading`` (as ``POST /readings`` serves it), each commit is first
+    reserved on ``arm`` for ``run_id`` (default ``fixture-<arm>``) as the worker reserves it
+    before its build (``reserve_for``), and its row carries that run, the reservation, the
+    treatment and the claim: the only row a reserved.v1 reading counts (P-792). A legacy
+    reading, or none, takes the row as it is (on ``run_id`` when one is named)."""
     rows: list[GradeRow] = []
     packs: list[tuple[str, dict[str, Any], str]] = []
+    reserved = reading is not None and reading.get("attempt_rule") == ATTEMPT_RULE_RESERVED
+    run = run_id or f"fixture-{arm}"
     for c in commits:
         extra = dict(kw)
+        if run_id:
+            extra["run_id"] = run_id
+        row_labels = dict(labels or {})
+        if reading is not None and reserved:
+            row_labels |= reserve_for(
+                factory,
+                reading_id=str(reading["reading_id"]),
+                arm=arm,
+                task_id=c,
+                run_id=run,
+                repo=ALPHA,
+                campaign_id=str(reading.get("campaign_id") or ""),
+            )
+            extra.setdefault("run_id", run)
         if clean and "evidence_pack_hash" not in extra:
             body = {"schema": "crb.fixture.pack.v1", "task_id": c, "arm": arm, "repo": ALPHA}
             extra["evidence_pack_hash"] = sha256_text(canonical_json(body))
@@ -156,7 +207,7 @@ def add_rows(
                 repo=ALPHA,
                 cell=dict(cell),
                 change=f"change-{c}",
-                labels=labels,
+                labels=row_labels or None,
                 **extra,
             )
         )
@@ -179,30 +230,36 @@ def write_reading(
     cell: Mapping[str, str] = CELL,
     hierarchy: Sequence[str] = (S1,),
     changes: Mapping[str, str] | None = None,
+    repo: str = ALPHA,
+    campaign_id: str = "",
+    posture_class: str = SEALED,
 ) -> Reading:
-    """Register a reading of ``cell`` on ``alpha`` with the core's rules and write it as the
-    ``reading.registered`` event ``POST /readings`` writes — for a test logged in as a role
-    that may not register one itself (a sign-off test's approver)."""
+    """Register a reading of ``cell`` on ``repo`` (``alpha``) with the core's rules and write it
+    as the ``reading.registered`` event ``POST /readings`` writes — for a test logged in as a
+    role that may not register one itself (a sign-off test's approver), or a worker test.
+    ``campaign_id`` names the campaign its runs spend under (DL-382; unchecked here);
+    ``posture_class`` the class it counts, as ``POST /readings`` takes an explicit one."""
     reading = register(
-        repo=ALPHA,
+        repo=repo,
         cell=dict(cell),
         hierarchy=hierarchy,
         pool=list(pool),
         apparatus=APPARATUS_VERSION,
         taxonomy=GLOBAL_CLASS_SET,
-        posture_class=SEALED,
+        posture_class=posture_class,
         checks_arm="off",
         actor="op-seed",
         rule=RULE_LOOK_V1,
         author_model=AUTHOR if any(a.startswith("S1@") for a in hierarchy) else "",
         changes=dict(changes or {}),
+        campaign_id=campaign_id,
     )
     append_event(
         factory,
-        trace_id=f"readings:{ALPHA}",
+        trace_id=f"readings:{repo}",
         stage="system",
         action=READING_EVENT_ACTION,
-        repo=ALPHA,
+        repo=repo,
         payload=reading.to_dict(),
     )
     return reading

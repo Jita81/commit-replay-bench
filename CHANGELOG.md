@@ -12,6 +12,17 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a product-held ceiling**
+  (P-787 to P-798, P-800 to P-808, G-957, DL-372 to DL-386, DL-390 to DL-392, DL-400 to DL-405,
+  DL-410 to DL-413; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
+  `hypothesis`, `smallest_effect`, campaign. Sealed, lint-on readings register overlay-free (409
+  `reading_checks_overlay`; forward, `reading_checks_arm_moved`) under `reserved.v1`: a commit's
+  reserved first attempt decides it (pinned pool, 409 `pool_drift`). Replays halt at an outage or
+  environment row, or off the frozen checks arm; off-arm reserved rows read `scope_fault`, not
+  misses; remeasure flags `checks_arm_moved`. Later arms read `waiting`; `duplicate_commits` is
+  served; lost claims append no ledger row (`run.claim_lost`). Campaigns cap pounds, one live run
+  per arm. Grading disqualifies forged Go events, pytest-machinery patches, in-build model calls.
+
 - **The Decisions inbox asks for sign-off by the entry gate's own reading** (P-411, G-738;
   [#84](https://github.com/Jita81/commit-replay-bench/pull/84)). The inbox read "sign-off due" off
   the capability map's tier while the entry gate reads the cell's signed standard, so it could ask

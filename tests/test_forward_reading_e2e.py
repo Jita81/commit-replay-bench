@@ -69,6 +69,7 @@ from crb.store.events import DbEventSink, append_event_checked
 from crb.store.ledger import DbLedger
 from fixtures import pyrepo as pr
 from fixtures.posture import posture_row
+from fixtures.readings import QUESTION, SEALED_SETTINGS
 from fixtures.server_seed import ALPHA, BUILDER, MODEL, PROVIDER, Env, envelope, login, make_env
 from test_factory_loop import MultiBuilder, _creds
 from test_governed_delivery_e2e import CELL_S, CELL_XS, FIRST_LOOK, Forge, _prove, _readers
@@ -96,8 +97,9 @@ ITEM: dict[str, Any] = {
 
 @pytest.fixture
 def env(tmp_path: Path) -> Iterator[Env]:
-    with make_env(tmp_path) as e:
-        e.settings.sandbox.executor = "docker"  # the sealed posture: only sealed rows license
+    # the sealed posture: only sealed rows license, and a replayed reading registers only on a
+    # sealed deployment (P-789)
+    with make_env(tmp_path, **SEALED_SETTINGS) as e:
         yield e
 
 
@@ -178,6 +180,7 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
             "builder": BUILDER,
             "model": MODEL,
             "provider": PROVIDER,
+            **QUESTION,
         },
     )
     assert r.status_code == 201, r.text
@@ -326,8 +329,9 @@ def test_a_calibration_build_on_a_ceiling_is_graded_on_held_out_tests_and_read_f
 def test_the_forward_reading_route_refuses_what_it_must(env: Env) -> None:
     """verify_fwd_evidence: the route's refusals were tested nowhere. A viewer may not register
     one (403); an unknown reading is 404; a reading that is not a ceiling is 409
-    ``not_a_ceiling``; a second forward reading that would overspend the ceiling's one budget
-    is 409 ``budget_spent``."""
+    ``not_a_ceiling``; the same forward reading sent again is 409 ``reading_exists`` naming
+    the first (a retry, P-793); a second forward reading that would overspend the ceiling's
+    one budget is 409 ``budget_spent``."""
     from crb.server.routes.readings import load_readings
 
     # the XS cell is a ceiling (S1 misses three); the S cell proves S1 outright: a standard
@@ -336,7 +340,7 @@ def test_the_forward_reading_route_refuses_what_it_must(env: Env) -> None:
     with env.factory() as s:
         by_cell = {r.cell["size"]: r.reading_id for r in load_readings(s, ALPHA)}
     ceiling_id, standard_id = by_cell["XS"], by_cell["S"]
-    body = {"repo": ALPHA, "builder": BUILDER, "model": MODEL, "provider": PROVIDER}
+    body = {"repo": ALPHA, "builder": BUILDER, "model": MODEL, "provider": PROVIDER, **QUESTION}
     login(env.client, "viewer")
     r = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
     assert r.status_code == 403, r.text
@@ -345,6 +349,11 @@ def test_the_forward_reading_route_refuses_what_it_must(env: Env) -> None:
     assert r.status_code == 404 and envelope(r)["code"] == "not_found"
     r = env.post("/readings/forward", json={**body, "promotes": standard_id})
     assert r.status_code == 409 and envelope(r)["code"] == "not_a_ceiling", r.text
-    assert env.post("/readings/forward", json={**body, "promotes": ceiling_id}).status_code == 201
+    first = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
+    assert first.status_code == 201, first.text
     r = env.post("/readings/forward", json={**body, "promotes": ceiling_id})
+    assert r.status_code == 409 and envelope(r)["code"] == "reading_exists", r.text
+    assert envelope(r)["detail"] == {"reading_id": first.json()["reading_id"]}
+    second = {**body, "hypothesis": f"{body['hypothesis']}, a second question"}
+    r = env.post("/readings/forward", json={**second, "promotes": ceiling_id})
     assert r.status_code == 409 and envelope(r)["code"] == "budget_spent", r.text

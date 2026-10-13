@@ -16,7 +16,13 @@ What it does: Shows a cell with rows and no reading offered ``register`` with no
               ``undecided`` reading named in ``cannot_clear`` with its reason; the arms a replay
               cannot write (``S2``, ``+L``, another test author, another posture) offered no
               request; gold-clean and relabelled commits left out; valid ``POST /runs`` bodies;
-              unknown cost; determinism; and the CLI rendering.
+              a reserved.v1 reading's top-up on the reading's own budget profile, admitted by
+              the submit gate's whitelist (P-792 C7); a reserved.v1 reading whose run would
+              resolve another checks arm than it froze flagged ``checks_arm_moved`` with no
+              request (RT2B-1), and a reading delivered on another checks arm never hiding
+              the cell's current-arm reading or reading up to date (R6V1-1); unknown cost,
+              and a blind top-up priced
+              at the one rung its run climbs; determinism; and the CLI rendering.
 How:          Sealed 2.4 rows and readings from ``tests.fixtures.readings``; rows of an older
               apparatus from ``tests.fixtures.posture``; no model, no docker, no store.
 Layer:        tests — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules
@@ -40,13 +46,19 @@ from crb.core import learn
 from crb.core.capability import ReadingBook
 from crb.core.ledger import GradeRow
 from crb.core.reading import (
+    ATTEMPT_RULE_RESERVED,
+    OUTCOME_CEILING,
     REFUSAL_POOL_SEEN,
     STATE_INSUFFICIENT,
     STATE_UNDECIDED,
     ReadingRefused,
+    Reservation,
     evaluate,
+    register,
     verdict_for,
+    with_reservations,
 )
+from crb.core.taxonomy import GLOBAL_CLASS_SET
 from fixtures.posture import posture_row
 from fixtures.readings import (
     AUTHOR,
@@ -327,6 +339,21 @@ def test_a_decided_reading_is_named_with_its_reason_and_offered_nothing() -> Non
     (u,) = _plan(rows_for([True] * 15, small.pool), small).cannot_clear
     assert (u.state, u.next_act) == (STATE_UNDECIDED, "mine")
     assert "pool" in u.reason and "labelled" in u.reason
+    assert "pool ended before the look at 20 (15 read)" in u.reason
+
+
+def test_an_undecided_reading_with_commits_to_run_is_not_said_to_have_ended() -> None:
+    """FZ-1's sibling: a pool of 15 with three commits unrun cannot reach the look at 20, but
+    it has not ended — those three may still read it insufficient."""
+    small = register_reading(commits(15, "small"), hierarchy=("S3",))
+    (u,) = _plan(rows_for([True] * 12, small.pool), small).cannot_clear
+    assert (u.state, u.next_act) == (STATE_UNDECIDED, "mine") and "ended" not in u.reason
+    assert "cannot reach the look at 20 (12 read, 3 still to run, 5 short)" in u.reason
+    assert "may still read insufficient as those run" in u.reason and "labelled" in u.reason
+    # one commit unrun and no miss read: look.v1's last look allows two, so it stays undecided
+    held = _plan(rows_for([True] * 14, small.pool), small).cannot_clear[0]
+    assert "(14 read, 1 still to run, 5 short): it never delivers:" in held.reason
+    assert "insufficient" not in held.reason
 
 
 # --- bodies, cost, determinism -----------------------------------------------------------
@@ -347,14 +374,199 @@ def test_requests_are_valid_post_runs_bodies() -> None:
                 assert req.kind in ("replay", "blind") and req.task_ids == list(r.task_ids)
 
 
-def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_per_rung() -> None:
+def test_a_reserved_readings_top_up_spends_on_the_readings_budget_profile() -> None:
+    """P-792 C7 at the plan: every reading ``POST /readings`` registers is reserved.v1
+    (DL-385), and a run of its non-loop arm spends on the reading's own budget profile — so
+    the top-up's body names that profile beside ``learning: off``, and the submit gate's
+    whitelist over the run as it will be stored (``reading_run_fields_refusal``, the call the
+    worker repeats at claim) admits it. Without the profile the same body is refused
+    ``reading_run_fields`` naming ``budget_profile`` alone. A legacy reading's body carries no
+    profile: it is the body it always was."""
+    pytest.importorskip("pydantic")
+    from crb.server.deps import ApiError
+    from crb.server.routes.runs import new_run, reading_run_fields_refusal
+    from crb.server.schemas import RunCreateRequest
+
+    reserved = register_reading(
+        commits(40),
+        hierarchy=("S3",),
+        attempt_rule=ATTEMPT_RULE_RESERVED,
+        max_reruns=0,
+        budget_profile="default",
+    )
+    (c,) = _plan([], reserved).cells
+    (req,) = c.requests
+    assert (req.learning, req.budget_profile) == ("off", "default")
+    body = {k: v for k, v in req.to_dict().items() if k != "note"}
+    assert body["budget_profile"] == "default"
+
+    def run_of(b: dict[str, Any]) -> Any:
+        return new_run(RunCreateRequest(**b, reading_id=reserved.reading_id), actor="op-1")
+
+    reading_run_fields_refusal(reserved, run_of(body))  # admitted: nothing raised
+    bare = {k: v for k, v in body.items() if k != "budget_profile"}
+    with pytest.raises(ApiError) as exc:
+        reading_run_fields_refusal(reserved, run_of(bare))
+    assert exc.value.code == "reading_run_fields"
+    assert exc.value.detail["fields"] == ["budget_profile"]
+    legacy = register_reading(commits(40), hierarchy=("S3",))
+    (lc,) = _plan([], legacy).cells
+    (lreq,) = lc.requests
+    assert lreq.budget_profile == "" and "budget_profile" not in lreq.to_dict()
+    assert lreq.to_dict() | {"budget_profile": "default"} == req.to_dict()
+
+
+def _reserved(pool: list[str], hierarchy: tuple[str, ...] = ("S3",)) -> Any:
+    return register_reading(
+        pool,
+        hierarchy=hierarchy,
+        attempt_rule=ATTEMPT_RULE_RESERVED,
+        max_reruns=0,
+        budget_profile="default",
+    )
+
+
+def test_a_reserved_reading_off_its_checks_arm_is_flagged_and_asked_nothing() -> None:
+    """RT2B-1: a reserved.v1 reading's runs halt ``reading_checks_arm_mismatch`` off the checks
+    arm it froze. Given the arm each entry's run would resolve — ``checks_arm`` for every
+    request the plan composes (``learning: off``: the team's block alone), ``checks_arm_loop``
+    for a ``+L`` arm's run (the loop's overlay too) — an entry whose run arm moved is flagged
+    ``(frozen, current)``, with no request and next act ``config``. A move of the overlay alone
+    leaves a learning-off arm's top-up as it was; a legacy reading, and a plan given no arm
+    (the host's ``crb learn remeasure``), flag nothing."""
+    reserved = _reserved(commits(40))
+    (moved,) = _plan([], reserved, checks_arm="fmt", checks_arm_loop="fmt").cells
+    assert moved.checks_arm_moved == ("off", "fmt") and moved.requests == ()
+    assert moved.next_act == learn.NEXT_CONFIG and moved.short_by == moved.n_needed == 20
+    assert "moved from off to fmt" in moved.note and "reading_checks_arm_mismatch" in moved.note
+    assert moved.to_dict()["checks_arm_moved"] == {"frozen": "off", "current": "fmt"}
+    # the loop's overlay moved, the team's block did not: a learning-off run still reads off
+    (held,) = _plan([], reserved, checks_arm="off", checks_arm_loop="fmt").cells
+    assert held.checks_arm_moved is None and held.next_act == learn.NEXT_REPLAY
+    assert held.requests[0].task_ids == reserved.pool[:20]
+    assert held.to_dict()["checks_arm_moved"] is None
+    # a +L arm's run, queued by hand, resolves the overlay
+    loop = _reserved(commits(40, "loop"), hierarchy=("S3+L",))
+    (lp,) = _plan([], loop, checks_arm="off", checks_arm_loop="fmt").cells
+    assert lp.checks_arm_moved == ("off", "fmt") and lp.next_act == learn.NEXT_CONFIG
+    (lp_off,) = _plan([], loop, checks_arm="fmt", checks_arm_loop="off").cells
+    assert lp_off.checks_arm_moved is None and lp_off.next_act == learn.NEXT_BY_HAND
+    # no arm given, or a legacy reading: nothing flagged
+    (bare,) = _plan([], reserved).cells
+    assert bare.checks_arm_moved is None and bare.requests
+    legacy = register_reading(commits(40), hierarchy=("S3",))
+    (lc,) = _plan([], legacy, checks_arm="fmt", checks_arm_loop="fmt").cells
+    assert lc.checks_arm_moved is None and lc.requests
+    assert learn.holds_its_checks_arm(reserved) and not learn.holds_its_checks_arm(legacy)
+
+
+def _delivered_off_arm() -> tuple[Any, list[GradeRow]]:
+    """A reserved.v1 ``S3`` reading frozen on ``off`` whose 20 reserved attempts were clean —
+    its first look delivered — with its reservations loaded, and those 20 rows."""
+    old = _reserved(commits(40, "old"))
+    reservations = [
+        Reservation(
+            arm="S3",
+            task_id=c,
+            run_id=f"run-{i}",
+            event_id=f"ev-{i}",
+            event_seq_id=11 + i,
+            claim=0,
+            treatment="treat-1",
+            hold_usd=0.5,
+            settled=False,
+        )
+        for i, c in enumerate(old.pool[:20])
+    ]
+    rows = [
+        sealed_row(
+            res.task_id,
+            run_id=res.run_id,
+            labels={"reservation": res.event_id, "treatment": res.treatment, "claim": "0"},
+        )
+        for res in reservations
+    ]
+    return with_reservations(old, reservations, 10), rows
+
+
+def test_a_delivered_reading_on_another_checks_arm_never_hides_the_current_arms() -> None:
+    """R6V1-1 (round 6): the plan let the latest delivered reading speak for a cell whatever
+    checks arm it froze, so after the arm moved a reserved.v1 reading of the old arm that
+    delivered (a ceiling ranks above ``look_pending``) hid the reading registered on the
+    current arm: the cell read ``up_to_date``, the new reading's top-up was never listed, and
+    the queue answered 422 with nothing available. The readings of the current checks arm
+    now speak first. One frozen on another arm speaks only where none does: never
+    ``up_to_date`` (its standard is another arm's), and never hiding the cell's register
+    entries."""
+    old, rows = _delivered_off_arm()
+    assert _book(old, rows=rows).outcomes[0].state == OUTCOME_CEILING
+    new = register(
+        repo=REPO,
+        cell=CELL,
+        hierarchy=("S3",),
+        pool=commits(40, "new"),
+        apparatus=CUR,
+        taxonomy=GLOBAL_CLASS_SET,
+        posture_class=SEALED,
+        checks_arm="fmt",
+        actor="op-1",
+        now="2026-09-28T10:00:00+00:00",
+        attempt_rule=ATTEMPT_RULE_RESERVED,
+        max_reruns=0,
+        budget_profile="default",
+    )
+    plan = _plan(rows, old, new, checks_arm="fmt", checks_arm_loop="fmt")
+    assert plan.up_to_date == ()
+    (c,) = plan.cells
+    assert (c.reading_id, c.reason, c.next_act) == (
+        new.reading_id,
+        learn.REASON_PENDING,
+        learn.NEXT_REPLAY,
+    )
+    assert c.checks_arm_moved is None and c.requests[0].task_ids == new.pool[:20]
+    # the old arm's reading alone: not delivered here, and the cell's rows ask to register
+    (alone,) = _plan(rows, old, checks_arm="fmt", checks_arm_loop="fmt").cells
+    assert (alone.next_act, alone.requests) == (learn.NEXT_REGISTER, ())
+    assert _plan(rows, old, checks_arm="fmt", checks_arm_loop="fmt").up_to_date == ()
+    # on its own arm, or with no arm given (the host's CLI), it is delivered as before
+    for kw in ({"checks_arm": "off", "checks_arm_loop": "off"}, {}):
+        on = _plan(rows, old, **kw)
+        assert on.up_to_date == (f"{LABEL}|S3",) and on.cells == (), kw
+
+
+def test_unknown_cost_is_honest_and_a_blind_top_up_is_priced_at_its_one_rung() -> None:
+    """PW-1: an S1 top-up's run climbs the ladder ``POST /runs`` stores for a body that names
+    none — ``["r1"]``, one rung — so it is priced at one attempt per commit, never three."""
     reading = register_reading(commits(40), hierarchy=(S1,))
     (c,) = _plan([], reading, s1_author_model=AUTHOR).cells
     assert not c.cost_known and c.est_cost_usd == 0.0
     assert "?" in learn.render_remeasure(_plan([], reading, s1_author_model=AUTHOR))
-    priced = [sealed_row(x, arm="A0", cost_usd=0.4) for x in commits(3, "priced")]
+    priced = [sealed_row(x, arm="A0", cost_usd=0.4, latency_s=30.0) for x in commits(3, "p")]
     (b,) = _plan(priced, reading, s1_author_model=AUTHOR).cells
-    assert b.cost_known and b.est_cost_usd == pytest.approx(0.4 * 20 * 3)
+    assert b.cost_known and b.est_cost_usd == pytest.approx(0.4 * 20 * 1)
+    assert b.est_minutes == pytest.approx(30.0 * 20 * 1 / 60.0)
+    (request,) = b.requests
+    assert (b.mode, request.kind, request.rungs, b.n_requested) == ("blind", "blind", 1, 20)
+    # R1-5: the served note says the same, never "up to the ladder's rungs" for a blind cell
+    note = _plan(priced, reading, s1_author_model=AUTHOR).to_dict()["note"]
+    assert "the rungs each request's run climbs — one, blind or sighted" in note
+    assert "up to the ladder's rungs" not in note
+
+
+def test_a_request_is_priced_at_the_rungs_its_body_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R1-4 (PW-1): ``RunRequest.rungs`` is read off the body the request sends, never a
+    constant beside it — a body that named a three-rung ladder would be priced at three
+    attempts per commit. No body names one today, so ``["r1"]`` prices one (above)."""
+    reading = register_reading(commits(40), hierarchy=(S1,))
+    priced = [sealed_row(x, arm="A0", cost_usd=0.4, latency_s=30.0) for x in commits(3, "p")]
+    body = learn.RunRequest.to_dict
+    monkeypatch.setattr(
+        learn.RunRequest, "to_dict", lambda self: {**body(self), "ladder": ["r1", "r2", "r3"]}
+    )
+    (b,) = _plan(priced, reading, s1_author_model=AUTHOR).cells
+    (request,) = b.requests
+    assert request.rungs == 3
+    assert b.est_cost_usd == pytest.approx(0.4 * 20 * 3)
 
 
 def test_deterministic_and_rendered() -> None:

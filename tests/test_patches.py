@@ -32,7 +32,7 @@ import pytest
 
 from crb.core.evidence import BuilderRef
 from crb.core.execution import LocalExecutor
-from crb.core.ledger import JsonlLedger
+from crb.core.ledger import LABEL_BUILDER_EXECUTOR, JsonlLedger
 from crb.core.patches import (
     NOTE_KEY,
     PatchStore,
@@ -73,7 +73,11 @@ def _spec(
 
 
 def _attempt() -> BuildAttempt:
-    return BuildAttempt(BuilderRef(name="fixture", model="m", provider="p", mode="sighted"))
+    # a host build records where it ran, as the adapter stamps every attempt (P-795)
+    return BuildAttempt(
+        BuilderRef(name="fixture", model="m", provider="p", mode="sighted"),
+        labels={LABEL_BUILDER_EXECUTOR: "host"},
+    )
 
 
 def _pack(tmp: Path, pack_hash: str) -> dict[str, object]:

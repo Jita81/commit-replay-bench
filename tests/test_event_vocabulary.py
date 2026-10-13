@@ -59,6 +59,9 @@ EMITTERS = {
     # the Learn writes' one serialised step (src/crb/server/routes/learn.py): it forwards
     # ``action`` to ``append_system_event``, so its callers name the ``learn.*`` actions (P-431)
     "_learn_step",
+    # the decided-under-the-lock writer (src/crb/store/events.py): its callers name the action
+    # (``reading.registered``, ``reading.reserved`` — P-792), so they are read like the rest
+    "append_event_checked",
 }
 #: Functions that forward an ``action`` parameter to an emitter but are only ever handed on
 #: as an ``on_event`` callback — their call sites are ``on_event("…")``, which the walker reads.

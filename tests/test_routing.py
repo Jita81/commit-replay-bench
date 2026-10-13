@@ -251,6 +251,45 @@ def test_the_reading_decided_against_routes_human_or_calibrate() -> None:
     assert und.shortfalls[0].next == "mine"
 
 
+def test_an_undecided_reading_with_commits_to_read_is_not_said_to_have_ended() -> None:
+    """FZ-1: a pool short of its next look, with commits still unread, has not ended — it
+    never delivers, but its unread first attempts may still read it insufficient."""
+    r = reading(VERDICT_UNDECIDED, counted=15, clean=15, pool_remaining=18, next_look=20, needed=2)
+    und = go(r=r)
+    assert und.route == rt.ROUTE_CALIBRATE and und.reason_code == rt.REASON_UNDECIDED
+    assert "ended" not in und.reason
+    assert "cannot reach its next look (15 read, 3 still to read, the next look is 20" in und.reason
+    assert "the pool is 2 short" in und.reason and "never delivers" in und.reason
+    assert "may still read insufficient" in und.reason
+    assert "mining further back is the way to reach a look" in und.reason
+    s = und.shortfalls[0]
+    assert (s.next, s.observed, s.threshold, s.count) == ("mine", 15, 20, 2)
+    # nothing missed and two commits unread: look.v1's last look allows two misses, so the
+    # reading can only stay undecided, whatever those two show
+    r = reading(VERDICT_UNDECIDED, counted=10, clean=10, pool_remaining=12, next_look=20, needed=8)
+    held = go(r=r)
+    assert "2 still to read" in held.reason and "insufficient" not in held.reason
+    assert "whatever they show, it stays undecided" in held.reason
+
+
+def test_an_undecided_reading_with_nothing_to_read_says_its_pool_ended() -> None:
+    r = reading(VERDICT_UNDECIDED, counted=18, clean=18, pool_remaining=18, next_look=20, needed=2)
+    und = go(r=r)
+    assert und.route == rt.ROUTE_CALIBRATE and und.reason_code == rt.REASON_UNDECIDED
+    assert "pool ended: all 18 of its commits are read" in und.reason
+    assert "the next look at 20 needs 2 more than it holds" in und.reason
+    assert "insufficient" not in und.reason and und.shortfalls[0].next == "mine"
+
+
+def test_an_arm_blocked_by_an_undecided_one_names_its_blocker() -> None:
+    blocked = {"blocking": "S3", "pool_remaining": 30, "next_look": 20, "needed": 4}
+    und = go(r=reading(VERDICT_UNDECIDED, counted=0, clean=0, **blocked))
+    assert und.reason_code == rt.REASON_UNDECIDED
+    assert und.reason.startswith("the reading read undecided on S3: its pool is 4 short")
+    assert "may still read insufficient while S3 has commits to run" in und.reason
+    assert "0 read" not in und.reason  # the arm's own count is not the blocker's
+
+
 def test_only_the_standard_arm_delivers() -> None:
     ceiling = go(stats(arm="S3"), r=reading(VERDICT_CEILING, arm="S3", standard=""))
     assert ceiling.route == rt.ROUTE_CALIBRATE and ceiling.reason_code == rt.REASON_CEILING

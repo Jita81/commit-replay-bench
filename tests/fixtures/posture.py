@@ -10,7 +10,8 @@ What it does: ``adhoc`` — an unwitnessed context from the task's discovery val
               and whose witness is a real ``GoldWitness`` on the fixture repository, so a
               blamed row names a control that actually ran. Neither is a qualification a
               deployment would accept: that is measured by ``qualify_task``.
-              ``posture_row`` stamps the labels a row of the current apparatus carries;
+              ``posture_row`` stamps the labels a row of the current apparatus carries (on a
+              replay row, ``builder_executor`` ``host`` unless named — P-795);
               ``at_apparatus`` / ``dict_at_apparatus`` move a row to an older apparatus through
               ``crb.core.ledger.labels_at_apparatus`` — never by hand (P-317).
 How:          Thin wrappers over ``crb.core.qualify`` and ``crb.core.ledger``.
@@ -212,9 +213,11 @@ def with_posture_labels(fields: dict[str, Any]) -> dict[str, Any]:
 def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> None:
     """ADR-0025 items 5 and 6 (stream G): a measured row of 2.4 or later carries its own
     ``failure_kind``, ``lint_reason``, on an outage row its ``outage_cause`` (pilot D1) and,
-    on a replay row, ``change_id`` — filled in here, as the writer would, where the test did
-    not name them."""
+    on a replay row, ``change_id`` and ``builder_executor`` (P-795: ``host`` — the test
+    posture runs its builder on the host; a sealed row names ``docker``) — filled in here,
+    as the writer would, where the test did not name them."""
     from crb.core.ledger import (
+        LABEL_BUILDER_EXECUTOR,
         LABEL_CHANGE_ID,
         LABEL_FAILURE_KIND,
         LABEL_LINT_REASON,
@@ -249,6 +252,7 @@ def _classification_labels(fields: dict[str, Any], labels: dict[str, str]) -> No
     labels.setdefault(LABEL_LINT_REASON, reason)
     if str(fields.get("process_step") or PROCESS_REPLAY) == PROCESS_REPLAY:
         labels.setdefault(LABEL_CHANGE_ID, f"change-{fields.get('task_id', '')}")
+        labels.setdefault(LABEL_BUILDER_EXECUTOR, "host")  # P-795: the ledger refuses none
         # a measured replay row of 2.4 was qualified in its posture (ADR-0019 §4)
         fields.setdefault("gold_clean", True)
     _context_labels(fields, labels)

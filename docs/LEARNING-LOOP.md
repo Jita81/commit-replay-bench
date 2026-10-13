@@ -140,8 +140,11 @@ for it at the current apparatus decides:
   `counted` and `needed`, the numbers the Capability page shows for that reading. One request names those
   commits for the arm the hierarchy stopped at (`S3` a sighted replay, `A0` or `S1@<author>` a
   blind one, `S1` with `arm: S1`), with `learning: off` so its rows carry that arm and not the
-  arm `+L`. The estimate is the cell's own mean row cost × the commits requested × up to the
-  ladder's rungs (3) for a blind cell, with `cost_known` false when no row recorded one:
+  arm `+L` — and, for a reserved.v1 reading (every one `POST /readings` registers), the
+  reading's own `budget_profile`, the only profile its run whitelist admits (P-792 C7). The
+  estimate is the cell's own mean row cost × the commits requested × the rungs each request's
+  run climbs — one, blind or sighted (`POST /runs` stores the default `["r1"]`) — with
+  `cost_known` false when no row recorded one:
 
 ```json
 {"repo": "cobra", "kind": "replay", "mode": "sighted", "builder": "claude_code",
@@ -273,8 +276,10 @@ POST /api/v1/learn/remeasure/queue?repo=…     {cell: "replay|bug.fix|S|…", m
   whole with nothing queued (`builder_credential_missing`). A what-if plan (an `apparatus`
   other than the running one) is refused: its runs would grade under the running apparatus
   and could never clear the plan they were queued from. The response repeats the plan's
-  estimate with `cost_known` honoured, so an unknown cost is never read as zero. While the
-  runs an earlier queue of the same cell put on the queue are unfinished, the cell is refused
+  estimate with `cost_known` honoured, so an unknown cost is never read as zero. While a run
+  is unfinished that an earlier queue of the same cell put on the queue, or that a campaign
+  admitted and would attempt one of the commits the cell asks for (F87-2: a campaign's runs
+  are filed by `POST /runs`, never by this queue), the cell is refused
   (`remeasure_already_queued`): the plan reads graded rows only, so it still holds the cell,
   and the page shows the runs in flight in place of the Queue control.
 
