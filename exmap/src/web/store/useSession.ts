@@ -142,9 +142,42 @@ export function useSessionTitle(): string {
   return env().sessionTitle;
 }
 
+/** The highest ledger seq in an act response's `events` (ActResponse and friends), or null. */
+export function responseHeadSeq(result: unknown): number | null {
+  if (!result || typeof result !== "object") return null;
+  const events = (result as { events?: unknown }).events;
+  if (!Array.isArray(events)) return null;
+  let max: number | null = null;
+  for (const e of events) {
+    const seq = (e as { seq?: unknown } | null)?.seq;
+    if (typeof seq === "number" && (max === null || seq > max)) max = seq;
+  }
+  return max;
+}
+
+/** Resolves once the source's head reaches `seq` (the events arrived on the stream), or after `timeoutMs`. */
+export function waitForHead(source: StateSource, seq: number, timeoutMs = 5000): Promise<void> {
+  return new Promise((resolve) => {
+    if (source.getState().head.seq >= seq) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(finish, timeoutMs);
+    const unsubscribe = source.subscribe(() => {
+      if (source.getState().head.seq >= seq) finish();
+    });
+    function finish() {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    }
+  });
+}
+
 /**
  * One human act: refuses without a name (opens settings), shows "pending…" on the clicked control until the server
- * answers, and turns a refusal into a toast naming the server's reason. Returns the response or null.
+ * answers and its events have landed on the stream (the response's events are never applied locally), and turns a
+ * refusal into a toast naming the server's reason. Returns the response or null.
  */
 export function useAct(): {
   pending: boolean;
@@ -152,7 +185,7 @@ export function useAct(): {
   run<T>(fn: (actor: string) => Promise<T>, opts?: { quiet?: boolean }): Promise<T | null>;
   clearError(): void;
 } {
-  const { actorApi, toast } = env();
+  const { actorApi, toast, source } = env();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const run = useCallback(
@@ -162,7 +195,10 @@ export function useAct(): {
       setPending(true);
       setError(null);
       try {
-        return await fn(actor);
+        const result = await fn(actor);
+        const seq = responseHeadSeq(result);
+        if (seq !== null) await waitForHead(source, seq);
+        return result;
       } catch (e) {
         const err = e instanceof ApiError ? e : new ApiError(0, { reason: "NETWORK", detail: e instanceof Error ? e.message : String(e) });
         setError(err);
@@ -172,7 +208,7 @@ export function useAct(): {
         setPending(false);
       }
     },
-    [actorApi, toast],
+    [actorApi, toast, source],
   );
   const clearError = useCallback(() => setError(null), []);
   return { pending, error, run, clearError };

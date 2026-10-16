@@ -1,8 +1,10 @@
 // exmap/src/server/config.ts — ServerConfig from env + opts; classifierSelection() for /api/config (design §8.1, §8.3).
-// Step-zero: findRoot, packageVersion and configFromEnv are real (the CLI needs them); classifierSelection is a stub.
+// classifierSelection() is built from booleans over the environment: it names which variable chose the provider and never
+// carries a credential's value.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { CLAUDE_MODEL, selectProvider } from "../classifier/index.js";
 import type { ClassifierConfig } from "../core/types.js";
 import { resolveOrtDir } from "./static.js";
 
@@ -18,6 +20,8 @@ export interface ServerConfig {
   dev: boolean;
   webDist: string | null;
   ortDir: string | null;
+  /** What GET /api/config reports; `last_error` is kept here in memory (set by the claude provider's onError). */
+  classifier: ClassifierConfig;
 }
 
 /** Walks up from `from` to the directory holding exmap's package.json (works from src/ under tsx and from dist/ under node). */
@@ -65,11 +69,31 @@ export function configFromEnv(env: NodeJS.ProcessEnv, root: string): ServerConfi
     dev,
     webDist: !dev && existsSync(join(webDist, "index.html")) ? webDist : null,
     ortDir,
+    classifier: classifierSelection(env),
   };
 }
 
-/** provider / reason / model / credentials / last_error for GET /api/config; never the key. */
+const nonEmpty = (v: string | undefined): boolean => v !== undefined && v.trim() !== "";
+
+/**
+ * provider / reason / model / credentials / last_error for GET /api/config; never the key. Throws the classifier's
+ * E_CLASSIFIER_UNKNOWN_PROVIDER for an EXMAP_CLASSIFIER value that names no provider (the server refuses to start).
+ */
 export function classifierSelection(env: NodeJS.ProcessEnv): ClassifierConfig {
-  void env;
-  throw new Error("not implemented: classifierSelection");
+  const provider = selectProvider(env);
+  const explicit = (env["EXMAP_CLASSIFIER"] ?? "").trim() !== "";
+  const hasKey = nonEmpty(env["ANTHROPIC_API_KEY"]);
+  const hasToken = nonEmpty(env["ANTHROPIC_AUTH_TOKEN"]);
+  let reason: string;
+  if (explicit) reason = provider === "claude" ? "EXMAP_CLASSIFIER=claude" : "EXMAP_CLASSIFIER=rules.v1";
+  else if (hasKey) reason = "ANTHROPIC_API_KEY is set";
+  else if (hasToken) reason = "ANTHROPIC_AUTH_TOKEN is set";
+  else reason = "no model configured; using the offline rules classifier";
+  const credentials: ClassifierConfig["credentials"] = hasKey ? "api_key" : hasToken ? "auth_token" : provider === "claude" ? "profile_or_none" : "none";
+  return { provider, reason, model: provider === "claude" ? CLAUDE_MODEL : null, credentials, last_error: null };
+}
+
+/** The startup line of design §6.2 (printed on stderr so stdout stays the single listening line). */
+export function classifierStartupLine(c: ClassifierConfig): string {
+  return c.provider === "claude" ? `classifier: claude (${c.model ?? CLAUDE_MODEL})` : "classifier: rules.v1 (offline)";
 }

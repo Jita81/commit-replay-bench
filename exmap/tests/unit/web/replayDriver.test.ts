@@ -2,7 +2,11 @@
 // skip calls skipReplay; playAll plays the rest; position follows the controller's replay index.
 import { describe, expect, it, vi } from "vitest";
 import type { ReplayStatus } from "../../../src/web/audio/types.js";
-import { ReplayDriver } from "../../../src/web/replay/driver.js";
+import type { PostOutcome, UtteranceWire } from "../../../src/web/audio/types.js";
+import { RecordingSink, ReplayDriver, ledgerHolds, ledgerSettled } from "../../../src/web/replay/driver.js";
+import { staticSource } from "../../../src/web/store/useSession.js";
+import { classify } from "../core/fixtures.js";
+import { MapBuilder } from "./helpers.js";
 
 function fakeController() {
   const status: ReplayStatus = { fixture: "demo", state: "ready", index: 0, total: 31, speed: "instant", until: null };
@@ -74,5 +78,42 @@ describe("ReplayDriver", () => {
     expect(driver.position).toBe(0);
     c.status.index = 12;
     expect(driver.position).toBe(12);
+  });
+
+  it("waits for the fixture to be ready before playing", async () => {
+    const c = fakeController();
+    let release!: () => void;
+    const ready = new Promise<void>((r) => (release = r));
+    const driver = new ReplayDriver({ controller: c, postQueueIdle: async () => {}, ready });
+    const run = driver.playUntil("u02");
+    await Promise.resolve();
+    expect(c.playReplay).not.toHaveBeenCalled();
+    release();
+    await run;
+    expect(c.playReplay).toHaveBeenCalledWith("instant", { until: "u02" });
+  });
+
+  it("settles once the reduced ledger holds every posted utterance with its classification record", async () => {
+    const accepted: PostOutcome = { ok: true, eventId: "evt_1", duplicate: false };
+    const refused: PostOutcome = { ok: false, kind: "refused", status: 422, reason: "EMPTY_TEXT", detail: "" };
+    const sink = new RecordingSink({ post: async (u: UtteranceWire) => (u.text ? accepted : refused) });
+    const b = new MapBuilder();
+    const u1 = b.utter("Right, let's start.");
+    const wire = (id: string, text: string) => ({ ...b.state.utterances.find((u) => u.id === id)!, id, text });
+    await sink.post(wire(u1, "Right, let's start."));
+    await sink.post(wire("utt_refused", ""));
+    expect(sink.posted).toEqual([u1]); // a refused post never lands, so it is not waited for
+    const source = staticSource(b.state);
+    expect(ledgerHolds(b.state, sink.posted)).toBe(false); // recorded, not yet classified
+    let settled = false;
+    const done = ledgerSettled(source, sink, 5_000)().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    b.run(classify(u1, "none", []));
+    source.set(b.state);
+    await done;
+    expect(settled).toBe(true);
   });
 });

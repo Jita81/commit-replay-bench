@@ -79,6 +79,27 @@ describe("Board", () => {
     expect(screen.getByTestId(`provenance-${ids.rule}`)).toHaveTextContent("v1 → v2 replaced by");
   });
 
+  it("a removed card's provenance names the act's classifier and who reviewed it; definitions read 'term — definition'", async () => {
+    const { b, ids } = richMap();
+    b.ai({ kind: "definition.refine", card_id: ids.story, term: "appointment", definition: "a booked slot, not a walk-in" }, b.utter("By appointment I mean a booked slot, not a walk-in."));
+    renderWithEnv(<Board showHistory />, { state: b.state });
+    expect(screen.getByTestId(`card-definitions-${ids.story}`).textContent).toBe("appointment — a booked slot, not a walk-in");
+    await userEvent.click(screen.getByTestId(`card-provenance-${ids.exRemoved}`));
+    const before = screen.getByTestId(`rejection-${ids.exRemoved}`);
+    expect(before).toHaveTextContent(`removed by proposal ${ids.pRemove}`);
+    expect(before).toHaveTextContent("classifier: rules.v1, confidence 0.5");
+    expect(screen.getByTestId(`rejection-review-${ids.exRemoved}`)).toHaveTextContent("not reviewed — an AI act needs a person's Accept or Reject");
+  });
+
+  it("a removal reviewed by voice reads 'confirmed by voice (<provider>, <confidence>, speaker <label>)'", async () => {
+    const { b, ids } = richMap();
+    const yes = b.utter("Yes.", { speaker: "Priya" });
+    b.ai({ kind: "confirm", card_ids: [], proposal_ids: [ids.pRemove] }, yes, { confidence: 0.5, stamp: { provider: "rules.v1", model: null, prompt_version: null, fallback_from: null, error: null, actor: "Priya" } });
+    renderWithEnv(<Board showHistory />, { state: b.state });
+    await userEvent.click(screen.getByTestId(`card-provenance-${ids.exRemoved}`));
+    expect(screen.getByTestId(`rejection-review-${ids.exRemoved}`)).toHaveTextContent("review: confirmed by voice (rules.v1, 0.5, speaker Priya)");
+  });
+
   it("keyboard: ArrowDown moves to the next card, ArrowRight to the next column, Enter opens the menu and Escape returns focus", async () => {
     const { b, ids } = richMap();
     renderWithEnv(<Board />, { state: b.state });

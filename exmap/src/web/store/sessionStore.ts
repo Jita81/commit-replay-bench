@@ -99,8 +99,13 @@ export class SessionStore {
     return this.#status.chainError !== null || this.#status.reduceError !== null || this.#status.closeReason !== null;
   }
 
+  /** Opens the stream (`after = head.seq`). Also after dispose(): React may unmount and remount the same store. */
   connect(): void {
-    if (this.#disposed || this.#socket) return;
+    if (this.#socket || this.terminal) return;
+    if (this.#disposed) {
+      this.#disposed = false;
+      this.#setStatus({ connection: "connecting", nextRetryMs: null });
+    }
     this.#open();
   }
 

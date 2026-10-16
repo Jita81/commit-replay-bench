@@ -22,9 +22,12 @@ export function ClarificationItem({ clarification: c }: ClarificationItemProps) 
   const headingId = `clarification-${c.id}-question`;
 
   return (
-    <li
+    <li className="list-none">
+    {/* the group is inside the <li> so the tray's list keeps only listitems (axe: list) */}
+    <div
       id={`clarification-${c.id}`}
       data-testid={`clarification-${c.id}`}
+      data-status={c.status}
       role="group"
       aria-labelledby={headingId}
       tabIndex={-1}
@@ -141,6 +144,7 @@ export function ClarificationItem({ clarification: c }: ClarificationItemProps) 
         </div>
       ) : null}
       {act.pending ? <div className="text-xs text-slate-600">pending…</div> : null}
+    </div>
     </li>
   );
 }

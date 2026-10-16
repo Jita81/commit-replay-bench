@@ -5,7 +5,7 @@ import { select } from "../../core/index.js";
 import type { MapState, ProposalRecord, Revision } from "../../core/types.js";
 import { cardText, describeOperation, excerpt, mmss, speakerLabel } from "../format.js";
 import { useAct, useApi, useSession } from "../store/useSession.js";
-import { classifierLine } from "./ProvenancePopover.js";
+import { proposalClassifierLine } from "./ProvenancePopover.js";
 
 export interface ProposalItemProps {
   record: ProposalRecord;
@@ -92,7 +92,7 @@ export function ProposalItem({ record, unreviewed }: ProposalItemProps) {
           {record.status}
         </span>
         <span className="rounded border border-slate-300 px-1.5 py-0.5" data-testid={`proposal-classifier-${p.id}`}>
-          {classifierLine(p.classifier)} · confidence <span data-testid={`proposal-confidence-${p.id}`}>{p.confidence}</span>
+          {proposalClassifierLine(p)} · confidence <span data-testid={`proposal-confidence-${p.id}`}>{p.confidence}</span>
         </span>
       </div>
       {p.classifier.fallback_from ? (

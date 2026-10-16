@@ -40,13 +40,21 @@ describe("ReviewDrawer", () => {
 
   it("the mark previews the list and sends exactly those card_ids", async () => {
     const { b, ids } = richMap();
-    const { api } = renderWithEnv(<ReviewDrawer open onClose={noop} />, { state: b.state });
-    await userEvent.click(screen.getByTestId("dod-mark-story_rules_confirmed"));
+    const { api, source } = renderWithEnv(<ReviewDrawer open onClose={noop} />, { state: b.state });
+    const mark = screen.getByTestId("dod-mark-story_rules_confirmed");
+    expect(mark).toHaveTextContent("Mark reviewed…");
+    await userEvent.click(mark);
+    expect(api.reviewChecks).not.toHaveBeenCalled(); // the first press only previews
     const list = screen.getByTestId("dod-mark-list-story_rules_confirmed");
     const previewed = Array.from(list.querySelectorAll("[data-card-id]")).map((el) => el.getAttribute("data-card-id"));
     expect(previewed).toEqual([ids.rule]); // the story is already confirmed
     expect(markList(b.state, "story_rules_confirmed")).toEqual([ids.rule]);
-    await userEvent.click(screen.getByTestId("dod-mark-confirm-story_rules_confirmed"));
+    expect(mark).toHaveTextContent("Confirm these 1 cards");
+    // a card that lands while the preview is open is not slipped into the list the person saw
+    b.create({ kind: "rule", text: "A receptionist must not be able to override the cut-off." }, b.utter("A receptionist must not be able to override the cut-off."));
+    source.set(b.state);
+    expect(markList(b.state, "story_rules_confirmed")).toHaveLength(2);
+    await userEvent.click(screen.getByTestId("dod-mark-story_rules_confirmed"));
     expect(api.reviewChecks).toHaveBeenCalledWith("Sam", "story_rules_confirmed", [ids.rule]);
     // check 2 lists the flagged example (exGp is confirmed and unflagged)
     expect(markList(b.state, "examples_reviewed")).toEqual([ids.exNurse]);

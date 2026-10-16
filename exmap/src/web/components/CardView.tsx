@@ -85,7 +85,10 @@ export function CardView({ card, history }: CardViewProps) {
             {card.definitions.map((d) => (
               <div key={d.term} className="contents">
                 <dt className="font-semibold">{d.term}</dt>
-                <dd>— {d.definition}</dd>
+                <dd>
+                  {" — "}
+                  {d.definition}
+                </dd>
               </div>
             ))}
           </dl>

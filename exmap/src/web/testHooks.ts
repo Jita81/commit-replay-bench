@@ -16,7 +16,8 @@ export interface ExmapTestHooks {
     playAll(): Promise<void>;
     readonly position: number;
   };
-  store?: { state(): unknown; status(): unknown };
+  /** Additive: the reduced ledger as this page holds it, and a promise that it holds every posted utterance's outcome. */
+  store?: { state(): unknown; status(): unknown; settled?(): Promise<void> };
 }
 
 declare global {

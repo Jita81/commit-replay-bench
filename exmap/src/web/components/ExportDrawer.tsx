@@ -136,7 +136,7 @@ export function ExportDrawer({ open, onClose, returnFocusTo }: ExportDrawerProps
           </>
         )}
         <label className="mt-2 flex items-center gap-2 text-xs">
-          <input type="checkbox" role="switch" aria-checked={draft} data-testid="export-draft-toggle" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
+          <input type="checkbox" role="switch" data-testid="export-draft-toggle" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
           Download as DRAFT / NOT VERIFIED (watermarked files, DRAFT- names)
         </label>
         {!verified && !draft ? <p className="mt-1 text-xs">The links below will answer 422 until the map is verified or the draft toggle is on.</p> : null}
@@ -258,7 +258,7 @@ export function ExportDrawer({ open, onClose, returnFocusTo }: ExportDrawerProps
       )}
 
       <h3 className="text-sm font-semibold">Preview — ticket.md{effectiveDraft ? " (draft)" : ""}</h3>
-      <pre data-testid="export-preview" className="max-h-64 overflow-auto rounded border border-slate-300 bg-slate-50 p-2 text-xs whitespace-pre-wrap">
+      <pre data-testid="export-preview" tabIndex={0} aria-label="Preview of ticket.md" className="max-h-64 overflow-auto rounded border border-slate-300 bg-slate-50 p-2 text-xs whitespace-pre-wrap">
         {preview || "(loading…)"}
       </pre>
 

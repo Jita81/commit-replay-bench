@@ -69,14 +69,14 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
   const act = useAct();
   const { actor } = useActor();
   const toast = useToast();
-  const [previewing, setPreviewing] = useState<DodCheckId | null>(null);
+  const [preview, setPreview] = useState<{ check: DodCheckId; ids: string[] } | null>(null);
   const [reason, setReason] = useState("");
   const [backlog, setBacklog] = useState(0);
   const [anyway, setAnyway] = useState(false);
   const [reviewer, setReviewer] = useState(actor);
   const [statement, setStatement] = useState("");
   const [signErrors, setSignErrors] = useState<DodReport | { reason: string; detail: string } | null>(null);
-  const [signed, setSigned] = useState<string | null>(null);
+  const [signed, setSigned] = useState<{ text: string; revision: string } | null>(null);
   const [signing, setSigning] = useState(false);
 
   useEffect(() => {
@@ -91,6 +91,8 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
   const revision = select.currentRevision(state);
   const verified = isHumanVerified(state);
   const last = select.lastSignoff(state);
+  // the response-derived line only bridges the moment before the signoff.recorded event lands; the ledger wins after
+  useEffect(() => setSigned(null), [last?.id, last?.status]);
   const active = select.activeSignoff(state);
   const check3 = dod.checks.find((c) => c.id === "changes_resolved")!;
   const openClarifications = select.openClarifications(state);
@@ -108,9 +110,10 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
       const res = await api.signoff(reviewer.trim(), statement.trim(), revision.hash);
       const recorded = res.events.find((e): e is Extract<ExmapEvent, { type: "signoff.recorded" }> => e.type === "signoff.recorded");
       if (recorded) {
-        setSigned(`Signed off by ${recorded.signoff.reviewer.name} at ${timeOf(recorded.at)} on revision ${hash8(recorded.signoff.revision.hash)} (evidence head ${recorded.signoff.evidence.head_seq})`);
-      } else {
-        setSigned(`Signed off by ${reviewer.trim()} on revision ${hash8(revision.hash)}`);
+        setSigned({
+          text: `Signed off by ${recorded.signoff.reviewer.name} at ${timeOf(recorded.at)} on revision ${hash8(recorded.signoff.revision.hash)} (evidence head ${recorded.signoff.evidence.head_seq})`,
+          revision: recorded.signoff.revision.hash,
+        });
       }
       toast("Sign-off recorded");
     } catch (e) {
@@ -127,6 +130,7 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
 
   const statusLine = active && verified ? `Human verified by ${active.reviewer.name} at ${timeOf(active.at)}` : "Not verified";
   const signedFromState = active ? `Signed off by ${active.reviewer.name} at ${timeOf(active.at)} on revision ${hash8(active.revision.hash)} (evidence head ${active.evidence.head_seq})` : null;
+  const signoffStatus = signedFromState ?? (signed && signed.revision === revision.hash ? signed.text : null);
 
   return (
     <Drawer open={open} title="Review and sign off" testId="review-drawer" onClose={onClose} returnFocusTo={returnFocusTo} wide>
@@ -150,42 +154,45 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
           <CheckRow key={check.id} check={check}>
             {MARKABLE.has(check.id) ? (
               <div className="mt-2 flex flex-col gap-1">
-                {previewing === check.id ? (
+                {preview?.check === check.id ? (
                   <div className="rounded border border-slate-400 bg-white p-2 text-xs" data-testid={`dod-mark-list-${check.id}`}>
-                    <div className="font-semibold">This confirms, as {actor || "(set your name)"}:</div>
+                    <div className="font-semibold">This records a confirmation, as {actor || "(set your name)"}, of exactly these cards:</div>
                     <ul className="list-inside list-disc">
-                      {markList(state, check.id).map((id) => (
+                      {preview.ids.map((id) => (
                         <li key={id} data-card-id={id}>
-                          {state.cards[id]?.kind} {id}: {excerpt(state.cards[id]?.text ?? "", 80)}
+                          {state.cards[id]?.kind ?? "card"} {id}: {excerpt(state.cards[id]?.text ?? "", 80)}
                         </li>
                       ))}
-                      {markList(state, check.id).length === 0 ? <li>nothing to confirm</li> : null}
+                      {preview.ids.length === 0 ? <li>nothing to confirm</li> : null}
                     </ul>
-                    <div className="mt-1 flex gap-2">
-                      <button
-                        type="button"
-                        data-testid={`dod-mark-confirm-${check.id}`}
-                        className="rounded border border-slate-700 bg-slate-800 px-2 py-0.5 text-white disabled:opacity-50"
-                        disabled={act.pending || markList(state, check.id).length === 0}
-                        onClick={() => {
-                          const ids = markList(state, check.id);
-                          void act.run((a) => api.reviewChecks(a, check.id, ids)).then((r) => {
-                            if (r) setPreviewing(null);
-                          });
-                        }}
-                      >
-                        Confirm these {markList(state, check.id).length} cards{act.pending ? " (pending…)" : ""}
-                      </button>
-                      <button type="button" className="rounded border border-slate-400 px-2 py-0.5" onClick={() => setPreviewing(null)}>
-                        Cancel
-                      </button>
-                    </div>
                   </div>
-                ) : (
-                  <button type="button" data-testid={`dod-mark-${check.id}`} className="self-start rounded border border-slate-600 bg-white px-2 py-0.5 text-xs" onClick={() => setPreviewing(check.id)}>
-                    Mark reviewed…
+                ) : null}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    data-testid={`dod-mark-${check.id}`}
+                    className="self-start rounded border border-slate-600 bg-white px-2 py-0.5 text-xs disabled:opacity-50"
+                    disabled={preview?.check === check.id && (act.pending || preview.ids.length === 0)}
+                    onClick={() => {
+                      if (preview?.check !== check.id) {
+                        // first press: preview the exact list; the second press sends that list, not a recomputed one
+                        setPreview({ check: check.id, ids: markList(state, check.id) });
+                        return;
+                      }
+                      const ids = preview.ids;
+                      void act.run((a) => api.reviewChecks(a, check.id, ids)).then((r) => {
+                        if (r) setPreview(null);
+                      });
+                    }}
+                  >
+                    {preview?.check === check.id ? `Confirm these ${preview.ids.length} cards${act.pending ? " (pending…)" : ""}` : "Mark reviewed…"}
                   </button>
-                )}
+                  {preview?.check === check.id ? (
+                    <button type="button" data-testid={`dod-mark-cancel-${check.id}`} className="rounded border border-slate-400 px-2 py-0.5 text-xs" onClick={() => setPreview(null)}>
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
             {check.id === "changes_resolved" && (openClarifications.length > 0 || unreviewed.length > 0) ? (
@@ -279,15 +286,16 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
           Reviewer (self-asserted)
           <input data-testid="signoff-reviewer" className="rounded border border-slate-400 px-1.5 py-0.5" value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
         </label>
-        <label className="flex flex-col gap-1 text-xs">
-          <span>
-            Statement — type exactly: “{SIGNOFF_CONFIRMATION_TEXT}”{" "}
+        <div className="flex flex-col gap-1 text-xs">
+          <label htmlFor="signoff-statement-field">{SIGNOFF_CONFIRMATION_TEXT}</label>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-700">Type the sentence above exactly, or</span>
             <button type="button" data-testid="signoff-insert" className="rounded border border-slate-500 px-1.5" onClick={() => setStatement(SIGNOFF_CONFIRMATION_TEXT)}>
               Insert sentence
             </button>
-          </span>
-          <textarea data-testid="signoff-statement" className="min-h-16 rounded border border-slate-400 p-1.5" value={statement} onChange={(e) => setStatement(e.target.value)} />
-        </label>
+          </div>
+          <textarea id="signoff-statement-field" data-testid="signoff-statement" className="min-h-16 rounded border border-slate-400 p-1.5" value={statement} onChange={(e) => setStatement(e.target.value)} />
+        </div>
         <label className="flex flex-col gap-1 text-xs">
           Cited revision (read-only)
           <input data-testid="signoff-revision" readOnly className="rounded border border-slate-300 bg-slate-100 px-1.5 py-0.5 font-mono" value={`${revision.seq} · ${revision.hash}`} />
@@ -318,9 +326,9 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
           )}
         </div>
       ) : null}
-      {signed ?? signedFromState ? (
+      {signoffStatus ? (
         <p role="status" data-testid="signoff-status" className="rounded border border-green-700 bg-green-50 p-2 text-sm text-green-950">
-          {signed ?? signedFromState}
+          {signoffStatus}
         </p>
       ) : null}
     </Drawer>

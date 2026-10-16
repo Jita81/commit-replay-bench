@@ -203,6 +203,21 @@ describe("SessionStore", () => {
     expect(opts[0]!.facts).toEqual([{ slot: "route_identity", text: "PUT /appointments/{id}/cancel" }]);
   });
 
+  it("connect after dispose reopens from the head (React may unmount and remount the same store)", () => {
+    const { b } = richMap();
+    const { store, ws } = makeStore();
+    ws.hello();
+    ws.event(b.events[0]!);
+    store.dispose();
+    store.connect();
+    expect(FakeWS.instances).toHaveLength(2);
+    expect(FakeWS.instances[1]!.url).toContain("after=1");
+    expect(store.getStatus().connection).toBe("connecting");
+    FakeWS.instances[1]!.open();
+    FakeWS.instances[1]!.hello(1);
+    expect(store.getStatus().connection).toBe("live");
+  });
+
   it("dispose closes the socket and stops reconnecting", () => {
     vi.useFakeTimers();
     const { store, ws } = makeStore();

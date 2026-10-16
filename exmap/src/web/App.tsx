@@ -1,7 +1,7 @@
 // exmap/src/web/App.tsx — one screen, no router (design §10.1). `?session=<id>` opens the session screen; without it the
 // SessionPicker. `?replay=<name>` without a session creates one first (title "Replay — <fixture title>", the fixture's
 // story when a name is set) and rewrites the URL, keeping ?replay/&speed/&autostart and ?testhooks.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ConfigResponse } from "../core/types.js";
 import { ApiClient, ApiError } from "./api/client.js";
 import { SessionPicker } from "./components/SessionPicker.js";
@@ -40,32 +40,38 @@ export function App({ testHooks = false, api: injected, search }: AppProps) {
       });
   }, [api]);
 
+  // The classifier chip follows /api/config: polled every 30 s (and after a fallback, by the session screen).
   useEffect(() => {
-    api
-      .getSettings()
-      .then((s) => setUserName(s.user_name ?? ""))
-      .catch(() => {
-        /* no name until the server answers */
-      });
     refreshConfig();
     const handle = setInterval(refreshConfig, 30_000);
     return () => clearInterval(handle);
-  }, [api, refreshConfig]);
+  }, [refreshConfig]);
 
-  // ?replay=<name> without ?session=: create a session first, then rewrite the URL.
+  // settings.user_name is the actor of every act; "" until set (acts then open the settings dialog first).
   const [nameKnown, setNameKnown] = useState(false);
   useEffect(() => {
+    let cancelled = false;
     api
       .getSettings()
       .then((s) => {
+        if (cancelled) return;
         setUserName(s.user_name ?? "");
         setNameKnown(true);
       })
-      .catch(() => setNameKnown(true));
+      .catch(() => {
+        if (!cancelled) setNameKnown(true); // no name until the server answers; acts ask for one
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [api]);
+
+  // ?replay=<name> without ?session=: create a session first, then rewrite the URL.
+  const creating = useRef(false);
   useEffect(() => {
-    if (sessionId || !replay || !nameKnown) return;
-    let cancelled = false;
+    // one creation per page, even when React re-runs the effect (StrictMode) or a dependency changes meanwhile
+    if (sessionId || !replay || !nameKnown || creating.current) return;
+    creating.current = true;
     (async () => {
       try {
         const index = (await (await fetch("/replay/index.json")).json()) as { fixtures: Array<{ name: string; file: string; title: string }> };
@@ -78,17 +84,13 @@ export function App({ testHooks = false, api: injected, search }: AppProps) {
           body.actor = userName.trim();
         }
         const r = await api.createSession(body);
-        if (cancelled) return;
         params.set("session", r.session.id);
         replaceQuery(params);
         setSessionId(r.session.id);
       } catch (e) {
-        if (!cancelled) setBootError(e instanceof ApiError ? `${e.reason}: ${e.detail}` : e instanceof Error ? e.message : String(e));
+        setBootError(e instanceof ApiError ? `${e.reason}: ${e.detail}` : e instanceof Error ? e.message : String(e));
       }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, [sessionId, replay, nameKnown, userName, api, params]);
 
   const saveName = useCallback(
@@ -119,6 +121,7 @@ export function App({ testHooks = false, api: injected, search }: AppProps) {
         api={api}
         sessionId={sessionId}
         userName={userName}
+        settingsLoaded={nameKnown}
         onSaveName={saveName}
         config={config}
         refreshConfig={refreshConfig}

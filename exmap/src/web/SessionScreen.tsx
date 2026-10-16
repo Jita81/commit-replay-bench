@@ -23,7 +23,7 @@ import { SettingsDialog } from "./components/SettingsDialog.js";
 import { Toast } from "./components/Toast.js";
 import { Transcript } from "./components/Transcript.js";
 import { sha256 } from "./hash.js";
-import { ReplayDriver } from "./replay/driver.js";
+import { RecordingSink, ReplayDriver, ledgerSettled } from "./replay/driver.js";
 import { SessionStore } from "./store/sessionStore.js";
 import { SessionEnv, type ToastMessage } from "./store/useSession.js";
 import { installTestHooks, removeTestHooks, replayHooks } from "./testHooks.js";
@@ -32,6 +32,8 @@ export interface SessionScreenProps {
   api: ApiClient;
   sessionId: string;
   userName: string;
+  /** False until GET /api/settings answered: the SpeakerStore takes the user's name as the microphone's default label. */
+  settingsLoaded?: boolean;
   onSaveName: (name: string) => Promise<void>;
   config: ConfigResponse | null;
   refreshConfig: () => void;
@@ -60,32 +62,8 @@ function useMediaQuery(query: string): boolean {
   return matches;
 }
 
-/** Resolves once every recorded utterance has a classification record (or after `timeoutMs`). */
-function settledFactory(store: SessionStore, timeoutMs = 60_000): () => Promise<void> {
-  return () =>
-    new Promise<void>((resolve) => {
-      const done = () => {
-        const c = select.counts(store.getState());
-        return c.classified >= c.utterances;
-      };
-      if (done() || store.terminal) {
-        resolve();
-        return;
-      }
-      const timer = setTimeout(finish, timeoutMs);
-      const unsub = store.subscribe(() => {
-        if (done() || store.terminal) finish();
-      });
-      function finish() {
-        clearTimeout(timer);
-        unsub();
-        resolve();
-      }
-    });
-}
-
 export function SessionScreen(props: SessionScreenProps) {
-  const { api, sessionId, userName, onSaveName, config, refreshConfig, testHooks, replay, onBack } = props;
+  const { api, sessionId, userName, settingsLoaded = true, onSaveName, config, refreshConfig, testHooks, replay, onBack } = props;
   const sessionApi = useMemo(() => api.session(sessionId), [api, sessionId]);
   const store = useMemo(
     () =>
@@ -131,9 +109,10 @@ export function SessionScreen(props: SessionScreenProps) {
     };
   }, [sessionApi]);
 
-  // 3. the audio controller, replay driver and test hooks, once the meta is known
+  // 3. the audio controller, replay driver and test hooks, once the meta (the session clock) and the settings (the
+  //    microphone's default speaker label) are known. With ?replay= the fixture is loaded before the hooks appear.
   useEffect(() => {
-    if (!meta) return;
+    if (!meta || !settingsLoaded) return;
     let cancelled = false;
     let controller: AudioControllerLike | null = null;
     (async () => {
@@ -141,14 +120,14 @@ export function SessionScreen(props: SessionScreenProps) {
       if (cancelled) return;
       if (!mod.AudioController) {
         setAudioError(`the audio controller is not available (missing: ${mod.missing.join(", ")})`);
-        setAudio({ mod, controller: null as unknown as AudioControllerLike });
         return;
       }
+      const sink = new RecordingSink(new HttpUtteranceSink({ baseUrl: "", sessionId }));
       try {
         controller = new mod.AudioController({
-          sink: new HttpUtteranceSink({ baseUrl: "", sessionId }),
+          sink,
           clock: createSessionClock(meta.created_at),
-          speakers: new SpeakerStore({ userName: userName || null, storage: browserStorage("local"), sessionStorage: browserStorage("session") }),
+          speakers: new SpeakerStore({ userName: userName.trim() || null, storage: browserStorage("local"), sessionStorage: browserStorage("session") }),
           storage: browserStorage("local"),
           autostartRequested: replay?.autostart ?? false,
         });
@@ -158,44 +137,64 @@ export function SessionScreen(props: SessionScreenProps) {
       }
       const ctrl = controller;
       setAudio({ mod, controller: ctrl });
-      const driver = new ReplayDriver({ controller: ctrl, postQueueIdle: () => ctrl.idle(), settled: settledFactory(store) });
+      const ready = replay ? loadFixture(ctrl, replay.name) : Promise.resolve(true);
+      const driver = new ReplayDriver({
+        controller: ctrl,
+        postQueueIdle: () => ctrl.idle(),
+        settled: ledgerSettled(store, sink),
+        ready: ready.then(() => undefined),
+      });
+      const loaded = await ready;
+      if (cancelled) return;
       if (testHooks) {
         installTestHooks({
           audio: {
             state: () => ctrl.getState(),
             postQueueIdle: () => ctrl.idle(),
             segmentsClosed: () => {
-              const s = ctrl.getState();
-              return { me: s.lanes.me.segmentsClosed, remote: s.lanes.remote.segmentsClosed };
+              const st = ctrl.getState();
+              return { me: st.lanes.me.segmentsClosed, remote: st.lanes.remote.segmentsClosed };
             },
             pendingWork: () => ctrl.pendingWork(),
           },
           replay: replayHooks(driver),
-          store: { state: () => store.getState(), status: () => store.getStatus() },
+          store: { state: () => store.getState(), status: () => store.getStatus(), settled: ledgerSettled(store, sink) },
         });
       }
-      if (replay) {
-        try {
-          const index = (await (await fetch("/replay/index.json")).json()) as { fixtures: Array<{ name: string; file: string }> };
-          const entry = index.fixtures.find((f) => f.name === replay.name);
-          if (!entry) throw new Error(`no replay fixture named ${replay.name}`);
-          const fixture = parseReplayFixture(await (await fetch(`/replay/${entry.file}`)).json());
-          if (cancelled) return;
-          ctrl.loadReplay(fixture, replay.name);
-          if (replay.autostart) void ctrl.playReplay(replay.speed);
-        } catch (e) {
-          setToasts((t) => [...t, { id: Date.now(), kind: "error", text: `Replay fixture: ${e instanceof Error ? e.message : String(e)}` }]);
-        }
-      }
+      if (replay && loaded && replay.autostart) void ctrl.playReplay(replay.speed);
     })();
     return () => {
       cancelled = true;
       if (testHooks) removeTestHooks();
       controller?.dispose();
     };
-    // userName is read once at controller creation (the SpeakerStore's initial label); later changes go through setSpeaker.
+
+    async function loadFixture(ctrl: AudioControllerLike, name: string): Promise<boolean> {
+      try {
+        const index = (await (await fetch("/replay/index.json")).json()) as { fixtures: Array<{ name: string; file: string }> };
+        const entry = index.fixtures.find((f) => f.name === name);
+        if (!entry) throw new Error(`no replay fixture named ${name} in /replay/index.json`);
+        const fixture = parseReplayFixture(await (await fetch(`/replay/${entry.file}`)).json());
+        if (cancelled) return false;
+        ctrl.loadReplay(fixture, name);
+        return true;
+      } catch (e) {
+        setToasts((t) => [...t, { id: Date.now(), kind: "error", text: `Replay fixture not loaded: ${e instanceof Error ? e.message : String(e)}` }]);
+        return false;
+      }
+    }
+    // userName is read once at controller creation (the SpeakerStore's initial label); later changes go through
+    // effect 3b below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meta, sessionId, store, testHooks, replay]);
+  }, [meta, settingsLoaded, sessionId, store, testHooks, replay]);
+
+  // 3b. a name set after the controller exists becomes the microphone's label when the person has not assigned one
+  useEffect(() => {
+    const c = audio?.controller;
+    const name = userName.trim();
+    if (!c || !name) return;
+    if (c.getState().speakers.me === null) c.setSpeaker("me", name);
+  }, [audio, userName]);
 
   // 4. a fallback classification refreshes /api/config so the chip and the notice follow it
   const fallbacks = select.counts(store.getState()).fallbacks;
@@ -261,6 +260,7 @@ export function SessionScreen(props: SessionScreenProps) {
             <CaptureStrip mod={audio?.mod ?? null} controller={controller} loadError={audioError} />
           </div>
         </details>
+        <main className="flex min-h-0 grow flex-col" aria-label="Session">
         {wide ? (
           <div className="grid min-h-0 grow grid-cols-[minmax(18rem,1fr)_minmax(0,2fr)_minmax(18rem,1fr)] gap-0 divide-x divide-slate-300">
             <div className="min-h-0 bg-white">{panes.transcript}</div>
@@ -281,6 +281,7 @@ export function SessionScreen(props: SessionScreenProps) {
             </div>
           </div>
         )}
+        </main>
         <ReviewDrawer open={drawer === "review"} onClose={closeDrawer} pendingWork={pendingWork} returnFocusTo={opener.current} />
         <ExportDrawer open={drawer === "export"} onClose={closeDrawer} returnFocusTo={opener.current} />
         <SettingsDialog

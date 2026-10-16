@@ -42,25 +42,26 @@ function focusById(id: string): void {
 function Row({ u, state }: { u: Utterance; state: MapState }) {
   const proposals = proposalsCiting(state, u.id);
   const records = select.classificationsOf(state, u.id);
-  const classifying = proposals.length === 0 && records.length === 0;
+  // "classifying…" until the ledger holds a classification record for this utterance (design §10.3)
+  const classifying = records.length === 0;
   return (
     <li data-testid={`utterance-${u.id}`} id={`utterance-${u.id}`} className="border-b border-slate-200 px-3 py-2 text-sm" data-lane={u.lane}>
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
-        <span className="rounded bg-slate-200 px-1.5 py-0.5 font-semibold text-slate-900" data-testid="lane-badge" aria-label={`lane ${LANE_LABEL[u.lane]}`}>
+        <span className="rounded bg-slate-200 px-1.5 py-0.5 font-semibold text-slate-900" data-testid="transcript-lane" aria-label={`lane ${LANE_LABEL[u.lane]}`}>
           {LANE_LABEL[u.lane]}
         </span>
-        <span data-testid="utterance-speaker" className="font-semibold text-slate-900">
+        <span data-testid="transcript-speaker" className="font-semibold text-slate-900">
           {speakerLabel(u.speaker)}
         </span>
-        <time data-testid="utterance-time" dateTime={`PT${Math.floor(u.t_start_ms / 1000)}S`}>
+        <time data-testid="transcript-time" dateTime={`PT${Math.floor(u.t_start_ms / 1000)}S`}>
           {mmss(u.t_start_ms)}
         </time>
-        <span className="rounded border border-slate-300 px-1.5 py-0.5" data-testid="utterance-provider">
+        <span className="rounded border border-slate-300 px-1.5 py-0.5" data-testid="transcript-provider">
           {providerChip(u)}
         </span>
         {u.confidence !== null ? <span>confidence {u.confidence}</span> : null}
       </div>
-      <p className="mt-1 text-slate-900" data-testid="utterance-text">
+      <p className="mt-1 text-slate-900" data-testid="transcript-text">
         {u.text}
       </p>
       <div className="mt-1 flex flex-wrap gap-1" data-testid={`utterance-proposals-${u.id}`}>
@@ -68,7 +69,7 @@ function Row({ u, state }: { u: Utterance; state: MapState }) {
           <button
             type="button"
             key={p.proposal.id}
-            data-testid={`utterance-chip-${p.proposal.id}`}
+            data-testid={`chip-proposal-${p.proposal.id}`}
             data-status={p.status}
             className="rounded border border-slate-400 bg-white px-1.5 py-0.5 text-xs hover:bg-slate-100"
             onClick={() => {
@@ -83,13 +84,13 @@ function Row({ u, state }: { u: Utterance; state: MapState }) {
         {records.map((r) => {
           const text = classificationChip(r);
           return text ? (
-            <span key={r.event_id} className="rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-xs" data-testid={`utterance-classification-${r.event_id}`}>
+            <span key={r.event_id} className="rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-xs" data-testid={`chip-classification-${r.event_id}`}>
               {text}
             </span>
           ) : null;
         })}
         {classifying ? (
-          <span className="rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-xs italic" data-testid="utterance-classifying">
+          <span className="rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-xs italic" data-testid="chip-classifying">
             classifying…
           </span>
         ) : null}
@@ -109,12 +110,15 @@ export function Transcript() {
       <h2 id="transcript-heading" className="border-b border-slate-300 px-3 py-2 text-sm font-semibold">
         Transcript ({rows.length})
       </h2>
-      <ol role="log" aria-live="polite" aria-relevant="additions" data-testid="transcript" className="min-h-0 grow overflow-y-auto">
-        {rows.length === 0 ? <li className="px-3 py-2 text-sm text-slate-600">Nothing recorded yet. Start a lane, play the replay or type below.</li> : null}
-        {rows.map((u) => (
-          <Row key={u.id} u={u} state={state} />
-        ))}
-      </ol>
+      {/* role="log" sits on the wrapper so the rows keep a real list parent (axe: listitem) */}
+      <div role="log" aria-live="polite" aria-relevant="additions" aria-labelledby="transcript-heading" data-testid="transcript" tabIndex={0} className="min-h-0 grow overflow-y-auto">
+        <ol className="m-0 list-none p-0">
+          {rows.length === 0 ? <li className="px-3 py-2 text-sm text-slate-600">Nothing recorded yet. Start a lane, play the replay or type below.</li> : null}
+          {rows.map((u) => (
+            <Row key={u.id} u={u} state={state} />
+          ))}
+        </ol>
+      </div>
     </section>
   );
 }
