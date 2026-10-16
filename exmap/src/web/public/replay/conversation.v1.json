@@ -12,217 +12,651 @@
       "atMs": 0,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Right, let's start with how cancellation works today."
+      "text": "Right, let's start with how cancellation works today.",
+      "expect": {
+        "intent": "none",
+        "heard_intent": null,
+        "confidence": 0,
+        "ops": [],
+        "clarification": null
+      }
     },
     {
       "label": "u02",
       "atMs": 4000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "A patient should be able to cancel online, but not within two hours of their appointment."
+      "text": "A patient should be able to cancel online, but not within two hours of their appointment.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "rule",
+              "text": "A patient should be able to cancel online, but not within two hours of their appointment."
+            },
+            "bind": "$rule_cancel"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u03",
       "atMs": 8000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Got it. So for example, if a GP appointment is at 10am and the patient tries to cancel at 9am, then it is refused."
+      "text": "Got it. So for example, if a GP appointment is at 10am and the patient tries to cancel at 9am, then it is refused.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "example",
+              "text": "If a GP appointment is at 10am and the patient tries to cancel at 9am, then it is refused.",
+              "rule_id": "$rule_cancel"
+            },
+            "bind": "$ex_gp"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u04",
       "atMs": 12000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "And for a nurse appointment, say it is at 10am and they cancel at 8am, that one is allowed because it is more than two hours."
+      "text": "And for a nurse appointment, say it is at 10am and they cancel at 8am, that one is allowed because it is more than two hours.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "example",
+              "text": "For a nurse appointment, say it is at 10am and they cancel at 8am, that one is allowed because it is more than two hours.",
+              "rule_id": "$rule_cancel"
+            },
+            "bind": "$ex_nurse"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u05",
       "atMs": 16000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Delete that example. It's not what I meant."
+      "text": "Delete that example. It's not what I meant.",
+      "expect": {
+        "intent": "remove",
+        "confidence": 0.5,
+        "ops": [],
+        "clarification": {
+          "kind": "choose_target",
+          "candidates": [
+            "$ex_nurse",
+            "$ex_gp"
+          ],
+          "pending": [
+            {
+              "kind": "card.remove",
+              "card_id": "$choice",
+              "reason": "It's not what I meant."
+            }
+          ]
+        }
+      }
     },
     {
       "label": "u06",
       "atMs": 19000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "The GP one."
+      "text": "The GP one.",
+      "expect": {
+        "intent": "remove",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.remove",
+            "card_id": "$ex_gp"
+          }
+        ],
+        "clarification": null,
+        "resolves": {
+          "proposal_id": "$p05",
+          "chosen": [
+            "$ex_gp"
+          ],
+          "dismissed": false
+        }
+      }
     },
     {
       "label": "u07",
       "atMs": 23000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Change that limit to 24 hours."
+      "text": "Change that limit to 24 hours.",
+      "expect": {
+        "intent": "amend",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.update",
+            "card_id": "$rule_cancel",
+            "patch": {
+              "text": "A patient should be able to cancel online, but not within 24 hours of their appointment."
+            },
+            "amendment": {
+              "from": "two hours",
+              "to": "24 hours",
+              "scope": null
+            }
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u08",
       "atMs": 27000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Actually, make that 24 hours for nurse appointments only. Keep two hours for GPs."
+      "text": "Actually, make that 24 hours for nurse appointments only. Keep two hours for GPs.",
+      "expect": {
+        "intent": "amend",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.update",
+            "card_id": "$rule_cancel",
+            "patch": {
+              "text_append": "Make that 24 hours for nurse appointments only. Keep two hours for GPs."
+            },
+            "amendment": {
+              "from": "24 hours",
+              "to": "24 hours",
+              "scope": "nurse appointments only"
+            }
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u09",
       "atMs": 30000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Yes, that's exactly right."
+      "text": "Yes, that's exactly right.",
+      "expect": {
+        "intent": "confirm",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "confirm",
+            "card_ids": [
+              "$rule_cancel"
+            ]
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u10",
       "atMs": 34000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "What about appointments already in progress?"
+      "text": "What about appointments already in progress?",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "question",
+              "text": "What about appointments already in progress?",
+              "about_card_id": "$rule_cancel"
+            },
+            "bind": "$q_inprogress"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u11",
       "atMs": 38000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Do we know if a nurse can cancel on the patient's behalf?"
+      "text": "Do we know if a nurse can cancel on the patient's behalf?",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "question",
+              "text": "Do we know if a nurse can cancel on the patient's behalf?",
+              "about_card_id": "$rule_cancel"
+            },
+            "bind": "$q_behalf"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u12",
       "atMs": 42000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "By appointment I mean a booked slot, not a walk-in."
+      "text": "By appointment I mean a booked slot, not a walk-in.",
+      "expect": {
+        "intent": "clarify",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "definition.refine",
+            "card_id": "$story",
+            "term": "appointment",
+            "definition": "a booked slot, not a walk-in"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u13",
       "atMs": 46000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "We also need an error case, when the cancellation fails because the system is down."
+      "text": "We also need an error case, when the cancellation fails because the system is down.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "example",
+              "text": "We also need an error case, when the cancellation fails because the system is down.",
+              "rule_id": "$rule_cancel"
+            },
+            "bind": "$ex_error"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u14",
       "atMs": 50000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Delete that example."
+      "text": "Delete that example.",
+      "expect": {
+        "intent": "remove",
+        "confidence": 0.5,
+        "ops": [
+          {
+            "kind": "card.remove",
+            "card_id": "$ex_error",
+            "reason": ""
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u15",
       "atMs": 53000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Yes."
+      "text": "Yes.",
+      "expect": {
+        "intent": "confirm",
+        "confidence": 0.5,
+        "ops": [
+          {
+            "kind": "confirm",
+            "card_ids": []
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u16",
       "atMs": 57000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "A receptionist must be able to override the cut-off."
+      "text": "A receptionist must be able to override the cut-off.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "rule",
+              "text": "A receptionist must be able to override the cut-off."
+            },
+            "bind": "$rule_override"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u17",
       "atMs": 60000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "No, that's not what I said."
+      "text": "No, that's not what I said.",
+      "expect": {
+        "intent": "reject",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "interpretation.reject",
+            "proposal_id": "$p16"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u18",
       "atMs": 64000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "A receptionist must not be able to override the cut-off."
+      "text": "A receptionist must not be able to override the cut-off.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "rule",
+              "text": "A receptionist must not be able to override the cut-off."
+            },
+            "bind": "$rule_override2"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u19",
       "atMs": 68000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "For a nurse, if the appointment is at 10am and they cancel at 9am, then it is refused under the 24-hour rule."
+      "text": "For a nurse, if the appointment is at 10am and they cancel at 9am, then it is refused under the 24-hour rule.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "example",
+              "text": "For a nurse, if the appointment is at 10am and they cancel at 9am, then it is refused under the 24-hour rule.",
+              "rule_id": "$rule_cancel"
+            },
+            "bind": "$ex_nurse2"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u20",
       "atMs": 72000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Use this example instead of the old nurse one."
+      "text": "Use this example instead of the old nurse one.",
+      "expect": {
+        "intent": "replace",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.replace",
+            "card_id": "$ex_nurse",
+            "replacement": null,
+            "replacement_card_id": "$ex_nurse2"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u21",
       "atMs": 76000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Go back to the previous version."
+      "text": "Go back to the previous version.",
+      "expect": {
+        "intent": "undo",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "undo",
+            "steps": 1
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u22",
       "atMs": 80000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Right, so is the two-hour window the same for dentists?"
+      "text": "Right, so is the two-hour window the same for dentists?",
+      "expect": {
+        "intent": "add",
+        "confidence": 0.5,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "question",
+              "text": "Is the two-hour window the same for dentists?",
+              "about_card_id": "$rule_cancel"
+            },
+            "bind": "$q_dentist"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u23",
       "atMs": 83000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Let's park that for now."
+      "text": "Let's park that for now.",
+      "expect": {
+        "intent": "none",
+        "heard_intent": null,
+        "confidence": 0,
+        "ops": [],
+        "clarification": null
+      }
     },
     {
       "label": "u24",
       "atMs": 87000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "One more example: a GP appointment at 10am cancelled at 7am is allowed."
+      "text": "One more example: a GP appointment at 10am cancelled at 7am is allowed.",
+      "expect": {
+        "intent": "add",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "example",
+              "text": "A GP appointment at 10am cancelled at 7am is allowed.",
+              "rule_id": "$rule_cancel"
+            },
+            "bind": "$ex_gp2"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u25",
       "atMs": 91000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "And a GP appointment at 10am cancelled at 9am is refused."
+      "text": "And a GP appointment at 10am cancelled at 9am is refused.",
+      "expect": {
+        "intent": "add",
+        "confidence": 0.5,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "example",
+              "text": "A GP appointment at 10am cancelled at 9am is refused.",
+              "rule_id": "$rule_cancel"
+            },
+            "bind": "$ex_gp3"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u26",
       "atMs": 95000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Delete that example, it duplicates the GP one."
+      "text": "Delete that example, it duplicates the GP one.",
+      "expect": {
+        "intent": "remove",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.remove",
+            "card_id": "$ex_gp3",
+            "reason": "it duplicates the GP one"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u27",
       "atMs": 98000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Undo that, we still need it."
+      "text": "Undo that, we still need it.",
+      "expect": {
+        "intent": "undo",
+        "confidence": 0.5,
+        "ops": [
+          {
+            "kind": "undo",
+            "steps": 1
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u28",
       "atMs": 102000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "Can a patient cancel twice in one day?"
+      "text": "Can a patient cancel twice in one day?",
+      "expect": {
+        "intent": "add",
+        "confidence": 0.5,
+        "ops": [
+          {
+            "kind": "card.create",
+            "card": {
+              "kind": "question",
+              "text": "Can a patient cancel twice in one day?",
+              "about_card_id": "$rule_cancel"
+            },
+            "bind": "$q_twice"
+          }
+        ],
+        "clarification": null
+      }
     },
     {
       "label": "u29",
       "atMs": 106000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "I'm not sure, let's leave that open."
+      "text": "I'm not sure, let's leave that open.",
+      "expect": {
+        "intent": "none",
+        "heard_intent": null,
+        "confidence": 0,
+        "ops": [],
+        "clarification": null
+      }
     },
     {
       "label": "u30",
       "atMs": 110000,
       "lane": "me",
       "speaker": "Sam",
-      "text": "I think that's everything for today."
+      "text": "I think that's everything for today.",
+      "expect": {
+        "intent": "none",
+        "heard_intent": null,
+        "confidence": 0,
+        "ops": [],
+        "clarification": null
+      }
     },
     {
       "label": "u31",
       "atMs": 114000,
       "lane": "remote",
       "speaker": "Priya",
-      "text": "Actually, make the GP window three hours."
+      "text": "Actually, make the GP window three hours.",
+      "expect": {
+        "intent": "amend",
+        "confidence": 1,
+        "ops": [
+          {
+            "kind": "card.update",
+            "card_id": "$rule_cancel",
+            "patch": {
+              "text_append": "Make the GP window three hours."
+            },
+            "amendment": {
+              "from": null,
+              "to": "3 hours",
+              "scope": null
+            }
+          }
+        ],
+        "clarification": null
+      }
     }
   ],
   "ui": [

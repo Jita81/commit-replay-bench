@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+/* Drawers slide in from the right; prefers-reduced-motion disables it (design §10.8). */
+@keyframes exmap-slide-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@utility animate-slide-in {
+  animation: exmap-slide-in 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-slide-in {
+    animation: none;
+  }
+}
+
+/* Focus is always visible (keyboard operation of the board). */
+:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
