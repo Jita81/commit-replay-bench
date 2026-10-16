@@ -46,7 +46,7 @@ describe("select", () => {
     expect(select.counts(s.state)).toEqual(expected);
     expect(select.counts(s.stateAfter("clar_remove"))).toMatchObject({ open_clarifications: 1, cards_live: 5, by_kind: { story: 1, rule: 1, example: 2, question: 1 } });
     expect(select.counts(s.stateAfter("amend"))).toMatchObject({ needs_review: 1 });
-    expect(select.counts(s.stateAfter("undo2"))).toMatchObject({ unreviewed_acts: 4 });
+    expect(select.counts(s.stateAfter("undo2"))).toMatchObject({ unreviewed_acts: 3 }); // undo1 was undone by undo2
     // the other selectors
     expect(select.story(s.state)?.id).toBe(s.ids.story);
     expect(select.cardsByKind(s.state, "example").map((c) => c.id)).toEqual([s.ids.ex_nurse2]);

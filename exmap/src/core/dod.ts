@@ -117,6 +117,18 @@ function liveRuleStatus(state: MapState, example: ExampleCard): string | null {
   return null;
 }
 
+/** The undo that reverted an act that no longer stands: the `restored_by` / `undone` rejection now on its cards. */
+function revertedBy(state: MapState, record: ProposalRecord): string {
+  const by = new Set<string>();
+  for (const effect of record.effects) {
+    const card = state.cards[effect.card_id];
+    if (!card) continue;
+    if (card.restored_by && card.restored_by.proposal_id !== record.proposal.id) by.add(card.restored_by.proposal_id);
+    else if (card.rejection?.kind === "undone" && card.rejection.proposal_id !== record.proposal.id) by.add(card.rejection.proposal_id);
+  }
+  return by.size > 0 ? `undone by ${[...by].join(", ")}` : "undone by a later undo";
+}
+
 function changesResolved(state: MapState): DodCheck {
   const details: string[] = [];
   let pass = true;
@@ -135,7 +147,9 @@ function changesResolved(state: MapState): DodCheck {
     const record = state.proposals[id];
     if (!record || record.proposal.classifier.actor !== null || record.proposal.operation === null) continue;
     if (!select.ACT_KINDS.includes(record.proposal.operation.kind)) continue;
-    if (record.status === "applied") {
+    if (record.status === "applied" && !select.actStands(state, record)) {
+      details.push(`${describeAct(state, record)} was ${revertedBy(state, record)}; nothing of it is left to review`);
+    } else if (record.status === "applied") {
       details.push(`${describeAct(state, record)} is not reviewed`);
       pass = false;
     } else if (record.status === "confirmed") {

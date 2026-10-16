@@ -1,6 +1,6 @@
 // tests/e2e/audio.spec.ts — TEST-PLAN §8.3: E1, E1a, E2–E8 over the session screen with testhooks=1. The mic lane is
-// driven by the fake-media Chromium flags of playwright.config.ts (design §7.7); getDisplayMedia is not available
-// headless, so the remote lane asserts its error path and the Linux guidance. The Whisper path is never exercised
+// driven by the fake-media Chromium flags of playwright.config.ts (design §7.7); the remote lane asserts whichever
+// branch headless getDisplayMedia takes (DESIGN §17) and the Linux guidance. The Whisper path is never exercised
 // here (scripts/whisper-check.mjs is the manual, headed run); E7 proves the download is inert without consent.
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
@@ -55,8 +55,8 @@ test.describe("audio", () => {
     await expect(rows.first()).toContainText(/\b\d{2}:\d{2}\b/);
     const res = await request.get(`/api/sessions/${id}`);
     expect(res.ok()).toBeTruthy();
-    const body = (await res.json()) as { counts: { utterances: number } };
-    expect(body.counts.utterances).toBe(31);
+    const body = (await res.json()) as { session: { counts: { utterances: number } } }; // §8.3: { session, dod, signoff, export_options }
+    expect(body.session.counts.utterances).toBe(31);
   });
 
   test("E1a replay breakpoints: until u05 asks a clarification with two candidates; Step answers it; Play finishes", async ({ page, request }) => {
@@ -116,30 +116,58 @@ test.describe("audio", () => {
     await expect.poll(async () => Number(await page.getByTestId("level-me").getAttribute("aria-valuenow")), { timeout: 5_000 }).toBeGreaterThan(0);
     await expect.poll(async () => (await hooks(page).segmentsClosed()).me, { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
     await expect(page.getByTestId("provider-select-me")).toBeDisabled();
-    // the WAV is played once (%noloop); 10 s after it ends the badge says so
-    await expect(page.getByTestId("lane-me-badge")).toHaveText("Live — no sound heard", { timeout: 25_000 });
+    // DESIGN §17 [VERIFY %noloop]: the WAV is played once (the segments stop after it), but Chrome 141's fake device
+    // then keeps delivering its last chunk at about −37 dBFS (measured at integration), above the −60 dBFS silence
+    // floor, so the detector cannot report silence here. §17's fallback drops the silent-badge assertion; what stays is
+    // the honesty rule: the badge says "no sound heard" exactly when the detector measured it, and never otherwise.
+    const badge = page.getByTestId("lane-me-badge");
+    const silent = await expect
+      .poll(async () => (await hooks(page).state()).lanes.me.signal, { timeout: 25_000 })
+      .toBe("silent")
+      .then(() => true, () => false);
+    if (silent) {
+      await expect(badge).toHaveText("Live — no sound heard");
+    } else {
+      test.info().annotations.push({ type: "verify", description: "%noloop: the fake device holds its last chunk above −60 dBFS after the file ends; the silent badge is unreachable (DESIGN §17)" });
+      await expect(badge).toHaveAttribute("data-signal", "signal");
+      await expect(badge).toHaveText("Live");
+    }
     await page.getByTestId("lane-me-stop").click();
     await expect(page.getByTestId("lane-me-badge")).toHaveAttribute("data-state", "stopped");
     await expect(page.getByTestId("provider-select-me")).toBeEnabled();
   });
 
-  test("E4 remote lane headless: an allowed error code, the Linux guidance, Escape closes it", async ({ page }) => {
+  test("E4 remote lane headless: whichever branch headless Chromium takes, the Linux guidance, Escape closes it", async ({ page }) => {
     await openSession(page, sessionId);
+    // capture only, so a granted share does not open the model-download notice (E7 covers that notice)
+    await page.getByTestId("provider-select-remote").selectOption({ label: "Capture only (test audio)" });
     await page.getByTestId("lane-remote-start").click();
     const badge = page.getByTestId("lane-remote-badge");
-    await expect(badge).toHaveAttribute("data-state", "error", { timeout: 15_000 });
+    // DESIGN §17 [VERIFY]: assert whichever branch headless Chromium takes (the full error table is unit-tested with a
+    // fake). Measured at integration: Chrome 141 headless with --use-fake-ui-for-media-stream grants getDisplayMedia a
+    // "Fake audio" track plus a screen video track, so the lane goes live; an error branch must carry an allowed code.
+    await expect(badge).toHaveAttribute("data-state", /^(error|live)$/, { timeout: 15_000 });
+    const state = await badge.getAttribute("data-state");
     const code = await badge.getAttribute("data-error-code");
-    expect(["NO_AUDIO_TRACK", "PERMISSION_DENIED", "UNSUPPORTED", "NOT_ACTIVATED"]).toContain(code);
+    test.info().annotations.push({ type: "verify", description: `headless getDisplayMedia branch: ${state}${code ? ` (${code})` : ""}` });
     const panel = page.getByTestId("guidance-panel");
-    if (code === "NOT_ACTIVATED") {
-      // no guidance opens by itself for NOT_ACTIVATED; Setup help shows the howto page
+    if (state === "error") {
+      expect(["NO_AUDIO_TRACK", "PERMISSION_DENIED", "UNSUPPORTED", "NOT_ACTIVATED"]).toContain(code);
+    }
+    if (state === "live" || code === "NOT_ACTIVATED") {
+      // no guidance opens by itself for a live lane or NOT_ACTIVATED; Setup help shows the howto page
+      await expect(panel).toHaveCount(0);
       await page.getByTestId("guidance-open").click();
     }
     await expect(panel).toBeVisible();
     await expect(panel).toHaveAttribute("data-os", "linux");
-    await expect(panel.getByRole("heading")).toContainText(/Linux|Sharing was cancelled|cannot share/);
+    await expect(panel.getByRole("heading", { level: 2 })).toContainText(/Linux|Sharing was cancelled|cannot share/); // the title (the page also has an "Alternatives" h3)
     await page.keyboard.press("Escape");
     await expect(panel).toHaveCount(0);
+    if (state === "live") {
+      await page.getByTestId("lane-remote-stop").click();
+      await expect(badge).toHaveAttribute("data-state", "stopped");
+    }
   });
 
   test("E5 speaker label: 'Bob' committed with Enter stamps subsequent Call utterances; an uncommitted 'Al' does not", async ({ page }) => {

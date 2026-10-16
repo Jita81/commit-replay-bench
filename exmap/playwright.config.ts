@@ -1,6 +1,6 @@
 // exmap/playwright.config.ts — design §13. No webServer block: tests/e2e/fixtures.ts spawns the built server itself.
 // PLAYWRIGHT_BROWSERS_PATH is preset in the dev container; never run `playwright install`.
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
 const fakeMicWav = fileURLToPath(new URL("./tests/fixtures/audio/mlk16k.wav", import.meta.url));
@@ -15,8 +15,14 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      // Not devices["Desktop Chrome"]: that descriptor spoofs a Windows user agent (and userAgentData.platform), so the
+      // page would detect Windows on this Linux runner and E4's Linux guidance could never show (integration note).
       use: {
-        ...devices["Desktop Chrome"],
+        browserName: "chromium",
+        viewport: { width: 1280, height: 720 },
+        deviceScaleFactor: 1,
+        isMobile: false,
+        hasTouch: false,
         permissions: ["microphone"],
         launchOptions: {
           args: [

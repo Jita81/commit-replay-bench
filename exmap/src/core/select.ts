@@ -114,11 +114,56 @@ export function isRejectable(state: MapState, proposal_id: ProposalId): boolean 
   return rejectability(state, proposal_id).ok;
 }
 
-/** The DoD check-3 list: applied AI acts (actor null; card.remove / undo / interpretation.reject) not yet reviewed. */
+/**
+ * The seqs of the revisions whose changes the current map still carries: walk back from the current revision one step at
+ * a time, except that an undo jumps to the revision it restored (the revisions it skipped were reverted by it). An undo
+ * that was itself rejected later is walked like any other step, so the changes it reverted count as standing again.
+ */
+function standingRevisionSeqs(state: MapState): Set<number> {
+  const byOutcome = new Map<string, ProposalRecord>();
+  for (const record of Object.values(state.proposals)) if (record.outcome_event_id !== null) byOutcome.set(record.outcome_event_id, record);
+  const out = new Set<number>();
+  let i = state.revisions.length - 1;
+  while (i >= 1) {
+    const revision = state.revisions[i]!;
+    out.add(revision.seq);
+    if (revision.cause === "undo.applied" && revision.event_id !== null) {
+      const record = byOutcome.get(revision.event_id);
+      const op = record?.proposal.operation;
+      if (record && record.status !== "rejected" && op && op.kind === "undo") {
+        const target = op.to_revision_seq ?? undoTarget({ ...state, revisions: state.revisions.slice(0, i) }, 1);
+        if (target !== null && target >= 0 && target < i) {
+          i = target;
+          continue;
+        }
+      }
+    }
+    i -= 1;
+  }
+  return out;
+}
+
+/**
+ * An applied act stands unless a later undo reverted it (and that undo still stands): an AI removal undone by a later
+ * undo, or an undo itself undone, leaves nothing of the act in the map to review, so check 3 does not list it; rejecting
+ * or undoing the reverting undo brings the act back. Integration ruling: design §13.1 step 8, §14 `accept_acts` and §18
+ * #10 / #24 list exactly the u17 reject and the u21 / u27 undos after u30; the u26 removal that u27 undid is not among them.
+ */
+export function actStands(state: MapState, record: ProposalRecord, standing: Set<number> = standingRevisionSeqs(state)): boolean {
+  if (record.outcome_event_id === null) return true;
+  const revision = state.revisions.find((r) => r.event_id === record.outcome_event_id);
+  if (!revision) return true;
+  return standing.has(revision.seq);
+}
+
+/** The DoD check-3 list: applied AI acts (actor null; card.remove / undo / interpretation.reject) that still stand and are not yet reviewed. */
 export function unreviewedActs(state: MapState): ProposalRecord[] {
-  return proposalsInOrder(state).filter(
+  const candidates = proposalsInOrder(state).filter(
     (p) => p.status === "applied" && p.proposal.classifier.actor === null && p.proposal.operation !== null && ACT_KINDS.includes(p.proposal.operation.kind),
   );
+  if (candidates.length === 0) return candidates;
+  const standing = standingRevisionSeqs(state);
+  return candidates.filter((p) => actStands(state, p, standing));
 }
 
 export function classificationsOf(state: MapState, utterance_id: UtteranceId): ClassificationRecord[] {

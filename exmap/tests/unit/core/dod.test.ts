@@ -66,9 +66,13 @@ describe("dodReport", () => {
     const s = scenario();
     const afterUndo2 = s.stateAfter("undo2");
     const unreviewed = select.unreviewedActs(afterUndo2).map((p) => p.proposal.id);
-    expect(unreviewed).toEqual([s.ids.p_reject_prefix, s.ids.p_reject_replace, s.ids.p_undo1, s.ids.p_undo2]);
+    // undo1 was itself undone by undo2 (the redo): nothing of it is left in the map, so check 3 lists the redo only
+    // (integration ruling, design §13.1 step 8 / §14 accept_acts / §18 #10: an undone act is not an outstanding one)
+    expect(unreviewed).toEqual([s.ids.p_reject_prefix, s.ids.p_reject_replace, s.ids.p_undo2]);
     expect(check(afterUndo2, "changes_resolved").pass).toBe(false);
-    expect(check(afterUndo2, "changes_resolved").details).toContain(`undo ${s.ids.p_undo1} (one step back) (rules.v1, 1) is not reviewed`);
+    expect(check(afterUndo2, "changes_resolved").details).toContain(`undo ${s.ids.p_undo2} (one step back) (rules.v1, 1) is not reviewed`);
+    expect(check(afterUndo2, "changes_resolved").details).toContain(`undo ${s.ids.p_undo1} (one step back) (rules.v1, 1) was undone by ${s.ids.p_undo2}; nothing of it is left to review`);
+    expect(select.unreviewedActs(s.stateAfter("undo1")).map((p) => p.proposal.id)).toContain(s.ids.p_undo1); // stands until undone
     expect(check(afterUndo2, "changes_resolved").details).toContain(`rejection ${s.ids.p_reject_prefix} of proposal ${s.ids.p_remove_nurse} (rules.v1, 1) is not reviewed`);
     expect(check(afterUndo2, "changes_resolved").details).toContain(`removal ${s.ids.p_remove_q} of question ${s.ids.q_inprogress} (rules.v1, 1) is reviewed`); // reviewed by voice
     expect(unreviewed).not.toContain(s.ids.p_resolved_remove); // resolved from a clarification by Sam
@@ -94,6 +98,32 @@ describe("dodReport", () => {
     expect(check(undone, "changes_resolved").details).toContain(`undo ${undoId} (one step back) (claude, 0.8) is not reviewed`);
     const reviewed = run(undone, propose(humanProposal(ctx.nextId("prop"), { kind: "confirm", card_ids: [], proposal_ids: [undoId] })), ctx).state;
     expect(check(reviewed, "changes_resolved").pass).toBe(true);
+  });
+
+  it("59b. an AI removal undone by a later AI undo is not listed (the undo is); rejecting the undo brings the removal back", () => {
+    const { ctx, state, rule } = smallMap();
+    const withUtt = run(state, { kind: "utterance.record", utterance: utterance("utt_1", "Delete that.") }, ctx).state;
+    const ex = run(withUtt, propose(humanProposal(ctx.nextId("prop"), { kind: "card.create", card: { kind: "example", text: "E1", rule_id: rule } })), ctx);
+    const exId = createdCardId(ex.events);
+    const rm = ctx.nextId("prop");
+    const removed = run(ex.state, propose(aiProposal(rm, { kind: "card.remove", card_id: exId }, { utts: ["utt_1"] })), ctx).state;
+    expect(select.unreviewedActs(removed).map((p) => p.proposal.id)).toEqual([rm]);
+    const undoId = ctx.nextId("prop");
+    const undone = run(removed, propose(aiProposal(undoId, { kind: "undo", to_revision_seq: null }, { utts: ["utt_1"] })), ctx).state;
+    expect(select.unreviewedActs(undone).map((p) => p.proposal.id)).toEqual([undoId]);
+    expect(undone.proposals[rm]!.status).toBe("applied"); // §5.9: historical status kept
+    expect(check(undone, "changes_resolved").details).toContain(`removal ${rm} of example ${exId} (rules.v1, 1) was undone by ${undoId}; nothing of it is left to review`);
+    const accepted = run(undone, propose(humanProposal(ctx.nextId("prop"), { kind: "confirm", card_ids: [], proposal_ids: [undoId] })), ctx).state;
+    expect(check(accepted, "changes_resolved").pass).toBe(true);
+    // a person rejects the undo instead: the removal stands again and is listed again
+    const back = run(undone, propose(humanProposal(ctx.nextId("prop"), { kind: "interpretation.reject", proposal_id: undoId })), ctx).state;
+    expect(back.cards[exId]!.status).toBe("rejected");
+    expect(select.unreviewedActs(back).map((p) => p.proposal.id)).toEqual([rm]);
+    // an undo of the undo (the redo) brings the removal back too, and the first undo no longer stands
+    const redoId = ctx.nextId("prop");
+    const redone = run(undone, propose(aiProposal(redoId, { kind: "undo", to_revision_seq: null }, { utts: ["utt_1"] })), ctx).state;
+    expect(redone.cards[exId]!.status).toBe("rejected");
+    expect(select.unreviewedActs(redone).map((p) => p.proposal.id)).toEqual([rm, redoId]);
   });
 
   it("60. an AI-recorded answer does not resolve a question until the card is confirmed", () => {

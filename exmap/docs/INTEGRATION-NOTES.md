@@ -454,3 +454,115 @@ Deviations and decisions recorded by step zero:
     `tests/unit/classifier/conversation.test.ts` runs through u29 with every command applied, and fails at the u30
     sign-off for the `$p26` reason of classifier note 4. A scratch copy with `"$p26"` added to the u30 `accept_acts`
     passes end to end: invalidation at u31, re-sign-off, the final live set and the counts.
+
+## 2026-10-16 — integration
+
+**Frozen-file changes applied.**
+
+1. **`playwright.config.ts`: the project no longer spreads `devices["Desktop Chrome"]`.** That descriptor spoofs a
+   Windows user agent, and Chromium then reports `navigator.userAgentData.platform === "Windows"` too, so on this Linux
+   runner the page detected Windows and E4's Linux guidance (TEST-PLAN §8.3) could never show. The project now sets
+   `browserName: "chromium"`, the same 1280×720 viewport, `deviceScaleFactor: 1`, `isMobile/hasTouch: false`,
+   `permissions` and the fake-media `launchOptions` as before; headless Chrome 141 reports its real Linux UA and the
+   `Chromium` brand (`isChromium` stays true).
+2. **Not applied: pinning `playwright-core` to 1.56.1 (audio note 7).** `@axe-core/playwright@4.14.0` has no runtime
+   import of `playwright-core` (only `axe-core` and `assert`), so the 1.64.1 copy is type-only; the specs' one cast
+   (`page as unknown as CorePage`) stays and `package.json` / `package-lock.json` are unchanged. No dependency was added.
+3. `src/core/types.ts`, the tsconfigs, `vite.config.ts`, `vitest.config.ts`, `.npmrc` are unchanged.
+
+**Rulings where modules (or the design with itself) disagreed.**
+
+4. **DoD check 3 and the undone u26 removal (classifier note 4, web notes 10/12, server note 15).** §5.6's formula
+   lists every applied AI act, while §13.1 step 8, §14's `accept_acts` and §18 #10 / #24 say that after u30 exactly the
+   u17 reject and the u21 / u27 undos are outstanding. The design's explicit, repeated statement wins: an act that a
+   later undo reverted has nothing left in the map to review (and could not be restored: it is not the latest), and
+   the undo that reverted it is itself listed. Core now has `select.actStands(state, record)`: walk back from the
+   current revision, one step at a time except that an applied (not rejected) undo jumps to the revision it restored
+   (`to_revision_seq`, or `undoTarget` over the revisions before it); an act stands iff its revision is on that walk.
+   `select.unreviewedActs` (so `counts.unreviewed_acts`, the tray) and check 3 skip acts that do not stand; check 3's
+   details still name them: `removal prop_26 of example card_X (rules.v1, 1) was undone by prop_27; nothing of it is
+   left to review`. Rejecting the reverting undo, or undoing it (the redo), brings the act back and lists it again
+   (new core test 59b). Statuses are untouched (§5.9 "keep their historical status"). Consequences: the fixture and
+   `conversation.test.ts` are unchanged and pass; the journey's step 8 asserts exactly three; core test 59 and 72
+   now expect the core scenario's `undo1` (undone by `undo2`) not to be listed (3 unreviewed acts, not 4).
+5. **Posts one at a time (web note 1) is kept.** Design §18 #4 allows three posts in flight, but the server records in
+   arrival order and three in flight reordered u04/u05 on a cold server; correctness of the clarification (§0 step 4)
+   wins over the throughput the three-in-flight rule bought. `RecordingSink` stays in the web module.
+
+**Cross-module bugs fixed.**
+
+6. `tests/e2e/audio.spec.ts` E1 read `body.counts.utterances`; `GET /api/sessions/:id` answers `{ session, dod,
+   signoff, export_options }` (§8.3), so it reads `body.session.counts.utterances` (web note 11).
+7. `tests/e2e/audio.spec.ts` E4 assumed headless `getDisplayMedia` fails. Measured here: Chrome 141 headless with
+   `--use-fake-ui-for-media-stream` grants a stream with a `Fake audio` track and a `screen:` video track, so the lane
+   goes **live**. Per §17 ("assert whichever branch it takes") the test accepts `live` or an allowed error code and
+   records the branch as an annotation; a live lane opens no guidance by itself, so it presses Setup help, asserts the
+   Linux page (`data-os=linux`, the level-2 title — the page also has an "Alternatives" h3, which made the old
+   `getByRole("heading")` ambiguous), Escape closes it, and the lane is stopped. The lane uses *Capture only* so a
+   granted share does not open the model-download notice over Setup help (E7 covers that notice).
+8. `tests/e2e/audio.spec.ts` E3's silent badge. Measured here: `%noloop` is honoured (speech and segments stop when
+   the WAV ends), but the fake device then keeps delivering its last chunk at about −37 dBFS, above the −60 dBFS
+   silence floor, so the detector never reports silence. §17's fallback drops that assertion; the test now asserts
+   the honesty rule instead (the badge reads "Live — no sound heard" iff the lane's `signal` is `silent`, else "Live"
+   with `data-signal=signal`) and annotates which happened. The rendering of the silent state is pinned by a new unit
+   test, `tests/unit/web/audio/LaneBadge.test.tsx`.
+9. Added the launcher tests the plan lists and nobody owned yet: `tests/unit/launcher/launcher.test.ts` (TEST-PLAN §7:
+   `nodeVersionOk`, `installNeeded`, `buildStale`'s five conditions, `locateNpm`'s order, `browserCommand`,
+   `probePort` against stub servers and a closed port, `scripts/install-stamp.mjs` in a temp root) and
+   `tests/e2e/launcher.spec.ts` (TEST-PLAN §8.5). The step-zero `.gitkeep` files in `tests/unit/{launcher,classifier,
+   export}/` are removed.
+
+**Measured for the README** (Hugging Face Hub, `x-linked-size`, 2026-10-16): the default model at q8 is 79 586 556
+bytes in total (encoder 23 201 320 + merged decoder 53 692 803 + tokenizer/config 2 692 433); the smaller model at q8
+is 43 536 374 bytes. The README states ≈ 80 MB and ≈ 44 MB.
+
+**The product run the way a user runs it.**
+
+`EXMAP_NO_OPEN=1 EXMAP_HOME=<fresh temp dir> ./start.sh` (in the background; `node_modules/.exmap-install-stamp` ==
+`sha256(package-lock.json)` == `2de4a676…593c`, so nothing was installed; `dist/` fresh, so nothing was built):
+
+```
+exmap listening on http://127.0.0.1:4317
+Open http://127.0.0.1:4317 in Chrome or Edge
+(stderr) classifier: rules.v1 (offline)
+$ GET /                         → 200 text/html; charset=utf-8
+$ GET /api/health               → {"app":"exmap","version":"0.1.0","ok":true,"pid":…}
+$ GET /api/config               → {…,"port":4317,"loopback":true,"coop":true,"classifier":{"provider":"rules.v1",
+                                   "reason":"no model configured; using the offline rules classifier","model":null,
+                                   "credentials":"none","last_error":null}}
+$ PUT /api/settings {"user_name":"Sam"} → {"user_name":"Sam"}
+$ POST /api/sessions {title, story, actor:"Sam"} → 201 (counts.utterances 0, cards_live 1, human_verified false)
+$ POST /api/sessions/<id>/utterances?wait=1 ("A patient should be able to cancel online, but not within two hours of
+  their appointment.", lane manual) → 201 {"ok":true,"classification":{"intent":"add","classifier":{"provider":
+  "rules.v1",…},"confidence":1,"rationale":"Heard a rule ('should', 'a patient should').","proposals":[{"status":
+  "applied","events":[proposal.made, proposal.applied]}],"refused":[],"error":null}}
+SIGTERM →
+exmap: SIGTERM received, shutting down...
+start.sh exit code after SIGTERM: 0 (14 ms, a second run); server.lock removed; port closed
+```
+
+`rm -rf dist && EXMAP_NO_OPEN=1 EXMAP_HOME=<fresh temp dir> node bin/exmap.mjs` (the rebuild path):
+
+```
+exmap: building the web bundle and the server (first run, or sources changed)...
+build: vite build
+…
+✓ built in 2.30s
+build: tsc -p tsconfig.server.json
+build: removed dist/web/assets/ort-wasm-simd-threaded.asyncify-CxOG5pUO.wasm (served from /ort/ instead)
+build: ok
+exmap listening on http://127.0.0.1:4317
+Open http://127.0.0.1:4317 in Chrome or Edge
+(stderr) classifier: rules.v1 (offline)
+$ GET /api/health → {"app":"exmap","version":"0.1.0","ok":true,"pid":…}
+SIGTERM →
+exmap: SIGTERM received, shutting down...
+server.lock removed; port closed
+```
+
+**Final gates (from `npm run clean`).** `npm run check` → exit 0: the three typechecks clean; `vitest run` 65 files,
+486 tests passed; build ok. `npm run e2e` → exit 0: 18 passed (audio E1, E1a, E2–E8; axe; journey and its typed
+variant; replay ×2; smoke ×3; launcher). E3 recorded the `%noloop` annotation (silent state unreachable with the fake
+device) and E4 the `live` branch. Not verified here: Windows and macOS (the wrappers, `locateNpm`'s Windows layout and
+the per-OS capture paths are unit-tested or documented only), a real Teams call, WebGPU in a worker, and the real
+Whisper path in a browser (`scripts/whisper-check.mjs` was not run in this phase).
