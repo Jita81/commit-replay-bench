@@ -1,0 +1,225 @@
+{
+  "_source": "src/crb/factory/readiness.py CATALOGUE in jita81/commit-replay-bench",
+  "_source_commit": "ba05a67d8dc0114b71b63043991f1466055b2660",
+  "_copied": "2026-10-16",
+  "classes": {
+    "backend.route.add": [
+      {
+        "name": "method_path",
+        "question": "What HTTP method and path does the new route answer?",
+        "kind": "structural"
+      },
+      {
+        "name": "request_shape",
+        "question": "What is the request shape (params / body fields and types)?",
+        "kind": "structural"
+      },
+      {
+        "name": "response_shape",
+        "question": "What is the response shape (status code, body fields and types)?",
+        "kind": "structural"
+      },
+      {
+        "name": "error_contract",
+        "question": "What error responses must it return, and for which inputs?",
+        "kind": "structural"
+      },
+      {
+        "name": "example_payload",
+        "question": "A representative request and its exact expected response.",
+        "kind": "value"
+      }
+    ],
+    "backend.route.edit": [
+      {
+        "name": "route_identity",
+        "question": "Which existing route (method + path) changes?",
+        "kind": "structural"
+      },
+      {
+        "name": "behaviour_change",
+        "question": "What changes in its request/response shape or semantics?",
+        "kind": "structural"
+      },
+      {
+        "name": "error_contract",
+        "question": "Which error responses change, and which must stay the same?",
+        "kind": "structural"
+      },
+      {
+        "name": "example_payload",
+        "question": "A representative request and its exact expected response.",
+        "kind": "value"
+      }
+    ],
+    "backend.model.edit": [
+      {
+        "name": "field_name_type",
+        "question": "Which model, and what is the field's name and type?",
+        "kind": "structural"
+      },
+      {
+        "name": "nullability",
+        "question": "Is the field nullable? Is it unique / indexed?",
+        "kind": "structural"
+      },
+      {
+        "name": "migration_needed",
+        "question": "Is a schema migration needed (yes/no), and is it reversible?",
+        "kind": "structural"
+      },
+      {
+        "name": "default_value",
+        "question": "The exact default value when the field is unset.",
+        "kind": "value"
+      }
+    ],
+    "backend.migration.add": [
+      {
+        "name": "schema_change",
+        "question": "Which table(s) / column(s) does the migration add or alter?",
+        "kind": "structural"
+      },
+      {
+        "name": "reversible",
+        "question": "What does the downgrade do (or why is it irreversible)?",
+        "kind": "structural"
+      },
+      {
+        "name": "data_backfill",
+        "question": "The exact backfill value or rule for existing rows, if any.",
+        "kind": "value"
+      }
+    ],
+    "frontend.component.add": [
+      {
+        "name": "props",
+        "question": "What props does the component take (names, types, required)?",
+        "kind": "structural"
+      },
+      {
+        "name": "states",
+        "question": "What visual states does it have (loading / empty / error / populated)?",
+        "kind": "structural"
+      },
+      {
+        "name": "rendered_text",
+        "question": "The exact text or labels rendered in each state.",
+        "kind": "value"
+      }
+    ],
+    "frontend.component.edit": [
+      {
+        "name": "component_identity",
+        "question": "Which component changes?",
+        "kind": "structural"
+      },
+      {
+        "name": "prop_or_state_change",
+        "question": "Which props or states are added, removed or changed?",
+        "kind": "structural"
+      },
+      {
+        "name": "rendered_text",
+        "question": "The exact text or labels rendered after the change.",
+        "kind": "value"
+      }
+    ],
+    "frontend.route.add": [
+      {
+        "name": "route_path",
+        "question": "What client-side path is added, and which component renders it?",
+        "kind": "structural"
+      },
+      {
+        "name": "guard",
+        "question": "Is the route guarded (auth / role)? What happens when denied?",
+        "kind": "structural"
+      }
+    ],
+    "bug.fix": [
+      {
+        "name": "reproduction",
+        "question": "How is the bug reproduced (the input / sequence that fails)?",
+        "kind": "structural"
+      },
+      {
+        "name": "expected_behaviour",
+        "question": "What is the correct behaviour instead?",
+        "kind": "structural"
+      },
+      {
+        "name": "exact_value",
+        "question": "The exact output value / message at the reproduction input.",
+        "kind": "value"
+      }
+    ],
+    "test.add": [
+      {
+        "name": "subject_under_test",
+        "question": "Which module / function / behaviour is under test?",
+        "kind": "structural"
+      },
+      {
+        "name": "behaviour_asserted",
+        "question": "What behaviour must the new test assert?",
+        "kind": "structural"
+      }
+    ],
+    "test.fix": [
+      {
+        "name": "failing_test",
+        "question": "Which test is wrong (id), and why is it wrong?",
+        "kind": "structural"
+      },
+      {
+        "name": "corrected_assertion",
+        "question": "What must it assert instead?",
+        "kind": "structural"
+      }
+    ],
+    "docs.update": [
+      {
+        "name": "doc_target",
+        "question": "Which document / section changes, and what must it say?",
+        "kind": "structural"
+      }
+    ],
+    "ci.workflow.edit": [
+      {
+        "name": "workflow",
+        "question": "Which workflow file and job change?",
+        "kind": "structural"
+      },
+      {
+        "name": "trigger_and_steps",
+        "question": "What triggers it, and which steps are added or changed?",
+        "kind": "structural"
+      }
+    ],
+    "infra.helm.edit": [
+      {
+        "name": "chart_and_values",
+        "question": "Which chart / template / values key changes?",
+        "kind": "structural"
+      },
+      {
+        "name": "provisioning",
+        "question": "What operator provisioning (cluster, credentials) must exist first?",
+        "kind": "structural"
+      }
+    ],
+    "infra.terraform.edit": [
+      {
+        "name": "resource",
+        "question": "Which resource(s) and attribute(s) change?",
+        "kind": "structural"
+      },
+      {
+        "name": "provisioning",
+        "question": "What operator provisioning (account, billing, domain) must exist first?",
+        "kind": "structural"
+      }
+    ]
+  }
+}

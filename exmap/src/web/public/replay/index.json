@@ -1,0 +1,11 @@
+{
+  "fixtures": [
+    {
+      "name": "demo",
+      "file": "conversation.v1.json",
+      "title": "Appointment cancellation — classifier fixture v1",
+      "utterances": 31,
+      "durationMs": 114000
+    }
+  ]
+}
