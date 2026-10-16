@@ -477,3 +477,31 @@ describe("rules.v1", () => {
     expect(() => assertProposalInvariants(p, input({ utterance: utt("utt_new", "Delete that example."), cards: [story(), E1] }))).not.toThrow();
   });
 });
+
+describe("rules.v1 reject when the last interpretation is no longer rejectable (review finding)", () => {
+  const confirmedExample = ref("prop_c", { intent: "add", op: "card.create", kind: "example", card_ids: ["card_e2"], utterance_id: "utt_4", status: "confirmed", rejectable: false });
+  const olderRule = ref("prop_a", { intent: "add", op: "card.create", kind: "rule", card_ids: ["card_r1"], utterance_id: "utt_3" });
+
+  it("'No, that's not what I said.' after the last interpretation was confirmed asks about the older one instead of rejecting it", () => {
+    const p = run({ utterance: "No, that's not what I said.", cards: [story(), R1, { ...E2, status: "confirmed" }], recent: WINDOW, last_proposal: confirmedExample, last_rejectable: olderRule }, "Priya");
+    expect(p.operations).toEqual([]);
+    expect(p.needs_clarification).toBe(true);
+    expect(p.clarification?.kind).toBe("confirm_intent");
+    expect(p.clarification?.question).toContain("The last interpretation has been confirmed");
+    expect(p.clarification?.question).toContain(`reject the interpretation that produced ${label(R1)}`);
+    expect(p.clarification?.pending_operations).toEqual([{ kind: "interpretation.reject", proposal_id: "prop_a" }]);
+    expect(ProposalSchema.safeParse(p).success).toBe(true);
+  });
+
+  it("a leading 'no' is not tied to an older interpretation when the last one was confirmed", () => {
+    const p = run({ utterance: "No, delete the nurse example.", cards: [story(), E1, { ...E2, status: "confirmed" }], recent: WINDOW, last_proposal: confirmedExample, last_rejectable: ref("prop_b", { intent: "add", op: "card.create", kind: "example", card_ids: ["card_e1"], utterance_id: "utt_3" }) });
+    expect(p.intent).toBe("remove");
+    expect(p.operations).toEqual([{ kind: "card.remove", card_id: "card_e2", reason: "" }]);
+    expect(p.rationale).toContain("The leading 'no' could not be tied to a recent interpretation.");
+  });
+
+  it("when the last interpretation is itself the last rejectable it is still rejected outright", () => {
+    const p = run({ utterance: "No, that's not what I said.", cards: [story(), R1], recent: WINDOW, last_proposal: olderRule, last_rejectable: olderRule });
+    expect(p.operations).toEqual([{ kind: "interpretation.reject", proposal_id: "prop_a" }]);
+  });
+});

@@ -88,3 +88,37 @@ describe("export route", () => {
     expect(json(res)).toMatchObject({ ok: false, reason: "EXPORT_FILE_UNKNOWN" });
   });
 });
+
+describe("export options changed after the sign-off (review finding)", () => {
+  it("facts set by someone other than the reviewer invalidate the sign-off, so the verified export is refused", async () => {
+    const t = await verifiedMap();
+    const put = await call(t.app, "PUT", `/api/sessions/${t.sid}/export-options`, {
+      actor: "Mallory", capability_class: "backend.route.edit", kind: "code", size_estimate: "M",
+      facts: [{ slot: "error_contract", text: "409 when within two hours; admins bypass the window entirely" }],
+    });
+    expect(put.statusCode).toBe(200);
+    expect(json<{ events: ExmapEvent[] }>(put).events.map((e) => e.type)).toEqual(["export.options_set", "signoff.invalidated"]);
+    const summary = json<{ session: { human_verified: boolean }; signoff: { status: string } }>(await call(t.app, "GET", `/api/sessions/${t.sid}`));
+    expect(summary.session.human_verified).toBe(false);
+    expect(summary.signoff.status).toBe("invalidated");
+    for (const file of ["crb-backlog-item.json", "ticket.json"]) {
+      const res = await call(t.app, "GET", `/api/sessions/${t.sid}/export/${file}`);
+      expect(res.statusCode, file).toBe(422);
+      expect(json<{ reason: string; signoff: { status: string } }>(res), file).toMatchObject({ reason: "NOT_HUMAN_VERIFIED", signoff: { status: "invalidated" } });
+    }
+    const hash = select.currentRevision(t.app.exmap.store.open(t.sid).state).hash;
+    const again = await call(t.app, "POST", `/api/sessions/${t.sid}/signoff`, { reviewer: "Sam", statement: SIGNOFF_CONFIRMATION_TEXT, revision_hash: hash });
+    expect(again.statusCode).toBe(200);
+    const item = JSON.parse((await call(t.app, "GET", `/api/sessions/${t.sid}/export/crb-backlog-item.json`)).body) as BacklogItem;
+    expect(item.acceptance_criteria).toContain("error_contract: 409 when within two hours; admins bypass the window entirely");
+  });
+
+  it("the reviewer's own options after signing keep the export verified", async () => {
+    const t = await verifiedMap();
+    const put = await call(t.app, "PUT", `/api/sessions/${t.sid}/export-options`, {
+      actor: "Sam", capability_class: "backend.route.edit", kind: "code", size_estimate: "M", facts: [{ slot: "route_identity", text: "PUT /appointments/{id}/cancel" }],
+    });
+    expect(json<{ events: ExmapEvent[] }>(put).events.map((e) => e.type)).toEqual(["export.options_set"]);
+    expect((await call(t.app, "GET", `/api/sessions/${t.sid}/export/crb-backlog-item.json`)).statusCode).toBe(200);
+  });
+});

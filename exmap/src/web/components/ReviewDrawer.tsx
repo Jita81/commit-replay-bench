@@ -37,7 +37,8 @@ export function markList(state: MapState, check: DodCheckId): string[] {
 function invalidationText(state: MapState, signoff: Signoff): string {
   const inv = signoff.invalidated!;
   const by = state.revisions.find((r) => r.event_id === inv.by_event_id);
-  const type = by?.cause ?? "a later event";
+  const optionsChange = by === undefined && inv.to_revision.hash === signoff.revision.hash;
+  const type = by?.cause ?? (optionsChange ? "a change to the export options by someone other than the reviewer" : "a later event");
   return `The sign-off by ${signoff.reviewer.name} (${timeOf(signoff.at)}, revision ${hash8(signoff.revision.hash)}) was invalidated by ${type} at ${timeOf(by?.at ?? null)} (revision ${hash8(inv.to_revision.hash)}). Review the map and sign off again.`;
 }
 

@@ -446,3 +446,28 @@ describe("buildClassifierInput", () => {
     expect(only.input(only.say("hmm")).pending_clarification).toBeNull();
   });
 });
+
+describe("voice reject after the newest interpretation was confirmed (review finding, real rules.v1 through the app)", () => {
+  it("asks about the older rule instead of rejecting it, and leaves both cards as they were", async () => {
+    const { classifyRules } = await import("../../../src/classifier/rules-v1.js");
+    const h = await import("./helpers.js");
+    const t = await h.makeApp({ classifier: h.fakeClassifier([], (input) => classifyRules(input)) });
+    const s = await h.createSession(t.app, { story: "As a patient I want to cancel my appointment online" });
+    await h.postUtterance(t.app, s.id, h.uttId(), "A patient should be able to cancel online, but not within two hours of their appointment.", { speaker: "Sam" });
+    await h.postUtterance(t.app, s.id, h.uttId(), "For example, if a patient cancels three hours before, then the cancellation succeeds.", { speaker: "Priya" });
+    const cards = () => Object.values(t.app.exmap.store.open(s.id).state.cards);
+    const rule = cards().find((c) => c.kind === "rule")!;
+    const example = cards().find((c) => c.kind === "example")!;
+    expect([rule.status, example.status]).toEqual(["applied", "applied"]);
+    expect((await h.call(t.app, "POST", `/api/sessions/${s.id}/cards/${example.id}/confirm`, { actor: "Sam" })).statusCode).toBe(200);
+    const res = await h.postUtterance(t.app, s.id, h.uttId(), "No, that's not what I said.", { speaker: "Priya" });
+    const c = h.json<{ classification: { intent: string; needs_clarification?: boolean } }>(res).classification;
+    expect(c.intent).toBe("reject");
+    const state = t.app.exmap.store.open(s.id).state;
+    expect(state.cards[rule.id]!.status).toBe("applied");
+    expect(state.cards[example.id]!.status).toBe("confirmed");
+    const open = select.openClarifications(state);
+    expect(open).toHaveLength(1);
+    expect(open[0]!.question).toContain("The last interpretation has been confirmed");
+  });
+});

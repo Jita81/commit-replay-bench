@@ -15,7 +15,7 @@ import * as select from "./select.js";
 import { INTENT_OF, Refusal, refuse, shapeCommand, sortDefinitions } from "./shape.js";
 import type {
   ApplyContext, ApplyResult, Card, CardEffect, CardId, CardKind, CardRecord, Clarification, Command, Definition, EventId,
-  EventPayload, ExmapEvent, IdPrefix, IsoTimestamp, MapState, NeedsReview, NewCard, Operation, OperationTemplate, Proposal,
+  EventPayload, ExmapEvent, ExportOptionsInput, IdPrefix, IsoTimestamp, MapState, NeedsReview, NewCard, Operation, OperationTemplate, Proposal,
   Provenance, RevisionStamp, Sha256Fn, Signoff,
 } from "./types.js";
 
@@ -51,14 +51,18 @@ class Batch {
     const event = chainEvent({ seq: this.cur.head.seq, hash: this.cur.head.hash }, body, this.sha256);
     this.events.push(event);
     this.cur = reduce(this.cur, event);
-    if ("revision" in event && this.signoffBefore !== null && !this.invalidated) {
-      this.invalidated = true;
-      const signoff = this.signoffBefore;
-      this.emit(this.ids("evt"), {
-        type: "signoff.invalidated", signoff_id: signoff.id, by_event_id: event.id, from_revision: signoff.revision, to_revision: event.revision,
-      });
-    }
+    if ("revision" in event) this.invalidateSignoff(event, event.revision);
     return event;
+  }
+
+  /** Appends signoff.invalidated once per batch when a sign-off was active before it (§5.8). */
+  invalidateSignoff(by: ExmapEvent, toRevision: RevisionStamp): void {
+    if (this.signoffBefore === null || this.invalidated) return;
+    this.invalidated = true;
+    const signoff = this.signoffBefore;
+    this.emit(this.ids("evt"), {
+      type: "signoff.invalidated", signoff_id: signoff.id, by_event_id: by.id, from_revision: signoff.revision, to_revision: toRevision,
+    });
   }
 
   nextRevision(): number {
@@ -717,7 +721,20 @@ function recordSignoff(b: Batch, command: Extract<Command, { kind: "signoff.reco
 function setExportOptions(b: Batch, command: Extract<Command, { kind: "export.options_set" }>): void {
   const previous = select.exportOptions(b.cur);
   const seq = (previous?.seq ?? 0) + 1;
-  b.emit(b.ids("evt"), (at) => ({ type: "export.options_set", options: { ...command.options, seq, at } }));
+  const event = b.emit(b.ids("evt"), (at) => ({ type: "export.options_set", options: { ...command.options, seq, at } }));
+  // The facts become acceptance-criteria lines of the verified export (brief §1.10), so a changed value that the
+  // signing reviewer did not supply is a substantive change for the sign-off (brief §0), though not for the revision.
+  const active = select.activeSignoff(b.base);
+  if (active !== null && command.options.by !== active.reviewer.name && !sameExportOptions(previous, command.options)) {
+    const { seq: revSeq, hash } = select.currentRevision(b.cur);
+    b.invalidateSignoff(event, { seq: revSeq, hash });
+  }
+}
+
+function sameExportOptions(previous: ExportOptionsInput | null, next: ExportOptionsInput): boolean {
+  if (previous === null) return next.facts.length === 0 && next.capability_class === "unclassified" && next.kind === "code" && next.size_estimate === "unsized";
+  return previous.capability_class === next.capability_class && previous.kind === next.kind && previous.size_estimate === next.size_estimate
+    && previous.facts.length === next.facts.length && previous.facts.every((f, i) => f.slot === next.facts[i]!.slot && f.text === next.facts[i]!.text);
 }
 
 function execute(b: Batch, command: Command): void {

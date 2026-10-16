@@ -366,7 +366,20 @@ function handleReject(sc: Scoring, input: ClassifierInput): Draft {
   if (lr === null) return none("reject", sc.confidence, "Heard a rejection, but nothing on the map can be rejected right now; use Remove or Edit on the card.");
   if (inWindow(lr, input)) {
     const op: ClassifierOperation = { kind: "interpretation.reject", proposal_id: lr.id };
-    return { intent: "reject", operations: [op], confidence: sc.confidence, clarification: null, heard_intent: null, rationale: `Rejecting the last interpretation (${quote(sc.cues.reject)}).` };
+    const lp = input.last_proposal;
+    if (lp === null || lp.id === lr.id) {
+      return { intent: "reject", operations: [op], confidence: sc.confidence, clarification: null, heard_intent: null, rationale: `Rejecting the last interpretation (${quote(sc.cues.reject)}).` };
+    }
+    // The newest interpretation was confirmed (or changed) since, so it is not rejectable; never fall through to an older
+    // one silently — the speaker may mean the newest card (brief §0: ask rather than guess).
+    const card = input.cards.find((c) => lr.card_ids.includes(c.id));
+    const what = card ? `the interpretation that produced ${candidateLabel(card, input)}` : "the earlier interpretation";
+    const why = lastNotRejectable(lp);
+    return {
+      intent: "reject", operations: [], confidence: sc.confidence, heard_intent: null,
+      clarification: { kind: "confirm_intent", question: `The last interpretation ${why}. Did you mean to reject ${what}?`, candidates: [], pending_operations: [op] },
+      rationale: `Heard a rejection (${quote(sc.cues.reject)}), but the last interpretation ${why}; asking before rejecting an older one.`,
+    };
   }
   const pool = bySeqDesc(input.cards.filter((c) => c.kind !== "story" && c.proposal_id !== null));
   const res: Resolution = pool.length === 0 ? { kind: "none", why: "no interpretation on the map" } : { kind: "ambiguous", candidates: pool, why: "" };
@@ -376,6 +389,13 @@ function handleReject(sc: Scoring, input: ClassifierInput): Draft {
     ask.clarification.question = ask.clarification.question.replace(/ \(\)$/, "");
   }
   return fromAsk(ask, "reject", sc.confidence, "reject", "Which interpretation is wrong? The last one is not recent.", "Heard a rejection, but nothing on the map can be rejected right now; use Remove or Edit on the card.");
+}
+
+/** Why the last interpretation cannot be the one a bare "no" rejects (it is not the last rejectable). */
+function lastNotRejectable(lp: NonNullable<ClassifierInput["last_proposal"]>): string {
+  if (lp.status === "confirmed") return "has been confirmed";
+  if (lp.op === "confirm") return "was a confirmation";
+  return "has changed since";
 }
 
 function handleConfirm(sc: Scoring, input: ClassifierInput): Draft {
@@ -413,7 +433,8 @@ function addPrefix(draft: Draft, sc: Scoring, input: ClassifierInput): Draft {
   }
   if (sc.prefix === "reject") {
     const lr = input.last_rejectable;
-    if (inWindow(lr, input)) return { ...draft, operations: [{ kind: "interpretation.reject", proposal_id: lr.id }, ...draft.operations] };
+    const lp = input.last_proposal;
+    if (inWindow(lr, input) && (lp === null || lp.id === lr.id)) return { ...draft, operations: [{ kind: "interpretation.reject", proposal_id: lr.id }, ...draft.operations] };
     return { ...draft, rationale: `${draft.rationale} (The leading 'no' could not be tied to a recent interpretation.)` };
   }
   const lp = input.last_proposal;

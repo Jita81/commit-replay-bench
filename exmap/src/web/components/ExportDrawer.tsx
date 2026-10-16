@@ -239,7 +239,7 @@ export function ExportDrawer({ open, onClose, returnFocusTo }: ExportDrawerProps
       </button>
       {current ? (
         <div className="text-xs" data-testid="export-options-status">
-          Supplied at export by {current.by} at {timeOf(current.at)} (change {current.seq} of {Math.max(state.export_options.length, current.seq)}); not part of the sign-off
+          Supplied at export by {current.by} at {timeOf(current.at)} (change {current.seq} of {Math.max(state.export_options.length, current.seq)}); not part of the sign-off; a change by anyone other than the signing reviewer invalidates it
           {state.export_options.length > 1 ? (
             <details className="mt-1" data-testid="export-options-history">
               <summary>Earlier values ({state.export_options.length - 1})</summary>
