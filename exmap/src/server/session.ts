@@ -66,6 +66,8 @@ export interface SessionDeps {
   onClassified?: (stamp: ClassifierStamp) => void;
   /** After a failed append (the store stops serving the session as open). */
   onBroken?: (session: Session, info: BrokenInfo) => void;
+  /** A classification job failed unexpectedly (a bug, not a classifier outcome); the app logs it. */
+  onJobError?: (e: unknown) => void;
 }
 
 function errorInfo(e: unknown): ClassifierErrorInfo {
@@ -228,7 +230,10 @@ export class Session {
    * broken, or the utterance unknown).
    */
   classify(utteranceId: UtteranceId): Promise<ClassificationOutcome | null> {
-    return this.#chain.run(() => this.#classifyJob(utteranceId)).catch(() => null);
+    return this.#chain.run(() => this.#classifyJob(utteranceId)).catch((e: unknown) => {
+      this.#deps.onJobError?.(e);
+      return null;
+    });
   }
 
   /** Resolves once every classification queued so far has finished. */
@@ -236,9 +241,10 @@ export class Session {
     return this.#chain.idle();
   }
 
-  async #callClassifier(input: ClassifierInput): Promise<{ p: ClassifierProposal | null; error: ClassifierErrorInfo | null }> {
+  /** Builds the input and calls the classifier; a throw from either is an error outcome, never a lost utterance. */
+  async #callClassifier(build: () => ClassifierInput): Promise<{ p: ClassifierProposal | null; error: ClassifierErrorInfo | null }> {
     try {
-      return { p: await this.#deps.classifier.classify(input, { signal: this.#abort.signal }), error: null };
+      return { p: await this.#deps.classifier.classify(build(), { signal: this.#abort.signal }), error: null };
     } catch (e) {
       return { p: null, error: errorInfo(e) };
     }
@@ -257,7 +263,7 @@ export class Session {
     if (this.#closed || this.#broken) return null;
     const utterance = this.#state.utterances.find((u) => u.id === utteranceId);
     if (!utterance) return null;
-    let { p, error } = await this.#callClassifier(buildClassifierInput(this, utterance));
+    let { p, error } = await this.#callClassifier(() => buildClassifierInput(this, utterance));
     let reran = false;
     for (;;) {
       if (this.#closed || this.#abort.signal.aborted) return null;
@@ -272,7 +278,7 @@ export class Session {
       });
       if ("outcome" in result) return result.outcome;
       reran = true;
-      ({ p, error } = await this.#callClassifier({ ...buildClassifierInput(this, utterance), pending_clarification: null }));
+      ({ p, error } = await this.#callClassifier(() => ({ ...buildClassifierInput(this, utterance), pending_clarification: null })));
     }
   }
 
@@ -282,7 +288,14 @@ export class Session {
     const proposalIds: ProposalId[] = [];
     const runEvents: ExmapEvent[] = [];
     if (p) {
-      const bridged = bridgeProposal(p, this.#state, utterance, { nextId: this.#deps.nextId, actorForVoice: voiceActor });
+      let bridged: ReturnType<typeof bridgeProposal>;
+      try {
+        bridged = bridgeProposal(p, this.#state, utterance, { nextId: this.#deps.nextId, actorForVoice: voiceActor });
+      } catch (e) {
+        // a bridge failure is a bug, but the utterance is still classified — as an error, never silently
+        error = { code: "E_BRIDGE_FAILED", message: e instanceof Error ? e.message : String(e) };
+        bridged = { commands: [], refused: [] };
+      }
       refused.push(...bridged.refused);
       for (const command of bridged.commands) {
         if (command.kind === "proposal.propose") {
@@ -299,34 +312,49 @@ export class Session {
       : { provider: this.#deps.classifier.provider, model: null, prompt_version: null, fallback_from: null, error: null, actor: null };
     const cited = proposalIds.filter((id) => this.#state.proposals[id]?.proposal.source_utterance_ids.includes(utterance.id));
     const intent: Intent | "none" = p ? p.intent : "none";
-    const record: Command = {
+    const record: Extract<Command, { kind: "classification.record" }> = {
       kind: "classification.record",
       utterance_id: utterance.id,
       intent,
       heard_intent: p && intent === "none" ? p.heard_intent : null,
       classifier: stamp,
       confidence: p ? round2(p.confidence) : 0,
-      rationale: p ? p.rationale : `The classifier failed (${error?.code ?? "unknown"}); nothing was proposed.`,
-      proposal_ids: cited,
+      rationale: p && !error ? p.rationale : `The classifier failed (${error?.code ?? "unknown"}); nothing was proposed.`,
+      proposal_ids: error ? [] : cited,
       refused,
-      error: p ? null : error,
+      error,
     };
-    const r = this.applyLocked(record);
-    if (!r.ok) return null;
+    let r = this.applyLocked(record);
+    if (!r.ok) {
+      // the classifier's own figures were refused by core (a malformed stamp or confidence): ledger that as the error
+      const fallback: Extract<Command, { kind: "classification.record" }> = {
+        ...record,
+        intent: "none",
+        heard_intent: null,
+        classifier: { provider: this.#deps.classifier.provider, model: null, prompt_version: null, fallback_from: null, error: null, actor: null },
+        confidence: 0,
+        rationale: "The classifier's result could not be recorded; nothing was proposed.",
+        proposal_ids: [],
+        error: { code: "E_CLASSIFICATION_REFUSED", message: `${r.reason}: ${r.detail}` },
+      };
+      r = this.applyLocked(fallback);
+      if (!r.ok) return null;
+      Object.assign(record, fallback);
+    }
     runEvents.push(...r.events);
-    this.#deps.onClassified?.(stamp);
+    this.#deps.onClassified?.(record.classifier);
     const classified = r.events[r.events.length - 1]!;
     return {
       events: runEvents,
-      proposal_ids: cited,
+      proposal_ids: record.proposal_ids,
       summary: {
         event: { id: classified.id, seq: classified.seq },
-        intent,
+        intent: record.intent,
         heard_intent: record.heard_intent,
-        classifier: stamp,
+        classifier: record.classifier,
         confidence: record.confidence,
         rationale: record.rationale,
-        proposals: cited.map((pid) => {
+        proposals: record.proposal_ids.map((pid) => {
           const mine = eventsOfProposal(runEvents, pid);
           const asked = mine.find((e): e is Extract<ExmapEvent, { type: "clarification.asked" }> => e.type === "clarification.asked");
           return {

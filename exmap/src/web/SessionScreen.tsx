@@ -254,12 +254,14 @@ export function SessionScreen(props: SessionScreenProps) {
       <div className="flex h-screen flex-col bg-slate-50 text-slate-900">
         <Header status={status} config={config} onReview={() => openDrawer("review")} onExport={() => openDrawer("export")} onSettings={() => openDrawer("settings")} />
         <ChainBanner status={status} onReload={() => location.reload()} onBack={onBack} />
-        <details className="border-b border-slate-300 bg-white px-4 py-1" open data-testid="capture-details">
-          <summary className="cursor-pointer text-sm font-semibold">Capture and replay</summary>
-          <div className="py-2">
-            <CaptureStrip mod={audio?.mod ?? null} controller={controller} loadError={audioError} />
-          </div>
-        </details>
+        <section aria-label="Capture and replay" className="border-b border-slate-300 bg-white px-4 py-1">
+          <details open data-testid="capture-details">
+            <summary className="cursor-pointer text-sm font-semibold">Capture and replay</summary>
+            <div className="py-2">
+              <CaptureStrip mod={audio?.mod ?? null} controller={controller} loadError={audioError} />
+            </div>
+          </details>
+        </section>
         <main className="flex min-h-0 grow flex-col" aria-label="Session">
         {wide ? (
           <div className="grid min-h-0 grow grid-cols-[minmax(18rem,1fr)_minmax(0,2fr)_minmax(18rem,1fr)] gap-0 divide-x divide-slate-300">

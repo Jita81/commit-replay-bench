@@ -160,7 +160,7 @@ export function ReviewDrawer({ open, onClose, pendingWork, returnFocusTo }: Revi
                     <ul className="list-inside list-disc">
                       {preview.ids.map((id) => (
                         <li key={id} data-card-id={id}>
-                          {state.cards[id]?.kind ?? "card"} {id}: {excerpt(state.cards[id]?.text ?? "", 80)}
+                          {state.cards[id]?.kind ?? "card"} {id}: {state.cards[id]?.text ?? "(not in the map)"}
                         </li>
                       ))}
                       {preview.ids.length === 0 ? <li>nothing to confirm</li> : null}

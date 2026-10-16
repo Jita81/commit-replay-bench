@@ -62,7 +62,17 @@ export function CardMenu({ card, id, pending, onClose, onConfirm, onEdit, onRemo
       className="absolute right-0 top-full z-20 mt-1 flex w-64 flex-col rounded border border-slate-500 bg-white p-1 text-sm text-slate-900 shadow-lg"
       onKeyDown={onKeyDown}
     >
-      <button type="button" role="menuitem" data-testid={`card-confirm-${card.id}`} className="rounded px-2 py-1 text-left hover:bg-slate-100 disabled:opacity-50" disabled={pending || !canConfirm} onClick={onConfirm}>
+      {/* aria-disabled, not disabled: a disabled menu item stays focusable and reachable with the arrows (ARIA menu pattern) */}
+      <button
+        type="button"
+        role="menuitem"
+        data-testid={`card-confirm-${card.id}`}
+        className="rounded px-2 py-1 text-left hover:bg-slate-100 aria-disabled:opacity-60"
+        aria-disabled={pending || !canConfirm ? true : undefined}
+        onClick={() => {
+          if (!pending && canConfirm) onConfirm();
+        }}
+      >
         Confirm{card.status === "confirmed" ? " (already confirmed)" : ""}
       </button>
       <button type="button" role="menuitem" data-testid={`card-edit-${card.id}`} className="rounded px-2 py-1 text-left hover:bg-slate-100" onClick={onEdit}>
@@ -72,7 +82,16 @@ export function CardMenu({ card, id, pending, onClose, onConfirm, onEdit, onRemo
         <div className="flex flex-col gap-1 rounded border border-red-700 bg-red-50 p-2" role="group" aria-label="Confirm removal">
           <span>Remove this {card.kind}? It stays in the history.</span>
           <div className="flex gap-2">
-            <button type="button" role="menuitem" data-testid={`card-remove-confirm-${card.id}`} className="rounded border border-red-700 px-2 py-0.5" disabled={pending} onClick={onRemove}>
+            <button
+              type="button"
+              role="menuitem"
+              data-testid={`card-remove-confirm-${card.id}`}
+              className="rounded border border-red-700 px-2 py-0.5 aria-disabled:opacity-60"
+              aria-disabled={pending ? true : undefined}
+              onClick={() => {
+                if (!pending) onRemove();
+              }}
+            >
               Confirm remove
             </button>
             <button type="button" role="menuitem" className="rounded border border-slate-400 px-2 py-0.5" onClick={() => setRemoving(false)}>
@@ -97,9 +116,11 @@ export function CardMenu({ card, id, pending, onClose, onConfirm, onEdit, onRemo
                 type="button"
                 role="menuitem"
                 data-testid={`card-accept-confirm-${card.id}`}
-                className="rounded border border-slate-600 px-2 py-0.5 disabled:opacity-50"
-                disabled={pending || reason.trim().length === 0}
-                onClick={() => onAcceptOutstanding(reason.trim())}
+                className="rounded border border-slate-600 px-2 py-0.5 aria-disabled:opacity-60"
+                aria-disabled={pending || reason.trim().length === 0 ? true : undefined}
+                onClick={() => {
+                  if (!pending && reason.trim().length > 0) onAcceptOutstanding(reason.trim());
+                }}
               >
                 Accept as outstanding
               </button>

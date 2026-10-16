@@ -300,3 +300,157 @@ Deviations and decisions recorded by step zero:
     `SpeakerStoreLike` (the contract's type), `controller.clock` / `controller.speakers` are exposed, and `updateSettings`
     / `submitManual` return booleans that a `void` contract ignores. The loader's `./audio/react/<X>.js` imports resolve
     to the `.tsx` files under Vite's bundler resolution.
+
+## 2026-10-16 — web (`src/web/` except `audio/`, `tests/unit/web/` except `audio/`, `tests/e2e/{journey,replay,axe}.spec.ts`, `tests/e2e/web-helpers.ts`)
+
+1. **Posts go one at a time, in emission order (deviation from "three posts in flight", §8.4 / decision #4).** The
+   session screen wraps the audio module's `HttpUtteranceSink` in `RecordingSink` (`src/web/replay/driver.ts`), which
+   sends each POST after the previous one has been answered. Reason: the server records, and so classifies, in arrival
+   order, and with three requests in flight back-to-back utterances arrived out of order (an instant replay on a cold
+   server, 1 run in 6: u05 recorded before u04). u05 was then classified while the map held one example, so it removed
+   "the only example" instead of asking. Serialising fixed it (9 of 9 cold runs in order). On loopback the cost is one
+   short request per utterance; the 201 never waits for classification. A retried transient failure can still land
+   after a newer post (the post queue's backoff). The integration phase may move this into the audio module instead
+   (`PostQueue` `maxInFlight: 1` for one session), or make the server order by `t_start_ms`.
+2. **`window.__exmap`** (only with `?testhooks=1` or a dev build) = `{ audio: { state, postQueueIdle, segmentsClosed,
+   pendingWork }, replay: { playUntil, skip, playAll, position }, store: { state, status, settled } }`. It is installed
+   only once the `?replay=` fixture is loaded into the controller. `ReplayDriver` additionally takes `ready` (every call
+   waits for the fixture) and `settled`. `playUntil` / `playAll` resolve once the page's reduced ledger holds every
+   utterance the sink posted, each with its classification record (`ledgerSettled`), so a test that acts next sees the
+   outcome of every utterance it played. `store.settled()` waits the same way after manual input.
+3. **Transcript test ids.** Inside a row nothing starts with `utterance-`: `transcript-lane`, `transcript-speaker`,
+   `transcript-time`, `transcript-provider`, `transcript-text`, `chip-proposal-<pid>` (text `<intent> · <status>`),
+   `chip-classification-<eventId>`, `chip-classifying`. This keeps the audio spec's row locator
+   `[data-testid^="utterance-"]:not([data-testid^="utterance-proposals-"])` counting rows only. `role="log"` +
+   `data-testid="transcript"` sit on a wrapper `div` around the `<ol>` (axe `listitem`: an `<li>` needs a real list
+   parent). The row's inline pieces are separated by spaces in the text ("Me Sam 00:00 Replay …"); without them the
+   audio spec's `\b\d{2}:\d{2}\b` cannot match `Sam00:00Replay`.
+4. **Clarification item** = `<li><div role="group" data-testid="clarification-<cid>" data-status>` (axe `list`: a
+   `<ul>` may only hold listitems). Extra ids: `clarification-will-<cid>`, `clarification-question-<cid>`,
+   `clarification-text-answers-<cid>`, `clarification-text-submit-<cid>`, `clarification-dismiss-reason-<cid>` /
+   `-confirm-<cid>`, `clarification-error-<cid>`.
+5. **Review drawer.** `dod-mark-<id>` is a single button: the first press shows `dod-mark-list-<id>`, a snapshot of
+   the cards; the second press ("Confirm these N cards") posts exactly that snapshot, never a recomputed list.
+   `dod-mark-cancel-<id>` cancels. Extra ids: `dod-details-<id>`, `dod-act-<pid>`, `dod-clarification-<cid>`,
+   `signoff-insert` ("Insert sentence"), `signoff-revision`, `signoff-not-current`, `review-status`,
+   `review-verified`, `outstanding-<qid>`, `accepted-questions`. `signoff-status` is derived from the ledger (the active
+   sign-off). The response-derived line only covers the moment before `signoff.recorded` arrives, and it is never
+   shown for a sign-off that was later invalidated.
+6. **Provenance popover** adds `rejection-<cardId>` and `rejection-review-<cardId>` for a removed, rejected or undone
+   card. They name the act's classifier and actor (`rules.v1 · answered by Sam` for a resolved clarification,
+   `· speaker <label>` for a voice confirm), and who reviewed it. The reviewer is found from the applied `confirm`
+   proposal that names the act in `proposal_ids`: "confirmed by voice (rules.v1, 0.5, speaker Priya)" or
+   "confirmed by Sam". The voice wording relies on the bridge stamping the speaker label as `classifier.actor` on voice
+   `confirm` proposals (core §7). `src/server/classifier-bridge.ts` as it stands does this. Also `history-v<n>`,
+   `supersedes-<id>`, `superseded-by-<id>`, `restored-by-<id>`, `confirmed-by-<id>`. The popover, menu and edit dialog
+   render beside the card's `<article>`, not inside it, so a faded (`opacity-60`) history card does not fade them.
+   Text inside history cards stays `text-slate-900` (axe colour-contrast with the history toggle on).
+7. **Card menu** items use `aria-disabled` instead of `disabled` (ARIA menu pattern: they stay focusable). Found in
+   Chromium: on a confirmed card the first item ("Confirm") was natively disabled, focus stayed on the card, and
+   Escape did not close the menu.
+8. **Acts stay "pending…" until their events land.** `useAct` waits up to 5 s for the store's head to reach the
+   highest `seq` in the response's `events`. The response's events are never applied locally.
+9. **Settings before audio.** `App` loads `GET /api/settings` once and the session screen builds the audio controller
+   only after that, so `SpeakerStore` gets `userName = settings.user_name || null`. A name set later becomes the
+   microphone's label when no label is assigned. `SessionStore.connect()` after `dispose()` reopens from the head
+   (React StrictMode remounts in dev). The `?replay=`-without-`?session=` creation runs once per page.
+10. **e2e.** The shared helpers for the three web specs are in `tests/e2e/web-helpers.ts`; `fixtures.ts` is unchanged.
+    The journey follows §13.1 as written. **Step 8 asserts exactly three unreviewed acts (u17, u21, u27) and fails
+    with core as landed: `$p26` is also listed (classifier §4).** The rest of step 8 and steps 9–14 accept whatever
+    acts are listed. Typed variant: the rule is made by hand first (`POST …/cards`) so that "Delete that example."
+    has exactly one example to resolve to. The three typed sentences are an example add, "Change that limit to 24
+    hours." and "Delete that example.", giving intents add / amend / remove, and every `utterance.recorded` is `lane:
+    "manual"`, `provider: "manual"`, `is_local: true`, `model: null`.
+11. **Seam for the audio module:** `tests/e2e/audio.spec.ts` E1 reads `body.counts.utterances` from `GET
+    /api/sessions/:id`, but §8.3 (and both servers below) answer `{ session: SessionSummary, dod, signoff,
+    export_options }`, so it should read `body.session.counts.utterances`. Not edited here (audio's file).
+12. **Verification.** The real server could not run from `dist/` during the parallel phase, so the three web specs
+    were run in Chromium 141 from a scratchpad harness against: (a) an in-memory stand-in for §8 built from the real
+    core, rules.v1, export and the classifier's scratch mini-bridge; (b) the server module's own in-progress
+    `startServer()`, run from source with a scratch web build. Neither touched `dist/`. On both, `replay.spec.ts`
+    (2/2), `axe.spec.ts` (1/1) and the journey's typed variant pass. The full journey passes steps 1–14 once step 8's
+    count is relaxed to the 4 that core lists today. Axe found no violation of any impact on the main screen, the
+    drawers, history-on, and 800 px wide. Not covered here: Windows / macOS browsers; the narrow (tab) layout beyond
+    axe.
+
+## 2026-10-16 — server (`src/server/` incl. `routes/`, `tests/unit/server/`, `tests/fixtures/sessions/`)
+
+1. **Bridge seam: `bridgeProposal(p, state, utterance, ctx): { commands, refused }`** is added next to `toCoreCommands`
+   (whose signature is kept and which returns `.commands`). A classifier op the bridge cannot turn into a core op
+   (`confirm` with nothing to confirm, `undo` with too few steps, an unrepresentable template) is returned in `refused`
+   as `{ operation: "unknown", reason, detail }` and ledgered in `utterance.classified.refused`, never dropped.
+   Exported too: `voiceActor(u)` (= `speaker ?? "(<Call|Me|Typed>, no speaker label)"`), `LANE_LABEL`, `REDO_QUESTION`,
+   `toClassifierOp`, `templateToClassifierOp`, `BridgeContext`, `BridgeResult`.
+2. **Actors.** As core note 7 asks, a voice `confirm` proposal carries `classifier.actor = utterance.speaker` (null when
+   no label was assigned); other AI interpretations carry `actor: null`. For a resolving (not dismissed) result, every
+   proposal carries `actorForVoice(utterance)`, not only the first (§8.7 names "proposals carrying
+   resolves_clarification_id"): a "both" answer's second removal was chosen by the person too, so it must not show up
+   as an unreviewed AI act. Only the first proposal carries `resolves_clarification_id`, as designed.
+3. **Voice and click give the same map outcome (§6.6), which the literal §8.7 rows did not guarantee.** A resolving
+   op whose kind matches the clarification's `pending_operation` applies that operation verbatim. A voice choice on a
+   `card.update` template with an amendment computes `patch.text` with core's `resolveTemplate` rule (`from`→`to` in
+   the chosen card, else `card.text + " Amendment: " + append`). The design said "amendment dropped", which gives
+   different text for voice and click. A resolving undo is never turned into another "redo it?" question. Without
+   this, a voice "yes" to "redo it?" asked again forever.
+4. **Template details §8.7 left open.** (a) A `choose_target` `card.update` whose pending patch has no text (only
+   `answer` / `rule_id` / `about_card_id`) becomes `{ patch: <those fields>, amendment: null }`. (b) The `card.remove`
+   reason goes into the asking proposal's rationale as ` — <reason>` (classifier note 3). (c) `intent: "none"` with
+   `resolves.dismissed: true` (a bare "No" / "Neither") still emits the `dismiss` answer. The "none → no commands" row
+   would otherwise never dismiss by voice.
+5. **A refused proposal never takes its batch-mates down.** `proposal.propose` is all or nothing. When core refuses
+   `proposal n of m`, the session records that proposal in `refused[]` and proposes the rest again as one batch, so it
+   is still one undo step. If the dropped one carried `resolves_clarification_id`, the next proposal carries it.
+6. **No utterance is classified silently or lost.** A throw from `buildClassifierInput` or the classifier → `error {
+   code: ClassifierError.code | "aborted" | "E_CLASSIFIER_FAILED" }`, intent `none`, confidence 0. A bridge throw →
+   `E_BRIDGE_FAILED`. Core refusing the `classification.record` (for example a malformed stamp from a provider) → a
+   fallback record with `E_CLASSIFICATION_REFUSED`. After `close()` nothing more is ledgered: an utterance whose
+   classification was aborted stays recorded and unclassified, and `counts.classified` shows it. It is not
+   re-classified on the next start (no design hook for that).
+7. **Session API (internal to the server).** `new Session(deps: SessionDeps)` (the stub took an id).
+   `classify(utteranceId): Promise<ClassificationOutcome | null>` (the stub said `void`; the summary feeds `?wait=1`).
+   `exclusive(fn)` + `applyLocked(cmd)` run compound mutex sections (§8.4 step 2, the typed answer).
+   `subscribe(fn | { onEvents, onBroken, onClose })`, `classificationsIdle()`, `humanProposal(id, op, actor,
+   rationale)`. `ExmapHome.acquireLock()` is `async` (the 200 ms re-read of an unparsable lock).
+8. **App seams.** `AppOptions.modelClient?: ModelClient` (additive) makes `createClassifier` build the real claude
+   provider over a fake client, so tests exercise `last_error` without network. `ServerConfig.classifier:
+   ClassifierConfig` holds `last_error` in memory. `app.exmap` also carries `home`, `now`, `nextId`, `port()`,
+   `allowedHosts()` and `allowedOrigins()`. When an injected classifier's provider differs from the environment's
+   selection, `/api/config` reports the injected one with reason `"a classifier was injected by the caller"`.
+9. **CLI output.** stdout stays exactly the listening line. The §6.2 `classifier: …` startup line goes to stderr.
+   `main()` exits 6 on `HomeLockedError` (same as the launcher).
+10. **Write failure.** After a failed append the session stays broken for the rest of the process: 409
+    `LEDGER_BROKEN` on every act and on GET, listed with `broken { code: "LEDGER_WRITE_FAILED", row, seq, detail }`
+    and the pre-failure head, WebSocket clients get an error frame + 4009. It is re-read from disk on the next start.
+    §9's "evicted so the next open re-reads the file" is read as "the next process"; re-opening in the same process
+    would hide the failure from the person.
+11. **BrokenInfo.** `row` = the file line of the failing event (blank lines counted), found by re-walking the chain
+    (core note 5). `seq` = that event's own `seq`, or `null` for `LEDGER_PARSE_ERROR`. Extra code `SESSION_MISMATCH`
+    when the first event names another session. A last line that parses but lacks its `\n` is also a parse error (a
+    torn write). `LedgerReadResult` gains `rows`, and its error branch carries the readable prefix. On the stream a
+    `META_INVALID` session closes 4009 with reason `LEDGER_BROKEN` (`StreamMessage` has three reasons).
+12. **Small choices.** Accept on a clarifying proposal → 409 `PROPOSAL_NOT_CONFIRMABLE`. `review/checks` with an
+    unknown card → 404 `CARD_NOT_FOUND` (§8.5 names only `CARD_NOT_LIVE`). Unknown routes → 404 `NOT_FOUND`
+    ErrorBody. Fastify body errors keep their 4xx with reason `BAD_REQUEST`. The `text/plain` parser is removed (415).
+    `/api/catalogue` serves the vendored file byte for byte. Export bodies go out as Buffers so the content types are
+    exactly the export module's: Fastify would append `; charset=utf-8` to `application/json`. `/ort/*.mjs` is forced
+    to `text/javascript; charset=utf-8` (step zero note 11). The WebSocket Origin check also accepts
+    `http://[::1]:<p>`, matching the Host guard. `summaryOf` caches a verified session as open, so listing does not
+    replay it again.
+13. **Arrival order.** The server records utterances in arrival order, as designed. Web note 1's reordering with
+    three posts in flight is still the client's to avoid. Ordering by `t_start_ms` on the server was not done:
+    utterances from two lanes overlap in time, so arrival order is the only order the server can honour without
+    holding posts back.
+14. **Fixtures.** `tests/fixtures/sessions/` holds `ses_valid01_0000a1`, `ses_tamper01_0000b2` (row 3's utterance text
+    changed by one character → `HASH_MISMATCH` at row 3) and `ses_trunc01_0000c3` (last line cut mid-JSON →
+    `LEDGER_PARSE_ERROR` at its last row). Each has `meta.json` and `events.jsonl`. All three are generated with the
+    real core by `tests/unit/server/fixture-ledgers.ts` (regenerate: `npx tsx tests/unit/server/fixture-ledgers.ts
+    --write`), and `persistence.test.ts` asserts byte equality. The step-zero `.gitkeep` there and in
+    `tests/unit/server/` are gone.
+15. **Verified.** `npx vitest run tests/unit/server` → 12 files, 87 tests passed. `npm run typecheck` is clean for the
+    whole tree at the time of writing. `npm run build` then `playwright test tests/e2e/smoke.spec.ts` → 3 passed
+    (COOP/COEP on, lock removed at teardown). A manual run of `node dist/server/server/main.js` with
+    `EXMAP_PORT=0` showed one stdout line, `/ort/*.mjs` as `text/javascript`, `no-store` on `/api/*`, 403 for a
+    foreign Host, and SIGTERM removing `server.lock`. The bridge over the whole §14 fixture:
+    `tests/unit/classifier/conversation.test.ts` runs through u29 with every command applied, and fails at the u30
+    sign-off for the `$p26` reason of classifier note 4. A scratch copy with `"$p26"` added to the u30 `accept_acts`
+    passes end to end: invalidation at u31, re-sign-off, the final live set and the counts.

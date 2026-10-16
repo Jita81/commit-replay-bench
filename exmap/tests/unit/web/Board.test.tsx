@@ -129,6 +129,23 @@ describe("Board", () => {
     expect(document.activeElement).toBe(rule);
   });
 
+  it("on a confirmed card the menu still takes focus (Confirm is aria-disabled) and Escape closes it", async () => {
+    const { b, ids } = richMap();
+    const { api } = renderWithEnv(<Board />, { state: b.state });
+    const story = screen.getByTestId(`card-${ids.story}`);
+    story.focus();
+    fireEvent.keyDown(story, { key: "Enter" });
+    const menu = await screen.findByTestId(`card-menu-${ids.story}`);
+    const confirm = within(menu).getByTestId(`card-confirm-${ids.story}`);
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(document.activeElement).toBe(confirm);
+    await userEvent.click(confirm);
+    expect(api.confirmCard).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByTestId(`card-menu-${ids.story}`)).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(story);
+  });
+
   it("the card menu sends a human confirm / remove through the API", async () => {
     const { b, ids } = richMap();
     const { api } = renderWithEnv(<Board />, { state: b.state });

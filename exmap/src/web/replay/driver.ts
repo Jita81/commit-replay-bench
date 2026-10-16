@@ -68,23 +68,36 @@ export class ReplayDriver {
   }
 }
 
-/** Wraps the audio module's sink and remembers the id of every utterance the server accepted (201, or a 409 duplicate). */
+/**
+ * Wraps the audio module's sink: (1) sends one POST at a time, in the order the pipeline emitted them, and (2) remembers
+ * the id of every utterance the server accepted (201, or a 409 duplicate).
+ *
+ * (1) exists because the server records — and therefore classifies — utterances in arrival order, and the classifier
+ * reads the conversation so far (§8.4, §6). With the post queue's three requests in flight, back-to-back utterances
+ * (an instant replay) were seen arriving out of order (u05 before u04), which changes what is proposed. On loopback the
+ * serial cost is one short request per utterance; the 201 never waits for classification. A later retry of a failed
+ * post can still land after a newer one (the post queue's backoff), which is a transient failure, not the normal path.
+ */
 export class RecordingSink implements UtteranceSink {
   readonly #inner: UtteranceSink;
   readonly posted: string[] = [];
   readonly #seen = new Set<string>();
+  #tail: Promise<unknown> = Promise.resolve();
 
   constructor(inner: UtteranceSink) {
     this.#inner = inner;
   }
 
-  async post(u: UtteranceWire): Promise<PostOutcome> {
-    const outcome = await this.#inner.post(u);
-    if (outcome.ok && !this.#seen.has(u.id)) {
-      this.#seen.add(u.id);
-      this.posted.push(u.id);
-    }
-    return outcome;
+  post(u: UtteranceWire): Promise<PostOutcome> {
+    const run = this.#tail.then(() => this.#inner.post(u));
+    this.#tail = run.catch(() => undefined);
+    return run.then((outcome) => {
+      if (outcome.ok && !this.#seen.has(u.id)) {
+        this.#seen.add(u.id);
+        this.posted.push(u.id);
+      }
+      return outcome;
+    });
   }
 }
 

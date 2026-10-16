@@ -249,7 +249,7 @@ export function buildClassifierInput(s: { state: MapState; seqOfEvent: (id: Even
   const cards: CardIndexEntry[] = [];
   for (const id of state.card_order) {
     const card = state.cards[id];
-    if (card && INDEX_STATUSES.has(card.status)) cards.push(indexEntry(card, s.seqOfEvent, speakerOf));
+    if (card && INDEX_STATUSES.has(card.status)) cards.push(indexEntry(card, (eventId) => s.seqOfEvent(eventId), speakerOf));
   }
   const last = lastProposalRecord(state);
   const rejectable = lastRejectableRecord(state);

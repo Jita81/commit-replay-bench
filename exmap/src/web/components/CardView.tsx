@@ -76,6 +76,17 @@ export function CardView({ card, history }: CardViewProps) {
         aria-labelledby={`card-${card.id}-text`}
         aria-describedby={`card-${card.id}-status`}
         className={`relative flex flex-col gap-1 rounded border border-slate-400 bg-white/70 p-2 text-sm text-slate-900 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 ${history ? "opacity-60" : ""}`}
+        onKeyDown={(e) => {
+          // Escape anywhere in the card closes what the card has open and returns focus to it
+          if (e.key !== "Escape" || (!menuOpen && !provOpen)) return;
+          e.stopPropagation();
+          e.preventDefault();
+          if (menuOpen) closeMenu();
+          if (provOpen) {
+            setProvOpen(false);
+            article.current?.focus();
+          }
+        }}
       >
         <p id={`card-${card.id}-text`} className={history ? "line-through" : ""} data-testid={`card-text-${card.id}`}>
           {card.text}
@@ -93,7 +104,7 @@ export function CardView({ card, history }: CardViewProps) {
             ))}
           </dl>
         ) : null}
-        {link ? <div className="text-xs text-slate-700">{link}</div> : null}
+        {link ? <div className={`text-xs ${history ? "text-slate-900" : "text-slate-700"}`}>{link}</div> : null}
         {card.kind === "question" ? (
           <div className="flex flex-wrap gap-1 text-xs">
             <span data-testid={`card-answer-${card.id}`}>{card.answer === null ? "unanswered" : `answer: ${excerpt(card.answer, 80)}`}</span>
@@ -143,45 +154,46 @@ export function CardView({ card, history }: CardViewProps) {
             </button>
           ) : null}
         </div>
-        {provOpen ? <ProvenancePopover card={card} id={provId} onClose={closeProv} eventSeq={eventSeq} /> : null}
-        {menuOpen && !history ? (
-          <CardMenu
-            card={card}
-            id={menuId}
-            pending={act.pending}
-            onClose={closeMenu}
-            onConfirm={() => {
-              setMenuOpen(false);
-              void act.run((actor) => api.confirmCard(card.id, actor));
-            }}
-            onEdit={() => {
-              setMenuOpen(false);
-              setEditOpen(true);
-            }}
-            onRemove={() => {
-              setMenuOpen(false);
-              void act.run((actor) => api.removeCard(card.id, actor));
-            }}
-            onAcceptOutstanding={(reason) => {
-              setMenuOpen(false);
-              void act.run((actor) => api.acceptQuestion(card.id, actor, reason));
-            }}
-          />
-        ) : null}
-        {editOpen ? (
-          <CardEditDialog
-            card={card}
-            open={editOpen}
-            pending={act.pending}
-            onClose={() => setEditOpen(false)}
-            onSave={(patch) => {
-              void act.run((actor) => api.updateCard(card.id, actor, patch)).then((r) => {
-                if (r) setEditOpen(false);
-              });
-            }}
-          />
-        ) : null}
       </article>
+      {/* beside the article, not inside it: a faded history card must not fade its popover (contrast) */}
+      {provOpen ? <ProvenancePopover card={card} id={provId} onClose={closeProv} eventSeq={eventSeq} /> : null}
+      {menuOpen && !history ? (
+        <CardMenu
+          card={card}
+          id={menuId}
+          pending={act.pending}
+          onClose={closeMenu}
+          onConfirm={() => {
+            setMenuOpen(false);
+            void act.run((actor) => api.confirmCard(card.id, actor));
+          }}
+          onEdit={() => {
+            setMenuOpen(false);
+            setEditOpen(true);
+          }}
+          onRemove={() => {
+            setMenuOpen(false);
+            void act.run((actor) => api.removeCard(card.id, actor));
+          }}
+          onAcceptOutstanding={(reason) => {
+            setMenuOpen(false);
+            void act.run((actor) => api.acceptQuestion(card.id, actor, reason));
+          }}
+        />
+      ) : null}
+      {editOpen ? (
+        <CardEditDialog
+          card={card}
+          open={editOpen}
+          pending={act.pending}
+          onClose={() => setEditOpen(false)}
+          onSave={(patch) => {
+            void act.run((actor) => api.updateCard(card.id, actor, patch)).then((r) => {
+              if (r) setEditOpen(false);
+            });
+          }}
+        />
+      ) : null}
     </li>
   );
 }

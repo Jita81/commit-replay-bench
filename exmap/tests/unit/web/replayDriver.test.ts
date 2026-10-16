@@ -116,4 +116,31 @@ describe("ReplayDriver", () => {
     await done;
     expect(settled).toBe(true);
   });
+
+  it("the recording sink sends one post at a time, in emission order", async () => {
+    const sent: string[] = [];
+    const releases: Array<() => void> = [];
+    const sink = new RecordingSink({
+      post: (u: UtteranceWire) =>
+        new Promise<PostOutcome>((resolve) => {
+          sent.push(u.id);
+          releases.push(() => resolve({ ok: true, eventId: `evt_${u.id}`, duplicate: false }));
+        }),
+    });
+    const b = new MapBuilder();
+    const ids = [b.utter("u04 text"), b.utter("u05 text")];
+    const wires = ids.map((id) => b.state.utterances.find((u) => u.id === id)!);
+    const first = sink.post(wires[0]!);
+    const second = sink.post(wires[1]!);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent).toEqual([ids[0]]); // the second waits for the first answer
+    releases[0]!();
+    await first;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sent).toEqual(ids);
+    releases[1]!();
+    await second;
+    expect(sink.posted).toEqual(ids);
+  });
 });

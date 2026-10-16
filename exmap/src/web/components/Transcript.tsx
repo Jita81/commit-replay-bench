@@ -1,6 +1,7 @@
 // exmap/src/web/components/Transcript.tsx — the utterance log (design §10.3): rows by t_start_ms, lane badge, the
 // speaker label a person assigned (or "— (no speaker label)"), mm:ss, the provider chip, the text, and under each row
 // the chips built from the ledger only: one per proposal citing it, one per classification record, "classifying…".
+import { Fragment } from "react";
 import { select } from "../../core/index.js";
 import type { ClassificationRecord, MapState, ProposalRecord, Utterance } from "../../core/types.js";
 import { LANE_LABEL, mmss, providerChip, speakerLabel } from "../format.js";
@@ -46,24 +47,25 @@ function Row({ u, state }: { u: Utterance; state: MapState }) {
   const classifying = records.length === 0;
   return (
     <li data-testid={`utterance-${u.id}`} id={`utterance-${u.id}`} className="border-b border-slate-200 px-3 py-2 text-sm" data-lane={u.lane}>
+      {/* the {" "} separators keep the row's text readable as text (copy, screen readers): "Call Priya 00:04 Replay …" */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-700">
-        <span className="rounded bg-slate-200 px-1.5 py-0.5 font-semibold text-slate-900" data-testid="transcript-lane" aria-label={`lane ${LANE_LABEL[u.lane]}`}>
+        <span className="rounded bg-slate-200 px-1.5 py-0.5 font-semibold text-slate-900" data-testid="transcript-lane">
           {LANE_LABEL[u.lane]}
-        </span>
+        </span>{" "}
         <span data-testid="transcript-speaker" className="font-semibold text-slate-900">
           {speakerLabel(u.speaker)}
-        </span>
+        </span>{" "}
         <time data-testid="transcript-time" dateTime={`PT${Math.floor(u.t_start_ms / 1000)}S`}>
           {mmss(u.t_start_ms)}
-        </time>
+        </time>{" "}
         <span className="rounded border border-slate-300 px-1.5 py-0.5" data-testid="transcript-provider">
           {providerChip(u)}
         </span>
-        {u.confidence !== null ? <span>confidence {u.confidence}</span> : null}
-      </div>
+        {u.confidence !== null ? <> <span>confidence {u.confidence}</span></> : null}
+      </div>{" "}
       <p className="mt-1 text-slate-900" data-testid="transcript-text">
         {u.text}
-      </p>
+      </p>{" "}
       <div className="mt-1 flex flex-wrap gap-1" data-testid={`utterance-proposals-${u.id}`}>
         {proposals.map((p) => (
           <button
@@ -80,13 +82,16 @@ function Row({ u, state }: { u: Utterance; state: MapState }) {
           >
             {p.proposal.intent} · {p.status}
           </button>
-        ))}
+        )).flatMap((chip, i) => (i === 0 ? [chip] : [" ", chip]))}
         {records.map((r) => {
           const text = classificationChip(r);
           return text ? (
-            <span key={r.event_id} className="rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-xs" data-testid={`chip-classification-${r.event_id}`}>
-              {text}
-            </span>
+            <Fragment key={r.event_id}>
+              {" "}
+              <span className="rounded border border-dashed border-slate-400 px-1.5 py-0.5 text-xs" data-testid={`chip-classification-${r.event_id}`}>
+                {text}
+              </span>
+            </Fragment>
           ) : null;
         })}
         {classifying ? (
