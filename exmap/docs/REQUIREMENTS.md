@@ -1,6 +1,6 @@
 # Example Map Live: business requirement v2
 
-**Status.** For the operator to confirm; four open questions are in §10. It supersedes the business requirement in `docs/DESIGN.md` §1 where they differ. v1's interaction model and verification gate are kept. Design detail, including every crb endpoint, label, stop code and citation, is in `docs/CRB-SEAM.md`. Sources: the v1 brief, and the operator's two messages after v1 shipped ("Msg 1", "Msg 2").
+**Status.** For the operator to confirm; five open questions are in §10. It supersedes the business requirement in `docs/DESIGN.md` §1 where they differ. v1's interaction model and verification gate are kept. Design detail, including every crb endpoint, label, stop code and citation, is in `docs/CRB-SEAM.md`. Sources: the v1 brief, and the operator's two messages after v1 shipped ("Msg 1", "Msg 2").
 
 ## 1. The value
 
@@ -14,12 +14,14 @@ A second arc of value is "ensuring that ticket matches what would be needed for 
 - confirming a card is the cheapest act on screen, and deliberate: a listening cue such as "yeah" is never taken as a decision;
 - whatever the Definition of Done needs is settled during the conversation, so little or no review is left for afterwards.
 
+**Review is calibrated, not minimised.** The operator: "I would challenge the point on wanting to reduce human review minutes. I don't think that's quite right. We want to calibrate human review time vs success rates of their requirements in a self learning loop that allows us to identify common requirement gaps and feed that back to the review process with suggestions of discussion topics and even elements of the story itself." The aim is not the fewest review minutes; it is review spent where it changes how requirements fare.
+
 We will know it works when:
 
 - the factory accepts exmap's work items without a person going back to ask for missing context;
 - every agreed rule and example can be traced to the work items that carry it;
 - stops of the same cause become rarer as the improvement loop runs.
-- the people review less after the conversation: the human minutes from the start of the conversation to a signed map, and on to work the factory accepts, fall against the current way of agreeing a comparable ask, and decisions taken on screen are not reopened later.
+- review effort is calibrated: for each kind of ask, the review spent on a requirement is related to how that requirement fared, and the gaps that keep recurring are found and fed back into the next conversation.
 
 ## 2. The two stages
 
@@ -78,6 +80,13 @@ This document reads "our standard" as the organisation's standard as crb already
 3. A change is kept only when re-testing shows the failure gone and nothing new broken.
 4. The loop runs autonomously and at pace, within a declared improvement budget. A named person can stop it or revert any change.
 
+The same loop learns from requirements themselves:
+
+5. For each kind of ask, the loop relates the review spent on a requirement to how that requirement fared, and reports that calibration with its sample size.
+6. It finds the requirement gaps that recur, and feeds them back into the live session as suggested discussion topics and as proposed elements of the story, such as rules, examples and questions.
+7. A suggestion is always a proposal. It appears as a proposed topic or card, becomes part of the map only through a deliberate confirmation, and the loop records which suggestions were taken and how those requirements then fared.
+8. The catalogue of recurring gaps is itself a standard (§5): proposed by the loop, verified by people, improved from feedback, with its history of use kept.
+
 ## 7. Honesty at the handover
 
 **exmap reports the factory's verdicts; it never makes them.**
@@ -127,3 +136,5 @@ v1's non-goals stand. In addition, exmap does not:
 **Q3.** Context exmap drafts or derives reaches a builder only once the factory has measured that kind of context. Do you accept that such items feed calibration builds only until then, and should exmap propose that measurement to crb?
 
 **Q4.** What is the improvement budget: what it is counted in (model spend, people's verification time, factory runs), how large it is, who sets it, and whether it is per product or overall?
+
+**Q5.** What counts as a requirement's success: decisions taken on screen not reopened later, engineers not going back to the business, the factory building its items clean at the first attempt, no later defect traced to a missing rule or example, or a combination; and how long should the loop wait for the slow signals?
