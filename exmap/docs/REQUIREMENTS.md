@@ -1,6 +1,6 @@
 # Example Map Live: business requirement v2
 
-**Status.** For the operator to confirm; five open questions are in §10. It supersedes the business requirement in `docs/DESIGN.md` §1 where they differ. v1's interaction model and verification gate are kept. Design detail, including every crb endpoint, label, stop code and citation, is in `docs/CRB-SEAM.md`. Sources: the v1 brief, and the operator's two messages after v1 shipped ("Msg 1", "Msg 2").
+**Status.** For the operator to confirm; six open questions are in §10. It supersedes the business requirement in `docs/DESIGN.md` §1 where they differ. v1's interaction model and verification gate are kept. Design detail, including every crb endpoint, label, stop code and citation, is in `docs/CRB-SEAM.md`. Sources: the v1 brief, and the operator's two messages after v1 shipped ("Msg 1", "Msg 2").
 
 ## 1. The value
 
@@ -16,12 +16,14 @@ A second arc of value is "ensuring that ticket matches what would be needed for 
 
 **Review is calibrated, not minimised.** The operator: "I would challenge the point on wanting to reduce human review minutes. I don't think that's quite right. We want to calibrate human review time vs success rates of their requirements in a self learning loop that allows us to identify common requirement gaps and feed that back to the review process with suggestions of discussion topics and even elements of the story itself." The aim is not the fewest review minutes; it is review spent where it changes how requirements fare.
 
+**What is calibrated is the full cost of the change.** The operator: "it's not just the review time. We should be tracking participants and who they are so that we can understand the full cost of the change. That's what we are really calibrating. We want the right resource used to deliver the [outcome] we need and that's something I think we can measure from the value we get from the context." The bracketed word is a reading of the operator's text. The cost side is everyone's time on the change, by who they are and what role they played, plus what it cost downstream. The value side is how the requirement fared (Q5).
+
 We will know it works when:
 
 - the factory accepts exmap's work items without a person going back to ask for missing context;
 - every agreed rule and example can be traced to the work items that carry it;
 - stops of the same cause become rarer as the improvement loop runs.
-- review effort is calibrated: for each kind of ask, the review spent on a requirement is related to how that requirement fared, and the gaps that keep recurring are found and fed back into the next conversation.
+- the full cost of each change is known, from who took part, in what role and for how long, through to its downstream cost; and for each kind of ask the loop shows which mix of people and effort delivers the outcome needed at the least cost.
 
 ## 2. The two stages
 
@@ -86,6 +88,9 @@ The same loop learns from requirements themselves:
 6. It finds the requirement gaps that recur, and feeds them back into the live session as suggested discussion topics and as proposed elements of the story, such as rules, examples and questions.
 7. A suggestion is always a proposal. It appears as a proposed topic or card, becomes part of the map only through a deliberate confirmation, and the loop records which suggestions were taken and how those requirements then fared.
 8. The catalogue of recurring gaps is itself a standard (§5): proposed by the loop, verified by people, improved from feedback, with its history of use kept.
+9. Each session records who took part, in what role, and for how long, and every participant knows it is recorded. Who said what stays what people assigned; exmap does not infer a person's contribution.
+10. The full cost of a change joins the people cost of its conversations with its downstream cost: engineers' time, the factory's spend and any rework, through the links from rules and examples to work items (§4).
+11. For each kind of ask, the loop relates the mix of roles and the effort spent to how requirements fared, and suggests who to involve as well as what to discuss.
 
 ## 7. Honesty at the handover
 
@@ -138,3 +143,5 @@ v1's non-goals stand. In addition, exmap does not:
 **Q4.** What is the improvement budget: what it is counted in (model spend, people's verification time, factory runs), how large it is, who sets it, and whether it is per product or overall?
 
 **Q5.** What counts as a requirement's success: decisions taken on screen not reopened later, engineers not going back to the business, the factory building its items clean at the first attempt, no later defect traced to a missing rule or example, or a combination; and how long should the loop wait for the slow signals?
+
+**Q6.** Is the calibration of roles, or of named people; where do the cost rates come from; and who may see the results? Measuring named individuals' contribution to outcomes is employee monitoring, with its own governance, and may change how people take part.
