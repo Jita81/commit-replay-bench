@@ -342,3 +342,24 @@ describe("claude provider", () => {
     for (const p of proposals) expect(() => ProposalSchema.parse(p)).not.toThrow();
   });
 });
+
+describe("claude: reject of the last rejectable when the last interpretation is a different, confirmed one (review finding)", () => {
+  const lp = ref("prop_c", { intent: "add", op: "card.create", kind: "example", card_ids: ["card_e2"], utterance_id: "utt_4", status: "confirmed", rejectable: false });
+  const lr = ref("prop_a", { intent: "add", op: "card.create", kind: "rule", card_ids: ["card_r1"], utterance_id: "utt_2" });
+
+  it("becomes a confirm_intent naming the older interpretation instead of rejecting it", async () => {
+    const { classifier } = make([reply({ intent: "reject", operations: [{ kind: "interpretation.reject", proposal_id: "prop_a" }], target_card_ids: [], confidence: 0.95, needs_clarification: false, clarification: null, resolves: null, rationale: "They said no." })]);
+    const p = await classifier.classify(input({ utterance: utt("utt_5", "No, that's not what I said.", { speaker: "Priya" }), cards: [story(), R1, { ...E2, status: "confirmed" }], last_proposal: lp, last_rejectable: lr }));
+    expect(p.operations).toEqual([]);
+    expect(p.clarification?.kind).toBe("confirm_intent");
+    expect(p.clarification?.question).toContain("The last interpretation has been confirmed");
+    expect(p.clarification?.pending_operations).toEqual([{ kind: "interpretation.reject", proposal_id: "prop_a" }]);
+    expect(ProposalSchema.safeParse(p).success).toBe(true);
+  });
+
+  it("a leading reject of that older interpretation on another intent is dropped", async () => {
+    const { classifier } = make([reply({ intent: "remove", operations: [{ kind: "interpretation.reject", proposal_id: "prop_a" }, { kind: "card.remove", card_id: "card_e2", reason: "" }], target_card_ids: ["card_e2"], confidence: 0.9, needs_clarification: false, clarification: null, resolves: null, rationale: "No, remove it." })]);
+    const p = await classifier.classify(input({ utterance: utt("utt_5", "No, delete the nurse example.", { speaker: "Priya" }), cards: [story(), R1, { ...E2, status: "confirmed" }], last_proposal: lp, last_rejectable: lr }));
+    expect(p.operations).toEqual([{ kind: "card.remove", card_id: "card_e2", reason: "" }]);
+  });
+});

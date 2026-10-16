@@ -93,6 +93,20 @@ export function parseGwt(text: string): Gwt | null {
   return { given, when, then };
 }
 
+/** A line Gherkin would read as structure (a keyword line, a step, a tag, a table row, a doc string fence). */
+const GHERKIN_LINE = /^\s*(?:(?:Feature|Rule|Background|Scenario Outline|Scenario Template|Scenario|Example|Examples|Scenarios)\s*:|(?:Given|When|Then|And|But|\*)(?:\s|$)|[@|]|"""|```)/;
+
+/**
+ * Free text for a Gherkin description: every line that Gherkin would parse as structure is written as a comment
+ * (`# <line>`), so card text can never add a scenario, a step or a tag to the file (design §12.4: no invented steps).
+ */
+export function gherkinDescription(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (GHERKIN_LINE.test(line) ? `# ${line.trim()}` : line))
+    .join("\n");
+}
+
 /** Prefixes every non-empty line with `spaces` spaces; empty lines stay empty (no trailing whitespace). */
 export function indent(text: string, spaces: number): string {
   const pad = " ".repeat(spaces);
@@ -102,11 +116,16 @@ export function indent(text: string, spaces: number): string {
     .join("\n");
 }
 
-/** Neutralises only a leading "#" / ">" / "-" (per line) in card text and backticks; everything else is left as typed. */
+/**
+ * Neutralises a leading "#" / ">" / "-" (per line), backticks, "<" (raw HTML and autolinks) and "](" (an inline link
+ * target such as javascript:) in card text; everything else is left as typed and renders as typed.
+ */
 export function mdEscape(text: string): string {
   return text
     .split("\n")
     .map((line) => line.replace(/^(\s*)([#>-])/, "$1\\$2"))
     .join("\n")
-    .replace(/`/g, "\\`");
+    .replace(/`/g, "\\`")
+    .replace(/</g, "\\<")
+    .replace(/\]\(/g, "]\\(");
 }

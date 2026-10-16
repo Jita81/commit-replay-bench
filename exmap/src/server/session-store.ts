@@ -232,7 +232,11 @@ export class SessionStore {
     const read = new JsonlLedger(join(this.dirOf(id), "events.jsonl")).readAll();
     if (!read.ok) {
       const prefix = this.#replayPrefix(id, read.events);
-      return { ok: false, status: "broken", meta: meta.meta, prefix, broken: { code: read.error.code, row: read.error.row, seq: null, detail: read.error.detail } };
+      // the rows before the unreadable one may end inside a batch too: point at that batch's first row
+      const torn = read.events.length > 0 ? this.engine.replay(read.events) : null;
+      const tornAt = torn && !torn.ok && torn.error.code === "INCOMPLETE_BATCH" ? failingIndex(this.engine, read.events, torn.error) : -1;
+      const hint = tornAt >= 0 ? `; the readable rows before it end inside an unfinished batch, so truncate before row ${read.rows[tornAt] ?? tornAt + 1} (that batch's first row)` : "";
+      return { ok: false, status: "broken", meta: meta.meta, prefix, broken: { code: read.error.code, row: read.error.row, seq: null, detail: `${read.error.detail}${hint}` } };
     }
     const { events, rows } = read;
     if (events.length === 0) return { ok: true, meta: meta.meta, events, state: initialState(id) };
@@ -246,11 +250,13 @@ export class SessionStore {
     const r = this.engine.replay(events);
     if (r.ok) return { ok: true, meta: meta.meta, events, state: r.state };
     const at = failingIndex(this.engine, events, r.error);
-    const prefix = this.#replayPrefix(id, events.slice(0, at));
+    const prefix = this.#replayPrefix(id, r.error.code === "INCOMPLETE_BATCH" ? events : events.slice(0, at));
     const seq = "seq" in r.error ? r.error.seq : null;
+    const row = rows[at] ?? at + 1;
+    const detail = r.error.code === "INCOMPLETE_BATCH" ? `${describeReplayError(r.error)}; truncate before row ${row} to drop the partial batch` : describeReplayError(r.error);
     return {
       ok: false, status: "broken", meta: meta.meta, prefix,
-      broken: { code: r.error.code, row: rows[at] ?? at + 1, seq, detail: describeReplayError(r.error) },
+      broken: { code: r.error.code, row, seq, detail },
     };
   }
 
@@ -258,7 +264,7 @@ export class SessionStore {
   #replayPrefix(id: string, events: ExmapEvent[]): MapState {
     let slice = events;
     for (let guard = 0; guard < 4 && slice.length > 0; guard++) {
-      const r = this.engine.replay(slice);
+      const r = this.engine.replay(slice, { requireComplete: false });
       if (r.ok) return r.state;
       slice = slice.slice(0, failingIndex(this.engine, slice, r.error));
     }
@@ -269,7 +275,7 @@ export class SessionStore {
 /** The index of the event a replay error names (the first index whose prefix fails the chain walk). */
 function failingIndex(engine: Engine, events: readonly ExmapEvent[], error: ReplayError): number {
   if (error.code === "EMPTY_LEDGER") return 0;
-  if (error.code === "REVISION_MISMATCH") {
+  if (error.code === "REVISION_MISMATCH" || error.code === "INCOMPLETE_BATCH") {
     const i = events.findIndex((e) => e.seq === error.seq);
     return i >= 0 ? i : 0;
   }

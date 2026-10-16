@@ -130,6 +130,41 @@ describe("launcher pure helpers (design §11)", () => {
       await new Promise<void>((r) => closed.close(() => r()));
       expect(await L.probePort(closedUrl)).toBe("free");
     });
+
+    it("a port held by a program that does not answer HTTP (silent, or resetting the connection) → other, and the launcher exits 3 (review finding)", async () => {
+      const net = await import("node:net");
+      const { spawn } = await import("node:child_process");
+      const held: import("node:net").Server[] = [];
+      const listen = (onConn: (s: import("node:net").Socket) => void) => new Promise<number>((r) => {
+        const srv = net.createServer(onConn);
+        held.push(srv);
+        srv.listen(0, "127.0.0.1", () => r((srv.address() as AddressInfo).port));
+      });
+      const sockets: import("node:net").Socket[] = [];
+      const silent = await listen((sock) => { sockets.push(sock); });
+      const reset = await listen((sock) => sock.destroy());
+      try {
+        expect(await L.probePort(`http://127.0.0.1:${silent}`, fetch, 300)).toBe("other");
+        expect(await L.probePort(`http://127.0.0.1:${reset}`)).toBe("other");
+        const home = mkdtempSync(join(tmpdir(), "exmap-launcher-port-"));
+        try {
+          const child = spawn(process.execPath, [join(ROOT, "bin", "exmap.mjs"), "--no-install", "--no-build"], {
+            env: { ...process.env, EXMAP_NO_OPEN: "1", EXMAP_HOME: home, EXMAP_PORT: String(reset) }, stdio: ["ignore", "pipe", "pipe"],
+          });
+          let err = "";
+          child.stderr.on("data", (d: Buffer) => { err += d.toString(); });
+          const code = await new Promise<number | null>((r) => child.on("exit", r));
+          expect(code).toBe(3);
+          expect(err).toContain(`port ${reset} is in use by another program; set EXMAP_PORT or pass --port`);
+          expect(err).not.toContain("EADDRINUSE");
+        } finally {
+          rmSync(home, { recursive: true, force: true });
+        }
+      } finally {
+        for (const sock of sockets) sock.destroy();
+        await Promise.all(held.map((srv) => new Promise<void>((r) => srv.close(() => r()))));
+      }
+    }, 20_000);
   });
 });
 

@@ -134,6 +134,43 @@ describe("replay and verify on open", () => {
     expect(listed.head.seq).toBe(lastRow - 1);
   });
 
+  it("a ledger cut at a line boundary inside a batch → 409 LEDGER_BROKEN INCOMPLETE_BATCH naming the batch's first row; writes are refused, not 500 (review finding)", async () => {
+    const t = await withThreeBatches();
+    await t.app.close();
+    const rows = lines(t.home, t.sid);
+    const last = JSON.parse(rows[rows.length - 1]!) as ExmapEvent;
+    const batchStart = rows.findIndex((r) => (JSON.parse(r) as ExmapEvent).batch_id === last.batch_id) + 1;
+    expect(rows.length - batchStart).toBe(1); // a two-event batch: proposal.made, proposal.applied
+    writeLines(t.home, t.sid, rows.slice(0, -1)); // newline-terminated, chain intact
+    const app = (await makeApp({ home: t.home })).app;
+    const res = await call(app, "GET", `/api/sessions/${t.sid}`);
+    expect(res.statusCode).toBe(409);
+    expect(json(res)).toMatchObject({ reason: "LEDGER_BROKEN", code: "INCOMPLETE_BATCH", row: batchStart, seq: batchStart });
+    expect(json<{ detail: string }>(res).detail).toContain(`row ${batchStart}`);
+    const listed = json<{ sessions: SessionSummary[] }>(await call(app, "GET", "/api/sessions")).sessions.find((s) => s.id === t.sid)!;
+    expect(listed.broken).toMatchObject({ code: "INCOMPLETE_BATCH", row: batchStart });
+    expect(listed.head.seq).toBe(batchStart); // the summary is computed from every readable row
+    const write = await call(app, "POST", `/api/sessions/${t.sid}/cards`, { actor: "Ana", card: { kind: "rule", text: "Another rule.", about_card_id: null } });
+    expect(write.statusCode).toBe(409);
+    expect(lines(t.home, t.sid)).toEqual(rows.slice(0, -1));
+    await app.close();
+    writeLines(t.home, t.sid, rows.slice(0, batchStart - 1)); // the advice: truncate before that row
+    const healed = (await makeApp({ home: t.home })).app;
+    expect((await call(healed, "GET", `/api/sessions/${t.sid}`)).statusCode).toBe(200);
+  });
+
+  it("a cut inside a two-event batch's last line names the batch's first row in the detail", async () => {
+    const t = await withThreeBatches();
+    await t.app.close();
+    const rows = lines(t.home, t.sid);
+    rows[rows.length - 1] = rows[rows.length - 1]!.slice(0, 40);
+    writeLines(t.home, t.sid, rows, false);
+    const app = (await makeApp({ home: t.home })).app;
+    const res = await call(app, "GET", `/api/sessions/${t.sid}`);
+    expect(json(res)).toMatchObject({ code: "LEDGER_PARSE_ERROR", row: rows.length });
+    expect(json<{ detail: string }>(res).detail).toContain(`truncate before row ${rows.length - 1}`);
+  });
+
   it("a broken session refuses POST …/utterances and writes nothing", async () => {
     const t = await withThreeBatches();
     await t.app.close();
@@ -271,5 +308,26 @@ describe("server.lock", () => {
     expect(err).toBeInstanceOf(HomeLockedError);
     expect((err as HomeLockedError).url).toBeNull();
     expect(fs.existsSync(join(home2, "server.lock"))).toBe(true); // not ours: left alone
+    expect((err as Error).message).toContain(`delete ${join(home2, "server.lock")}`); // the remedy is printed
+  });
+
+  it("a lock with a port where no exmap with that pid answers is stale even though the pid is alive (pid reused after a crash or reboot; review finding)", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const net = await import("node:net");
+    const closed = await new Promise<number>((r) => { const srv = net.createServer().listen(0, "127.0.0.1", () => { const p = (srv.address() as { port: number }).port; srv.close(() => r(p)); }); });
+    const sleeper = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"]);
+    try {
+      for (const pid of [sleeper.pid!, process.pid]) { // an unrelated live process, and this very process (same pid after a restart)
+        const home = tempHome();
+        fs.writeFileSync(join(home, "server.lock"), JSON.stringify({ pid, started_at: "2026-10-16T00:00:00.000Z", version: "0.1.0", port: closed }));
+        const srv = await startServer(opts(home));
+        const lock = JSON.parse(fs.readFileSync(join(home, "server.lock"), "utf8")) as { pid: number; port: number };
+        expect(lock, `pid ${pid}`).toMatchObject({ pid: process.pid, port: srv.port });
+        await srv.close();
+      }
+    } finally {
+      sleeper.kill();
+    }
   });
 });

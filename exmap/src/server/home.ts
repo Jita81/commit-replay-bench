@@ -1,6 +1,7 @@
 // exmap/src/server/home.ts — ExmapHome: paths, settings.json (atomic write), server.lock acquire/complete/release (design §9).
 // The lock is taken with an exclusive create and written + fsynced in the same step (the file is never empty); after
-// listen it is rewritten atomically with the port. A lock whose pid is dead, or that stays unparsable for 200 ms, is stale.
+// listen it is rewritten atomically with the port. A lock whose pid is dead, whose port has no exmap of that pid answering,
+// or that stays unparsable for 200 ms, is stale.
 import fs from "node:fs";
 import { join } from "node:path";
 
@@ -9,8 +10,11 @@ export class HomeLockedError extends Error {
   readonly pid: number;
   readonly port: number | null;
   readonly url: string | null;
-  constructor(info: { pid: number; port: number | null }) {
-    super(info.port ? `another exmap is already using this home at http://127.0.0.1:${info.port}` : "another exmap is starting on this home");
+  readonly lockPath: string | null;
+  constructor(info: { pid: number; port: number | null; lockPath?: string }) {
+    const what = info.port ? `another exmap is already using this home at http://127.0.0.1:${info.port}` : "another exmap is starting on this home";
+    super(info.lockPath ? `${what} (pid ${info.pid}; if no exmap is running, delete ${info.lockPath})` : what);
+    this.lockPath = info.lockPath ?? null;
     this.name = "HomeLockedError";
     this.pid = info.pid;
     this.port = info.port;
@@ -59,6 +63,29 @@ export function pidAlive(pid: number): boolean {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+export type LockProbe = "live" | "gone" | "unknown";
+
+/**
+ * Whether the exmap that wrote a lock still serves its port: "live" when /api/health answers app "exmap" with the lock's
+ * pid; "gone" when the connection is refused or something else (another program, another exmap) answers; "unknown" when
+ * the port accepts but does not answer in time (kept as live: never take a lock from a server that may be busy).
+ */
+export async function probeLockOwner(lock: { pid: number; port: number }, timeoutMs = 1500): Promise<LockProbe> {
+  let res: Response;
+  try {
+    res = await fetch(`http://127.0.0.1:${lock.port}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch (e) {
+    const code = (e as { cause?: { code?: string } }).cause?.code;
+    return code === "ECONNREFUSED" ? "gone" : "unknown";
+  }
+  try {
+    const body = (await res.json()) as { app?: unknown; pid?: unknown };
+    return res.status === 200 && body.app === "exmap" && body.pid === lock.pid ? "live" : "gone";
+  } catch {
+    return "gone";
+  }
+}
 
 export class ExmapHome {
   readonly root: string;
@@ -113,10 +140,10 @@ export class ExmapHome {
   }
 
   /**
-   * Takes server.lock (design §9). A live owner → HomeLockedError { pid, port, url }. A stale lock (dead pid, or unparsable
-   * twice 200 ms apart) is removed and the create retried once.
+   * Takes server.lock (design §9). A live owner → HomeLockedError { pid, port, url }. A stale lock (dead pid, a port where
+   * no exmap with that pid answers, or unparsable twice 200 ms apart) is removed and the create retried once.
    */
-  async acquireLock(version: string): Promise<void> {
+  async acquireLock(version: string, probe: (lock: { pid: number; port: number }) => Promise<LockProbe> = probeLockOwner): Promise<void> {
     ensureHomeDir(this.root);
     for (let attempt = 0; attempt < 2; attempt++) {
       const info: LockInfo = { pid: process.pid, started_at: new Date().toISOString(), version };
@@ -138,7 +165,14 @@ export class ExmapHome {
         await sleep(200);
         existing = this.readLock();
       }
-      if (existing !== null && pidAlive(existing.pid)) throw new HomeLockedError({ pid: existing.pid, port: existing.port ?? null });
+      // A pid alone is not proof: after a crash or reboot the old pid can belong to any process (even this one). A lock
+      // that names a port is live only while the exmap with that pid answers there.
+      if (existing !== null && pidAlive(existing.pid) && (existing.port === undefined || (await probe({ pid: existing.pid, port: existing.port })) !== "gone")) {
+        throw new HomeLockedError({ pid: existing.pid, port: existing.port ?? null, lockPath: this.lockPath });
+      }
+      if (existing !== null && pidAlive(existing.pid)) {
+        console.error(`exmap: removed a stale ${this.lockPath} (pid ${existing.pid} is not an exmap serving port ${existing.port})`);
+      }
       if (attempt === 1) break;
       try {
         fs.unlinkSync(this.lockPath);

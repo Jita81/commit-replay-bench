@@ -14,7 +14,7 @@ import {
 } from "./extract.js";
 import { isContinuation, normalizeText, splitSentences, stripDiscourse, type Sentence } from "./normalize.js";
 import {
-  askTarget, bySeqDesc, candidateLabel, inWindow, isRecent, maskReferents, parseReferent, parseReferents, resolveReferent,
+  askTarget, bySeqDesc, candidateLabel, inWindow, lastNotRejectable, isRecent, maskReferents, parseReferent, parseReferents, resolveReferent,
   titleOf, type AskResult, type Resolution,
 } from "./referents.js";
 import { CHOICE, ClassifierInputSchema, assertProposalInvariants, targetCardIds } from "./schema.js";
@@ -389,13 +389,6 @@ function handleReject(sc: Scoring, input: ClassifierInput): Draft {
     ask.clarification.question = ask.clarification.question.replace(/ \(\)$/, "");
   }
   return fromAsk(ask, "reject", sc.confidence, "reject", "Which interpretation is wrong? The last one is not recent.", "Heard a rejection, but nothing on the map can be rejected right now; use Remove or Edit on the card.");
-}
-
-/** Why the last interpretation cannot be the one a bare "no" rejects (it is not the last rejectable). */
-function lastNotRejectable(lp: NonNullable<ClassifierInput["last_proposal"]>): string {
-  if (lp.status === "confirmed") return "has been confirmed";
-  if (lp.op === "confirm") return "was a confirmation";
-  return "has changed since";
 }
 
 function handleConfirm(sc: Scoring, input: ClassifierInput): Draft {

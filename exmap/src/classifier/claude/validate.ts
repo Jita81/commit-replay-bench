@@ -4,7 +4,7 @@
 import type { CardKind, ClassifierInput, ClassifierOperation, ClassifierProposal, HeardIntent, Intent } from "../../core/types.js";
 import { MAX_CANDIDATES, MIN_CONFIDENCE, RATIONALE_MAX, SYSTEM_PROMPT_VERSION } from "../constants.js";
 import { verbPhrase } from "../extract.js";
-import { askTarget, bySeqDesc, candidateLabel, type Resolution } from "../referents.js";
+import { askTarget, bySeqDesc, candidateLabel, lastNotRejectable, type Resolution } from "../referents.js";
 import { CHOICE, INTENT_OF_OP, assertProposalInvariants, idsOfOperation, targetCardIds, type ModelProposal } from "../schema.js";
 
 export type ValidateResult = { ok: ClassifierProposal } | { fallback: string };
@@ -138,6 +138,26 @@ export function validateModelProposal(m: ModelProposal, input: ClassifierInput, 
       // a prefix reject on another intent: drop the prefix op
       operations = operations.filter((op) => !(op.kind === "interpretation.reject" && !rejectOk(op.proposal_id)));
       note("(the leading rejection named an unknown proposal and was dropped)");
+    }
+  }
+
+  // the last rejectable is older than the last interpretation, which was confirmed or changed since: rejecting the older
+  // one would be a guess at which card "that" means, so ask (brief §0, §1.7); a leading reject of it is dropped
+  const lpRef = input.last_proposal;
+  const lrRef = input.last_rejectable;
+  if (intent !== "none" && clarification === null && lpRef !== null && lrRef !== null && lpRef.id !== lrRef.id) {
+    const first = operations[0];
+    if (first?.kind === "interpretation.reject" && first.proposal_id === lrRef.id) {
+      if (intent === "reject" && operations.length === 1) {
+        const card = input.cards.find((c) => lrRef.card_ids.includes(c.id));
+        const what = card ? `the interpretation that produced ${candidateLabel(card, input)}` : "the earlier interpretation";
+        operations = [];
+        clarification = { kind: "confirm_intent", question: `The last interpretation ${lastNotRejectable(lpRef)}. Did you mean to reject ${what}?`, candidates: [], pending_operations: [first] };
+        note("(the last interpretation is not rejectable; asking before rejecting an older one)");
+      } else if (intent !== "reject" && operations.length > 1) {
+        operations = operations.slice(1);
+        note("(the leading rejection could not be tied to the last interpretation and was dropped)");
+      }
     }
   }
 

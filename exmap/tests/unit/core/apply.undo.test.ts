@@ -123,3 +123,45 @@ describe("undo", () => {
     expect(revisionHash(ok)).toBe(state.revisions[0]!.hash);
   });
 });
+
+describe("undo keeps later review decisions on cards it does not change (review finding)", () => {
+  it("confirmations and an acceptance made after the target revision survive an undo of an unrelated change", async () => {
+    const { isHumanVerified, dodReport } = await import("../../../src/core/dod.js");
+    const { signoff } = await import("./fixtures.js");
+    const { ctx, state: start, story, rule } = smallMap();
+    const create = (s: typeof start, card: Parameters<typeof humanProposal>[1]) => run(s, propose(humanProposal(ctx.nextId("prop"), card)), ctx);
+    const a = create(start, { kind: "card.create", card: { kind: "example", text: "Given a booking at 10am when the patient cancels at 7am then it is allowed", rule_id: rule } });
+    const b = create(a.state, { kind: "card.create", card: { kind: "example", text: "Given a booking at 10am when the patient cancels at 9am then it is refused", rule_id: rule } });
+    const q = create(b.state, { kind: "card.create", card: { kind: "question", text: "Do walk-ins count?", about_card_id: rule } });
+    const [ex1, ex2, question] = [createdCardId(a.events), createdCardId(b.events), createdCardId(q.events)];
+    let state = run(q.state, propose(humanProposal(ctx.nextId("prop"), { kind: "confirm", card_ids: [story, rule, ex1, ex2], proposal_ids: [] })), ctx).state;
+    state = run(state, { kind: "question.accept", question_id: question, by: "Sam", reason: "To be settled later" }, ctx).state;
+    expect(dodReport(state).pass).toBe(true);
+    state = run(state, signoff(state), ctx).state;
+    const signed = state.signoffs[0]!.revision.hash;
+    state = run(state, propose(humanProposal(ctx.nextId("prop"), { kind: "card.update", card_id: question, patch: { answer: "yes, the two hour limit applies" } }, "Priya")), ctx).state;
+    expect(isHumanVerified(state)).toBe(false);
+    const undone = run(state, propose(humanProposal(ctx.nextId("prop"), { kind: "undo", to_revision_seq: null })), ctx);
+    const undo = undone.events.find((e): e is Undo => e.type === "undo.applied")!;
+    expect(undo.revision.hash).toBe(signed);
+    for (const id of [story, rule, ex1, ex2]) expect(undone.state.cards[id]!.status, id).toBe("confirmed");
+    expect(undo.effects.map((e) => e.card_id)).toEqual([question]);
+    const qCard = undone.state.cards[question]!;
+    expect(qCard.kind === "question" && qCard.answer).toBe(null);
+    expect(qCard.kind === "question" && qCard.accepted_outstanding?.by).toBe("Sam");
+    expect(dodReport(undone.state).pass).toBe(true);
+  });
+
+  it("a needs_review flag raised by the undone rule change is cleared; one cleared by a later review stays cleared", () => {
+    const { ctx, state: start, rule } = smallMap();
+    const a = run(start, propose(humanProposal(ctx.nextId("prop"), { kind: "card.create", card: { kind: "example", text: "E1", rule_id: rule } })), ctx);
+    const ex = createdCardId(a.events);
+    const changed = run(a.state, propose(humanProposal(ctx.nextId("prop"), { kind: "card.update", card_id: rule, patch: { text: "Rule, changed." } })), ctx).state;
+    const flagged = changed.cards[ex]!;
+    expect(flagged.kind === "example" && flagged.needs_review).not.toBe(null);
+    const undone = run(changed, propose(humanProposal(ctx.nextId("prop"), { kind: "undo", to_revision_seq: null })), ctx).state;
+    const after = undone.cards[ex]!;
+    expect(after.kind === "example" && after.needs_review).toBe(null);
+    expect(after.status).toBe("applied");
+  });
+});

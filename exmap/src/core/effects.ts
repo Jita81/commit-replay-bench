@@ -157,9 +157,31 @@ export function invertEffects(effects: readonly CardEffect[], cards: Readonly<Re
 }
 
 /**
+ * The latest record of the target's version (the card now when its version has not moved, else the history entry that
+ * version left behind), when it is live with the target's content: it carries the review decisions (confirmations,
+ * acceptance, reviews of a flag) made on that very content after the target revision, which snapshots never see because
+ * review-only events create no revision.
+ */
+function reviewSource(card: Card, current: CardRecord, target: CardRecord): CardRecord | null {
+  if (!isLive(target)) return null;
+  const source = current.version === target.version ? current : card.history.find((h) => h.version === target.version)?.record ?? null;
+  return source !== null && isLive(source) && contentEquals(source, target) ? source : null;
+}
+
+/** The target record with the review state of `source`; a flag raised since the target (by a change being undone) is dropped. */
+function withLaterReview(target: CardRecord, source: CardRecord | null): CardRecord {
+  if (source === null) return target;
+  const reviewed = { ...target, status: source.status, confirmation: source.confirmation } as CardRecord;
+  if (reviewed.kind === "question" && source.kind === "question") return { ...reviewed, accepted_outstanding: source.accepted_outstanding };
+  if (reviewed.kind === "example" && source.kind === "example") return { ...reviewed, needs_review: source.needs_review === null ? null : reviewed.needs_review };
+  return reviewed;
+}
+
+/**
  * §5.9 undo: a card present in the snapshot whose record (sans history / version / restored_by) differs -> the snapshot
- * record verbatim at version+1 when content differs, `restored_by` = the undo; a card absent from the snapshot (created
- * after the target) -> rejected / undone. Already-rejected cards absent from the snapshot are left as they are.
+ * record verbatim at version+1 when content differs, `restored_by` = the undo, except that review decisions made on the
+ * target's content since the target revision are kept (reviewSource); a card absent from the snapshot (created after the
+ * target) -> rejected / undone. Already-rejected cards absent from the snapshot are left as they are.
  */
 export function diffToSnapshot(
   cards: Readonly<Record<CardId, Card>>,
@@ -175,11 +197,13 @@ export function diffToSnapshot(
     const target = snapshot[id];
     if (target) {
       if (recordEqualsIgnoring(current, target, ["version", "restored_by"])) continue;
+      const restored = withLaterReview(target, reviewSource(card, current, target));
+      if (recordEqualsIgnoring(current, restored, ["version", "restored_by"])) continue;
       out.push({
         card_id: id,
         before: current,
         after: {
-          ...target,
+          ...restored,
           version: contentEquals(current, target) ? current.version : current.version + 1,
           restored_by: provenanceOf(act.proposal, act.event_id),
         } as CardRecord,

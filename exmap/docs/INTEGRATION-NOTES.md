@@ -566,3 +566,64 @@ variant; replay ×2; smoke ×3; launcher). E3 recorded the `%noloop` annotation 
 device) and E4 the `live` branch. Not verified here: Windows and macOS (the wrappers, `locateNpm`'s Windows layout and
 the per-OS capture paths are unit-tested or documented only), a real Teams call, WebGPU in a worker, and the real
 Whisper path in a browser (`scripts/whisper-check.mjs` was not run in this phase).
+
+## 2026-10-16 — review fixes (confirmed findings of the post-build review)
+
+Each fix has a test written first that failed on the old code. Where the fix changes behaviour that DESIGN.md
+describes, the design sentence it overrides is named.
+
+1. **Export options after sign-off** (`src/core/apply.ts` `setExportOptions`, `Batch.invalidateSignoff`). Overrides
+   §5.8 and §6 "`export.options_set` … Not substantive; never invalidates". The facts are acceptance-criteria lines and
+   structural facts of the verified `crb-backlog-item.json` / `ticket.json` (brief §1.10), so a changed value set by
+   anyone other than the active sign-off's reviewer now appends `signoff.invalidated` (`by_event_id` = the options
+   event, `to_revision` = the unchanged current revision) in the same batch. The reviewer's own change and a re-save of
+   the same value do not invalidate; the options still create no revision and stay out of the revision hash. The
+   journey (sign off, then the reviewer sets the options, then export) is unchanged. TEST-PLAN case 71's last two
+   assertions pinned the old behaviour (Priya changing Sam's signed options kept the sign-off); they now assert the
+   invalidation. The review drawer names "a change to the export options by someone other than the reviewer" and the
+   export panel says so. Tests: `tests/unit/core/apply.export-options.test.ts`, `tests/unit/server/export-routes.test.ts`.
+2. **Voice reject falling through to an older interpretation** (`src/classifier/rules-v1.ts` `handleReject` and the
+   reject prefix; `src/classifier/claude/validate.ts`). Overrides §8 "`last_rejectable` in the window →
+   `interpretation.reject`" when `last_rejectable` is not `last_proposal` (the newest interpretation was confirmed or
+   changed since): rules.v1 now asks a `confirm_intent` ("The last interpretation has been confirmed. Did you mean to
+   reject the interpretation that produced …?") and a leading "no" is not applied; the Claude validator turns the same
+   reject into the same question (and drops such a leading reject). The frozen system prompt is unchanged. Tests:
+   `tests/unit/classifier/rules-v1.test.ts`, `tests/unit/classifier/claude-provider.test.ts`,
+   `tests/unit/server/bridge.test.ts` (the full flow through the app with the real rules.v1).
+3. **Undo discarding later review decisions** (`src/core/effects.ts` `diffToSnapshot`). Refines §5.9 "the snapshot
+   record verbatim": snapshots are taken only at revisions, so confirmations and question acceptances made after the
+   target revision were reverted on cards the undo did not change. The restored record is still the snapshot's, but
+   its review state (status confirmed/applied, confirmation, accepted_outstanding) comes from the latest record of the
+   target's version when that record is live with the same content (the card now, or the history entry that version
+   left); a `needs_review` flag raised since the target is dropped, one reviewed since stays cleared. Cards whose review
+   state already matches get no effect. Undo and `interpretation.reject` of the same change now leave the same review
+   state. Test: `tests/unit/core/apply.undo.test.ts`.
+4. **A ledger cut inside a batch** (`src/core/replay.ts` `incompleteBatch`, `src/server/session-store.ts`). A
+   line-aligned cut verifies as a chain but leaves a card `proposed`, a proposal `pending`, a `clarifying` proposal with
+   no question, or an active sign-off on a non-current revision; every write then failed with 500. `replay()` now
+   refuses such a ledger with `INCOMPLETE_BATCH` at the batch's first event, so the session opens as `LEDGER_BROKEN`
+   (409) with that row and the advice to truncate before it; a `LEDGER_PARSE_ERROR` whose readable rows end inside a
+   batch names that batch's first row too. The broken session's summary still covers every readable row
+   (`replay(…, { requireComplete: false })`). README *Data location* says so. Tests: `tests/unit/core/replay.test.ts`,
+   `tests/unit/server/persistence.test.ts`.
+5. **Stale server.lock with a reused pid** (`src/server/home.ts`, `bin/exmap.mjs`). Overrides §9's pid-only liveness
+   for a lock that names a port: it is live only while `/api/health` on that port answers `app: "exmap"` with the
+   lock's pid (a refused connection or another answer → stale, taken over with a log line; a port that accepts but does
+   not answer stays locked). A lock without a port (a server still starting) keeps the pid check. The error and the
+   launcher now print the remedy (delete `<home>/server.lock` when no exmap runs); README troubleshooting says so.
+   Test: `tests/unit/server/persistence.test.ts`.
+6. **Gherkin injection through multi-line story / rule text** (`src/export/text.ts` `gherkinDescription`,
+   `src/export/feature.ts`). Refines §12.4 "<story text, each line indented two spaces>": a story line or rule
+   continuation line that Gherkin would read as structure (a `Feature:`/`Rule:`/`Scenario:`/`Examples:`… keyword, a
+   step keyword, `*`, a tag, a table row or a doc-string fence) is written as a `# ` comment, keeping "no invented
+   steps". Other lines are unchanged. Test: `tests/unit/export/feature.test.ts`.
+7. **Launcher port probe** (`bin/exmap.mjs` `probePort`, `main`). A port is "free" only when the connection is refused;
+   a reset, close or silence means another program (e.g. an OTLP/gRPC collector on 4317) and gives the documented
+   exit 3 message; an `EADDRINUSE` from listen is mapped to the same message and exit code. Test:
+   `tests/unit/launcher/launcher.test.ts`.
+
+Low-severity findings: `ticket.md` now escapes `<` and `](` in card text (`mdEscape`; test in
+`tests/unit/export/ticket.test.ts`); `start.ps1` prints the missing-Node message with `[Console]::Error.WriteLine` so
+`exit 2` is reached under `$ErrorActionPreference = "Stop"` (not run here: no PowerShell in this container). Not
+changed: the append / cold-open cost growth with very long sessions (a structural change to snapshots and the session
+list; tolerable at realistic sizes per the measurement).

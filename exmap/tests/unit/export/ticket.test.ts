@@ -219,3 +219,12 @@ describe("ticket.md", () => {
     expect(file.body).toBe(ticketMarkdown(ctxOf()));
   });
 });
+
+describe("ticket.md escaping of raw HTML and link syntax in card text (review finding, low)", () => {
+  it("mdEscape turns '<' into '\\<' and '](' into ']\\(' so pasted Markdown renders the words, not markup", async () => {
+    const { mdEscape } = await import("../../../src/export/text.js");
+    const out = mdEscape("Not within two hours <img src=x onerror=alert(1)> [click](javascript:alert(1)) <javascript:alert(1)>");
+    expect(out).toBe("Not within two hours \\<img src=x onerror=alert(1)> [click]\\(javascript:alert(1)) \\<javascript:alert(1)>");
+    expect(mdEscape("[DRAFT / NOT VERIFIED] A title")).toBe("[DRAFT / NOT VERIFIED] A title");
+  });
+});

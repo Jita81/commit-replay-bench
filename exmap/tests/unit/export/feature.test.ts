@@ -148,3 +148,30 @@ describe("requirement.feature", () => {
     expect(file.body).toContain("accepted as outstanding by Sam: To be settled with the practice manager");
   });
 });
+
+describe("requirement.feature: multi-line story and rule text cannot add Gherkin structure (review finding)", () => {
+  it("a continuation line that starts with a Gherkin keyword is written as a comment, so no scenario or step is invented", () => {
+    const s = story("card_story", 1, "A patient can cancel online\nScenario: injected scenario\n  Given the attacker typed this\n  Then cucumber runs it\n@tag\n| a | b |\n\"\"\"\nplain second line");
+    const r = rule("card_rule", 2, "Not within two hours\nScenario: second injected\n  Given from a rule\nExamples:\nalso plain");
+    const e = example("card_ex", 3, "Given a booking at 10am when the patient cancels at 9am then it is refused", "card_rule");
+    const out = feature(ctxOf(buildState([s, r, e]), true));
+    const structural = lines(out).filter((l) => /^\s*(Scenario|Examples|Rule|Feature|Background)\s*:|^\s*(Given|When|Then|And|But) |^\s*[@|]|^\s*"""/.test(l) && !/^\s*#/.test(l));
+    expect(structural.filter((l) => /Scenario:/.test(l))).toHaveLength(1);
+    expect(structural.filter((l) => /^\s*Given /.test(l))).toEqual(["      Given a booking at 10am"]);
+    expect(structural.some((l) => /injected|attacker|from a rule|@tag|\| a \|/.test(l))).toBe(false);
+    expect(out).toContain("  # Scenario: injected scenario");
+    expect(out).toContain("  # Given the attacker typed this");
+    expect(out).toContain("  plain second line");
+    expect(out).toContain("  Rule: Not within two hours");
+    expect(out).toContain("    # Scenario: second injected");
+    expect(out).toContain("    also plain");
+  });
+
+  it("a first rule line that starts with a keyword is kept on the Rule: line, and a story whose first line does is commented", () => {
+    const s = story("card_story", 1, "Scenario: story as a scenario");
+    const r = rule("card_rule", 2, "Given a rule written as a step");
+    const out = feature(ctxOf(buildState([s, r]), true));
+    expect(out).toContain("  # Scenario: story as a scenario");
+    expect(out).toContain("  Rule: Given a rule written as a step");
+  });
+});

@@ -327,7 +327,8 @@ export type ApplyResult =
 export type ChainErrorCode = "PREV_HASH_MISMATCH" | "HASH_MISMATCH" | "SEQ_MISMATCH" | "SESSION_MISMATCH";
 export interface ChainError { code: ChainErrorCode; seq: number; event_id: string; detail: string }
 export type VerifyResult = { ok: true; count: number; head: Sha256Hex | "" } | { ok: false; error: ChainError };
-export type ReplayError = ChainError | { code: "REVISION_MISMATCH"; seq: number; expected: Sha256Hex; actual: Sha256Hex } | { code: "EMPTY_LEDGER" };
+export type ReplayError = ChainError | { code: "REVISION_MISMATCH"; seq: number; expected: Sha256Hex; actual: Sha256Hex } | { code: "EMPTY_LEDGER" }
+  | { code: "INCOMPLETE_BATCH"; seq: number; event_id: EventId; detail: string };   // the chain verifies but ends inside a batch
 export type ReplayResult = { ok: true; state: MapState } | { ok: false; error: ReplayError };
 
 export interface CanonicalState { schema: "exmap.revision.v1"; cards: CanonicalCard[] }   // live cards, sorted by id

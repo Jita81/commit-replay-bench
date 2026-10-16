@@ -33,3 +33,26 @@ describe("replay", () => {
     expect(imports.every((i) => i!.startsWith("./"))).toBe(true);
   });
 });
+
+describe("replay: a ledger that ends inside a batch (review finding)", () => {
+  it("every batch boundary of the scenario replays; a cut inside a batch that leaves a proposed card, a pending proposal or an un-invalidated sign-off is INCOMPLETE_BATCH at that batch's first event", () => {
+    const events = scenario().events;
+    let flagged = 0;
+    for (let n = 1; n <= events.length; n++) {
+      const prefix = events.slice(0, n);
+      const boundary = n === events.length || events[n]!.batch_id !== events[n - 1]!.batch_id;
+      const r = replay(prefix, sha256);
+      if (boundary) {
+        expect(r.ok, `boundary after seq ${n}`).toBe(true);
+        continue;
+      }
+      expect(replay(prefix, sha256, { requireComplete: false }).ok).toBe(true);
+      if (r.ok) continue;
+      flagged++;
+      expect(r.error.code).toBe("INCOMPLETE_BATCH");
+      const start = events.find((e) => e.id === events[n - 1]!.batch_id)!;
+      expect(r.error).toMatchObject({ seq: start.seq, event_id: start.id });
+    }
+    expect(flagged).toBeGreaterThan(10);
+  });
+});

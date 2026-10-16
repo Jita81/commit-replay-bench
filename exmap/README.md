@@ -188,7 +188,8 @@ Proposals are kept separate from the map: a proposal names the operation, its so
 its confidence; the map is a pure reduction of the ledger. When the target is ambiguous or the confidence is low, the
 proposal is a **clarification** — a question naming the candidates (or a yes/no on a fully resolved change), answered by
 voice or by clicking a candidate; the same answer gives the same map either way. One *step* is one utterance's batch
-or one click; **Undo** goes back one step by making a new revision that restores the earlier state. A *revision* is
+or one click; **Undo** goes back one step by making a new revision that restores the earlier state (confirmations and
+question acceptances made since on cards the undo does not change are kept). A *revision* is
 the SHA-256 of the canonical map (cards' content, links and statuses); it changes on every create, update, removal,
 replacement, definition, rejection or undo, and not on confirmations, question acceptance, sign-offs or export options.
 Removed, rejected and superseded cards stay in the ledger and appear under **Show history**.
@@ -218,7 +219,8 @@ the revision hash, the evidence chain head and the five checks, and is refused w
 *human verified* only while that sign-off is active, names the current revision and the checks still pass. **Any later
 substantive change** (a new revision) appends `signoff.invalidated` naming the change; the header returns to "Not
 verified" and the map must be reviewed and signed off again. A clarification asked after sign-off creates no revision
-but still makes the map unverified until it is answered or dismissed.
+but still makes the map unverified until it is answered or dismissed. Changing the export options (whose facts become
+acceptance-criteria lines) after sign-off also invalidates it, unless the signing reviewer made the change.
 
 ## The crb bridge
 
@@ -236,7 +238,9 @@ Export is refused with `422 NOT_HUMAN_VERIFIED` and the failing checks unless th
 exports anyway, with `DRAFT / NOT VERIFIED` in every file, `-draft-` in the item id and `DRAFT-` in the filename.
 
 The export options — crb capability class, kind, size and *slot facts* — are ledger events (`export.options_set`),
-outside the sign-off: changing them does not invalidate it. The class list and each class's slot questions come from a
+outside the requirement revision. Because their facts become acceptance-criteria lines of the verified export, a change
+by anyone other than the signing reviewer invalidates the sign-off (the reviewer's own change, or re-saving the same
+values, does not). The class list and each class's slot questions come from a
 vendored copy of crb's readiness catalogue (`src/export/crb-catalogue.json`, copied from
 `src/crb/factory/readiness.py` at commit `ba05a67d`; to update it, copy the catalogue again — never edit it by hand).
 Structural slots are the ones crb needs before work can start; value slots route rather than block. A fact is written as
@@ -252,7 +256,7 @@ lines. Pushing straight into a crb deployment is a documented next step, not par
 ```
 ~/.exmap/                     (or EXMAP_HOME)
   settings.json               your name for acts and sign-offs
-  server.lock                 exists only while a server runs (pid, port)
+  server.lock                 exists while a server runs (pid, port); a crash can leave it behind
   sessions/<session-id>/
     meta.json                 title and creation time
     events.jsonl              the ledger: one canonical-JSON event per line, append-only
@@ -261,9 +265,14 @@ lines. Pushing straight into a crb deployment is a documented next step, not par
 Each event carries `prev_hash` (the previous event's `hash`, `""` for the first) and `hash` = SHA-256 of its canonical
 JSON (sorted keys, no whitespace) including `prev_hash`. Every open re-walks the chain. A broken chain — an edited,
 missing or truncated line — is refused with its row number (`LEDGER_BROKEN`) and is never repaired automatically;
-inspect the row with `sed -n '<row>p' events.jsonl` and, if you decide to, truncate the file yourself (keep a copy).
+inspect the row with `sed -n '<row>p' events.jsonl` and, if you decide to, truncate the file yourself (keep a copy),
+keeping only the rows before the one named. A ledger that ends inside an unfinished batch (one act writes several
+rows; a crash or a hand truncation can leave only some of them) is refused as `INCOMPLETE_BATCH` naming the batch's
+first row: truncate before that row.
 If an append ever fails, that session refuses further changes until the next start. Back up by copying the directory
-while exmap is stopped. Only one exmap server may use a data directory at a time (`server.lock`).
+while exmap is stopped. Only one exmap server may use a data directory at a time (`server.lock`). A lock left by a
+crash is taken over on the next start when its process is gone or no exmap with its pid answers on its port; if
+startup still says another exmap is using the directory and none is running, delete `server.lock`.
 
 ## Running the tests
 
@@ -283,10 +292,12 @@ it needs `npm run build` first and downloads the model.
 
 ## Troubleshooting
 
-- **"port 4317 is in use by another program"** (exit 3) — another program holds the port: `EXMAP_PORT=4400 ./start.sh`
+- **"port 4317 is in use by another program"** (exit 3) — another program holds the port (4317 is also the
+  OpenTelemetry OTLP/gRPC port, so a local collector or tracing agent is a common cause): `EXMAP_PORT=4400 ./start.sh`
   or `./start.sh --port 4400`. If it says *already running*, exmap is up: open the printed URL.
 - **"another exmap is already using <home>"** (exit 6) — a second server on the same data directory: use the URL it
-  prints, or stop that server, or point this one at another `EXMAP_HOME`.
+  prints, or stop that server, or point this one at another `EXMAP_HOME`. If no exmap is running (it crashed while
+  starting), delete `<home>/server.lock` and start again.
 - **"exmap needs Node 22.12 or newer"** (exit 2) — install a current LTS from https://nodejs.org; the floor is 22.12
   because the bundler requires it.
 - **The Call lane says the shared screen had no audio** — on Windows share the *Entire screen* with *Share system audio*

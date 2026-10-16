@@ -151,13 +151,17 @@ export function browserCommand(platform, env, url, resolveCmd = (n) => whichOnPa
   return null;
 }
 
-/** "exmap" when an exmap server answers at url, "other" for anything else that answers, "free" when nothing does. */
+/**
+ * "exmap" when an exmap server answers at url, "free" only when the connection is refused (nothing listens), "other" for
+ * anything else: another HTTP server, or a program that accepts and then resets, closes or never answers (an OTLP/gRPC
+ * collector on 4317, for example) — listen() would fail on that port too.
+ */
 export async function probePort(url, fetchImpl = globalThis.fetch, timeoutMs = 1500) {
   let res;
   try {
     res = await fetchImpl(`${url}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
-  } catch {
-    return "free"; // connection refused or timed out
+  } catch (e) {
+    return e?.cause?.code === "ECONNREFUSED" || e?.code === "ECONNREFUSED" ? "free" : "other";
   }
   if (res.status === 200) {
     try {
@@ -328,7 +332,13 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   } catch (e) {
     if (e && e.name === "HomeLockedError") {
       console.error(e.url ? `another exmap is already using ${home} at ${e.url}` : `another exmap is starting on this home (${home})`);
+      console.error(`if no exmap is running (for example after a crash), delete ${join(home, "server.lock")} and start again`);
       return 6;
+    }
+    if (e && e.code === "EADDRINUSE") {
+      // taken between the probe and listen, or held by something the probe could not tell apart
+      console.error(`port ${port} is in use by another program; set EXMAP_PORT or pass --port`);
+      return 3;
     }
     console.error(`exmap: the server failed to start: ${e?.message ?? e}`);
     return 1;

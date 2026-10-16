@@ -18,7 +18,8 @@ export type * from "./types.js";
 
 export interface Engine {
   apply: (state: MapState, command: Command) => ApplyResult;
-  replay: (events: readonly ExmapEvent[]) => ReplayResult;
+  /** `requireComplete: false` skips the unfinished-batch check (for summarising the readable prefix of a broken ledger). */
+  replay: (events: readonly ExmapEvent[], opts?: { requireComplete?: boolean }) => ReplayResult;
   verifyChain: (events: readonly ExmapEvent[]) => VerifyResult;
   revisionOf: (state: MapState) => Sha256Hex;
 }
@@ -28,7 +29,7 @@ export function createEngine(deps: { sha256: Sha256Fn; now: () => IsoTimestamp; 
   const ctx: ApplyContext = { now: deps.now, nextId: deps.nextId, sha256: deps.sha256 };
   return {
     apply: (state, command) => apply(state, command, ctx),
-    replay: (events) => replay(events, deps.sha256),
+    replay: (events, opts) => replay(events, deps.sha256, opts),
     verifyChain: (events) => verifyChain(events, deps.sha256),
     revisionOf: (state) => computeRevision(state.cards, deps.sha256),
   };

@@ -203,6 +203,13 @@ export function inWindow(ref: LastProposalRef | null, input: ClassifierInput): r
   return ref !== null && recentIds(input).has(ref.utterance_id);
 }
 
+/** Why the last interpretation cannot be the one a bare "no" rejects (it is not the last rejectable). */
+export function lastNotRejectable(lp: LastProposalRef): string {
+  if (lp.status === "confirmed") return "has been confirmed";
+  if (lp.op === "confirm") return "was a confirmation";
+  return "has changed since";
+}
+
 export function bySeqDesc(cards: CardIndexEntry[]): CardIndexEntry[] {
   return [...cards].sort((a, b) => b.seq - a.seq);
 }
