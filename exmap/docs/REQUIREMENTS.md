@@ -1,8 +1,11 @@
 # Example Map Live: business requirement v2
 
-**Status.** For the operator to confirm; six open questions are in §10. It supersedes the business requirement in `docs/DESIGN.md` §1 where they differ. v1's interaction model and verification gate are kept. Design detail, including every crb endpoint, label, stop code and citation, is in `docs/CRB-SEAM.md`. Sources: the v1 brief, and the operator's two messages after v1 shipped ("Msg 1", "Msg 2").
+**Status.** For the operator to confirm; seven open questions are in §10. It supersedes the business requirement in `docs/DESIGN.md` §1 where they differ. v1's interaction model and verification gate are kept. Design detail, including every crb endpoint, label, stop code and citation, is in `docs/CRB-SEAM.md`. Sources: the v1 brief, and the operator's two messages after v1 shipped ("Msg 1", "Msg 2").
 
 ## 1. The value
+
+**The purpose is to measure what AI adds to the process.** The operator: "ultimately the point of this whole process is to layer enough governance around a process so that we can effectively use AI and actually track token cost, effort cost, success rates etc so we can really see how successful layering AI on the process actually is. Real metrics." exmap is governance and an instrument as well as a tool. Every requirement below serves that: its numbers must be measured, not estimated, and must show what the AI contributed, not only what it cost.
+
 
 **exmap turns unstructured but guided context into structured context the factory can consume.** In the operator's words: "the value of this is decomposition of unstructured but guided context into structured context that allows for factory consumption" (Msg 1).
 
@@ -24,6 +27,7 @@ We will know it works when:
 - every agreed rule and example can be traced to the work items that carry it;
 - stops of the same cause become rarer as the improvement loop runs.
 - the full cost of each change is known, from who took part, in what role and for how long, through to its downstream cost; and for each kind of ask the loop shows which mix of people and effort delivers the outcome needed at the least cost.
+- for each kind of ask, the cost per successful change is known, split into token, people and factory cost, and the AI's contribution is measured against a baseline rather than assumed.
 
 ## 2. The two stages
 
@@ -92,6 +96,14 @@ The same loop learns from requirements themselves:
 10. The full cost of a change joins the people cost of its conversations with its downstream cost: engineers' time, the factory's spend and any rework, through the links from rules and examples to work items (§4).
 11. For each kind of ask, the loop relates the mix of roles and the effort spent to how requirements fared, and suggests who to involve as well as what to discuss.
 
+**Real metrics.** These are what make the purpose in §1 measurable:
+
+12. Every AI call is recorded with its model, the version of its configuration, its tokens in and out, its cost and the time it took. Local transcription records its compute time.
+13. People's effort is recorded from item 9, and the factory's spend and review are read from crb, so one change can be costed end to end.
+14. Every session and work item is stamped with the versions of everything that shaped it, such as the classifier and its prompt, the model, the gap catalogue and the suggestions offered. Rates from different configurations are never pooled into one number.
+15. Every rate is reported with its sample size and an interval, and every number says whether it was measured or estimated.
+16. What the AI adds is measured against a baseline on comparable asks, never assumed (Q7).
+
 ## 7. Honesty at the handover
 
 **exmap reports the factory's verdicts; it never makes them.**
@@ -145,3 +157,5 @@ v1's non-goals stand. In addition, exmap does not:
 **Q5.** What counts as a requirement's success: decisions taken on screen not reopened later, engineers not going back to the business, the factory building its items clean at the first attempt, no later defect traced to a missing rule or example, or a combination; and how long should the loop wait for the slow signals?
 
 **Q6.** Is the calibration of roles, or of named people; where do the cost rates come from; and who may see the results? Measuring named individuals' contribution to outcomes is employee monitoring, with its own governance, and may change how people take part.
+
+**Q7.** What is the baseline for "how successful layering AI on the process actually is": the team's current way of agreeing and delivering a comparable ask, exmap with its AI parts switched off, or both? Without one, the metrics show what the AI cost but not what it added.
