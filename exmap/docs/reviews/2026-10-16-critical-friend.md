@@ -141,3 +141,20 @@ The lenses disagree on Q1 and Q4. I decide and say why.
 | 12 | Run Wave 3; publish `S1` against `S3` per cell | crb | The only source of ceilings and of `S2` headroom (4.1) |
 | 13 | Run the timed intake pass over one real board column, on the pilot's tickets | crb | crb's pending milestone [read: `docs/dod/PLAN.md:200`]; shows whether its comment closes the engineer's gaps |
 | 14 | Freeze R6, R8, R12, R19 to R28, R30 to R41 until actions 8 and 12 read; state in §10 that crb can falsify exmap's factory value but never attribute it | operator | Unadmitted context, a loop with no signal, and provenance that never splits a cell (4.1, 4.8, Q3, Q4) |
+
+---
+
+## 9. Operator's response (2026-10-16) and what it changes
+
+**The operator corrected the premise.** Live transcription exists so the map appears and changes on screen in front of the people deciding. The bottleneck is review time, and exmap brings the review inside the conversation, as close to the decision as possible, at the lowest effort and with the best experience. This review measured exmap mainly by factory pass rates and treated its gates as a burden; it should have treated human review minutes as the target. What changes [judgement throughout]:
+
+1. **Q7 is answered: live capture is the product.** A Teams transcript import is after-the-fact review, the cost exmap removes. It stays only as a fallback where information governance forbids live capture (action 6). The governance work in 4.5 and Q5 still has to happen, as a participant notice and consent inside the live flow.
+2. **exmap has value before any crb cell is proven.** Less review time on agreed requirements is worth having on its own. The "zero deliveries today" point in §1 limits the factory arc, not the product.
+3. **v1 does not yet deliver the premise.** In the demo, sign-off needed a long run of clicks in the Review drawer after the conversation ended (accepting four questions, marking cards reviewed, accepting three acts). That is the after-the-fact review. The next build should move those acts into the flow of talk.
+4. **The confirmation flaw in 4.4 becomes the central design problem.** Voice confirmation is what makes in-conversation review cheap, and it is also what turned "yeah" into a decision 5 times in 6. The fix is a confirmation that is cheap and deliberate, not voice confirmation switched off.
+5. **Latency and wording become critical, and both are unmeasured.** The on-screen rule must read as the agreed rule within seconds. The offline classifier is instant but appends corrections verbatim; the Claude classifier's latency was only estimated in the design, at 20 to 45 seconds per utterance [read: `exmap/docs/DESIGN.md` §17]. Measure both on real speech before anything else.
+6. **Q1 shifts towards live.** The same argument applies to stage 2: where engineers can attend, a live technical session on the same engine brings technical review into the conversation too. Derived-then-checked becomes the fallback, not the default.
+7. **The pilot measures review time.** Record the human minutes from the start of the conversation to a signed map, and on to ready tickets, against the team's current way for comparable asks; and how many on-screen decisions are reopened later. Engineer go-backs stay as a secondary measure.
+
+Q2, Q3 and Q4 stand. Counting the improvement budget in people's review minutes now matches the operator's bottleneck exactly.
+

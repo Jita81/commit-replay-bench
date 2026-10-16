@@ -8,11 +8,18 @@
 
 A second arc of value is "ensuring that ticket matches what would be needed for context for the factory for the ask (which may require multiple factory components)" (Msg 1). A verified Example Map is therefore a step, not the finish line. Done means the factory receives work it can accept, carrying the context it needs, for everything that was agreed.
 
+**The bottleneck is review time, so review happens inside the conversation.** The operator: "The idea of live transcript is so that we can talk about it and have it appear and change on the screen in front of them. Remember that our bottleneck is review time. Here we are bringing the review within the conversation and therefore making it as close to the decision making as possible and the lowest effort possible with the best UX possible." Live capture is therefore the product, not a convenience: a transcript reviewed after the meeting is the after-the-fact review exmap exists to remove. This sets three conditions on the experience:
+
+- what people see changes within seconds of what they say, worded as the agreed rule rather than as a log of corrections;
+- confirming a card is the cheapest act on screen, and deliberate: a listening cue such as "yeah" is never taken as a decision;
+- whatever the Definition of Done needs is settled during the conversation, so little or no review is left for afterwards.
+
 We will know it works when:
 
 - the factory accepts exmap's work items without a person going back to ask for missing context;
 - every agreed rule and example can be traced to the work items that carry it;
 - stops of the same cause become rarer as the improvement loop runs.
+- the people review less after the conversation: the human minutes from the start of the conversation to a signed map, and on to work the factory accepts, fall against the current way of agreeing a comparable ask, and decisions taken on screen are not reopened later.
 
 ## 2. The two stages
 
