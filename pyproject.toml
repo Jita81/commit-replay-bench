@@ -67,7 +67,7 @@ all = ["commit-replay-bench[openai,claude,server,postgres,mcp,dev]"]
 # release nobody chose (pip-audit's is a gate).
 [dependency-groups]
 audit = ["pip==26.2.1", "pip-audit==2.10.1"]
-sbom = ["cyclonedx-bom==7.4.0"]
+sbom = ["cyclonedx-bom==7.5.0"]
 
 [project.scripts]
 crb = "crb.cli.main:main"
