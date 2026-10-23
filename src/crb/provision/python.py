@@ -209,9 +209,11 @@ def write_stubs(site: Path, stubs: tuple[tuple[str, str], ...]) -> list[str]:
     held = {_dist(d.name)[0] for d in site.glob("*.dist-info") if d.is_dir()}
     written = []
     for name, version in stubs:
-        if re.sub(r"[-_.]+", "-", name).lower() in held:
+        norm = re.sub(r"[-_.]+", "-", name).lower()
+        if norm in held:
             continue
         write_dist_info(site, name, version)
+        held.add(norm)
         written.append(f"{name}=={version}")
     return written
 

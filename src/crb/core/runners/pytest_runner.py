@@ -540,10 +540,20 @@ DEFAULT_STUB_VERSION = "0.0.0+crb"
 
 def dist_info_stubs(opts: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
     """``runner_opts.dist_info_stubs`` as ``(name, version)`` pairs, the version
-    ``0.0.0+crb`` when none is given. A malformed entry is a ``ValueError`` that names it:
+    ``0.0.0+crb`` when none is given. A malformed entry, a value that is not a list of
+    entries, or a name given twice (as PEP 503 compares names: two stubs would leave which
+    one ``importlib.metadata`` reads to directory order) is a ``ValueError`` that names it:
     the host's setup records it, the sealed set refuses ``PROVISION_STUB_INVALID``."""
+    entries = opts.get("dist_info_stubs")
+    if entries is None:
+        return ()
+    if not isinstance(entries, (list, tuple)):
+        raise ValueError(
+            f"runner_opts.dist_info_stubs is a list of {{name, version}} entries (got {entries!r})"
+        )
     out: list[tuple[str, str]] = []
-    for stub in opts.get("dist_info_stubs") or []:
+    seen: set[str] = set()
+    for stub in entries:
         name = str((stub.get("name") if isinstance(stub, Mapping) else "") or "").strip()
         if not name:
             raise ValueError(
@@ -555,6 +565,10 @@ def dist_info_stubs(opts: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
                 "runner_opts.dist_info_stubs: a name is a distribution name and a version is "
                 f"letters, digits and '.+!' (got {stub!r})"
             )
+        norm = re.sub(r"[-_.]+", "-", name).lower()
+        if norm in seen:
+            raise ValueError(f"runner_opts.dist_info_stubs: {name!r} names a distribution twice")
+        seen.add(norm)
         out.append((name, version))
     return tuple(out)
 

@@ -1074,3 +1074,16 @@ def test_dist_info_stubs_default_the_version_and_refuse_what_would_leave_the_sit
     ):
         with pytest.raises(ValueError, match="dist_info_stubs"):
             dist_info_stubs({"dist_info_stubs": [bad]})
+    # the value itself must be a list of entries: a scalar was a TypeError neither the
+    # setup nor the sealed set caught, a string or a mapping iterated as one (CodeRabbit
+    # on PR #96)
+    assert dist_info_stubs({"dist_info_stubs": None}) == ()
+    for shape in (1, True, "click", {"name": "click"}, {}, ""):
+        with pytest.raises(ValueError, match="is a list of"):
+            dist_info_stubs({"dist_info_stubs": shape})
+    # one distribution, two stubs: which one importlib.metadata reads would be directory
+    # order, so a name given twice (as PEP 503 compares names) is refused
+    with pytest.raises(ValueError, match="names a distribution twice"):
+        dist_info_stubs(
+            {"dist_info_stubs": [{"name": "Mesh-Client"}, {"name": "mesh_client", "version": "2"}]}
+        )

@@ -309,18 +309,25 @@ _VERSION_OF_PKG = (
 
 
 @pytest.mark.parametrize(
-    "stub",
-    [{"version": "1.0"}, {"name": "pkg", "version": "1/../../x"}, {"name": "pkg\nVersion: 9"}],
+    "stubs",
+    [
+        [{"version": "1.0"}],
+        [{"name": "pkg", "version": "1/../../x"}],
+        [{"name": "pkg\nVersion: 9"}],
+        1,
+        [{"name": "pkg"}, {"name": "PKG", "version": "2"}],
+    ],
 )
 def test_a_malformed_dist_info_stub_is_refused_before_any_fetch(
-    tmp_path: Path, stub: dict[str, str]
+    tmp_path: Path, stubs: object
 ) -> None:
     """A stub's name and version go into a directory name and a METADATA header: an entry
-    with no name, or one that would leave the site or add a header, stops the run
+    with no name, or one that would leave the site or add a header, a value that is not a
+    list of entries, or one distribution named twice, stops the run
     ``PROVISION_STUB_INVALID`` before anything is fetched (the index does not exist, so a
     fetch would have been ``PROVISION_FETCH_FAILED``)."""
     root, feat = pyrepo_deps.build(tmp_path)
-    cfg = replace(pyrepo_deps.config(), runner_opts={"dist_info_stubs": [stub]})
+    cfg = replace(pyrepo_deps.config(), runner_opts={"dist_info_stubs": stubs})
     provider = SealedProvider(
         ProvisionConfig(
             enabled=True, env="dev", store=tmp_path / "deps", pypi_index="file:///nowhere"
@@ -347,6 +354,10 @@ def test_a_stub_is_metadata_beside_the_set_never_a_package_and_never_a_second_co
         "cfx_dep-1.0.0.dist-info",
         "pkg-0.0.0+crb.dist-info",
     ]
+    # a stub it wrote is held too: a later variant of the same name writes no second one
+    # (CodeRabbit on PR #96; the validator refuses the pair before it gets here)
+    assert py_recipe.write_stubs(site, (("New.Dist", "1"), ("new_dist", "2"))) == ["New.Dist==1"]
+    assert [d.name for d in site.glob("new_dist-*.dist-info")] == ["new_dist-1.dist-info"]
 
 
 @pytest.mark.docker

@@ -140,8 +140,8 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
     ),
     PROVISION_STUB_INVALID: (
         SCOPE_RUN,
-        "give every runner_opts.dist_info_stubs entry a name (the distribution's) and, if "
-        "you give one, a version of letters, digits and '.+!' (OPERATOR §2.1a)",
+        "give runner_opts.dist_info_stubs as a list, every entry a name (the distribution's, "
+        "once) and, if you give one, a version of letters, digits and '.+!' (OPERATOR §2.1a)",
     ),
     PROVISION_NO_LOCK: (
         SCOPE_TASK,
