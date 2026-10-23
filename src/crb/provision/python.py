@@ -16,7 +16,9 @@ Hashes are verified where the lock commits them (``--require-hashes``); where it
 every fetched wheel's sha256 is recorded in the manifest (``hashes: recorded``). A package
 published only as a source distribution has no wheel to fetch:
 ``PROVISION_BUILD_REQUIRED``. The set is mounted read-only at ``/deps/site``; the pytest
-runner puts it on ``PYTHONPATH`` after the tree.
+runner puts it on ``PYTHONPATH`` after the tree. A repository's ``runner_opts.dist_info_stubs``
+are written into the site after the install (METADATA only, as the host's setup writes
+them) and are in the set's key; a malformed entry is ``PROVISION_STUB_INVALID``.
 
 Navigation
 ----------
@@ -46,7 +48,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from crb.core.deps import DepsBinding, ProvisionRefused
+from crb.core.deps import PROVISION_STUB_INVALID, DepsBinding, ProvisionRefused
 from crb.core.provision import (
     LANG_PYTHON,
     RECIPE_PY,
@@ -54,6 +56,7 @@ from crb.core.provision import (
     describe_inputs,
     pin_line_refusal,
 )
+from crb.core.runners.pytest_runner import dist_info_stubs, write_dist_info
 from crb.provision import RECIPES, SealedProvider
 from crb.provision.config import ProvisionConfig
 from crb.provision.fetch import MIRROR_INSIDE, FetchPlan
@@ -197,6 +200,24 @@ def installed_manifest(inputs: LockInputs, site: Path) -> tuple[dict[str, list[s
     return packages, sorted(skipped)
 
 
+def write_stubs(site: Path, stubs: tuple[tuple[str, str], ...]) -> list[str]:
+    """Write each ``(name, version)`` stub into ``site`` after pip's install, as
+    ``name==version``. They are never ``packages``: the environment probe requires those, and
+    a stub is metadata, not a pin. A name the set already holds a distribution of is left
+    alone — that distribution answers ``importlib.metadata`` already, and two would leave
+    which one answers to the order the directory is read in."""
+    held = {_dist(d.name)[0] for d in site.glob("*.dist-info") if d.is_dir()}
+    written = []
+    for name, version in stubs:
+        norm = re.sub(r"[-_.]+", "-", name).lower()
+        if norm in held:
+            continue
+        write_dist_info(site, name, version)
+        held.add(norm)
+        written.append(f"{name}=={version}")
+    return written
+
+
 def _wheel_hashes(wheels: Path) -> dict[str, str]:
     return {
         p.name: "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
@@ -209,6 +230,10 @@ def resolve(
 ) -> TaskDeps:
     cfg = provider.config
     image = cfg.python_image
+    try:
+        stubs = dist_info_stubs(config.runner_opts)
+    except ValueError as exc:
+        raise ProvisionRefused(PROVISION_STUB_INVALID, str(exc)) from exc
 
     def build_for(inputs: LockInputs, key: str, image_id: str) -> Callable[[Path], dict[str, Any]]:
         def build(stage: Path) -> dict[str, Any]:
@@ -230,6 +255,7 @@ def resolve(
             provider.fetch(install_plan(inputs, key=key, image=image), stage)
             remove_tree(stage / "out" / "wheels")
             packages, marker_skipped = installed_manifest(inputs, stage / "out" / SUB)
+            written = write_stubs(stage / "out" / SUB, stubs)
             return {
                 "recipe": RECIPE_PY,
                 "inputs": [describe_inputs(inputs)],
@@ -242,6 +268,7 @@ def resolve(
                 "marker_skipped": marker_skipped,
                 "wheels": wheels,
                 "hashes": "committed" if inputs.require_hashes else "recorded",
+                **({"dist_info_stubs": written} if stubs else {}),
             }
 
         return build
@@ -268,6 +295,7 @@ def resolve(
         gin=gin,
         build_for=build_for,
         bind=bind,
+        extra=tuple(f"dist-info-stub:{n}=={v}" for n, v in stubs),
     )
 
 
@@ -281,4 +309,5 @@ __all__ = [
     "installed_manifest",
     "lock_text",
     "resolve",
+    "write_stubs",
 ]

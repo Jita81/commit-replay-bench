@@ -12,6 +12,13 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **`dist_info_stubs` hold under the docker executor** (P-812;
+  [#96](https://github.com/Jita81/commit-replay-bench/pull/96)). The stubs were a setup step,
+  and the sandbox refuses every setup step under docker, so a test reading the repository's own
+  package metadata failed for the harness's reason. The sealed Python set now carries them,
+  keyed and recorded as the manifest's `dist_info_stubs`; a malformed entry is
+  `PROVISION_STUB_INVALID`, run scope. A commit with no lockfile still gets none (OPERATOR §2.1a).
+
 - **The browser jobs name their runner image; two advisories cleared** (P-809, P-810;
   [#95](https://github.com/Jita81/commit-replay-bench/pull/95)). From 2026-10-21 `ubuntu-latest`
   was Ubuntu 26.04, which Playwright 1.59.1 has no Chromium for, so every browser job failed on

@@ -448,6 +448,24 @@ dist-info (no file records, so nothing is shadowed) after the uninstall:
 The stub is a recorded setup step (`crb dist-info-stub …`) and therefore part of the
 apparatus record of every row measured under it.
 
+Under the docker executor the trial runs no setup step (the sandbox refuses one), so the
+**sealed set carries the stubs** instead. The Python provider writes them into the set after
+pip's install, keys the set on them — a set with stubs is never reused as the set without
+them — and records them in the set's manifest as `dist_info_stubs`, never among its
+`packages` (the environment probe requires every one of those). A name the set already holds
+a distribution of is left alone, so `importlib.metadata` never has two to choose between. A
+malformed entry, a value that is not a list of entries, or one distribution named twice (as
+PEP 503 compares names) is `PROVISION_STUB_INVALID`, run scope, before anything is fetched
+**[measured — `tests/test_provision_python.py`: `test_dist_info_stubs_ride_in_the_sealed_set_so_metadata_resolves_under_docker`
+resolves n = 1 fixture twice, plain and stubbed, and reads `importlib.metadata.version("pkg")`
+in the sandbox as `not found` and `0.0.0+crb` (1 run, colima 0.10.3, Docker 29.5.2);
+`test_a_malformed_dist_info_stub_is_refused_before_any_fetch` points the index at
+`file:///nowhere` and refuses n = 5 malformed values, each before a fetch; apparatus 2.4]**.
+
+**[gap]** A Python commit with no lockfile the provider reads gets no sealed set, and so no
+stubs under docker: a metadata test there still fails for the harness's reason. Measure such a
+repository in the local posture, or give it a lock.
+
 ### 2.1b Clean means working — the `checks` switchboard
 
 A clean row says the repository's tests accept a patch. The mechanisms in the table below make

@@ -90,6 +90,8 @@ PROVISION_PUBLIC_REGISTRY = "PROVISION_PUBLIC_REGISTRY"
 PROVISION_FETCH_IMAGE_UNPINNED = "PROVISION_FETCH_IMAGE_UNPINNED"
 PROVISION_STORE_NOT_VISIBLE = "PROVISION_STORE_NOT_VISIBLE"
 PROVISION_UNSUPPORTED_LANGUAGE = "PROVISION_UNSUPPORTED_LANGUAGE"
+#: Run scope too: the repository's setting is wrong for every task it has.
+PROVISION_STUB_INVALID = "PROVISION_STUB_INVALID"
 #: Task scope: a fact about one commit's lockfiles or about the registry.
 PROVISION_NO_LOCK = "PROVISION_NO_LOCK"
 PROVISION_UNPINNED = "PROVISION_UNPINNED"
@@ -135,6 +137,11 @@ REFUSALS: Mapping[str, tuple[str, str]] = {
         SCOPE_RUN,
         "JVM and Rust repositories are measured in the local posture only in this version "
         "(ADR-0019); set CRB_SANDBOX__EXECUTOR=local for them, on a stamp that says so",
+    ),
+    PROVISION_STUB_INVALID: (
+        SCOPE_RUN,
+        "give runner_opts.dist_info_stubs as a list, every entry a name (the distribution's, "
+        "once) and, if you give one, a version of letters, digits and '.+!' (OPERATOR §2.1a)",
     ),
     PROVISION_NO_LOCK: (
         SCOPE_TASK,
@@ -699,6 +706,7 @@ __all__ = [
     "PROVISION_PUBLIC_REGISTRY",
     "PROVISION_SOURCE_REFUSED",
     "PROVISION_STORE_NOT_VISIBLE",
+    "PROVISION_STUB_INVALID",
     "PROVISION_TOOLCHAIN_TOO_OLD",
     "PROVISION_TOO_LARGE",
     "PROVISION_TREE_SHADOWS_SET",

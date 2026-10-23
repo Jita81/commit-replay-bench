@@ -52,7 +52,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -423,13 +423,16 @@ class SealedProvider:
         gin: LockInputs,
         build_for: Callable[[LockInputs, str, str], Callable[[Path], dict[str, Any]]],
         bind: Callable[[str, Sealed], DepsBinding],
+        extra: Sequence[str] = (),
     ) -> TaskDeps:
         """One sealed set per lockfile (Python, Node): the parent's and the gold's — one key
-        when the lock did not change; the builder gets the parent's."""
+        when the lock did not change; the builder gets the parent's. ``extra`` is whatever
+        else the recipe writes into the set (Python's ``dist_info_stubs``): it is in the key,
+        so a set is never reused for different contents."""
         image_id = self.image_id(image)
         sealed: dict[str, Sealed] = {}
         for role, inputs in ((ROLE_PARENT, pin), (ROLE_GOLD, gin)):
-            key = bundle_key(recipe, image_id, inputs.blobs)
+            key = bundle_key(recipe, image_id, (*inputs.blobs, *extra))
             sealed[role] = self.seal_or_reuse(lang, key, build_for(inputs, key, image_id))
         return TaskDeps(
             self.deps_mode,

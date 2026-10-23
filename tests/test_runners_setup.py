@@ -1051,3 +1051,39 @@ def test_dist_info_stub_makes_importlib_metadata_resolve_without_shadowing(tmp_p
     # nothing importable was installed: the stub carries no package files
     rc = subprocess.run([str(python), "-c", "import mesh_client"], capture_output=True).returncode
     assert rc != 0
+
+
+def test_dist_info_stubs_default_the_version_and_refuse_what_would_leave_the_site() -> None:
+    """``dist_info_stubs``: the pairs both postures write (the host's setup, the sealed
+    set); the version is ``0.0.0+crb`` when none is given, and a name or version that is
+    not a distribution's — a path separator, a newline — is a ``ValueError`` naming it."""
+    from crb.core.runners.pytest_runner import dist_info_stubs
+
+    assert dist_info_stubs({}) == ()
+    assert dist_info_stubs(
+        {"dist_info_stubs": [{"name": "Mesh-Client"}, {"name": "a.b", "version": "1.0rc1"}]}
+    ) == (
+        ("Mesh-Client", "0.0.0+crb"),
+        ("a.b", "1.0rc1"),
+    )
+    for bad in (
+        {"version": "1"},
+        "click",
+        {"name": "../x"},
+        {"name": "x", "version": "1\nName: y"},
+    ):
+        with pytest.raises(ValueError, match="dist_info_stubs"):
+            dist_info_stubs({"dist_info_stubs": [bad]})
+    # the value itself must be a list of entries: a scalar was a TypeError neither the
+    # setup nor the sealed set caught, a string or a mapping iterated as one (CodeRabbit
+    # on PR #96)
+    assert dist_info_stubs({"dist_info_stubs": None}) == ()
+    for shape in (1, True, "click", {"name": "click"}, {}, ""):
+        with pytest.raises(ValueError, match="is a list of"):
+            dist_info_stubs({"dist_info_stubs": shape})
+    # one distribution, two stubs: which one importlib.metadata reads would be directory
+    # order, so a name given twice (as PEP 503 compares names) is refused
+    with pytest.raises(ValueError, match="names a distribution twice"):
+        dist_info_stubs(
+            {"dist_info_stubs": [{"name": "Mesh-Client"}, {"name": "mesh_client", "version": "2"}]}
+        )
