@@ -40,10 +40,10 @@ clean (CI runs `hadolint/hadolint-action` on each file, as it does on `deploy/Do
 
 What CI proves on each image, from inside, on every pull request
 (`tests/test_sandbox_images_docker.py`): the image's own default user and the executor's
-user are uid 65534; `/usr` and the worktree — read-only at `/src` — refuse a write
-(`Read-only file system`), while `/work`, the throwaway copy of the tree every command runs
+user are uid 65534; `/usr` refuses a write (`Read-only file system`) and the worktree
+is not mounted for a command that declares no writable path (the worker streams it over stdin), while `/work`, the throwaway copy of the tree every command runs
 in (ADR-0019 §7), and `/tmp` accept one, and the host tree is byte-identical afterwards; the
-image carries `/bin/sh` and GNU `tar`, which make that copy; no setuid/setgid file is in the
+image carries `/bin/sh` and GNU `tar`, which extract that copy; no setuid/setgid file is in the
 image; `/tmp` is `noexec` for every command but the Go runner's (`/proc/mounts` says so and a
 script written there is refused / runs accordingly); a test that asserts `example.com:443` is
 reachable **fails** through that language's runner, attributed to exactly that test id; an

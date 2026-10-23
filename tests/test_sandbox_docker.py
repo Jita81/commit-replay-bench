@@ -8,8 +8,11 @@ already present (CI: the reference image it just built from
 
 * ``qualify`` + ``grade`` run and parse under ``--network=none`` (gold → clean);
 * a test that opens ``https://example.com`` FAILS (the network is truly off);
-* the worktree is read-only at ``/src``, and a test that writes ``/work/hacked.txt``
-  writes a throwaway copy — it passes and nothing reaches the host (ADR-0019 §7);
+* the worktree is never mounted — the host streams it over stdin into a tmpfs ``/work`` —
+  so a test that writes ``/work/hacked.txt`` writes a throwaway copy: it passes and
+  nothing reaches the host (ADR-0019 §7); a stream cut before its sentinel, or a path the
+  host cannot read, fails closed as ``tree_copy_failed``; a file the host replaced by
+  rename the instant before a run is what the run reads;
 * the worktree on the host is byte-identical after a sandboxed run;
 * a cancel and the wall clock on ``DockerExecutor.run`` (the non-stream path the grade
   stage uses) kill the CONTAINER, confirmed by the daemon, and ``docker ps`` no longer
@@ -29,8 +32,10 @@ What it is:   The sandbox suite — the instrument inside ``DockerExecutor`` aga
               and proof that the walls hold.
 What it does: Pins that the executor is hardened, that ``qualify`` and ``grade`` run and parse
               under ``--network=none`` (gold → clean), that a test opening ``https://example.com``
-              FAILS, that the worktree is read-only at ``/src`` and a test writing
-              ``/work/hacked.txt`` writes only a throwaway copy, that
+              FAILS, that the worktree is never mounted (the host streams it over stdin into a
+              tmpfs ``/work``) and a test writing ``/work/hacked.txt`` writes only a
+              throwaway copy, that the copy fails closed on a cut stream or an unreadable
+              path, that a file replaced by rename just before a run is read whole, that
               the host worktree is byte-identical after a sandboxed run, and that a cancel /
               the wall clock on ``run()`` ends in a daemon-confirmed ``docker kill`` of the
               container (``kill_confirmed`` True, nothing reported, gone from ``docker ps``
@@ -59,9 +64,11 @@ Touch when:   never for a new repository; a hardening flag is added (a wall test
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import shutil
 import subprocess
+import tarfile
 import threading
 import time
 import uuid
@@ -71,6 +78,7 @@ from pathlib import Path
 import pytest
 
 import docker_wait
+from crb.core import execution
 from crb.core.execution import (
     TREE_COPY_MARKER,
     TREE_COPY_RC,
@@ -248,9 +256,10 @@ def test_network_is_off(trial, task, runner, executor):
 def test_worktree_is_read_only_and_a_test_writes_only_a_throwaway_copy(
     trial, task, runner, executor
 ):
-    """ADR-0019 §7: the worktree is read-only at ``/src``; a test that writes into ``/work``
-    writes a throwaway copy (so it PASSES, as it does on the host), and nothing it writes
-    reaches the host tree."""
+    """ADR-0019 §7: the worktree is never mounted into the container — the host streams it
+    over stdin into ``/work``, a tmpfs — so a test that writes into ``/work`` writes a
+    throwaway copy (it PASSES, as it does on the host), and nothing it writes reaches the
+    host tree."""
     trial.overlay_sources(task.src_files)
     (trial.root / pyrepo_min.WRITE_TEST).write_text(pyrepo_min.WRITE_TEST_SRC, encoding="utf-8")
     before = _snapshot(trial.root)
@@ -258,10 +267,14 @@ def test_worktree_is_read_only_and_a_test_writes_only_a_throwaway_copy(
     assert run.green, run.tail
     assert not (trial.root / "hacked.txt").exists()
     assert _snapshot(trial.root) == before
-    src = executor.run(
-        Command(("sh", "-c", "echo owned > /src/hacked.txt"), trial.root, timeout=60)
+    probe = executor.run(
+        Command(
+            ("sh", "-c", "test ! -e /src && awk '$2 == \"/work\" {print $3}' /proc/mounts"),
+            trial.root,
+            timeout=60,
+        )
     )
-    assert not src.ok and "Read-only file system" in src.combined, src.combined
+    assert probe.ok and probe.stdout.split() == ["tmpfs"], probe.combined
 
 
 def test_host_worktree_unchanged_after_sandboxed_run(trial, task, config, runner, executor):
@@ -332,21 +345,69 @@ def test_a_command_after_a_runner_wrote_its_scratch_still_copies_the_tree(
     assert ".pytest_scratch" in r.stdout.split()
 
 
-def test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it(trial, executor):
-    """Belt and braces under the host-side grant: the copy script itself, run WITHOUT the
-    grant, stops with the tree-copy marker on a directory it cannot read. Under colima GNU
-    tar calls such a directory "removed before we read it" and exits 1 — the exit the script
-    must tolerate for "file changed" — so the rc alone would have dropped it silently."""
+def test_the_copy_fails_closed_on_a_path_it_cannot_read_never_drops_it(
+    trial, executor, monkeypatch
+):
+    """Belt and braces under the host-side grant: WITHOUT the grant, the host cannot read a
+    mode-000 directory, so the stream stops before its sentinel and the run is
+    ``tree_copy_failed`` — the directory named relative to the tree — never a copy that
+    silently left it out and ran the tests anyway."""
+    monkeypatch.setattr(execution, "grant_sandbox_read", lambda *a, **k: None)
     locked = trial.root / "locked"
     locked.mkdir()
     (locked / "inner.txt").write_text("inner\n", encoding="utf-8")
     locked.chmod(0o000)
     try:
-        argv = executor.build_argv(Command(("true",), trial.root, timeout=60))
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=120, check=False)
+        r = executor.run(Command(("echo", "ran"), trial.root, timeout=60))
     finally:
         locked.chmod(0o755)
-    assert r.returncode == TREE_COPY_RC and TREE_COPY_MARKER in r.stderr, r.stderr
+    assert r.returncode == TREE_COPY_RC and r.env_error == "tree_copy_failed", r.combined
+    assert TREE_COPY_MARKER in r.stderr and "could not read locked" in r.stderr, r.stderr
+    assert "ran" not in r.stdout.split()
+
+
+@pytest.mark.parametrize("stream", ["empty", "no-sentinel"])
+def test_a_stream_that_ends_before_its_sentinel_never_runs_the_command(trial, executor, stream):
+    """The container's half of the fail-closed copy: a stream that is empty, or a valid tar
+    cut before the sentinel member, exits with the tree-copy marker before the command runs
+    — so a host that died mid-stream can never hand the tests a partial tree."""
+    buf = io.BytesIO()
+    if stream == "no-sentinel":
+        with tarfile.open(fileobj=buf, mode="w", format=tarfile.GNU_FORMAT) as tf:
+            info = tarfile.TarInfo("a.txt")
+            info.size = 3
+            tf.addfile(info, io.BytesIO(b"abc"))
+    argv = executor.build_argv(
+        Command(("echo", "ran"), trial.root, timeout=60), sentinel="0123456789abcdef"
+    )
+    r = subprocess.run(argv, input=buf.getvalue(), capture_output=True, timeout=120, check=False)
+    err = r.stderr.decode(errors="replace")
+    assert r.returncode == TREE_COPY_RC and TREE_COPY_MARKER in err, err
+    assert b"ran" not in r.stdout
+
+
+def test_a_file_the_host_replaced_just_before_the_run_is_read_whole(trial, executor):
+    """The Wave 3 step-3 failure (2026-10-23): the qualify stage replaced test files by
+    rename (``git checkout``) and the next container's copy, read through virtiofs, saw
+    ENOENT for about a second (45 of 105 copies failed on five cobra commits). The host now
+    reads the tree itself, so a rename the instant before a run is always what the run
+    sees. The directory holds 100 siblings, as cobra's root does: in a directory of five
+    the read through the share saw every replace on the mounted tree too, in one of 100
+    it failed all five."""
+    wide = trial.root / "wide"
+    wide.mkdir()
+    for n in range(100):
+        (wide / f"sibling{n:03d}.txt").write_text("s\n", encoding="utf-8")
+    target = wide / "replaced.txt"
+    target.write_text("v0\n", encoding="utf-8")
+    first = executor.run(Command(("cat", "wide/replaced.txt"), trial.root, timeout=60))
+    assert first.ok and first.stdout == "v0\n", first.combined
+    for i in range(1, 6):
+        tmp = wide / f".replaced.{i}.tmp"
+        tmp.write_text(f"v{i}\n", encoding="utf-8")
+        os.replace(tmp, target)
+        r = executor.run(Command(("cat", "wide/replaced.txt"), trial.root, timeout=60))
+        assert r.ok and r.env_error == "" and r.stdout == f"v{i}\n", (i, r.combined)
 
 
 # ---------------------------------------------------------------------------

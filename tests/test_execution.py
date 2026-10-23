@@ -45,11 +45,15 @@ Touch when:   never for a new repository; a hardening flag is added or removed (
 
 from __future__ import annotations
 
+import errno
+import io
 import os
 import shutil
+import socket
 import stat
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 from pathlib import Path
@@ -464,13 +468,14 @@ def test_readonly_tree_keeps_todays_argv(tmp_path: Path) -> None:
     ]
 
 
-def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tmpfs_at_work(
+def test_copy_tree_argv_streams_the_worktree_over_stdin_into_a_sized_exec_tmpfs_at_work(
     tmp_path: Path,
 ) -> None:
-    """The default tree (ADR-0019 §7): the worktree read-only at ``/src``, a size-capped tmpfs
-    at ``/work`` — ``exec`` because the tree was always executable to its own tests, and
-    ``nosuid,nodev`` — a declared writable path still bound from the worktree and excluded
-    from the copy, and the command run by ``sh`` in the copy after a tar that fails closed."""
+    """The default tree (ADR-0019 §7): NO worktree mount — the host streams the tree in on
+    stdin (``--interactive``) — a size-capped tmpfs at ``/work`` (``exec`` because the tree
+    was always executable to its own tests, and ``nosuid,nodev``), a declared writable path
+    still bound from the worktree, and the command run by ``sh`` in the copy only once the
+    stream's sentinel arrived; the command's own stdin stays ``/dev/null``."""
     d = DockerExecutor(_settings(work_size="3g"), runner=FakeRunner(_ok()), verify_daemon=False)
     cmd = Command(
         ("python", "-m", "pytest", "-q"),
@@ -480,17 +485,12 @@ def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tm
         writable_paths=(".pytest_scratch",),
         timeout=90,
     )
-    argv = d.build_argv(cmd)
+    argv = d.build_argv(cmd, sentinel="0123456789abcdef")
     script = (
-        "{ { tar -C /src --warning=no-file-changed --exclude=./node_modules "
-        "--exclude=./.pytest_scratch -cf - .; "
-        "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; } 2> /tmp/.crb-copy-err; "
-        "cat /tmp/.crb-copy-err >&2; "
-        'case "$(cat /tmp/.crb-copy-err)" in *"removed before we read"*) '
-        ": > /tmp/.crb-copy-failed;; esac; } | tar -C /work -xf - "
-        "&& [ ! -e /tmp/.crb-copy-failed ] "
+        "tar -C /work -xf - && [ -e /work/.crb-tree-0123456789abcdef ] "
+        "&& { rm -f /work/.crb-tree-0123456789abcdef || :; } "
         "|| { echo crb:tree-copy-failed >&2; exit 97; }; "
-        'cd "/work/$0" && exec "$@"'
+        'cd "/work/$0" && exec "$@" </dev/null'
     )
     assert argv == [
         "/fake/docker",
@@ -508,8 +508,7 @@ def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tm
         "--read-only",
         "--tmpfs",
         "/tmp:rw,noexec,nosuid,nodev,size=512m",
-        "--mount",
-        f"type=bind,src={tmp_path.resolve()},dst=/src,readonly",
+        "--interactive",
         "--tmpfs",
         "/work:rw,exec,nosuid,nodev,size=3g,uid=65534,gid=65534,mode=0700",
         "--mount",
@@ -535,6 +534,11 @@ def test_copy_tree_argv_mounts_the_worktree_read_only_at_src_and_a_sized_exec_tm
         "pytest",
         "-q",
     ]
+    # the worktree reaches the container only as the stream: no bind of the tree itself
+    assert not any(f"src={tmp_path.resolve()}," in a for a in argv)
+    # no sentinel named: a fresh random one per argv, never a fixed, guessable name
+    drawn = [d.build_argv(cmd)[-6] for _ in range(2)]
+    assert drawn[0] != drawn[1] and all(".crb-tree-" in x for x in drawn)
     facts = d.posture_facts()
     assert facts["tree"] == "copy" and facts["limits"].endswith(",work=3g")
     ro = DockerExecutor(_settings(tree="readonly"), runner=FakeRunner(_ok()), verify_daemon=False)
@@ -697,6 +701,379 @@ def test_tree_copy_failure_is_an_env_error_not_a_verdict(tmp_path: Path) -> None
     assert run.env_error == "tree_copy_failed" and run.red and run.failing == frozenset()
     assert run.parse_error == "environment: tree_copy_failed"
     assert run.to_dict()["env_error"] == "tree_copy_failed"
+
+
+# ---------------------------------------------------------------------------
+# TreeStream — the HOST writes the tree the container extracts (virtiofs, 2026-10-23)
+# ---------------------------------------------------------------------------
+
+
+def _members(tree: ex.TreeStream) -> tuple[list[tarfile.TarInfo], dict[str, bytes]]:
+    buf = io.BytesIO()
+    tree.write(buf)
+    buf.seek(0)
+    with tarfile.open(fileobj=buf, mode="r:") as tf:
+        members = tf.getmembers()
+        data = {}
+        for m in members:
+            f = tf.extractfile(m) if m.isreg() else None
+            if f is not None:
+                data[m.name] = f.read()
+    return members, data
+
+
+def test_tree_stream_archives_the_whole_tree_and_ends_with_its_sentinel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every entry but the excluded root-relative paths and what lies under them (a nested
+    ``node_modules`` stays, as GNU ``tar --exclude=./node_modules`` kept it), depth-first —
+    a directory, then all it holds, then its next sibling, as ``tar -c`` orders it — links as links (never followed), a hard link as one, a FIFO as a
+    FIFO, a socket skipped, no host owner, whole-second times, the host's modes — and the
+    empty sentinel LAST; ``complete`` only once it was handed to the archive."""
+    root = tmp_path / "wt"
+    (root / "pkg" / "sub").mkdir(parents=True)
+    (root / "pkg" / "a.go").write_text("package pkg\n")
+    big = os.urandom(70_000)  # more than one tar record
+    (root / "pkg" / "sub" / "b.go").write_bytes(big)
+    (root / "run.sh").write_text("#!/bin/sh\n")
+    (root / "run.sh").chmod(0o755)
+    (root / "link").symlink_to("/etc/passwd")
+    os.link(root / "pkg" / "a.go", root / "hard.go")
+    (root / "node_modules" / "dep").mkdir(parents=True)
+    (root / ".pytest_scratch").mkdir()
+    (root / ".pytest_scratch" / "junit.xml").write_text("a previous command's report")
+    (root / "pkg" / "node_modules").mkdir()
+    os.mkfifo(root / "fifo")
+    monkeypatch.chdir(root)  # a short relative name: AF_UNIX paths are capped at ~104 bytes
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind("sock")
+    try:
+        tree = ex.TreeStream(root, exclude=("node_modules", ".pytest_scratch/"), sentinel="ab" * 8)
+        assert not tree.complete
+        members, data = _members(tree)
+    finally:
+        sock.close()
+    assert tree.complete
+    assert [m.name for m in members] == [
+        ".",
+        "fifo",
+        "hard.go",
+        "link",
+        "pkg",
+        "pkg/a.go",
+        "pkg/node_modules",
+        "pkg/sub",
+        "pkg/sub/b.go",
+        "run.sh",
+        ".crb-tree-" + "ab" * 8,
+    ]
+    by = {m.name: m for m in members}
+    assert by["."].isdir() and by["pkg"].isdir() and by["pkg/node_modules"].isdir()
+    assert by["link"].issym() and by["link"].linkname == "/etc/passwd"
+    assert by["hard.go"].isreg() and by["pkg/a.go"].islnk()
+    assert by["pkg/a.go"].linkname == "hard.go"
+    assert by["fifo"].isfifo()
+    assert by["run.sh"].mode & 0o777 == 0o755
+    assert data["pkg/sub/b.go"] == big and data["hard.go"] == b"package pkg\n"
+    mark = members[-1]
+    assert mark.isreg() and mark.size == 0
+    for m in members:
+        assert (m.uid, m.gid, m.uname, m.gname) == (0, 0, "", "")
+        assert m.mtime == int(m.mtime)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 path")
+def test_tree_stream_fails_on_a_path_it_cannot_read_and_names_it_relative_to_the_root(
+    tmp_path: Path,
+) -> None:
+    """A path the host cannot read is an error naming it relative to the tree — never left
+    out, never the host path — whether a file it cannot open or a directory it cannot
+    list; the sentinel is never written after it."""
+    root = tmp_path / "wt"
+    (root / "d").mkdir(parents=True)
+    (root / "d" / "locked.txt").write_text("secret")
+    (root / "d" / "locked.txt").chmod(0)
+    (root / "e").mkdir()
+    try:
+        tree = ex.TreeStream(root, sentinel="cd" * 8)
+        with pytest.raises(OSError, match=r"could not read d/locked\.txt") as e:
+            tree.write(io.BytesIO())
+        assert str(tmp_path) not in str(e.value) and not tree.complete
+        (root / "d" / "locked.txt").chmod(0o644)
+        (root / "e").chmod(0)
+        tree = ex.TreeStream(root, sentinel="cd" * 8)
+        with pytest.raises(OSError, match=r"could not read e:") as e:
+            tree.write(io.BytesIO())
+        assert str(tmp_path) not in str(e.value) and not tree.complete
+    finally:
+        (root / "e").chmod(0o755)
+        (root / "d" / "locked.txt").chmod(0o644)
+
+
+def test_tree_stream_fails_on_a_directory_it_opened_but_could_not_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A directory that opened but could not be listed (an I/O error, say) fails the copy
+    naming it — it is never streamed as an empty directory."""
+    root = tmp_path / "wt"
+    (root / "d").mkdir(parents=True)
+    (root / "d" / "x.txt").write_text("x")
+    d_ino = (root / "d").stat().st_ino
+    real_scandir = os.scandir
+
+    def cannot_list(path: Any) -> Any:
+        if isinstance(path, int) and os.fstat(path).st_ino == d_ino:
+            raise OSError(errno.EIO, "Input/output error")
+        return real_scandir(path)
+
+    monkeypatch.setattr(ex.os, "scandir", cannot_list)
+    tree = ex.TreeStream(root, sentinel="78" * 8)
+    with pytest.raises(OSError, match=r"could not read d: Input/output error"):
+        tree.write(io.BytesIO())
+    assert not tree.complete
+
+
+@pytest.mark.parametrize("swap", ["link", "directory"])
+def test_tree_stream_never_reads_outside_the_root_through_a_swapped_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swap: str
+) -> None:
+    """A directory swapped, after it was looked at and before it is opened, for a link to a
+    directory outside the tree is refused at the open (never followed); one swapped for
+    another directory is refused as not the one looked at. Either way the copy fails
+    closed naming the path, and nothing from outside the root reaches the stream."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("from outside the tree")
+    root = tmp_path / "wt"
+    (root / "d").mkdir(parents=True)
+    (root / "d" / "inside.txt").write_text("inside")
+    real_open = os.open
+
+    def swapped_first(path: Any, flags: int, mode: int = 0o777, *, dir_fd: Any = None) -> int:
+        if path == "d" and dir_fd is not None:
+            (root / "d").rename(tmp_path / "d.before")
+            if swap == "link":
+                (root / "d").symlink_to(outside)
+            else:
+                outside.rename(root / "d")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(ex.os, "open", swapped_first)
+    out = io.BytesIO()
+    tree = ex.TreeStream(root, sentinel="12" * 8)
+    with pytest.raises(OSError, match=r"could not read d:") as e:
+        tree.write(out)
+    # a link is refused by the open itself (Linux says ENOTDIR, macOS ELOOP); a directory
+    # by its identity
+    assert e.value.errno in ((errno.ELOOP, errno.ENOTDIR) if swap == "link" else (0,))
+    assert b"from outside the tree" not in out.getvalue() and not tree.complete
+
+
+def test_tree_stream_builds_each_header_from_the_one_look_it_read_the_entry_by(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An entry swapped for a regular file after it was looked at is archived as what was
+    looked at — never a regular header with no body, which tears the stream (Python 3.12's
+    ``addfile`` writes one) — so every later member, the sentinel last, still reads."""
+    root = tmp_path / "wt"
+    root.mkdir()
+    os.mkfifo(root / "p")
+    (root / "z.txt").write_text("after")
+    swapped: list[bool] = []
+
+    def looked_then_swapped(real: Any) -> Any:
+        def look(path: Any, *a: Any, **k: Any) -> Any:
+            st = real(path, *a, **k)
+            named = isinstance(path, (str, os.PathLike)) and os.path.basename(os.fspath(path))
+            if not swapped and named == "p":
+                swapped.append(True)
+                (root / "p").unlink()
+                (root / "p").write_bytes(b"x" * 5000)
+            return st
+
+        return look
+
+    monkeypatch.setattr(ex.os, "stat", looked_then_swapped(os.stat))
+    monkeypatch.setattr(ex.os, "lstat", looked_then_swapped(os.lstat))
+    tree = ex.TreeStream(root, sentinel="34" * 8)
+    members, data = _members(tree)
+    assert swapped and [m.name for m in members] == [".", "p", "z.txt", ".crb-tree-" + "34" * 8]
+    assert members[1].isfifo() and members[1].size == 0
+    assert data["z.txt"] == b"after" and tree.complete
+
+
+def test_tree_stream_closes_a_file_swapped_for_a_directory_before_it_was_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file swapped for a directory after it was looked at opens as that directory: the
+    copy fails closed naming it, and the descriptor that open returned is closed, never
+    leaked — a worker streams tree after tree and must not run out of them."""
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "f.txt").write_text("a file")
+    swapped: list[bool] = []
+    real_stat = os.stat
+
+    def looked_then_swapped(path: Any, *a: Any, **k: Any) -> Any:
+        st = real_stat(path, *a, **k)
+        if not swapped and path == "f.txt":
+            swapped.append(True)
+            (root / "f.txt").unlink()
+            (root / "f.txt").mkdir()
+        return st
+
+    def open_fds() -> int:
+        return len(os.listdir("/dev/fd"))
+
+    monkeypatch.setattr(ex.os, "stat", looked_then_swapped)
+    before = open_fds()
+    tree = ex.TreeStream(root, sentinel="78" * 8)
+    with pytest.raises(OSError, match=r"could not read f\.txt:"):
+        tree.write(io.BytesIO())
+    assert swapped and open_fds() == before and not tree.complete
+
+
+def test_tree_stream_holds_no_member_per_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stream is never read back, so it keeps nothing per entry: the archive's member list
+    is empty at every member it writes, however wide the tree."""
+    root = tmp_path / "wt"
+    root.mkdir()
+    for i in range(200):
+        (root / f"f{i:03}.txt").write_text(str(i))
+    held: list[int] = []
+    real_addfile = tarfile.TarFile.addfile
+
+    def counted(self: tarfile.TarFile, *a: Any, **k: Any) -> None:
+        held.append(len(self.members))
+        real_addfile(self, *a, **k)
+
+    monkeypatch.setattr(tarfile.TarFile, "addfile", counted)
+    members, _ = _members(ex.TreeStream(root, sentinel="56" * 8))
+    assert len(members) == 202 and len(held) == 202 and max(held) == 0
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "ABCDEF0123456789", "../../etc/x", "a" * 65])
+def test_tree_stream_refuses_a_sentinel_that_is_not_a_hex_token(tmp_path: Path, bad: str) -> None:
+    """The sentinel lands in a shell script and a file name: hex only, 8 to 64 characters."""
+    with pytest.raises(ValueError, match="sentinel"):
+        ex.TreeStream(tmp_path, sentinel=bad)
+
+
+def test_the_feeder_records_a_stream_cut_before_its_sentinel_never_one_after(
+    tmp_path: Path,
+) -> None:
+    """A reader that went away before the sentinel is a problem the result must carry —
+    for a tree small enough that the archive still held its sentinel when the pipe broke,
+    too; a whole stream read to its end is none; a pipe that broke once the sentinel was
+    written (the container stopped reading the end-of-archive padding) is the container's
+    to judge by the sentinel, so it is no problem here either."""
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "big.bin").write_bytes(os.urandom(1 << 20))  # more than any pipe buffer
+    r, w = os.pipe()
+    os.close(r)  # nobody reads
+    problems: list[str] = []
+    ex._feed_tree(ex.TreeStream(root, sentinel="ef" * 8), w, problems)
+    assert problems == ["the container stopped reading the tree before it ended"]
+
+    tiny = tmp_path / "tiny"
+    tiny.mkdir()
+    (tiny / "a.txt").write_text("small")  # the whole stream fits in one record on the host
+    r, w = os.pipe()
+    os.close(r)
+    problems = []
+    small = ex.TreeStream(tiny, sentinel="ef" * 8)
+    ex._feed_tree(small, w, problems)
+    assert problems == ["the container stopped reading the tree before it ended"]
+    assert not small.complete
+
+    r, w = os.pipe()
+    got = bytearray()
+
+    def drain() -> None:
+        with os.fdopen(r, "rb") as f:
+            got.extend(f.read())
+
+    reader = threading.Thread(target=drain)
+    reader.start()
+    problems = []
+    tree = ex.TreeStream(root, sentinel="ef" * 8)
+    ex._feed_tree(tree, w, problems)
+    reader.join(10)
+    assert problems == [] and tree.complete
+    with tarfile.open(fileobj=io.BytesIO(bytes(got)), mode="r:") as tf:
+        assert tf.getnames()[-1] == ".crb-tree-" + "ef" * 8
+
+    class CutAfterTheSentinel(ex.TreeStream):
+        def write(self, out: Any) -> None:
+            super().write(out)
+            raise BrokenPipeError(32, "Broken pipe")
+
+    r, w = os.pipe()
+    reader = threading.Thread(target=lambda: os.fdopen(r, "rb").read())
+    reader.start()
+    problems = []
+    ex._feed_tree(CutAfterTheSentinel(root, sentinel="ef" * 8), w, problems)
+    reader.join(10)
+    assert problems == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 path")
+def test_a_tree_the_host_could_not_stream_is_tree_copy_failed_whatever_the_client_exits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The feeder could not read a path, so the container never got the sentinel and never
+    ran the command: the result is ``tree_copy_failed`` — rc 97 with the marker, the path
+    named relative to the tree and no host path — even when the client itself exited 0."""
+    docker = tmp_path / "docker"
+    docker.write_text("#!/bin/sh\ncat > /dev/null\necho ran\n")  # reads the stream, exits 0
+    docker.chmod(0o755)
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "a.txt").write_text("fine")
+    (root / "z.txt").write_text("secret")
+    monkeypatch.setattr(ex, "grant_sandbox_read", lambda *a, **k: None)  # keep the mode 000
+    (root / "z.txt").chmod(0)
+    try:
+        e = DockerExecutor(
+            DockerSettings(image="img", docker_binary=str(docker)), verify_daemon=False
+        )
+        r = e.run(Command(("go", "test"), root, timeout=30))
+    finally:
+        (root / "z.txt").chmod(0o644)
+    assert r.returncode == ex.TREE_COPY_RC and r.env_error == "tree_copy_failed" and not r.ok
+    assert "crb: the tree copy could not read z.txt" in r.stderr
+    assert ex.TREE_COPY_MARKER in r.stderr and str(tmp_path) not in r.stderr
+    assert r.stdout == "ran\n" and not (r.cancelled or r.timed_out)
+
+
+def test_a_feeder_the_host_cannot_start_is_tree_copy_failed_and_never_hangs_the_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host could not start the feeder thread (it is out of threads): its end of the
+    pipe is closed, so the container reads an empty stream and exits instead of waiting on
+    its stdin for ever, and the result is ``tree_copy_failed`` saying why."""
+    docker = tmp_path / "docker"
+    docker.write_text("#!/bin/sh\ncat > /dev/null\necho ran\n")  # reads the stream to EOF
+    docker.chmod(0o755)
+    root = tmp_path / "wt"
+    root.mkdir()
+    (root / "a.txt").write_text("fine")
+    real_start = threading.Thread.start
+
+    def no_feeder(self: threading.Thread) -> None:
+        if self.name.startswith("crb-tree-"):
+            raise RuntimeError("can't start new thread")
+        real_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", no_feeder)
+    e = DockerExecutor(DockerSettings(image="img", docker_binary=str(docker)), verify_daemon=False)
+    r = e.run(Command(("go", "test"), root, timeout=10))
+    assert r.returncode == ex.TREE_COPY_RC and r.env_error == "tree_copy_failed" and not r.ok
+    assert "crb: the tree could not be written (RuntimeError)" in r.stderr
+    assert r.stdout == "ran\n" and not (r.cancelled or r.timed_out)
 
 
 def test_docker_run_returns_result_and_records_argv(tmp_path: Path) -> None:
