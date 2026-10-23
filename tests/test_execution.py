@@ -727,9 +727,10 @@ def test_tree_stream_archives_the_whole_tree_and_ends_with_its_sentinel(
 ) -> None:
     """Every entry but the excluded root-relative paths and what lies under them (a nested
     ``node_modules`` stays, as GNU ``tar --exclude=./node_modules`` kept it), depth-first —
-    a directory, then all it holds, then its next sibling, as ``tar -c`` orders it — links as links (never followed), a hard link as one, a FIFO as a
-    FIFO, a socket skipped, no host owner, whole-second times, the host's modes — and the
-    empty sentinel LAST; ``complete`` only once it was handed to the archive."""
+    a directory, then all it holds, then its next sibling, as ``tar -c`` orders it — links
+    as links (never followed), a hard link as one, a FIFO as a FIFO, a socket skipped, no
+    host owner, whole-second times, the host's modes — and the empty sentinel LAST;
+    ``complete`` only once the sentinel's bytes went through to ``out``."""
     root = tmp_path / "wt"
     (root / "pkg" / "sub").mkdir(parents=True)
     (root / "pkg" / "a.go").write_text("package pkg\n")
@@ -1183,10 +1184,13 @@ def test_local_executor_cancel_kills_the_running_command(tmp_path: Path) -> None
 
 def _fake_docker_stream(dir_: Path, *, inspect: str) -> tuple[str, Path]:
     """A ``docker`` stand-in for :class:`DockerStream`: ``run`` prints one line and
-    sleeps as a container would, ``kill`` and ``inspect`` are logged to ``calls``.
-    ``inspect`` scripts the daemon's answers — ``true:N`` says Running=true N times
-    then false, ``always-true`` never stops, ``no-such`` answers as a removed
-    (``--rm``) container does: exit 1 + "No such container"."""
+    sleeps as a container would, ``kill`` and ``inspect`` are logged to ``calls``. ``run``
+    never reads its stdin: a :class:`DockerExecutor` test whose container exits on its own
+    drains it first, as the copy step does, or the tree's stream is cut before its sentinel
+    and the run is ``tree_copy_failed``. ``inspect`` scripts the daemon's answers —
+    ``true:N`` says Running=true N times then false, ``always-true`` never stops,
+    ``no-such`` answers as a removed (``--rm``) container does: exit 1 + "No such
+    container"."""
     dir_.mkdir(parents=True, exist_ok=True)
     calls = dir_ / "calls"
     calls.write_text("")
@@ -1497,7 +1501,10 @@ def test_docker_run_natural_exit_confirms_nothing(tmp_path: Path) -> None:
     and the daemon is asked nothing."""
     docker, calls = _fake_docker_stream(tmp_path, inspect="always-true")
     script = Path(docker)
-    script.write_text(script.read_text().replace("echo hello; sleep 60", "echo hello"))
+    # the container reads its whole tree before the command runs, as the copy step does: one
+    # that exits without reading it cut the stream, and the run is tree_copy_failed (P-811)
+    drained = script.read_text().replace("echo hello; sleep 60", "cat > /dev/null; echo hello")
+    script.write_text(drained)
     e = _cancellable(docker, cancel=lambda: False)
     r = e.run(Command(("true",), tmp_path, timeout=10))
     assert r.ok and r.stdout.strip() == "hello"

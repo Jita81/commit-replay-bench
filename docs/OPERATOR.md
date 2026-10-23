@@ -392,11 +392,11 @@ container's stdin into a throwaway, size-capped tmpfs copy at `/work` (the defau
 mounts only the command's declared writable paths, read-write and left out of the copy
 (pytest's `.pytest_scratch`, cargo's `target`), any extra read-only mounts the runner names,
 and the sealed dependency sets, read-only; the builder's own fixer (`writable_paths=(".",)`)
-still binds the worktree (ADR-0005) **[measured —
+still binds the worktree (ADR-0005) **[measured — n = 3 tests; method:
 `tests/test_execution.py::test_copy_tree_argv_streams_the_worktree_over_stdin_into_a_sized_exec_tmpfs_at_work`,
 `::test_docker_build_argv_has_every_hardening_flag` and
 `::test_docker_build_argv_writable_paths_extra_mounts_and_cwd` pin the argv token by token;
-apparatus 2.2]**.
+apparatus 2.4]**.
 
 **Dependencies under docker come from the sealed sets (ADR-0019).** The workflow, per
 repository: commit the lockfile the recipe reads (`go.sum`; `name==version` pins in

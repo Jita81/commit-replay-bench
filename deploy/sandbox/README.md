@@ -41,8 +41,9 @@ clean (CI runs `hadolint/hadolint-action` on each file, as it does on `deploy/Do
 What CI proves on each image, from inside, on every pull request
 (`tests/test_sandbox_images_docker.py`): the image's own default user and the executor's
 user are uid 65534; `/usr` refuses a write (`Read-only file system`) and the worktree
-is not mounted for a command that declares no writable path (the worker streams it over stdin), while `/work`, the throwaway copy of the tree every command runs
-in (ADR-0019 §7), and `/tmp` accept one, and the host tree is byte-identical afterwards; the
+is not mounted for a command that declares no writable path (the worker streams it over
+stdin), while `/work`, the throwaway copy of the tree every command runs in (ADR-0019 §7),
+and `/tmp` accept one, and the host tree is byte-identical afterwards; the
 image carries `/bin/sh` and GNU `tar`, which extract that copy; no setuid/setgid file is in the
 image; `/tmp` is `noexec` for every command but the Go runner's (`/proc/mounts` says so and a
 script written there is refused / runs accordingly); a test that asserts `example.com:443` is
@@ -52,9 +53,13 @@ image absent from the daemon's store is `SandboxUnavailable` rather than a pull 
 (RED at the parent, gold clean) and grades clean with the same baseline reading the host
 runner suite pins, leaving the host worktree untouched; the OCI labels and `USER` are set; and
 a Go test that writes into its own package directory reads the same on the host and in the
-copy (the D5 regression) **[measured — n = 42 tests passed, 0 skipped, across
+copy (the D5 regression) **[measured — n = 51 tests passed, 0 skipped, across
 `tests/test_sandbox_images_docker.py` (3 images) and `tests/test_sandbox_docker.py`; method: a
-local run on colima, Docker 29.5.2, 2026-09-25; apparatus 2.2]**. Before ADR-0019 the same
+local run with `CRB_TEST_STRICT_WARMUP=1` on PR #97's head `0dc5d5c4`, the first tree that
+streams the worktree, colima 0.10.3 (VZ + virtiofs), Docker 29.5.2, 2026-10-23; apparatus
+2.4]**. When the worktree was still bound read-only at `/src`, the same two modules passed
+**[measured — n = 42 tests passed, 0 skipped; method: a local run on colima, Docker 29.5.2,
+2026-09-25; apparatus 2.2]**. Before ADR-0019 the same
 module had ten tests per language and pinned the read-only `/work` instead **[measured — 47
 passed / 0 skipped locally (colima, Docker 29.5.2, 2026-09-22) and 44 passed / 0 skipped in CI
 on PR #44 run 35678358686, head 4a64fe3; apparatus 2.2]**. The sandbox suite and the
