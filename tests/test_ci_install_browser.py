@@ -21,10 +21,12 @@ What it does: Pins that a quick install succeeds on attempt 1; that a silent att
               the configuration: no workflow line runs ``playwright install`` itself, the
               ``ui-smoke``, ``walkthrough-story`` and ``walkthrough-screens`` jobs call the
               wrapper, each passing a ``--budget`` of at most half its ``timeout-minutes``,
-              and each runs on a named image, never ``ubuntu-latest`` (P-809); the default
+              and each runs on the image the pinned Playwright release was checked on,
+              never ``ubuntu-latest``, and that image moves with the release (P-809); the default
               idle timeout outlasts the slow mirror's measured silences, and the attempts
               outlast every job's budget, so the budget, not the count, binds. An install
-              that fails the same way every time is not blamed on the mirror (P-810).
+              that fails the same way every time is not blamed on the mirror, nor is one
+              that was still printing when the budget ran out (P-810).
 How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands, a recording
               cleanup and a no-op apt writer; reads ``ci.yml`` as text, job by job.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
@@ -44,6 +46,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import os
 import re
 import sys
@@ -58,6 +61,10 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
 #: Every job that needs a Playwright browser, and so must install it through the wrapper.
 INSTALLING = ("ui-smoke", "walkthrough-story", "walkthrough-screens")
+UI_PACKAGE = ROOT / "ui" / "package.json"
+#: The Playwright release the browser jobs' image was checked against, and that image: 1.59.1
+#: ships Chromium for Ubuntu 24.04 and refuses 26.04 (P-809). They move together.
+PLAYWRIGHT, PLAYWRIGHT_IMAGE = "1.59.1", "ubuntu-24.04"
 #: The longest silence of a healthy attempt on the slow mirror of 7 Oct 2026 (15 to 70 kB/s; run
 #: 37683365608, jobs 113004810354 and 113004810596): apt prints nothing while a package downloads.
 SLOW_MIRROR_SILENCE_S = 237
@@ -163,7 +170,9 @@ def test_the_budget_ends_a_run_that_keeps_printing_past_it() -> None:
     assert time.monotonic() - started < 15
     assert "was stopped when the install budget ran out" in out
     assert "attempt 2" not in out, "no attempt may start once the budget is spent"
-    assert "the package mirror or the browser download is not answering" in out
+    # It never went quiet, so the error must not call the download unresponsive.
+    assert "slow rather than silent" in out
+    assert "not answering" not in out
 
 
 def test_a_stopped_attempt_leaves_no_process_of_its_group_behind(tmp_path: Path) -> None:
@@ -365,6 +374,20 @@ def test_each_browser_job_runs_on_a_named_image_not_the_latest(job: str) -> None
     # change (P-809). A named image moves only when this repository moves it.
     runner = _runner(job)
     assert not runner.endswith("-latest"), f"{job} runs on {runner}; name the image it needs"
+    assert runner == PLAYWRIGHT_IMAGE, (
+        f"{job} runs on {runner}; Playwright {PLAYWRIGHT} was checked on {PLAYWRIGHT_IMAGE}"
+    )
+
+
+def test_the_runner_image_moves_with_the_playwright_release() -> None:
+    # A named image is only right for the release it was checked against: a job could move to
+    # a newer image the pinned Playwright still refuses, or Playwright could move on without
+    # the image (P-809). Upgrading Playwright restates both constants above.
+    pinned = json.loads(UI_PACKAGE.read_text("utf-8"))["devDependencies"]["@playwright/test"]
+    assert pinned == PLAYWRIGHT, (
+        f"ui/package.json pins Playwright {pinned}; check which Ubuntu image it ships Chromium "
+        f"for and restate PLAYWRIGHT and PLAYWRIGHT_IMAGE (now {PLAYWRIGHT} on {PLAYWRIGHT_IMAGE})"
+    )
 
 
 def test_the_runner_check_reads_a_floating_image() -> None:

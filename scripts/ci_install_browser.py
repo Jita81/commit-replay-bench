@@ -29,10 +29,11 @@ to pass its job-budget guard (the screens shards: 700 s, against 485 to 682 s fo
 Before the first attempt it writes apt network timeouts into ``/etc/apt/apt.conf.d`` (best
 effort: a runner that refuses ``sudo -n`` gets a warning, not a failure), so most stalls end
 inside apt itself. Every stopped or failed attempt is a ``::warning``; running out is an
-``::error`` and exit 1. The error names a mirror only when an attempt was stopped: an install
-that exits non-zero every time says so instead, since a rerun meets the same error (run
-39905786776, 2026-10-23: Playwright refused Ubuntu 26.04 on all five attempts, and the error
-blamed the mirror).
+``::error`` and exit 1. The error names a mirror only when an attempt was stopped for silence:
+an install that exits non-zero every time says so instead, since a rerun meets the same error
+(run 39905786776, 2026-10-23: Playwright refused Ubuntu 26.04 on all five attempts, and the error
+blamed the mirror), and a last attempt still printing when the budget ran out is called slow,
+not silent.
 
 Navigation
 ----------
@@ -258,6 +259,11 @@ def main(
             f"the install exited non-zero every time (the last with exit {tried[-1].returncode}), "
             "so read its output above before rerunning: a rerun meets the same error unless the "
             "network caused it"
+        )
+    elif tried[-1].outcome == "out-of-budget":
+        cause = (
+            "the budget ran out while the last attempt was still printing, so the download is "
+            "slow rather than silent; rerun the job"
         )
     else:
         cause = "the package mirror or the browser download is not answering; rerun the job"
