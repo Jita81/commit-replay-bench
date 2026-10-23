@@ -65,6 +65,7 @@ import sys
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from crb.core.execution import Command, ExecResult, Executor
 from crb.core.lint import LintPlan, pinned_ruff_spec, python_plan
@@ -513,15 +514,15 @@ class PytestRunner(BaseRunner):
         #    PYTHONPATH — so the operator declares the identity and the harness writes a
         #    dist-info with METADATA only (no RECORD of files, so nothing is shadowed).
         #    NHSDigital/mesh-client `test_get_version`, 2026-09-14.
-        for stub in self.opts.get("dist_info_stubs") or []:
+        #    Under the docker executor this step never runs: the sealed set carries the
+        #    same stubs (crb.provision.python).
+        try:
+            stubs = dist_info_stubs(self.opts)
+        except ValueError as exc:
             # a malformed entry is a configuration error the setup RECORDS, never a
             # KeyError that loses the setup result (CodeRabbit on PR #3, 2026-09-15)
-            name = str((stub.get("name") if isinstance(stub, Mapping) else "") or "").strip()
-            if not name:
-                return session.result(
-                    False, f"runner_opts.dist_info_stubs: every entry needs a name (got {stub!r})"
-                )
-            version = str(stub.get("version") or "0.0.0+crb")
+            return session.result(False, str(exc))
+        for name, version in stubs:
             written = write_dist_info_stub(python, name, version)
             session.record(
                 Command(("crb", "dist-info-stub", name, version), root),
@@ -530,10 +531,37 @@ class PytestRunner(BaseRunner):
         return self.finish_setup(session, root, env_dir)
 
 
+#: A stub's name is a distribution name (PEP 508) and its version PEP 440's characters
+#: without a ``-``: both go into a directory name and a METADATA header, so nothing else may.
+_STUB_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+_STUB_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+!]*")
+DEFAULT_STUB_VERSION = "0.0.0+crb"
+
+
+def dist_info_stubs(opts: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    """``runner_opts.dist_info_stubs`` as ``(name, version)`` pairs, the version
+    ``0.0.0+crb`` when none is given. A malformed entry is a ``ValueError`` that names it:
+    the host's setup records it, the sealed set refuses ``PROVISION_STUB_INVALID``."""
+    out: list[tuple[str, str]] = []
+    for stub in opts.get("dist_info_stubs") or []:
+        name = str((stub.get("name") if isinstance(stub, Mapping) else "") or "").strip()
+        if not name:
+            raise ValueError(
+                f"runner_opts.dist_info_stubs: every entry needs a name (got {stub!r})"
+            )
+        version = str(stub.get("version") or DEFAULT_STUB_VERSION).strip()
+        if not _STUB_NAME.fullmatch(name) or not _STUB_VERSION.fullmatch(version):
+            raise ValueError(
+                "runner_opts.dist_info_stubs: a name is a distribution name and a version is "
+                f"letters, digits and '.+!' (got {stub!r})"
+            )
+        out.append((name, version))
+    return tuple(out)
+
+
 def write_dist_info_stub(python: Path, name: str, version: str) -> Path:
-    """Write ``<site-packages>/<name>-<version>.dist-info/{METADATA,RECORD,INSTALLER}``
-    for the interpreter ``python`` so ``importlib.metadata.version(name)`` resolves,
-    without any file entries that could shadow the worktree's package."""
+    """Write the stub (:func:`write_dist_info`) into the purelib of the interpreter
+    ``python``."""
     site = subprocess.run(
         [str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
         capture_output=True,
@@ -541,8 +569,15 @@ def write_dist_info_stub(python: Path, name: str, version: str) -> Path:
         check=True,
         timeout=60,
     ).stdout.strip()
+    return write_dist_info(Path(site), name, version)
+
+
+def write_dist_info(site: Path, name: str, version: str) -> Path:
+    """Write ``<site>/<name>-<version>.dist-info/{METADATA,RECORD,INSTALLER}`` so
+    ``importlib.metadata.version(name)`` resolves from ``site``, without any file entries
+    that could shadow the worktree's package."""
     norm = re.sub(r"[-_.]+", "_", name).lower()
-    d = Path(site) / f"{norm}-{version}.dist-info"
+    d = site / f"{norm}-{version}.dist-info"
     d.mkdir(parents=True, exist_ok=True)
     (d / "METADATA").write_text(
         f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"

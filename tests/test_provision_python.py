@@ -32,12 +32,13 @@ from __future__ import annotations
 import importlib
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from crb.core.deps import ProvisionRefused
-from crb.core.execution import DockerExecutor, DockerSettings
+from crb.core.execution import Command, DockerExecutor, DockerSettings
 from crb.core.git import GitRepo
 from crb.core.provision import LockInputs
 from crb.core.runners import get_runner
@@ -292,5 +293,106 @@ def test_a_pin_its_marker_excludes_never_fails_the_environment_probe(scratch: Pa
         with runner.deps_bound(deps.binding_for(ws.root)):
             probe = runner.probe_environment(DockerExecutor(DockerSettings(image=image)), ws.root)
         assert probe is not None and probe.ok, probe.combined if probe else ""
+    finally:
+        ws.remove()
+
+
+#: The fixture's own package, ``pkg``: the code comes from the tree, the identity from a stub.
+_STUB_OPTS = {"dist_info_stubs": [{"name": "pkg"}]}
+_VERSION_OF_PKG = (
+    "import importlib.metadata as m\n"
+    "try:\n"
+    "    print(m.version('pkg'))\n"
+    "except m.PackageNotFoundError:\n"
+    "    print('not found')\n"
+)
+
+
+@pytest.mark.parametrize(
+    "stub",
+    [{"version": "1.0"}, {"name": "pkg", "version": "1/../../x"}, {"name": "pkg\nVersion: 9"}],
+)
+def test_a_malformed_dist_info_stub_is_refused_before_any_fetch(
+    tmp_path: Path, stub: dict[str, str]
+) -> None:
+    """A stub's name and version go into a directory name and a METADATA header: an entry
+    with no name, or one that would leave the site or add a header, stops the run
+    ``PROVISION_STUB_INVALID`` before anything is fetched (the index does not exist, so a
+    fetch would have been ``PROVISION_FETCH_FAILED``)."""
+    root, feat = pyrepo_deps.build(tmp_path)
+    cfg = replace(pyrepo_deps.config(), runner_opts={"dist_info_stubs": [stub]})
+    provider = SealedProvider(
+        ProvisionConfig(
+            enabled=True, env="dev", store=tmp_path / "deps", pypi_index="file:///nowhere"
+        )
+    )
+    with pytest.raises(ProvisionRefused) as ei:
+        provider.resolve(GitRepo(root), cfg, gold=feat)
+    assert ei.value.code == "PROVISION_STUB_INVALID" and ei.value.refusal.scope == "run"
+
+
+def test_a_stub_is_metadata_beside_the_set_never_a_package_and_never_a_second_copy(
+    tmp_path: Path,
+) -> None:
+    """``write_stubs``: a METADATA-only dist-info per stub, listed as ``name==version``;
+    a name the set already holds a distribution of is left alone, so ``importlib.metadata``
+    never has two to choose between."""
+    site = tmp_path / "site"
+    (site / "cfx_dep-1.0.0.dist-info").mkdir(parents=True)
+    written = py_recipe.write_stubs(site, (("Pkg", "0.0.0+crb"), ("CFX.Dep", "9.9")))
+    assert written == ["Pkg==0.0.0+crb"]
+    meta = (site / "pkg-0.0.0+crb.dist-info" / "METADATA").read_text()
+    assert "Name: Pkg\nVersion: 0.0.0+crb\n" in meta
+    assert sorted(d.name for d in site.iterdir()) == [
+        "cfx_dep-1.0.0.dist-info",
+        "pkg-0.0.0+crb.dist-info",
+    ]
+
+
+@pytest.mark.docker
+@pytest.mark.slow
+@pytest.mark.sandbox_images
+def test_dist_info_stubs_ride_in_the_sealed_set_so_metadata_resolves_under_docker(
+    scratch: Path,
+) -> None:
+    """Under the docker executor the host's setup never runs, so its step 4 (the stubs) did
+    not either: ``importlib.metadata.version("click")`` found nothing and click's tests that
+    read it failed on every commit (Wave 3 qualification, 2026-10-23). The sealed set now
+    carries the stubs: the version resolves in the sandbox, the set's packages and the
+    environment probe are unchanged, and the key differs from the set without them."""
+    image = langs.ensure_shipped_sandbox_image("python")
+    index = pkgmirror.build_pypi(scratch / "simple")
+    root, feat = pyrepo_deps.build(scratch / "repo")
+    repo = GitRepo(root)
+    plain_cfg = pyrepo_deps.config()
+    cfg = replace(plain_cfg, runner_opts=_STUB_OPTS)
+    provider = SealedProvider(
+        ProvisionConfig(
+            enabled=True, env="dev", store=scratch / "deps", pypi_index=f"file://{index}"
+        )
+    )
+    plain = provider.resolve(repo, plain_cfg, gold=feat)
+    deps = provider.resolve(repo, cfg, gold=feat)
+    assert deps.parent.key != plain.parent.key and deps.gold.key != plain.gold.key
+    assert deps.parent.manifest == plain.parent.manifest == ("cfxdep==1.0.0",)
+    sealed = provider.store.verify(deps.parent.key)
+    assert sealed.manifest["dist_info_stubs"] == ["pkg==0.0.0+crb"]
+    assert "dist_info_stubs" not in provider.store.verify(plain.parent.key).manifest
+
+    executor = DockerExecutor(DockerSettings(image=image))
+    runner = get_runner(cfg)
+    ws = _parent_tree(repo, feat, scratch / "t-parent", cfg)
+    try:
+        seen = {}
+        for name, bound in (("plain", plain), ("stubbed", deps)):
+            with runner.deps_bound(bound.binding_for(ws.root)):
+                probe = runner.probe_environment(executor, ws.root)
+                assert probe is not None and probe.ok, probe.combined if probe else ""
+                base = runner.command(ws.root, (), executor=executor, timeout=60)
+                cmd = Command((base.argv[0], "-c", _VERSION_OF_PKG), ws.root, env=dict(base.env))
+                res = executor.run(runner.declare(runner.bind_deps(cmd, executor), executor))
+            assert res.ok, res.combined
+            seen[name] = res.stdout.strip()
+        assert seen == {"plain": "not found", "stubbed": "0.0.0+crb"}
     finally:
         ws.remove()
