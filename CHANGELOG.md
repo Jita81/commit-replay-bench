@@ -15,8 +15,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **filelock moves past CVE-2026-112940**
   ([#98](https://github.com/Jita81/commit-replay-bench/pull/98)). pip-audit found the advisory
   in filelock 4.0.4, which `cachecontrol` pulls in, and failed the security job on every pull
-  request with no code change. `uv.lock` moves it to 4.2.4 (fixed from 4.2.1); nothing else
-  changes.
+  request with no code change. `uv.lock` moves it to 4.2.4; the fix landed in 4.2.1. Nothing
+  else changes.
 
 - **`dist_info_stubs` hold under the docker executor** (P-812;
   [#96](https://github.com/Jita81/commit-replay-bench/pull/96)). The stubs were a setup step,
