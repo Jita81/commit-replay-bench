@@ -141,6 +141,16 @@ def test_a_failing_install_is_retried_and_running_out_is_an_error() -> None:
     assert cleanups == [1, 1]
 
 
+def test_an_install_that_fails_the_same_way_every_time_is_not_blamed_on_the_mirror() -> None:
+    # Run 39905786776: Playwright refused Ubuntu 26.04 on all five attempts, and the error told
+    # the reader the mirror was not answering and to rerun the job.
+    code = "import sys; print('ERROR: Playwright does not support chromium'); sys.exit(1)"
+    rc, out = _main(["--attempts", "2", *_py(code)])
+    assert rc == 1
+    assert "the install exited non-zero every time (the last with exit 1)" in out
+    assert "not answering" not in out and "rerun the job" not in out
+
+
 def test_the_budget_ends_a_run_that_keeps_printing_past_it() -> None:
     # Prints every 0.1 s, so the idle timeout never trips; only the budget can end it.
     code = "import time\nwhile True:\n    print('.', flush=True); time.sleep(0.1)\n"
@@ -150,6 +160,7 @@ def test_the_budget_ends_a_run_that_keeps_printing_past_it() -> None:
     assert time.monotonic() - started < 15
     assert "was stopped when the install budget ran out" in out
     assert "attempt 2" not in out, "no attempt may start once the budget is spent"
+    assert "the package mirror or the browser download is not answering" in out
 
 
 def test_a_stopped_attempt_leaves_no_process_of_its_group_behind(tmp_path: Path) -> None:

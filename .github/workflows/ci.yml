@@ -634,7 +634,11 @@ jobs:
   ui-smoke:
     # quoted: an unquoted YAML scalar may not contain ": "
     name: "ui-smoke (mocked browser: axe on /login, the index redirect, the 404)"
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: from the nightly run of 2026-10-21 ubuntu-latest is Ubuntu
+    # 26.04, and Playwright 1.59.1 ships no Chromium for it ("Playwright does not support
+    # chromium on ubuntu26.04-x64", run 39905786776). Move to ubuntu-latest again with the
+    # Playwright upgrade that supports it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -1047,7 +1051,11 @@ jobs:
 
   walkthrough-story:
     name: walkthrough story (browser, live stack, tier 1)
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: from the nightly run of 2026-10-21 ubuntu-latest is Ubuntu
+    # 26.04, and Playwright 1.59.1 ships no Chromium for it ("Playwright does not support
+    # chromium on ubuntu26.04-x64", run 39905786776). Move to ubuntu-latest again with the
+    # Playwright upgrade that supports it.
+    runs-on: ubuntu-24.04
     # The tier-1 walk grew past its budget twice: 25 minutes (run 35741391422, cancelled at
     # 25m18s) and then 40 (PR #57, cancelled twice at 40 minutes with every spec so far
     # passing) — 11-screens alone was ~34 of them (8 persona x width passes at ~4.3 min each).
@@ -1122,7 +1130,11 @@ jobs:
     # assumes state the `walkthrough-story` job made. ~8.5 min of passes + ~1.5 min seed + ~1 min
     # setup on a hosted runner, estimated from PR #57's log: under half of this budget.
     name: walkthrough screens (browser, live stack, tier 1, shard ${{ matrix.shard }} of 4)
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: from the nightly run of 2026-10-21 ubuntu-latest is Ubuntu
+    # 26.04, and Playwright 1.59.1 ships no Chromium for it ("Playwright does not support
+    # chromium on ubuntu26.04-x64", run 39905786776). Move to ubuntu-latest again with the
+    # Playwright upgrade that supports it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false

@@ -29,7 +29,10 @@ to pass its job-budget guard (the screens shards: 700 s, against 485 to 682 s fo
 Before the first attempt it writes apt network timeouts into ``/etc/apt/apt.conf.d`` (best
 effort: a runner that refuses ``sudo -n`` gets a warning, not a failure), so most stalls end
 inside apt itself. Every stopped or failed attempt is a ``::warning``; running out is an
-``::error`` and exit 1.
+``::error`` and exit 1. The error names a mirror only when an attempt was stopped: an install
+that exits non-zero every time says so instead, since a rerun meets the same error (run
+39905786776, 2026-10-23: Playwright refused Ubuntu 26.04 on all five attempts, and the error
+blamed the mirror).
 
 Navigation
 ----------
@@ -230,9 +233,11 @@ def main(
             file=sink,
         )
     deadline = clock() + args.budget
+    tried: list[Attempt] = []
     for k in range(1, args.attempts + 1):
         print(f"::group::browser install, attempt {k} of {args.attempts}", file=sink, flush=True)
         attempt = run(command, idle_timeout_s=args.idle_timeout, deadline=deadline, out=sink)
+        tried.append(attempt)
         print("::endgroup::", file=sink, flush=True)
         if attempt.outcome == "ok":
             print(
@@ -248,10 +253,17 @@ def main(
         if k == args.attempts or clock() + args.backoff >= deadline:
             break
         sleep(args.backoff)
+    if all(a.outcome == "failed" for a in tried):
+        cause = (
+            f"the install exited non-zero every time (the last with exit {tried[-1].returncode}), "
+            "so read its output above before rerunning: a rerun meets the same error unless the "
+            "network caused it"
+        )
+    else:
+        cause = "the package mirror or the browser download is not answering; rerun the job"
     print(
         f"::error title=browser install::no attempt succeeded within {args.attempts} attempts "
-        f"and {args.budget:.0f} s (docs/PREVENTION.md P-751): the package mirror or the browser "
-        "download is not answering; rerun the job",
+        f"and {args.budget:.0f} s (docs/PREVENTION.md P-751): {cause}",
         file=sink,
         flush=True,
     )
