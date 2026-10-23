@@ -20,27 +20,33 @@ What it does: Pins that a quick install succeeds on attempt 1; that a silent att
               ``\\r`` counts as output; that a refused apt-config write is only a warning. For
               the configuration: no workflow line runs ``playwright install`` itself, the
               ``ui-smoke``, ``walkthrough-story`` and ``walkthrough-screens`` jobs call the
-              wrapper, each passing a ``--budget`` of at most half its ``timeout-minutes``;
-              the default idle timeout outlasts the slow mirror's measured silences, and the
-              attempts outlast every job's budget, so the budget, not the count, binds.
+              wrapper, each passing a ``--budget`` of at most half its ``timeout-minutes``,
+              and each runs on the image the pinned Playwright release was checked on,
+              never ``ubuntu-latest``, and that image moves with the release (P-809); the default
+              idle timeout outlasts the slow mirror's measured silences, and the attempts
+              outlast every job's budget, so the budget, not the count, binds. An install
+              that fails the same way every time is not blamed on the mirror, nor is one
+              that was still printing when the budget ran out (P-810).
 How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands, a recording
               cleanup and a no-op apt writer; reads ``ci.yml`` as text, job by job.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_install_browser.py (the wrapper), .github/workflows/ci.yml (the jobs),
-              docs/PREVENTION.md (P-751), tests/test_ci_job_budget.py (the job parser this
-              mirrors)
+              docs/PREVENTION.md (P-751, P-809, P-810), tests/test_ci_job_budget.py (the
+              job parser this mirrors)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); a CI job starts
               installing a Playwright browser (add it to ``INSTALLING``); the wrapper's
               defaults change; a healthy install is measured silent for longer than
-              ``SLOW_MIRROR_SILENCE_S``.
+              ``SLOW_MIRROR_SILENCE_S``; Playwright is upgraded to a release that supports a
+              newer Ubuntu image.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import os
 import re
 import sys
@@ -55,6 +61,10 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CI = WORKFLOWS / "ci.yml"
 #: Every job that needs a Playwright browser, and so must install it through the wrapper.
 INSTALLING = ("ui-smoke", "walkthrough-story", "walkthrough-screens")
+UI_PACKAGE = ROOT / "ui" / "package.json"
+#: The Playwright release the browser jobs' image was checked against, and that image: 1.59.1
+#: ships Chromium for Ubuntu 24.04 and refuses 26.04 (P-809). They move together.
+PLAYWRIGHT, PLAYWRIGHT_IMAGE = "1.59.1", "ubuntu-24.04"
 #: The longest silence of a healthy attempt on the slow mirror of 7 Oct 2026 (15 to 70 kB/s; run
 #: 37683365608, jobs 113004810354 and 113004810596): apt prints nothing while a package downloads.
 SLOW_MIRROR_SILENCE_S = 237
@@ -141,6 +151,16 @@ def test_a_failing_install_is_retried_and_running_out_is_an_error() -> None:
     assert cleanups == [1, 1]
 
 
+def test_an_install_that_fails_the_same_way_every_time_is_not_blamed_on_the_mirror() -> None:
+    # Run 39905786776: Playwright refused Ubuntu 26.04 on all five attempts, and the error told
+    # the reader the mirror was not answering and to rerun the job.
+    code = "import sys; print('ERROR: Playwright does not support chromium'); sys.exit(1)"
+    rc, out = _main(["--attempts", "2", *_py(code)])
+    assert rc == 1
+    assert "the install exited non-zero every time (the last with exit 1)" in out
+    assert "not answering" not in out and "rerun the job" not in out
+
+
 def test_the_budget_ends_a_run_that_keeps_printing_past_it() -> None:
     # Prints every 0.1 s, so the idle timeout never trips; only the budget can end it.
     code = "import time\nwhile True:\n    print('.', flush=True); time.sleep(0.1)\n"
@@ -150,6 +170,9 @@ def test_the_budget_ends_a_run_that_keeps_printing_past_it() -> None:
     assert time.monotonic() - started < 15
     assert "was stopped when the install budget ran out" in out
     assert "attempt 2" not in out, "no attempt may start once the budget is spent"
+    # It never went quiet, so the error must not call the download unresponsive.
+    assert "slow rather than silent" in out
+    assert "not answering" not in out
 
 
 def test_a_stopped_attempt_leaves_no_process_of_its_group_behind(tmp_path: Path) -> None:
@@ -336,3 +359,38 @@ def test_the_budget_check_refuses_a_call_with_no_budget() -> None:
     with pytest.raises(AssertionError, match="must pass its own --budget"):
         _budgets("x", planted)
     assert _budgets("x", planted.replace(".py\n", ".py --budget 600\n")) == ([600.0], 20)
+
+
+def _runner(job: str, text: str | None = None) -> str:
+    """The image ``job`` runs on: its ``runs-on``."""
+    body = _jobs(CI.read_text("utf-8") if text is None else text)[job]
+    return next(m.group(1) for ln in body if (m := re.match(r"^    runs-on:\s*(\S+)", ln)))
+
+
+@pytest.mark.parametrize("job", INSTALLING)
+def test_each_browser_job_runs_on_a_named_image_not_the_latest(job: str) -> None:
+    # Run 39905786776: ubuntu-latest became Ubuntu 26.04 under the nightly of 2026-10-21,
+    # Playwright 1.59.1 ships no Chromium for it, and every browser job failed with no code
+    # change (P-809). A named image moves only when this repository moves it.
+    runner = _runner(job)
+    assert not runner.endswith("-latest"), f"{job} runs on {runner}; name the image it needs"
+    assert runner == PLAYWRIGHT_IMAGE, (
+        f"{job} runs on {runner}; Playwright {PLAYWRIGHT} was checked on {PLAYWRIGHT_IMAGE}"
+    )
+
+
+def test_the_runner_image_moves_with_the_playwright_release() -> None:
+    # A named image is only right for the release it was checked against: a job could move to
+    # a newer image the pinned Playwright still refuses, or Playwright could move on without
+    # the image (P-809). Upgrading Playwright restates both constants above.
+    pinned = json.loads(UI_PACKAGE.read_text("utf-8"))["devDependencies"]["@playwright/test"]
+    assert pinned == PLAYWRIGHT, (
+        f"ui/package.json pins Playwright {pinned}; check which Ubuntu image it ships Chromium "
+        f"for and restate PLAYWRIGHT and PLAYWRIGHT_IMAGE (now {PLAYWRIGHT} on {PLAYWRIGHT_IMAGE})"
+    )
+
+
+def test_the_runner_check_reads_a_floating_image() -> None:
+    planted = "jobs:\n  x:\n    runs-on: ubuntu-latest\n    steps: []\n"
+    assert _runner("x", planted) == "ubuntu-latest"
+    assert _runner("x", planted.replace("ubuntu-latest", "ubuntu-24.04")) == "ubuntu-24.04"

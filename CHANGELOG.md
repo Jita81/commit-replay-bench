@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The browser jobs name their runner image; two advisories cleared** (P-809, P-810;
+  [#95](https://github.com/Jita81/commit-replay-bench/pull/95)). From 2026-10-21 `ubuntu-latest`
+  was Ubuntu 26.04, which Playwright 1.59.1 has no Chromium for, so every browser job failed on
+  `main` with no code change. They run on `ubuntu-24.04` until the Playwright upgrade that
+  supports 26.04, and a ratchet holds that image to the Playwright pin in `ui/package.json`.
+  certifi and opentelemetry-api move to their fixed releases in `uv.lock`. The install wrapper
+  no longer blames the mirror when every attempt fails the same way, or calls a download that
+  was still printing when the budget ran out silent.
+
 - **Wave 3 pre-run: a reading fixed before its data, measured sealed, under a product-held ceiling**
   (P-787 to P-798, P-800 to P-808, G-957, DL-372 to DL-386, DL-390 to DL-392, DL-400 to DL-405,
   DL-410 to DL-413; [#87](https://github.com/Jita81/commit-replay-bench/pull/87)). Reading ids hash
