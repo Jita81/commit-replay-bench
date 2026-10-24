@@ -33,13 +33,14 @@
 #       --user=65534:65534 --cap-drop=ALL --security-opt no-new-privileges --read-only
 #       --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m   (exec: the Go runner declares
 #         Command.exec_tmp — every other command's tmpfs is noexec)
-#       --mount type=bind,src=<worktree>,dst=/src,readonly
+#       --interactive   (the worker writes the tree to the container's stdin as a tar)
 #       --tmpfs /work:rw,exec,nosuid,nodev,size=1g,uid=65534,gid=65534,mode=0700
 #       --mount type=bind,src=<sealed module cache>,dst=/deps/gomod,readonly   (ADR-0019)
 #       --env GOMODCACHE=/deps/gomod --env GOPROXY=off --env GOSUMDB=off …
 #       --env HOME=/tmp --env CI=1 --env NO_COLOR=1 --workdir /work
-#       crb-sandbox-go:local /bin/sh -c '<tar /src into /work>; cd /work/$0 && exec "$@"' . \
-#         go test -json ./…   (the tests run in a throwaway copy of the tree: ADR-0019 §7)
+#       crb-sandbox-go:local /bin/sh -c '<tar from stdin into /work>; cd /work/$0 && exec "$@"' . \
+#         go test -json ./…   (the tests run in a throwaway copy of the tree; the worktree
+#         itself is not mounted: ADR-0019 §7)
 #
 # Security posture (docs/SECURITY.md §3.1):
 #   * Both bases are pinned BY DIGEST (the multi-arch index, so amd64 and arm64 resolve the

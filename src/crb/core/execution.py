@@ -7,9 +7,11 @@ an :class:`Executor`. The executor decides *where* it runs:
 * :class:`LocalExecutor` — a plain subprocess on the host with a minimal, explicit
   environment (no inherited secrets) and process-group kill on timeout.
 * :class:`DockerExecutor` — ``docker run`` with the full hardening set:
-  ``--network=none``, read-only root, the worktree read-only at ``/src`` and the tests
-  run in a throwaway, size-capped tmpfs copy of it at ``/work`` (ADR-0019 §7; the
-  ``readonly`` tree keeps the worktree itself at ``/work``), ``/tmp`` scratch
+  ``--network=none``, read-only root, the tests run in a throwaway, size-capped tmpfs
+  copy of the worktree at ``/work`` that the host streams in as a tar on the container's
+  stdin — the worktree itself is not mounted, only the command's declared writable paths
+  are (ADR-0019 §7; the ``readonly`` tree keeps the worktree itself read-only at
+  ``/work``), ``/tmp`` scratch
   (``exec`` on it only for a toolchain that declared ``Command.exec_tmp``),
   sealed dependency sets mounted read-only, ``--cap-drop=ALL``, ``no-new-privileges``,
   non-root user, cpu / memory / pid caps. It **fails closed**: no docker binary, no
@@ -23,7 +25,8 @@ installed in the sandbox. A tree that cannot be copied (rc 97 with the marker) i
 environment error on the result (``ExecResult.env_error``), never a verdict. Host file modes
 never hide the tree from the container's user: :func:`grant_sandbox_read` makes every path
 the worker owns readable to it before the container starts, and the copy never leaves a
-path out.
+path out: :class:`TreeStream` reads every path on the host and ends with a sentinel member
+the container must receive before the command runs.
 
 Navigation
 ----------
@@ -44,10 +47,11 @@ What it does: Runs one command with a wall clock and a cancel token and reports 
               kill it reads the killed command's output for ``POST_KILL_DRAIN_S`` at most,
               however much is still written, then kills the group once more (P-774).
 How:          ``Command`` (argv, root, writable paths, sealed ``ro_mounts``) → ``build_argv``
-              (the full ``docker run`` hardening set, the worktree read-only at ``/src`` and a
-              throwaway tmpfs copy at ``/work`` — or the ``readonly`` tree — each bundle mount
-              re-validated, ``network=True`` refused; asserted on by tests) → ``Popen`` with a
-              drain thread polled against the deadline and the cancel token → ``docker
+              (the full ``docker run`` hardening set, a throwaway tmpfs copy at ``/work`` the
+              host streams the worktree into over stdin (``TreeStream``) — or the ``readonly``
+              tree — each bundle mount re-validated, ``network=True`` refused; asserted on by
+              tests) → ``Popen`` with a drain thread polled against the deadline and the
+              cancel token, and a feeder thread writing the tree → ``docker
               kill <name>`` / process-group kill → ``ExecResult``; ``make_executor`` picks
               the kind from configuration — ``local`` or ``docker`` only, an empty or other
               name is an error — and fails closed on ``docker`` without settings. Exit 125 is
@@ -120,6 +124,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import tarfile
 import tempfile
 import threading
 import time
@@ -127,7 +132,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, Protocol
+from typing import IO, Any, Protocol, cast
 
 from crb.core.deps import BundleMount, validate_mount
 
@@ -754,22 +759,25 @@ _NO_TREE_WORK_SIZE = "16m"
 #: The exit code and stderr marker of a failed tree copy (an environment error).
 TREE_COPY_RC = 97
 TREE_COPY_MARKER = "crb:tree-copy-failed"
-#: ``$0`` is the working directory relative to the tree; ``$@`` the command. The reading tar
-#: writes a marker on a fatal error (exit 2 or more) so a partial copy is never mistaken for
-#: a tree (``sh`` has no ``pipefail``); its exit 1 — "file changed as we read it", which a
-#: bind mount's directory times provoke under colima — is a warning, not a failure. The
-#: same exit 1 is all GNU tar gives for a path it could not open under colima ("removed
-#: before we read it"), so that message is read from its stderr (echoed as it was) and is
-#: fatal too: a path is never silently left out of the copy (PR #56).
+#: The name of the tree stream's last member (``TREE_SENTINEL_PREFIX`` + a per-command
+#: random hex): the container runs the command only once it has extracted it.
+TREE_SENTINEL_PREFIX = ".crb-tree-"
+#: How long ``run`` waits, after the container ended, for the thread that writes the tree.
+_TREE_FEED_JOIN_S = 5.0
+#: ``$0`` is the working directory relative to the tree; ``$@`` the command. The tree arrives
+#: on stdin as a tar the HOST writes (:class:`TreeStream`) — the container never reads the
+#: worktree through the VM's file share, whose name cache made a path the host had just
+#: replaced (``git checkout`` renames) vanish from the copy (virtiofs under colima,
+#: 2026-10-23). The command runs only when the stream's sentinel, its LAST member, was
+#: extracted: a stream that ended early — the host could not read a path, the pipe broke —
+#: is a failed copy (rc 97 with the marker), never a partial tree; ``sh`` needs no
+#: ``pipefail`` for that. Removing the sentinel is best effort: tar sets ``/work``'s own
+#: mode last, and a tree whose root is ``r-x`` leaves no write to remove it with. The
+#: command's own stdin is ``/dev/null``, as it always was.
 _COPY_SCRIPT = (
-    "{{ {{ tar -C /src --warning=no-file-changed {excludes}-cf - .; "
-    "[ $? -le 1 ] || : > /tmp/.crb-copy-failed; }} 2> /tmp/.crb-copy-err; "
-    "cat /tmp/.crb-copy-err >&2; "
-    'case "$(cat /tmp/.crb-copy-err)" in *"removed before we read"*) '
-    ": > /tmp/.crb-copy-failed;; esac; }} | tar -C {work} -xf - "
-    "&& [ ! -e /tmp/.crb-copy-failed ] "
+    "tar -C {work} -xf - && [ -e {work}/{sentinel} ] && {{ rm -f {work}/{sentinel} || :; }} "
     "|| {{ echo " + TREE_COPY_MARKER + " >&2; exit " + str(TREE_COPY_RC) + "; }}; "
-    'cd "{work}/$0" && exec "$@"'
+    'cd "{work}/$0" && exec "$@" </dev/null'
 )
 
 
@@ -789,11 +797,11 @@ class DockerSettings:
     #: ``node_modules`` or a Go module cache. Never a docker socket, never $HOME.
     extra_ro_mounts: Mapping[str, str] = field(default_factory=dict)
     docker_binary: str = ""
-    #: How the tests see the tree (ADR-0019 §7). ``copy`` (default): the worktree is mounted
-    #: read-only at ``/src`` and every command runs in a throwaway tmpfs copy at ``/work`` of
-    #: at most ``work_size`` — a test may write its own tree (the D5 finding) and nothing
-    #: reaches the host. ``readonly``: the worktree itself read-only at ``/work``. A
-    #: different tree is a different posture, qualified separately.
+    #: How the tests see the tree (ADR-0019 §7). ``copy`` (default): every command runs in a
+    #: throwaway tmpfs copy at ``/work`` of at most ``work_size``, which the host streams in
+    #: over stdin (the worktree itself is not mounted) — a test may write its own tree (the D5
+    #: finding) and nothing reaches the host. ``readonly``: the worktree itself read-only at
+    #: ``/work``. A different tree is a different posture, qualified separately.
     tree: str = TREE_COPY
     work_size: str = "1g"
 
@@ -940,15 +948,23 @@ class DockerExecutor:
             "limits": limits,
         }
 
-    def build_argv(self, cmd: Command) -> list[str]:
-        """The hardened ``docker run`` argv. Tests assert on this directly."""
+    def copies_tree(self, cmd: Command) -> bool:
+        """Whether ``cmd`` runs in a throwaway copy of the tree (the ``copy`` tree, and a
+        command that reads one). A fixer that writes the tree itself (``"."`` in its
+        writable paths) gets the worktree read-only at ``/work`` instead, as before."""
+        return cmd.tree and self.settings.tree == TREE_COPY and "." not in cmd.writable_paths
+
+    def build_argv(self, cmd: Command, *, sentinel: str = "") -> list[str]:
+        """The hardened ``docker run`` argv. Tests assert on this directly. For a copied
+        tree ``sentinel`` names the stream's last member (:class:`TreeStream`; a random
+        one when not given), and the argv expects the tree on stdin."""
         s = self.settings
         if cmd.network:
             raise SandboxUnavailable(
                 "a command asked for a network in the sandbox: dependencies are provisioned "
                 "per task, never installed in the sandbox (ADR-0019)"
             )
-        copy = cmd.tree and s.tree == TREE_COPY and "." not in cmd.writable_paths
+        copy = self.copies_tree(cmd)
         argv: list[str] = [
             self.docker,
             "run",
@@ -980,14 +996,15 @@ class DockerExecutor:
                 f"uid={uid},gid={gid or uid},mode=0700",
             ]
         elif copy:
-            # the worktree is read-only at /src and the command runs in a throwaway copy of
-            # it: a size-capped tmpfs at the workdir that dies with the container. exec, as
-            # the tree always was to its own tests (scripts, built binaries); nosuid, nodev.
-            # The tmpfs is OWNED by the container's user (uid/gid, mode 0700): tar restores
-            # the tree's own modes and times onto it, and nobody else in the container can
-            # write it.
+            # the command runs in a throwaway copy of the tree: a size-capped tmpfs at the
+            # workdir that dies with the container, filled from the tar the host writes to
+            # the container's stdin (--interactive; the worktree itself is not mounted). exec,
+            # as the tree always was to its own tests (scripts, built binaries); nosuid,
+            # nodev. The tmpfs is OWNED by the container's user (uid/gid, mode 0700): tar
+            # restores the tree's own modes and times onto it, and nobody else in the
+            # container can write it.
             uid, _, gid = s.user.partition(":")
-            argv += ["--mount", f"type=bind,src={cmd.root},dst=/src,readonly"]
+            argv += ["--interactive"]
             argv += [
                 "--tmpfs",
                 f"{s.workdir}:rw,exec,nosuid,nodev,size={s.work_size},"
@@ -1023,10 +1040,8 @@ class DockerExecutor:
         # (and a qualification) measured on other bytes
         image = self._image_id or s.image
         if copy:
-            excludes = "".join(
-                f"--exclude=./{rel.strip('/')} " for rel in ("node_modules", *cmd.writable_paths)
-            )
-            script = _COPY_SCRIPT.format(excludes=excludes, work=s.workdir)
+            marker = TREE_SENTINEL_PREFIX + (sentinel or uuid.uuid4().hex)
+            script = _COPY_SCRIPT.format(work=s.workdir, sentinel=marker)
             argv += ["--workdir", s.workdir, f"--stop-timeout={max(1, int(cmd.timeout))}", image]
             argv += ["/bin/sh", "-c", script, cmd.cwd_rel or ".", *cmd.argv]
             return argv
@@ -1034,7 +1049,9 @@ class DockerExecutor:
         argv += list(cmd.argv)
         return argv
 
-    def _run_cancellable(self, argv: list[str], cmd: Command, started: float) -> ExecResult:
+    def _run_cancellable(
+        self, argv: list[str], cmd: Command, started: float, tree: TreeStream | None = None
+    ) -> ExecResult:
         """``docker run`` under the cancel token. The container gets a name so the
         deadline and the token can ``docker kill`` IT — killing the client process
         alone would leave the container running (the same rule as :class:`DockerStream`).
@@ -1046,17 +1063,50 @@ class DockerExecutor:
         group is killed once more if a pipe is still open (a member forked as the first
         signal was sent survives it on macOS), and a pipe a process outside the group still
         holds after that is abandoned with what was read and a warning naming the container
-        (:class:`OutputDrain`, P-774)."""
+        (:class:`OutputDrain`, P-774).
+
+        With ``tree`` (a copied tree) a feeder thread writes the tree's tar to the client's
+        stdin. A stream that failed before its sentinel — a path the host could not read, a
+        pipe the container stopped reading, a feeder the host could not start (its end of
+        the pipe is closed, so the container reads an empty stream and exits) — is
+        ``tree_copy_failed`` whatever the container exited with (the container cannot have
+        run the command); a cancel or the wall clock still reads as itself."""
         name = f"crb-{uuid.uuid4().hex[:12]}"
         argv = [*argv[:3], "--name", name, *argv[3:]]  # docker run --rm --name …
-        proc = subprocess.Popen(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=True,
-        )
+        stdin: int = subprocess.DEVNULL
+        feed_w = -1
+        if tree is not None:
+            stdin, feed_w = os.pipe()  # both non-inheritable; Popen dups the read end to fd 0
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+        except BaseException:
+            if tree is not None:
+                os.close(stdin)
+                os.close(feed_w)
+            raise
+        feed_problems: list[str] = []
+        feeder: threading.Thread | None = None
+        if tree is not None:
+            os.close(stdin)  # the client holds it now; EOF/EPIPE then follow the client
+            feeder = threading.Thread(
+                target=_feed_tree,
+                args=(tree, feed_w, feed_problems),
+                name=f"crb-tree-{name}",
+                daemon=True,
+            )
+            try:
+                feeder.start()
+            except Exception as e:  # the host could not start a thread: a failed copy
+                feeder = None
+                os.close(feed_w)  # EOF before the sentinel: the container refuses it, exits
+                feed_problems.append(f"the tree could not be written ({type(e).__name__})")
         drain = OutputDrain(proc, leads_group=True)
         timed_out = cancelled = False
         kill_confirmed: bool | None = None
@@ -1072,6 +1122,11 @@ class DockerExecutor:
             drain.finish_after_kill(self.POST_KILL_DRAIN_S, f"docker container {name}")
             break
         out, err = drain.text()
+        if feeder is not None:
+            # the client has exited, so its stdin is closed and a blocked write fails now
+            feeder.join(_TREE_FEED_JOIN_S)
+            if feeder.is_alive():
+                _LOG.warning("the tree feeder of container %s is still writing; abandoned", name)
         if (
             proc.returncode == 125
             and not (cancelled or timed_out)
@@ -1081,6 +1136,11 @@ class DockerExecutor:
                 f"docker failed to launch the container (exit 125): {err[:400]}"
             )
         rc = 130 if cancelled else 124 if timed_out else int(proc.returncode or 0)
+        if feed_problems and not (cancelled or timed_out):
+            # the tree never fully reached the container: its command did not run
+            rc = TREE_COPY_RC
+            lead = err if not err or err.endswith("\n") else err + "\n"
+            err = f"{lead}crb: {feed_problems[0]}\n{TREE_COPY_MARKER}\n"
         return ExecResult(
             rc,
             out,
@@ -1190,22 +1250,25 @@ class DockerExecutor:
     def run(self, cmd: Command) -> ExecResult:
         """Run ``cmd`` in the sandbox. A timeout is a result (124); a failure of docker
         itself to launch (exit 125, a missing binary) is :class:`SandboxUnavailable`."""
-        argv = self.build_argv(cmd)
+        copy = self.copies_tree(cmd)
+        sentinel = uuid.uuid4().hex if copy else ""
+        argv = self.build_argv(cmd, sentinel=sentinel)
         # the tree the container reads is the WHOLE worktree whatever its host modes: the
-        # sandbox uid owns nothing on the host (see grant_sandbox_read)
+        # sandbox uid owns nothing on the host (see grant_sandbox_read); the copy keeps the
+        # modes the grant leaves, as the in-container copy did
+        skip = (*(("node_modules",) if copy else ()), *cmd.writable_paths)
         if cmd.tree:
-            copy = self.settings.tree == TREE_COPY and "." not in cmd.writable_paths
-            grant_sandbox_read(
-                cmd.root, skip=(*(("node_modules",) if copy else ()), *cmd.writable_paths)
-            )
+            grant_sandbox_read(cmd.root, skip=skip)
+        tree = TreeStream(cmd.root, exclude=skip, sentinel=sentinel) if copy else None
         started = time.monotonic()
         # The real daemon always takes the polled path — with or without a cancel token —
         # because it is the one that kills the CONTAINER on the wall clock and confirms
         # it: subprocess.run's own timeout kills only the ``docker run`` client and would
         # leave the container running (the CLI's executors carry no cancel token). An
-        # injected runner (tests) cannot be polled, so it keeps the plain timeout path.
+        # injected runner (tests) cannot be polled, so it keeps the plain timeout path —
+        # and is handed no tree: it records the argv, it starts no container.
         if self._runner is subprocess.run:
-            return self._run_cancellable(argv, cmd, started)
+            return self._run_cancellable(argv, cmd, started, tree)
         try:
             r = self._runner(argv, capture_output=True, text=True, timeout=cmd.timeout, check=False)
         except subprocess.TimeoutExpired:
@@ -1294,6 +1357,241 @@ def grant_sandbox_read(root: Path, *, skip: Sequence[str] = ()) -> None:
             elif stat.S_ISREG(st.st_mode):
                 extra = stat.S_IXOTH if st.st_mode & stat.S_IXUSR else 0
                 grant(e.path, st, _GRANT_FILE | extra)
+
+
+class TreeStream:
+    """The worktree as the tar a copied tree's container extracts from its stdin.
+
+    The HOST reads every path, so no container reads the worktree through the VM's file
+    share: under colima (virtiofs) a guest lookup caches a name for about a second, and a
+    path the host replaced by rename or unlink — ``git checkout`` does both — just after one
+    container read the tree was ``ENOENT`` to the next when its directory was wide, and
+    Wave 3's qualification failed ``tree_copy_failed`` on five cobra commits (2026-10-23,
+    colima VZ + virtiofs; ``test_a_file_the_host_replaced_just_before_the_run_is_read_whole``
+    fails on the mounted tree). An in-place write is seen at once; a replaced name is not.
+
+    The archive holds ``.`` and then every entry under ``root`` (depth-first and sorted: a
+    directory, then all it holds, before its next sibling — the order ``tar -c`` writes)
+    except the root-relative paths in ``exclude`` and what lies under them —
+    the command's writable paths, which are bind mounts in the container, and
+    ``node_modules`` — as GNU ``tar --exclude=./<path>`` left them out. Regular files,
+    directories, links, FIFOs and devices as tar archives them; a socket is skipped, as
+    GNU tar skips one. Every entry is looked up in the open directory that holds it and
+    opened ``O_NOFOLLOW``, never by its path: a link is archived as a link, never followed,
+    and a directory swapped since it was looked at — for a link, or for another directory
+    — is refused, so nothing outside ``root`` is read; each header is built from the one
+    look its entry was read by. Owners are not carried (the container's user owns the
+    copy); modes and whole-second times are. A path the host cannot read raises
+    ``OSError`` naming it relative to ``root`` — it is never left out. A later command
+    that does not declare a writable path an earlier one wrote into (pytest's
+    ``.pytest_scratch``, cargo's ``target``) gets what the sandbox wrote there in its copy:
+    the design assumes the sandbox writes such files readable to others, as the
+    container's umask (``022``) does unless a tool narrows a mode itself (pytest's own
+    ``0700`` temporary directories are in the container's ``/tmp``: crb sets no
+    ``--basetemp``); on native Linux, where the sandbox's uid owns what it wrote, one it
+    wrote unreadable fails that later copy closed. The LAST member is the empty
+    ``TREE_SENTINEL_PREFIX + sentinel``: the container runs the command only once it holds
+    it, so a stream cut short is a failed copy, never a partial tree; ``complete`` says the
+    sentinel went through to ``out``, not merely into the archive's buffer."""
+
+    def __init__(self, root: Path, *, exclude: Sequence[str] = (), sentinel: str) -> None:
+        if not re.fullmatch(r"[0-9a-f]{8,64}", sentinel):
+            raise ValueError(f"tree sentinel must be 8-64 lowercase hex characters: {sentinel!r}")
+        self.root = Path(root)
+        normal = (os.path.normpath(x.strip("/")) for x in exclude if x.strip("/"))
+        self.exclude = frozenset(x for x in normal if x != ".")
+        self.sentinel = sentinel
+        self._through: _Through | None = None
+        self._sentinel_end: int | None = None
+
+    @property
+    def complete(self) -> bool:
+        """Has the sentinel gone through to ``out``? Not merely into the archive: tarfile
+        holds up to a record (10 KiB) before it writes, so a small tree's sentinel is still
+        on the host when ``addfile`` returns, and a pipe that breaks then broke before it."""
+        end, through = self._sentinel_end, self._through
+        return end is not None and through is not None and through.taken >= end
+
+    def write(self, out: IO[bytes]) -> None:
+        """Write the archive to ``out`` (not closed here)."""
+        through = self._through = _Through(out)
+        sink = cast(IO[bytes], through)  # tarfile's stream mode only ever writes to it
+        with tarfile.open(fileobj=sink, mode="w|", format=tarfile.GNU_FORMAT) as tf:
+            links: dict[tuple[int, int], str] = {}
+            # depth-first, a directory's whole subtree straight after it, as ``tar -c``
+            # orders it: GNU tar extracting as non-root sets a directory's own mode once
+            # it reaches a member outside it, so a sibling first would lock a ``r-x``
+            # directory before its files were written into it. One open directory per
+            # level, closed as the walk leaves it.
+            frames: list[tuple[int, str, Iterator[str]]] = []
+            try:
+                try:  # the root itself may lie behind a link (macOS's /tmp is one)
+                    top = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+                except OSError as e:
+                    raise _unreadable(".", e) from None
+                frames.append((top, "", self._names(top, ".")))
+                _append(tf, _header(".", os.fstat(top), tarfile.DIRTYPE))
+                while frames:
+                    fd, rel_dir, names = frames[-1]
+                    name = next(names, None)
+                    if name is None:
+                        frames.pop()
+                        os.close(fd)
+                        continue
+                    rel = f"{rel_dir}/{name}" if rel_dir else name
+                    if rel in self.exclude:
+                        continue
+                    sub = self._add(tf, fd, name, rel, links)
+                    if sub is not None:
+                        frames.append((sub, rel, self._names(sub, rel)))
+            finally:
+                for fd, _, _ in frames:
+                    os.close(fd)
+            mark = tarfile.TarInfo(TREE_SENTINEL_PREFIX + self.sentinel)
+            mark.mode = 0o600
+            tf.addfile(mark)
+            self._sentinel_end = tf.offset  # the stream's bytes up to the sentinel's end
+
+    @staticmethod
+    def _names(fd: int, rel: str) -> Iterator[str]:
+        """The names in the open directory ``fd`` (``rel`` from the root), sorted; read at
+        the first ``next``, so the walk meets an unreadable directory where it stands."""
+        try:
+            with os.scandir(fd) as it:
+                names = sorted(e.name for e in it)
+        except OSError as e:
+            raise _unreadable(rel, e) from None
+        yield from names
+
+    @staticmethod
+    def _add(
+        tf: tarfile.TarFile, dfd: int, name: str, rel: str, links: dict[tuple[int, int], str]
+    ) -> int | None:
+        """Archive the entry ``name`` of the open directory ``dfd``; the open descriptor of a
+        directory to descend into (the caller closes it), else ``None``. ``links`` holds the
+        first name of each file with more than one, so a later name is a hard link to it."""
+        try:
+            st = os.stat(name, dir_fd=dfd, follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode):
+                fd = os.open(name, _TREE_DIR_FLAGS, dir_fd=dfd)
+                try:
+                    now = os.fstat(fd)
+                    if (now.st_dev, now.st_ino) != (st.st_dev, st.st_ino):
+                        raise OSError(0, "changed while the tree was read")
+                    _append(tf, _header(rel, now, tarfile.DIRTYPE))
+                except BaseException:
+                    os.close(fd)
+                    raise
+                return fd
+            if stat.S_ISREG(st.st_mode):
+                fd = os.open(name, _TREE_FILE_FLAGS, dir_fd=dfd)
+                try:
+                    now = os.fstat(fd)
+                    if not stat.S_ISREG(now.st_mode):  # swapped since the look: no fdopen
+                        raise OSError(0, "changed while the tree was read")
+                    f = os.fdopen(fd, "rb")
+                except BaseException:
+                    os.close(fd)
+                    raise
+                with f:
+                    key = (now.st_dev, now.st_ino)
+                    first = links.get(key) if now.st_nlink > 1 else None
+                    if first is not None:
+                        _append(tf, _header(rel, now, tarfile.LNKTYPE, first))
+                    else:
+                        if now.st_nlink > 1:
+                            links[key] = rel
+                        _append(tf, _header(rel, now, tarfile.REGTYPE), f)
+                return None
+            if stat.S_ISSOCK(st.st_mode):
+                return None  # GNU tar skips a socket too
+            if stat.S_ISLNK(st.st_mode):
+                info = _header(rel, st, tarfile.SYMTYPE, os.readlink(name, dir_fd=dfd))
+            elif stat.S_ISFIFO(st.st_mode):
+                info = _header(rel, st, tarfile.FIFOTYPE)
+            elif stat.S_ISCHR(st.st_mode):
+                info = _header(rel, st, tarfile.CHRTYPE)
+            elif stat.S_ISBLK(st.st_mode):
+                info = _header(rel, st, tarfile.BLKTYPE)
+            else:
+                raise OSError(0, "is a kind of file a tar cannot hold")
+            _append(tf, info)
+            return None
+        except (BrokenPipeError, ConnectionError):
+            raise  # the container stopped reading: the writer's fault to report, not a path's
+        except OSError as e:
+            raise _unreadable(rel, e) from None
+
+
+#: How the stream opens an entry, in the open directory that holds it and never through a
+#: link: a directory as one, a regular file without blocking (one swapped for a FIFO since
+#: it was looked at must not stall the stream).
+_TREE_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_TREE_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+
+
+def _header(rel: str, st: os.stat_result, kind: bytes, linkname: str = "") -> tarfile.TarInfo:
+    """The member for ``rel`` from the one ``st`` it was read by — never a second look at the
+    path, so an entry swapped between two looks never gets a header of one kind for the
+    body of another (Python 3.12's ``addfile`` writes a regular header with no body, and
+    the stream is torn) — with no host owner (the container's user extracts it as its own)
+    and the whole-second time GNU tar's own format carried."""
+    info = tarfile.TarInfo(rel)
+    info.type = kind
+    info.mode = stat.S_IMODE(st.st_mode)
+    info.size = st.st_size if kind == tarfile.REGTYPE else 0
+    info.mtime = int(st.st_mtime)
+    info.linkname = linkname
+    if kind in (tarfile.CHRTYPE, tarfile.BLKTYPE):
+        info.devmajor, info.devminor = os.major(st.st_rdev), os.minor(st.st_rdev)
+    return info
+
+
+class _Through:
+    """``out``, counting the bytes written through it: each write is flushed, so ``taken``
+    is what reached the pipe, never what a buffer on the host still holds."""
+
+    def __init__(self, out: IO[bytes]) -> None:
+        self.out = out
+        self.taken = 0
+
+    def write(self, data: bytes) -> int:
+        self.out.write(data)
+        self.out.flush()
+        self.taken += len(data)
+        return len(data)
+
+
+def _append(tf: tarfile.TarFile, info: tarfile.TarInfo, body: IO[bytes] | None = None) -> None:
+    """Hand one member to the stream and keep nothing of it: a stream is never read back,
+    and a member held per entry would grow with the tree."""
+    tf.addfile(info, body)
+    tf.members.clear()  # type: ignore[attr-defined]  # typeshed omits the list addfile fills
+
+
+def _unreadable(rel: str, e: OSError) -> OSError:
+    """The error for a path the stream could not read — relative to the tree's root, so no
+    host path reaches a record."""
+    return OSError(e.errno, f"the tree copy could not read {rel}: {e.strerror or e}")
+
+
+def _feed_tree(tree: TreeStream, fd: int, problems: list[str]) -> None:
+    """The feeder thread: write ``tree`` to the pipe ``fd`` (closed on return). A failure
+    before the sentinel went through to the pipe (:attr:`TreeStream.complete`) is appended
+    to ``problems``; one after it (the container stopped reading the end-of-archive
+    padding) is the container's to judge by the sentinel."""
+    try:
+        with os.fdopen(fd, "wb") as out:
+            tree.write(out)
+    except (BrokenPipeError, ConnectionError):
+        if not tree.complete:
+            problems.append("the container stopped reading the tree before it ended")
+    except OSError as e:
+        if not tree.complete:
+            problems.append(e.strerror or "the tree could not be read")
+    except Exception as e:  # never lost in a thread: a failed copy, named by its type
+        if not tree.complete:
+            problems.append(f"the tree could not be written ({type(e).__name__})")
 
 
 #: The docker CLI's own words when IT could not launch the container (docker 24 to 29): its

@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The sandbox gets the worktree from the worker, not through a mount** (P-811;
+  [#97](https://github.com/Jita81/commit-replay-bench/pull/97)). Under colima the daemon read the
+  bind-mounted worktree through virtiofs, where a file `git checkout` had just replaced read
+  `ENOENT` in the next container, so qualification failed `tree_copy_failed` on cobra commits the
+  host held whole. The worker now streams the tree over stdin as a GNU tar ending in a per-run
+  sentinel, and the command runs only once that sentinel arrives; the walk never reads through a
+  link. Declared writable paths are still bound, and the `readonly` tree is unchanged.
+
 - **filelock moves past three advisories** (CVE-2026-112940, CVE-2026-112913 and
   CVE-2026-112907; [#98](https://github.com/Jita81/commit-replay-bench/pull/98)). pip-audit
   found them in filelock 4.0.4, which `cachecontrol` pulls in, and failed the security job on

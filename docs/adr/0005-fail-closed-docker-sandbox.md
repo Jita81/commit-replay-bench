@@ -144,17 +144,19 @@ method: the run's grade rows as read on 2026-09-25, and each defect reproduced b
 against a fresh clone inside the shipped Go image with `--network none`; apparatus 2.2]**. ADR-0019 decides the fix; this
 ADR's argv changes three ways:
 
-1. **Tests run in a throwaway copy of the tree.** The worktree is bind-mounted read-only at
-   `/src`; every command runs in a copy of it on a tmpfs at `/work` — capped at
+1. **Tests run in a throwaway copy of the tree.** The worktree itself is not mounted: the worker streams
+   it over the container's stdin (since 2026-10-23; it was bind-mounted read-only at `/src` and
+   copied inside the container, which a host rename raced under virtiofs — see ADR-0019 §7);
+   every command runs in a copy of it on a tmpfs at `/work` — capped at
    `DockerSettings.work_size`, owned by the container's uid (mode 0700), `exec,nosuid,nodev`
-   (the tree was always executable to its own tests), made by GNU `tar` under `/bin/sh` and
+   (the tree was always executable to its own tests), extracted by GNU `tar` under `/bin/sh` and
    gone with the container. Declared writable paths are still bound from the worktree and
    excluded from the copy; the builder's own fixer (`writable_paths=(".",)`) keeps the old
    shape. A copy that fails exits 97 with a marker and is `env_error: tree_copy_failed` on
    the result — red, never attributed, never a verdict. `tree: readonly` keeps the old argv
    token for token, as a separate posture. **[measured — `tests/test_execution.py` pins both
    shapes; `tests/test_sandbox_images_docker.py` proves from inside each shipped image that
-   `/src` refuses a write, `/work` accepts one and the host tree is byte-identical, and that
+   no worktree is mounted (until 2026-10-23: that `/src` refused a write), `/work` accepts one and the host tree is byte-identical, and that
    the D5 test reads the same on the host and in the copy; n = 3 images, colima, Docker
    29.5.2, 2026-09-25; apparatus 2.2]**
 2. **Dependency sets are mounted read-only.** `Command.ro_mounts` carries sealed sets from
