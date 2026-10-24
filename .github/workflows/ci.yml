@@ -62,15 +62,19 @@
 #                  network, no model (fixture repo over file://, test-only fixture_gold
 #                  builder); the Playwright report + traces are uploaded on failure. It runs the
 #                  stateful story — every spec except 11-screens, in order
-#   walkthrough-screens  11-screens (every route x persona x width) split four ways by persona
-#                  (CRB_E2E_SCREENS_SHARD=k/4), each shard on a stack of its own that the
-#                  spec seeds through the API; the four run in parallel beside the story
+#   walkthrough-screens  11-screens (every route x persona x width) split eight ways, one
+#                  persona x width pass each (CRB_E2E_SCREENS_SHARD=k/8), each shard on a stack
+#                  of its own that the spec seeds through the API; the eight run in parallel
+#                  beside the story
 #   job budget     `test-shard`, `test`, `walkthrough-story`, `walkthrough-screens` and the three
 #                  `fresh-clone` jobs start a clock in their first step and end with
 #                  scripts/ci_job_budget.py: past 80 % of
 #                  the job's own timeout-minutes it writes an alarm into the job summary and the
 #                  job fails — a job that creeps to its timeout blocks every merge, so it is
-#                  split before it gets there (docs/PREVENTION.md P-051, P-053). No guard only
+#                  split before it gets there (docs/PREVENTION.md P-051, P-053). A job that
+#                  installs a browser fails too once the rest of it leaves no room for the
+#                  slowest install its budget allows (P-813), so a job that has grown fails on
+#                  its own runs, not only on the one that meets a slow mirror. No guard only
 #                  warns: tests/test_ci_job_budget.py fails the build if one does
 #
 # Required contexts: every job in this file except `test-shard`, `walkthrough-story`,
@@ -1061,7 +1065,7 @@ jobs:
     # passing) — 11-screens alone was ~34 of them (8 persona x width passes at ~4.3 min each).
     # So the job was split, not raised: this one runs the stateful story (every spec but
     # 11-screens, ~9-12 min on a hosted runner) and `walkthrough-screens` runs 11-screens as
-    # four parallel shards; `walkthrough` below keeps the required context and passes only
+    # eight parallel shards; `walkthrough` below keeps the required context and passes only
     # when all of them did. The guard at the end fails the job past 80 % of this budget; if
     # a future wave needs more, split again — a gate nobody can finish is not a gate.
     timeout-minutes: 40
@@ -1089,7 +1093,10 @@ jobs:
         working-directory: ui
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          python3 ../scripts/ci_install_browser.py --budget 1200
+          # 600 s, not the 1200 it had: the guard below fails the job at 1920 s, and the rest of
+          # it took up to 1212 s (5 jobs, 2026-10-23), so a 1200 s install had no room left.
+          # Installs took 22-40 s there, so this is still 15x the slowest (P-813).
+          python3 ../scripts/ci_install_browser.py --budget 600
       - name: Build the UI bundle the API serves
         working-directory: ui
         run: npm run build
@@ -1123,13 +1130,18 @@ jobs:
         run: python3 scripts/ci_job_budget.py --timeout-minutes 40 --mode fail
 
   walkthrough-screens:
-    # 11-screens, every route x persona x width, one persona per shard (k/4 takes every 4th
-    # persona from the k-th, so the four shards are every persona by construction). Each shard
-    # boots its own stack and the spec's first test seeds the primary repository through the
-    # API (onboard, probe, mine, oracle, controls, a two-task fixture_gold replay) — it never
-    # assumes state the `walkthrough-story` job made. ~8.5 min of passes + ~1.5 min seed + ~1 min
-    # setup on a hosted runner, estimated from PR #57's log: under half of this budget.
-    name: walkthrough screens (browser, live stack, tier 1, shard ${{ matrix.shard }} of 4)
+    # 11-screens, every route x persona x width, one persona x width pass per shard (k/8 takes
+    # every 8th pass from the k-th, so the eight shards are every pass by construction). Each
+    # shard boots its own stack and the spec's first test seeds the primary repository through
+    # the API (onboard, probe, mine, oracle, controls, a two-task fixture_gold replay) — it never
+    # assumes state the `walkthrough-story` job made.
+    # Eight, not four: with two passes a shard the job took 748-1178 s besides its install
+    # step, and the guard fails it at 1200, so a slow mirror failed three shards on 2026-10-23
+    # (a 431 s install made 1390 s; one of 32 s still made 1210). One pass took 333-527 s
+    # (n = 58), and everything but the passes and the install step 75-134 s (n = 29, the seed
+    # included), so a one-pass shard is at most ~710 s besides the browser itself, and its
+    # 450 s install budget still fits under the guard (P-813).
+    name: walkthrough screens (browser, live stack, tier 1, shard ${{ matrix.shard }} of 8)
     # Pinned, not ubuntu-latest: from the nightly run of 2026-10-21 ubuntu-latest is Ubuntu
     # 26.04, and Playwright 1.59.1 ships no Chromium for it ("Playwright does not support
     # chromium on ubuntu26.04-x64", run 39905786776). Move to ubuntu-latest again with the
@@ -1139,7 +1151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - name: Start the job-budget clock
         run: echo "CRB_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
@@ -1164,7 +1176,7 @@ jobs:
         working-directory: ui
         run: |
           npm ci --no-audit --no-fund --legacy-peer-deps
-          python3 ../scripts/ci_install_browser.py --budget 700
+          python3 ../scripts/ci_install_browser.py --budget 450
       - name: Build the UI bundle the API serves
         working-directory: ui
         run: npm run build
@@ -1173,10 +1185,10 @@ jobs:
           git config --global user.email "ci@crb.invalid"
           git config --global user.name "crb ci"
           git config --global init.defaultBranch main
-      - name: 11-screens for this shard's personas, on a fresh stack the spec seeds
+      - name: 11-screens for this shard's pass, on a fresh stack the spec seeds
         env:
           CI: "1"
-          CRB_E2E_SCREENS_SHARD: ${{ matrix.shard }}/4
+          CRB_E2E_SCREENS_SHARD: ${{ matrix.shard }}/8
           CRB_E2E_REPORT_DIR: ${{ github.workspace }}/ui/playwright-report-walkthrough
           CRB_E2E_OUTPUT_DIR: ${{ github.workspace }}/ui/test-results-walkthrough
         run: scripts/walkthrough.sh e2e/walkthrough/11-screens.spec.ts

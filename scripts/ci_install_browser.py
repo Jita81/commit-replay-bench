@@ -25,7 +25,9 @@ on, and job 113004810596's 686 s install passed on its third attempt. So attempt
 ``--attempts``, while the overall ``--budget`` lasts, and the budget, not the attempt count,
 decides how slow a mirror a job survives: each job passes at most half its own
 ``timeout-minutes``, and less where the rest of the job would leave a longer install no room
-to pass its job-budget guard (the screens shards: 700 s, against 485 to 682 s for the rest).
+to pass its job-budget guard. It leaves its time and its budget in ``$GITHUB_ENV``
+(``CRB_INSTALL_SECONDS``, ``CRB_INSTALL_BUDGET``), and that guard fails a job whose rest has
+grown into the budget's room, on every run rather than on the day a mirror is slow (P-813).
 Before the first attempt it writes apt network timeouts into ``/etc/apt/apt.conf.d`` (best
 effort: a runner that refuses ``sudo -n`` gets a warning, not a failure), so most stalls end
 inside apt itself. Every stopped or failed attempt is a ``::warning``; running out is an
@@ -43,7 +45,8 @@ What it does: Runs the install command (``npx playwright install --with-deps chr
               one after ``--``) until it succeeds, an attempt stalls (no output for
               ``--idle-timeout`` s) or fails, retrying within ``--attempts`` and ``--budget``;
               exits 0 on success and 1 with an ``::error`` annotation when attempts or budget
-              run out. It never leaves a stopped attempt's process group running.
+              run out, and either way records its time and budget for the job's budget guard.
+              It never leaves a stopped attempt's process group running.
 How:          ``write_apt_timeouts`` (best effort, bounded) → for each attempt,
               ``run_attempt`` starts the command with ``start_new_session``, a reader thread
               timestamps every chunk of output, and the poll loop stops the group on idle or
@@ -54,7 +57,8 @@ Layer:        deploy — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   .github/workflows/ci.yml (the ``ui-smoke``, ``walkthrough-story`` and
               ``walkthrough-screens`` jobs run it), docs/PREVENTION.md (P-751 — the class it
-              closes), scripts/ci_job_budget.py (the guard that measures the rest of the job)
+              closes; P-813, its room), scripts/ci_job_budget.py (the guard that measures the
+              rest of the job and reads this one's record)
 Tested by:    tests/test_ci_install_browser.py
 Touch when:   never for a new repository (it installs this repository's own CI browser); a CI
               job starts needing a Playwright browser (call this, never ``playwright install``);
@@ -75,6 +79,10 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TextIO
+
+#: What the install leaves for the job's budget guard (scripts/ci_job_budget.py reads them).
+SECONDS_VAR = "CRB_INSTALL_SECONDS"
+BUDGET_VAR = "CRB_INSTALL_BUDGET"
 
 #: The install every browser job needs: Chromium and the system libraries it links against.
 DEFAULT_COMMAND = ("npx", "playwright", "install", "--with-deps", "chromium")
@@ -204,6 +212,16 @@ def cleanup() -> None:
     _helper(CLEANUP_COMMAND)
 
 
+def record_install(seconds: float, budget: float) -> None:
+    """Leave the install's time and budget in ``$GITHUB_ENV`` for the job's later steps, so the
+    budget guard can ask whether the job has room for the slowest install the budget allows
+    (P-813). Outside Actions there is no ``$GITHUB_ENV`` and nothing is written."""
+    path = os.environ.get("GITHUB_ENV", "")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{SECONDS_VAR}={seconds:.0f}\n{BUDGET_VAR}={budget:.0f}\n")
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -213,6 +231,7 @@ def main(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
     out: TextIO | None = None,
+    record: Callable[[float, float], None] = record_install,
 ) -> int:
     sink = out if out is not None else sys.stdout
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -233,7 +252,8 @@ def main(
             f"({APT_CONF_PATH}); a stalled mirror is bounded only by the idle timeout",
             file=sink,
         )
-    deadline = clock() + args.budget
+    started = clock()
+    deadline = started + args.budget
     tried: list[Attempt] = []
     for k in range(1, args.attempts + 1):
         print(f"::group::browser install, attempt {k} of {args.attempts}", file=sink, flush=True)
@@ -244,6 +264,7 @@ def main(
             print(
                 f"browser install: attempt {k} of {args.attempts} {attempt.describe()}", file=sink
             )
+            record(clock() - started, args.budget)
             return 0
         print(
             f"::warning title=browser install::attempt {k} of {args.attempts} {attempt.describe()}",
@@ -273,6 +294,7 @@ def main(
         file=sink,
         flush=True,
     )
+    record(clock() - started, args.budget)
     return 1
 
 

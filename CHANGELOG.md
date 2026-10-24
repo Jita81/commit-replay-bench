@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The walkthrough's screens run as eight one-pass shards, and the job-budget guard checks
+  the room left for the browser install** (P-813;
+  [#99](https://github.com/Jita81/commit-replay-bench/pull/99)). With two persona × width passes
+  a shard, `walkthrough-screens` left too little room under the guard's 1200 s line for its
+  700 s install budget, and three shards failed on 2026-10-23 when the package mirror was slow.
+  Each shard now runs one pass with a 450 s budget, `walkthrough-story`'s budget drops from
+  1200 s to 600 s, and the install records its time and budget so the guard fails a job whose
+  rest plus that budget reaches the line, even when the run itself did not.
+
 - **filelock moves past three advisories** (CVE-2026-112940, CVE-2026-112913 and
   CVE-2026-112907; [#98](https://github.com/Jita81/commit-replay-bench/pull/98)). pip-audit
   found them in filelock 4.0.4, which `cachecontrol` pulls in, and failed the security job on

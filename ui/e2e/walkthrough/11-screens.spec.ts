@@ -7,8 +7,8 @@
  * primary repository through the API — onboard, probe, mine, oracle, controls, a two-task
  * `fixture_gold` replay, the same runs 02–05 queue through the UI — unless the repository is
  * already there (run after 01–10 in one invocation, it reuses what they made and seeds
- * nothing). `CRB_E2E_SCREENS_SHARD=k/n` runs every n-th persona from the k-th, so the n
- * parallel jobs cover every persona by construction; unset, it runs all four.
+ * nothing). `CRB_E2E_SCREENS_SHARD=k/n` runs every n-th persona × width pass from the k-th, so
+ * the n parallel jobs cover every pass by construction; unset, it runs all eight.
  * For each persona (viewer /
  * operator / approver / admin) it visits every route at desktop (1280×900) and phone
  * (375×812) widths, waits for the page to settle (load + bounded network-idle + the main
@@ -49,7 +49,7 @@
  * What it is:   Walkthrough spec 11 (screens) — the visual record of every route for every
  *               role at two widths, and the About-block ratchet on the live stack.
  * What it does: Seeds the primary repository's history through the API when the stack has
- *               none (a stack of its own, in CI), selects the personas of its shard,
+ *               none (a stack of its own, in CI), selects the passes of its shard,
  *               creates the three non-admin accounts if missing (and, for one that exists,
  *               asserts the stable password signs into it), finds a finished run and a
  *               task to anchor the detail routes, then for each persona × width first
@@ -92,8 +92,10 @@
  *               must cover), ui/e2e/walkthrough/README.md (the spec table)
  * Tested by:    ui/e2e/walkthrough/11-screens.spec.ts (this file; run by scripts/walkthrough.sh)
  * Touch when:   never for a new repository (it reads the primary tier target); a screen is
- *               added (add its route and slug to `routes()`); a persona is added (the shards
- *               pick it up; a fifth persona makes one shard run two).
+ *               added (add its route and slug to `routes()`); a persona or a width is added
+ *               (the shards pick it up; with eight shards a ninth pass makes one shard run
+ *               two, and the job-budget guard fails a shard with no room left for its browser
+ *               install — add a shard, P-813).
  */
 import { axeViolations } from '../axe'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
@@ -107,31 +109,35 @@ mkdirSync(OUT, { recursive: true })
 
 const PERSONAS = ['viewer', 'operator', 'approver', 'admin'] as const
 type Persona = (typeof PERSONAS)[number]
-
-/**
- * The personas this run covers. `CRB_E2E_SCREENS_SHARD=k/n` takes every n-th persona starting
- * at the k-th (1-based), so shards 1/n … n/n are disjoint and together are every persona — a
- * persona added to `PERSONAS` lands in a shard with no list to update. CI runs one job per
- * shard, in parallel (.github/workflows/ci.yml `walkthrough-screens`). Unset: all of them. A
- * malformed value, or a shard that would select nobody, throws at load, so a job can never
- * pass having covered no persona.
- */
-function personasOfShard(spec: string, all: readonly Persona[] = PERSONAS): readonly Persona[] {
-  if (!spec) return all
-  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec.trim())
-  if (!m) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: expected k/n, for example 2/4`)
-  const k = Number(m[1])
-  const n = Number(m[2])
-  if (k > n) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: shard ${k} of ${n} does not exist`)
-  const chosen = all.filter((_, i) => i % n === k - 1)
-  if (chosen.length === 0) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec} selects no persona (there are ${all.length})`)
-  return chosen
-}
-const SHARD_PERSONAS = personasOfShard(process.env.CRB_E2E_SCREENS_SHARD ?? '')
 const VIEWPORTS = [
   { width: 1280, height: 900 },
   { width: 375, height: 812 },
 ] as const
+/** Every persona × width pass, persona by persona: viewer @ 1280, viewer @ 375, operator @ 1280, … */
+const PASSES = PERSONAS.flatMap((persona) => VIEWPORTS.map((vp) => ({ persona, vp })))
+type Pass = (typeof PASSES)[number]
+
+/**
+ * The passes this run covers. `CRB_E2E_SCREENS_SHARD=k/n` takes every n-th persona × width pass
+ * starting at the k-th (1-based), so shards 1/n … n/n are disjoint and together are every pass —
+ * a persona or a width added above lands in a shard with no list to update. CI runs one job per
+ * pass, in parallel (.github/workflows/ci.yml `walkthrough-screens`): a job of two passes left no
+ * room inside its budget for a slow browser install (P-813). Unset: all of them. A malformed
+ * value, or a shard that would select no pass, throws at load, so a job can never pass having
+ * covered nothing.
+ */
+function passesOfShard(spec: string, all: readonly Pass[] = PASSES): readonly Pass[] {
+  if (!spec) return all
+  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec.trim())
+  if (!m) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: expected k/n, for example 2/8`)
+  const k = Number(m[1])
+  const n = Number(m[2])
+  if (k > n) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec}: shard ${k} of ${n} does not exist`)
+  const chosen = all.filter((_, i) => i % n === k - 1)
+  if (chosen.length === 0) throw new Error(`CRB_E2E_SCREENS_SHARD=${spec} selects no pass (there are ${all.length})`)
+  return chosen
+}
+const SHARD_PASSES = passesOfShard(process.env.CRB_E2E_SCREENS_SHARD ?? '')
 
 /**
  * A persona × width pass's time limit, from the routes it walks. It was a fixed six minutes, and
@@ -624,81 +630,79 @@ test.describe('11-screens: every route × persona × width, with the About block
       const tj = (await tasks.json()) as { items: Array<{ task_id?: string; id?: string }> }
       ctx.taskId = (tj.items[0]?.task_id ?? tj.items[0]?.id ?? '') as string
     }
-    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} personas=${SHARD_PERSONAS.join(',')} out=${OUT}` })
+    test.info().annotations.push({ type: 'note', description: `repo=${ctx.repo} run=${ctx.runId || '(none)'} task=${ctx.taskId || '(none)'} accounts_reused=${reused} passes=${SHARD_PASSES.map((p) => `${p.persona}@${p.vp.width}`).join(',')} out=${OUT}` })
     // the detail routes are anchored to a real run and a real task, or they would sweep the 404
     expect(ctx.runId, 'no finished run to anchor /runs/:id').not.toBe('')
     expect(ctx.taskId, `no task of ${ctx.repo} to anchor /tasks/:repo/:taskId`).not.toBe('')
   })
 
-  for (const persona of SHARD_PERSONAS) {
-    for (const vp of VIEWPORTS) {
-      test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
-        test.setTimeout(passTimeoutMs(routes(ctx).length))
-        await page.setViewportSize({ width: vp.width, height: vp.height })
-        // /login as the signed-out screen first — checked like every other route, before
-        // anyone signs in (G-192)
-        await page.goto('/login')
+  for (const { persona, vp } of SHARD_PASSES) {
+    test(`${persona} @ ${vp.width}: every route renders, is captured, and carries About this screen`, async ({ page }) => {
+      test.setTimeout(passTimeoutMs(routes(ctx).length))
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      // /login as the signed-out screen first — checked like every other route, before
+      // anyone signs in (G-192)
+      await page.goto('/login')
+      await settle(page)
+      await shot(page, persona, 'login', vp.width)
+      await loginChecks(page, `${persona} @ ${vp.width} /login (signed out)`, vp.width)
+      if (persona === PERSONAS[0]) {
+        // /invite, where an invited person chooses their password, is outside the shell too:
+        // the same checks, once per width (G-209). The token was never issued — the page
+        // sends it only when the form is submitted, and nothing here submits it
+        await page.goto('/invite?token=walkthrough-never-issued')
         await settle(page)
-        await shot(page, persona, 'login', vp.width)
-        await loginChecks(page, `${persona} @ ${vp.width} /login (signed out)`, vp.width)
-        if (persona === PERSONAS[0]) {
-          // /invite, where an invited person chooses their password, is outside the shell too:
-          // the same checks, once per width (G-209). The token was never issued — the page
-          // sends it only when the form is submitted, and nothing here submits it
-          await page.goto('/invite?token=walkthrough-never-issued')
-          await settle(page)
-          await shot(page, persona, 'invite', vp.width)
-          await preSessionChecks(page, `${persona} @ ${vp.width} /invite (signed out)`, vp.width, 'Set my password')
-        }
-        await signIn(page, USERNAMES[persona], PASSWORDS[persona])
-        let eyebrows = 0
-        for (const r of routes(ctx)) {
-          await page.goto(r.path)
-          await settle(page)
-          await shot(page, persona, r.slug, vp.width)
-          if (vp.width === 375) {
-            // the top bar is ONE row on a phone — the brand and the Menu button; everything else
-            // is folded behind the menu (F26). It was two rows (brand; pill · role · help · theme
-            // · sign out) before, and three nav rows took half the first screen
-            const bar = page.getByRole('banner').locator('> div').first()
-            const box = await bar.boundingBox()
-            expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past one row (${box?.height} px)`).toBeLessThan(TOP_BAR_ONE_ROW_PX)
-            if (await phoneMenu(page, `${persona} @ 375 ${r.path}`)) eyebrows += 1
-            // and the page does not scroll sideways: a phone reader should never have to pan
-            // to read a number. Every route, not only the Factory (G-905).
-            const width = await widestOverflow(page)
-            const known = SIDEWAYS_SCROLL_RATCHET[r.slug]
-            const where = `${persona} @ 375 ${r.path}`
-            if (known) {
-              // A listed route is annotated either way and never fails. It is NOT asserted to
-              // overflow: whether a table is wider than the phone depends on the DATA the
-              // fixture happens to carry (this route overflowed locally at 981 px and did not
-              // in CI, on the same commit — PR #48), so "it stopped overflowing" is not
-              // evidence that anything was fixed. An entry leaves this list when a person
-              // records the fix and its measurement, never because one run got narrow rows.
-              const state = width.scroll > width.inner ? `scrollWidth ${width.scroll} > ${width.inner}; widest: ${width.culprit}` : `did not overflow on this run's data (scrollWidth ${width.scroll})`
-              test.info().annotations.push({ type: 'sideways-scroll (known)', description: `${where}: ${state} — ${known}` })
-            } else {
-              expect.soft(width.scroll, `${where}: the page scrolls sideways (scrollWidth ${width.scroll} > innerWidth ${width.inner}); the widest element is ${width.culprit}. Fix it, or record it in SIDEWAYS_SCROLL_RATCHET with its gap id`).toBeLessThanOrEqual(width.inner)
-            }
-          }
-          const about = page.getByTestId('about-this-screen')
-          if (r.about) {
-            await expect(about, `${persona} @ ${vp.width} ${r.path}: no About this screen block`).toHaveCount(1)
-            await expect(about.getByText('About this screen')).toBeVisible()
+        await shot(page, persona, 'invite', vp.width)
+        await preSessionChecks(page, `${persona} @ ${vp.width} /invite (signed out)`, vp.width, 'Set my password')
+      }
+      await signIn(page, USERNAMES[persona], PASSWORDS[persona])
+      let eyebrows = 0
+      for (const r of routes(ctx)) {
+        await page.goto(r.path)
+        await settle(page)
+        await shot(page, persona, r.slug, vp.width)
+        if (vp.width === 375) {
+          // the top bar is ONE row on a phone — the brand and the Menu button; everything else
+          // is folded behind the menu (F26). It was two rows (brand; pill · role · help · theme
+          // · sign out) before, and three nav rows took half the first screen
+          const bar = page.getByRole('banner').locator('> div').first()
+          const box = await bar.boundingBox()
+          expect(box?.height ?? 0, `${persona} @ 375 ${r.path}: the top bar wrapped past one row (${box?.height} px)`).toBeLessThan(TOP_BAR_ONE_ROW_PX)
+          if (await phoneMenu(page, `${persona} @ 375 ${r.path}`)) eyebrows += 1
+          // and the page does not scroll sideways: a phone reader should never have to pan
+          // to read a number. Every route, not only the Factory (G-905).
+          const width = await widestOverflow(page)
+          const known = SIDEWAYS_SCROLL_RATCHET[r.slug]
+          const where = `${persona} @ 375 ${r.path}`
+          if (known) {
+            // A listed route is annotated either way and never fails. It is NOT asserted to
+            // overflow: whether a table is wider than the phone depends on the DATA the
+            // fixture happens to carry (this route overflowed locally at 981 px and did not
+            // in CI, on the same commit — PR #48), so "it stopped overflowing" is not
+            // evidence that anything was fixed. An entry leaves this list when a person
+            // records the fix and its measurement, never because one run got narrow rows.
+            const state = width.scroll > width.inner ? `scrollWidth ${width.scroll} > ${width.inner}; widest: ${width.culprit}` : `did not overflow on this run's data (scrollWidth ${width.scroll})`
+            test.info().annotations.push({ type: 'sideways-scroll (known)', description: `${where}: ${state} — ${known}` })
           } else {
-            await expect(about, `${persona} @ ${vp.width} ${r.path}: the help pages carry no About block`).toHaveCount(0)
+            expect.soft(width.scroll, `${where}: the page scrolls sideways (scrollWidth ${width.scroll} > innerWidth ${width.inner}); the widest element is ${width.culprit}. Fix it, or record it in SIDEWAYS_SCROLL_RATCHET with its gap id`).toBeLessThanOrEqual(width.inner)
           }
-          // the keyboard path, on this route: focus shows a hinted control's bubble, Tab away
-          // hides it (G-905 — it used to run on /results alone)
-          if (vp.width === 1280) await keyboardPass(page, `${persona} @ 1280 ${r.path}`)
-          await hintSample(page, `${persona} @ ${vp.width} ${r.path}`, vp.width)
         }
-        // the eyebrow check is not vacuous: every journey screen that carries one was seen
-        if (vp.width === 375) expect(eyebrows, `${persona} @ 375: journey-position eyebrows seen with the menu closed`).toBeGreaterThanOrEqual(JOURNEY_EYEBROW_ROUTES)
-        if (vp.width === 1280 && persona === 'operator') await dialogHints(page, `${persona} @ 1280 /repos`)
-        await page.context().clearCookies()
-      })
-    }
+        const about = page.getByTestId('about-this-screen')
+        if (r.about) {
+          await expect(about, `${persona} @ ${vp.width} ${r.path}: no About this screen block`).toHaveCount(1)
+          await expect(about.getByText('About this screen')).toBeVisible()
+        } else {
+          await expect(about, `${persona} @ ${vp.width} ${r.path}: the help pages carry no About block`).toHaveCount(0)
+        }
+        // the keyboard path, on this route: focus shows a hinted control's bubble, Tab away
+        // hides it (G-905 — it used to run on /results alone)
+        if (vp.width === 1280) await keyboardPass(page, `${persona} @ 1280 ${r.path}`)
+        await hintSample(page, `${persona} @ ${vp.width} ${r.path}`, vp.width)
+      }
+      // the eyebrow check is not vacuous: every journey screen that carries one was seen
+      if (vp.width === 375) expect(eyebrows, `${persona} @ 375: journey-position eyebrows seen with the menu closed`).toBeGreaterThanOrEqual(JOURNEY_EYEBROW_ROUTES)
+      if (vp.width === 1280 && persona === 'operator') await dialogHints(page, `${persona} @ 1280 /repos`)
+      await page.context().clearCookies()
+    })
   }
 })
