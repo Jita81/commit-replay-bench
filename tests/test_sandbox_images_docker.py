@@ -7,10 +7,10 @@ that each of them is fit for :class:`~crb.core.execution.DockerExecutor` — the
 that ships, through the real runner of that language on that language's fixture:
 
 * the image's own default user is uid 65534, and so is the user the executor runs;
-* the root filesystem is read-only from inside (``/usr`` refuses a write) and so is the
-  worktree at ``/src``; ``/work`` — the throwaway copy every command runs in (ADR-0019 §7) —
-  and ``/tmp`` accept one, and nothing a test writes reaches the host; the image carries the
-  ``sh`` and GNU ``tar`` that copy needs;
+* the root filesystem is read-only from inside (``/usr`` refuses a write) and the worktree
+  is never mounted (the host streams it over stdin); ``/work`` — the throwaway copy every
+  command runs in (ADR-0019 §7) — and ``/tmp`` accept one, and nothing a test writes reaches
+  the host; the image carries the ``sh`` and GNU ``tar`` that copy needs;
 * no setuid/setgid file is in the image (the bases' ``su``, ``mount``, ``passwd`` … have the
   bits stripped by the Dockerfile) — inert under the executor anyway, held regardless;
 * the network is off: a test that asserts ``example.com:443`` is reachable FAILS, attributed
@@ -36,8 +36,8 @@ Navigation
 What it is:   The suite for the shipped reference sandbox images (deploy/sandbox), one
               parametrisation per language, against a real daemon.
 What it does: Pins, per image, that the default and the executor's user are uid 65534, that
-              the root filesystem and the worktree (``/src``) are read-only from inside while
-              the throwaway ``/work`` copy and ``/tmp`` are writable and the host tree stays
+              the root filesystem is read-only from inside and the worktree is never mounted
+              while the throwaway ``/work`` copy and ``/tmp`` are writable and the host tree stays
               byte-identical, that ``sh`` and GNU ``tar`` are present, that no setuid/setgid file is
               in the image, that ``/tmp`` is
               ``noexec`` except for the Go runner's command, that a network probe FAILS
@@ -358,16 +358,15 @@ def _tree_hashes(root: Path) -> dict[str, str]:
 
 
 def test_a_test_can_write_its_tree_and_nothing_reaches_the_host(executor: DockerExecutor, trial):
-    """ADR-0019 §7 (the D5 finding): ``/usr`` and the worktree at ``/src`` refuse a write
-    (``Read-only file system``); ``/work`` — the throwaway copy the command runs in — and
-    ``/tmp`` accept one; and the host tree is byte-identical afterwards."""
+    """ADR-0019 §7 (the D5 finding): ``/usr`` refuses a write (``Read-only file system``)
+    and the worktree is not mounted at all — the host streams it into ``/work``, the
+    throwaway copy the command runs in, which accepts a write as ``/tmp`` does; and the host
+    tree is byte-identical afterwards."""
     before = _tree_hashes(trial.root)
     root = executor.run(Command(("sh", "-c", "echo owned > /usr/hacked"), trial.root, timeout=60))
     assert not root.ok and "Read-only file system" in root.combined, root.combined
-    src = executor.run(
-        Command(("sh", "-c", "echo owned > /src/hacked.txt"), trial.root, timeout=60)
-    )
-    assert not src.ok and "Read-only file system" in src.combined, src.combined
+    src = executor.run(Command(("sh", "-c", "test ! -e /src && echo no-src"), trial.root))
+    assert src.ok and src.stdout.split() == ["no-src"], src.combined
     work = executor.run(
         Command(
             ("sh", "-c", "echo owned > /work/hacked.txt && cat /work/hacked.txt && pwd"),
@@ -385,8 +384,9 @@ def test_a_test_can_write_its_tree_and_nothing_reaches_the_host(executor: Docker
 
 
 def test_the_images_carry_sh_and_tar(image: str):
-    """The throwaway tree is made by ``/bin/sh`` and GNU ``tar`` inside the image (the
-    copy's ``--warning`` option is GNU's): every shipped image must carry both."""
+    """The throwaway tree is made by ``/bin/sh`` and GNU ``tar`` inside the image (GNU tar,
+    extracting as non-root, sets a directory's own mode only once what it holds is written,
+    so a read-only directory still gets its files): every shipped image must carry both."""
     r = _docker(
         "run", "--rm", "--network=none", image, "/bin/sh", "-c", "command -v tar && tar --version"
     )
