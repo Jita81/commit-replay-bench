@@ -391,9 +391,9 @@ def test_a_file_the_host_replaced_just_before_the_run_is_read_whole(trial, execu
     rename (``git checkout``) and the next container's copy, read through virtiofs, saw
     ENOENT for about a second (45 of 105 copies failed on five cobra commits). The host now
     reads the tree itself, so a rename the instant before a run is always what the run
-    sees. The directory holds 100 siblings, as cobra's root does: in a directory of five
-    the read through the share saw every replace on the mounted tree too, in one of 100
-    it failed all five."""
+    sees. The directory holds 100 siblings, as cobra's root does: in one of 100, the read
+    through the share on the mounted tree failed at the first replace (an earlier version
+    with five siblings saw every replace there; that run is not kept)."""
     wide = trial.root / "wide"
     wide.mkdir()
     for n in range(100):
