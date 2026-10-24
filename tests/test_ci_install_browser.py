@@ -277,6 +277,21 @@ def test_the_record_reaches_the_guard_under_the_names_it_reads(
     assert "its budget allows (450 s; this run's took 431 s)" in summary.read_text("utf-8")
 
 
+def test_a_fractional_budget_reaches_the_guard_as_a_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The wrapper takes any positive --budget. Rounded to whole seconds, 0.4 would be written as
+    # 0, a budget the guard refuses with exit 2: the record must keep what the wrapper accepted.
+    job_env = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(job_env))
+    _mod().record_install(0.2, 0.4)
+    written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
+    assert float(written["CRB_INSTALL_BUDGET"]) == 0.4
+    guard = _guard()
+    env = {**written, guard.START_VAR: "1000", "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md")}
+    assert guard.main(["--timeout-minutes", "25", "--mode", "fail"], env, now=1600.0) == 0
+
+
 def test_the_wrapper_records_to_the_job_environment_unless_told_otherwise(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
