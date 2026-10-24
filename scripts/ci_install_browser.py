@@ -215,13 +215,14 @@ def cleanup() -> None:
 def record_install(seconds: float, budget: float) -> None:
     """Leave the install's time and budget in ``$GITHUB_ENV`` for the job's later steps, so the
     budget guard can ask whether the job has room for the slowest install the budget allows
-    (P-813). Outside Actions there is no ``$GITHUB_ENV`` and nothing is written. The budget is
-    not rounded to whole seconds: rounded, ``--budget 0.4`` would read as 0, which the guard
-    refuses."""
+    (P-813). Outside Actions there is no ``$GITHUB_ENV`` and nothing is written. Neither number
+    is rounded to whole seconds: rounded, ``--budget 0.4`` would read as 0, which the guard
+    refuses, and an install of 430.6 s would read as 431, which puts the guard's projection
+    0.4 s short of the truth and can pass a job that sits on its threshold."""
     path = os.environ.get("GITHUB_ENV", "")
     if path:
         with open(path, "a", encoding="utf-8") as fh:
-            fh.write(f"{SECONDS_VAR}={seconds:.0f}\n{BUDGET_VAR}={budget:g}\n")
+            fh.write(f"{SECONDS_VAR}={seconds}\n{BUDGET_VAR}={budget:g}\n")
 
 
 def main(

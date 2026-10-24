@@ -269,7 +269,7 @@ def test_the_record_reaches_the_guard_under_the_names_it_reads(
     monkeypatch.setenv("GITHUB_ENV", str(job_env))
     _mod().record_install(431.4, 450)
     written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
-    assert written == {"CRB_INSTALL_SECONDS": "431", "CRB_INSTALL_BUDGET": "450"}
+    assert written == {"CRB_INSTALL_SECONDS": "431.4", "CRB_INSTALL_BUDGET": "450"}
     guard = _guard()
     summary = tmp_path / "summary.md"
     env = {**written, guard.START_VAR: "1000", "GITHUB_STEP_SUMMARY": str(summary)}
@@ -290,6 +290,25 @@ def test_a_fractional_budget_reaches_the_guard_as_a_budget(
     guard = _guard()
     env = {**written, guard.START_VAR: "1000", "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md")}
     assert guard.main(["--timeout-minutes", "25", "--mode", "fail"], env, now=1600.0) == 0
+
+
+def test_a_fractional_install_time_reaches_the_guard_at_its_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 1180.7 s used, an install of 430.6 s against a 450 s budget: the slowest install the
+    # budget allows puts the job at 1200.1 s, past the 1200 s the guard allows a 25-minute job.
+    # Rounded to 431 s, the record would project 1199.7 s and the guard would pass it.
+    job_env = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(job_env))
+    _mod().record_install(430.6, 450)
+    written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
+    assert float(written["CRB_INSTALL_SECONDS"]) == 430.6
+    guard = _guard()
+    args = ["--timeout-minutes", "25", "--mode", "fail"]
+    env = {**written, guard.START_VAR: "0", "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md")}
+    assert guard.main(args, env, now=1180.7) == 1
+    rounded = {**env, "CRB_INSTALL_SECONDS": "431"}
+    assert guard.main(args, rounded, now=1180.7) == 0
 
 
 def test_the_wrapper_records_to_the_job_environment_unless_told_otherwise(
