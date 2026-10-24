@@ -26,14 +26,19 @@ What it does: Pins that a quick install succeeds on attempt 1; that a silent att
               idle timeout outlasts the slow mirror's measured silences, and the attempts
               outlast every job's budget, so the budget, not the count, binds. An install
               that fails the same way every time is not blamed on the mirror, nor is one
-              that was still printing when the budget ran out (P-810).
+              that was still printing when the budget ran out (P-810). Every run, failed or
+              not, leaves its time and budget in ``$GITHUB_ENV`` under the names the job-budget
+              guard reads, by default, and no test here writes to the real job's (P-813).
 How:          Calls ``main``/``run_attempt`` with ``sys.executable -c`` commands, a recording
-              cleanup and a no-op apt writer; reads ``ci.yml`` as text, job by job.
+              cleanup, a recording ``record`` and a no-op apt writer, with ``GITHUB_ENV``
+              unset, or pointed at a temporary file to check the default ``record``; reads
+              ``ci.yml`` as text, job by job.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_install_browser.py (the wrapper), .github/workflows/ci.yml (the jobs),
-              docs/PREVENTION.md (P-751, P-809, P-810), tests/test_ci_job_budget.py (the
-              job parser this mirrors)
+              docs/PREVENTION.md (P-751, P-809, P-810, P-813), scripts/ci_job_budget.py (the
+              guard that reads the record), tests/test_ci_job_budget.py (the job parser this
+              mirrors)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); a CI job starts
               installing a Playwright browser (add it to ``INSTALLING``); the wrapper's
@@ -84,18 +89,45 @@ def _mod() -> ModuleType:
     return mod
 
 
+@pytest.fixture(autouse=True)
+def _no_job_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests run inside CI jobs, so no call here may append to the real job's
+    ``$GITHUB_ENV``: the job-budget guard would read a fake install's record (P-813)."""
+    monkeypatch.delenv("GITHUB_ENV", raising=False)
+
+
+def _guard() -> ModuleType:
+    """scripts/ci_job_budget.py, which reads the record the wrapper leaves."""
+    if "ci_job_budget" in sys.modules:
+        return sys.modules["ci_job_budget"]
+    spec = importlib.util.spec_from_file_location(
+        "ci_job_budget", ROOT / "scripts" / "ci_job_budget.py"
+    )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["ci_job_budget"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _main(
-    argv: list[str], cleanups: list[int] | None = None, apt_ok: bool | None = None
+    argv: list[str],
+    cleanups: list[int] | None = None,
+    apt_ok: bool | None = None,
+    records: list[tuple[float, float]] | None = None,
 ) -> tuple[int, str]:
-    """Run ``main`` with no sleeping; skip the apt write unless ``apt_ok`` says how it ends."""
+    """Run ``main`` with no sleeping; skip the apt write unless ``apt_ok`` says how it ends.
+    ``records`` collects what the run leaves for the job-budget guard."""
     out = io.StringIO()
     rec = cleanups if cleanups is not None else []
+    left = records if records is not None else []
     rc = _mod().main(
         ["--no-apt-timeouts", *argv] if apt_ok is None else argv,
         cleanup=lambda: rec.append(1),
         apt=lambda: bool(apt_ok),
         sleep=lambda _s: None,
         out=out,
+        record=lambda seconds, budget: left.append((seconds, budget)),
     )
     return rc, out.getvalue()
 
@@ -204,6 +236,108 @@ def test_a_stopped_attempt_leaves_no_process_of_its_group_behind(tmp_path: Path)
     else:
         os.kill(pid, 9)
         pytest.fail("the grandchild outlived the stopped attempt")
+
+
+def test_an_install_leaves_its_time_and_budget_for_the_job_budget_guard() -> None:
+    # The guard projects the install's whole budget onto the rest of the job (P-813): it can
+    # only do that if every run, failed or not, says how long it took and what it was allowed.
+    records: list[tuple[float, float]] = []
+    rc, _ = _main(["--budget", "450", *_py("print('ok')")], records=records)
+    assert rc == 0
+    assert len(records) == 1
+    seconds, budget = records[0]
+    assert budget == 450
+    assert 0 <= seconds < 15
+
+
+def test_a_failed_install_leaves_its_record_too() -> None:
+    records: list[tuple[float, float]] = []
+    rc, _ = _main(
+        ["--attempts", "2", "--budget", "450", *_py("import sys; sys.exit(100)")],
+        records=records,
+    )
+    assert rc == 1
+    assert [budget for _seconds, budget in records] == [450]
+
+
+def test_the_record_reaches_the_guard_under_the_names_it_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Two scripts, one contract: the wrapper writes $GITHUB_ENV, the guard reads the next step's
+    # environment. A renamed variable on either side would leave the guard measuring nothing.
+    job_env = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(job_env))
+    _mod().record_install(431.4, 450)
+    written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
+    assert written == {"CRB_INSTALL_SECONDS": "431.4", "CRB_INSTALL_BUDGET": "450"}
+    guard = _guard()
+    summary = tmp_path / "summary.md"
+    env = {**written, guard.START_VAR: "1000", "GITHUB_STEP_SUMMARY": str(summary)}
+    assert guard.main(["--timeout-minutes", "25", "--mode", "fail"], env, now=1600.0) == 0
+    assert "its budget allows (450 s; this run's took 431 s)" in summary.read_text("utf-8")
+
+
+def test_a_fractional_budget_reaches_the_guard_as_a_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The wrapper takes any positive --budget. Rounded to whole seconds, 0.4 would be written as
+    # 0, a budget the guard refuses with exit 2: the record must keep what the wrapper accepted.
+    job_env = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(job_env))
+    _mod().record_install(0.2, 0.4)
+    written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
+    assert float(written["CRB_INSTALL_BUDGET"]) == 0.4
+    guard = _guard()
+    env = {**written, guard.START_VAR: "1000", "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md")}
+    assert guard.main(["--timeout-minutes", "25", "--mode", "fail"], env, now=1600.0) == 0
+
+
+def test_a_fractional_install_time_reaches_the_guard_at_its_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 1180.7 s used, an install of 430.6 s against a 450 s budget: the slowest install the
+    # budget allows puts the job at 1200.1 s, past the 1200 s the guard allows a 25-minute job.
+    # Rounded to 431 s, the record would project 1199.7 s and the guard would pass it.
+    job_env = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(job_env))
+    _mod().record_install(430.6, 450)
+    written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
+    assert float(written["CRB_INSTALL_SECONDS"]) == 430.6
+    guard = _guard()
+    args = ["--timeout-minutes", "25", "--mode", "fail"]
+    env = {**written, guard.START_VAR: "0", "GITHUB_STEP_SUMMARY": str(tmp_path / "s.md")}
+    assert guard.main(args, env, now=1180.7) == 1
+    rounded = {**env, "CRB_INSTALL_SECONDS": "431"}
+    assert guard.main(args, rounded, now=1180.7) == 0
+
+
+def test_the_wrapper_records_to_the_job_environment_unless_told_otherwise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CI calls the wrapper with no ``record`` of its own: if the default stopped writing, the
+    # guard would read "no browser installed" and measure no room at all (P-813).
+    job_env = tmp_path / "github_env"
+    monkeypatch.setenv("GITHUB_ENV", str(job_env))
+    rc = _mod().main(
+        ["--no-apt-timeouts", "--budget", "450", *_py("print('ok')")],
+        cleanup=lambda: None,
+        sleep=lambda _s: None,
+        out=io.StringIO(),
+    )
+    assert rc == 0
+    written = dict(ln.split("=", 1) for ln in job_env.read_text("utf-8").splitlines())
+    assert written.keys() == {"CRB_INSTALL_SECONDS", "CRB_INSTALL_BUDGET"}
+    assert written["CRB_INSTALL_BUDGET"] == "450"
+
+
+def test_without_a_job_environment_nothing_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Run by hand, outside Actions, the wrapper has nowhere to leave its record: it must neither
+    # fail nor leave a stray file where it ran.
+    monkeypatch.chdir(tmp_path)
+    _mod().record_install(10, 450)
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_a_progress_bar_redrawn_in_place_counts_as_output() -> None:

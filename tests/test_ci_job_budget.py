@@ -4,7 +4,9 @@ PR #57's required walkthrough was cancelled at its 40-minute budget twice with e
 passing, and its py3.13 test job ran 58 of 60 minutes: a job that grows with the product
 reaches its timeout without anyone deciding it should, and then blocks every merge
 (docs/PREVENTION.md P-051). ``scripts/ci_job_budget.py`` makes the creep visible at 80 %, and
-the walkthrough was split so each part finishes well inside its budget.
+the walkthrough was split so each part finishes well inside its budget. On 2026-10-23 three
+walkthrough-screens shards failed it on a slow mirror: two passes a shard had left no room under
+the line for the browser install's own budget, so a job can now fail for that too (P-813).
 
 Navigation
 ----------
@@ -17,24 +19,30 @@ What it does: Pins the guard's arithmetic, its summary and annotation, its exit 
               ``walkthrough-story`` and ``walkthrough-screens`` jobs and runs the guard last,
               ``if: always()``, with the job's OWN ``timeout-minutes`` (so a raised timeout
               cannot leave the guard measuring the old one) — failing, in every job that runs
-              it (P-053: none warns). For the split:
+              it (P-053: none warns). That a job whose browser install recorded its time and
+              budget is over budget once the rest of the job plus that budget reaches the
+              threshold even though the job itself did not (failing in fail mode, the mode every
+              guarded job runs), and passes saying how much room is left otherwise; that an
+              unreadable record exits 2 and never passes; that a job with no record is
+              measured as before (P-813). For the split:
               ``walkthrough-story`` runs every spec except 11-screens, ``walkthrough-screens``
               runs only 11-screens with a shard per matrix value ``k/N`` for k = 1..N, and N
-              is at most the spec's persona count, so no shard is empty and together they are
-              every persona; the required ``walkthrough`` job keeps its exact name as an
-              aggregator that ``needs`` every job running ``scripts/walkthrough.sh``, runs
-              ``if: always()`` and passes only when every part succeeded (its jq program is
-              run against success, failure, cancelled, skipped and empty ``needs``).
+              is at most the spec's pass count (personas x widths), so no shard is empty and
+              together they are every pass; the required ``walkthrough`` job keeps its exact
+              name as an aggregator that ``needs`` every job running ``scripts/walkthrough.sh``,
+              runs ``if: always()`` and passes only when every part succeeded (its jq program
+              is run against success, failure, cancelled, skipped and empty ``needs``).
               Also that every guarded job checks out before any step that can fail, so the
               guard can run on the failure path (P-708).
 How:          Calls ``main`` with a fake clock and environment; reads ``ci.yml`` as text,
-              job by job (no YAML dependency), and the spec's ``PERSONAS`` list; runs ``jq``
-              (on every hosted runner) over sample ``needs`` objects.
+              job by job (no YAML dependency), and the spec's ``PERSONAS`` and ``VIEWPORTS``
+              lists; runs ``jq`` (on every hosted runner) over sample ``needs`` objects.
 Layer:        tests — docs/ARCHITECTURE.md#7-cross-cutting-concepts
 ADRs:         none
 Works with:   scripts/ci_job_budget.py (the guard), .github/workflows/ci.yml (the jobs),
               ui/e2e/walkthrough/11-screens.spec.ts (the shard selection it reads),
-              docs/PREVENTION.md (P-051, P-053), tests/test_ci_test_shards.py (the Python
+              docs/PREVENTION.md (P-051, P-053, P-813), scripts/ci_install_browser.py (the
+              install record the guard reads), tests/test_ci_test_shards.py (the Python
               suite's split, held the same way)
 Tested by:    (this is a test file)
 Touch when:   never for a new repository (it reads this repository's own CI); a long CI job
@@ -166,6 +174,100 @@ def test_a_start_stamp_in_the_future_or_a_nonsense_budget_is_refused() -> None:
         guard.assess(10, 0)
     with pytest.raises(ValueError, match="threshold"):
         guard.assess(10, 40, threshold=1.5)
+
+
+def _room_env(summary: Path, seconds: str | None, budget: str | None) -> dict[str, str]:
+    """A screens shard's environment: its clock started at 0, and the install's record."""
+    env = {"CRB_JOB_STARTED_AT": "0", "GITHUB_STEP_SUMMARY": str(summary), "GITHUB_JOB": "w"}
+    if seconds is not None:
+        env["CRB_INSTALL_SECONDS"] = seconds
+    if budget is not None:
+        env["CRB_INSTALL_BUDGET"] = budget
+    return env
+
+
+@pytest.mark.parametrize("mode", ["fail", "warn"])
+def test_a_job_with_no_room_left_for_its_install_is_over_budget_though_under_80_percent(
+    mode: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Run 39950157003, shard 3 (2026-10-23): the install took 32 s, the rest of the shard
+    # 1178 s, so it failed at 1210 s of 1200 s. On a quick mirror the shard reads 75 % and
+    # passes; on a slow one it fails a pull request that changed nothing. With the 700 s its
+    # install was allowed it is 120 %, and that is the reading that must fail (P-813).
+    summary = tmp_path / "summary.md"
+    env = _room_env(summary, "32", "700")
+    rc = _guard().main(["--timeout-minutes", "25", "--mode", mode], env, now=1132)
+    assert rc == (1 if mode == "fail" else 0)
+    text = summary.read_text("utf-8")
+    assert text.startswith("## NO ROOM FOR THE INSTALL — `w`: 18.9 of 25 min (75%")
+    assert "this run's took 32 s) it would be 30.0 min (120%)" in text
+    assert "P-813" in text and "OVER BUDGET" not in text
+    level = "error" if mode == "fail" else "warning"
+    assert (
+        f"::{level} title=job budget::w used 75% of its 25-minute timeout, but 120% with the "
+        "700 s its browser install is allowed (limit 80%)"
+    ) in capsys.readouterr().out
+
+
+def test_a_job_with_room_for_its_install_passes_and_says_how_much(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A one-pass shard at about its slowest measured rest (687 s with npm ci) and a quick
+    # install: the 450 s budget leaves it at 76 %, under the limit.
+    summary = tmp_path / "summary.md"
+    rc = _guard().main(
+        ["--timeout-minutes", "25", "--mode", "fail"], _room_env(summary, "30", "450"), now=720
+    )
+    assert rc == 0
+    text = summary.read_text("utf-8")
+    assert text.startswith("**Job budget — `w`:** 12.0 of 25 min (48%")
+    assert "allows (450 s; this run's took 30 s) it would be 19.0 min (76%)." in text
+    assert "::" not in capsys.readouterr().out
+
+
+def test_a_job_already_over_80_percent_is_over_budget_whatever_its_install() -> None:
+    budget = _guard().assess(1210, 25, install=_guard().Install(32, 700))
+    assert budget.over and not budget.no_room
+    assert budget.worst_s == pytest.approx(1878)
+
+
+def test_an_install_slower_than_its_budget_projects_no_less_than_the_job_took() -> None:
+    # The wrapper stops an attempt at the budget, so the record can run a little past it: the
+    # projection must never read below what the job actually used.
+    budget = _guard().assess(900, 25, install=_guard().Install(460, 450))
+    assert budget.worst_s == 900
+
+
+def test_a_job_with_no_install_is_measured_as_before() -> None:
+    budget = _guard().assess(600, 25)
+    assert budget.worst_s == 600 and not budget.no_room
+
+
+@pytest.mark.parametrize(
+    ("seconds", "budget"),
+    [("32", None), (None, "700"), ("", "700"), ("x", "700"), ("32", "nan"), ("inf", "700")],
+)
+@pytest.mark.parametrize("mode", ["fail", "warn"])
+def test_an_unreadable_install_record_never_reads_as_a_pass(
+    seconds: str | None,
+    budget: str | None,
+    mode: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Half a record is a wrapper and a guard that disagree: the room cannot be measured.
+    env = _room_env(tmp_path / "s.md", seconds, budget)
+    assert _guard().main(["--timeout-minutes", "25", "--mode", mode], env, now=600) == 2
+    assert "the browser install's record is unreadable" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(("seconds", "budget"), [("-1", "700"), ("32", "0"), ("32", "-450")])
+def test_an_install_record_that_is_not_a_time_and_a_budget_is_refused(
+    seconds: str, budget: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    env = _room_env(tmp_path / "s.md", seconds, budget)
+    assert _guard().main(["--timeout-minutes", "25", "--mode", "fail"], env, now=600) == 2
+    assert "is not a time and a budget" in capsys.readouterr().out
 
 
 # --- the CI configuration ----------------------------------------------------------------------
@@ -328,7 +430,26 @@ def test_the_aggregator_passes_only_when_every_part_succeeded(
     assert (done.returncode == 0) is passes, done.stdout + done.stderr
 
 
-def test_the_screens_jobs_run_only_11_screens_one_shard_each_and_together_every_persona() -> None:
+def _passes(spec: str) -> int:
+    """How many persona × width passes 11-screens makes: ``PERSONAS`` times ``VIEWPORTS``."""
+    personas = re.search(r"const PERSONAS = \[([^\]]*)\]", spec)
+    viewports = re.search(r"const VIEWPORTS = \[(.*?)\]", spec, re.S)
+    assert personas is not None and viewports is not None
+    return len(re.findall(r"'[a-z]+'", personas.group(1))) * len(
+        re.findall(r"\{\s*width:", viewports.group(1))
+    )
+
+
+def test_the_pass_count_reads_the_specs_personas_and_widths() -> None:
+    planted = (
+        "const PERSONAS = ['viewer', 'admin'] as const;\n"
+        "const VIEWPORTS = [\n  { width: 1440, height: 900 },\n  { width: 390, height: 844 },\n"
+        "  { width: 768, height: 1024 },\n];\n"
+    )
+    assert _passes(planted) == 6
+
+
+def test_the_screens_jobs_run_only_11_screens_one_shard_each_and_together_every_pass() -> None:
     jobs = _jobs(CI.read_text("utf-8"))
     body = jobs["walkthrough-screens"]
     shards_line = next(ln for ln in body if re.match(r"^\s+shard:\s*\[", ln))
@@ -344,10 +465,8 @@ def test_the_screens_jobs_run_only_11_screens_one_shard_each_and_together_every_
     assert shards == list(range(1, n + 1)), f"the matrix must list every shard 1..{n}, got {shards}"
     name = next(ln for ln in body if ln.startswith("    name:"))
     assert f"of {n})" in name, "the job name must state the same shard count"
-    personas = re.search(r"const PERSONAS = \[([^\]]*)\]", SCREENS_SPEC.read_text("utf-8"))
-    assert personas is not None
-    count = len(re.findall(r"'[a-z]+'", personas.group(1)))
-    assert 1 <= n <= count, f"{n} shards over {count} personas would leave a shard with no persona"
+    passes = _passes(SCREENS_SPEC.read_text("utf-8"))
+    assert n == passes, f"{n} shards over {passes} passes: each shard must run exactly one pass"
 
 
 def test_every_walkthrough_spec_runs_in_exactly_one_of_the_split_jobs() -> None:
