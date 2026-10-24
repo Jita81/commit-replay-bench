@@ -466,7 +466,7 @@ def test_the_screens_jobs_run_only_11_screens_one_shard_each_and_together_every_
     name = next(ln for ln in body if ln.startswith("    name:"))
     assert f"of {n})" in name, "the job name must state the same shard count"
     passes = _passes(SCREENS_SPEC.read_text("utf-8"))
-    assert 1 <= n <= passes, f"{n} shards over {passes} passes would leave a shard with no pass"
+    assert n == passes, f"{n} shards over {passes} passes: each shard must run exactly one pass"
 
 
 def test_every_walkthrough_spec_runs_in_exactly_one_of_the_split_jobs() -> None:
