@@ -302,3 +302,32 @@ space on the env volume and at most `era_keep` (8) eras are kept per repository,
 used evicted first — a tree that fills the disk takes the worker, the API and the ledger down
 with it. Under a docker executor the image's tree is used as before (an era-aware image is a
 follow-up).
+
+## Amendment 2026-10-25 (d) — under docker, the pinned ruff is a sealed set, not the image's
+
+Amendment (b) installs the pinned ruff into the runner's environment — on the host. The sandbox
+images carry no linter, so under docker belt 5 ran a bare `ruff` that resolved nowhere: at Wave
+3 step 7 every pallets/click candidate was `QUAL_GOLD_LINT` (rc 127), and `grade.py` runs the
+same belt on every Python trial. Under a docker executor the sealed provider now provisions a
+**lint set** per commit (`py.lint.v1`, `src/crb/provision/python.py::lint_sets`): the version
+the commit pins (a frozen `ruff-pre-commit` rev's `# frozen: vX`, an exact `==` pin, else the
+version `uv.lock` holds when it satisfies the pin's range — read from git objects, never a
+worktree), fetched wheel-only behind the allowlisting proxy (`--require-hashes` when `uv.lock`
+commits that version's hashes), installed offline with `--target`, checked to hold exactly
+`ruff-V.dist-info` and `bin/ruff`, and sealed under a key over the image and the pin. Every
+role's binding carries the sets; the task's keys cite them, so a damaged set revokes the
+qualifications that used it.
+
+Belt 5 runs `/deps/lint/bin/ruff` read-only (`RUFF_NO_CACHE=true`), mounted for the lint and
+fixer commands alone (never on `PYTHONPATH`), and `detected` takes the version from the set's
+manifest (`ruff@0.15.9+ruff-format`). Inside the sandbox a pin mismatch is refused as it is on
+the host: no set for the commit (`no sealed ruff for this commit: <why>`), a set at another
+version (`ruff@<held>!pin<spec>`), or a commit that pins no ruff — each a harness error (rc
+127, verdict `None`, the row outside `n`), never a label and never a fall-back. A stored set
+whose manifest names another tool or version under its key is damaged: it is quarantined and
+sealed afresh, as a digest failure is; a fresh one is `BUNDLE_INTEGRITY` and refuses the run,
+as every run-scope provisioning refusal does (only a wheel that will not fetch or install is
+the lint step's note). All seven `run_plan` call sites build the plan from the binding — mine, qualify, grade,
+the finish gate, and the adapter's preflight before its fixer, after it and after a repair —
+as do the fixers and the format pass. Other languages are unchanged.
+

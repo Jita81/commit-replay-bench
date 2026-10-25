@@ -238,7 +238,7 @@ class _Scripted(PytestRunner):
             (sys.executable, "-c", f"import sys; sys.exit({code})"), root, timeout=timeout
         )
 
-    def lint_plan(self, root: Path, executor: Executor) -> Any:
+    def lint_plan(self, root: Path, executor: Executor, *, deps: Any = None) -> Any:
         return None
 
 

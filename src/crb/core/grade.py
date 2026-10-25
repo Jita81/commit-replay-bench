@@ -1027,7 +1027,7 @@ def grade(
         #     error, never a verdict (ADR-0011). --------------------------------------
         lint_run: LintRun | None = None
         lint_error = ""
-        plan = runner.lint_plan(ws.root, executor) if evaluate_lint else None
+        plan = runner.lint_plan(ws.root, executor, deps=binding) if evaluate_lint else None
         disabled = lint_disabled(getattr(getattr(runner, "config", None), "lint", None))
         if plan is not None:
             present = [f for f in changed if ws.exists(f)]

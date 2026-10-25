@@ -1501,6 +1501,13 @@ def build_fn_for(
             return None
         return task_deps.builder
 
+    def lint_binding(task: TaskSpec) -> DepsBinding | None:
+        """The binding belt 5's plan is detected under — the task's gold binding, whose lint
+        sets (the commit's sealed ruff under docker) every role carries alike — or ``None``
+        when nothing is provisioned (the runner's own binding then stands)."""
+        task_deps = deps_for(task) if deps_for is not None else None
+        return task_deps.gold if task_deps is not None else None
+
     def _gate_setup(
         ws: Workspace, task: TaskSpec, mode: str, test_command: str, deps: DepsBinding | None
     ) -> _Gate | str | None:
@@ -1511,7 +1518,7 @@ def build_fn_for(
         if checks is None or not checks.finish_gate:
             return None
         try:
-            plan = runner.lint_plan(ws.root, executor)
+            plan = runner.lint_plan(ws.root, executor, deps=lint_binding(task))
         except Exception as exc:  # detection failed: the gate carries the commands only
             emit(on_event, BUILDER_EVENT_PREFIX + "finish_gate.error", error=str(exc)[:200])
             plan = None
@@ -1575,7 +1582,7 @@ def build_fn_for(
             return outcome
         try:
             if checks.format_step:
-                fr = format_once(ws)
+                fr = format_once(ws, task)
                 labels["format_step"] = fr.label()
                 notes["format_step"] = fr.to_dict()
             if gate is not None:
@@ -1604,11 +1611,11 @@ def build_fn_for(
             )
         return outcome
 
-    def format_once(ws: Workspace) -> FormatRun:
+    def format_once(ws: Workspace, task: TaskSpec) -> FormatRun:
         """The repository's own formatter over the changed non-test files."""
         assert checks is not None
         files = _changed_source_files(ws, config)
-        plan = runner.lint_plan(ws.root, executor) if files else None
+        plan = runner.lint_plan(ws.root, executor, deps=lint_binding(task)) if files else None
         formatters, skipped = formatters_for(plan, ws.root, checks.repo.formatter)
         fr = run_formatters(formatters, executor, ws.root, files, skipped=skipped)
         emit(on_event, BUILDER_EVENT_PREFIX + "format_step", **fr.to_dict())
@@ -1670,7 +1677,7 @@ def build_fn_for(
                 break
             if checks.format_step:
                 # the first run's record stays; the repair's own formatting is appended
-                again = format_once(ws).label()
+                again = format_once(ws, task).label()
                 labels["format_step"] = f"{labels.get('format_step', '')};repair:{again}"[:300]
             run = check()
         if repairs:
@@ -1723,7 +1730,7 @@ def build_fn_for(
         merged = replace(outcome, builder=f"{outcome.builder}+preflight")
         try:
             files = _changed_source_files(ws, config)
-            plan = runner.lint_plan(ws.root, executor) if files else None
+            plan = runner.lint_plan(ws.root, executor, deps=lint_binding(task)) if files else None
             if plan is None:
                 record["before"] = "no_plan" if files else "no_changed_files"
                 return merged, {"preflight": _preflight_label(record)}
@@ -1738,9 +1745,18 @@ def build_fn_for(
                 note=before.note,
             )
             if pf.fix:
+                tools = {t.name: t for t in plan.tools}
                 for name, argv in fix_commands(plan, files):
+                    # the check step's own env and sealed mounts: the fixer is that binary
                     res = executor.run(
-                        Command(argv, ws.root, timeout=plan.timeout, writable_paths=(".",))
+                        Command(
+                            argv,
+                            ws.root,
+                            env=dict(tools[name].env),
+                            timeout=plan.timeout,
+                            writable_paths=(".",),
+                            ro_mounts=tools[name].ro_mounts,
+                        )
                     )
                     record["fixers"].append(f"{name}:{res.returncode}")
                 after = run_plan(plan, executor, ws.root, files)

@@ -424,6 +424,28 @@ def validate_mount(mount: BundleMount) -> None:
         raise ValueError(f"refusing bundle mount: {problem}")
 
 
+@dataclass(frozen=True)
+class LintSet:
+    """A sealed set holding one lint tool at the version a commit pins (``ruff`` 0.15.9),
+    mounted read-only beside the dependency set for belt 5's commands only. Under docker the
+    image carries no linter: the label is this set's ``version`` (the manifest's, never a
+    host binary's) and the command runs :attr:`bin` inside the sandbox (ADR-0011 §5)."""
+
+    name: str
+    version: str
+    key: str
+    digest: str
+    mount: BundleMount
+
+    @property
+    def bin(self) -> str:
+        """The tool's executable inside the sandbox."""
+        return f"{self.mount.container_path}/bin/{self.name}"
+
+    def to_dict(self) -> dict[str, str]:
+        return {"name": self.name, "version": self.version, "key": self.key, "digest": self.digest}
+
+
 # ---------------------------------------------------------------------------
 # Bindings
 # ---------------------------------------------------------------------------
@@ -459,6 +481,9 @@ class DepsBinding:
     host command (the store's own paths). ``mounts`` become ``Command.ro_mounts`` and are
     rendered by the docker executor only. ``manifest`` lists what the set holds
     (``module@version``, ``name==version``) — the closure a trial must stay inside.
+    ``lint`` are the sealed lint tools belt 5 runs under docker (one per pinned version the
+    task's commits name); ``lint_note`` says why there are none when a set could not be
+    provisioned, and belt 5 refuses with it instead of running an unpinned tool.
     """
 
     role: str = ""
@@ -470,12 +495,15 @@ class DepsBinding:
     env: Mapping[str, str] = field(default_factory=dict)
     local_env: Mapping[str, str] = field(default_factory=dict)
     manifest: tuple[str, ...] = ()
+    lint: tuple[LintSet, ...] = ()
+    lint_note: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mounts", tuple(self.mounts))
         object.__setattr__(self, "env", dict(self.env))
         object.__setattr__(self, "local_env", dict(self.local_env))
         object.__setattr__(self, "manifest", tuple(self.manifest))
+        object.__setattr__(self, "lint", tuple(self.lint))
 
     @property
     def sealed(self) -> bool:
@@ -487,7 +515,7 @@ class DepsBinding:
         return dict(self.env if executor_name == "docker" else self.local_env)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "role": self.role,
             "lang": self.lang,
             "scheme": self.scheme,
@@ -495,6 +523,11 @@ class DepsBinding:
             "digest": self.digest,
             "mounts": [m.to_dict() for m in self.mounts],
         }
+        if self.lint:
+            out["lint"] = [s.to_dict() for s in self.lint]
+        if self.lint_note:
+            out["lint_note"] = self.lint_note
+        return out
 
 
 def empty_binding(role: str, lang: str = "", scheme: str = SCHEME_NONE) -> DepsBinding:
@@ -565,17 +598,20 @@ class TaskDeps:
 
     @property
     def keys(self) -> tuple[str, ...]:
-        """Every distinct sealed key the task cites (what a qualification records)."""
-        seen: dict[str, None] = {}
-        for b in (self.parent, self.gold, self.builder):
-            if b.key:
-                seen[b.key] = None
-        return tuple(seen)
+        """Every distinct sealed key the task cites (what a qualification records), its
+        lint sets' included: a damaged lint set revokes what was qualified on it."""
+        return tuple(self.digests)
 
     @property
     def digests(self) -> dict[str, str]:
         """key → output digest, for every sealed set the task cites."""
-        return {b.key: b.digest for b in (self.parent, self.gold, self.builder) if b.key}
+        out: dict[str, str] = {}
+        for b in (self.parent, self.gold, self.builder):
+            if b.key:
+                out.setdefault(b.key, b.digest)
+            for s in b.lint:
+                out.setdefault(s.key, s.digest)
+        return out
 
     def binding_for(self, root: Path) -> DepsBinding:
         """The binding a trial at ``root`` is graded with — the set its own manifests
@@ -734,6 +770,7 @@ __all__ = [
     "DepsBinding",
     "DepsProvider",
     "EventFn",
+    "LintSet",
     "NullDepsProvider",
     "ProvisionRefused",
     "Refusal",

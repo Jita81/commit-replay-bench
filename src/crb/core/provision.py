@@ -951,6 +951,34 @@ def _uv_marker(clauses: set[frozenset[str]]) -> str:
     return "; " + (terms[0] if len(terms) == 1 else " or ".join(f"({t})" for t in terms))
 
 
+def uv_locked(text: str, name: str) -> PyPin | None:
+    """The one wheel-published pin ``uv.lock`` holds for ``name`` (a lint tool's version and
+    wheel hashes), or None: an unparsable lock, no such package, an index outside
+    :data:`UV_PUBLIC_INDEX`, or a wheel without a sha256 all give None — the caller then
+    installs by version alone and records that no hashes were committed."""
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return None
+    want = _norm_name(name)
+    for pkg in data.get("package", []) or []:
+        if not isinstance(pkg, dict) or _norm_name(str(pkg.get("name", ""))) != want:
+            continue
+        version = str(pkg.get("version", ""))
+        if not _NAME.match(name) or not _VERSION.match(version):
+            return None
+        try:
+            _uv_check_source("uv.lock", name, pkg.get("source"))
+        except ProvisionRefused:
+            return None
+        wheels = [w for w in pkg.get("wheels", []) or [] if isinstance(w, dict)]
+        hashes = tuple(str(w.get("hash", "")) for w in wheels)
+        if not hashes or not all(_HASH.match(h) for h in hashes):
+            return None
+        return PyPin(name, version, hashes, "", f"uv.lock:{name}")
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
@@ -1337,4 +1365,5 @@ __all__ = [
     "pin_line_refusal",
     "select_role",
     "tree_lock_key",
+    "uv_locked",
 ]

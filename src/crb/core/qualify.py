@@ -857,8 +857,9 @@ def qualify_task(
                 return refuse(
                     QUAL_GOLD_NEW_FAILURES, gold["note"] + ": " + ", ".join(sorted(new)[:5])
                 )
-            # belt 5 on the gold: the plan a builder's patch would face
-            plan = runner.lint_plan(gws.root, executor)
+            # belt 5 on the gold: the plan a builder's patch would face, detected under the
+            # gold's binding (its lint sets: the commit's sealed ruff under docker)
+            plan = runner.lint_plan(gws.root, executor, deps=deps.gold)
             if plan is not None:
                 present = [f for f in task.src_files if gws.exists(f)]
                 lint_run = run_plan(plan, executor, gws.root, present)

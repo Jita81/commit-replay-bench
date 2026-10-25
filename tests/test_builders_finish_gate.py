@@ -136,7 +136,7 @@ def _register(monkeypatch: pytest.MonkeyPatch) -> None:
 class _FormattedRunner(PytestRunner):
     """The fixture repository with ``ruff format`` as its configured formatter (belt 5)."""
 
-    def lint_plan(self, root: Path, executor: Any) -> LintPlan | None:
+    def lint_plan(self, root: Path, executor: Any, *, deps: Any = None) -> LintPlan | None:
         return LintPlan(
             (LintTool("ruff-format", (RUFF, "format", "--check"), exts=(".py",)),), "ruff-format"
         )

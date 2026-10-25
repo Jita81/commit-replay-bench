@@ -99,7 +99,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from crb.core.deps import SCOPE_RUN, DepsProvider, NullDepsProvider, ProvisionRefused, TaskDeps
+from crb.core.deps import (
+    SCOPE_RUN,
+    DepsBinding,
+    DepsProvider,
+    NullDepsProvider,
+    ProvisionRefused,
+    TaskDeps,
+)
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.git import GitError, GitRepo
 from crb.core.lint import DEFAULT_LINT_TIMEOUT_S, LintRun, run_plan
@@ -652,6 +659,7 @@ def gold_check(
     executor: Executor,
     timeout: int = 0,
     on_event: EventFn | None = None,
+    deps: DepsBinding | None = None,
 ) -> TaskSpec:
     """Overlay the commit's own sources and prove the oracle can be satisfied.
 
@@ -673,11 +681,19 @@ def gold_check(
 
     The ``mine.gold`` event carries ``lint``: ``True`` / ``False`` / ``None`` (not
     evaluated), the same value semantics as ``GradeResult.belts.repo_lint_clean``.
+
+    ``deps`` (the gold's binding) is bound for every run and for belt 5's detection —
+    its lint sets are the commit's sealed ruff under docker; ``None`` keeps the runner's.
     """
     try:
         ws.overlay_sources(task.src_files)
         tgt = runner.run_for(
-            executor, ws.root, task.target_tests, timeout=timeout, authored=task.authored
+            executor,
+            ws.root,
+            task.target_tests,
+            timeout=timeout,
+            authored=task.authored,
+            deps=deps,
         )
         if not tgt.green:
             note = (
@@ -688,7 +704,12 @@ def gold_check(
             _emit(on_event, "mine.gold", sha=task.task_id, clean=False, note=note, lint=None)
             return task.with_(gold_clean=False, gold_note=note)
         belt = runner.run_belt_for(
-            executor, ws.root, task.belt_scope, timeout=timeout, authored=task.authored
+            executor,
+            ws.root,
+            task.belt_scope,
+            timeout=timeout,
+            authored=task.authored,
+            deps=deps,
         )
         if belt.timed_out or belt.parse_error:
             note = (
@@ -705,7 +726,7 @@ def gold_check(
             return task.with_(gold_clean=False, gold_note=note)
         # belt 5 on the gold: the same plan a builder's patch would face, over the
         # overlaid source files that still exist (a deletion cannot be linted).
-        lint_run = _gold_lint(ws, task, runner=runner, executor=executor)
+        lint_run = _gold_lint(ws, task, runner=runner, executor=executor, deps=deps)
         lint = lint_run.ok if lint_run is not None else None
         clean, note = _read_gold_lint(lint_run)
         _emit(on_event, "mine.gold", sha=task.task_id, clean=clean, note=note, lint=lint)
@@ -717,11 +738,16 @@ def gold_check(
 
 
 def _gold_lint(
-    ws: Workspace, task: TaskSpec, *, runner: BaseRunner, executor: Executor
+    ws: Workspace,
+    task: TaskSpec,
+    *,
+    runner: BaseRunner,
+    executor: Executor,
+    deps: DepsBinding | None = None,
 ) -> LintRun | None:
     """Run belt 5's plan on the overlaid gold sources; ``None`` when the repository
     has no linter (the belt is then not evaluated for the gold, as for a trial)."""
-    plan = runner.lint_plan(ws.root, executor)
+    plan = runner.lint_plan(ws.root, executor, deps=deps)
     if plan is None:
         return None
     present = [f for f in task.src_files if ws.exists(f)]

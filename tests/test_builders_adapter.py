@@ -863,7 +863,7 @@ class _RuffRunner(PytestRunner):
 
     script: str = ""
 
-    def lint_plan(self, root: Path, executor: Any) -> LintPlan | None:
+    def lint_plan(self, root: Path, executor: Any, *, deps: Any = None) -> LintPlan | None:
         return LintPlan(
             (LintTool("ruff", (self.script, "check", "--no-fix"), exts=(".py",)),),
             detected="fake-ruff",

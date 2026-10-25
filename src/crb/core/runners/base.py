@@ -429,7 +429,9 @@ class TestRunner(Protocol):
 
     def environment_ready(self, root: Path, env_dir: Path) -> bool: ...
 
-    def lint_plan(self, root: Path, executor: Executor) -> LintPlan | None: ...
+    def lint_plan(
+        self, root: Path, executor: Executor, *, deps: DepsBinding | None = None
+    ) -> LintPlan | None: ...
 
 
 class BaseRunner:
@@ -869,17 +871,24 @@ class BaseRunner:
         return out
 
     # --- belt 5: the repository's own formatter / linter (ADR-0011) ------------
-    def lint_plan(self, root: Path, executor: Executor) -> LintPlan | None:
+    def lint_plan(
+        self, root: Path, executor: Executor, *, deps: DepsBinding | None = None
+    ) -> LintPlan | None:
         """What belt 5 runs on the changed files: the declared ``RepoConfig.lint``
         when present, else this language's default (:meth:`detect_lint`), else
         ``None`` — the belt is then *not evaluated* (never a pass, never a fail).
-        ``{"disabled": true}`` in the config is an explicit ``None``."""
+        ``{"disabled": true}`` in the config is an explicit ``None``. ``deps`` (when
+        given) is bound for the detection: under docker its lint sets are the sealed
+        linter the plan runs (ADR-0011, the sealed ruff)."""
         if lint_disabled(self.config.lint):
             return None
         declared = plan_from_config(self.config.lint)
         if declared is not None:
             return declared
-        return self.detect_lint(Path(root), executor)
+        if deps is None:
+            return self.detect_lint(Path(root), executor)
+        with self.deps_bound(deps):
+            return self.detect_lint(Path(root), executor)
 
     def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
         """The language default, from the repository's OWN configuration only
