@@ -1013,16 +1013,31 @@ def sealed_ruff_version(root: Path | ConfigFiles) -> tuple[str, str]:
     """``(version, "")`` — the ONE ruff version the commit pins, the version a sealed lint
     set holds — or ``("", reason)``. An exact pin (``==0.15.9``, a frozen pre-commit rev)
     names it; a range is resolved only by the version ``uv.lock`` commits and only when it
-    satisfies the range. Nothing else is guessed: a sandbox holds no "latest" ruff."""
+    satisfies the range — one version: a universal lock holding two within it, under
+    disjoint markers, names neither. Nothing else is guessed: a sandbox holds no "latest"
+    ruff."""
     files = config_files(root)
     spec = pinned_ruff_spec(files)
     if spec.startswith("==") and not any(c in spec for c in "*,;<>!~"):
         version = spec[2:].strip()
         if _VERSION_RE.match(version):
             return version.lstrip("v"), ""
-    locked = uv_locked(files.text("uv.lock"), "ruff")
-    if locked is not None and (not spec or version_satisfies(locked.version, spec) is True):
-        return locked.version, ""
+    lock = files.text("uv.lock")
+
+    def in_pin(version: str) -> bool:
+        return not spec or version_satisfies(version, spec) is True
+
+    locked = uv_locked(lock, "ruff", in_pin)
+    if locked is not None:
+        first = locked.version
+        other = uv_locked(lock, "ruff", lambda v: v != first and in_pin(v))
+        if other is None:
+            return first, ""
+        within = f" within the pin ruff{spec}" if spec else ""
+        return "", (
+            f"uv.lock holds ruff {first} and {other.version}{within} under different "
+            "markers; which one judges is not decided here"
+        )
     if spec:
         return "", f"the repository's pin ruff{spec} names no exact version and uv.lock holds none"
     return "", "the repository pins no ruff version (pre-commit, pyproject, requirements, uv.lock)"
@@ -1115,6 +1130,7 @@ def _sealed_python_plan(
         tag = f"ruff@{'+'.join(held)}!pin{spec}"
         refuse = (
             f"no sealed ruff satisfies the repository's pin ruff{spec} (sealed: {', '.join(held)})"
+            + (f"; {note}" if note else "")  # why the pinned set is absent, when it is known
         )
     else:
         refuse = f"no sealed ruff for this commit: {note or 'no lint set was provisioned'}"

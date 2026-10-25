@@ -365,8 +365,8 @@ def _ruff_pin(files: _CommitFiles, sha: str) -> tuple[PyPin | None, str]:
     version, why = sealed_ruff_version(files)
     if not version:
         return None, f"{sha[:12]}: {why}"
-    locked = uv_locked(files.text(UV_LOCK), "ruff")
-    if locked is not None and locked.version == version:
+    locked = uv_locked(files.text(UV_LOCK), "ruff", lambda v: v == version)
+    if locked is not None:
         return PyPin("ruff", version, locked.hashes, "", f"{sha[:12]}:{UV_LOCK}"), ""
     return PyPin("ruff", version, (), "", f"{sha[:12]}:ruff=={version}"), ""
 

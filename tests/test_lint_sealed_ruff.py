@@ -102,6 +102,13 @@ def _uv_lock(version: str = "0.15.9", hashes: tuple[str, ...] = (H1, H2), **src:
     )
 
 
+def _uv_universal(*entries: tuple[str, str]) -> str:
+    """A universal lock holding ruff once per ``(version, hash)`` — uv writes one package at
+    several versions when disjoint ``resolution-markers`` resolve it differently."""
+    head = 'version = 1\nrequires-python = ">=3.10"\n\n'
+    return head + "\n".join(_uv_lock(v, (h,)).split("\n\n", 1)[1] for v, h in entries)
+
+
 def _write(root: Path, files: dict[str, str]) -> None:
     for rel, text in files.items():
         p = root / rel
@@ -185,6 +192,17 @@ def test_uv_locked_is_the_public_index_wheel_pin_or_nothing() -> None:
     assert uv_locked("not [toml", "ruff") is None and uv_locked("", "ruff") is None
 
 
+def test_a_universal_lock_gives_the_entry_the_pin_names_not_the_first() -> None:
+    """``accept`` passes over the entries the pin rejects; without it the first entry is
+    the answer, as before."""
+    lock = _uv_universal(("0.14.0", H1), ("0.15.9", H2))
+    first = uv_locked(lock, "ruff")
+    assert first is not None and (first.version, first.hashes) == ("0.14.0", (H1,))
+    pin = uv_locked(lock, "ruff", lambda v: v == "0.15.9")
+    assert pin is not None and (pin.version, pin.hashes) == ("0.15.9", (H2,))
+    assert uv_locked(lock, "ruff", lambda v: v == "0.16.0") is None
+
+
 @pytest.mark.parametrize(
     ("files", "version", "why"),
     [
@@ -230,6 +248,32 @@ def test_uv_locked_is_the_public_index_wheel_pin_or_nothing() -> None:
             "the repository's pin ruff>=0.15 names no exact version and uv.lock holds none",
         ),
         ({"uv.lock": _uv_lock("0.15.2")}, "0.15.2", ""),  # the lock IS a pin
+        # a universal lock: the entry within the range, wherever it sits; two within it, none
+        (
+            {
+                "pyproject.toml": '[project]\nname = "x"\nversion = "0"\n'
+                '[dependency-groups]\ndev = ["ruff>=0.15,<0.16"]\n',
+                "uv.lock": _uv_universal(("0.14.0", H1), ("0.15.9", H2)),
+            },
+            "0.15.9",
+            "",
+        ),
+        (
+            {
+                "pyproject.toml": '[project]\nname = "x"\nversion = "0"\n'
+                '[dependency-groups]\ndev = ["ruff>=0.14"]\n',
+                "uv.lock": _uv_universal(("0.14.0", H1), ("0.15.9", H2)),
+            },
+            "",
+            "uv.lock holds ruff 0.14.0 and 0.15.9 within the pin ruff>=0.14 under different "
+            "markers; which one judges is not decided here",
+        ),
+        (
+            {"uv.lock": _uv_universal(("0.14.0", H1), ("0.15.9", H2))},
+            "",
+            "uv.lock holds ruff 0.14.0 and 0.15.9 under different markers; which one judges "
+            "is not decided here",
+        ),
         (
             {"ruff.toml": "line-length = 88\n"},
             "",
@@ -343,6 +387,22 @@ def test_the_recipe_seals_exactly_the_commits_ruff_and_reuses_it(
     steps.clear()
     again, _ = py_recipe.lint_sets(provider, repo, (parent, gold))
     assert again == sets and steps == []
+
+
+def test_an_exact_pin_takes_the_hashes_of_its_own_entry_in_a_universal_lock(
+    tmp_path: Path, provider: SealedProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pinned version's entry is second in the lock: its hashes still go to pip — the
+    first entry is another version and is never a reason to install by version alone."""
+    lock = _uv_universal(("0.14.0", H1), ("0.15.9", H2))
+    repo, parent, gold = _repo(
+        tmp_path, {".pre-commit-config.yaml": CLICK_PRECOMMIT, "uv.lock": lock}, {"a": "1"}
+    )
+    steps = _fake_pip(provider, monkeypatch)
+    sets, note = py_recipe.lint_sets(provider, repo, (parent, gold))
+    assert note == "" and [s.version for s in sets] == ["0.15.9"]
+    assert steps[:2] == ["fetch", f"ruff==0.15.9 --hash={H2}\n"]
+    assert provider.store.verify(sets[0].key).manifest["hashes"] == "committed"
 
 
 def test_parent_and_gold_pinning_different_ruffs_get_one_set_each(
@@ -549,6 +609,13 @@ def test_break_and_restore_the_sealed_ruff(click_tree: Path, tmp_path: Path) -> 
         run.error
     )
     assert lint_mod.fix_commands(plan, ["src/click/core.py"]) == [], "no fixer either"
+    # ...and the provisioner's reason the pinned set is absent stays in the refusal
+    plan = lint_mod.python_plan(
+        click_tree, None, sealed=(wrong,), sealed_note="ruff==0.15.9: PROVISION_FETCH_FAILED: x"
+    )
+    run, ex = _refused(plan, click_tree)
+    assert ex.commands == [] and run.steps[0].verdict is None
+    assert "(sealed: 0.16.0); ruff==0.15.9: PROVISION_FETCH_FAILED: x" in run.error
 
     # break 3: the commit pins nothing — refused with that reason, whatever is sealed
     unpinned = tmp_path / "unpinned"

@@ -307,27 +307,37 @@ follow-up).
 
 Amendment (b) installs the pinned ruff into the runner's environment — on the host. The sandbox
 images carry no linter, so under docker belt 5 ran a bare `ruff` that resolved nowhere: at Wave
-3 step 7 every pallets/click candidate was `QUAL_GOLD_LINT` (rc 127), and `grade.py` runs the
-same belt on every Python trial. Under a docker executor the sealed provider now provisions a
-**lint set** per commit (`py.lint.v1`, `src/crb/provision/python.py::lint_sets`): the version
-the commit pins (a frozen `ruff-pre-commit` rev's `# frozen: vX`, an exact `==` pin, else the
-version `uv.lock` holds when it satisfies the pin's range — read from git objects, never a
-worktree), fetched wheel-only behind the allowlisting proxy (`--require-hashes` when `uv.lock`
-commits that version's hashes), installed offline with `--target`, checked to hold exactly
-`ruff-V.dist-info` and `bin/ruff`, and sealed under a key over the image and the pin. Every
-role's binding carries the sets; the task's keys cite them, so a damaged set revokes the
-qualifications that used it.
+3 step 7, 51 of the 62 pallets/click candidates were `QUAL_GOLD_LINT`, every one of them rc 127
+under a version label that never ran [measured 2026-10-25; n = 62 candidates, apparatus 2.4;
+method: qualify run 40ab0b89 under docker/copy/sealed, each row's code and message read from
+task_qualifications]; `grade.py` runs the same belt on every Python trial. Under a docker
+executor the sealed provider now provisions a **lint set** per commit (`py.lint.v1`,
+`src/crb/provision/python.py::lint_sets`): the version the commit pins (a frozen
+`ruff-pre-commit` rev's `# frozen: vX`, an exact `==` pin, else the version `uv.lock` holds when
+it satisfies the pin's range, the one entry within it however many a universal lock writes, and
+none when two are — read from git objects, never a worktree), fetched wheel-only behind the
+allowlisting proxy (`--require-hashes` when `uv.lock` commits that version's hashes), installed
+offline with `--target`, checked to hold exactly `ruff-V.dist-info` and `bin/ruff`, and sealed
+under a key over the image and the pin. Every role's binding carries the sets; the task's keys
+cite them, so a damaged set revokes the qualifications that used it.
 
 Belt 5 runs `/deps/lint/bin/ruff` read-only (`RUFF_NO_CACHE=true`), mounted for the lint and
 fixer commands alone (never on `PYTHONPATH`), and `detected` takes the version from the set's
 manifest (`ruff@0.15.9+ruff-format`). Inside the sandbox a pin mismatch is refused as it is on
 the host: no set for the commit (`no sealed ruff for this commit: <why>`), a set at another
-version (`ruff@<held>!pin<spec>`), or a commit that pins no ruff — each a harness error (rc
-127, verdict `None`, the row outside `n`), never a label and never a fall-back. A stored set
-whose manifest names another tool or version under its key is damaged: it is quarantined and
-sealed afresh, as a digest failure is; a fresh one is `BUNDLE_INTEGRITY` and refuses the run,
-as every run-scope provisioning refusal does (only a wheel that will not fetch or install is
-the lint step's note). All seven `run_plan` call sites build the plan from the binding — mine, qualify, grade,
-the finish gate, and the adapter's preflight before its fixer, after it and after a repair —
-as do the fixers and the format pass. Other languages are unchanged.
+version (`ruff@<held>!pin<spec>`), or a commit that pins no ruff — each a harness error (rc 127,
+verdict `None`, the row outside `n`), never a label and never a fall-back. A stored set whose
+manifest names another tool or version under its key is damaged: it is quarantined and sealed
+afresh, as a digest failure is; a fresh one is `BUNDLE_INTEGRITY` and refuses the run, as every
+run-scope provisioning refusal does (only a wheel that will not fetch or install is the lint
+step's note). All seven `run_plan` call sites build the plan from the binding — mine, qualify,
+grade, the finish gate, and the adapter's preflight before its fixer, after it and after a
+repair — as do the fixers and the format pass. Other languages are unchanged.
 
+`APPARATUS_VERSION` stays 2.4. It moves when the meaning of a verdict could change, and none
+does. On the host, belt 5 has run the commit's pinned ruff since amendment (b); under docker it
+now runs that same version. Before this, the docker belt never produced a verdict: rc 126 and
+127 are "not runnable", a harness error outside `n`, and no grade row is stamped 2.3 or 2.4
+[measured 2026-10-25; n = 618 grade rows, all stamped 2.0–2.2; method: a count of the grades
+table by apparatus_version; apparatus 2.4]. A belt-5 verdict at 2.4 means the same on either
+executor, and every row carries its posture labels (ADR-0019).

@@ -60,7 +60,7 @@ import json
 import posixpath
 import re
 import tomllib
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -951,11 +951,14 @@ def _uv_marker(clauses: set[frozenset[str]]) -> str:
     return "; " + (terms[0] if len(terms) == 1 else " or ".join(f"({t})" for t in terms))
 
 
-def uv_locked(text: str, name: str) -> PyPin | None:
+def uv_locked(text: str, name: str, accept: Callable[[str], bool] | None = None) -> PyPin | None:
     """The one wheel-published pin ``uv.lock`` holds for ``name`` (a lint tool's version and
     wheel hashes), or None: an unparsable lock, no such package, an index outside
     :data:`UV_PUBLIC_INDEX`, or a wheel without a sha256 all give None — the caller then
-    installs by version alone and records that no hashes were committed."""
+    installs by version alone and records that no hashes were committed. ``accept`` (a
+    version predicate) passes over the entries it rejects: a universal lock can hold one
+    package at several versions under disjoint markers, and the caller wants the one its
+    pin names, wherever it sits in the file."""
     try:
         data = tomllib.loads(text)
     except (tomllib.TOMLDecodeError, UnicodeDecodeError):
@@ -965,6 +968,8 @@ def uv_locked(text: str, name: str) -> PyPin | None:
         if not isinstance(pkg, dict) or _norm_name(str(pkg.get("name", ""))) != want:
             continue
         version = str(pkg.get("version", ""))
+        if accept is not None and not accept(version):
+            continue
         if not _NAME.match(name) or not _VERSION.match(version):
             return None
         try:
