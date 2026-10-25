@@ -98,7 +98,7 @@ from crb.core.acceptance import (
 )
 from crb.core.checks import LABEL_CHECKS, RepoChecks, ResolvedChecks
 from crb.core.checks import resolve as resolve_checks
-from crb.core.deps import NullDepsProvider, TaskDeps
+from crb.core.deps import DepsBinding, NullDepsProvider, TaskDeps
 from crb.core.evidence import ApparatusStamp, BuilderRef, EvidencePack, utc_now_iso
 from crb.core.execution import Executor, SandboxUnavailable
 from crb.core.formatting import formatters_for, run_formatters
@@ -493,12 +493,15 @@ def _apply_checks(
     runner: BaseRunner,
     executor: Executor,
     on_event: EventFn | None,
+    deps: DepsBinding | None = None,
 ) -> dict[str, str]:
     """The ``checks`` switches on a factory attempt, after the builder and before the grade
     (ADR-0024 §6, GOV-3): the ``checks`` stamp always; the repository's own formatter over
     the changed source files when the format step is on and the attempt is admissible (the
     graded patch is the formatted one, as in replay); the finish gate named as not run.
-    Returns the row labels. Never raises into the grade (``SandboxUnavailable`` excepted)."""
+    Returns the row labels. Never raises into the grade (``SandboxUnavailable`` excepted).
+    ``deps``: the binding the grade runs under, whose lint sets the formatter's plan reads
+    (the commit's sealed ruff under docker)."""
     labels = {LABEL_CHECKS: checks.label()}
     if checks.finish_gate:
         labels["finish_gate"] = FINISH_GATE_NOT_ON_FACTORY
@@ -509,7 +512,7 @@ def _apply_checks(
         return labels
     try:
         files = [f for f in ws.touched_files() if not config.is_test(f) and (ws.root / f).is_file()]
-        plan = runner.lint_plan(ws.root, executor) if files else None
+        plan = runner.lint_plan(ws.root, executor, deps=deps) if files else None
         formatters, skipped = formatters_for(plan, ws.root, checks.repo.formatter)
         fr = run_formatters(formatters, executor, ws.root, files, skipped=skipped)
         labels["format_step"] = fr.label()
@@ -746,6 +749,7 @@ def build_item(
             runner=runner,
             executor=executor,
             on_event=on_event,
+            deps=deps.parent,
         )
         touched = ws.touched_files()
         changed = tuple(f for f in touched if f != oracle.test_path and not config.is_test(f))

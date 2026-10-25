@@ -378,7 +378,8 @@ class PytestRunner(BaseRunner):
         (``runner_opts.python`` or the setup venv — click's ``dev`` extra installs
         it there), else the host's, else the bare name (fails closed at run time as a
         visible harness error, never a silent skip). Under a sandbox the image's PATH
-        resolves it."""
+        would resolve it — but belt 5 under docker does not come here: the image carries no
+        linter, so :meth:`detect_lint` runs the binding's sealed ruff instead."""
         if executor.name == "docker":
             return executor.tool("ruff")
         python = self.configured_python(root, self.env_dir)
@@ -416,7 +417,17 @@ class PytestRunner(BaseRunner):
     def detect_lint(self, root: Path, executor: Executor) -> LintPlan | None:
         """``ruff check`` (+ ``ruff format --check``) when the repository configures
         ruff — click: ``pyproject.toml [tool.ruff]`` and the ``ruff-check`` /
-        ``ruff-format`` pre-commit hooks its CI runs on every PR."""
+        ``ruff-format`` pre-commit hooks its CI runs on every PR. Under docker the plan
+        runs the commit's pinned ruff from the bound lint set (``/deps/lint``), refused
+        when no set holds that version (:func:`crb.core.lint.python_plan`)."""
+        if executor.name == "docker":
+            b = self.deps
+            return python_plan(
+                root,
+                None,
+                sealed=b.lint if b is not None else (),
+                sealed_note=b.lint_note if b is not None else "",
+            )
         return python_plan(root, self.ruff_for(root, executor))
 
     # --- environment -------------------------------------------------------------

@@ -54,10 +54,11 @@ from __future__ import annotations
 import hashlib
 import shutil
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from crb.core.deps import BundleMount
 from crb.core.execution import Command, Executor
 from crb.core.lint import LintPlan, black_evidence, prettier_evidence
 
@@ -92,11 +93,15 @@ DEFAULT_FORMAT_TIMEOUT_S = 300
 
 @dataclass(frozen=True)
 class Formatter:
-    """One formatter in write mode: ``argv`` + the files with one of ``exts``."""
+    """One formatter in write mode: ``argv`` + the files with one of ``exts``. ``env`` and
+    ``ro_mounts`` are the belt-5 step's own (the sealed ruff set under docker), so the
+    formatter runs the very binary belt 5 then judges with."""
 
     name: str
     argv: tuple[str, ...]
     exts: tuple[str, ...] = ()
+    env: Mapping[str, str] = field(default_factory=dict)
+    ro_mounts: tuple[BundleMount, ...] = ()
 
     def files_for(self, files: Sequence[str]) -> list[str]:
         return [f for f in files if not self.exts or f.endswith(self.exts)]
@@ -180,7 +185,7 @@ def formatters_for(
                 held.append(f"{SKIP_NOT_FILE_SCOPED}:{tool.name}")
                 continue
             binary = tool.argv[0]
-            out.append(Formatter(tool.name, (binary, *write), tool.exts))
+            out.append(Formatter(tool.name, (binary, *write), tool.exts, tool.env, tool.ro_mounts))
     has_py_formatter = any(f.name in ("ruff-format", "black") for f in out) or any(
         h.endswith(":ruff-format") for h in held
     )
@@ -236,7 +241,14 @@ def run_formatters(
         ran.append(fmt.name)
         try:
             res = executor.run(
-                Command((*fmt.argv, *mine), root, timeout=timeout, writable_paths=(".",))
+                Command(
+                    (*fmt.argv, *mine),
+                    root,
+                    env=dict(fmt.env),
+                    timeout=timeout,
+                    writable_paths=(".",),
+                    ro_mounts=fmt.ro_mounts,
+                )
             )
         except OSError as exc:
             errors.append(f"{fmt.name}:{type(exc).__name__}")

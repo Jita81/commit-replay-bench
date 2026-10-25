@@ -199,31 +199,18 @@ spend.
 
 ### 4.1 Extending an image for a toolchain (never for dependencies)
 
-A derived image is for something the **toolchain** lacks: cgo's compiler, the linter belt 5
-runs (`ruff` at the version the repository pins), another language's runtime. It is a
+A derived image is for something the **toolchain** lacks: cgo's compiler, another language's
+runtime. Not ruff: belt 5's ruff is the version each commit pins, sealed per commit as a lint
+set and mounted read-only at `/deps/lint` (ADR-0011 amendment d) — an image would hold one
+version for every commit. It is a
 different posture — the image's ID is part of what a qualification records — so a repository
 moved onto it is qualified again. Build it multi-stage: fetch in the full toolchain image by
 digest (it has CA certificates; the slim sandbox images have none, so a `RUN` that downloads
 inside them fails with `x509: certificate signed by unknown authority` — the D3 finding), then
-copy the result onto the sandbox image:
+copy the result onto the sandbox image.
 
-```dockerfile
-# syntax=docker/dockerfile:1.7
-FROM python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7 AS fetch
-COPY ruff-requirements.txt /r.txt          # ruff==<the repository's pin> --hash=sha256:…
-RUN pip download --only-binary=:all: --no-deps --require-hashes -r /r.txt -d /wheels
-
-FROM <acr>.azurecr.io/crb-sandbox/python@sha256:<digest>
-COPY --from=fetch /wheels /opt/wheels
-COPY ruff-requirements.txt /opt/wheels/r.txt
-USER 0
-RUN pip install --no-index --find-links /opt/wheels --require-hashes --root-user-action=ignore \
-      -r /opt/wheels/r.txt
-USER 65534:65534
-```
-
-Belt 5 runs the image's `ruff` under docker and fails closed (a visible harness error, never a
-silent skip) when it is absent. For cgo: a stage that installs `gcc libc6-dev` from the Debian
+Belt 5 under docker runs the commit's sealed `ruff` and fails closed (a visible harness error,
+never a silent skip, never a label) when the commit has no set at its pinned version. For cgo: a stage that installs `gcc libc6-dev` from the Debian
 release the image is built on, copied or installed onto the Go sandbox image, and
 `runner_opts.cgo: "1"`. The Go runner sets `Command.exec_tmp` — the `/tmp` tmpfs is `exec` for
 Go alone, because `go test` compiles each test binary there and runs it; `nosuid,nodev` hold.

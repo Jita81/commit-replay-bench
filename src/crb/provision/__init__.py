@@ -49,10 +49,11 @@ Touch when:   never for a new repository; a new language recipe registers here a
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import subprocess
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -65,6 +66,7 @@ from crb.core.deps import (
     ROLE_PARENT,
     DepsBinding,
     EventFn,
+    LintSet,
     ProvisionRefused,
     TaskDeps,
     host_env_deps,
@@ -100,6 +102,13 @@ MODE_HOST = DEPS_MODE_HOST_ENV
 #: Language → recipe resolver, for the languages that are not Go (registered by their
 #: modules on import: src/crb/provision/python.py, src/crb/provision/node.py).
 RECIPES: dict[str, RecipeFn] = {}
+
+#: ``(provider, repo, (parent, gold)) → (lint sets, note)`` — the sealed linters belt 5 runs
+#: under docker, whose image carries none (Python's pinned ruff: src/crb/provision/python.py).
+LintRecipeFn = Callable[
+    ["SealedProvider", "GitRepo", tuple[str, ...]], tuple[tuple[LintSet, ...], str]
+]
+LINT_RECIPES: dict[str, LintRecipeFn] = {}
 
 
 def _emit(on_event: EventFn | None, action: str, **payload: Any) -> None:
@@ -263,12 +272,21 @@ class SealedProvider:
                     keys=(key,),
                 ) from exc
 
-    def seal_or_reuse(self, lang: str, key: str, build: Callable[[Path], dict[str, Any]]) -> Sealed:
+    def seal_or_reuse(
+        self,
+        lang: str,
+        key: str,
+        build: Callable[[Path], dict[str, Any]],
+        accept: Callable[[Mapping[str, Any]], str] | None = None,
+    ) -> Sealed:
         """A whole store hit, or ``build(stage)`` (which fetches into the stage and returns
         the manifest fields) and a seal. One fetch at a time in this process. A hit is
         re-hashed first (once per provider): one that fails its digest is moved to quarantine
         (``provision.quarantined``) and fetched and sealed afresh, so the resolve path —
-        qualification included — never mounts a damaged set (G-966)."""
+        qualification included — never mounts a damaged set (G-966). ``accept(manifest)``,
+        when given, says what is wrong with a set's manifest (``""`` when nothing is): a hit
+        it rejects is damaged too — quarantined and sealed afresh — and a fresh seal it
+        rejects is quarantined and refused as ``BUNDLE_INTEGRITY`` naming the key."""
         on_event = self._events()
         with self._lock:
             hit = self.store.get(lang, key)
@@ -288,6 +306,18 @@ class SealedProvider:
                         quarantine=where.name,
                     )
                     hit = None
+            wrong = accept(hit.manifest) if hit is not None and accept is not None else ""
+            if hit is not None and wrong:
+                where = self.store.quarantine(key, wrong)
+                self._whole.discard(key)
+                _emit(
+                    on_event,
+                    "provision.quarantined",
+                    key=key,
+                    reason=wrong,
+                    quarantine=where.name,
+                )
+                hit = None
             if hit is not None:
                 _emit(on_event, "provision.reuse", lang=lang, key=key, digest=hit.digest)
                 return hit
@@ -306,6 +336,14 @@ class SealedProvider:
                 digest=sealed.digest,
                 bytes=sealed.bytes,
             )
+            wrong = accept(sealed.manifest) if accept is not None else ""
+            if wrong:
+                where = self.store.quarantine(key, wrong)
+                raise ProvisionRefused(
+                    BUNDLE_INTEGRITY,
+                    f"{wrong}; the set sealed just now was moved to quarantine ({where.name})",
+                    keys=(key,),
+                )
             return sealed
 
     def fetch(self, plan: Any, stage: Path) -> Any:
@@ -328,12 +366,23 @@ class SealedProvider:
         previous = getattr(self._call, "on_event", None)
         self._call.on_event = on_event
         try:
-            return self._resolve(repo, config, gold=gold, parent=parent)
+            lang, pin, gin = _inputs(repo, config, gold, parent, self.config.npm_registry_host())
+            deps = self._resolve(config, lang, pin, gin)
+            lint = LINT_RECIPES.get(lang)
+            if executor_name != "docker" or lint is None:
+                return deps
+            sets, note = lint(self, repo, (pin.sha, gin.sha))
+            return dataclasses.replace(
+                deps,
+                **{
+                    role: dataclasses.replace(getattr(deps, role), lint=sets, lint_note=note)
+                    for role in (ROLE_PARENT, ROLE_GOLD, ROLE_BUILDER)
+                },
+            )
         finally:
             self._call.on_event = previous
 
-    def _resolve(self, repo: GitRepo, config: RepoConfig, *, gold: str, parent: str) -> TaskDeps:
-        lang, pin, gin = _inputs(repo, config, gold, parent, self.config.npm_registry_host())
+    def _resolve(self, config: RepoConfig, lang: str, pin: LockInputs, gin: LockInputs) -> TaskDeps:
         if not (pin.declares_dependencies or gin.declares_dependencies):
             return no_deps(self.deps_mode, lang)
         if lang == LANG_GO:

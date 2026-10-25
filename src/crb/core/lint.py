@@ -99,6 +99,7 @@ Touch when:   onboarding a repository whose linter detection is wrong or missing
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -111,7 +112,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from crb.core.deps import BundleMount, LintSet
 from crb.core.execution import Command, ExecResult, Executor
+from crb.core.provision import uv_locked
 from crb.core.redact import redact_and_cap
 
 #: Wall clock for one lint step when neither the config nor the plan says otherwise.
@@ -200,6 +203,9 @@ class LintTool:
     #: repository does not hold (the resolved ruff does not satisfy the repository's pin).
     #: The step is then a harness error, never a verdict (runner-command audit, 2026-09-25).
     refuse: str = ""
+    #: Sealed sets the step reads (``/deps/lint`` — the commit's pinned ruff under docker).
+    #: Read-only by construction; a local executor refuses a command that carries one.
+    ro_mounts: tuple[BundleMount, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -213,6 +219,7 @@ class LintTool:
         object.__setattr__(self, "findings_rcs", frozenset(int(r) for r in self.findings_rcs))
         object.__setattr__(self, "env", dict(self.env))
         object.__setattr__(self, "writable_paths", tuple(str(p) for p in self.writable_paths))
+        object.__setattr__(self, "ro_mounts", tuple(self.ro_mounts))
         re.compile(self.unrunnable_re)  # a bad pattern is a configuration error, not a verdict
         if self.findings_re and "file" not in re.compile(self.findings_re).groupindex:
             raise ValueError(f"lint tool {self.name!r}: findings_re needs a named group 'file'")
@@ -506,6 +513,7 @@ def run_plan(
             env=dict(tool.env),
             timeout=t,
             writable_paths=tool.writable_paths,
+            ro_mounts=tool.ro_mounts,
         )
         step_started = time.monotonic()
         try:
@@ -727,7 +735,8 @@ class ConfigFiles(Protocol):
         ...
 
     def files_under(self, directory: str) -> list[str]:
-        """The paths of the files directly under ``directory``, sorted."""
+        """The paths of the files directly under ``directory`` (``""``: the root, as bare
+        names), sorted."""
         ...
 
 
@@ -747,7 +756,8 @@ class DirFiles:
         d = self.root / directory
         if not d.is_dir():
             return []
-        return sorted(f"{directory}/{p.name}" for p in d.iterdir() if p.is_file())
+        prefix = f"{directory}/" if directory else ""
+        return sorted(f"{prefix}{p.name}" for p in d.iterdir() if p.is_file())
 
 
 def config_files(root: Path | ConfigFiles) -> ConfigFiles:
@@ -853,9 +863,10 @@ _PRECOMMIT_RUFF_REPO = re.compile(
 _VERSION_RE = re.compile(r"^v?([0-9]+(?:\.[0-9]+)*)$")
 _HEX_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _PEP508_RUFF = re.compile(r"^\s*ruff\s*(\[[^\]]*\])?\s*([=<>!~^][^;#]*)?", re.I)
+_REQ_TAIL = re.compile(r"\s+--|\s*\\\s*$")  # requirements options / line continuation
 
 
-def pinned_ruff_spec(root: Path) -> str:
+def pinned_ruff_spec(root: Path | ConfigFiles) -> str:
     """The ruff VERSION the repository itself runs, as a pip requirement specifier
     (``==0.4.4``, ``>=0.2.0,<0.3.0``), or ``""`` when the repository does not say.
 
@@ -865,10 +876,13 @@ def pinned_ruff_spec(root: Path) -> str:
     honest tasks (2026-09-14). Evidence, in order: a ``ruff-pre-commit`` hook's
     ``rev`` (exact), a PEP 508 pin anywhere in ``pyproject.toml`` dependency lists
     (``project.dependencies``, ``optional-dependencies``, ``dependency-groups``), a
-    Poetry dev dependency (caret/tilde translated), ``requirements*.txt``."""
-    pc = root / ".pre-commit-config.yaml"
-    if pc.is_file():
-        m = _PRECOMMIT_RUFF_REPO.search(pc.read_text(encoding="utf-8", errors="replace"))
+    Poetry dev dependency (caret/tilde translated), ``requirements*.txt``. ``root`` is a
+    worktree or a commit's tree (:class:`ConfigFiles`): the provisioner reads the pin from
+    the commit itself to seal that ruff (:func:`sealed_ruff_version`)."""
+    files = config_files(root)
+    pc = files.text(".pre-commit-config.yaml")
+    if pc:
+        m = _PRECOMMIT_RUFF_REPO.search(pc)
         if m:
             rev, frozen = m.group(1), m.group(2)
             # ``rev: <sha>  # frozen: v0.15.9`` (pre-commit autoupdate --freeze, pallets/click):
@@ -878,12 +892,9 @@ def pinned_ruff_spec(root: Path) -> str:
             v = _VERSION_RE.match(rev)
             if v and ("." in rev or rev.startswith("v")) and not _HEX_SHA_RE.match(rev):
                 return f"=={v.group(1)}"
-    py = root / "pyproject.toml"
-    if py.is_file():
-        try:
-            data = tomllib.loads(py.read_text(encoding="utf-8"))
-        except (tomllib.TOMLDecodeError, OSError):
-            data = {}
+    py = files.text("pyproject.toml")
+    if py:
+        data = _toml_of(py)
         specs: list[str] = []
         project_tbl = data.get("project")
         project: dict[str, Any] = project_tbl if isinstance(project_tbl, dict) else {}
@@ -913,11 +924,14 @@ def pinned_ruff_spec(root: Path) -> str:
                     v = v.get("version")
                 if isinstance(v, str) and v.strip():
                     return _poetry_to_pep440(v.strip())
-    for req in sorted(root.glob("requirements*.txt")):
-        for line in req.read_text(encoding="utf-8", errors="replace").splitlines():
+    for req in files.files_under(""):
+        if not fnmatch.fnmatchcase(req, "requirements*.txt"):
+            continue
+        for line in files.text(req).splitlines():
             m = _PEP508_RUFF.match(line)
             if m and m.group(2):
-                return m.group(2).strip()
+                # a hashed pin goes on with ``\`` or inline ``--hash=…``: neither is the spec
+                return _REQ_TAIL.split(m.group(2), maxsplit=1)[0].strip()
     return ""
 
 
@@ -995,15 +1009,60 @@ def version_satisfies(version: str, spec: str) -> bool | None:
     return True
 
 
-def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
+def sealed_ruff_version(root: Path | ConfigFiles) -> tuple[str, str]:
+    """``(version, "")`` — the ONE ruff version the commit pins, the version a sealed lint
+    set holds — or ``("", reason)``. An exact pin (``==0.15.9``, a frozen pre-commit rev)
+    names it; a range is resolved only by the version ``uv.lock`` commits and only when it
+    satisfies the range — one version: a universal lock holding two within it, under
+    disjoint markers, names neither. Nothing else is guessed: a sandbox holds no "latest"
+    ruff."""
+    files = config_files(root)
+    spec = pinned_ruff_spec(files)
+    if spec.startswith("==") and not any(c in spec for c in "*,;<>!~"):
+        version = spec[2:].strip()
+        if _VERSION_RE.match(version):
+            return version.lstrip("v"), ""
+    lock = files.text("uv.lock")
+
+    def in_pin(version: str) -> bool:
+        return not spec or version_satisfies(version, spec) is True
+
+    locked = uv_locked(lock, "ruff", in_pin)
+    if locked is not None:
+        first = locked.version
+        other = uv_locked(lock, "ruff", lambda v: v != first and in_pin(v))
+        if other is None:
+            return first, ""
+        within = f" within the pin ruff{spec}" if spec else ""
+        return "", (
+            f"uv.lock holds ruff {first} and {other.version}{within} under different "
+            "markers; which one judges is not decided here"
+        )
+    if spec:
+        return "", f"the repository's pin ruff{spec} names no exact version and uv.lock holds none"
+    return "", "the repository pins no ruff version (pre-commit, pyproject, requirements, uv.lock)"
+
+
+def python_plan(
+    root: Path,
+    ruff: str | None,
+    *,
+    sealed: Sequence[LintSet] | None = None,
+    sealed_note: str = "",
+) -> LintPlan | None:
     """``ruff check <changed .py>`` (+ ``ruff format --check <changed .py>`` when the
     repository evidences ``ruff format``). ``ruff`` is the resolved binary (the
     repository's venv first, then the host); ``None`` ⇒ the plan cannot run and is
-    not detected (the belt is not evaluated, and the note says why)."""
+    not detected (the belt is not evaluated, and the note says why).
+
+    ``sealed`` (docker): the lint sets the binding carries — the commit's pinned ruff,
+    sealed (:func:`_sealed_python_plan`); ``ruff`` is then unused."""
     found = python_lint_evidence(root)
     check, fmt, black = "ruff" in found, "ruff-format" in found, "black" in found
     if not check and not fmt and not black:
         return None
+    if sealed is not None:
+        return _sealed_python_plan(root, check, fmt, sealed, sealed_note)
     tools: list[LintTool] = []
     names: list[str] = []
     if (check or fmt) and ruff:
@@ -1040,6 +1099,67 @@ def python_plan(root: Path, ruff: str | None) -> LintPlan | None:
             names.append("black")
     if not tools:
         return None
+    return LintPlan(tuple(tools), "+".join(names))
+
+
+def _sealed_python_plan(
+    root: Path, check: bool, fmt: bool, sealed: Sequence[LintSet], note: str
+) -> LintPlan | None:
+    """Belt 5 under docker: the image carries no linter, so the step runs the sealed set's
+    ``/deps/lint/bin/ruff`` read-only, labelled with the set manifest's version. A missing
+    set, or one whose version is not the commit's pin, REFUSES the step (a harness error
+    with the reason) — the sandbox's counterpart of the host's pin refusal; never a label
+    for a binary that did not run. black is host-only (declare it in ``RepoConfig.lint``)."""
+    if not check and not fmt:
+        return None
+    want, why = sealed_ruff_version(root)
+    spec = pinned_ruff_spec(root) or (f"=={want}" if want else "")
+    rufs = [s for s in sealed if s.name == "ruff"]
+    chosen = next((s for s in rufs if s.version == want), None) if want else None
+    argv0, tag, refuse = "ruff", "ruff", ""
+    env: dict[str, str] = {}
+    mounts: tuple[BundleMount, ...] = ()
+    if chosen is not None:
+        argv0, tag = chosen.bin, f"ruff@{chosen.version}"
+        env = {"RUFF_NO_CACHE": "true"}  # the tree is read-only to the belt
+        mounts = (chosen.mount,)
+    elif not want:
+        refuse = f"no sealed ruff for this commit: {why}"
+    elif rufs:
+        held = sorted({s.version for s in rufs})
+        tag = f"ruff@{'+'.join(held)}!pin{spec}"
+        refuse = (
+            f"no sealed ruff satisfies the repository's pin ruff{spec} (sealed: {', '.join(held)})"
+            + (f"; {note}" if note else "")  # why the pinned set is absent, when it is known
+        )
+    else:
+        refuse = f"no sealed ruff for this commit: {note or 'no lint set was provisioned'}"
+    tools: list[LintTool] = []
+    names: list[str] = []
+    if check:
+        tools.append(
+            LintTool(
+                "ruff",
+                (argv0, "check", "--no-fix"),
+                exts=(".py",),
+                env=env,
+                refuse=refuse,
+                ro_mounts=mounts,
+            )
+        )
+        names.append(tag)
+    if fmt:
+        tools.append(
+            LintTool(
+                "ruff-format",
+                (argv0, "format", "--check"),
+                exts=(".py",),
+                env=env,
+                refuse=refuse,
+                ro_mounts=mounts,
+            )
+        )
+        names.append("ruff-format")
     return LintPlan(tuple(tools), "+".join(names))
 
 

@@ -817,10 +817,10 @@ class _TreeFiles:
         return data.decode("utf-8", errors="ignore")
 
     def files_under(self, directory: str) -> list[str]:
-        prefix = directory.rstrip("/") + "/"
-        return [
+        prefix = f"{directory.rstrip('/')}/" if directory else ""  # "": the root's own files
+        return sorted(
             f for f in self._source.files if f.startswith(prefix) and "/" not in f[len(prefix) :]
-        ]
+        )
 
 
 def belt5_tools(source: MineSource) -> dict[str, str]:
