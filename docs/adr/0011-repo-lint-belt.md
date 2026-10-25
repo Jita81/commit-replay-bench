@@ -308,10 +308,11 @@ follow-up).
 Amendment (b) installs the pinned ruff into the runner's environment — on the host. The sandbox
 images carry no linter, so under docker belt 5 ran a bare `ruff` that resolved nowhere: at Wave
 3 step 7, 51 of the 62 pallets/click candidates were `QUAL_GOLD_LINT`, every one of them rc 127
-under a version label that never ran [measured 2026-10-25; n = 62 candidates, apparatus 2.4;
-method: qualify run 40ab0b89 under docker/copy/sealed, each row's code and message read from
-task_qualifications]; `grade.py` runs the same belt on every Python trial. Under a docker
-executor the sealed provider now provisions a **lint set** per commit (`py.lint.v1`,
+under a version label that never ran [hypothesis, recorded as measured 2026-10-25 — read on the
+operator's stack, whose rows are not vendored; n = 62 candidates; method: qualify run 40ab0b89
+under docker/copy/sealed, each row's code and message read from task_qualifications; apparatus
+2.4]; `grade.py` runs the same belt on every Python trial. Under a docker executor the sealed
+provider now provisions a **lint set** per commit (`py.lint.v1`,
 `src/crb/provision/python.py::lint_sets`): the version the commit pins (a frozen
 `ruff-pre-commit` rev's `# frozen: vX`, an exact `==` pin, else the version `uv.lock` holds when
 it satisfies the pin's range, the one entry within it however many a universal lock writes, and
@@ -336,8 +337,15 @@ repair — as do the fixers and the format pass. Other languages are unchanged.
 
 `APPARATUS_VERSION` stays 2.4. It moves when the meaning of a verdict could change, and none
 does. On the host, belt 5 has run the commit's pinned ruff since amendment (b); under docker it
-now runs that same version. Before this, the docker belt never produced a verdict: rc 126 and
-127 are "not runnable", a harness error outside `n`, and no grade row is stamped 2.3 or 2.4
-[measured 2026-10-25; n = 618 grade rows, all stamped 2.0–2.2; method: a count of the grades
-table by apparatus_version; apparatus 2.4]. A belt-5 verdict at 2.4 means the same on either
-executor, and every row carries its posture labels (ADR-0019).
+now runs that same version with the same two commands (`check --no-fix` and `format --check`).
+Before this, the docker belt never produced a verdict: rc 126 and 127 are "not runnable", a
+harness error outside `n`, and no grade row is stamped 2.3 or 2.4 [hypothesis, recorded as
+measured 2026-10-25 — read on the operator's stack, whose rows are not vendored; n = 618 grade
+rows, all stamped 2.0–2.2; method: a count of the grades table by apparatus_version; apparatus
+2.4]. The two executors apply one definition. That they reach the same verdict on the same
+commit is not shown [hypothesis — the evidence so far is one docker test,
+test_clicks_pinned_ruff_is_sealed_and_judges_in_the_sandbox, in which the sealed ruff 0.15.9
+passes a clean file and rejects a misformatted one; a paired run of belt 5 on the host and under
+docker over the same commits would confirm or falsify it, and would test the sandbox's copied
+tree, uid 65534, RUFF_NO_CACHE and absent network]. Until that runs, a verdict is read with its
+posture: every row carries it as a hashed label, a stamp and a read filter (ADR-0019).
