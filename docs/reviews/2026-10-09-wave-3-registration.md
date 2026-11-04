@@ -1090,7 +1090,7 @@ enrols its full 16. The other three cells repeat no change either: `S3` reads 27
 and `A0` and `A0+L` read 16 in each **[hypothesis — read from the code at 46c0a36d, run on a fixture
 reading of 17 commits with no rows, and counted with `_enrolled` over the tasks' `change_id` labels
 on 2026-11-04, apparatus 2.4; those labels are not in this repository, and the real plan cannot be
-read until the reading exists, so step 17 checks it]**.
+read until the reading exists, so step 6 reads it before cobra XS's first run]**.
 
 **The changes made around qualification.** Both are configuration, and neither changes a protocol
 value.
