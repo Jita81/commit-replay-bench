@@ -1,7 +1,7 @@
 # Wave 3 — the registration, prepared and not run — 2026-10-09
 
-**Status.** Prepared; steps 0 and 3 of part 5 have run, and part 6 records them. No reading is
-registered and no run is queued. Part 5 marks every other step "not yet run".
+**Status.** Prepared; steps 0 and 3 of part 5 have run, and their record is part 6. No reading is
+registered and no run is queued. In part 5 every other step reads "not yet run".
 
 **Authority.** Paul Glover's decision 7 of 2026-10-09, recorded as DL-371: Q-11 (ADR-0026's
 values accepted), Q-14 (the restart and the money), Q-06 (each campaign is approved with a stated
@@ -1004,8 +1004,10 @@ ones as they stand.
 
 ### The step-3 amendment, 2026-11-04
 
-Step 3's runs ran from 2026-10-23 to 2026-11-04. Its success condition is met for three of the
-four cells and fails for cobra XS, which holds 17 qualified commits against the 20.
+Step 3's runs ran from 2026-10-23 to 2026-11-04. Its success condition is met for three of the four
+cells and fails for cobra XS, which holds 17 qualified commits against the 20 **[hypothesis —
+counted from the stack's qualification records on 2026-11-04, apparatus 2.4; those rows are not in
+this repository]**.
 
 **The stack.** Paul Glover restarted the stack on `46c0a36d74eb968f1c647172287cb002a1659661` on
 2026-10-25 at 17:17Z, apparatus 2.4. That commit is the pull request Paul approved at this step,
@@ -1036,9 +1038,10 @@ no row written since 2026-10-25, and no run other than these has touched cobra o
 
 **The cells.** Each pool is every qualified `bug.fix` commit of the cell (`all-qualified`). The
 first hash is the qualified-set sha256, the qualified commits in seeded order, hashed as
-`pool_sha256` is. The second is the reserved pool's. Every label came from the classifier, by
-intent or by path; none came from a human. K1's audit (part 2) passed in all four cells: each
-commit's `red.failing ⊆ baseline_failing − flaky`, with no failure.
+`pool_sha256` is. The second is the reserved pool's. Every label came from the classifier, by intent
+or by path; none came from a human. K1's audit (part 2) passed in all four cells: each commit's
+`red.failing ⊆ baseline_failing − flaky`, with no failure **[hypothesis — counted from the stack's
+qualification records on 2026-11-04, apparatus 2.4; those rows are not in this repository]**.
 
 | cell | candidates | qualified | labels (intent, path) | qualified-set sha256 | reserved-pool sha256 |
 |---|---:|---:|---|---|---|
@@ -1051,11 +1054,13 @@ The postures are `pst_2b3f4ee45151cff77b95f85b` (cobra) and `pst_04100cf00f88d26
 Both postures' records are at apparatus 2.4, so each posture's `stale_reason` is empty.
 
 **Cobra XS is short.** Step 3's condition is at least 20 in each cell. Cobra XS's six skips are five
-`QUAL_GOLD_NOT_GREEN` and one `QUAL_NOT_RED`. Step 3 stopped and reported it, and Paul's decision of
-2026-10-25 was to report a short cobra cell the same way and not amend it, so this amendment changes
-nothing about the cell. What 17 means under `look.v1`: the first look needs 20 commits, so the cell
-cannot read `deliver`. It ends `undecided` if the pool runs out first, or `insufficient` at the
-third miss. Whether stage 1 spends on that cell is Paul's decision, and it is not made here.
+`QUAL_GOLD_NOT_GREEN` and one `QUAL_NOT_RED` **[hypothesis — counted from the stack's qualification
+records on 2026-11-04, apparatus 2.4; those rows are not in this repository]**. Step 3 stopped and
+reported it, and Paul's decision of 2026-10-25 was to report a short cobra cell the same way and not
+amend it, so this amendment changes nothing about the cell. What 17 means under `look.v1`: the first
+look needs 20 commits, so the cell cannot read `deliver`. It ends `undecided` if the pool runs out
+first, or `insufficient` at the third miss. Whether stage 1 spends on that cell is Paul's decision,
+and it is not made here.
 
 **The changes made around qualification.** Both are configuration, and neither changes a protocol
 value.
@@ -1066,7 +1071,8 @@ value.
   was unset on both. Reading the qualified sets again afterwards gave byte-identical results.
 
 **What the seal did to click.** `QUAL_GOLD_LINT` fell from 51 to 2 once #100 was serving. Both of
-the 2 are size M, outside the four cells.
+the 2 are size M, outside the four cells **[hypothesis — counted from the stack's qualification
+records on 2026-11-04, apparatus 2.4; those rows are not in this repository]**.
 
 **What the pools can speak for.** Click's skips fall mostly on its older commits, so its readings
 describe its recent commits, not its whole history. Qualified commits by year:
