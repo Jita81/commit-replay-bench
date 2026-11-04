@@ -1057,10 +1057,21 @@ Both postures' records are at apparatus 2.4, so each posture's `stale_reason` is
 `QUAL_GOLD_NOT_GREEN` and one `QUAL_NOT_RED` **[hypothesis — counted from the stack's qualification
 records on 2026-11-04, apparatus 2.4; those rows are not in this repository]**. Step 3 stopped and
 reported it, and Paul's decision of 2026-10-25 was to report a short cobra cell the same way and not
-amend it, so this amendment changes nothing about the cell. What 17 means under `look.v1`: the first
-look needs 20 commits, so the cell cannot read `deliver`. It ends `undecided` if the pool runs out
-first, or `insufficient` at the third miss. Whether stage 1 spends on that cell is Paul's decision,
-and it is not made here.
+amend it, so this amendment changes nothing about the cell. Paul's go of 2026-11-04, relayed by the
+carve-out session, was for Wave 3 as registered, so the cell stays as it is.
+
+**What 17 does to the cell.** The first look needs 20 commits, so `look.v1` reads the arm
+`undecided` before any row exists, and the cell cannot read `deliver`. The remeasure plan lists an
+`undecided` arm under `cannot_clear` with next act `mine` and builds no request, and step 6 files
+`S3` only as the plan serves it. So cobra XS gets no `S3` run and no `S3` spend, no row of that arm
+is read, `insufficient` is not reached, and `S1` reads `stopped`. The plan's own reason says the arm
+"may still read insufficient as those run"; with no request served, nothing runs. The cell's spend
+is `A0` and then `A0+L` on their first 16 commits. All 17 hold distinct registered changes, so `A0`
+enrols its full 16. The other three cells repeat no change either: `S3` reads 27, 30 and 38 commits,
+and `A0` and `A0+L` read 16 in each **[hypothesis — read from the code at 46c0a36d, run on a fixture
+reading of 17 commits with no rows, and counted with `_enrolled` over the tasks' `change_id` labels
+on 2026-11-04, apparatus 2.4; those labels are not in this repository, and the real plan cannot be
+read until the reading exists, so step 17 checks it]**.
 
 **The changes made around qualification.** Both are configuration, and neither changes a protocol
 value.
