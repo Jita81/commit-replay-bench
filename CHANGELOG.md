@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Wave 3 registration records step 3**
+  ([#103](https://github.com/Jita81/commit-replay-bench/pull/103)). Part 6's step-3 amendment holds
+  each mine and qualify body as sent, each cell's count, qualified-set sha256 and label sources,
+  K1's audit, the image Ids and what the pools can speak for. Three cells hold at least 20
+  qualified commits; cobra XS holds 17, so its condition fails, and the cell stays as registered.
+  [#100](https://github.com/Jita81/commit-replay-bench/pull/100), the seal that let click qualify,
+  is recorded there too. No protocol value changes.
+
 - **The walkthrough's screens run as eight one-pass shards, and the job-budget guard checks
   the room left for the browser install** (P-813;
   [#99](https://github.com/Jita81/commit-replay-bench/pull/99)). With two persona × width passes
