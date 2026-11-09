@@ -12,6 +12,12 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Wave 3 decision has no date; it is taken when Wave 3 reports** (DL-415;
+  [#108](https://github.com/Jita81/commit-replay-bench/pull/108)). DL-377 set Friday 6 November
+  2026, or Wave 3's report if sooner. The date passed before Wave 3's first row, so the operator
+  voided it. The decision log is append-only: DL-377 stays as written and DL-415 supersedes its
+  date. Documentation only: no code, rule or apparatus version changes.
+
 - **authlib, joserfc and msgpack move past ten advisories** (eight in authlib, among them
   PYSEC-2026-4355 to PYSEC-2026-4360, CVE-2026-96760 and CVE-2026-116672; CVE-2026-119284 in
   joserfc; CVE-2026-114613 in msgpack;
