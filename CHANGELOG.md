@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The remeasure plan asks a reserved.v1 pool's commits by their records, not the miner's flag**
+  (P-814; [#107](https://github.com/Jita81/commit-replay-bench/pull/107)). `GET /learn/remeasure`
+  left a pending commit out of a reading's S3 request when the miner's `gold_clean` was false,
+  though the posture gate admits it by its qualification record (ADR-0019) and the pool is pinned
+  to those records (P-797); Wave 3's first S3 looks would have been served short and then waited.
+  A reading that pins its pool is now asked whatever that flag says, and nothing while its pool
+  drifts, the drift named in the note. Legacy readings are unchanged. No grading, ledger, reading
+  rule or apparatus version changes.
+
 - **The walkthrough's screens run as eight one-pass shards, and the job-budget guard checks
   the room left for the browser install** (P-813;
   [#99](https://github.com/Jita81/commit-replay-bench/pull/99)). With two persona × width passes

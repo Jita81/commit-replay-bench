@@ -375,7 +375,9 @@ def derive_remeasure(
         and o.reading.taxonomy in ("", GLOBAL_CLASS_SET)
     ]
     # each task's CURRENT label and whether it is gold-clean: a pending commit relabelled
-    # out of the cell, or no longer gold-clean (the worker skips it), is left out and named
+    # out of the cell, or (a legacy reading's) no longer gold-clean, is left out and named; a
+    # reserved.v1 reading's pool is admitted by the records it pinned, whose drift the
+    # readings already carry (``load_readings``, P-797), never by the miner's flag
     tasks = list(db.execute(select(Task).where(Task.repo == repo)).scalars())
     labels = {str(t.task_id): (str(t.capability_class or ""), str(t.size or "")) for t in tasks}
     gold = [str(t.task_id) for t in tasks if t.gold_clean]
