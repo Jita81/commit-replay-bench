@@ -19,6 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   authlib 1.8.0, joserfc 1.7.5 and msgpack 1.2.2 and failed the security job on every pull
   request with no code change. `uv.lock` moves them to 1.9.5, 1.8.0 and 1.2.4; the fixes
   landed in authlib 1.9.1, joserfc 1.7.6 and msgpack 1.2.3. Nothing else changes.
+
 - **The walkthrough's screens run as eight one-pass shards, and the job-budget guard checks
   the room left for the browser install** (P-813;
   [#99](https://github.com/Jita81/commit-replay-bench/pull/99)). With two persona × width passes
