@@ -1155,3 +1155,42 @@ fingerprint, the Workspace's name and limit, the test author, the campaign and r
 Learn state, the smoke run's outcome, the image click's builds run in (the stack's builder image
 has no Python, so that is settled before click's first run), the stage-1 report and part 4's
 stage-2 statement.
+
+### The smoke amendment, 2026-11-09
+
+**The first smoke run.** Step 4's sealed `S1` smoke check ran as run
+`0a7048daf7cf4e5a8297c0f03d3c939f` under campaign `cmp_8e1f261023db8a26a40e0e84`, on cobra commit
+`6b0bd3076cfafd1c108264ed1e4aa0c0fe3f8537`, with a $5 cap. It finished `failed` at 22:06:49Z in the
+sealed posture (`docker/copy/sealed`, apparatus 2.4, image `crb-sandbox-go:main-8ab88ad`), with one
+row and the error "authoring: the authored test 'args_minus_first_x_test.go' is not RED at the
+parent: it passes at the parent". That is a quality miss, not one of the three errors step 4 names
+as a stop, so the campaign goes on **[hypothesis — read from `GET /api/v1/runs/0a7048da…` and its
+22 events at 22:11Z on 2026-11-09; the row is in the stack's ledger, not in this repository]**.
+
+**What it did not check.** The test author ran inside the seal: one call to `gpt-oss-120b` on
+Cerebras wrote the test, the test ran sealed, and the commit's own suite ran green as the gold
+control. The builder did not run. Authoring failed before the build, so the build has 0 turns and
+costs $0, and the check that the product's tally for Sonnet 5 agrees with the Console's Usage for
+the builder's key has nothing to compare **[hypothesis — the run's `build.done` event reads
+`turns` 0, `tokens_in` 0, `tokens_out` 0 and `cost_usd` 0.0; its `author.attempt` event reads
+`cost_usd` 0.00169664 at the product's price]**.
+
+**A second smoke run.** Paul approved a second smoke run on 2026-11-09 ("Yes, A0 smoke"), to run
+the builder inside the seal and give the tally a cost to compare. It is the `A0` arm's body with no
+`reading_id`, on the same commit, which step 4 chose outside every Wave 3 pool and which already
+holds a 2.4 replay row: `{"repo": "cobra", "kind": "blind", "mode": "blind", "builder":
+"claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids":
+["6b0bd3076cfafd1c108264ed1e4aa0c0fe3f8537"], "learning": "off", "budget_profile": "default",
+"campaign_id": "cmp_8e1f261023db8a26a40e0e84", "max_cost_usd": 5}`. Its spend counts toward the
+campaign. It names no reading and no reading exists yet, so no pool moves **[hypothesis — the body
+follows step 6's `A0` body less `reading_id`; no reading is registered on 2026-11-09 at 22:13Z]**.
+
+**How the second run is read.** It goes on when the run finishes in the sealed posture with the
+builder's turns above 0 and its cost known, whether or not its row is clean. Any other end (the
+builder not starting, its cost unknown, a harness error) stops Wave 3 before any reading is
+registered, and Claude Code reports it. Paul then compares the run's cost with the Console's Usage
+for the builder's key, the Sonnet 5 line only: the verify press at submit is one Haiku turn the
+campaign does not count. No reading run starts until they agree **[hypothesis — the builder's key
+sits in the organisation's Default Workspace, not a `crb-builder` Workspace, by Paul's decision
+relayed on 2026-11-09, so Usage is filtered by the key; a later amendment records the Workspace and
+its limit]**.
