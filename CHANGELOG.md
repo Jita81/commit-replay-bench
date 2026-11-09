@@ -12,6 +12,13 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **authlib, joserfc and msgpack move past ten advisories** (eight in authlib, among them
+  PYSEC-2026-4355 to PYSEC-2026-4360, CVE-2026-96760 and CVE-2026-116672; CVE-2026-119284 in
+  joserfc; CVE-2026-114613 in msgpack;
+  [#106](https://github.com/Jita81/commit-replay-bench/pull/106)). pip-audit found them in
+  authlib 1.8.0, joserfc 1.7.5 and msgpack 1.2.2 and failed the security job on every pull
+  request with no code change. `uv.lock` moves them to 1.9.5, 1.8.0 and 1.2.4; the fixes
+  landed in authlib 1.9.1, joserfc 1.7.6 and msgpack 1.2.3. Nothing else changes.
 - **The walkthrough's screens run as eight one-pass shards, and the job-budget guard checks
   the room left for the browser install** (P-813;
   [#99](https://github.com/Jita81/commit-replay-bench/pull/99)). With two persona × width passes
