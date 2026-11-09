@@ -156,9 +156,17 @@ for it at the current apparatus decides:
   `budget_profile` is the reading's own: `default` here, the profile `POST /readings`
   registers when its body names none.
 
-  A pending commit that is no longer gold-clean (the worker builds only those) or whose label
-  moved out of the cell is left out and `short_by` says so. No request is offered — `next_act`
-  `runs`, with the reason — when a replay this plan composes could not write rows the reading
+  For a legacy or forward reading, a pending commit that is no longer gold-clean or whose label
+  moved out of the cell is left out and `short_by` says so. A reading that pins its pool
+  (reserved.v1) is asked by the records that pinned it, never the miner's `gold_clean` flag:
+  the posture gate admits a commit by its record (P-814). A pending commit whose newer record
+  in force in the pool's posture is `unqualified` or `legacy` is left out, named and counted
+  in `short_by`; a `revoked` one is still asked, because the run measures it again
+  (`qualify_first`). While the reading's `pool_drift` is not empty — a pinned record missing
+  or not qualified, or a pool commit relabelled out of the cell — no request is offered and
+  `next_act` is `none`, with the drift named: the worker refuses every run of it `pool_drift`,
+  queued from here or by hand. Otherwise no request is offered — `next_act` `runs`, with the
+  reason — when a replay this plan composes could not write rows the reading
   counts: `S2` (factory rows only), `+facts` / `+library` briefs, `+L` (the repository's loop
   switch, which a run can only opt out of), an `S1` author other than the deployment's, or a
   deployment that grades outside the reading's posture class.

@@ -20,9 +20,10 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
   --controls <GET /oracle/{repo}/controls>`` derives from the exports;
 * ``/learn/remeasure`` — read from the repository's registered readings (ADR-0026 item 2):
   each reading waiting on its look → the commits it still needs in its seeded order, the
-  ``POST /runs`` body an operator can queue for them (gold-clean, in this deployment's
-  posture, with its test author) and what it costs; each cell with rows and no reading →
-  register one first, never a replay.
+  ``POST /runs`` body an operator can queue for them (gold-clean — or, for a reading that
+  pins its pool, admitted by its pinned records in force, and none while that pool drifts,
+  P-814 — in this deployment's posture, with its test author) and what it costs; each cell
+  with rows and no reading → register one first, never a replay.
 
 The three reads are viewer-readable and pure. The three writes (G-532) are
 operator-gated and each one carries the **same named-person decision the CLI already

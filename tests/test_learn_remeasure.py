@@ -51,6 +51,7 @@ from crb.core.ledger import GradeRow
 from crb.core.reading import (
     ATTEMPT_RULE_RESERVED,
     OUTCOME_CEILING,
+    POOL_RULE_CALIBRATION,
     REFUSAL_POOL_SEEN,
     STATE_INSUFFICIENT,
     STATE_UNDECIDED,
@@ -298,7 +299,8 @@ def test_a_pinned_pool_is_asked_whatever_the_miners_flag_and_not_at_all_while_it
     assert c.next_act == "replay"
     assert "gold-clean" not in c.note and "pool_drift" not in c.note
     # drift anywhere in the pool — a pending commit's record or one past the look — asks none
-    for commit, state in ((pool[5], "missing"), (pool[30], "revoked")):
+    # (a revocation is a newer record, never drift: the pinned record itself reads unqualified)
+    for commit, state in ((pool[5], "missing"), (pool[30], "unqualified")):
         row = {"task_id": commit, "field": "qualification", "registered": "q", "now": state}
         (d,) = _plan([], replace(reserved, pool_drift=(row,)), gold_clean_tasks=gold).cells
         assert d.requests == () and (d.n_requested, d.short_by) == (0, 20), commit
@@ -318,6 +320,11 @@ def test_a_pinned_pool_is_asked_whatever_the_miners_flag_and_not_at_all_while_it
     lpool = legacy.pool
     (lc,) = _plan([], legacy, gold_clean_tasks=lpool[1:]).cells
     assert lc.requests[0].task_ids == lpool[1:20] and "gold-clean" in lc.note
+    # ...and so does a reserved reading that pins nothing (a calibration pool, P-797)
+    calibration = replace(reserved, pool_rule=POOL_RULE_CALIBRATION)
+    assert not calibration.pins_pool
+    (cc,) = _plan([], calibration, gold_clean_tasks=gold).cells
+    assert not flagged & set(cc.requests[0].task_ids) and "gold-clean" in cc.note
 
 
 def test_a_pinned_commit_the_posture_gate_refuses_by_its_record_in_force_is_named_short() -> None:
