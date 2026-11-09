@@ -458,6 +458,63 @@ def test_p792_the_remeasure_plan_asks_a_pinned_pool_by_its_records_not_the_miner
         assert _plan_entry(w, key)["requests"] == whole["requests"]
 
 
+def test_p814_the_remeasure_plan_reads_a_pinned_commits_record_in_force(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #107 (P-814's first gap), break and restore: a NEWER record in force that
+    is not qualified is not drift (C18), and the posture gate refuses its commit, yet the plan
+    asked it, so the run would leave it pending with no shortfall said. Now the plan reads each
+    pinned commit's record in force in the pool's posture: a revoked one is still asked (the
+    run measures it again, ``qualify_first``); a newer ``unqualified`` one is left out, counted
+    in ``short_by`` and named, with no drift; a newer ``qualified`` one restores the request."""
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        key = ("cobra", "XS")
+        reading = w.readings[key]
+        posture_id = reading["pool_posture_id"]
+        whole = _plan_entry(w, key)
+        (request,) = whole["requests"]
+        commit = request["task_ids"][3]
+
+        with w.env.factory() as s:
+            in_force = store_q.latest(s, "cobra", commit, posture_id)
+            assert in_force is not None and in_force.is_qualified
+            store_q.revoke(s, in_force, QUAL_ENV_WITNESS_RED, "op-1", "gold control red")
+        revoked = _plan_entry(w, key)
+        assert revoked["requests"] == whole["requests"], revoked["note"]
+        assert revoked["short_by"] == whole["short_by"] and "record in force" not in revoked["note"]
+
+        qualify_pool(
+            w.env.factory,
+            "cobra",
+            [commit],
+            posture_class=reading["posture_class"],
+            posture_id=posture_id,
+            state=STATE_UNQUALIFIED,
+            code=QUAL_GOLD_NOT_GREEN,
+            salt="p814",
+        )
+        refused = _plan_entry(w, key)
+        (asked,) = refused["requests"]
+        assert asked["task_ids"] == [t for t in request["task_ids"] if t != commit], refused
+        assert refused["n_requested"] == whole["n_requested"] - 1, refused
+        assert refused["short_by"] == whole["short_by"] + 1, refused
+        assert refused["next_act"] == "replay" and "pool_drift" not in refused["note"]
+        assert (
+            "1 pending commit(s) have a newer record in force that is not qualified "
+            "(unqualified)" in refused["note"]
+        ), refused["note"]
+
+        qualify_pool(
+            w.env.factory,
+            "cobra",
+            [commit],
+            posture_class=reading["posture_class"],
+            posture_id=posture_id,
+            salt="p814-restored",
+        )
+        assert _plan_entry(w, key)["requests"] == whole["requests"]
+
+
 def test_p792_a_posture_move_halts_a_pinned_pool_before_any_reservation(
     backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

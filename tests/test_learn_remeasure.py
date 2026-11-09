@@ -320,6 +320,45 @@ def test_a_pinned_pool_is_asked_whatever_the_miners_flag_and_not_at_all_while_it
     assert lc.requests[0].task_ids == lpool[1:20] and "gold-clean" in lc.note
 
 
+def test_a_pinned_commit_the_posture_gate_refuses_by_its_record_in_force_is_named_short() -> None:
+    """CodeRabbit on #107 (P-814's first gap): a NEWER record in force that is not qualified is
+    not drift (P-797 C18), so ``pool_drift`` passes it, but the posture gate refuses its commit
+    (``posture_gate.admit``). The plan asked it anyway: the run left it pending and the plan
+    said no shortfall. Now the plan reads each pinned commit's record in force
+    (``pool_records``): an ``unqualified`` or ``legacy`` one is left out, named and counted in
+    ``short_by``; a ``revoked`` one, which the run measures again (``qualify_first``), is still
+    asked; with no entry for the reading every pending commit is asked, as before, and a
+    legacy reading is never read by its records."""
+    reserved = _reserved(commits(40))
+    pool = reserved.pool
+    states = dict.fromkeys(pool, "qualified")
+    # two refused pending, one revoked pending (asked), one refused past the look (not pending)
+    states.update(
+        {pool[2]: "unqualified", pool[7]: "legacy", pool[11]: "revoked", pool[30]: "unqualified"}
+    )
+    (c,) = _plan([], reserved, pool_records={reserved.reading_id: states}).cells
+    assert c.requests[0].task_ids == tuple(t for t in pool[:20] if t not in (pool[2], pool[7]))
+    assert (c.n_requested, c.short_by) == (18, 2) and c.next_act == "replay"
+    assert (
+        "2 pending commit(s) have a newer record in force that is not qualified "
+        "(legacy, unqualified), and the posture gate refuses them" in c.note
+    ), c.note
+    assert "pool_drift" not in c.note
+    # every pending commit refused: no request, nothing asked of the worker
+    (r,) = _plan(
+        [], reserved, pool_records={reserved.reading_id: dict.fromkeys(pool, "unqualified")}
+    ).cells
+    assert r.requests == () and (r.n_requested, r.short_by) == (0, 20) and "20 pending" in r.note
+    # no entry for the reading (another reading's): every pending commit is asked
+    (n,) = _plan([], reserved, pool_records={"rdg_other": states}).cells
+    assert n.requests[0].task_ids == pool[:20] and n.short_by == 0
+    assert "record in force" not in n.note
+    legacy = register_reading(commits(40, "legacy"), hierarchy=("S3",))
+    refused = {legacy.reading_id: dict.fromkeys(legacy.pool, "unqualified")}
+    (lc,) = _plan([], legacy, pool_records=refused).cells
+    assert lc.requests[0].task_ids == legacy.pool[:20] and "record in force" not in lc.note
+
+
 # --- counting distinct first attempts, never attempts --------------------------------------
 
 

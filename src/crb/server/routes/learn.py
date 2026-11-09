@@ -178,6 +178,7 @@ from crb.server.routes.runs import (
     system_trace_id,
 )
 from crb.server.schemas import TERMINAL_STATUSES, RunCreateRequest
+from crb.store import qualifications as store_q
 from crb.store.events import lock_event_writes
 from crb.store.jobs import stage_queued
 from crb.store.ledger import DbLedger
@@ -381,6 +382,19 @@ def derive_remeasure(
     tasks = list(db.execute(select(Task).where(Task.repo == repo)).scalars())
     labels = {str(t.task_id): (str(t.capability_class or ""), str(t.size or "")) for t in tasks}
     gold = [str(t.task_id) for t in tasks if t.gold_clean]
+    # ...and by the record in force in the pool's posture: a newer record that is not
+    # qualified is not drift (P-797 C18), and the posture gate refuses its commit, so the plan
+    # leaves it out and says so rather than queue a request that leaves it pending
+    pool_records = {
+        o.reading.reading_id: {
+            tid: q.state
+            for tid, q in store_q.latest_by_task(
+                db, repo, o.reading.pool_posture_id, list(o.reading.pool)
+            ).items()
+        }
+        for o in outcomes
+        if o.reading.pins_pool and o.reading.pool_posture_id
+    }
     return remeasure_plan(
         rows,
         readings=outcomes,
@@ -399,6 +413,7 @@ def derive_remeasure(
         # (the team's block alone); a +L arm's run, queued by hand, under the loop's overlay
         checks_arm=current_checks_arm(factory, repo, learning=False),
         checks_arm_loop=checks,
+        pool_records=pool_records,
     )
 
 

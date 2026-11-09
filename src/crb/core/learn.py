@@ -130,6 +130,7 @@ from crb.core.ledger import (
     first_attempts,
     group_by_cell,
 )
+from crb.core.qualify import STATE_QUALIFIED, STATE_REVOKED
 from crb.core.reading import (
     HALT_CHECKS_ARM_MISMATCH,
     LABEL_RESERVATION,
@@ -2048,6 +2049,7 @@ def remeasure_plan(
     deployment_posture: str | None = None,
     checks_arm: str | None = None,
     checks_arm_loop: str | None = None,
+    pool_records: Mapping[str, Mapping[str, str]] | None = None,
 ) -> RemeasurePlan:
     """What each cell needs before a reading at ``current_apparatus`` can license it.
 
@@ -2073,7 +2075,13 @@ def remeasure_plan(
       says, and while its pool drifts (:attr:`Reading.pool_drift` — a pinned record missing
       or not qualified, a commit relabelled out of the cell) no request at all and ``next_act``
       ``none``, since the worker refuses every run of it ``pool_drift``, here or by hand
-      (:func:`_pool_drift_blocker`). Any other
+      (:func:`_pool_drift_blocker`). A newer record in force is never drift (P-797), so the
+      plan reads it too: ``pool_records`` maps a pinned reading's id to the state of each pool
+      commit's record in force in the pool's posture (``qualified``, ``unqualified``,
+      ``revoked``, ``legacy``). A pending commit whose record the posture gate refuses — any
+      state but ``qualified``, or ``revoked``, which a run re-measures (``qualify_first``) —
+      is left out and named, and ``short_by`` counts it; with no entry for the reading every
+      pending commit is asked, as before. Any other
       reading leaves out a commit that is not gold-clean (``gold_clean_tasks``) or whose
       current label moved (``task_labels``) and ``short_by`` says so. No request at all when
       a replay could not write rows the reading counts
@@ -2206,7 +2214,20 @@ def remeasure_plan(
         not_gold = [
             t for t in pending if not reading.pins_pool and gold is not None and t not in gold
         ]
-        askable = [t for t in pending if t not in relabelled and t not in not_gold]
+        # ...and refused at the posture gate by a newer record in force that is not qualified
+        # (P-797 C18: not drift): asked, it would stay pending with no shortfall said. A
+        # revoked record is measured again by the run (``qualify_first``), so it is asked
+        in_force = (pool_records or {}).get(reading.reading_id) if reading.pins_pool else None
+        refused = [
+            t
+            for t in pending
+            if in_force is not None
+            and t in in_force
+            and in_force[t] not in (STATE_QUALIFIED, STATE_REVOKED)
+        ]
+        askable = [
+            t for t in pending if t not in relabelled and t not in not_gold and t not in refused
+        ]
         moved = _checks_arm_moved(reading, arm, checks_arm, checks_arm_loop)
         drifted = _pool_drift_blocker(reading)
         blocker = _arm_request_blocker(
@@ -2254,6 +2275,13 @@ def remeasure_plan(
             notes.append(
                 f"{len(not_gold)} pending commit(s) are no longer gold-clean, and the worker "
                 "builds only a gold-clean commit: re-qualify them, or the look waits"
+            )
+        if refused:
+            states = ", ".join(sorted({in_force[t] for t in refused if in_force is not None}))
+            notes.append(
+                f"{len(refused)} pending commit(s) have a newer record in force that is not "
+                f"qualified ({states}), and the posture gate refuses them: re-qualify them in "
+                "the pool's posture, or the look waits"
             )
         if relabelled:
             notes.append(
