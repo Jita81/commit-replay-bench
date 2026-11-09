@@ -1222,7 +1222,7 @@ The fingerprint is the same at both, so this is no stop **[hypothesis — read f
 - The gate before the readings' runs is met.
 
 **[hypothesis — Paul's readings of the Console, relayed by the lead session on 2026-11-09 between
-22:35Z and 23:40Z; the Console is not in this repository]**.
+22:35Z and 22:50Z; the Console is not in this repository]**.
 
 The campaign's spend after both smokes is about $0.2658 of the $54.00 line: the builder's
 $0.2641 and the first smoke's test author's $0.0017 **[hypothesis — the campaign's events on
