@@ -167,6 +167,9 @@ from crb.core.routing import (
     NEXT_NEW_READING as ROUTING_NEXT_NEW_READING,
 )
 from crb.core.routing import (
+    NEXT_NONE as ROUTING_NEXT_NONE,
+)
+from crb.core.routing import (
     NEXT_REGISTER as ROUTING_NEXT_REGISTER,
 )
 from crb.core.routing import (
@@ -1675,11 +1678,14 @@ REASON_PENDING = "look_pending"
 #: queue the reading's pending commits, register a reading first, (``runs``) queue by hand
 #: a run this plan cannot compose, because a replay it composed would write another arm, or
 #: (``config``) restore the repository's checks arm, which moved since a reserved.v1 reading
-#: froze it, so any run of the reading would halt (RT2B-1, :attr:`RemeasureCell.checks_arm_moved`).
+#: froze it, so any run of the reading would halt (RT2B-1, :attr:`RemeasureCell.checks_arm_moved`);
+#: (``none``) nothing to queue while a reserved.v1 reading's pool drifts — the worker refuses
+#: every run of it ``pool_drift``, queued here or by hand, until the pool is restored (P-814).
 NEXT_REPLAY = ROUTING_NEXT_REPLAY
 NEXT_REGISTER = ROUTING_NEXT_REGISTER
 NEXT_BY_HAND = "runs"
 NEXT_CONFIG = ROUTING_NEXT_CONFIG
+NEXT_NONE = ROUTING_NEXT_NONE
 #: What an operator reads when a reading's pool is too small for its next look.
 MINE_MORE = "mine more history"
 
@@ -1722,7 +1728,8 @@ class RemeasureCell:
     short_by: int = 0
     note: str = ""
     #: ``replay`` (queue the requests), ``register`` (register a reading first), ``runs``
-    #: (queue by hand) or ``config`` (restore the checks arm, ``checks_arm_moved``)
+    #: (queue by hand), ``config`` (restore the checks arm, ``checks_arm_moved``) or ``none``
+    #: (restore the reading's drifted pool: every run of it would be refused ``pool_drift``)
     next_act: str = NEXT_REPLAY
     #: the context arm this entry is about: the reading's blocking arm, or the rows' own arm
     #: (``""`` for rows written before apparatus 2.4, which carry none)
@@ -2064,8 +2071,9 @@ def remeasure_plan(
       admitted it (P-797) and the worker admits a commit by its record in the posture, never
       the miner's ``gold_clean`` flag (ADR-0019): its commits are asked whatever that flag
       says, and while its pool drifts (:attr:`Reading.pool_drift` — a pinned record missing
-      or not qualified, a commit relabelled out of the cell) no request at all, since the
-      worker refuses every run of it ``pool_drift`` (:func:`_pool_drift_blocker`). Any other
+      or not qualified, a commit relabelled out of the cell) no request at all and ``next_act``
+      ``none``, since the worker refuses every run of it ``pool_drift``, here or by hand
+      (:func:`_pool_drift_blocker`). Any other
       reading leaves out a commit that is not gold-clean (``gold_clean_tasks``) or whose
       current label moved (``task_labels``) and ``short_by`` says so. No request at all when
       a replay could not write rows the reading counts
@@ -2237,7 +2245,8 @@ def remeasure_plan(
                 f"it: a run would halt {HALT_CHECKS_ARM_MISMATCH} — restore the repository's "
                 f"{moved[0]} checks arm, or end the stage"
             )
-        elif blocker:
+        elif blocker and not drifted:
+            # a drifted pool refuses every arm's run, by hand as well: its note is what tells
             notes.append(blocker)
         if drifted:
             notes.append(drifted)
@@ -2277,7 +2286,15 @@ def remeasure_plan(
                 n_requested=n_requested,
                 short_by=look.needed - n_requested,
                 note="; ".join(notes),
-                next_act=NEXT_CONFIG if moved else NEXT_REPLAY if requests else NEXT_BY_HAND,
+                next_act=(
+                    NEXT_CONFIG
+                    if moved
+                    else NEXT_NONE
+                    if drifted
+                    else NEXT_REPLAY
+                    if requests
+                    else NEXT_BY_HAND
+                ),
                 arm=arm,
                 reading_id=reading.reading_id,
                 next_look=look.next_look,

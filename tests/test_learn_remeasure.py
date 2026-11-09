@@ -295,16 +295,25 @@ def test_a_pinned_pool_is_asked_whatever_the_miners_flag_and_not_at_all_while_it
     gold = [t for t in pool if t not in flagged]
     (c,) = _plan([], reserved, gold_clean_tasks=gold).cells
     assert c.requests[0].task_ids == pool[:20] and (c.n_requested, c.short_by) == (20, 0)
+    assert c.next_act == "replay"
     assert "gold-clean" not in c.note and "pool_drift" not in c.note
     # drift anywhere in the pool — a pending commit's record or one past the look — asks none
     for commit, state in ((pool[5], "missing"), (pool[30], "revoked")):
         row = {"task_id": commit, "field": "qualification", "registered": "q", "now": state}
         (d,) = _plan([], replace(reserved, pool_drift=(row,)), gold_clean_tasks=gold).cells
         assert d.requests == () and (d.n_requested, d.short_by) == (0, 20), commit
+        # nothing to queue here or by hand: every run of the reading would be refused
+        assert d.next_act == "none", commit
         assert f"{commit} qualification" in d.note and "pool_drift" in d.note
     unpinned = {"task_id": "", "field": "pool_posture_id", "registered": "", "now": "missing"}
     (u,) = _plan([], replace(reserved, pool_drift=(unpinned,))).cells
-    assert u.requests == () and "the pool pool_posture_id" in u.note
+    assert u.requests == () and u.next_act == "none" and "the pool pool_posture_id" in u.note
+    # and a drifted pool's note never advises queueing by hand, which the worker refuses too
+    row = {"task_id": pool[5], "field": "qualification", "registered": "q", "now": "missing"}
+    (b,) = _plan([], replace(reserved, pool_drift=(row,)), deployment_posture="elsewhere").cells
+    assert b.next_act == "none" and "this deployment grades in" not in b.note, b.note
+    (nb,) = _plan([], reserved, deployment_posture="elsewhere").cells
+    assert nb.next_act == learn.NEXT_BY_HAND and "this deployment grades in" in nb.note
     legacy = register_reading(commits(40, "legacy"), hierarchy=("S3",))
     lpool = legacy.pool
     (lc,) = _plan([], legacy, gold_clean_tasks=lpool[1:]).cells

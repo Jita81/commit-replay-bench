@@ -440,6 +440,7 @@ def test_p792_the_remeasure_plan_asks_a_pinned_pool_by_its_records_not_the_miner
         _set_gold_clean(w, "cobra", commit, False)
         flagged = _plan_entry(w, key)
         assert flagged["requests"] == whole["requests"], flagged["note"]
+        assert flagged["next_act"] == "replay"
         assert (flagged["n_requested"], flagged["short_by"]) == (whole["n_requested"], 0)
         assert "gold-clean" not in flagged["note"] and "pool_drift" not in flagged["note"]
         assert _r_admit(w, _s3_body(w, key)).status == STATUS_CANCELLED
@@ -448,6 +449,7 @@ def test_p792_the_remeasure_plan_asks_a_pinned_pool_by_its_records_not_the_miner
         _label(backend.url, "cobra", commit, "perf")
         drifted = _plan_entry(w, key)
         assert drifted["requests"] == [] and drifted["n_requested"] == 0, drifted
+        assert drifted["next_act"] == "none", drifted
         assert drifted["short_by"] == whole["n_requested"], drifted
         note = drifted["note"]
         assert f"{commit} capability_class" in note and "pool_drift" in note, note

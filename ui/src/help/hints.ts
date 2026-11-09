@@ -2024,6 +2024,8 @@ export const HINTS = {
     'The repository’s checks arm is no longer the one this reading froze when it was registered. Any run of the reading would halt before its first build, so nothing can be queued for it until the arm is restored or the stage is ended.',
   'text.learn.remeasure_restore_arm':
     'Nothing can be queued for this reading: its runs would halt, here or by hand, because the repository’s checks arm moved. Restore the checks arm the reading froze, or end the stage.',
+  'text.learn.remeasure_restore_pool':
+    'Nothing can be queued for this reading: its pool moved since it was registered (a pinned record missing or no longer qualified, or a commit relabelled), so every run of it is refused, here or by hand. Restore the record or label the note names.',
   'link.learn.remeasure_by_hand':
     'The runs page for this repository. The reading waits on an arm this plan cannot compose a replay for (another test author, the loop switch, a factory arm or another posture), so the run is queued there by hand.',
   'link.learn.remeasure_mine':

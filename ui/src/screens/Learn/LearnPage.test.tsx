@@ -467,6 +467,16 @@ describe('LearnPage', () => {
     expect(screen.getByTestId(`learn-needed-${moved.key}`)).toHaveTextContent('end the stage')
   })
 
+  it('a reading whose pool drifted is listed with the drift and nothing to queue, here or by hand (P-814)', async () => {
+    const drifted: RemeasureCell = { ...CELL, next_act: 'none', n_requested: 0, short_by: 6, est_cost_usd: 0, requests: [], note: 'its reading’s pool moved since registration (1 drift row(s): c13 qualification): a run would be refused pool_drift — restore the pinned record or label, or the look waits' }
+    mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [drifted] } }))
+    renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
+    expect(await screen.findByTestId(`learn-needed-${drifted.key}`)).toHaveTextContent('a run would be refused pool_drift')
+    expect(screen.queryByRole('button', { name: 'Queue runs' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Queue from Runs' })).toBeNull()
+    expect(document.querySelector('[data-hint="text.learn.remeasure_restore_pool"]')).toHaveTextContent('Restore the pool first')
+  })
+
   it('an empty plan never says every cell reached the look while a reading has decided against one', async () => {
     const decided = { label: 'replay|docs.update|S|go|editblock|m|cerebras', mode: 'sighted', arm: 'S3', state: 'undecided' as const, reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_9' }
     mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [], cannot_clear: [decided] } }))

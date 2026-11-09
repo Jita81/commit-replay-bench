@@ -245,8 +245,8 @@ export interface RemeasureCell {
   /** `label|mode|arm` — one entry per (cell, mode, context arm), never two arms pooled. */
   key: string
   reason: 'look_pending' | 'stale' | 'thin'
-  /** `replay` — queue the requests; `register` — register a reading first; `runs` — queue by hand from the Runs page; `config` — restore the repository's checks arm (`checks_arm_moved`). */
-  next_act: 'replay' | 'register' | 'runs' | 'config'
+  /** `replay` — queue the requests; `register` — register a reading first; `runs` — queue by hand from the Runs page; `config` — restore the repository's checks arm (`checks_arm_moved`); `none` — restore the reading's drifted pool (P-814). */
+  next_act: 'replay' | 'register' | 'runs' | 'config' | 'none'
   /** The context arm: the reading's arm it waits on, or the rows' own ('' before apparatus 2.4). */
   arm: string
   reading_id: string
@@ -1064,6 +1064,12 @@ function RemeasureSection({ repo }: { repo: string }) {
                   // well as from here, so the page offers no route to one (RT2B-1)
                   <Hint as="span" id="text.learn.remeasure_restore_arm" className="text-xs text-on-surface-muted">
                     Restore the checks arm first
+                  </Hint>
+                ) : c.next_act === 'none' ? (
+                  // the reading's pool drifted since registration: the worker refuses every run
+                  // of it pool_drift, by hand as well, so the page offers no route to one (P-814)
+                  <Hint as="span" id="text.learn.remeasure_restore_pool" className="text-xs text-on-surface-muted">
+                    Restore the pool first
                   </Hint>
                 ) : !c.requests.length ? (
                   <Hint as={Link} id="link.learn.remeasure_by_hand" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">

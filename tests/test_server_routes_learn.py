@@ -911,8 +911,9 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     """G-565, P-602: a cell whose registered reading waits on its look is offered its top-up —
     the commits the reading still needs, in its seeded order, priced — and queued from one act:
     the plan's own body, put to the submit gate ``POST /runs`` applies before it is enqueued,
-    recorded with the operator's identity, the arm and the reading. A pending commit that is
-    no longer gold-clean is left out: the worker would skip it."""
+    recorded with the operator's identity, the arm and the reading. A pending commit the
+    miner has since flagged not gold-clean is still asked: the reading's pool is admitted by
+    its pinned qualification records, never by that flag (P-797, P-814)."""
     del builder_keys
     from crb.server.routes import learn as learn_routes
 
@@ -934,9 +935,9 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     assert (cell["n_current"], cell["next_look"], cell["n_needed"]) == (12, 20, 8)
     assert cell["reading_id"] == reading["reading_id"]
     (request,) = cell["requests"]
-    assert request["task_ids"] == [pool[12], *pool[14:20]] and pool[13] not in request["task_ids"]
+    assert request["task_ids"] == pool[12:20] and pool[13] in request["task_ids"]
     assert request["learning"] == "off" and request["kind"] == "replay"
-    assert (cell["n_requested"], cell["short_by"]) == (7, 1) and "gold-clean" in cell["note"]
+    assert (cell["n_requested"], cell["short_by"]) == (8, 0) and "gold-clean" not in cell["note"]
     gated: list[str] = []
     prechecked: list[str] = []
     real_gate = learn_routes.submit_refusals

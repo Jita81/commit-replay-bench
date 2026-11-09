@@ -18,7 +18,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   though the posture gate admits it by its qualification record (ADR-0019) and the pool is pinned
   to those records (P-797); Wave 3's first S3 looks would have been served short and then waited.
   A reading that pins its pool is now asked whatever that flag says, and nothing while its pool
-  drifts, the drift named in the note. Legacy readings are unchanged. No grading, ledger, reading
+  drifts: the drift is named in the note, the next act is `none`, and the Learn page shows
+  "Restore the pool first" with no route to Runs. Legacy readings are unchanged. No grading, ledger, reading
   rule or apparatus version changes.
 
 - **The walkthrough's screens run as eight one-pass shards, and the job-budget guard checks
