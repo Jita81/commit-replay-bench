@@ -1194,3 +1194,99 @@ campaign does not count. No reading run starts until they agree **[hypothesis �
 sits in the organisation's Default Workspace, not a `crb-builder` Workspace, by Paul's decision
 relayed on 2026-11-09, so Usage is filtered by the key; a later amendment records the Workspace and
 its limit]**.
+
+### The registration amendment, 2026-11-09
+
+**The second smoke run.** Run `2dfb6a08248c43948b7ff92517059ec4`, the body above, finished
+`succeeded` at 22:19:05Z with one row, clean on the first pass. It ran sealed:
+`docker/copy/sealed`, apparatus 2.4, canary clean, the builder in `crb-builder-go:local` behind the
+proxy. The builder ran 17 turns, read 140,772 tokens and wrote 5,039. Claude Code's own
+`total_cost_usd` is $0.2641455, which is the row's `cost_usd`. That meets "how the second run is
+read", so the campaign went on **[hypothesis — read from `GET /api/v1/runs/2dfb6a08…` and its
+events on 2026-11-09 at 22:20Z; the row is in the stack's ledger, not in this repository]**.
+
+**The builder's login (step 1's record).** Both verifications on 2026-11-09 (21:57:48Z at
+settings and 22:17:27Z at submit) read `auth` `api_key` with source `env` and fingerprint `GwAA`.
+The fingerprint is the same at both, so this is no stop **[hypothesis — read from the stack's
+`builder.login.verified` events on 2026-11-09; those rows are not in this repository]**.
+
+**The account and the tally.**
+- The builder's key sits in the organisation's Default Workspace, not a `crb-builder` Workspace of
+  its own. That departs from part 5's builder's-account check, item 3, by Paul's decision. The
+  Default Workspace takes no custom limit, so the cap is the organisation's monthly limit,
+  **$150**.
+- Paul compared the Console's Usage for the builder's key with the run's $0.2641455. Usage reads
+  **$0.26**, so they agree.
+- The organisation's Limits page read $0.11 at the same time. It lags Usage. Paul ruled the lag no
+  blocker: "don't let it be a blocker and proceed regardless".
+- The gate before the readings' runs is met.
+
+**[hypothesis — Paul's readings of the Console, relayed by the lead session on 2026-11-09 between
+22:35Z and 23:40Z; the Console is not in this repository]**.
+
+The campaign's spend after both smokes is about $0.2658 of the $54.00 line: the builder's
+$0.2641 and the first smoke's test author's $0.0017 **[hypothesis — the campaign's events on
+2026-11-09]**.
+
+**The campaign and the readings.** Campaign `cmp_8e1f261023db8a26a40e0e84` was registered at
+21:47:16Z, with `ceiling_usd` 108.00 and `line_usd` 54.00. Paul registered the four readings at
+22:25:37Z, each `reserved.v1`, `max_reruns` 0, `budget_profile` `default`, `pool_rule`
+`all-qualified` **[hypothesis — read from each `201` response on 2026-11-09; the readings are in
+the stack's database, not in this repository]**:
+
+| cell | reading | pool | `pool_sha256` | posture |
+|---|---|---|---|---|
+| cobra XS | `rdg_e6bbe59930cd26e728a24364` | 17 | `26047d89205784f1d58c3af2cb47d5fc85fc1bc1d3fc5364f43510212fde70bc` | `pst_2b3f4ee45151cff77b95f85b` |
+| cobra S | `rdg_2910bad1397a488cd6c05457` | 27 | `7662393a27074ee2b1903f135478acc3fd60f00e11b9118acbd9650ddc56942c` | `pst_2b3f4ee45151cff77b95f85b` |
+| click XS | `rdg_1d932e9f635d6583f111d548` | 30 | `0170f75e4524b22cae0037c59f3187ad5fcd15f69ade1346c4234af692f6f5af` | `pst_04100cf00f88d266c820b24e` |
+| click S | `rdg_471d0e7f4f51146392e8c788` | 38 | `5c27a2aed8e85c0f2b5932cbccc52211cf0b9dd183d6ba138e2a919e17b998ee` | `pst_04100cf00f88d266c820b24e` |
+
+**The checks after registration** **[hypothesis — read from the stack on 2026-11-09 at about 22:40Z]**:
+- Each pool equals its cell's qualified set from step 3, by digest and in seeded order.
+- The smoke commit is in no pool, and no pool repeats a change.
+- Each reading's `checks_arm` reads `off`.
+- Each cell's error budget reads 2.10% of 5%.
+- The API's own `pool_drift` list was not read. `GET /api/v1/readings` needs an operator session,
+  and no MCP tool serves it. The digest comparison covers the same ground.
+
+**The remeasure plan, and Paul's choice.** At step 14, `GET /api/v1/learn/remeasure` served each
+S3 request short.
+
+- **What it did.** It left out every pending commit whose miner flag (`tasks.gold_clean`) is false.
+  But the worker admits a reserved.v1 pool's commit by its pinned qualification record in the
+  posture, never by that flag (ADR-0019, P-797).
+- **How many.** 27 of the 112 pool commits carry the flag: cobra XS 1, cobra S 7, click XS 4 and
+  click S 15. All 112 have a `qualified` record in force in their posture **[hypothesis — counted
+  from the stack's `tasks` and `task_qualifications` tables on 2026-11-09, n = 112, apparatus 2.4;
+  those rows are not in this repository]**.
+- **The effect.** The first S3 look would have been served cobra S 15 of 20, click XS 18 of 20 and
+  click S 11 of 20, and would then have waited for good. Re-qualifying does not clear the flag:
+  step 7 re-qualified both repositories, and the flags survived.
+- **Paul's choice.** Paul chose to fix the plan (option A, relayed on 2026-11-09). The fix is
+  [#107](https://github.com/Jita81/commit-replay-bench/pull/107), P-814:
+  - For a reading that pins its pool, the plan ignores the flag.
+  - While the reading's `pool_drift` is not empty, the plan asks for nothing and names the drift.
+- **What does not change.** The fix touches the plan only. No grading, ledger, reading rule or
+  `APPARATUS_VERSION` changes, so no protocol value, money figure or reading body changes, and the
+  readings stand as registered.
+- **The restart.** Cobra S, click XS and click S start their runs only once #107 is merged and Paul
+  has restarted the stack on its merge commit.
+
+**Stage 1's order.** For cobra XS, the plan serves no S3 request. Its pool holds 17 commits and
+its first look is at 20, so the cell reads `cannot_clear`, and S3-first order reads as `A0` first
+(the plan check above) **[hypothesis — read from `GET /api/v1/learn/remeasure` on 2026-11-09 at
+about 22:40Z: "0 read, 17 still to run, 3 short"]**. Cobra XS's `A0` enrols the first 16 of its 17
+commits, in seeded order.
+Its `A0` and `A0+L` runs don't use the plan's S3 request, so they may run on the stack at
+`46c0a36d` before the restart, each on Paul's own go.
+
+**The stack commit per cell.** The stage-1 report records the stack commit each cell's runs ran on:
+`46c0a36d` before the restart, and #107's merge commit after it. Rows from both commits are
+apparatus 2.4 and read under the same rule, because #107 changes no grading.
+
+**Not in this amendment.** These are recorded at their own steps:
+- the Learn state (step 15);
+- the image click's builds run in;
+- the stack commit each cell's runs ran on;
+- the stage-1 report;
+- part 4's stage-2 statement.
