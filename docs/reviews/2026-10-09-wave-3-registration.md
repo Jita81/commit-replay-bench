@@ -1092,6 +1092,19 @@ reading of 17 commits with no rows, and counted with `_enrolled` over the tasks'
 on 2026-11-04, apparatus 2.4; those labels are not in this repository, and the real plan cannot be
 read until the reading exists, so step 6 reads it before cobra XS's first run]**.
 
+**The order when the plan serves no `S3`.** Choice (e) and part 3's order post a cell's `A0` run
+only once its `S3` run (and `S1`'s, as the remeasure plan serves it) is terminal. If the plan serves
+no `S3` request for cobra XS, no `S3` or `S1` run exists to become terminal, so read literally the
+condition is never met and the cell's `A0` run is never posted. The reading this record proposes is
+that the condition binds only a run the plan serves: an arm with no request has no run to wait for,
+so cobra XS's first run is `A0`'s, its `A0+L` run follows once `A0`'s is terminal, and the cells'
+order is unchanged. That reading is not part of this amendment, which changes nothing about the
+cell. It is Paul's to confirm, because Paul's decisions leave the cells unamended (**Cobra XS is
+short.**, above). Until Paul confirms it or decides otherwise, no run is posted on cobra XS, and
+step 6 records which reading was taken **[hypothesis — read from choice (e) and part 3's order at
+this commit; that the plan serves cobra XS no `S3` request is the reading above, not yet observed,
+because the reading does not exist yet]**.
+
 **The changes made around qualification.** Both are configuration, and neither changes a protocol
 value.
 
