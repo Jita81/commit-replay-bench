@@ -1,6 +1,6 @@
 # ADR-0049 — Apparatus 2.5 separates rows graded after the Wave 3 harness fixes
 
-**Status:** Accepted (the operator, Paul Glover, on 2026-11-10; decision-log row to follow)
+**Status:** Accepted (DL-417; the operator, Paul Glover, on 2026-11-10)
 **Date:** 2026-11-10
 **Apparatus impact:** bumps `APPARATUS_VERSION` to **2.5**. Nothing else moves: the belt set
 stays `v5`, the failure rule is unchanged (its golden hash at 2.5 equals 2.4's), the mutation
@@ -19,7 +19,9 @@ measured row means:
 2. The builder's git guard refused `git -C <worktree>`, so a builder that names its worktree
    that way lost commands a builder that `cd`s first did not.
 3. A row's `cost_usd` was the builder CLI's figure, not the product's price table: the Wave 3
-   tally read $52.71 against about $21 at the table's prices.
+   tally read $52.71 against about $21 at the table's prices **[hypothesis — the Wave 3 stage-1
+   report's section 1, read from the campaign's tally and the stack's `grades` rows on
+   2026-11-10, apparatus 2.4; those records are not in this repository]**.
 
 The fixes for 2 and 3 are separate pull requests. Rows graded before and after these fixes are
 different measurements, and nothing on a row can tell them apart. Economics and the forecast
