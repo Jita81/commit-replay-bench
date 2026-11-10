@@ -182,7 +182,7 @@ def _check_rate(model: str, field: str, entry: Mapping[str, Any]) -> None:
         return
     try:
         rate = float(entry[field])
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         rate = math.nan
     if not math.isfinite(rate) or rate < 0:
         raise ValueError(
@@ -263,6 +263,19 @@ EXTRA_PRICING_ERROR = "pricing_error"
 COST_PROVENANCE_KEYS = (EXTRA_COST_SOURCE, EXTRA_CLI_COST, EXTRA_CLI_COST_PARTIAL)
 
 
+def _usable_cost(reported_cost: float | None) -> float | None:
+    """The CLI's figure when it is a finite, non-negative number, else ``None``: JSON
+    admits ``NaN``, ``Infinity`` and negatives, and none of them is a cost (a NaN never
+    trips a spend cap; a negative hands budget back)."""
+    if reported_cost is None:
+        return None
+    try:
+        cost = float(reported_cost)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return cost if math.isfinite(cost) and cost >= 0 else None
+
+
 def table_cost(
     pricing: Pricing,
     tokens_in: int,
@@ -275,7 +288,8 @@ def table_cost(
 ) -> tuple[float, bool, str]:
     """``(cost_usd, cost_known, cost_source)`` for one build: the table price of its tokens
     when the model is priced (whatever the CLI reported — its figure is its own price
-    list, not ours), else the CLI's figure, else ``0.0`` and unknown."""
+    list, not ours), else the CLI's figure when it is a finite, non-negative number, else
+    ``0.0`` and unknown."""
     if pricing.known:
         cost = pricing.cost(
             tokens_in,
@@ -285,8 +299,9 @@ def table_cost(
             cache_write_1h_in=cache_write_1h_in,
         )
         return cost, True, COST_SOURCE_TABLE
-    if reported_cost is not None:
-        return float(reported_cost), True, COST_SOURCE_CLI
+    usable = _usable_cost(reported_cost)
+    if usable is not None:
+        return usable, True, COST_SOURCE_CLI
     return 0.0, False, COST_SOURCE_UNKNOWN
 
 
@@ -294,8 +309,9 @@ def cost_provenance(source: str, reported_cost: float | None) -> dict[str, Any]:
     """The ``extra`` / pack-notes entry recording where ``cost_usd`` came from, with the
     CLI's own figure beside it (``cli_cost_usd``) when it gave one."""
     out: dict[str, Any] = {EXTRA_COST_SOURCE: source}
-    if reported_cost is not None:
-        out[EXTRA_CLI_COST] = round(float(reported_cost), 6)
+    usable = _usable_cost(reported_cost)
+    if usable is not None:
+        out[EXTRA_CLI_COST] = round(usable, 6)
     return out
 
 

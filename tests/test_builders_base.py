@@ -254,7 +254,7 @@ def test_load_pricing_overlay_and_malformed(
     assert bud.load_pricing()["azure:gpt-4o"].output_per_m == 10
 
 
-@pytest.mark.parametrize("rate", ["NaN", "Infinity", "-Infinity", "-0.5"])
+@pytest.mark.parametrize("rate", ["NaN", "Infinity", "-Infinity", "-0.5", "1" + "0" * 400])
 @pytest.mark.parametrize(
     "field", ["input_per_m", "output_per_m", "cached_input_per_m", "cache_write_per_m"]
 )
@@ -268,6 +268,21 @@ def test_load_pricing_refuses_a_non_finite_or_negative_rate(
     f.write_text(json.dumps({"m-x": entry}).replace('"__RATE__"', rate), encoding="utf-8")
     with pytest.raises(ValueError, match=field):
         bud.load_pricing(f)
+
+
+@pytest.mark.parametrize("figure", [float("nan"), float("inf"), float("-inf"), -0.5])
+def test_a_non_finite_or_negative_cli_figure_is_no_cost(figure: float) -> None:
+    """JSON admits NaN, Infinity and negatives as the CLI's cost; none is a cost, so an
+    unpriced model's build stays unknown and the figure is not recorded beside it."""
+    unpriced = bud.Pricing(0.0, 0.0, known=False)
+    assert bud.table_cost(unpriced, 1_000, 100, reported_cost=figure) == (
+        0.0,
+        False,
+        bud.COST_SOURCE_UNKNOWN,
+    )
+    assert bud.cost_provenance(bud.COST_SOURCE_UNKNOWN, figure) == {
+        bud.EXTRA_COST_SOURCE: bud.COST_SOURCE_UNKNOWN
+    }
 
 
 def test_a_pricing_overlay_inherits_the_rates_it_omits(tmp_path: Path) -> None:
