@@ -4,6 +4,10 @@
 amendment for steps 0 and 3, and the smoke and registration amendments for step 4, which registered
 the campaign and the four readings. The API's `pool_drift` list read `[]` for each reading before
 its cell's first run. The readings' runs, from step 6 on, are recorded at their own steps, not here.
+Stage 1 ended at its line, and its record is the stage-1 report
+(`2026-11-10-wave-3-stage-1-report.md`, step 8). Part 6's stage-2 statement amendment holds part
+4's statement. Paul then closed Wave 3 on that report, with no stage 2 (DL-416), so step 9's
+release was not filed and nothing was released; part 6's closure amendment records the close.
 **[hypothesis — read from the stack's `runs` and `events` tables, the registration responses and
 `GET /api/v1/readings` between 2026-11-04 and 2026-11-10, apparatus 2.4; those records are not in
 this repository]**
@@ -892,14 +896,14 @@ and stops and reports at the first step whose success condition fails.
 | 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>`, and `<author>` has a known price (else an `S1` run is refused `spend_cap_unpriced`, a stop; K3, part 2) | run; part 6's registration amendment holds `<author>`, its price and when it was read |
 | 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click. The parameters are pinned, as values the step-3 amendment records: each mine and qualify body as sent (`pool`, `limit`, `max_candidates`, `ref`, and no `task_ids`), and the `since` and `taxonomy` step 4's bodies leave out (empty: every qualified commit, choice (c), and the global vocabulary); none changes after step 3. From then on: no label run, CLI label edit or 2.4 replay on cobra or click between step 3 and the end of step 11, but the runs step 6 files under the campaign and step 4's smoke run | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here. The step-3 amendment records, for each cell, the qualified-set sha256 (its qualified commits in seeded order, hashed as `pool_sha256` is) and where each label came from (classifier or human), and the result of K1's audit (part 2) | run; part 6's step-3 amendment holds the counts and their source, and reconciles the one cancelled run. Three cells hold at least 20 and cobra XS holds 17 |
 | 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then the sealed `S1` smoke check below, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Before the first registration, Claude Code records here, for cobra and for click, the loop's switch and the changes in force — `switch`, `overlay` and each entry's `change` from `GET /api/v1/learn/register?repo=<repo>` — the state step 10 restores; and checks that each repository's own `checks` block sets `format_step: false` (`GET /api/v1/repos/<repo>`, DL-410), setting it with `PUT /api/v1/repos/<repo>` and `{"checks": {"format_step": false}}` if it does not. **The sealed `S1` smoke check.** After the campaign is registered and before cobra's first reading, Claude Code files one `S1` run under the campaign with no `reading_id`, on a cobra commit qualified at step 3 that is in no Wave 3 pool (another class or size) and whose change is in none, else that reading would be refused `pool_seen`: `{"repo": "cobra", "kind": "blind", "mode": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "arm": "S1", "task_ids": ["<that commit>"], "learning": "off", "budget_profile": "default", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. It sits here because once a `reserved.v1` reading is on the repository, a campaign run with no `reading_id` is refused 409 `reading_required`; a run with no reading reserves and pins nothing. Its spend counts toward the campaign | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, `attempt_rule` `reserved.v1`, `max_reruns` 0 and `budget_profile` `default` (part 1's attempt rule; a body naming another rule or re-run count is refused 422 `validation_error`), the `pool` in seeded order, `pool_sha256`, `pool_rule`, and the `pool_posture_id` and `pool_qualifications` the pool is pinned to (its commits' qualification records from step 3, never the miner's `gold_clean`; P-797); `GET /api/v1/readings?repo=<repo>` lists each with `pool_drift` `[]`, its cell's budget spent at 2.10% of 5%. Each reading's `checks_arm` reads `off`, the arm of the repository's own `checks` block; a reading on any other arm stops the campaign before any spend. A refusal (`campaign_unknown`, `lint_disabled`, `reading_checks_overlay`, `pool_seen` — under `reserved.v1`, any 2.4 replay row on a pool commit or its change, under any arm or test author, P-797 — `budget_spent`, `pool_not_blind`, `invalid_reading`), or a reading served with a `pool_drift` other than `[]` (`state` `undecided`: a pool commit relabelled out of its cell, or a pinned record missing or not qualified, P-797), stops the campaign before any spend; `lint_disabled` (`detail` `{repo, reason}`, nothing written) answers any registration while the repository's lint is switched off, and a `reserved.v1` reading hashes the repository's lint configuration as `lint_digest` (P-796). `reading_checks_overlay` (`detail` `{overlay_arm, repo_arm}`, nothing written) answers a registration while the loop's overlay moves the repository's checks arm off its own block's, so the precondition above did not hold: a reading frozen then would rest on a loop change (RT2B-2). On an unsealed deployment `invalid_reading` names what is unsealed in its `detail`: both executors, `{sandbox_executor, builder_executor}`, when the sandbox is on docker and the builder on the host; the posture class alone, `{posture_class}`, when the sandbox is not on docker, because that refusal comes first. A `409` `reading_exists` (`detail` `{reading_id}`, nothing written, nothing spent) answers a reading already registered, a retried request under any second or actor: it is a retry, not a stop; read the reading back with `GET /api/v1/readings?repo=<repo>`. The smoke run's row stops the campaign before any reading is registered when its error, after its `authoring:` prefix, reads "the authored test … is not RED at the parent: it timed out" or "… failed without attributable test ids", or starts "harness error proving RED:" (`src/crb/builders/adapter.py`): the sealed posture cannot prove an `S1` test RED there. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | run; part 6's smoke and registration amendments hold the campaign, both smoke runs, the four readings and the `pool_drift` reads |
-| 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is the one recorded at step 4. Then Claude Code reads each repository's loop chain (`GET /api/v1/learn/register?repo=<repo>`) for an applied change to `checks.format_step` still in force (RT2B-1), and records the changes in force (each entry's `change`, which each later run stamps as its `extra.learning`) and the repository's factory rows (`total` from `GET /api/v1/grades?repo=<repo>&process_step=factory`), and records both again before each `A0+L` run. From step 5 until step 10 restores the switch, or until the stage is terminal, the only runs on cobra and click are the registered readings' runs: no factory run, calibration build or intake; PLAN's cobra calibration builds run after stage 1 is terminal (RT2B-3) | the Learn page reads `config` for cobra and for click. An applied `checks.format_step` change in force while the repository's own `checks` block does not set the key stops the campaign before any spend (RT2B-1). A factory row or a loop change that no registered reading run made stops the stage (RT2B-3) | not yet run |
-| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, after the builder's-account check below passes at the start of each session, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is refused 409 `reading_required` when the campaign holds a reserved.v1 reading on that repository (`detail` `{campaign_id, reading_ids}`, nothing queued) — every body here carries `reading_id` (DL-382; P-792). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`, each look's request filed as one run, as the plan serves it (PW-4); a reading the plan lists with `checks_arm_moved` `{frozen, current}` has no request, because its run would halt `reading_checks_arm_mismatch`, so the repository's frozen checks arm is restored or the stage ends (RT2B-1). **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 commits the arm enrols], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`; those are the arm's `commits` in `GET /api/v1/readings`, the pool in seeded order less each commit whose registered change an earlier one holds, so a task outside them is skipped `task_not_enrolled`, and `A0+L`'s are among them (RT2B-5). **`A0+L`**: the same with no `learning` and no `budget_profile`. `A0+L` files its `task_ids` in the seeded order: the commits of the `A0` body it has not reserved yet, first to last, or the first of them; a subset such as `A0`'s misses, another order or a commit outside the first 16 is refused 422 `reading_run_fields` (`detail.fields` `["task_ids"]`, nothing queued), and again at claim (NEW-1, round 5). **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"`. Re-filing a run never re-rolls, because commits already reserved are skipped (`run.task_skipped commit_reserved`). Post a run on an arm of a reading only after the last run on that arm of that reading, or of another reading naming one of its commits, has finished: read its status in `GET /api/v1/campaigns/{id}` (`runs[].status`) or `GET /api/v1/runs/{run_id}` first, and never re-post while that run is `queued` or `running`. The product refuses such a re-post 409 `campaign_arm_in_flight`, naming the live run (`detail.run_id`, `detail.status`), and queues nothing (F87-2, DL-392). A run is still `running` until the worker has stopped it, cancelled or not. No body names `outage_stop` or `env_stop` other than 1: a reading run halts at its first outage or environment row, its in-flight commit a miss (reserved.v1) and its unreserved commits pending, run later by a re-filed body; any other value is refused 422 `reading_run_fields`, and again at claim (PW-7). Before each run, item 5 of the builder's-account check below. After each `A0+L` run, every row's `checks` label (of the form `fmt=1:repo;gate=0:default;api=1:run;cfg=<version>`, `crb.core.checks`) reads `fmt=0` and `api=0`, and `GET /api/v1/readings` shows the reading's `checks_arm` unchanged; otherwise the stage stops and Claude Code reports it (RT2B-1). A `system/run.reclaimed`, `system/run.abandoned` or `system/run.claim_lost` event on any run stops the stage, and Claude Code reports it (KG-7). Stop between tasks, never mid-attempt, because a cancel after a reservation costs the commit | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `unplaced_spend` — the campaign is stopped, P-798 — `campaign_arm_in_flight` — a run of the same arm still live on one of its commits, F87-2 — `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_required`, `reading_unknown`, `reading_run_fields` — a field or value the reading does not register, P-792 — `reading_unsealed`, `reading_posture_mismatch`, `lint_disabled` — the repository's lint switched off, P-796 — `pool_drift` — the reading's pool moved since step 4, P-797); a queued run whose repository's lint is switched off, or whose reading's pool drifts or whose live posture is no longer the reading's `pool_posture_id`, after submit ends `failed` before anything is reserved (`system/run.refused`, `code: lint_disabled` or `pool_drift`), its commits still pending; a reading run whose resolved checks arm differs from the reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (`system/run.halted`, `detail` `{frozen, run}`), and the commit stays pending; an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`, or `failed` at its first outage row (`system/run.outage_stop`) or environment row (`system/run.environment_stop`) with one reserved commit missed and the rest pending (PW-7); its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; each counted row carries `reservation` and `treatment` labels; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run; `pinned_treatment` is served after the first run on each repository, and its deployment's `container.extra_ro_mounts` reads `{}`, else the stage stops (KG-2) | not yet run |
-| 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is `null` while the campaign runs, and spent and held stay at or under the stage's line; otherwise part 2's stop, which `stopped` serves as `{code, message, run_ids}` | not yet run |
-| 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the report says why stage 1 ended and whether Q-26's rule releases stage 2; the record is committed under `docs/reviews/` | not yet run |
-| 9 | stage 2 | Claude Code, on decision 9's fixed rule (Q-26; DL-400): when stage 1 ended at its line with any cell still waiting on a look, it files `POST /api/v1/campaigns/{id}/release` (part 2), with no further decision; then the builder's-account check below, and step 6 resumes with the line at $108.00. When stage 1 ended on a stop or with the protocol complete, nothing is released | the release answers `200` with the campaign and is filed before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not yet run |
-| 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 4 | not yet run |
-| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3), reading each patch only from `GET /api/v1/grades/{row_hash}/patch`, and no one opens the Runs screen's evidence drawer or its Review tab on a Wave 3 row (KG-5); then Paul sends the salt and Claude Code draws his 10; Paul files his | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals, the reviewer's session id and the bootstrap seed. The readings do not answer whether a patch is mergeable; the reviews do, and a verdict's `patch_sha256` anchor proves only that the reviewer named the pack's diff hash (which `GET /grades/{row_hash}/retained` serves too), not that the patch was fetched or read (KG-6) | not yet run |
-| 12 | publish the rows | Claude Code, after step 11: the ledger export (`GET /api/v1/ledger/export?format=jsonl`, unfiltered, so it verifies standalone with `verify_chain`) and each repository's readings (`GET /api/v1/readings?repo=<repo>`, which serves each reserved commit's `reason` and `scope`), committed beside the stage records under `docs/reviews/` | the rows and readings every stage record cites are in the repository, and the export's chain verifies | not yet run |
+| 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is the one recorded at step 4. Then Claude Code reads each repository's loop chain (`GET /api/v1/learn/register?repo=<repo>`) for an applied change to `checks.format_step` still in force (RT2B-1), and records the changes in force (each entry's `change`, which each later run stamps as its `extra.learning`) and the repository's factory rows (`total` from `GET /api/v1/grades?repo=<repo>&process_step=factory`), and records both again before each `A0+L` run. From step 5 until step 10 restores the switch, or until the stage is terminal, the only runs on cobra and click are the registered readings' runs: no factory run, calibration build or intake; PLAN's cobra calibration builds run after stage 1 is terminal (RT2B-3) | the Learn page reads `config` for cobra and for click. An applied `checks.format_step` change in force while the repository's own `checks` block does not set the key stops the campaign before any spend (RT2B-1). A factory row or a loop change that no registered reading run made stops the stage (RT2B-3) | run on 2026-11-09 at 23:19Z (cobra) and 23:20Z (click); the stage-1 report holds the loop's changes in force and the factory rows |
+| 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, after the builder's-account check below passes at the start of each session, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is refused 409 `reading_required` when the campaign holds a reserved.v1 reading on that repository (`detail` `{campaign_id, reading_ids}`, nothing queued) — every body here carries `reading_id` (DL-382; P-792). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`, each look's request filed as one run, as the plan serves it (PW-4); a reading the plan lists with `checks_arm_moved` `{frozen, current}` has no request, because its run would halt `reading_checks_arm_mismatch`, so the repository's frozen checks arm is restored or the stage ends (RT2B-1). **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 commits the arm enrols], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`; those are the arm's `commits` in `GET /api/v1/readings`, the pool in seeded order less each commit whose registered change an earlier one holds, so a task outside them is skipped `task_not_enrolled`, and `A0+L`'s are among them (RT2B-5). **`A0+L`**: the same with no `learning` and no `budget_profile`. `A0+L` files its `task_ids` in the seeded order: the commits of the `A0` body it has not reserved yet, first to last, or the first of them; a subset such as `A0`'s misses, another order or a commit outside the first 16 is refused 422 `reading_run_fields` (`detail.fields` `["task_ids"]`, nothing queued), and again at claim (NEW-1, round 5). **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"`. Re-filing a run never re-rolls, because commits already reserved are skipped (`run.task_skipped commit_reserved`). Post a run on an arm of a reading only after the last run on that arm of that reading, or of another reading naming one of its commits, has finished: read its status in `GET /api/v1/campaigns/{id}` (`runs[].status`) or `GET /api/v1/runs/{run_id}` first, and never re-post while that run is `queued` or `running`. The product refuses such a re-post 409 `campaign_arm_in_flight`, naming the live run (`detail.run_id`, `detail.status`), and queues nothing (F87-2, DL-392). A run is still `running` until the worker has stopped it, cancelled or not. No body names `outage_stop` or `env_stop` other than 1: a reading run halts at its first outage or environment row, its in-flight commit a miss (reserved.v1) and its unreserved commits pending, run later by a re-filed body; any other value is refused 422 `reading_run_fields`, and again at claim (PW-7). Before each run, item 5 of the builder's-account check below. After each `A0+L` run, every row's `checks` label (of the form `fmt=1:repo;gate=0:default;api=1:run;cfg=<version>`, `crb.core.checks`) reads `fmt=0` and `api=0`, and `GET /api/v1/readings` shows the reading's `checks_arm` unchanged; otherwise the stage stops and Claude Code reports it (RT2B-1). A `system/run.reclaimed`, `system/run.abandoned` or `system/run.claim_lost` event on any run stops the stage, and Claude Code reports it (KG-7). Stop between tasks, never mid-attempt, because a cancel after a reservation costs the commit | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `unplaced_spend` — the campaign is stopped, P-798 — `campaign_arm_in_flight` — a run of the same arm still live on one of its commits, F87-2 — `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_required`, `reading_unknown`, `reading_run_fields` — a field or value the reading does not register, P-792 — `reading_unsealed`, `reading_posture_mismatch`, `lint_disabled` — the repository's lint switched off, P-796 — `pool_drift` — the reading's pool moved since step 4, P-797); a queued run whose repository's lint is switched off, or whose reading's pool drifts or whose live posture is no longer the reading's `pool_posture_id`, after submit ends `failed` before anything is reserved (`system/run.refused`, `code: lint_disabled` or `pool_drift`), its commits still pending; a reading run whose resolved checks arm differs from the reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (`system/run.halted`, `detail` `{frozen, run}`), and the commit stays pending; an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`, or `failed` at its first outage row (`system/run.outage_stop`) or environment row (`system/run.environment_stop`) with one reserved commit missed and the rest pending (PW-7); its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; each counted row carries `reservation` and `treatment` labels; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run; `pinned_treatment` is served after the first run on each repository, and its deployment's `container.extra_ro_mounts` reads `{}`, else the stage stops (KG-2) | run for stage 1; the stage-1 report holds each run, its admission and its rows |
+| 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is `null` while the campaign runs, and spent and held stay at or under the stage's line; otherwise part 2's stop, which `stopped` serves as `{code, message, run_ids}` | run after each stage-1 run; the stage-1 report holds the tally at the stage's end |
+| 8 | report stage 1 | Claude Code, when stage 1 ends (part 2) | Paul has the report and part 4's statement; the report says why stage 1 ended and whether Q-26's rule releases stage 2; the record is committed under `docs/reviews/` | run; the stage-1 report (`2026-11-10-wave-3-stage-1-report.md`) and part 6's stage-2 statement amendment hold it |
+| 9 | stage 2 | Claude Code, on decision 9's fixed rule (Q-26; DL-400): when stage 1 ended at its line with any cell still waiting on a look, it files `POST /api/v1/campaigns/{id}/release` (part 2), with no further decision; then the builder's-account check below, and step 6 resumes with the line at $108.00. When stage 1 ended on a stop or with the protocol complete, nothing is released | the release answers `200` with the campaign and is filed before any stage-2 run is queued; `GET /api/v1/campaigns/{id}` reads `line_usd` 108.00 | not run: Paul closed Wave 3 on the stage-1 report with no stage 2 (DL-416), so the release was not filed and nothing was released; part 6's closure amendment |
+| 10 | restore the loop switch | Paul or Claude Code, after the last `A0+L` run | the switch reads the state recorded at step 4 | run on 2026-11-10 at 17:37Z: off, with an empty overlay. It differs from step 4's "never switched" in having switch records, and the applied changes stay dormant on each chain; part 6's closure amendment holds the records |
+| 11 | the reviews | Paul creates the reviewer's account; Claude reviews in a fresh session (part 3), reading each patch only from `GET /api/v1/grades/{row_hash}/patch`, and no one opens the Runs screen's evidence drawer or its Review tab on a Wave 3 row (KG-5); then Paul sends the salt and Claude Code draws Paul's 10; Paul files them | a review on every clean blind row a reading counts; Paul's 10 filed after Claude's; the agreement reported with its intervals, the reviewer's session id and the bootstrap seed. The readings do not answer whether a patch is mergeable; the reviews do, and a verdict's `patch_sha256` anchor proves only that the reviewer named the pack's diff hash (which `GET /grades/{row_hash}/retained` serves too), not that the patch was fetched or read (KG-6) | not yet run; the close leaves it open (part 6's closure amendment) |
+| 12 | publish the rows | Claude Code, after step 11: the ledger export (`GET /api/v1/ledger/export?format=jsonl`, unfiltered, so it verifies standalone with `verify_chain`) and each repository's readings (`GET /api/v1/readings?repo=<repo>`, which serves each reserved commit's `reason` and `scope`), committed beside the stage records under `docs/reviews/` | the rows and readings every stage record cites are in the repository, and the export's chain verifies | not yet run; Q-25 requires it whichever branch fires (part 6's closure amendment) |
 
 **The builder's account (R-13; DL-405).** The builder runs on its own Anthropic API key, in a
 Workspace of its own whose spend limit sits at the ceiling (the default Workspace takes no
@@ -1006,7 +1010,9 @@ sealed.
 ## 6. The amendments
 
 Each amendment records what a step found. None changes a protocol value in part 1, the money in
-part 2 or a reading's body in part 5. A later amendment adds to this part and leaves the earlier
+part 2 or a reading's body in part 5, except the closure amendment: it records Paul's decision,
+taken after stage 1's data, to close Wave 3 with no stage 2 (DL-416), which sets aside part 1's
+and part 2's stage-2 release for this campaign. A later amendment adds to this part and leaves the earlier
 ones as they stand.
 
 ### The step-3 amendment, 2026-11-04
@@ -1470,3 +1476,209 @@ not in this repository]**.
 - the stack commit each cell's runs ran on;
 - the stage-1 report;
 - part 4's stage-2 statement.
+
+### The stage-2 statement amendment, 2026-11-10
+
+**What this adds.** Part 4's statement, filled from stage 1's results at the end of stage 1
+(part 5 step 8). The stage-1 report, `2026-11-10-wave-3-stage-1-report.md` beside this record,
+holds the runs, the spend, the readings and why stage 1 ended. This amendment also records who
+files the release, what runs in stage 2 and on which image, and the reading of "fits" that Paul
+has still to choose on.
+
+**The statement.** Filled from the template at the end of part 4 **[hypothesis — p̂ is read from
+the stack's `grades` table and `GET /api/v1/readings` on 2026-11-10 at about 10:55Z, apparatus
+2.4, blind, n = 16 first attempts per complete arm and 3 for click S `A0`; the value baseline's
+prior is measured at apparatus 2.2 in the host posture; E and h are part 4's formulas. The stack's
+records are not in this repository]**:
+
+```text
+Wave 3 — the stage-2 statement — 2026-11-10
+Stage 1 spent $52.708356 (£39.04) of $54.00, author calls included; see 2026-11-10-wave-3-stage-1-report.md.
+Clean blind patches expected for review by the campaign's end: E = 66.4, or 60.8 with the value baseline's 0.233 for click S A0's 13 pending commits; the two get equal weight
+  per cell and arm: cobra XS A0: N = 16, p̂ = 0.688 (stage 1)
+  per cell and arm: cobra XS A0+L: N = 16, p̂ = 0.563 (stage 1)
+  per cell and arm: cobra XS S1@gpt-oss-120b: N = 0 (S3 undecided, not run; S1 stopped)
+  per cell and arm: cobra S A0: N = 16, p̂ = 0.500 (stage 1)
+  per cell and arm: cobra S A0+L: N = 16, p̂ = 0.375 (stage 1)
+  per cell and arm: cobra S S1@gpt-oss-120b: N = 0 (S3 insufficient; S1 stopped)
+  per cell and arm: click XS A0: N = 16, p̂ = 0.500 (stage 1)
+  per cell and arm: click XS A0+L: N = 16, p̂ = 0.625 (stage 1)
+  per cell and arm: click XS S1@gpt-oss-120b: N = 0 (S3 insufficient; S1 stopped)
+  per cell and arm: click S A0: N = 16, p̂ = 0.667 (stage 1, n = 3)
+  per cell and arm: click S A0+L: N = 16, p̂ = 0.233 (value baseline)
+  per cell and arm: click S S1@gpt-oss-120b: N = 0 (S3 insufficient; S1 stopped)
+Precision bought: the share judged mergeable to ±10.8 points (Wilson 95%, n = 66.4, p = 0.308;
+  descriptive: fixed-n, not adjusted for the sequential look), ±11.7 points at worst; with E = 60.8, ±11.3 and ±12.2. Paul's 10 give the agreement as in part 3.
+Stage 2 asks for up to $54.00 (£40.00); the line becomes $108.00 for the campaign in all.
+```
+
+**How the figures were reached.** Each figure follows part 4's rules **[hypothesis — arithmetic on
+the rates above; the rows they come from are not in this repository]**:
+- N is 16 for each `A0` and `A0+L` arm, the fixed count. `S1`'s N is none, because no `S3` arm
+  delivered.
+- p̂ is the arm's clean first-attempt rate in stage 1 wherever stage 1 has one, as part 4's rule
+  says. Click S `A0` has one, 2 of 3 (Wilson 95% [0.208, 0.939]), so the rule forces it though n is
+  small. Its one miss, row 779, was a budget miss: the attempt reached its turn limit at $0.863184.
+  Click S `A0+L` has none, so p̂ is the value baseline's blind rate at S, 7 of 30.
+- p is 4 of 13 (0.308), the value baseline's share, because stage 1 holds no review: the reviews
+  are step 11, after the campaign.
+- With the value baseline's 0.233 for click S `A0`'s 13 pending commits as well, and its 2 clean
+  of 3 kept as observed, E would be 60.8, and the share would be known to ±11.3 points, or ±12.2
+  at worst. Three attempts are too few to prefer 2 of 3 over the
+  baseline, so the two get equal weight. Either way, E sits between part 4's worked example (about
+  51) and the table's 80.
+- Stage 1 observed 54 clean blind first attempts, click S `A0`'s 2 among them. Stage 2 adds about
+  12.4 to them, or 6.8 with E = 60.8 (its 29 attempts at 7 of 30). At n = 54 the share would be
+  known to about ±12.0 points (±12.9 at worst), so stage 2 narrows it by about 1.1 points, or 0.7.
+
+**Who files the release.** Part 2, decision 9's entry in part 1 (DL-400) and part 5 step 9 say
+Claude Code files `POST /api/v1/campaigns/{id}/release`. The start-up runbook (handbook page 13,
+v0.4.18) gives that request to Paul. Its C-AMEND item, in Claude Code's voice, records "that you,
+not I, file the campaign, the readings and any release", and its step 22, P-RELEASE-STAGE2, is
+Paul's. Paul approved C-AMEND "as page 13 defines them" on 2026-10-23 at 15:58:20Z. No row in the
+decision log records the change of filer; one can be added only from Paul's own words. No MCP tool
+files a release, and Claude Code holds no operator password. This amendment records that
+departure, as the registration amendment recorded that Paul registered the readings
+**[hypothesis — page 13 is in the private handbook, and Paul's approval and Claude Code's want of
+an operator password are in the lead session's transcript; neither is in this repository. Of the
+38 tools `src/crb/mcp/server.py` defines, none names a campaign or a release]**. Only the filer changes:
+- The body is part 2's, `{"released_gbp": 80, "decision": …}`. The decision is DL-400's id and its
+  words verbatim, without the bold markup, as `docs/DECISION-LOG.md` holds them: "DL-400: Stage 2
+  of Wave 3 is released in advance, on a fixed rule; …", through "DL-381's release of stage 1
+  stands."
+- The condition is DL-400's. The release is filed only because stage 1 ended at its line with a
+  cell still waiting on a look. It is never filed after a stop or once the protocol is complete.
+  Whether stage 1 has ended at its line waits on Paul's choice on "fits" (below).
+- Paul files it on the fixed rule, and no stage-1 result can hold it back.
+- Step 9's success condition stands. Before any stage-2 run is queued, Claude Code reads
+  `GET /api/v1/campaigns/{id}` for `line_usd` 108.00 and runs the builder's-account check again.
+
+**What stage 2 runs, and on which image.** Stage 2 runs click S only. First come `A0`'s 13 pending
+commits, in seeded order, or fewer if Paul chooses the literal path and its runs take some. Then
+`A0+L`'s 16, the same commits as `A0`, once `A0` has finished. Each run is capped to fit under
+$108.00 by part 2's rule. No cobra cell runs: cobra XS and cobra S have run both descriptive arms
+in full, and neither has an `S3` look left to run. Click's reservations
+pinned `crb-builder:local`, the image the stack already runs. So stage 2 needs no image switch, no
+`env.sh` edit and no restart. The separate image phases the click builder-image amendment
+foresaw do not arise. Cobra's runs used `crb-builder-go:local`. Whether click's builder can run
+click's tests in `crb-builder:local` is unconfirmed (the stage-1 report, section 10), and all of
+stage 2 runs on that image. At each stage start Claude Code checks the five image Ids, and
+`crb-sandbox-go:main-8ab88ad` must read `0e796b7e…` as recorded at step 0 **[hypothesis — read from
+`GET /api/v1/readings`, the `reading.reserved` events' builder image, and the output of the local
+image-Id check (`check_image_ids.sh`) of 2026-11-10 at 10:54:52Z, which matched all five; none of
+these records is in this repository]**.
+
+**How "fits" was read, and Paul's choice.** Part 2 queues a run when spent, held, its cap and its
+headroom stay at or under the line, and sets each cap "to fit". After the last run, $1.291644 was
+left and the headroom was $0.863184, so the largest cap that fits is $0.428460. Click S `A0`'s
+attempts averaged $0.555. Claude Code read a run as fitting only when its cap holds one attempt at
+the arm's expected cost. That reading is Claude Code's; part 2 does not contain it. Read literally,
+a run on click S `A0`'s next pending commit, capped at up to $0.428460, fits. The two readings are
+not equivalent. The worker does not bound a run's first attempt by its cap (G-938), so if that
+attempt cost more than $1.291644 the campaign would overrun. That is a stop, and DL-400 then
+releases nothing **[hypothesis — the campaign's tally and rows on 2026-11-10 at about 10:55Z, and
+code reading of the worker's admission and spend cap at the served `406722a6`; the stack's records
+are not in this repository]**. Paul chooses:
+- (a) attest Claude Code's reading in a decision-log row, in Paul's words, and stage 1 has ended
+  at its line; or
+- (b) have the literal run, or runs, made first, under C-STAGE1-RUNS and Paul's "A, go ahead with
+  click" of 2026-11-10 at 08:42Z, and stage 1 ends when nothing fits as part 2 is written.
+
+No run is queued and nothing is released until Paul chooses. The detail, and the outcomes of a
+literal run, are in the stage-1 report's section 7.
+
+**The statement on path (b).** The statement above is filled from the rows at the end of stage 1
+on path (a). On path (b) stage 1 ends only after the literal runs, which change its spend and click
+S `A0`'s rate. Part 4's statement is filled from the results at the end of stage 1 (part 5 step 8),
+so on that path Claude Code fills it again, and the stage-1 report, from the rows at that end, and
+updates this amendment before step 22's release is filed. If path (b) ends on a stop, nothing is
+released and the statement is not filed again.
+
+**What does not change.** No protocol value in part 1, money figure in part 2 or reading body in
+part 5 changes. The release's body and condition stay as part 2 and DL-400 fix them. No reading is
+amended, and no cell's `next_act` is acted on. Each `next_act` that reads `new_reading` is Paul's
+call ("Option D: not yet") **[hypothesis — the readings' `next_act` as `GET /api/v1/readings`
+served it on 2026-11-10 at about 10:55Z, and Paul's own words in the lead session's transcript;
+neither is in this repository]**.
+
+**Not in this amendment.** These are recorded at their own steps:
+- stage 2's runs and their record;
+- the loop switch's restore (step 10);
+- the reviews (step 11) and the published rows (step 12).
+
+### The closure amendment, 2026-11-10
+
+**What this adds.** Paul's decision to close Wave 3 on the stage-1 report, with no stage 2; part 1's
+loop pair, read once at the close; Q-25's branch as the registered rule reads it; step 10's restore
+of the loop switch; and Paul's answers after the read, on the disqualified rows and on when the
+FREEZE ends. The detail is in the stage-1 report's section 11.
+
+**The decision.** At 14:06:15Z Claude Code asked Paul: "Do you confirm closing Wave 3 on the
+stage-1 report, with no stage 2? Yes, or no and keep stage 2 as planned." Paul answered "Yes" at
+17:33:07Z **[hypothesis — the question and the answer in the lead session's transcript,
+2026-11-10; it is not in this repository]**. DL-416 records it:
+- For this campaign it sets aside DL-400's fixed release (Q-26). Step 9's release is not filed,
+  nothing is released, and the campaign's line stays at $54.00.
+- The stage-2 statement amendment above stays as written. The statement was recorded there, and
+  it is not acted on. The choice between paths (a) and (b) is moot, and no literal run is made.
+- Claude Code reads the close as the campaign ending first (part 1; the report's section 11 lists
+  this among the choices the read rests on), so part 1's loop pair is read now.
+- The FREEZE (Q-24, DL-375) holds until Wave 3 reports, and Q-25 publishes the result with its rows
+  (step 12). Asked which event that is, Paul answered "Yes it does" at 18:49:00Z to "Does the FREEZE
+  end when #111 merges, or at step 12, when the rows are published?" In the carve-out session Paul
+  had answered "Yes" to "End the freeze at #111's merge, not at the published rows…". So the FREEZE
+  ends when the stage-1 report merges, and step 12 does not hold it **[hypothesis — Claude Code's
+  question and Paul's answer at 18:49:00Z in the lead session's transcript, and Paul's "Yes" to the
+  carve-out session's item on the FREEZE, relayed at 18:46:01Z, 2026-11-10; neither is in this
+  repository]**.
+
+**The loop pair.** It was read once, on the same 64 pairs, with each pending commit read against
+the loop: a pending `A0` commit counts as clean and a pending `A0+L` commit as a miss. Sixteen pairs
+were pending, all in click S, which is 29 commit-arms (`A0`'s 13 and `A0+L`'s 16). Pooled, b = 8
+and c = 25, so (b − c) / n = −0.266, p = 0.0046. The loop does not clear, since only a positive
+difference clears (Q-28, DL-402). On the 48 observed pairs, b = 8 and c = 10, p = 0.81. No pair
+was decided by infrastructure **[hypothesis — the stack's `grades` table (rows 619 to 779) and
+`GET /api/v1/readings` on 2026-11-10 at about 17:40Z, apparatus 2.4, blind, n = 64 pairs, 48 of
+them observed; part 1's exact two-sided McNemar test; those records are not in this
+repository]**.
+
+**Q-25.** Read in the order Continue, Change course, Stop (Q-32, DL-411), the rule fires
+**Stop**, not the default **[hypothesis — the rates and intervals of the stage-1 report's section 3
+and the reachable prior measured at apparatus 2.2 in the host posture; the stack's records are not
+in this repository]**:
+- Continue does not fire: no cell delivers, and the loop does not clear.
+- Change course does not fire: in each complete cell, `A0+L`'s rate lies inside `A0`'s Wilson
+  interval, and `S1` was not run, so it reads "did not move".
+- Stop fires: in each of the three complete cells, nothing moves and the reachable rate's lower
+  bound is at or below `A0`'s upper bound.
+
+Of the choices the read rests on, only one flips it: the registered rule counts disqualified rows as
+misses. If the scratch-path disqualifications were counted clean instead, as an upper bound, cobra
+XS's `A0+L` would lie outside `A0`'s interval and Change course would fire. Asked after the read,
+Paul kept the registered rule: disqualified rows count as misses, and Wave 3's verdict is left alone
+**[hypothesis — the carve-out session's question and Paul's "Yes", relayed to the lead session at
+18:46:01Z on 2026-11-10; at 18:49:00Z Paul said to take that session's commands as Paul's own;
+neither transcript is in this repository]**. No miss that makes a reading insufficient is served as
+an outage, a harness fault, a cancel or a missing row, so DL-404's label is not earned. The decision
+Wave 3 informs is Paul's (Q-19, DL-377); DL-415, in PR #108 and not yet on `main`, voids its 6
+November date **[hypothesis — the stage-1 report's section 11, read from the stack's rows on
+2026-11-10 at about 17:40Z, apparatus 2.4; those records are not in this repository]**.
+
+**Step 10.** The switch was restored to `auto_apply` off with an empty overlay:
+- cobra, record `beaccf3a5089716e` at 17:37:10Z;
+- click, record `c7bfbeda017d3891` at 17:37:29Z.
+
+The state differs from step 4's "never switched" in one respect: the switch now has records. The
+applied changes on each chain lie dormant while the switch is off. The factory rows did not
+move **[hypothesis — `GET /api/v1/learn/register` and `GET /api/v1/grades?process_step=factory`
+for each repository at about 17:38Z; those records are not in this repository]**.
+
+**Steps 11 and 12.** Neither has run:
+- The close leaves step 11, the reviews, open.
+- Q-25 requires step 12, the published rows, whichever branch fires.
+
+**What this sets aside.** By Paul's decision, taken after stage 1's data, this amendment sets
+aside for this campaign part 1's fixed stage-2 release (Q-26, DL-400) and part 2's "No decision is
+taken after stage 1". It changes no other protocol value in part 1, money figure in part 2 or
+reading body in part 5. No reading is amended, and no cell's `next_act` is acted on. The
+next acts stay Paul's.
