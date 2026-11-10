@@ -26,6 +26,9 @@ from a simulation of the registered test, not from data.
 
 **Review.** Two independent reviewers checked the first draft, one on the statistics and one
 against the product's code. This version takes in all fourteen of their findings **[hypothesis — the review ran in Claude Code's session on 2026-11-10; its output is not in this repository]**.
+It was then revised for the five points of an outside review of the pull request (the source of
+the pool counts, the simulation's method, the pilot's overlap with the wave, approval of a repeat
+pilot, and a test that respects batches), and two more reviewers checked that revision **[hypothesis — CodeRabbit's review of #117 and a second review in Claude Code's session, both on 2026-11-10; neither output is in this repository]**.
 
 ## Decision R-1: option B, the combined test
 
@@ -36,7 +39,8 @@ design; it does not cover spending. Paul's separate yes to the spends is under A
 reasoning are kept below as the record of what was weighed.
 
 The approved design assumed 40 qualified click commits in each of XS and S. The served stack
-holds fewer. Read on 2026-11-10 from `GET /api/v1/repos/<repo>/tasks`, `bug.fix` only:
+holds fewer. Read on 2026-11-10 from `GET /api/v1/repos/<repo>/tasks` on the served stack at
+apparatus 2.4, `bug.fix` only **[hypothesis — counts read from the stack by Claude Code on 2026-11-10; the responses are not in this repository]**:
 
 | Cell | Mined | Qualified now | Not qualified, by reason |
 |---|---|---|---|
@@ -62,6 +66,39 @@ added to it afterwards.
 
 Either way the number of commits is cut to fit the money line before the first wave run (part 3),
 so the wave cannot outgrow the line.
+
+**How the two right-hand columns were found.** By simulation, not from data. Each commit got its
+own chance of a clean build, drawn from a beta distribution with a mean of 0.3, 0.5, 0.6 or 0.7
+and a within-commit correlation of 0, 0.25 or 0.5. `A0` made two independent attempts at that
+chance and `S1` two at that chance plus the effect. Commits were independent of each other. The
+test was the exact sign-flip test on per-commit differences, two-sided at 0.05. Each figure is
+the share of 800 to 1,500 simulated waves that rejected, and the ranges span the settings above **[hypothesis — a simulation run in Claude Code's session on 2026-11-10; its script and output are not in this repository]**.
+
+**Revised on 2026-11-10 after outside review; this replaces option B's row above.** Option A's
+row rests on the old test and on pools that still hold the pilot's commits, so it overstates A;
+it is kept as the record only. Three things changed. The pilot's six commits are struck from the
+click lists before anything is counted (part 5), so today's pools give about 81 commits, about
+405 attempts and about $53. Batches are five commits, not ten. The primary test flips whole
+batches, not single commits (part 6), because all the commits of a batch share the same four runs **[hypothesis — counts read from the stack by Claude Code on 2026-11-10 and priced at 13 cents an attempt; the responses are not in this repository]**.
+
+The simulation was repeated for that design, twice, by two scripts written independently. The four
+cells held 24, 21, 16 and 20 commits in 18 batches. Each commit's chance came from a beta
+distribution with a mean of 0.3, 0.5 or 0.7 and a within-commit correlation of 0, 0.25 or 0.5.
+Each of a batch's four runs carried a shock shared by all its commits, drawn from a normal
+distribution with a mean of 0 and a standard deviation of 0, 5 or 10 points. The effect and the
+shock were added to the commit's chance and the sum was cut off at 0 and 1. Each setting ran
+2,000 simulated waves (600 per step for the smallest difference); the first script's seed was
+20261110 **[hypothesis — a simulation run in Claude Code's session on 2026-11-10; its script and output are not in this repository]**. Across the 27 settings and both scripts:
+
+- the test rejected a true null in 2.5% to 4.6% of waves **[hypothesis — a simulation run in Claude Code's session on 2026-11-10; its script and output are not in this repository]**;
+- it detected a 15-point effect in about 58% to 89% of waves **[hypothesis — a simulation run in Claude Code's session on 2026-11-10; its script and output are not in this repository]**;
+- the smallest difference detected four times in five was 13 to 20 points **[hypothesis — a simulation run in Claude Code's session on 2026-11-10; its script and output are not in this repository]**.
+
+The weakest setting is a mean of 0.7 with a correlation of 0.5: there the cut-off at 1 leaves less
+than 15 points of real effect. The old test, flipping single commits, rejected a true null in up
+to 8% of waves with batches of ten and about 6% with batches of five once runs carried a 10-point
+shock; that is why it was replaced. Option B is still the only option with a fair chance of
+detecting a 15-point effect, but that chance is lower than the first table said **[hypothesis — a simulation run in Claude Code's session on 2026-11-10; its script and output are not in this repository]**.
 
 ## 1. The question
 
@@ -130,22 +167,28 @@ the builder; the test author's own budget is separate and is left at the product
    `bug.fix`, `XS` or `S`, the repository's language, `claude_code`, `claude-sonnet-5`,
    `anthropic` — joined as `canonical_cell_key` joins them **[aspiration — the rule the lists will be built by; no list exists yet]**.
 3. The four **full** ordered lists, the exact key string of each, each pool's size and a sha256 of
-   each list are appended to this document in an amendment commit **before the pilot**.
+   each list are appended to this document in an amendment commit **before the pilot**. The
+   amendment marks the pilot's six commits (the last three of each click list) as struck; from
+   then on "the list" means the list without them **[aspiration — this registration's design; nothing is run yet]**.
 4. After the pilot, one per-cell cap `k` is set by the money rule of part 3 and each list is cut
-   to its first `k` commits. `k`, the turn limit and the campaign id are appended in a second
+   to its first `k` commits. `k`, the turn limit, the campaign id, every batch's seeded order and
+   the power of the test on the cut lists (the same simulation, rerun) are appended in a second
    amendment **before the first wave run**. Nothing is added or removed after that.
 
 All four steps are design **[aspiration — this registration's design; nothing is run yet]**.
 
-**Run order.** Commits are taken in batches of ten, in list order, XS and S alternating. Each batch
-is four blind runs filed one after another, never in parallel. A seeded coin per batch (the first
-hex digit of `sha256("crb.wave4.order|" + repo + "|" + batch number)`, even or odd) picks the
-order `A0, S1, S1, A0` or `S1, A0, A0, S1`. Each arm therefore sits equally early and late within
-every batch, and neither drift in the model nor a service outage can line up with one arm by
-design. All blind batches of click run first, then, after the image switch, all blind batches of
-cobra. `S3` runs are filed last and only while the remaining line still covers every outstanding
-blind row at one and a half times the running cost per attempt. The report prints the realised
-schedule with times **[aspiration — this registration's design; nothing is run yet]**.
+**Run order.** Each cell's list is cut into batches of five in list order; a cell's last batch
+may hold fewer, down to one commit. Within a repository the batches of the two sizes are filed
+alternately, XS first, and when one size runs out the other carries on. A batch's number is its
+place in that filing order within its repository, starting at 1. Each batch is four blind runs
+filed one after another, never in parallel. A seeded coin per batch (the first hex digit of
+`sha256("crb.wave4.order|" + repo + "|" + batch number)`, even or odd) picks the order
+`A0, S1, S1, A0` or `S1, A0, A0, S1`. Each arm therefore sits equally early and late within every
+batch, and neither drift in the model nor a service outage can line up with one arm by design. A
+batch that is filed again keeps the order of its first filing. All blind batches of click run
+first, then, after the image switch, all blind batches of cobra. `S3` runs are filed last and
+only while the remaining line still covers every outstanding blind row at one and a half times
+the running cost per attempt. The report prints the realised schedule with times **[aspiration — this registration's design; nothing is run yet]**.
 
 **Row rule.** Fixed here so that no choice about rows can be made after results are seen **[aspiration — this registration's design; nothing is run yet]**.
 
@@ -153,6 +196,9 @@ schedule with times **[aspiration — this registration's design; nothing is run
 - If any of a batch's four runs halts, fails or returns fewer rows than it has commits, the whole
   batch is filed again once, all four runs, and the first filing's rows are set aside unread. The
   trigger is the run's status and row count, never its results.
+- An `S1` build whose author produced no usable test is an ordinary miss. It is not a halted,
+  failed or short run for the rule above: a run that is short only for that reason, read from
+  the run's events and not from its results, is not filed again.
 - After that, a row that is still missing counts as a miss. That covers a commit the product
   drops because it stopped qualifying, an outage, and a halted run.
 - Pilot rows are never counted.
@@ -161,10 +207,11 @@ schedule with times **[aspiration — this registration's design; nothing is run
 
 | Item | Estimate | Line |
 |---|---|---|
-| Pilot | about $3 | inside the stage-1 line |
-| Option A, stage 1 (click) | about $33 | $60 |
-| Option A, stage 2 (cobra) | about $23 | $35 |
-| Option B, whole wave | about $57 | $95 |
+| Pilot | about $3 | inside the $95 line |
+| A repeat pilot, only on Paul's yes | about $3 | inside the $95 line |
+| Option A, stage 1 (click) — not chosen, kept as the record | about $33 | $60 |
+| Option A, stage 2 (cobra) — not chosen, kept as the record | about $23 | $35 |
+| Option B, whole wave | about $53 (about 81 commits once the pilot's six are struck) | $95 |
 
 Estimates use Wave 3's real cost of about 13 cents an attempt. The test author's calls and a
 higher turn limit will add to it; treat each estimate as plus or minus 50%. Costs are counted in
@@ -176,12 +223,14 @@ It must not be a Wave 3 campaign: a campaign that holds reserved readings on a r
 every run that names no reading. Every run also carries its own `max_cost_usd`. A run the campaign
 would refuse is not filed.
 
-**The list is cut to fit the line.** With `c` the pilot's mean product cost per blind attempt,
-both arms pooled and the author's calls included, the wave may hold at most
+**The list is cut to fit the line.** `c` is the pilot's product cost per blind attempt: the mean
+for `A0` and the mean for `S1`, author's calls included, averaged with equal weight, because the
+wave runs the two arms equally. The wave may hold at most
 `N = floor((line − pilot spend) / (5 × 1.5 × c))` commits. `k` is the largest whole number, at
-most 40, for which the four cells (two under option A) cut to `k` hold no more than `N` commits
-together. At 13 cents this leaves today's pools whole; at 20 cents it would cut option B to about
-61 commits, and the power figures of R-1 would fall with it. The half again in the rule pays for
+most 40, for which the four cells cut to `k` hold no more than `N` commits together. Pilot spend
+is the spend of every pilot run, a repeat included, and `c` comes from the pilot whose gates
+passed. At 13 cents this leaves today's pools whole; at 20 cents it would cut the wave to 60
+commits, and the power figures of R-1 would fall with it. The half again in the rule pays for
 re-filed batches and for `S3` **[aspiration — this registration's design; nothing is run yet]**.
 
 **If the money stops the wave anyway,** the primary is **not read**. Under option B that includes
@@ -207,9 +256,11 @@ when every gate before it has passed.
 
 ## 5. Pilot
 
-Eighteen builds on click, about $3: twelve `A0` and six `S1`, transcripts kept. The pilot uses
-the last commits of each click cell's seeded order (six XS and six S for `A0`; the last three of
-each for `S1`). Pilot rows are never counted **[aspiration — this registration's design; nothing is run yet]**.
+Eighteen builds on click, about $3, transcripts kept. The pilot uses the last three commits of
+each click cell's seeded order, six commits in all: two `A0` attempts on each (twelve builds) and
+one `S1` attempt on each (six builds). Those six commits are struck from the click lists in the
+first amendment, before `k`, the cost and the power are worked out, so no commit is in both the
+pilot and the wave. Pilot rows are never counted **[aspiration — this registration's design; nothing is run yet]**.
 
 The wave starts only if all of these hold **[aspiration — this registration's design; nothing is run yet]**:
 
@@ -217,6 +268,8 @@ The wave starts only if all of these hold **[aspiration — this registration's 
 - the test author produces a usable test for at least 5 of 6 commits;
 - no `S1` build is disqualified because of the authored test file itself: the test-files check
   must not fire on the file the harness wrote;
+- if the author produces no usable test for a commit, that build still ends as a row or a
+  recorded miss and its run's status is not halted or failed;
 - one `S1` row's arm label reads `S1@gpt-oss-120b`, and a transcript file exists for a build of
   each arm;
 - the product's cost for the pilot is within 10% of the provider consoles.
@@ -225,9 +278,11 @@ The wave starts only if all of these hold **[aspiration — this registration's 
 builds, both arms counted together, end on the turn limit having run the tests within their last
 five turns. In that case it is doubled, once, for every arm **[aspiration — this registration's design; nothing is run yet]**.
 
-**If a gate fails.** Whatever is changed in the harness or the author's set-up, the pilot commits
-already used are struck from the lists before anything is run again, and the repeat pilot takes
-the next commits from the tail. The `S1` arm is never tuned on commits the wave will count.
+**If a gate fails.** Everything stops. No repeat pilot is filed and nothing more is spent until
+Paul says yes to it, having seen which gate failed and what would change. If Paul does say yes, the
+repeat pilot takes the next three commits from the tail of each click list, and those are struck
+from the lists in a further amendment written before it runs. Its spend counts against the one
+line. The `S1` arm is never tuned on commits the wave will count **[aspiration — this registration's design; nothing is run yet]**.
 
 ## 6. Analysis, fixed in advance
 
@@ -235,13 +290,20 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
 
 1. **Primary.** `A0` against `S1`. For each commit, the share of its two attempts that are clean
    under each arm, and the difference. Statistic: the sum of the per-commit differences. One exact
-   two-sided sign-flip test at 0.05, over click's commits (option A) or over all four cells'
-   commits (option B). Smallest effect of interest: 15 points. This is the only p-value in the
+   two-sided sign-flip test at 0.05 over all four cells' commits, in which the unit that is
+   flipped is the batch: each batch's summed difference keeps or changes its sign as a whole, and
+   every one of the 2^(number of batches) sign patterns is counted. The p-value is the share of
+   those patterns, the observed one included, whose summed difference is at least as far from
+   zero as the observed sum. The commits of a batch share
+   the same four runs, so they are not treated as independent; batches are. Smallest effect of
+   interest: 15 points. This is the only p-value in the
    wave. It is read once, when every batch has been filed (and re-filed where the row rule says
    so). Until then no comparison between the arms is computed, on click or anywhere; rows are
    looked at only for the harness checks.
 2. **The interval.** Beside the p-value, a 95% interval for the mean per-commit difference, found
-   by inverting the same sign-flip test.
+   by inverting the same batch-level sign-flip test under a constant added effect: a candidate
+   value is subtracted from every commit's difference before the batch sums are flipped, and
+   the interval is every candidate the test does not reject at 0.05.
 3. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead. *No 15-point
    effect*: p not below 0.05 and the interval's upper end below 15 points. *Inconclusive*:
    anything else. Under option B the claim is about the average over the listed commits of both
@@ -300,5 +362,6 @@ Harness².
 | When | What |
 |---|---|
 | Before the pilot | Nothing more: R-1 is decided (B), and the restart and the three spends have Paul's yes of 2026-11-10 (Authority). |
+| If a pilot gate fails | A yes or a no to a repeat pilot. Nothing is spent until then. |
 | Before cobra | Cobra builds in the Go builder image, so its stage needs the image switch in `env.sh` and a second restart. Paul's yes covered one restart, so cobra waits for Paul's word on the second. |
 | During the report | Check five sampled patches per repository. |
