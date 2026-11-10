@@ -1,7 +1,12 @@
 # Wave 3 — the registration, prepared and not run — 2026-10-09
 
-**Status.** Prepared, not run. No reading is registered and no run is queued. The stack stays
-down until Paul Glover restarts it (Q-14). Every step in part 5 is marked "not yet run".
+**Status.** Steps 0, 3 and 4 of part 5 have run, and part 6 holds their record: the step-3
+amendment for steps 0 and 3, and the smoke and registration amendments for step 4, which registered
+the campaign and the four readings. The API's `pool_drift` list read `[]` for each reading before
+its cell's first run. The readings' runs, from step 6 on, are recorded at their own steps, not here.
+**[hypothesis — read from the stack's `runs` and `events` tables, the registration responses and
+`GET /api/v1/readings` between 2026-11-04 and 2026-11-10, apparatus 2.4; those records are not in
+this repository]**
 
 **Authority.** Paul Glover's decision 7 of 2026-10-09, recorded as DL-371: Q-11 (ADR-0026's
 values accepted), Q-14 (the restart and the money), Q-06 (each campaign is approved with a stated
@@ -875,16 +880,16 @@ Stage 2 asks for up to $<t> (£<t / 1.35>); the line becomes $108.00 for the cam
 
 ## 5. The steps after the restart
 
-In order. Each is **not yet run**. Claude Code runs a step only on the stack Paul has restarted,
+In order. Each is **not yet run** unless its state says otherwise. Claude Code runs a step only on the stack Paul has restarted,
 and stops and reports at the first step whose success condition fails.
 
 | # | step | who and how | success condition | state |
 |---|---|---|---|---|
-| 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14). The order and the sealed settings are DEPLOYMENT §1.1's: `source ~/crb-stack/env.sh` before `crb migrate`, the UI rebuilt before `crb doctor`, the worker on `--executor docker`; with both processes stopped across a migration (§6.1). Then Paul or Claude Code records here the Id of the builder and sandbox images the deployment names (`docker image inspect --format '{{.Id}}' <image>`), and records them again at each stage start: the treatment pins an image only by its tag (`container.image`), so a changed Id stops the stage (KG-3; red team 2b read `crb-builder-go:local` as `77b43c31…`). The builder container mounts the checkout at `/work`, the sealed set read-only under `/deps` and a `/tmp` tmpfs (`builder_run_args`, `src/crb/builders/container.py`), plus only the deployment's `extra_ro_mounts` and the harness's symlink targets (`ContainerSession.ro_mounts`); step 6 checks the deployment's half, and nothing serves the link targets (KG-2, K8) | `crb doctor` has no `fail`; `/health` reads ok once the builder's login is verified, and exactly one worker is up: in `GET /api/v1/health` the `worker` probe's `data.alive` is 1, and exactly one `data.workers` entry has no `stopped`, with `executor` `docker`, a `worker_id` of the form `<hostname>-<pid>` (`default_worker_id`, `src/crb/server/worker.py`; `CRB_WORKER_ID` overrides it) and that hostname as its `hostname`. A second worker at any later point stops the stage. With one worker, one run executes at a time, claimed in posting order (`Run.created`), so each commit's rows reach the ledger in the order Claude Code posted its runs (F87-2, DL-392) | not yet run |
-| 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos`; then the builder's-account check below (R-13); the sealed `S1` smoke check runs in step 4, once the campaign is registered | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used]; the check passes, and the login's source label and fingerprint are recorded here | not yet run |
-| 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>`, and `<author>` has a known price (else an `S1` run is refused `spend_cap_unpriced`, a stop; K3, part 2) | not yet run |
-| 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click. The parameters are pinned, as values the step-3 amendment records: each mine and qualify body as sent (`pool`, `limit`, `max_candidates`, `ref`, and no `task_ids`), and the `since` and `taxonomy` step 4's bodies leave out (empty: every qualified commit, choice (c), and the global vocabulary); none changes after step 3. From then on: no label run, CLI label edit or 2.4 replay on cobra or click between step 3 and the end of step 11, but the runs step 6 files under the campaign and step 4's smoke run | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here. The step-3 amendment records, for each cell, the qualified-set sha256 (its qualified commits in seeded order, hashed as `pool_sha256` is) and where each label came from (classifier or human), and the result of K1's audit (part 2) | not yet run |
-| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then the sealed `S1` smoke check below, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Before the first registration, Claude Code records here, for cobra and for click, the loop's switch and the changes in force — `switch`, `overlay` and each entry's `change` from `GET /api/v1/learn/register?repo=<repo>` — the state step 10 restores; and checks that each repository's own `checks` block sets `format_step: false` (`GET /api/v1/repos/<repo>`, DL-410), setting it with `PUT /api/v1/repos/<repo>` and `{"checks": {"format_step": false}}` if it does not. **The sealed `S1` smoke check.** After the campaign is registered and before cobra's first reading, Claude Code files one `S1` run under the campaign with no `reading_id`, on a cobra commit qualified at step 3 that is in no Wave 3 pool (another class or size) and whose change is in none, else that reading would be refused `pool_seen`: `{"repo": "cobra", "kind": "blind", "mode": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "arm": "S1", "task_ids": ["<that commit>"], "learning": "off", "budget_profile": "default", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. It sits here because once a `reserved.v1` reading is on the repository, a campaign run with no `reading_id` is refused 409 `reading_required`; a run with no reading reserves and pins nothing. Its spend counts toward the campaign | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, `attempt_rule` `reserved.v1`, `max_reruns` 0 and `budget_profile` `default` (part 1's attempt rule; a body naming another rule or re-run count is refused 422 `validation_error`), the `pool` in seeded order, `pool_sha256`, `pool_rule`, and the `pool_posture_id` and `pool_qualifications` the pool is pinned to (its commits' qualification records from step 3, never the miner's `gold_clean`; P-797); `GET /api/v1/readings?repo=<repo>` lists each with `pool_drift` `[]`, its cell's budget spent at 2.10% of 5%. Each reading's `checks_arm` reads `off`, the arm of the repository's own `checks` block; a reading on any other arm stops the campaign before any spend. A refusal (`campaign_unknown`, `lint_disabled`, `reading_checks_overlay`, `pool_seen` — under `reserved.v1`, any 2.4 replay row on a pool commit or its change, under any arm or test author, P-797 — `budget_spent`, `pool_not_blind`, `invalid_reading`), or a reading served with a `pool_drift` other than `[]` (`state` `undecided`: a pool commit relabelled out of its cell, or a pinned record missing or not qualified, P-797), stops the campaign before any spend; `lint_disabled` (`detail` `{repo, reason}`, nothing written) answers any registration while the repository's lint is switched off, and a `reserved.v1` reading hashes the repository's lint configuration as `lint_digest` (P-796). `reading_checks_overlay` (`detail` `{overlay_arm, repo_arm}`, nothing written) answers a registration while the loop's overlay moves the repository's checks arm off its own block's, so the precondition above did not hold: a reading frozen then would rest on a loop change (RT2B-2). On an unsealed deployment `invalid_reading` names what is unsealed in its `detail`: both executors, `{sandbox_executor, builder_executor}`, when the sandbox is on docker and the builder on the host; the posture class alone, `{posture_class}`, when the sandbox is not on docker, because that refusal comes first. A `409` `reading_exists` (`detail` `{reading_id}`, nothing written, nothing spent) answers a reading already registered, a retried request under any second or actor: it is a retry, not a stop; read the reading back with `GET /api/v1/readings?repo=<repo>`. The smoke run's row stops the campaign before any reading is registered when its error, after its `authoring:` prefix, reads "the authored test … is not RED at the parent: it timed out" or "… failed without attributable test ids", or starts "harness error proving RED:" (`src/crb/builders/adapter.py`): the sealed posture cannot prove an `S1` test RED there. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | not yet run |
+| 0 | restart the stack on merged `main` | Paul, by handbook page 08's steps; the container runtime is colima, so step 7 there is `colima start` (HB-14). The order and the sealed settings are DEPLOYMENT §1.1's: `source ~/crb-stack/env.sh` before `crb migrate`, the UI rebuilt before `crb doctor`, the worker on `--executor docker`; with both processes stopped across a migration (§6.1). Then Paul or Claude Code records here the Id of the builder and sandbox images the deployment names (`docker image inspect --format '{{.Id}}' <image>`), and records them again at each stage start: the treatment pins an image only by its tag (`container.image`), so a changed Id stops the stage (KG-3; red team 2b read `crb-builder-go:local` as `77b43c31…`). The builder container mounts the checkout at `/work`, the sealed set read-only under `/deps` and a `/tmp` tmpfs (`builder_run_args`, `src/crb/builders/container.py`), plus only the deployment's `extra_ro_mounts` and the harness's symlink targets (`ContainerSession.ro_mounts`); step 6 checks the deployment's half, and nothing serves the link targets (KG-2, K8) | `crb doctor` has no `fail`; `/health` reads ok once the builder's login is verified, and exactly one worker is up: in `GET /api/v1/health` the `worker` probe's `data.alive` is 1, and exactly one `data.workers` entry has no `stopped`, with `executor` `docker`, a `worker_id` of the form `<hostname>-<pid>` (`default_worker_id`, `src/crb/server/worker.py`; `CRB_WORKER_ID` overrides it) and that hostname as its `hostname`. A second worker at any later point stops the stage. With one worker, one run executes at a time, claimed in posting order (`Run.created`), so each commit's rows reach the ledger in the order Claude Code posted its runs (F87-2, DL-392) | restarted; part 6 holds the images and their source, and `/health` waits for the builder's login |
+| 1 | confirm the instrument | Claude Code: `crb_version` (MCP) or `GET /version`; `GET /api/v1/repos`; then the builder's-account check below (R-13); the sealed `S1` smoke check runs in step 4, once the campaign is registered | apparatus `2.4`; the repositories `cobra` and `click` listed [hypothesis — the names the 2026-09-25 export used]; the check passes, and the login's source label and fingerprint are recorded here | run; part 6's registration amendment holds the record and when each check ran |
+| 2 | fix the test author, choice (a) | Claude Code reads `raw.factory.test_author` from `GET /api/v1/settings` (admin); if it is empty or names `claude-sonnet-5`, Paul sets `CRB_FACTORY__TEST_AUTHOR` and restarts the worker | a `builder:model[:provider]` whose model is not `claude-sonnet-5`; its canonical model recorded here as `<author>`, and `<author>` has a known price (else an `S1` run is refused `spend_cap_unpriced`, a stop; K3, part 2) | run; part 6's registration amendment holds `<author>`, its price and when it was read |
+| 3 | mine and qualify each repository, at no model cost | the Posture panel at `/repos/cobra` and `/repos/click` ("Qualify for this posture — no model spend"), or `crb_start_run` with `{"kind": "mine", "repo": "cobra"}` then `{"kind": "qualify", "repo": "cobra"}`, and the same for click. The parameters are pinned, as values the step-3 amendment records: each mine and qualify body as sent (`pool`, `limit`, `max_candidates`, `ref`, and no `task_ids`), and the `since` and `taxonomy` step 4's bodies leave out (empty: every qualified commit, choice (c), and the global vocabulary); none changes after step 3. From then on: no label run, CLI label edit or 2.4 replay on cobra or click between step 3 and the end of step 11, but the runs step 6 files under the campaign and step 4's smoke run | each run `succeeded` with a `cost_usd` of 0; `GET /api/v1/repos/<repo>/posture` shows `executor` `docker`, a `posture_class` of `docker/<tree>/sealed` and an empty `stale_reason`; each cell holds at least 20 qualified `bug.fix` commits, the first look, and each cell's count is noted here. The step-3 amendment records, for each cell, the qualified-set sha256 (its qualified commits in seeded order, hashed as `pool_sha256` is) and where each label came from (classifier or human), and the result of K1's audit (part 2) | run; part 6's step-3 amendment holds the counts and their source, and reconciles the one cancelled run. Three cells hold at least 20 and cobra XS holds 17 |
+| 4 | register the campaign, then the four readings | Claude Code, over HTTP with an operator session (`POST /api/v1/auth/login`, then `X-CSRF-Token` from the `crb_csrf` cookie, `__Host-crb_csrf` under TLS): first `POST /api/v1/campaigns` with part 2's body, then the sealed `S1` smoke check below, then `POST /api/v1/readings` for each reading; no screen and no MCP tool registers a reading, and `crb reading register` writes only a local file. The body is below; it states the `hypothesis` and the `smallest_effect` and names the campaign (`campaign_id`), so the campaign comes first (DL-382). A reading registers only on a sealed deployment, the builder included: `CRB_SANDBOX__EXECUTOR` and `CRB_BUILDER__EXECUTOR` both `docker` (DL-373). Before the first registration, Claude Code records here, for cobra and for click, the loop's switch and the changes in force — `switch`, `overlay` and each entry's `change` from `GET /api/v1/learn/register?repo=<repo>` — the state step 10 restores; and checks that each repository's own `checks` block sets `format_step: false` (`GET /api/v1/repos/<repo>`, DL-410), setting it with `PUT /api/v1/repos/<repo>` and `{"checks": {"format_step": false}}` if it does not. **The sealed `S1` smoke check.** After the campaign is registered and before cobra's first reading, Claude Code files one `S1` run under the campaign with no `reading_id`, on a cobra commit qualified at step 3 that is in no Wave 3 pool (another class or size) and whose change is in none, else that reading would be refused `pool_seen`: `{"repo": "cobra", "kind": "blind", "mode": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "arm": "S1", "task_ids": ["<that commit>"], "learning": "off", "budget_profile": "default", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`. It sits here because once a `reserved.v1` reading is on the repository, a campaign run with no `reading_id` is refused 409 `reading_required`; a run with no reading reserves and pins nothing. Its spend counts toward the campaign | `201` for the campaign, with `campaign_id`, `ceiling_usd` 108.00 and `line_usd` 54.00. `201` for each reading, with `reading_id`, the campaign's `campaign_id`, `attempt_rule` `reserved.v1`, `max_reruns` 0 and `budget_profile` `default` (part 1's attempt rule; a body naming another rule or re-run count is refused 422 `validation_error`), the `pool` in seeded order, `pool_sha256`, `pool_rule`, and the `pool_posture_id` and `pool_qualifications` the pool is pinned to (its commits' qualification records from step 3, never the miner's `gold_clean`; P-797); `GET /api/v1/readings?repo=<repo>` lists each with `pool_drift` `[]`, its cell's budget spent at 2.10% of 5%. Each reading's `checks_arm` reads `off`, the arm of the repository's own `checks` block; a reading on any other arm stops the campaign before any spend. A refusal (`campaign_unknown`, `lint_disabled`, `reading_checks_overlay`, `pool_seen` — under `reserved.v1`, any 2.4 replay row on a pool commit or its change, under any arm or test author, P-797 — `budget_spent`, `pool_not_blind`, `invalid_reading`), or a reading served with a `pool_drift` other than `[]` (`state` `undecided`: a pool commit relabelled out of its cell, or a pinned record missing or not qualified, P-797), stops the campaign before any spend; `lint_disabled` (`detail` `{repo, reason}`, nothing written) answers any registration while the repository's lint is switched off, and a `reserved.v1` reading hashes the repository's lint configuration as `lint_digest` (P-796). `reading_checks_overlay` (`detail` `{overlay_arm, repo_arm}`, nothing written) answers a registration while the loop's overlay moves the repository's checks arm off its own block's, so the precondition above did not hold: a reading frozen then would rest on a loop change (RT2B-2). On an unsealed deployment `invalid_reading` names what is unsealed in its `detail`: both executors, `{sandbox_executor, builder_executor}`, when the sandbox is on docker and the builder on the host; the posture class alone, `{posture_class}`, when the sandbox is not on docker, because that refusal comes first. A `409` `reading_exists` (`detail` `{reading_id}`, nothing written, nothing spent) answers a reading already registered, a retried request under any second or actor: it is a retry, not a stop; read the reading back with `GET /api/v1/readings?repo=<repo>`. The smoke run's row stops the campaign before any reading is registered when its error, after its `authoring:` prefix, reads "the authored test … is not RED at the parent: it timed out" or "… failed without attributable test ids", or starts "harness error proving RED:" (`src/crb/builders/adapter.py`): the sealed posture cannot prove an `S1` test RED there. The campaign id, the reading ids and the pool sizes are added here in an amendment commit | run; part 6's smoke and registration amendments hold the campaign, both smoke runs, the four readings and the `pool_drift` reads |
 | 5 | turn the loop on for `A0+L`, choice (b) | Paul or Claude Code: the switch on the Learn page, or `PUT /api/v1/learn/switch?repo=<repo>` with `{"auto_apply": "config", "reason": "Wave 3, the A0+L arm (ADR-0026 item 13; DL-371)"}`; the state before is the one recorded at step 4. Then Claude Code reads each repository's loop chain (`GET /api/v1/learn/register?repo=<repo>`) for an applied change to `checks.format_step` still in force (RT2B-1), and records the changes in force (each entry's `change`, which each later run stamps as its `extra.learning`) and the repository's factory rows (`total` from `GET /api/v1/grades?repo=<repo>&process_step=factory`), and records both again before each `A0+L` run. From step 5 until step 10 restores the switch, or until the stage is terminal, the only runs on cobra and click are the registered readings' runs: no factory run, calibration build or intake; PLAN's cobra calibration builds run after stage 1 is terminal (RT2B-3) | the Learn page reads `config` for cobra and for click. An applied `checks.format_step` change in force while the repository's own `checks` block does not set the key stops the campaign before any spend (RT2B-1). A factory row or a loop change that no registered reading run made stops the stage (RT2B-3) | not yet run |
 | 6 | queue the runs, cell by cell, under part 2's rule | Claude Code, after the builder's-account check below passes at the start of each session, `crb_start_run` (`POST /api/v1/runs`), which posts the body unchanged; runs are queued with `POST /runs` only: `POST /api/v1/learn/remeasure/queue` files no run under a campaign, so the product refuses it for these readings (409 `campaign_required`). Every body carries `"reading_id": "<the cell's reading>"`, `"campaign_id": "<the campaign>"` and `"max_cost_usd": <cap>`; a body without `campaign_id` is refused 409 `campaign_required` when it carries `reading_id`, and is otherwise queued outside the campaign, and the reading never sees its rows, whatever their failure kind; a body with `campaign_id` but no `reading_id` is refused 409 `reading_required` when the campaign holds a reserved.v1 reading on that repository (`detail` `{campaign_id, reading_ids}`, nothing queued) — every body here carries `reading_id` (DL-382; P-792). **`S3`**: the cell's request from `crb_remeasure_plan` (`GET /api/v1/learn/remeasure?repo=<repo>`; nothing queued), plus those three and `"budget_profile": "default"`, each look's request filed as one run, as the plan serves it (PW-4); a reading the plan lists with `checks_arm_moved` `{frozen, current}` has no request, because its run would halt `reading_checks_arm_mismatch`, so the repository's frozen checks arm is restored or the stage ends (RT2B-1). **`A0`**: `{"repo": "<repo>", "kind": "blind", "builder": "claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids": [the first 16 commits the arm enrols], "learning": "off", "budget_profile": "default", "reading_id": "<reading>", "campaign_id": "<campaign>", "max_cost_usd": <cap>}`; those are the arm's `commits` in `GET /api/v1/readings`, the pool in seeded order less each commit whose registered change an earlier one holds, so a task outside them is skipped `task_not_enrolled`, and `A0+L`'s are among them (RT2B-5). **`A0+L`**: the same with no `learning` and no `budget_profile`. `A0+L` files its `task_ids` in the seeded order: the commits of the `A0` body it has not reserved yet, first to last, or the first of them; a subset such as `A0`'s misses, another order or a commit outside the first 16 is refused 422 `reading_run_fields` (`detail.fields` `["task_ids"]`, nothing queued), and again at claim (NEW-1, round 5). **`S1`**: its request from the remeasure plan once `S3` delivers, with its `task_ids` or `limit`, plus those three and `"budget_profile": "default"`. Re-filing a run never re-rolls, because commits already reserved are skipped (`run.task_skipped commit_reserved`). Post a run on an arm of a reading only after the last run on that arm of that reading, or of another reading naming one of its commits, has finished: read its status in `GET /api/v1/campaigns/{id}` (`runs[].status`) or `GET /api/v1/runs/{run_id}` first, and never re-post while that run is `queued` or `running`. The product refuses such a re-post 409 `campaign_arm_in_flight`, naming the live run (`detail.run_id`, `detail.status`), and queues nothing (F87-2, DL-392). A run is still `running` until the worker has stopped it, cancelled or not. No body names `outage_stop` or `env_stop` other than 1: a reading run halts at its first outage or environment row, its in-flight commit a miss (reserved.v1) and its unreserved commits pending, run later by a re-filed body; any other value is refused 422 `reading_run_fields`, and again at claim (PW-7). Before each run, item 5 of the builder's-account check below. After each `A0+L` run, every row's `checks` label (of the form `fmt=1:repo;gate=0:default;api=1:run;cfg=<version>`, `crb.core.checks`) reads `fmt=0` and `api=0`, and `GET /api/v1/readings` shows the reading's `checks_arm` unchanged; otherwise the stage stops and Claude Code reports it (RT2B-1). A `system/run.reclaimed`, `system/run.abandoned` or `system/run.claim_lost` event on any run stops the stage, and Claude Code reports it (KG-7). Stop between tasks, never mid-attempt, because a cancel after a reservation costs the commit | each run is admitted (`201`) or refused before it is queued (`campaign_ceiling`, `campaign_cost_unknown`, `campaign_overrun`, `unplaced_spend` — the campaign is stopped, P-798 — `campaign_arm_in_flight` — a run of the same arm still live on one of its commits, F87-2 — `campaign_cap_required`, `campaign_s1_unbounded`, `campaign_required`, `campaign_unknown`, `reading_required`, `reading_unknown`, `reading_run_fields` — a field or value the reading does not register, P-792 — `reading_unsealed`, `reading_posture_mismatch`, `lint_disabled` — the repository's lint switched off, P-796 — `pool_drift` — the reading's pool moved since step 4, P-797); a queued run whose repository's lint is switched off, or whose reading's pool drifts or whose live posture is no longer the reading's `pool_posture_id`, after submit ends `failed` before anything is reserved (`system/run.refused`, `code: lint_disabled` or `pool_drift`), its commits still pending; a reading run whose resolved checks arm differs from the reading's frozen arm halts `reading_checks_arm_mismatch` before it reserves (`system/run.halted`, `detail` `{frozen, run}`), and the commit stays pending; an admitted run ends `succeeded`, or `failed` with `stopped_code: spend_cap`, or `failed` at its first outage row (`system/run.outage_stop`) or environment row (`system/run.environment_stop`) with one reserved commit missed and the rest pending (PW-7); its rows carry the arm queued, at rung `r1`, apparatus 2.4, in the sealed posture; each counted row carries `reservation` and `treatment` labels; `GET /api/v1/readings` counts the run's commits under that arm — only rows of runs the campaign admitted count, and `admitted_runs`, which every reading of the campaign serves, rises by one for each run the campaign admits — and `GET /api/v1/campaigns/{id}` lists the run; `pinned_treatment` is served after the first run on each repository, and its deployment's `container.extra_ro_mounts` reads `{}`, else the stage stops (KG-2) | not yet run |
 | 7 | read the tally | Claude Code, after each run: `GET /api/v1/campaigns/{id}` (`spent_usd`, `authoring_usd`, `held_usd`, `left_usd`, `stopped`); `GET /api/v1/runs/{id}` and `crb_run_events` only to place a figure against a run | `stopped` is `null` while the campaign runs, and spent and held stay at or under the stage's line; otherwise part 2's stop, which `stopped` serves as `{code, message, run_ids}` | not yet run |
@@ -993,3 +998,349 @@ names: cobra S (`go`), click XS and click S (`python`). `pool`, `since`, `taxono
 and `org_class` are left out, so the pool is every qualified commit of the cell (choice (c)), the
 class set is the global vocabulary, and the posture class is the deployment's own, which must be
 sealed.
+
+---
+
+## 6. The amendments
+
+Each amendment records what a step found. None changes a protocol value in part 1, the money in
+part 2 or a reading's body in part 5. A later amendment adds to this part and leaves the earlier
+ones as they stand.
+
+### The step-3 amendment, 2026-11-04
+
+Step 3's runs ran from 2026-10-23 to 2026-11-04. Its success condition is met for three of the four
+cells and fails for cobra XS, which holds 17 qualified commits against the 20 **[hypothesis —
+counted from the stack's qualification records on 2026-11-04, apparatus 2.4; those rows are not in
+this repository]**.
+
+**The stack.** Paul Glover restarted the stack on `46c0a36d74eb968f1c647172287cb002a1659661` on
+2026-10-25 at 17:17Z, apparatus 2.4 **[hypothesis — the commit and the time from the stack
+checkout's reflog (`HEAD` moved to `46c0a36d` at 17:16:51Z) and the stack's `workers` table (the
+worker started at 17:17:01Z); the apparatus from the `apparatus_version` stamped on that worker's
+runs; read on 2026-11-10, those records are not in this repository]**. That commit is the pull request Paul approved at this step,
+[#100](https://github.com/Jita81/commit-replay-bench/pull/100): it seals each commit's pinned ruff
+as a read-only set for belt 5 under docker, because `grade.py` runs that belt too, and without it
+every Python trial would have ended in a harness error. Its effect on click is below.
+
+**The runs, with each body as sent.** All ran under `docker/copy/sealed`. None holds an evidence
+pack, so none made a model call and each cost $0. `pool`, `max_candidates`, `ref` and `task_ids`
+were sent in no body, and `limit` only where shown. `since` and `taxonomy` stay empty, as step 4's
+bodies leave them out: every qualified commit, choice (c), and the global vocabulary. This paragraph
+and the table under it are **[hypothesis — read from the stack's `runs`, `events` and `evidence`
+tables on 2026-11-04, n=9 runs, every run created on cobra or click since 2026-10-23, apparatus 2.4;
+those rows are not in this repository]**.
+
+| run | body as sent | finished (UTC) | result |
+|---|---|---|---|
+| `a8ce0037` | `{"kind": "mine", "repo": "cobra"}` | 2026-10-23 16:17 | succeeded; 25 found, 36 known |
+| `e325acee` | `{"kind": "qualify", "repo": "cobra"}` | 2026-10-23 16:49 | succeeded; replaced by `527f9f7f` |
+| `86995592` | `{"kind": "mine", "repo": "click"}` | 2026-10-23 18:11 | cancelled; 1 found, 36 known |
+| `60c263ae` | `{"kind": "mine", "repo": "cobra"}` | 2026-10-25 11:22 | succeeded; 25 found, 61 known |
+| `6447208d` | `{"kind": "mine", "repo": "click"}` | 2026-10-25 11:33 | succeeded; 25 found, 37 known |
+| `527f9f7f` | `{"kind": "qualify", "repo": "cobra"}` | 2026-10-25 12:53 | succeeded; 74 qualified of 86 |
+| `40ab0b89` | `{"kind": "qualify", "repo": "click"}` | 2026-10-25 13:00 | succeeded; 0 of 62, 51 of them `QUAL_GOLD_LINT`; replaced by `a440b494` |
+| `290d508f` | `{"kind": "mine", "repo": "click", "limit": 150}` | 2026-10-25 18:05 | succeeded; 150 found, 62 known |
+| `a440b494` | `{"kind": "qualify", "repo": "click"}` | 2026-11-04 16:17 | succeeded; 87 qualified of 212 |
+
+`86995592` is the one run that did not succeed. Claude Code cancelled it on 2026-10-23, after Paul
+answered the stop report that offered it with "Just do what's sensible". Click's baselines were
+taking about 800 s against a 900 s timeout, so the mine would have run for about 36 hours, with
+nearly every candidate ending `QUAL_BASELINE_TIMEOUT`. Mine `6447208d` replaced it and succeeded. The
+one commit the cancelled run found is size L, outside the four cells. So step 3's condition, each
+run `succeeded` with a `cost_usd` of 0, is read on the runs that count: mines `a8ce0037`, `60c263ae`,
+`6447208d` and `290d508f`, and qualifies `527f9f7f` and `a440b494`. All six succeeded **[hypothesis
+— read from the stack's `runs` and `events` tables on 2026-11-04, n=6 runs, apparatus 2.4, with the
+timings from the step-3 stop report of 2026-10-23; those rows and that report are not in this
+repository]**.
+
+The records that count are `527f9f7f`'s for cobra and `a440b494`'s for click. The label table,
+`class_labels`, holds no row at all, and no run other than these has touched cobra or click since
+2026-10-23 **[hypothesis — read from the stack's `runs` and `class_labels` tables on 2026-11-04,
+apparatus 2.4; those rows are not in this repository]**.
+
+**The cells.** Each pool is every qualified `bug.fix` commit of the cell (`all-qualified`). The
+first hash is the qualified-set sha256, the qualified commits in seeded order, hashed as
+`pool_sha256` is. The second is the reserved pool's. Every label came from the classifier, by intent
+or by path; none came from a human. K1's audit (part 2) passed in all four cells: each commit's
+`red.failing ⊆ baseline_failing − flaky`, with no failure. This paragraph and the table under it
+are **[hypothesis — counted by `qualified_sets.py` and `cell_breakdown.py` from the stack's
+qualification records on 2026-11-04, n=4 cells, apparatus 2.4; those rows are not in this
+repository]**.
+
+| cell | candidates | qualified | labels (intent, path) | qualified-set sha256 | reserved-pool sha256 |
+|---|---:|---:|---|---|---|
+| cobra XS (`go`) | 23 | **17** | 9, 8 | `6fcbb961ef8714403cd512c51f557f4c92f3a1cf693832e2c3b19375e9dd2e06` | `26047d89205784f1d58c3af2cb47d5fc85fc1bc1d3fc5364f43510212fde70bc` |
+| cobra S (`go`) | 29 | 27 | 6, 21 | `afafd0162113d1ffc2b1fafcfbe0d54935b7f170a9e7bf4254b99858beda82cf` | `7662393a27074ee2b1903f135478acc3fd60f00e11b9118acbd9650ddc56942c` |
+| click XS (`python`) | 75 | 30 | 9, 21 | `8b91d15d62c0d38ae2b6ff8757e5093f84c322ee51b0e73eb8b0bec65ea44e3c` | `0170f75e4524b22cae0037c59f3187ad5fcd15f69ade1346c4234af692f6f5af` |
+| click S (`python`) | 81 | 38 | 6, 32 | `7bd244ab20453889dca774ef095f11f0b5a1948d19ab7672dc631973dc8d343d` | `5c27a2aed8e85c0f2b5932cbccc52211cf0b9dd183d6ba138e2a919e17b998ee` |
+
+The postures are `pst_2b3f4ee45151cff77b95f85b` (cobra) and `pst_04100cf00f88d266c820b24e` (click).
+Both postures' records are at apparatus 2.4, so each posture's `stale_reason` is empty.
+
+**Cobra XS is short.** Step 3's condition is at least 20 in each cell. Cobra XS's six skips are five
+`QUAL_GOLD_NOT_GREEN` and one `QUAL_NOT_RED` **[hypothesis — counted from the stack's qualification
+records on 2026-11-04, apparatus 2.4; those rows are not in this repository]**. Step 3 stopped and
+reported it, and Paul's decision of 2026-10-25 was to report a short cobra cell the same way and not
+amend it, so this amendment changes nothing about the cell. Paul's go of 2026-11-04, relayed by the
+carve-out session, was for Wave 3 as registered, so the cell stays as it is.
+
+**What 17 does to the cell.** The first look needs 20 commits, so `look.v1` reads the arm
+`undecided` before any row exists, and the cell cannot read `deliver`. The remeasure plan lists an
+`undecided` arm under `cannot_clear` with next act `mine` and builds no request, and step 6 files
+`S3` only as the plan serves it. So cobra XS gets no `S3` run and no `S3` spend, no row of that arm
+is read, `insufficient` is not reached, and `S1` reads `stopped`. The plan's own reason says the arm
+"may still read insufficient as those run"; with no request served, nothing runs. The cell's spend
+is `A0` and then `A0+L` on their first 16 commits. All 17 hold distinct registered changes, so `A0`
+enrols its full 16. The other three cells repeat no change either: `S3` reads 27, 30 and 38 commits,
+and `A0` and `A0+L` read 16 in each **[hypothesis — read from the code at 46c0a36d, run on a fixture
+reading of 17 commits with no rows, and counted with `_enrolled` over the tasks' `change_id` labels
+on 2026-11-04, apparatus 2.4; those labels are not in this repository, and the real plan cannot be
+read until the reading exists, so step 6 reads it before cobra XS's first run]**.
+
+**The order when the plan serves no `S3`.** Choice (e) and part 3's order post a cell's `A0` run
+only once its `S3` run (and `S1`'s, as the remeasure plan serves it) is terminal. If the plan serves
+no `S3` request for cobra XS, no `S3` or `S1` run exists to become terminal, so read literally the
+condition is never met and the cell's `A0` run is never posted. The reading this record proposes is
+that the condition binds only a run the plan serves: an arm with no request has no run to wait for,
+so cobra XS's first run is `A0`'s, its `A0+L` run follows once `A0`'s is terminal, and the cells'
+order is unchanged. That reading is not part of this amendment, which changes nothing about the
+cell. It is Paul's to confirm, because Paul's decisions leave the cells unamended (**Cobra XS is
+short.**, above). Until Paul confirms it or decides otherwise, no run is posted on cobra XS, and
+step 6 records which reading was taken **[hypothesis — read from choice (e) and part 3's order at
+this commit; that the plan serves cobra XS no `S3` request is the reading above, not yet observed,
+because the reading does not exist yet]**.
+
+**The changes made around qualification.** Both are configuration, and neither changes a protocol
+value.
+
+- Click's `runner_opts.deps_lock` was set to `[["uv.lock", "requirements/tests.txt"]]` on Paul's
+  instruction, before mine `290d508f`.
+- `checks.format_step` was set to `false` on cobra and on click at 2026-11-04 16:20Z (DL-410). It
+  was unset on both. Reading the qualified sets again afterwards gave byte-identical results
+  **[hypothesis — `qualified_sets.py` re-run at 16:21Z and again later that day, each output
+  compared with `cmp` against the 16:17Z output, n=4 cells, apparatus 2.4; those outputs are not in
+  this repository]**.
+
+**What the seal did to click.** `QUAL_GOLD_LINT` fell from 51 to 2 once #100 was serving. Both of
+the 2 are size M, outside the four cells **[hypothesis — counted from the stack's qualification
+records on 2026-11-04, apparatus 2.4; those rows are not in this repository]**.
+
+**What the pools can speak for.** Click's skips fall mostly on its older commits, so its readings
+describe its recent commits, not its whole history. Qualified commits by year, in the table under
+this paragraph, **[hypothesis — counted by year authored from the stack's qualification records on
+2026-11-04, n=68 commits, apparatus 2.4; those rows are not in this repository]**:
+
+| cell | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|---:|
+| click XS | 4 | 0 | 7 | 6 | 13 |
+| click S | 0 | 3 | 8 | 9 | 18 |
+
+All 42 of click's `PROVISION_BUILD_REQUIRED` skips are commits of 2018 to 2020 whose locks pin
+`iniconfig==1.0.0`, which the package index no longer offers. Of the 79 `QUAL_GOLD_NOT_GREEN` across
+all sizes, 50 are from 2021. The two cells hold 60 of the 79, and 41 of those 60 are from 2021. Their
+cause was not found: the record says only that the gold target was not green. Cobra's mining stopped
+at 2018-02-25, and its history goes back to 2013 **[hypothesis — counted from the stack's
+qualification records on 2026-11-04, n=121 skips, apparatus 2.4, with cobra's first commit read from
+the stack's clone; those rows are not in this repository]**.
+
+**The images.** Recorded on 2026-10-23 and read again on 2026-11-04 at 16:18Z, all unchanged
+**[hypothesis — `docker image inspect --format '{{.Id}}'` on n=5 tags, apparatus 2.4, at both times;
+the images are not in this repository]**.
+
+| tag | Id |
+|---|---|
+| `crb-builder-go:local` | `sha256:77b43c312c7a7b3f60af8420d4b6e891a274b9a6fcf57215f70284b020fada95` |
+| `crb-sandbox-go:local` | `sha256:45c5184e77d9806babafd03219d7fac9d8eaaf2ebe949a49dae76d110ed17874` |
+| `crb-builder:local` | `sha256:116f523d26d208f215081eef810fa83a6aaa8af21338c04a589304809808010b` |
+| `crb-sandbox-python:local` (click's grading image) | `sha256:50081bdcf80398259afd2cbd6fddc6ea5e908c030909794c0e347240351f4117` |
+| `crb-sandbox-go:main-8ab88ad` (cobra's grading image) | `sha256:0e796b7e21a0d6dc7dde96e95420f0f6928a77b3e6d1ede1190b05266157f69c` |
+
+**Not in this amendment.** Later amendments record, at their steps: the login's source and
+fingerprint, the Workspace's name and limit, the test author, the campaign and reading ids, the
+Learn state, the smoke run's outcome, the image click's builds run in (the stack's builder image
+has no Python, so that is settled before click's first run), the stage-1 report and part 4's
+stage-2 statement.
+
+### The smoke amendment, 2026-11-09
+
+**The first smoke run.** Step 4's sealed `S1` smoke check ran as run
+`0a7048daf7cf4e5a8297c0f03d3c939f` under campaign `cmp_8e1f261023db8a26a40e0e84`, on cobra commit
+`6b0bd3076cfafd1c108264ed1e4aa0c0fe3f8537`, with a $5 cap. It finished `failed` at 22:06:49Z in the
+sealed posture (`docker/copy/sealed`, apparatus 2.4, image `crb-sandbox-go:main-8ab88ad`), with one
+row and the error "authoring: the authored test 'args_minus_first_x_test.go' is not RED at the
+parent: it passes at the parent". That is a quality miss, not one of the three errors step 4 names
+as a stop, so the campaign goes on **[hypothesis — read from `GET /api/v1/runs/0a7048da…` and its
+22 events at 22:11Z on 2026-11-09; the row is in the stack's ledger, not in this repository]**.
+
+**What it did not check.** The test author ran inside the seal: one call to `gpt-oss-120b` on
+Cerebras wrote the test, the test ran sealed, and the commit's own suite ran green as the gold
+control. The builder did not run. Authoring failed before the build, so the build has 0 turns and
+costs $0, and the check that the product's tally for Sonnet 5 agrees with the Console's Usage for
+the builder's key has nothing to compare **[hypothesis — the run's `build.done` event reads
+`turns` 0, `tokens_in` 0, `tokens_out` 0 and `cost_usd` 0.0; its `author.attempt` event reads
+`cost_usd` 0.00169664 at the product's price]**.
+
+**A second smoke run.** Paul approved a second smoke run on 2026-11-09 ("Yes, A0 smoke"), to run
+the builder inside the seal and give the tally a cost to compare. It is the `A0` arm's body with no
+`reading_id`, on the same commit, which step 4 chose outside every Wave 3 pool and which already
+holds a 2.4 replay row: `{"repo": "cobra", "kind": "blind", "mode": "blind", "builder":
+"claude_code", "model": "claude-sonnet-5", "provider": "anthropic", "task_ids":
+["6b0bd3076cfafd1c108264ed1e4aa0c0fe3f8537"], "learning": "off", "budget_profile": "default",
+"campaign_id": "cmp_8e1f261023db8a26a40e0e84", "max_cost_usd": 5}`. Its spend counts toward the
+campaign. It names no reading and no reading exists yet, so no pool moves **[hypothesis — the body
+follows step 6's `A0` body less `reading_id`; no reading is registered on 2026-11-09 at 22:13Z]**.
+
+**How the second run is read.** It goes on when the run finishes in the sealed posture with the
+builder's turns above 0 and its cost known, whether or not its row is clean. Any other end (the
+builder not starting, its cost unknown, a harness error) stops Wave 3 before any reading is
+registered, and Claude Code reports it. Paul then compares the run's cost with the Console's Usage
+for the builder's key, the Sonnet 5 line only: the verify press at submit is one Haiku turn the
+campaign does not count. No reading run starts until they agree **[hypothesis — the builder's key
+sits in the organisation's Default Workspace, not a `crb-builder` Workspace, by Paul's decision
+relayed on 2026-11-09, so Usage is filtered by the key; a later amendment records the Workspace and
+its limit]**.
+
+### The registration amendment, 2026-11-09
+
+**The second smoke run.** Run `2dfb6a08248c43948b7ff92517059ec4`, the body above, finished
+`succeeded` at 22:19:05Z with one row, clean on the first pass. It ran sealed:
+`docker/copy/sealed`, apparatus 2.4, canary clean, the builder in `crb-builder-go:local` behind the
+proxy. The builder ran 17 turns, read 140,772 tokens and wrote 5,039. Claude Code's own
+`total_cost_usd` is $0.2641455, which is the row's `cost_usd`. That meets "how the second run is
+read", so the campaign went on **[hypothesis — read from `GET /api/v1/runs/2dfb6a08…` and its
+events on 2026-11-09 at 22:20Z; the row is in the stack's ledger, not in this repository]**.
+
+**The builder's login (step 1's record).** Both verifications on 2026-11-09 (21:57:48Z at
+settings and 22:17:27Z at submit) read `auth` `api_key` with source `env` and fingerprint `GwAA`.
+The fingerprint is the same at both, so this is no stop **[hypothesis — read from the stack's
+`builder.login.verified` events on 2026-11-09; those rows are not in this repository]**.
+
+**Steps 1 and 2, and when they ran.** Both checks pass, step 1 with one exception, and both held
+before the first spend. The exception: the builder's key sits in the organisation's Default
+Workspace, not a `crb-builder` Workspace, which departs from part 5's builder's-account check, item
+3, by Paul's decision ("the account and the tally" below). Neither check was recorded in full
+before step 3, and neither bears on what step 3 found:
+- **Step 1.** Apparatus `2.4`, with cobra and click registered, held before step 3: step 3's own
+  runs are on both repositories and stamped 2.4 (the step-3 amendment). The builder's-account check
+  ran on 2026-11-09 at 21:57:48Z. That is after step 3's runs and before the first spend, the first
+  smoke run's admission at 22:05:52Z. Its record is the login paragraph above and "the account and
+  the tally" below **[hypothesis — the times from the stack's `builder.login.verified` and
+  `campaign.admitted` events on 2026-11-09; those rows are not in this repository]**.
+- **Step 2.** `raw.factory.test_author` reads `editblock:gpt-oss-120b:cerebras`, so `<author>` is
+  `gpt-oss-120b`, the `author_model` each reading names. Its price is known: the first smoke's
+  `author.attempt` event reads `cost_known` true, at $0.00169664. That author wrote the first
+  smoke's test at 22:06Z on 2026-11-09, so it was in force before the first spend. No record reads
+  the setting before step 3 **[hypothesis — read from `GET /api/v1/settings` with an admin session
+  on 2026-11-10 at 04:12:51Z, and from run `0a7048da…`'s events; neither is in this repository]**.
+- **Why the order does not change a result.** Step 3's mine and qualify runs make no model call and
+  cost $0. They use neither the builder's login nor the test author, so neither check could change
+  a qualification record **[hypothesis — inferred from the step-3 amendment's record of its runs:
+  none holds an evidence pack or made a model call, and each cost $0; those records are in the
+  stack, not in this repository]**. Steps 1 and 2 met their success conditions, step 1 with the
+  exception above, so part 5's stop rule did not stop the campaign at either. Step 3's condition did
+  fail: cobra XS holds 17 qualified commits against the 20, and step 3 stopped and reported it under
+  that rule (the step-3 amendment).
+
+**The account and the tally.**
+- The builder's key sits in the organisation's Default Workspace, not a `crb-builder` Workspace of
+  its own. That departs from part 5's builder's-account check, item 3, by Paul's decision. The
+  Default Workspace takes no custom limit, so the cap is the organisation's monthly limit,
+  **$150**.
+- Paul compared the Console's Usage for the builder's key with the run's $0.2641455. Usage reads
+  **$0.26**, so they agree.
+- The organisation's Limits page read $0.11 at the same time. It lags Usage. Paul ruled the lag no
+  blocker: "don't let it be a blocker and proceed regardless".
+- The gate before the readings' runs is met.
+
+**[hypothesis — Paul's readings of the Console, relayed by the lead session on 2026-11-09 between
+22:35Z and 22:50Z; the Console is not in this repository]**.
+
+The campaign's spend after both smokes is about $0.2658 of the $54.00 line: the builder's
+$0.2641 and the first smoke's test author's $0.0017 **[hypothesis — the campaign's events on
+2026-11-09]**.
+
+**The campaign and the readings.** Campaign `cmp_8e1f261023db8a26a40e0e84` was registered at
+21:47:16Z, with `ceiling_usd` 108.00 and `line_usd` 54.00. Paul registered the four readings at
+22:25:37Z, each `reserved.v1`, `max_reruns` 0, `budget_profile` `default`, `pool_rule`
+`all-qualified` **[hypothesis — read from each `201` response on 2026-11-09; the readings are in
+the stack's database, not in this repository]**:
+
+| cell | reading | pool | `pool_sha256` | posture |
+|---|---|---|---|---|
+| cobra XS | `rdg_e6bbe59930cd26e728a24364` | 17 | `26047d89205784f1d58c3af2cb47d5fc85fc1bc1d3fc5364f43510212fde70bc` | `pst_2b3f4ee45151cff77b95f85b` |
+| cobra S | `rdg_2910bad1397a488cd6c05457` | 27 | `7662393a27074ee2b1903f135478acc3fd60f00e11b9118acbd9650ddc56942c` | `pst_2b3f4ee45151cff77b95f85b` |
+| click XS | `rdg_1d932e9f635d6583f111d548` | 30 | `0170f75e4524b22cae0037c59f3187ad5fcd15f69ade1346c4234af692f6f5af` | `pst_04100cf00f88d266c820b24e` |
+| click S | `rdg_471d0e7f4f51146392e8c788` | 38 | `5c27a2aed8e85c0f2b5932cbccc52211cf0b9dd183d6ba138e2a919e17b998ee` | `pst_04100cf00f88d266c820b24e` |
+
+**The checks after registration** **[hypothesis — read from the stack on 2026-11-09 at about 22:40Z]**:
+- Each pool equals its cell's qualified set from step 3, by digest and in seeded order.
+- The smoke commit is in no pool, and no pool repeats a change.
+- Each reading's `checks_arm` reads `off`.
+- Each cell's error budget reads 2.10% of 5%.
+- The API's own `pool_drift` list was not read at registration: `GET /api/v1/readings` needs an
+  operator session, and no MCP tool serves it. The digest comparison does not stand in for it,
+  because it checks neither the live labels nor the pinned qualification records, so the list
+  stayed a prerequisite of each reading's first run. It was read later, through the operator's
+  signed-in session: `[]` for both cobra readings on 2026-11-09 between 23:18Z and 23:22Z, before
+  cobra's first reading run, and `[]` for all four on 2026-11-10 between 02:48Z and 02:57Z, before
+  cobra S's first run and before any click run **[hypothesis — read from
+  `GET /api/v1/readings?repo=<repo>`; the responses are not in this repository]**.
+
+**The remeasure plan, and Paul's choice.** At step 14, `GET /api/v1/learn/remeasure` served each
+S3 request short.
+
+- **What it did.** It left out every pending commit whose miner flag (`tasks.gold_clean`) is false.
+  But the worker admits a reserved.v1 pool's commit by its pinned qualification record in the
+  posture, never by that flag (ADR-0019, P-797).
+- **How many.** 27 of the 112 pool commits carry the flag: cobra XS 1, cobra S 7, click XS 4 and
+  click S 15. All 112 have a `qualified` record in force in their posture **[hypothesis — counted
+  from the stack's `tasks` and `task_qualifications` tables on 2026-11-09, n = 112, apparatus 2.4;
+  those rows are not in this repository]**.
+- **The effect.** The first S3 look would have been served cobra S 15 of 20, click XS 18 of 20 and
+  click S 11 of 20, and would then have waited for good. Re-qualifying does not clear the flag:
+  step 7 re-qualified both repositories, and the flags survived.
+- **Paul's choice.** Paul chose to fix the plan (option A, relayed on 2026-11-09). The fix is
+  P-814. It was first [#107](https://github.com/Jita81/commit-replay-bench/pull/107), closed
+  unmerged, and is carried by [#109](https://github.com/Jita81/commit-replay-bench/pull/109),
+  merged as `406722a6972ea4998501ae3fe2e8d8f77caea635` **[hypothesis — the pull requests' records
+  on GitHub, read on 2026-11-10: #107 `CLOSED` at 01:03:00Z with no merge commit; #109 `MERGED` at
+  02:43:26Z with merge commit `406722a6…`]**:
+  - For a reading that pins its pool, the plan ignores the flag.
+  - While the reading's `pool_drift` is not empty, the plan asks for nothing and names the drift.
+- **What does not change.** The fix touches the plan, and the Learn page's wording for it, only.
+  No grading, ledger, reading rule or `APPARATUS_VERSION` changes, so no protocol value, money
+  figure or reading body changes, and the readings stand as registered **[hypothesis — #109's
+  own diff, `git diff be15791b 406722a6`, read on 2026-11-10: its source changes are the plan in
+  `src/crb/core/learn.py` and `src/crb/server/routes/learn.py` and one docstring in
+  `src/crb/server/reading_book.py`; the rest are tests, docs and the Learn page; and
+  `src/crb/core/version.py` reads `APPARATUS_VERSION = "2.4"` at both ends]**.
+- **The restart.** Cobra S, click XS and click S start their runs only once #109 is merged and the
+  stack is restarted on its merge commit. That happened on 2026-11-10: the stack checkout's `HEAD`
+  moved to `406722a6` at 02:43:42Z, the old worker stopped at 02:44:15Z and the new one started at
+  02:44:17Z **[hypothesis — read from the stack checkout's reflog and the stack's `workers` table on
+  2026-11-10; those records are not in this repository]**.
+
+**Stage 1's order.** For cobra XS, the plan serves no S3 request. Its pool holds 17 commits and
+its first look is at 20, so the cell reads `cannot_clear`, and S3-first order reads as `A0` first
+(the plan check above) **[hypothesis — read from `GET /api/v1/learn/remeasure` on 2026-11-09 at
+about 22:40Z: "0 read, 17 still to run, 3 short"]**. Cobra XS's `A0` enrols the first 16 of its 17
+commits, in seeded order.
+Its `A0` and `A0+L` runs don't use the plan's S3 request, so they may run on the stack at
+`46c0a36d` before the restart, each on Paul's own go.
+
+**The stack commit per cell.** The stage-1 report records the stack commit each cell's runs ran on:
+`46c0a36d` before the restart, and #109's merge commit `406722a6` after it. Rows from both commits
+are apparatus 2.4 and read under the same rule. Two pull requests lie between the commits:
+[#106](https://github.com/Jita81/commit-replay-bench/pull/106), which moves three dependencies in
+`uv.lock`, and #109. Neither changes the grading code **[hypothesis — `git log
+46c0a36d..406722a6` lists #106 (`be15791b`) and #109 (`406722a6`); `git diff --stat 46c0a36d
+be15791b` touches `CHANGELOG.md` and `uv.lock` only; #109's diff is as above; read on
+2026-11-10]**.
+
+**Not in this amendment.** These are recorded at their own steps:
+- the Learn state (step 15);
+- the image click's builds run in;
+- the stack commit each cell's runs ran on;
+- the stage-1 report;
+- part 4's stage-2 statement.
