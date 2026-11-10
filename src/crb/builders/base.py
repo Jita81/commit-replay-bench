@@ -1706,14 +1706,23 @@ def _worktree_path(here: Path, a: str) -> bool:
         return False
 
 
+#: Characters the shell expands in an unquoted word — ``$X``, ``$( … )``, backticks, globs
+#: and braces. A ``-C`` value holding one is rewritten before git runs, so its literal text
+#: proves nothing about where git ends up (``/work/.[.]`` is ``/work/..``).
+_SHELL_EXPANDS_RE = re.compile(r"[$`*?\[\]{}]")
+
+
 def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Path | None]:
     """Where git runs after ``-C path`` from ``at``, and whether that is still the worktree
     ``root`` or a directory under it. Fails closed: a home-relative, drive-lettered or
-    backslashed path, a ``..`` component (``link/..`` follows the link, so it is never
-    normalised away) and an empty component (``//work``, ``a//b``; one trailing slash is
-    fine) are refused outright. An absolute path is accepted only when ``root`` is known
-    and the path lies at or under it both as written and with symlinks resolved — the
-    sealed container's ``/work`` reaches the guard as ``root`` (``StreamStats.host_view``).
+    backslashed path, anything the shell expands (``$``, a backtick, a hoisted
+    ``__SUBST_k__``/``__GROUP_k__`` substitution, ``* ? [ ] { }``), a ``.git`` component,
+    a ``..`` component (``link/..`` follows the link, so it is never normalised away) and an
+    empty component (``//work``, ``a//b``; one trailing slash is fine) are refused outright,
+    absolute or relative. An absolute path is accepted only when ``root`` is known and the
+    path lies at or under it as written (under ``root`` or its resolved spelling — the
+    sealed container's ``/work`` reaches the guard as the resolved root through
+    ``StreamStats.host_view``) and with symlinks resolved, never landing in ``.git``.
     A relative path composes onto ``at`` (repeated ``-C`` compose as git composes them)
     and gets the same check; with ``at`` or ``root`` unknown it cannot climb, so it
     passes as before. ``-C ""`` leaves git where it is."""
@@ -1721,8 +1730,12 @@ def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Pa
         return True, at
     if path.startswith("~") or "\\" in path or re.match(r"^[A-Za-z]:", path):
         return False, None
+    if _SHELL_EXPANDS_RE.search(path) or _PLACEHOLDER_RE.search(path):
+        return False, None
+    if _LITERAL_PUNCT_RE.search(path):
+        return False, None
     parts = (path[:-1] if path.endswith("/") else path).split("/")
-    if ".." in parts or "" in parts[1:]:
+    if ".." in parts or "" in parts[1:] or any(p.casefold() == ".git" for p in parts):
         return False, None
     absolute = path.startswith("/")
     if absolute:
@@ -1736,7 +1749,13 @@ def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Pa
     if root is None:
         return True, target
     try:
-        inside = target.is_relative_to(root) and target.resolve().is_relative_to(root.resolve())
+        real_root = root.resolve()
+        real = target.resolve()
+        inside = (
+            (target.is_relative_to(root) or target.is_relative_to(real_root))
+            and real.is_relative_to(real_root)
+            and ".git" not in (p.casefold() for p in real.relative_to(real_root).parts)
+        )
     except (OSError, RuntimeError, ValueError):
         inside = False
     return inside, target if inside else None

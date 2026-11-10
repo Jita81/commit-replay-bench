@@ -17,8 +17,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
   directory under it, as written and with links resolved; repeated `-C` compose as git composes
   them, and the verb rules then check paths from there. A `..` component, `//`, `~`, a
-  backslash, a link out of the tree, an absolute path with no known root and every `-C` that
-  lands outside stay refused. No grading, ledger or apparatus version changes.
+  backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
+  an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
 
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click

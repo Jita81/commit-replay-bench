@@ -645,6 +645,8 @@ def _c_tree(tmp_path: Path) -> Path:
     (tmp_path / "elsewhere").mkdir()
     (root / "out").symlink_to(tmp_path / "elsewhere")
     (root / "in").symlink_to(root / "src")
+    (root / ".git" / "refs").mkdir(parents=True)
+    (root / "gitlink").symlink_to(root / ".git")
     return root
 
 
@@ -705,6 +707,33 @@ _GIT_C_REFUSE = (
     "git -C {r} --work-tree=/etc status",
     "git --git-dir={r}/.git -C {r} status",
     "git -C {r} -c core.worktree=/etc status",
+    # shell expansion: bash rewrites the value before git sees it, so the literal text
+    # proves nothing about where git runs (review of 184a7bf9, BLOCKING)
+    'git -C {r}/"$(printf ..)" grep foo',  # hoisted to {r}/__SUBST_0__
+    "git -C {r}/$(printf ..) status",
+    "git -C {r}/`echo ..` status",
+    "X=..; git -C {r}/$X status",
+    "git -C {r}/${{X}} status",
+    "git -C {r}/.[.] status",  # glob matching `..`
+    "git -C {r}/.[.]/elsewhere grep foo",
+    "git -C {r}/.? status",
+    "git -C {r}/* status",
+    "git -C {r}/{{..,src}} status",  # brace expansion
+    "git -C $X status",
+    "git -C src/$X status",
+    "git -C `echo ..` status",
+    'git -C "$(echo ..)" status',
+    "git -C .[.] status",
+    "git -C src/* status",
+    "git -C {{src,..}} status",
+    "git -C ~+ status",
+    # .git is the repository's guts, not the work tree
+    "git -C {r}/.git status",
+    "git -C {r}/.git/ status",
+    "git -C {r}/.git/refs grep foo",
+    "git -C .git status",
+    "git -C src/.git status",
+    "git -C {r}/gitlink status",  # a link inside the tree onto .git
 )
 
 
@@ -730,6 +759,24 @@ def test_guard_git_c_accepts_only_the_worktree_and_below(tmp_path: Path) -> None
     assert "leaves the worktree" in blind.check_shell(f"git -C {root} status")
     assert blind.check_shell("git -C src status") == ""
     assert "leaves the worktree" in blind.check_shell("git -C ../x status")
+    # … but a relative -C the shell rewrites, or one into .git, is refused even blind
+    for cmd in ("git -C $X status", "git -C src/* status", "git -C .git status"):
+        assert "leaves the worktree" in blind.check_shell(cmd), cmd
+
+
+def test_guard_git_c_root_given_through_a_symlink(tmp_path: Path) -> None:
+    """The guard's root may be the unresolved spelling (``Workspace.root``) while the
+    command names the resolved one (``StreamStats.host_view`` substitutes the resolved
+    ``TestFileGuard.root``): ``git -C <resolved root> status`` was refused. Containment is
+    now judged on the resolved paths; the lexical refusals still apply to both spellings."""
+    real = _c_tree(tmp_path / "real")
+    (tmp_path / "via").symlink_to(tmp_path / "real")
+    linked = tmp_path / "via" / "repo"
+    g = base.GitArchaeologyGuard(cwd=linked)
+    for path in (real, linked, real / "src", linked / "src"):
+        assert g.check_shell(f"git -C {path} status") == "", path
+    for path in (f"{real}/..", f"{real}/out", f"{real}/.git", f"{real}/$X", str(tmp_path)):
+        assert "leaves the worktree" in g.check_shell(f"git -C {path} status"), path
 
 
 def test_guard_git_diff_and_grep_reject_branch_names(tmp_path: Path) -> None:
