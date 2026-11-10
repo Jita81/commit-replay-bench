@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **The remeasure plan asks a pinned pool's commits by their records, not the miner's flag**
-  (P-814; [#107](https://github.com/Jita81/commit-replay-bench/pull/107)). `GET /learn/remeasure`
+  (P-814; [#109](https://github.com/Jita81/commit-replay-bench/pull/109)). `GET /learn/remeasure`
   dropped a pending commit whose miner `gold_clean` was false, though the posture gate admits it
   by its record (ADR-0019). A reading that pins its pool to those records (P-797) now asks each
   pending commit by its record in force: `qualified` or `revoked` is asked; `unqualified` or
