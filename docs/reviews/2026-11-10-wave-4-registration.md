@@ -1,14 +1,23 @@
 # Wave 4 — the registration, prepared and not run — 2026-11-10
 
-**Status.** Draft for Paul Glover to read. Nothing here has been run and nothing has been spent.
+**Status.** Registered design. Nothing here has been run and nothing has been spent.
 Decision R-1 is taken: option B, the combined test. No Wave 4 run is filed until the fixes of
-part 4 are deployed and Paul has said yes to each spend.
+part 4 are deployed. Paul's yes to the spends is recorded under Authority.
 
 **Authority.** Paul's "yes to all four, go ahead" of 2026-11-10 (the Wave 3 closure; this design
 with a money line of $60 for stage 1 and $35 for stage 2, in real dollars; apparatus 2.5 with a
 short ADR; `gpt-oss-120b` on Cerebras as the test author), and his "Yes" of the same day to three
 points: the freeze ends when #111 merges, Wave 4 stands under Wave 3's Stop verdict, and
 disqualified rows count as misses **[hypothesis — Paul's words in the session of 2026-11-10, quoted by Claude Code]**.
+
+On 2026-11-10 at about 22:10Z Claude Code asked Paul three things before an unattended night:
+whether it may pull and restart the stack once after the fixes merge; how far the money may go
+(the pilot only; the pilot, then click and cobra if every pilot gate passes, all under the one
+line, stopping at the first failed gate or the money stop; or nothing); and whether CodeRabbit's
+re-review is waived for heads whose only change since a reviewed head is the changelog merge with
+`main`. Paul answered "restart yes, pilot plus both stages, waiver yes". That is the yes to the
+pilot, to click and to cobra, each conditional on the gates of part 5 **[hypothesis — the question
+and the answer in Claude Code's session of 2026-11-10; the transcript is not in this repository]**.
 
 **Claims in this record.** Nothing here is measured on a Wave 4 row. Wave 3 figures are quoted from
 its stage-1 report (#111). Pool counts were read from the served stack on 2026-11-10 at apparatus
@@ -23,7 +32,7 @@ against the product's code. This version takes in all fourteen of their findings
 **Decided 2026-11-10.** Asked to choose between A and B, Paul answered "I'm happy for you to make
 the best decisions for our products future". Claude Code chose B on that authority: it is the
 only option able to settle the effect the wave is built to find. The delegation covers the
-design; it does not cover spending, and each spend still waits for Paul's yes. The table and the
+design; it does not cover spending. Paul's separate yes to the spends is under Authority. The table and the
 reasoning are kept below as the record of what was weighed.
 
 The approved design assumed 40 qualified click commits in each of XS and S. The served stack
@@ -177,7 +186,8 @@ re-filed batches and for `S3` **[aspiration — this registration's design; noth
 
 **If the money stops the wave anyway,** the primary is **not read**. Under option B that includes
 the case where cobra cannot be run or finished for any reason: the result is reported as not
-read, never as a click-only test. Each new spend (pilot, click, cobra) starts only on Paul's yes.
+read, never as a click-only test. Each spend (pilot, click, cobra) starts only under Paul's yes recorded under Authority, and only
+when every gate before it has passed.
 
 ## 4. Before any Wave 4 row
 
@@ -186,12 +196,12 @@ read, never as a click-only test. Each new spend (pilot, click, cobra) starts on
 | 1 | Click's dependency set includes the `tests` group, so pytest is present for every build | Paul's stack step |
 | 2 | The builder's own cache and temp files no longer disqualify a build | PR #113, reviewed, green |
 | 3 | `git -C <worktree> <allowed command>` is accepted | PR #114, reviewed, green |
-| 4 | Cost is computed from the product's price table, with the CLI's figure beside it | PR #115, green, outside review still owed |
-| 5 | Apparatus 2.5 (ADR-0049), so Wave 3 and Wave 4 rows can never be blended | branch ready; opens after #111 merges |
-| 6 | The test author's key is on the stack | Paul, with the `addkey` helper |
-| 7 | Served checkout updated and the stack restarted | Paul |
+| 4 | Cost is computed from the product's price table, with the CLI's figure beside it | PR #115, outside review still owed |
+| 5 | Apparatus 2.5 (ADR-0049, DL-417), so Wave 3 and Wave 4 rows can never be blended | PR #116 |
+| 6 | The test author's key is on the stack | The stack's `env.sh` already names `CEREBRAS_API_KEY`; pilot gate checks that it works |
+| 7 | Served checkout updated and the stack restarted | Claude Code, once, by Paul's yes of 22:10Z |
 | 8 | Every commit re-qualified at 2.5; the full lists appended here | me, at no model cost, after 7 |
-| 9 | The Wave 4 campaign registered | on Paul's yes to the pilot |
+| 9 | The Wave 4 campaign registered | before the pilot, by Paul's yes of 22:10Z |
 
 2.5 is not deployed while a 2.4 campaign is open, and not without fixes 2 to 4.
 
@@ -289,8 +299,6 @@ Harness².
 
 | When | What |
 |---|---|
-| Now | Nothing: R-1 is decided (B). |
-| After #111 merges | Nothing: I merge the fix PRs under the usual rule and open the 2.5 PR. |
-| Before the pilot | The Cerebras key with `addkey`; yes to click's `tests` dependency group; pull and restart the stack. I will give the exact commands then. |
-| Before each spend | Yes to the pilot (which also registers the campaign), yes to click, yes to cobra (with its image switch). |
+| Before the pilot | Nothing more: R-1 is decided (B), and the restart and the three spends have Paul's yes of 2026-11-10 (Authority). |
+| Before cobra | Cobra builds in the Go builder image, so its stage needs the image switch in `env.sh` and a second restart. Paul's yes covered one restart, so cobra waits for Paul's word on the second. |
 | During the report | Check five sampled patches per repository. |
