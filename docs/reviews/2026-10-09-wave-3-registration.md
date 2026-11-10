@@ -1378,15 +1378,20 @@ with click" **[hypothesis — Paul's own turn in the lead session's transcript, 
 readings stay as read, and no further cobra run is made.
 
 **The change made.** One line in the stack's `env.sh` changed: `CRB_BUILDER__IMAGE` went from
-`crb-builder-go:local` to `crb-builder:local`. `CRB_BUILDER__PROXY_IMAGE` is unchanged. The stack
-was restarted at 08:42:26Z by the lead session, on Paul's word:
+`crb-builder-go:local` to `crb-builder:local`. `CRB_BUILDER__PROXY_IMAGE` is unchanged. The egress
+proxy takes the builder's image unless `CRB_BUILDER__PROXY_IMAGE` names another
+(`src/crb/builders/container.py`), so click's proxy also runs in `crb-builder:local`. The first
+click run, `7d5d4bd7b0bc42d1bc999fe28c698da4`, ran both its builder and its proxy containers in
+`crb-builder:local`, Id `sha256:116f523d…` **[hypothesis — `docker ps` and `docker inspect` on the
+run's two containers on 2026-11-10 at about 08:59Z; the containers are not in this repository]**.
+The stack was restarted at 08:42:26Z by the lead session, on Paul's word:
 - The old worker stopped cleanly at 08:42:27Z. The new worker started at 08:42:29Z.
 - No migration ran: the database is at `0018`, the code's head.
 - The stack still serves `406722a6`, with the checkout and the UI built from the same commit.
 - The four image Ids above read the same after the restart, at 08:44:09Z.
 
 **[hypothesis — the `env.sh` edit as the lead session reported it; this record does not read
-`env.sh`, so the first click run's events confirm the builder image. The rest is read from the
+`env.sh`, so the first click run's containers confirm the builder image. The rest is read from the
 stack on 2026-11-10 between 08:44Z and 08:53Z: the database backup named for 08:42:26Z, the
 `workers` table, `GET /api/v1/health` (serving `406722a6`, migrations `0018` = head) and `docker
 image inspect`. None of these records is in this repository]**.
