@@ -1344,3 +1344,127 @@ be15791b` touches `CHANGELOG.md` and `uv.lock` only; #109's diff is as above; re
 - the stack commit each cell's runs ran on;
 - the stage-1 report;
 - part 4's stage-2 statement.
+
+### The click builder-image amendment, 2026-11-10
+
+**What changes.** Click's cells build in `crb-builder:local`, Id
+`sha256:116f523d26d208f215081eef810fa83a6aaa8af21338c04a589304809808010b` (Python 3.12.11, Claude
+Code 2.1.132). Cobra's cells built in `crb-builder-go:local`, Id
+`sha256:77b43c312c7a7b3f60af8420d4b6e891a274b9a6fcf57215f70284b020fada95` (Go, the same Claude Code
+2.1.132). Both Ids are the ones in the step-3 amendment's image table. Click's grading image does
+not change: `crb-sandbox-python:local`, Id
+`sha256:50081bdcf80398259afd2cbd6fddc6ea5e908c030909794c0e347240351f4117`. Neither does cobra's:
+`crb-sandbox-go:main-8ab88ad`, Id
+`sha256:0e796b7e21a0d6dc7dde96e95420f0f6928a77b3e6d1ede1190b05266157f69c` **[hypothesis — `docker
+image inspect` and `docker image history` on the four tags, read on 2026-11-10 at about 08:55Z:
+`PYTHON_VERSION=3.12.11` in `crb-builder:local`'s environment, `CLAUDE_CODE_VERSION=2.1.132` in
+both builders' build steps, and no Python in `crb-builder-go:local`'s build steps; the images are
+not in this repository]**.
+
+**Why.** The stack has one builder image at a time: `CRB_BUILDER__IMAGE`, a single setting
+(`BuilderSettings.image` in `src/crb/server/settings.py`). It named `crb-builder-go:local`, and
+that image has no Python. Click's tests are pytest tests, run with the tree and the sealed
+dependency set at `/deps/site` on `PYTHONPATH` (`src/crb/core/runners/pytest_runner.py`,
+`src/crb/provision/python.py`). In the Go image, click's builder could not run them inside the
+seal. Click's rows would then have measured a builder blind to its own test results, which cobra's
+builder was not **[hypothesis — `docker image history --no-trunc` on the two builder images, read
+on 2026-11-10 at about 09:15Z: `crb-builder-go:local` has a `/usr/local/go` step and no Python
+install step, and `crb-builder:local` has `PYTHON_VERSION=3.12.11` in its environment and no Go
+step. A shell in each image (`docker run --rm --network none`), read at about 09:27Z, rules out a
+base-image runtime. In `crb-builder:local`, `go` and `gofmt` are not on `PATH`, `/usr/local/go`
+does not exist, a search of the root filesystem finds no file named `go`, and `python3` is
+Python 3.12.11. In `crb-builder-go:local`, `go` is go1.26.8 at `/usr/local/go/bin/go`, `python`,
+`python3` and `pip` are not on `PATH`, and the root filesystem has no `python3*` file. That a
+builder without its tests' runtime measures worse is an inference, not a measured result. The
+images are not in this repository]**.
+
+**The options Paul had.** At the start-up runbook's step 20 (the click stop) Paul had four options:
+- **A.** Switch the builder image to `crb-builder:local` for click.
+- **B.** Run click on the Go image as it stood.
+- **C.** Build one image with Go and Python and use it for both.
+- **D.** End stage 1 at cobra and report click as not measured.
+
+**Paul's decision.** Paul chose A on 2026-11-10 at 08:42:02Z, in their own words: "A, go ahead
+with click" **[hypothesis — Paul's own turn in the lead session's transcript, timestamped
+2026-11-10T08:42:02Z; the transcript is not in this repository]**. Paul's message names click
+only. This record reads it as leaving cobra's two readings as read, with no further cobra run in
+stage 1. Cobra XS ran `A0` (`27f45991…`) and `A0+L` (`f224053e…`). Cobra S ran its S3 look
+(`5a395c04…`), `A0` (`715c67b5…`) and `A0+L` (`f9a0e9e4…`) **[hypothesis — the stack's `runs`
+table and its `reading.reserved` events, read on 2026-11-10 at about 09:18Z: these five are the
+only runs with reservations under the campaign's two cobra readings; neither is in this
+repository]**.
+
+**The change made.** One line in the stack's `env.sh` changed: `CRB_BUILDER__IMAGE` went from
+`crb-builder-go:local` to `crb-builder:local`. `CRB_BUILDER__PROXY_IMAGE` is unchanged: it
+already named `crb-builder:local`. So the egress proxy ran in `crb-builder:local` for cobra's cells
+and runs in it for click's. Only the builder image differs between the two repositories. The first
+click run, `7d5d4bd7b0bc42d1bc999fe28c698da4`, ran both its builder and its proxy containers in
+`crb-builder:local`, Id `sha256:116f523d…` **[hypothesis — `docker ps` and `docker inspect` on the
+run's two containers on 2026-11-10 at about 08:59Z; the containers are not in this repository]**.
+The stack's own records agree. Each `reading.reserved` event records the builder's `image` and
+`proxy_image`. Cobra's events from 04:32Z to 04:38Z read `crb-builder-go:local` and
+`crb-builder:local`, and click's from 08:58Z read `crb-builder:local` for both **[hypothesis — the
+stack's `events` table, read on 2026-11-10 at about 09:02Z, and `env.sh`'s two image lines as the
+lead session read them; neither is in this repository]**.
+The stack was restarted at 08:42:26Z by the lead session, on Paul's word:
+- The old worker stopped cleanly at 08:42:27Z. The new worker started at 08:42:29Z.
+- No migration ran: the database is at `0018`, the code's head.
+- The stack still serves `406722a6`, with the checkout and the UI built from the same commit.
+- The four image Ids above read the same after the restart, at 08:44:09Z.
+
+**[hypothesis — the `env.sh` edit as the lead session reported it; this record does not read
+`env.sh`, so the first click run's containers confirm the builder image. The rest is read from the
+stack on 2026-11-10 between 08:44Z and 08:53Z: the database backup named for 08:42:26Z, the
+`workers` table, `GET /api/v1/health` (serving `406722a6`, migrations `0018` = head) and `docker
+image inspect`. None of these records is in this repository]**.
+
+**The order.** Every cobra stage-1 cell finished before the change. The last cobra run,
+`f9a0e9e4e91b4a288a8607813b729e82` (cobra S `A0+L`), finished at 04:44:58Z. No reading row for
+click existed before the change. The ledger's 156 click rows were all written between 2026-09-13
+and 2026-09-16, and none names a reading or this campaign **[hypothesis — read from the stack's
+`runs` and `grades` tables on 2026-11-10 at about 08:55Z, ledger at 704 rows; those rows are not in
+this repository]**.
+
+**The checks after the restart.** Step 16 was run again on the restarted stack between 08:44Z and
+08:55Z, and passed **[hypothesis — read from the stack on 2026-11-10; those records are not in
+this repository]**:
+- One worker is alive. No run is queued or running.
+- The builder's login on record is `api_key` from `env`, with fingerprint `GwAA`. The submit gate
+  verifies it once before click's first run.
+- The remeasure plan serves both click cells in full. Click XS's S3 look gets 20 of 20 commits, est.
+  $2.70. Click S's S3 look gets 20 of 20, est. $3.42. `checks_arm_moved` is null on both.
+- The plan serves no request to a reading whose pool has drifted (P-814, carried by #109), so the
+  full requests also mean neither click pool has drifted.
+- Click has no Learn change in force. Its only record is the switch record, with an empty overlay.
+- The campaign `cmp_8e1f261023db8a26a40e0e84` has $26.917947 spent and $27.082053 left of the
+  $54.00 line, with nothing held.
+
+**What does not change.** The amendment changes the builder's image for click's cells and nothing
+else. No protocol value in part 1, money figure in part 2 or reading body in part 5 changes, and no
+reading body carries a `builder_config`. The stack commit, the grading images and
+`APPARATUS_VERSION` 2.4 stay as they were **[hypothesis — the change is the one `env.sh` line
+above; `GET /api/v1/health` reads apparatus 2.4 and serving `406722a6` after the restart, and the
+grading images' Ids are unchanged, read on 2026-11-10 at about 08:53Z; the stack's records are not
+in this repository]**.
+
+**What it means for stage 2.** The new builder image has no Go, so a cobra cell cannot run on it.
+Switching the builder image back to `crb-builder-go:local` would match cobra's pinned settings:
+the campaign's first reservation on cobra pinned a deployment half whose builder container image is
+`crb-builder-go:local`, so a cobra run on that image, with nothing else in the deployment half
+changed, reserves as before. The mismatch runs the other way. Click's first reservation pinned
+`crb-builder:local`, and a click run on the Go image would halt `reading_treatment_mismatch` before
+any build (the reserver in `src/crb/server/worker.py`). Because the builder image is one setting
+for the whole stack, stage 2 can run cobra and click only in separate image phases. Each switch is
+an `env.sh` edit and a restart, which are the operator's. Each switch needs its own amendment and
+Paul's yes. This departs from step 9, which resumes stage 2 with no further decision: on this
+image, step 9 cannot run a cobra cell. The stage-1 report puts that to Paul **[hypothesis — the
+`reading.reserved` events' `treatment_body.deployment.container.image`, read from the stack's
+`events` table on 2026-11-10 at about 09:02Z (cobra's `crb-builder-go:local`, click's
+`crb-builder:local`); the image Ids, history and shell check as in "Why" above. The events are
+not in this repository]**.
+
+**Not in this amendment.** These are recorded at their own steps:
+- the Learn state (step 15);
+- the stack commit each cell's runs ran on;
+- the stage-1 report;
+- part 4's stage-2 statement.
