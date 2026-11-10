@@ -499,7 +499,8 @@ const REMEASURE = {
   ],
   up_to_date: [],
   cannot_clear: [{ label: 'docs.update · S', mode: 'sighted', arm: 'S3', state: 'undecided', reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_4' }],
-  summary: { cells_pending: 3, cells_stale: 1, cells_thin: 0, n_needed_total: 36, n_requested_total: 16, short_by_total: 20, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 3 },
+  // as the core sums it: every look_pending row (the config and none rows too), stale ones apart
+  summary: { cells_pending: 5, cells_stale: 1, cells_thin: 0, n_needed_total: 70, n_requested_total: 16, short_by_total: 54, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 5 },
   note: '',
 }
 

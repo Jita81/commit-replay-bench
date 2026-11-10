@@ -435,6 +435,8 @@ describe('LearnPage', () => {
     // an arm this plan cannot compose: no button, a way to Runs, and why
     expect(within(row(byHand.label)).queryByRole('button', { name: 'Queue runs' })).toBeNull()
     expect(within(row(byHand.label)).getByRole('link', { name: 'Queue from Runs' })).toHaveAttribute('href', '/runs?repo=alpha')
+    // while a row can run, the Estimated-spend tile links to Runs too
+    expect(screen.getByRole('link', { name: 'Queue runs' })).toHaveAttribute('href', '/runs?repo=alpha')
     // the dialog for the pending cell repeats what the runs ask for and how many are short
     await userEvent.click(within(row(pending.label)).getByRole('button', { name: 'Queue runs' }))
     const summary = within(await screen.findByTestId('learn-queue-summary'))
@@ -463,6 +465,7 @@ describe('LearnPage', () => {
     // a run would halt from here or by hand: no Queue, no route to Runs, the act that comes first
     expect(screen.queryByRole('button', { name: 'Queue runs' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Queue from Runs' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Queue runs' })).toBeNull()
     expect(document.querySelector('[data-hint="text.learn.remeasure_restore_arm"]')).toHaveTextContent('Restore the checks arm first')
     expect(screen.getByTestId(`learn-needed-${moved.key}`)).toHaveTextContent('end the stage')
   })
@@ -474,6 +477,8 @@ describe('LearnPage', () => {
     expect(await screen.findByTestId(`learn-needed-${drifted.key}`)).toHaveTextContent('a run would be refused pool_drift')
     expect(screen.queryByRole('button', { name: 'Queue runs' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Queue from Runs' })).toBeNull()
+    // nor does the Estimated-spend tile link to Runs while no row can run
+    expect(screen.queryByRole('link', { name: 'Queue runs' })).toBeNull()
     expect(document.querySelector('[data-hint="text.learn.remeasure_restore_pool"]')).toHaveTextContent('Restore the pool first')
   })
 
