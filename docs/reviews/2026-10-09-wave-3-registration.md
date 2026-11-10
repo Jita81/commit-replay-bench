@@ -1476,9 +1476,9 @@ not in this repository]**.
 
 **What this adds.** Part 4's statement, filled from stage 1's results at the end of stage 1
 (part 5 step 8). The stage-1 report, `2026-11-10-wave-3-stage-1-report.md` beside this record,
-holds the runs, the spend, the readings and why stage 1 ended. This amendment also settles what the
-stage left open: who files the release, what runs in stage 2 and on which image, and how "fits"
-was read when stage 1 ended.
+holds the runs, the spend, the readings and why stage 1 ended. This amendment also records who
+files the release, what runs in stage 2 and on which image, and the reading of "fits" that Paul
+has still to choose on.
 
 **The statement.** Filled from the template at the end of part 4 **[hypothesis — p̂ is read from
 the stack's `grades` table and `GET /api/v1/readings` on 2026-11-10 at about 10:55Z, apparatus
@@ -1489,9 +1489,9 @@ records are not in this repository]**:
 ```text
 Wave 3 — the stage-2 statement — 2026-11-10
 Stage 1 spent $52.708356 (£39.04) of $54.00, author calls included; see 2026-11-10-wave-3-stage-1-report.md.
-Clean blind patches expected for review by the campaign's end: E = 66.4
+Clean blind patches expected for review by the campaign's end: E = 66.4, or 59.5 with the value baseline's 0.233 for click S A0; the two get equal weight
   per cell and arm: cobra XS A0: N = 16, p̂ = 0.688 (stage 1)
-  per cell and arm: cobra XS A0+L: N = 16, p̂ = 0.562 (stage 1)
+  per cell and arm: cobra XS A0+L: N = 16, p̂ = 0.563 (stage 1)
   per cell and arm: cobra XS S1@gpt-oss-120b: N = 0 (S3 undecided, not run; S1 stopped)
   per cell and arm: cobra S A0: N = 16, p̂ = 0.500 (stage 1)
   per cell and arm: cobra S A0+L: N = 16, p̂ = 0.375 (stage 1)
@@ -1503,7 +1503,7 @@ Clean blind patches expected for review by the campaign's end: E = 66.4
   per cell and arm: click S A0+L: N = 16, p̂ = 0.233 (value baseline)
   per cell and arm: click S S1@gpt-oss-120b: N = 0 (S3 insufficient; S1 stopped)
 Precision bought: the share judged mergeable to ±10.8 points (Wilson 95%, n = 66.4, p = 0.308;
-  descriptive: fixed-n, not adjusted for the sequential look), ±11.7 points at worst. Paul's 10 give the agreement as in part 3.
+  descriptive: fixed-n, not adjusted for the sequential look), ±11.7 points at worst; with E = 59.5, ±11.4 and ±12.3. Paul's 10 give the agreement as in part 3.
 Stage 2 asks for up to $54.00 (£40.00); the line becomes $108.00 for the campaign in all.
 ```
 
@@ -1511,52 +1511,75 @@ Stage 2 asks for up to $54.00 (£40.00); the line becomes $108.00 for the campai
 the rates above; the rows they come from are not in this repository]**:
 - N is 16 for each `A0` and `A0+L` arm, the fixed count. `S1`'s N is none, because no `S3` arm
   delivered.
-- p̂ is the arm's clean first-attempt rate in stage 1 wherever stage 1 has one. Click S `A0` has
-  one, 2 of 3, though n is small. Click S `A0+L` has none, so p̂ is the value baseline's blind rate
-  at S, 7 of 30.
+- p̂ is the arm's clean first-attempt rate in stage 1 wherever stage 1 has one, as part 4's rule
+  says. Click S `A0` has one, 2 of 3 (Wilson 95% [0.208, 0.939]), so the rule forces it though n is
+  small. Its one miss, row 779, was a budget miss: the attempt reached its turn limit at $0.863184.
+  Click S `A0+L` has none, so p̂ is the value baseline's blind rate at S, 7 of 30.
 - p is 4 of 13 (0.308), the value baseline's share, because stage 1 holds no review: the reviews
   are step 11, after the campaign.
 - With the value baseline's 0.233 for click S `A0` as well, E would be 59.5, and the share would
-  be known to ±11.4 points, or ±12.3 at worst. Either way, E sits between part 4's worked example
-  (about 51) and the table's 80.
+  be known to ±11.4 points, or ±12.3 at worst. Three attempts are too few to prefer 2 of 3 over the
+  baseline, so the two get equal weight. Either way, E sits between part 4's worked example (about
+  51) and the table's 80.
+- Stage 1 observed 54 clean blind first attempts. Stage 2 adds about 12.4 to them, or 5.5 with
+  E = 59.5. At n = 54 the share would be known to about ±12.0 points (±12.9 at worst), so stage 2
+  narrows it by about 1.1 points, or 0.5.
 
 **Who files the release.** Part 2, decision 9's entry in part 1 (DL-400) and part 5 step 9 say
 Claude Code files `POST /api/v1/campaigns/{id}/release`. The start-up runbook (handbook page 13,
-v0.4.18) gives that request to Paul. Its C-AMEND item records that Paul, not Claude Code, files the
-campaign, the readings and any release. Its step 22, P-RELEASE-STAGE2, is Paul's: no MCP tool files
-a release, and Claude Code holds no operator password. This amendment records that departure, as
-the registration amendment recorded that Paul registered the readings. Only the filer changes:
-- The body is part 2's, `{"released_gbp": 80, "decision": …}`. The decision is DL-400's id and
-  words: "DL-400 (Q-26, decision 9): stage 1 ended at its £40 line with a cell still waiting on a
-  look, so stage 2's £40 is released on the fixed rule".
+v0.4.18) gives that request to Paul. Its C-AMEND item, in Claude Code's voice, records "that you,
+not I, file the campaign, the readings and any release", and its step 22, P-RELEASE-STAGE2, is
+Paul's. Paul approved C-AMEND "as page 13 defines them" on 2026-10-23 at 15:58:20Z. No row in the
+decision log records the change of filer; one can be added only from Paul's own words. No MCP tool
+files a release, and Claude Code holds no operator password. This amendment records that
+departure, as the registration amendment recorded that Paul registered the readings
+**[hypothesis — page 13 is in the private handbook, and Paul's approval and Claude Code's want of
+an operator password are in the lead session's transcript; neither is in this repository. Of the
+38 tools `src/crb/mcp/server.py` defines, none names a campaign or a release]**. Only the filer changes:
+- The body is part 2's, `{"released_gbp": 80, "decision": …}`. The decision is DL-400's id and its
+  words verbatim, without the bold markup, as `docs/DECISION-LOG.md` holds them: "DL-400: Stage 2
+  of Wave 3 is released in advance, on a fixed rule; …", through "DL-381's release of stage 1
+  stands."
 - The condition is DL-400's. The release is filed only because stage 1 ended at its line with a
   cell still waiting on a look. It is never filed after a stop or once the protocol is complete.
-- Paul files it on the fixed rule. No decision is taken after stage 1.
+  Whether stage 1 has ended at its line waits on Paul's choice on "fits" (below).
+- Paul files it on the fixed rule, and no stage-1 result can hold it back.
 - Step 9's success condition stands. Before any stage-2 run is queued, Claude Code reads
   `GET /api/v1/campaigns/{id}` for `line_usd` 108.00 and runs the builder's-account check again.
 
 **What stage 2 runs, and on which image.** Stage 2 runs click S only. First come `A0`'s 13 pending
-commits, in seeded order. Then `A0+L`'s 16, the same commits as `A0`, once `A0` has finished. Each
-run is capped to fit under $108.00 by part 2's rule. No cobra cell runs: cobra XS and cobra S have
-run both descriptive arms in full, and neither has an `S3` look left to run. Click's reservations
+commits, in seeded order, or fewer if Paul chooses the literal path and its runs take some. Then
+`A0+L`'s 16, the same commits as `A0`, once `A0` has finished. Each run is capped to fit under
+$108.00 by part 2's rule. No cobra cell runs: cobra XS and cobra S have run both descriptive arms
+in full, and neither has an `S3` look left to run. Click's reservations
 pinned `crb-builder:local`, the image the stack already runs. So stage 2 needs no image switch, no
 `env.sh` edit and no restart. The separate image phases the click builder-image amendment
-foresaw do not arise. At each stage start Claude Code checks the five image Ids, and
+foresaw do not arise. Cobra's runs used `crb-builder-go:local`. Whether click's builder can run
+click's tests in `crb-builder:local` is unconfirmed (the stage-1 report, section 10), and all of
+stage 2 runs on that image. At each stage start Claude Code checks the five image Ids, and
 `crb-sandbox-go:main-8ab88ad` must read `0e796b7e…` as recorded at step 0 **[hypothesis — read from
 `GET /api/v1/readings`, the `reading.reserved` events' builder image, and the output of the local
 image-Id check (`check_image_ids.sh`) of 2026-11-10 at 10:54:52Z, which matched all five; none of
 these records is in this repository]**.
 
-**How "fits" was read when stage 1 ended.** Part 2 queues a run when spent, held, its cap and its
+**How "fits" was read, and Paul's choice.** Part 2 queues a run when spent, held, its cap and its
 headroom stay at or under the line, and sets each cap "to fit". After the last run, $1.291644 was
 left and the headroom was $0.863184, so the largest cap that fits is $0.428460. Click S `A0`'s
-attempts averaged $0.555. This record read a run as fitting only when its cap holds one attempt at
-the arm's expected cost. Read literally, a run capped at $0.43 is admitted and runs one attempt.
-That attempt would leave too little for any further run, and click S would still wait on a look.
-Under either reading DL-400 releases stage 2. The stage-1 report's section 7 gives the detail
-**[hypothesis — the campaign's tally and rows on 2026-11-10 at about 10:55Z, and code reading of
-the worker's admission and spend cap at the served `406722a6`; the stack's records are not in this
-repository]**.
+attempts averaged $0.555. Claude Code read a run as fitting only when its cap holds one attempt at
+the arm's expected cost. That reading is Claude Code's; part 2 does not contain it. Read literally,
+a run on click S `A0`'s next pending commit, capped at up to $0.428460, fits. The two readings are
+not equivalent. The worker does not bound a run's first attempt by its cap (G-938), so if that
+attempt cost more than $1.291644 the campaign would overrun. That is a stop, and DL-400 then
+releases nothing **[hypothesis — the campaign's tally and rows on 2026-11-10 at about 10:55Z, and
+code reading of the worker's admission and spend cap at the served `406722a6`; the stack's records
+are not in this repository]**. Paul chooses:
+- (a) attest Claude Code's reading in a decision-log row, in Paul's words, and stage 1 has ended
+  at its line; or
+- (b) have the literal run, or runs, made first, under C-STAGE1-RUNS and Paul's "A, go ahead with
+  click" of 2026-11-10 at 08:42Z, and stage 1 ends when nothing fits as part 2 is written.
+
+No run is queued and nothing is released until Paul chooses. The detail, and the outcomes of a
+literal run, are in the stage-1 report's section 7.
 
 **What does not change.** No protocol value in part 1, money figure in part 2 or reading body in
 part 5 changes. The release's body and condition stay as part 2 and DL-400 fix them. No reading is

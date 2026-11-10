@@ -15,10 +15,10 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 - **The Wave 3 stage-1 report and the stage-2 statement**
   ([#111](https://github.com/Jita81/commit-replay-bench/pull/111)). A new record,
   `docs/reviews/2026-11-10-wave-3-stage-1-report.md`, reports stage 1: the spend against the $54.00
-  line, the readings, the descriptive arms as interim figures, and why stage 1 ended. Nothing more
-  fits, click S still waits on a look, and DL-400 releases stage 2. The registration's part 6 gains
-  the stage-2 statement amendment, which fills part 4's template and records that Paul files the
-  release. Docs only.
+  line, the readings, the descriptive arms as interim figures, and why stage 1 ended on Claude
+  Code's reading of "fits". Paul chooses between attesting that reading and a literal run first;
+  click S still waits on a look. The registration's part 6 gains the stage-2 statement amendment,
+  which fills part 4's template and records that Paul files the release. Docs only.
 
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
