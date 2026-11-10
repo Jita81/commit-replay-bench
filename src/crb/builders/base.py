@@ -2100,7 +2100,7 @@ class GitArchaeologyGuard:
       below is now accepted. The container path reaches this guard already mapped to
       the host root, so the honest case is pinned end to end in
       ``tests/test_builders_container.py`` (``test_stream_stats_git_c_container_workdir*``),
-      and by ``git -C . status`` in the corpus.
+      and as mapped by the ``git -C @WORKTREE@ …`` corpus lines.
     """
 
     def __init__(self, cwd: Path | str | None = None) -> None:
