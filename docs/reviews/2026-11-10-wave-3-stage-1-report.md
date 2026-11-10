@@ -57,7 +57,14 @@ those records are not in this repository]**:
 - **The descriptive arms.** Three cells have both arms complete at 16 commits each. Click S `A0`
   has run 3 of its 16 and `A0+L` none, so click S waits on a look. Four of cobra XS `A0+L`'s seven
   misses are refused `git -C` calls, and the scratch-path disqualifications fall in both cobra
-  arms, so no `A0+L` effect, for or against, can be read.
+  arms, so no `A0+L` effect, for or against, can be read. Paired commit by commit (interim, not
+  tested), 18 of the 48 commits in the three complete cells were clean under one blind arm and
+  not the other, 10 only under `A0` and 8 only under `A0+L`; each flip may be the loop's changes,
+  the attempt's own variation or a suspected harness artefact, and one attempt per commit cannot
+  tell which. Cobra's finish gate was learned from rows that include cobra XS `A0`'s own, a bias
+  that, argued from the code and not measured, can only favour `A0+L` there (K7, part 2). On cobra S, of 16 commits, 6 were clean only when
+  sighted and none only when blind (p = 0.031); that comparison was not registered and was chosen
+  after the rows were seen, so it describes these rows, not the cell (section 3).
 - **"Fits" — your choice.** Part 2 does not say what "fits" means. I read a run as fitting only
   when its cap holds one attempt at the arm's expected cost, so on my reading nothing more fits.
   Read literally, a run capped at up to $0.43 on click S `A0`'s next commit still fits. You choose:
@@ -191,7 +198,8 @@ not confirmed (section 10) **[hypothesis — the rows' `dq_reason` and the readi
 
 Each `A0` and `A0+L` arm enrols the first 16 commits of its reading's pool in seeded order. These
 figures are **interim, not tested**: the loop pair is tested once, when both arms of every cell
-are complete (part 1) **[hypothesis — read from the stack's `grades` table and
+are complete or, if the campaign ends first, then, with each pending commit read against the loop
+(part 1) **[hypothesis — read from the stack's `grades` table and
 `GET /api/v1/readings` on 2026-11-10, apparatus 2.4, blind, n = 16 per arm except click S; those
 records are not in this repository]**.
 
@@ -222,6 +230,75 @@ $0.863184, the dearest attempt of the stage, before the lint gate ran. It counts
 **[hypothesis — read from the rows' `failure_kind`, `stop_reason` and `dq_reason` in the stack's
 `grades` table on 2026-11-10, apparatus 2.4, n = 16 per arm except click S; the rows are not in
 this repository]**.
+
+**Paired by commit.** Each complete cell's `A0` and `A0+L` arms ran the same 16 commits in the
+same order, and each `S3` look's first 16 commits are its `A0` arm's 16 (click S `A0`'s 3 are its
+look's first 3). So the arms can be compared commit by commit: each pair shares the commit, its
+era and, on click, its dependency set, and differs by the arm: the loop's changes for `A0` and
+`A0+L`; for `S3` against a blind arm, whether the tests are seen and the blind-only checks that
+go with it **[hypothesis — each run's
+`task_id`s and their order in the stack's `grades` table, 2026-11-10; those records are not in
+this repository]**. A disqualified row counts as not clean. The last column counts the
+scratch-path disqualifications clean instead. For the `S3` rows, the p value is the exact
+two-sided sign test on the commits clean under one arm only. The `A0` and `A0+L` pairs are the
+loop pair, which part 1 tests once, so they carry no p value here:
+
+| cell | first arm | second arm | commits | clean in both | only the first | only the second | in neither | p | scratch DQs counted clean: only the first, only the second |
+|---|---|---|---|---|---|---|---|---|---|
+| cobra XS | `A0` | `A0+L` | 16 | 7 | 4 | 2 | 3 | not tested (part 1) | 4, 0 |
+| cobra S | `A0` | `A0+L` | 16 | 4 | 4 | 2 | 6 | not tested (part 1) | 2, 1 |
+| click XS | `A0` | `A0+L` | 16 | 6 | 2 | 4 | 4 | not tested (part 1) | no scratch DQ |
+| the three | `A0` | `A0+L` | 48 | 17 | 10 | 8 | 13 | not tested (part 1) | 8, 5 |
+| cobra S | `S3` | `A0` | 16 | 8 | 6 | 0 | 2 | 0.031 | 6, 0 |
+| cobra S | `S3` | `A0+L` | 16 | 6 | 8 | 0 | 2 | 0.0078 | 7, 0 |
+| click XS | `S3` | `A0` | 16 | 6 | 7 | 2 | 1 | 0.18 | no scratch DQ |
+| click XS | `S3` | `A0+L` | 16 | 8 | 5 | 2 | 1 | 0.45 | no scratch DQ |
+| click S | `S3` | `A0` | 3 | 1 | 1 | 1 | 0 | 1.00 | no scratch DQ |
+
+Click XS's look took its third miss at its 10th commit, so its `S3` rows 11 to 16 do not bear on
+the reading; they are paired here only as rows **[hypothesis — the order and `clean` flags of
+`7d5d4bd7…`'s rows in the stack's `grades` table, 2026-11-10; those records are not in this
+repository]**.
+
+What the pairs show **[hypothesis — the rows of the ten runs above in the stack's `grades` table
+(`task_id`, `clean`, `disqualified`, `dq_reason`), read on 2026-11-10, apparatus 2.4; and the
+carve-out session's count from the served run-task lists, which agrees; those records are not
+in this repository]**:
+
+- **The loop pair.** In the three complete cells, 18 of the 48 commits were clean under one blind
+  arm and not the other: 10 only under `A0`, 8 only under `A0+L`. Each flip may be the loop's
+  changes, the attempt's own variation or a suspected harness artefact (the refused `git -C`
+  calls and the scratch-path disqualifications, section 10), and with one attempt per commit they
+  cannot be told apart. The net is 2 commits of 48 toward `A0`: cobra 8 to 4 toward `A0`, click XS
+  4 to 2 toward `A0+L`. With the scratch-path disqualifications counted clean, 13 commits flip, 8
+  and 5. All of it is interim, not tested.
+- **The loop's switch on cobra was learned in-sample (K7, part 2).** Cobra's finish gate
+  (`b383c935…`) was applied at 23:44:13Z on 2026-11-09, as cobra XS `A0` finished. Its evidence, 2
+  target-red first attempts of 18 blind ones at apparatus 2.4, matches the 18 blind 2.4 cobra rows
+  then in the ledger: the smoke commit's 2 rows and cobra XS `A0`'s 16, the last of them written at
+  23:44:13Z. The gate was in force on both cobra `A0+L` runs. On cobra XS, then, each commit's
+  `A0+L` attempt ran under a switch learned from rows that include its own `A0` attempt, a bias
+  that, argued from the code and not measured, can only favour b (clean only under `A0+L`) over c
+  (clean only under `A0`) (part 2). On cobra S the switch was learned from the smoke commit's 2
+  rows and cobra XS `A0`'s 16, none of them on a cobra S commit. Click XS's switch (`de907765…`) was
+  keyed on apparatus 2.2 rows from before the campaign, not on click XS `A0`'s rows. The table of
+  levers below lists the config changes in force on each `A0+L` run.
+- **Sighted against blind.** On cobra S, 6 commits were clean only when sighted and none only
+  when blind (p = 0.031), and still 6 and none with the scratch-path disqualifications counted
+  clean. Against `A0+L` it is 8 and none (p = 0.0078), or 7 and none (p = 0.016) with them counted
+  clean. One of the 6, commit `e0fefb2b`, is clean sighted (row 664) and disqualified blind (row
+  684) for test files modified before the overlay, a check only blind rows run; row 700 plays the
+  same part against `A0+L`. On click XS it is 7 and 2 (p = 0.18). This pairs sighted and blind
+  rows commit by commit; it does not pool them.
+- **What the p values are.** Part 1 registers none of the `S3` comparisons, and tests the loop
+  pair only once, when both arms of every cell are complete or the campaign ends; that test has
+  not been run. The `S3` comparisons were chosen after the rows were seen, among eight distinct
+  pairings (the table's "three" row sums three others), each read two ways, with the scratch-path
+  disqualifications as misses and as clean, and none is corrected for that. Corrected for the
+  eight, none is below 0.05 / 8, about 0.0063. Corrected for the five `S3` pairings alone, only
+  cobra S's `S3` against `A0+L` is below 0.01, and only with those disqualifications as misses
+  (0.0078; 0.016 with them clean); corrected for the ten `S3` readings (0.005), none is. They
+  describe these rows, not the cells.
 
 **The levers in force on each run.** Every row of every run carries `budget_tier` 25/25/900, the
 default profile **[hypothesis — read from each row's labels in the stack's `grades` table on
@@ -401,9 +478,12 @@ repository]**.
 
 **What stage 2 cannot conclude.**
 - No cell can deliver. Stage 2 runs no reading arm, and every reading's next act is a new reading.
-- Stage 2 completes the last cell, so the loop pair is then tested once (part 1). At 16 commits an
-  arm's Wilson interval is about ±0.22 at p = 0.5, so that test can show only a large difference
-  **[hypothesis — part 4's Wilson formula at n = 16; no stage-2 row exists yet]**.
+- Stage 2 completes the last cell, so the loop pair is then tested once (part 1). That test pools
+  64 pairs, and the smallest difference it finds 80% of the time is about 18 to 25 points, so a
+  loop effect smaller than about 20 points will usually be missed. In the three complete cells,
+  18 of 48 commits were clean under one blind arm and not the other (section 3), and with one
+  attempt per commit no single flip can be put down to the loop **[hypothesis — part 1's pre-run power simulation, and the
+  paired rows in section 3; no stage-2 row exists yet]**.
 - Click S `A0+L` will pin the calibrated budget profile while `A0` runs the default, so any
   difference between them mixes the loop's checks with a budget change.
 - Click's builder has pytest for only 10 of stage 2's 29 builds, as for 25 of stage 1's 75, so
