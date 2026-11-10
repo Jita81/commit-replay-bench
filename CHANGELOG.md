@@ -12,6 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **Apparatus 2.5 separates rows graded after the Wave 3 harness fixes** (#TBD).
+  ADR-0049 moves `APPARATUS_VERSION` to 2.5, by Paul's decision of 2026-11-10: the builder's exec
+  `/tmp`, `git -C` past the builder's git guard and `cost_usd` from the price table change what a
+  row means, and no row label could tell the waves apart. Belt set `v5`, the failure rule and
+  `mutation.v2` are unchanged; no migration. Every posture id moves, so every task is qualified
+  again at 2.5 (test runs, no model money), and oracle scores, controls and sign-offs are redone
+  before a cell delivers. A run under a 2.4 reserved reading is refused `pool_drift`: close every
+  open 2.4 campaign before a stack takes this.
+
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
   builder-image amendment: click's cells build in `crb-builder:local` (Python), not

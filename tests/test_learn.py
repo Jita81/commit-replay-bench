@@ -70,6 +70,7 @@ from crb.core.routing import (
     ControlsVerdict,
     RoutingPolicy,
 )
+from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import Backlog, BacklogItem
 from crb.factory.readiness import ROUTE_BUILD, assess
 from fixtures.posture import dict_at_apparatus, posture_row
@@ -793,7 +794,7 @@ TASK_C = "c" * 40
 def _live(task: str, **kw: Any) -> GradeRow:
     """A clean row of apparatus 2.4 a reading counts (sealed, ``r1``, graded after the
     registration ``fixtures.readings.book_for`` makes)."""
-    return _clean(task_id=task, apparatus_version="2.4", **live_labels(task), **kw)
+    return _clean(task_id=task, apparatus_version=APPARATUS_VERSION, **live_labels(task), **kw)
 
 
 def _map(
@@ -983,7 +984,7 @@ class TestStrengthen:
             _live(TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
         ] * 10
         controls = ControlsVerdict(
-            passed=True, constructible=7, total=7, escapes=3, apparatus_version="2.4"
+            passed=True, constructible=7, total=7, escapes=3, apparatus_version=APPARATUS_VERSION
         )
         cmap = _map(strong, controls=controls)
         assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
@@ -999,7 +1000,7 @@ class TestStrengthen:
             _live(TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")
         ] * 10
         controls = ControlsVerdict(
-            passed=True, constructible=6, total=7, escapes=1, apparatus_version="2.4"
+            passed=True, constructible=6, total=7, escapes=1, apparatus_version=APPARATUS_VERSION
         )
         cmap = _map(strong, controls=controls)
         assert cmap.cells[0].reason_code == REASON_CONTROLS_ESCAPES
@@ -1041,7 +1042,7 @@ class TestStrengthen:
         assert assess(BacklogItem.from_dict(item.to_dict())).route_hint == ROUTE_BUILD
         # the controls item keeps its own id space: the two can never collide on one cell
         controls = ControlsVerdict(
-            passed=True, constructible=6, total=7, escapes=1, apparatus_version="2.4"
+            passed=True, constructible=6, total=7, escapes=1, apparatus_version=APPARATUS_VERSION
         )
         held = _map(
             [_live(TASK_A, oracle_strength=0.95, repo="click", language="python", size="S")] * 10,

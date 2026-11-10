@@ -63,6 +63,7 @@ from crb.core.reading import (
     with_reservations,
 )
 from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.core.version import APPARATUS_VERSION
 from fixtures.posture import posture_row
 from fixtures.readings import (
     AUTHOR,
@@ -77,7 +78,7 @@ from fixtures.readings import (
 )
 
 LABEL = "|".join(CELL.values())
-CUR = "2.4"
+CUR = APPARATUS_VERSION
 
 
 def _book(*readings: Any, rows: list[GradeRow]) -> ReadingBook:
@@ -161,7 +162,7 @@ def test_a_stale_cell_is_offered_a_reading_at_the_running_apparatus() -> None:
     (c,) = plan.cells
     assert (c.reason, c.next_act, c.requests) == (learn.REASON_STALE, learn.NEXT_REGISTER, ())
     assert (c.n_stale, c.stale_versions, c.n_current) == (7, ("2.0",), 0)
-    assert "apparatus 2.4" in c.note
+    assert f"apparatus {CUR}" in c.note
     # the stale commits were never graded at 2.4, so a reading may hold them
     assert register_reading([r.task_id for r in old], rows=old).pool
 
@@ -681,7 +682,7 @@ def test_deterministic_and_rendered() -> None:
     b = learn.dumps(_plan(list(reversed(rows)), reading).to_dict())
     assert a == b and "nothing here was sent" in a
     text = learn.render_remeasure(_plan(rows, reading))
-    assert "apparatus 2.4" in text and "| look_pending |" in text and "| register |" in text
+    assert f"apparatus {CUR}" in text and "| look_pending |" in text and "| register |" in text
 
 
 def test_a_reading_already_seen_is_refused_so_a_burned_pool_is_visible() -> None:
