@@ -2069,19 +2069,22 @@ def remeasure_plan(
       ``n_current`` the commits its look has read, ``n_needed`` the commits still needed before
       the next look, and ONE request naming exactly those commits — the pool's first
       ``next_look`` in the seeded order with no observed first attempt graded after
-      registration. A reserved.v1 reading's pool is pinned to the qualification records that
-      admitted it (P-797) and the worker admits a commit by its record in the posture, never
+      registration. A reading that pins its pool (:attr:`Reading.pins_pool` — a reserved.v1
+      reading of a frozen pool, never a calibration pool) is pinned to the qualification records
+      that admitted it (P-797) and the worker admits a commit by its record in the posture, never
       the miner's ``gold_clean`` flag (ADR-0019): its commits are asked whatever that flag
       says, and while its pool drifts (:attr:`Reading.pool_drift` — a pinned record missing
       or not qualified, a commit relabelled out of the cell) no request at all and ``next_act``
-      ``none``, since the worker refuses every run of it ``pool_drift``, here or by hand
-      (:func:`_pool_drift_blocker`). A newer record in force is never drift (P-797), so the
-      plan reads it too: ``pool_records`` maps a pinned reading's id to the state of each pool
-      commit's record in force in the pool's posture (``qualified``, ``unqualified``,
-      ``revoked``, ``legacy``). A pending commit whose record the posture gate refuses — any
-      state but ``qualified``, or ``revoked``, which a run re-measures (``qualify_first``) —
-      is left out and named, and ``short_by`` counts it; with no entry for the reading every
-      pending commit is asked, as before. Any other
+      ``none`` (``config`` first when its checks arm moved), since the worker refuses every
+      run of it ``pool_drift``, here or by hand (:func:`_pool_drift_blocker`). A newer record
+      in force is never drift (P-797), so the plan reads it too: ``pool_records`` maps a
+      pinned reading's id to the state of each pool commit's record in force in the pool's
+      posture (``qualified``, ``unqualified``, ``revoked``, ``legacy``). A pending commit
+      whose record the posture gate refuses — any state but ``qualified``, or ``revoked``,
+      which a run re-measures (``qualify_first``) — is left out and named, and ``short_by``
+      counts it (with none left: no request, and ``next_act`` ``runs`` though the posture
+      gate refuses them in a run queued by hand too — P-814's gap); with no entry for the
+      reading every pending commit is asked, as before. Any other
       reading leaves out a commit that is not gold-clean (``gold_clean_tasks``) or whose
       current label moved (``task_labels``) and ``short_by`` says so. No request at all when
       a replay could not write rows the reading counts

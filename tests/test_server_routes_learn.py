@@ -95,6 +95,7 @@ from sqlalchemy.orm import Session
 
 from crb.core import learn as core_learn
 from crb.core.ledger import FAILURE_PROTOCOL, LABEL_FAILURE_KIND
+from crb.core.qualify import QUAL_GOLD_NOT_GREEN, STATE_UNQUALIFIED
 from crb.core.version import APPARATUS_VERSION
 from crb.factory.backlog import Backlog, BacklogError, BacklogItem, ItemExists
 from crb.server.app import API_PREFIX
@@ -109,7 +110,7 @@ from fixtures.proven import CELL as PROVEN_CELL
 from fixtures.proven import add_rows as add_proven_rows
 from fixtures.proven import add_tasks as add_proven_tasks
 from fixtures.proven import register_via_api
-from fixtures.readings import format_step_in_force
+from fixtures.readings import format_step_in_force, qualify_pool
 from fixtures.server_seed import (
     ALPHA,
     BETA,
@@ -970,6 +971,62 @@ def test_queueing_a_readings_top_up_enqueues_its_pending_commits_through_the_sub
     assert event.payload_json["arm"] == "S3"
     assert event.payload_json["reading_id"] == reading["reading_id"]
     assert event.payload_json["apparatus"] == APPARATUS_VERSION
+
+
+def test_a_readings_top_up_leaves_out_a_commit_its_record_in_force_refuses(
+    env: Env, builder_keys: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P-814, through the route: ``derive_remeasure`` passes each pinning reading's records in
+    force in its pool's posture to the plan (``pool_records``). A pending commit whose newer
+    record is ``unqualified`` (the posture gate refuses it) is left out, named and counted in
+    ``short_by``, with no drift; when its records refuse every pending commit there is no
+    request, and the queue is refused ``validation_error`` with nothing queued."""
+    del builder_keys
+    _sealed(env, monkeypatch)
+    reading = _add_reading(env, graded=12)
+    pool = reading["pool"]
+
+    def refuse(task_ids: list[str], salt: str) -> None:
+        qualify_pool(
+            env.factory,
+            ALPHA,
+            task_ids,
+            posture_class=reading["posture_class"],
+            posture_id=reading["pool_posture_id"],
+            state=STATE_UNQUALIFIED,
+            code=QUAL_GOLD_NOT_GREEN,
+            salt=salt,
+        )
+
+    refuse([pool[13]], "p814-one")
+    cell = _read_cell(env)
+    (request,) = cell["requests"]
+    assert request["task_ids"] == [t for t in pool[12:20] if t != pool[13]], cell
+    assert (cell["next_act"], cell["n_needed"], cell["n_requested"], cell["short_by"]) == (
+        "replay",
+        8,
+        7,
+        1,
+    )
+    assert (
+        "1 pending commit(s) have a newer record in force that is not qualified (unqualified)"
+        in cell["note"]
+    ), cell["note"]
+    assert "pool_drift" not in cell["note"]
+
+    refuse(pool[12:20], "p814-all")
+    cell = _read_cell(env)
+    assert cell["requests"] == [] and (cell["n_requested"], cell["short_by"]) == (0, 8), cell
+    assert (
+        "8 pending commit(s) have a newer record in force that is not qualified" in cell["note"]
+    ), cell["note"]
+    assert "pool_drift" not in cell["note"]
+    # P-814's gap: no request, yet the act is `runs` though a run queued by hand is refused too
+    assert cell["next_act"] == "runs", cell
+    before = env.get("/runs").json()["total"]
+    r = _queue(env, cell=READ_CELL)
+    assert r.status_code == 422 and envelope(r)["code"] == "validation_error", r.text
+    assert env.get("/runs").json()["total"] == before and _queued_events(env) == []
 
 
 def test_a_readings_top_up_under_a_campaign_is_refused_with_nothing_queued(

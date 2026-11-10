@@ -189,8 +189,10 @@ def pool_drift(session: Session, reading: Reading) -> list[dict[str, str]]:
     ``qualified``, or of another repository, task or posture; a reading pinned to no posture is
     one ``pool_posture_id`` row (fail closed). A NEWER record for the pinned posture — a
     requalification, or a revocation — is never drift: the pinned record is append-only and
-    still says what admitted the commit, and a revoked record in force is refused at admission,
-    so that commit stays pending (a stall, never a skip)."""
+    still says what admitted the commit. A revoked record in force is refused at admission only
+    by a run with ``qualify_first`` off, so that commit stays pending (a stall, never a skip); with
+    ``qualify_first`` on (the default) the run measures it again and may admit it under a new
+    record."""
     if not reading.pins_pool:
         return []
     if not reading.pool_posture_id:

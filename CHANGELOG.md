@@ -12,15 +12,15 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **The remeasure plan asks a reserved.v1 pool's commits by their records, not the miner's flag**
+- **The remeasure plan asks a pinned pool's commits by their records, not the miner's flag**
   (P-814; [#107](https://github.com/Jita81/commit-replay-bench/pull/107)). `GET /learn/remeasure`
-  left a pending commit out of a reading's S3 request when the miner's `gold_clean` was false,
-  though the posture gate admits it by its qualification record (ADR-0019) and the pool is pinned
-  to those records (P-797); Wave 3's first S3 looks would have been served short and then waited.
-  A reading that pins its pool is now asked whatever that flag says, and nothing while its pool
-  drifts: the drift is named in the note, the next act is `none`, and the Learn page shows
-  "Restore the pool first" with no route to Runs. Legacy readings are unchanged. No grading, ledger, reading
-  rule or apparatus version changes.
+  dropped a pending commit whose miner `gold_clean` was false, though the posture gate admits it
+  by its record (ADR-0019). A reading that pins its pool to those records (P-797) now asks each
+  pending commit by its record in force: `qualified` or `revoked` is asked; `unqualified` or
+  `legacy` is left out and counted in `short_by`. While its pool drifts nothing is asked: the
+  next act is `none` and the Learn page shows "Restore the pool first" (a moved checks arm still
+  comes first, `config`). Legacy readings are unchanged. No grading, ledger, reading rule or
+  apparatus version changes.
 
 - **authlib, joserfc and msgpack move past ten advisories** (eight in authlib, among them
   PYSEC-2026-4355 to PYSEC-2026-4360, CVE-2026-96760 and CVE-2026-116672; CVE-2026-119284 in
