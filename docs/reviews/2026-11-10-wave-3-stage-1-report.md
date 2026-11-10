@@ -2,13 +2,13 @@
 
 **Closed.** Paul closed Wave 3 on this report at 17:33Z, with no stage 2 (DL-416). Nothing is
 released. Read once at the close, the loop pair does not clear, and Q-25's rule reads Stop, not the
-default. Of the choices the read rests on, only one would flip it, and Paul kept that one as
-registered; section 11 sets it out with the rest of the close. The FREEZE ends when this record
-merges, by Paul's answers at 18:49Z and in the carve-out session (section 11). Sections 1 to 10
-stand as written at stage 1's end; where the close makes a passage moot, the passage says so
-**[hypothesis — Paul's answers in the lead session's transcript (17:33:07Z and 18:49:00Z) and in the
-carve-out session (relayed at 18:46:01Z), and the stack's rows and readings on 2026-11-10 at about
-17:40Z, apparatus 2.4; those records are not in this repository]**.
+default. Of the choices the read rests on, only one would flip it; asked after the read, Paul kept
+it as registered (section 11). The FREEZE ends when this record merges, by Paul's answers at 18:49Z
+and in the carve-out session (section 11). Sections 1 to 10 stand as written at stage 1's end; where
+the close makes a passage moot, the passage says so **[hypothesis — Paul's answers in the lead
+session's transcript (17:33:07Z and 18:49:00Z) and in the carve-out session (relayed at 18:46:01Z),
+and the stack's rows and readings on 2026-11-10 at about 17:40Z, apparatus 2.4; those records are
+not in this repository]**.
 
 **Status at stage 1's end, before the close.** Stage 1 of the Wave 3 campaign `cmp_8e1f261023db8a26a40e0e84` has ended at its line
 on Claude Code's reading of "fits", which part 2 does not contain. On that reading nothing more
@@ -37,10 +37,11 @@ the repository's held-out suite passed under the belts. It is not proof that the
 Cobra's runs used the builder image `crb-builder-go:local` and click's `crb-builder:local`. This
 record counts a disqualified row as a miss, as the readings do. At stage 1's end Paul had not
 decided how the disqualifications suspected to be harness false positives are treated (section 10),
-so each arm's upper bound with them counted clean is in section 3 as well. At the close Paul kept
-them as misses, as registered (section 11) **[hypothesis — Paul's answers in the lead session's
-transcript up to 17:33:07Z, and the carve-out session's question and Paul's "Yes", relayed to the
-lead session at 18:46:01Z on 2026-11-10; neither transcript is in this repository]**.
+so each arm's upper bound with them counted clean is in section 3 as well. At the close the
+registered rule counted them as misses, and Paul confirmed that rule after the read (section 11)
+**[hypothesis — the stack's rows and readings on 2026-11-10 at about 17:40Z, apparatus 2.4, and the
+carve-out session's question and Paul's "Yes", relayed to the lead session at 18:46:01Z; neither
+those records nor the transcripts are in this repository]**.
 
 ## Summary for Paul
 
@@ -54,13 +55,13 @@ those records are not in this repository]**:
   the loop; on the 48 observed pairs it still leans to `A0`, b = 8 against c = 10, p = 0.81. Q-25's
   rule reads **Stop**, not the default. Of the choices the read rests on, only one flips it:
   disqualified rows count as misses, as registered. With the scratch-path disqualifications counted
-  clean, Change course would fire instead. You kept them as misses and left the verdict at Stop. The
-  decision Wave 3 informs is yours (Q-19, DL-377); DL-415, in PR #108 and not yet on `main`, voids
-  its 6 November date. You chose to end the FREEZE when this record merges, not at step 12's
-  published rows. The loop switch is off again (step 10). The four bullets below on "fits", stage 2,
-  part 4 and your step were written before the close and are moot **[hypothesis — section 11's
-  sources: the stack's rows on 2026-11-10 at about 17:40Z, apparatus 2.4, and your answers up to
-  18:49Z; those records are not in this repository]**.
+  clean, Change course would fire instead. Asked after the read, you kept them as misses and left
+  the verdict at Stop. The decision Wave 3 informs is yours (Q-19, DL-377); DL-415, in PR #108 and
+  not yet on `main`, voids its 6 November date. You chose to end the FREEZE when this record merges,
+  not at step 12's published rows. The loop switch is off again (step 10). The four bullets below on
+  "fits", stage 2, part 4 and your step were written before the close and are moot **[hypothesis —
+  section 11's sources: the stack's rows on 2026-11-10 at about 17:40Z, apparatus 2.4, and your
+  answers up to 18:49Z; those records are not in this repository]**.
 - **Spend.** Stage 1 spent $52.708356 (£39.04) of the $54.00 line, author calls included, over
   12 runs and 161 rows. $1.29 (£0.96) is left. The dearest attempt so far cost $0.86, so by part
   2's rule the largest cap that still fits is $0.43, below one click S blind attempt ($0.555 on
@@ -77,10 +78,12 @@ those records are not in this repository]**:
 - **The readings.** None delivers. Cobra XS is `undecided`: its pool of 17 cannot reach the first
   look at 20, so its `S3` arm never ran. Cobra S, click XS and click S read `insufficient` at their
   third miss. Cobra S's three misses are all disqualifications on builder scratch paths, suspected
-  harness false positives whose treatment Paul had not decided at stage 1's end (at the close Paul
-  kept them as misses, section 11). Those rows were never graded; counted clean, the look would read
-  20 of 20. `S1` stops in every cell. Each reading's next act is a new reading, which is Paul's
-  call. Nothing is amended.
+  harness false positives whose treatment Paul had not decided at stage 1's end. At the close the
+  registered rule counted them as misses, and Paul confirmed that rule after the read (section 11)
+  **[hypothesis — the carve-out session's question and Paul's "Yes", relayed to the lead session at
+  18:46:01Z on 2026-11-10; neither transcript is in this repository]**. Those rows were never
+  graded; counted clean, the look would read 20 of 20. `S1` stops in every cell. Each reading's next
+  act is a new reading, which is Paul's call. Nothing is amended.
 - **The descriptive arms.** Three cells have both arms complete at 16 commits each. Click S `A0`
   has run 3 of its 16 and `A0+L` none, so click S waits on a look. Four of cobra XS `A0+L`'s seven
   misses are refused `git -C` calls, and the scratch-path disqualifications fall in both cobra
@@ -209,12 +212,14 @@ Click XS read 7 of its first 10 clean, 0.700 [0.397, 0.892], and click S 4 of it
 PW-4); the rows after the third miss are reserved under the reading and change nothing. Cobra S's
 three misses are all disqualifications: one on a builder scratch file (`.tmp/out.json`) and two on
 the in-repository Go build cache (`.gocache`). All three are suspected harness false positives
-(section 10). At stage 1's end Paul had not decided how they are treated; at the close Paul kept
-them as misses (section 11). Those rows were never graded, so whether they were clean is not known;
-counted clean, the look reads 20 of 20, 1.000 [0.839, 1.000], an upper bound. Click's two looks
-depend on whether the builder can run click's tests, which is not confirmed (section 10)
-**[hypothesis — the rows' `dq_reason` and the reading's text on 2026-11-10, apparatus 2.4, n = 20
-rows; those records are not in this repository]**.
+(section 10). At stage 1's end Paul had not decided how they are treated; at the close the
+registered rule counted them as misses, and Paul confirmed that rule after the read (section 11)
+**[hypothesis — the carve-out session's question and Paul's "Yes", relayed to the lead session at
+18:46:01Z on 2026-11-10; neither transcript is in this repository]**. Those rows were never graded,
+so whether they were clean is not known; counted clean, the look reads 20 of 20, 1.000
+[0.839, 1.000], an upper bound. Click's two looks depend on whether the builder can run click's
+tests, which is not confirmed (section 10) **[hypothesis — the rows' `dq_reason` and the reading's
+text on 2026-11-10, apparatus 2.4, n = 20 rows; those records are not in this repository]**.
 
 - **No reading delivers**, so no result carries the label "look.v1 deliver; oracle and controls
   not yet measured".
@@ -594,10 +599,12 @@ item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this 
   kind) on the builder's scratch paths: eleven on the in-repository Go build cache (`.gocache`,
   `.gotmp/cache`) and one on `.tmp/out.json`. Nine fell in the descriptive arms and three in cobra
   S's look. They are suspected harness false positives, but they were never graded, so whether they
-  would have been clean is not known. At stage 1's end Paul had not decided how they are treated; at
-  the close Paul kept them as misses for Wave 3's read (section 11). Two more rows, 684 and 700,
-  both on commit `e0fefb2b`, were disqualified for modified test files; this record does not class
-  them with the scratch-path rows.
+  would have been clean is not known. At stage 1's end Paul had not decided how they are treated;
+  the registered rule counted them as misses in Wave 3's read at the close, and Paul confirmed that
+  rule afterwards (section 11) **[hypothesis — the carve-out session's question and Paul's "Yes",
+  relayed to the lead session at 18:46:01Z on 2026-11-10; neither transcript is in this
+  repository]**. Two more rows, 684 and 700, both on commit `e0fefb2b`, were disqualified for
+  modified test files; this record does not class them with the scratch-path rows.
 - **The archaeology guard may refuse the worktree's own root.** Five refused calls were
   `git -C /work …`: rows 641, 642, 647 and 652 in cobra XS `A0+L`, and 703 in cobra S `A0+L`. The
   suspected mechanism is that the guard resolves `/work` to the host path; it is not confirmed.

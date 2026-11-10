@@ -19,8 +19,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   part 6 gains the stage-2 statement amendment. Paul then closed Wave 3 on the report, with no stage
   2 (DL-416), so nothing is released. The report's section 11 and the registration's closure
   amendment record the close: the loop pair, read once, does not clear; Q-25's rule reads Stop,
-  which turns on counting disqualified rows as misses, the registered rule Paul kept; and the loop
-  switch is off again. The FREEZE ends at this merge. Docs only.
+  which turns on counting disqualified rows as misses, the registered rule Paul kept after the read;
+  and the loop switch is off again. The FREEZE ends at this merge. Docs only.
 
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
