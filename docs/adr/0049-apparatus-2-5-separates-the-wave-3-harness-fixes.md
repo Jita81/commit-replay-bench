@@ -11,7 +11,8 @@ and are never pooled with 2.5 rows.
 ## Context
 
 Wave 3 stage 1, graded at apparatus 2.4, showed three harness effects that change what a
-measured row means:
+measured row means **[hypothesis — read from the Wave 3 stage-1 report (#111) and its build
+transcripts; the campaign's rows are not in this repository]**:
 
 1. The Go toolchain's scratch files in the builder's `/tmp` disqualified builds under belt 1b.
    Pull request #113 mounts the builder's `/tmp` exec so the scratch files run where the
