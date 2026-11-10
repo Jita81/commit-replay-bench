@@ -76,13 +76,17 @@ those records are not in this repository]**:
   than $0.86. Section 7 has the detail.
 - **Stage 2.** It runs click S only: `A0`'s 13 pending commits (fewer if you choose (b)), then
   `A0+L`'s 16. That is about $10 to $16 of the $55.29 the release leaves, and up to about $25 if
-  every attempt cost as much as the dearest so far; each run's cap bounds it. No builder-image
+  every attempt cost as much as the dearest so far. Each run's cap limits it but does not bound
+  it: a run's first attempt is unbounded, and a later one dearer than any before it can pass the
+  cap (section 9). No builder-image
   switch is needed, because click already runs on `crb-builder:local`. That image has no pytest,
   and click's dependency sets give the builder pytest for only 10 of the 29 builds (section 10).
 - **Part 4.** The statement expects 66.4 clean blind patches for review if click S `A0`'s 2 of 3
-  holds, or 59.5 at the value baseline's rate, and I give the two equal weight. Stage 1 has already
-  observed 54. Stage 2 adds about 12 (or 5.5), which narrows the share judged mergeable from ±12.0
-  points to ±10.8 (or ±11.4). No cell can deliver in stage 2.
+  holds, or 60.8 if its 13 pending commits run at the value baseline's rate, and I give the two
+  equal weight. Stage 1 has already observed 54. Stage 2 adds about 12 (or 6.8), which narrows the
+  share judged mergeable from ±12.0 points to ±10.8 (or ±11.3). No cell can deliver in stage 2.
+  These are path (a)'s figures: if you choose (b), I fill the statement and this report again from
+  the rows at stage 1's end before step 22.
 - **Your step.** First the "fits" choice above. Then step 22, P-RELEASE-STAGE2, is yours: the
   three `wave3_post.py` commands in the runbook's step 22, whose decision is now DL-400's id and
   its words verbatim. If (b) ends on a stop, nothing is released. I check the line reads $108.00
@@ -456,23 +460,31 @@ about 10:55Z, apparatus 2.4; those records are not in this repository]**.
 still waiting on a look and no stop, DL-400 releases stage 2. Paul files it at the runbook's step
 22, `POST /api/v1/campaigns/{id}/release` with `{"released_gbp": 80, "decision": …}`, the decision
 being DL-400's id and its words verbatim. If the literal path ends on a stop, nothing is released.
-The amendment records why Paul, not Claude Code, files it.
+The amendment records why Paul, not Claude Code, files it. On path (b), Claude Code first fills
+part 4's statement and this report again from the rows at stage 1's end, since the literal runs
+change its spend and click S `A0`'s rate **[hypothesis — DL-400 in `docs/DECISION-LOG.md`, part 5
+steps 8 and 9 and the stage-2 statement amendment in the registration, and step 22 of the start-up
+runbook (handbook page 13, v0.4.18); the runbook is in the private handbook, not in this
+repository]**.
 
 ## 8. What stage 2 buys
 
 Part 4's statement, filled from stage 1, is in the registration's part 6:
 [the stage-2 statement amendment](2026-10-09-wave-3-registration.md#the-stage-2-statement-amendment-2026-11-10).
 It expects 66.4 clean blind patches for review by the campaign's end if click S `A0`'s 2 of 3
-holds, as part 4's rule makes it, or 59.5 if click S `A0` runs at the value baseline's 0.233. This
+holds, as part 4's rule makes it, or 60.8 if click S `A0`'s 13 pending commits run at the value
+baseline's 0.233, its 2 clean of 3 kept as observed. These are path (a)'s figures; on path (b)
+they are filled again from the rows at stage 1's end (section 7). This
 record gives the two equal weight, because 2 of 3 rests on three rows, one of them a budget miss.
-That gives the share judged mergeable to ±10.8 points at p = 0.308 (±11.4 on 59.5), and ±11.7 at
-p = 0.5 (±12.3) **[hypothesis — part 4's formulas on stage 1's rates and the value baseline's
+That gives the share judged mergeable to ±10.8 points at p = 0.308 (±11.3 on 60.8), and ±11.7 at
+p = 0.5 (±12.2) **[hypothesis — part 4's formulas on stage 1's rates and the value baseline's
 priors; the rows are not in this repository]**. Stage 2 asks for up to $54.00 (£40.00). The line
 becomes $108.00 for the campaign in all.
 
 **What stage 2 adds.** Stage 1 has already observed 54 clean blind patches. Stage 2 adds about
-12.4 of the 66.4, or 5.5 of the 59.5, so it narrows the share's interval by about 1.1 points, or
-0.5: from ±12.0 to ±10.8 (or ±11.4) at p = 0.308, and from ±12.9 to ±11.7 (or ±12.3) at worst
+12.4 of the 66.4, or 6.8 of the 60.8 (its 29 attempts at 7 of 30), so it narrows the share's
+interval by about 1.1 points, or 0.7: from ±12.0 to ±10.8 (or ±11.3) at p = 0.308, and from ±12.9
+to ±11.7 (or ±12.2) at worst
 **[hypothesis — part 4's formulas at 54 patches and at E; the rows are not in this
 repository]**.
 
@@ -485,7 +497,11 @@ repository]**.
   attempt per commit no single flip can be put down to the loop **[hypothesis — part 1's pre-run power simulation, and the
   paired rows in section 3; no stage-2 row exists yet]**.
 - Click S `A0+L` will pin the calibrated budget profile while `A0` runs the default, so any
-  difference between them mixes the loop's checks with a budget change.
+  difference between them mixes the loop's checks with a budget change **[hypothesis — the config
+  change `678532656dbf3811` (`spend.budget_profile=calibrated`) in the stack's `events` table on
+  2026-11-10, the run bodies in section 9, and code reading of the arm's pin at its first
+  reservation (`treatment_pins` in `src/crb/server/reading_book.py` at the served `406722a6`); the
+  stack's records are not in this repository]**.
 - Click's builder has pytest for only 10 of stage 2's 29 builds, as for 25 of stage 1's 75, so
   every click arm measures a builder that, for most commits, has no pytest to run click's tests
   with (section 10) **[hypothesis — the commits' parents in the stack's click clone and the
@@ -505,10 +521,16 @@ over click S's 3, apparatus 2.4; those rows are not in this repository]**:
 - about 29 attempts in all, roughly $10 to $16 of the $55.29 left after the release, and up to
   about $25 if every attempt cost as much as the dearest so far, $0.863184.
 
-Each run's cap bounds what it can spend, whatever the estimate. The plan's own estimates are no
-guide here: they cover `S3` only, they came to about half of what stage 1's runs cost (section 10), and they
-read 0.0 for `A0` and `A0+L`. The calibrated budget profile that click S `A0+L` will pin has no
-measured cost yet.
+Each run's cap limits what it can spend, whatever the estimate, but it is a guard, not a
+guarantee. The worker reserves nothing before a run's first attempt (G-938, section 7), and before
+each later attempt it reserves only the dearest attempt the run has made, so one dearer attempt can
+carry a run past its cap **[hypothesis — code reading of `SpendCap.check` in
+`src/crb/server/spend_cap.py` at the served `406722a6`]**. The plan's own estimates are no guide
+here: they cover `S3` only, they came to about half of what stage 1's runs cost (section 10), and
+they read 0.0 for `A0` and `A0+L`. The calibrated budget profile that click S `A0+L` will pin has
+no measured cost yet **[hypothesis — the remeasure plan as the stack served it on 2026-11-10 at
+about 10:55Z, the runs' spend in section 1, and the rows of section 3, none of them on the
+calibrated profile; those records are not in this repository]**.
 
 **No image switch.** Click's runs are pinned to `crb-builder:local`, and the stack already runs that
 image, so stage 2 needs no `env.sh` edit and no restart. Cobra's runs used `crb-builder-go:local`;

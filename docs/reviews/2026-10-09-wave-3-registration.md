@@ -1489,7 +1489,7 @@ records are not in this repository]**:
 ```text
 Wave 3 — the stage-2 statement — 2026-11-10
 Stage 1 spent $52.708356 (£39.04) of $54.00, author calls included; see 2026-11-10-wave-3-stage-1-report.md.
-Clean blind patches expected for review by the campaign's end: E = 66.4, or 59.5 with the value baseline's 0.233 for click S A0; the two get equal weight
+Clean blind patches expected for review by the campaign's end: E = 66.4, or 60.8 with the value baseline's 0.233 for click S A0's 13 pending commits; the two get equal weight
   per cell and arm: cobra XS A0: N = 16, p̂ = 0.688 (stage 1)
   per cell and arm: cobra XS A0+L: N = 16, p̂ = 0.563 (stage 1)
   per cell and arm: cobra XS S1@gpt-oss-120b: N = 0 (S3 undecided, not run; S1 stopped)
@@ -1503,7 +1503,7 @@ Clean blind patches expected for review by the campaign's end: E = 66.4, or 59.5
   per cell and arm: click S A0+L: N = 16, p̂ = 0.233 (value baseline)
   per cell and arm: click S S1@gpt-oss-120b: N = 0 (S3 insufficient; S1 stopped)
 Precision bought: the share judged mergeable to ±10.8 points (Wilson 95%, n = 66.4, p = 0.308;
-  descriptive: fixed-n, not adjusted for the sequential look), ±11.7 points at worst; with E = 59.5, ±11.4 and ±12.3. Paul's 10 give the agreement as in part 3.
+  descriptive: fixed-n, not adjusted for the sequential look), ±11.7 points at worst; with E = 60.8, ±11.3 and ±12.2. Paul's 10 give the agreement as in part 3.
 Stage 2 asks for up to $54.00 (£40.00); the line becomes $108.00 for the campaign in all.
 ```
 
@@ -1517,13 +1517,14 @@ the rates above; the rows they come from are not in this repository]**:
   Click S `A0+L` has none, so p̂ is the value baseline's blind rate at S, 7 of 30.
 - p is 4 of 13 (0.308), the value baseline's share, because stage 1 holds no review: the reviews
   are step 11, after the campaign.
-- With the value baseline's 0.233 for click S `A0` as well, E would be 59.5, and the share would
-  be known to ±11.4 points, or ±12.3 at worst. Three attempts are too few to prefer 2 of 3 over the
+- With the value baseline's 0.233 for click S `A0`'s 13 pending commits as well, and its 2 clean
+  of 3 kept as observed, E would be 60.8, and the share would be known to ±11.3 points, or ±12.2
+  at worst. Three attempts are too few to prefer 2 of 3 over the
   baseline, so the two get equal weight. Either way, E sits between part 4's worked example (about
   51) and the table's 80.
-- Stage 1 observed 54 clean blind first attempts. Stage 2 adds about 12.4 to them, or 5.5 with
-  E = 59.5. At n = 54 the share would be known to about ±12.0 points (±12.9 at worst), so stage 2
-  narrows it by about 1.1 points, or 0.5.
+- Stage 1 observed 54 clean blind first attempts, click S `A0`'s 2 among them. Stage 2 adds about
+  12.4 to them, or 6.8 with E = 60.8 (its 29 attempts at 7 of 30). At n = 54 the share would be
+  known to about ±12.0 points (±12.9 at worst), so stage 2 narrows it by about 1.1 points, or 0.7.
 
 **Who files the release.** Part 2, decision 9's entry in part 1 (DL-400) and part 5 step 9 say
 Claude Code files `POST /api/v1/campaigns/{id}/release`. The start-up runbook (handbook page 13,
@@ -1580,6 +1581,13 @@ are not in this repository]**. Paul chooses:
 
 No run is queued and nothing is released until Paul chooses. The detail, and the outcomes of a
 literal run, are in the stage-1 report's section 7.
+
+**The statement on path (b).** The statement above is filled from the rows at the end of stage 1
+on path (a). On path (b) stage 1 ends only after the literal runs, which change its spend and click
+S `A0`'s rate. Part 4's statement is filled from the results at the end of stage 1 (part 5 step 8),
+so on that path Claude Code fills it again, and the stage-1 report, from the rows at that end, and
+updates this amendment before step 22's release is filed. If path (b) ends on a stop, nothing is
+released and the statement is not filed again.
 
 **What does not change.** No protocol value in part 1, money figure in part 2 or reading body in
 part 5 changes. The release's body and condition stay as part 2 and DL-400 fix them. No reading is
