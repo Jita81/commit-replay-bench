@@ -18,6 +18,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   voided it. The decision log is append-only: DL-377 stays as written and DL-415 supersedes its
   date. Documentation only: no code, rule or apparatus version changes.
 
+- **The Wave 3 registration records step 3**
+  ([#103](https://github.com/Jita81/commit-replay-bench/pull/103)). Part 6's step-3 amendment holds
+  each mine and qualify body as sent, each cell's count, qualified-set sha256 and label sources,
+  K1's audit, the image Ids and what the pools can speak for. Three cells hold at least 20
+  qualified commits; cobra XS holds 17, so its condition fails, and the cell stays as registered.
+  [#100](https://github.com/Jita81/commit-replay-bench/pull/100), the seal that let click qualify,
+  is recorded there too. No protocol value changes.
+
 - **The remeasure plan asks a pinned pool's commits by their records, not the miner's flag**
   (P-814; [#109](https://github.com/Jita81/commit-replay-bench/pull/109)). `GET /learn/remeasure`
   dropped a pending commit whose miner `gold_clean` was false, though the posture gate admits it
