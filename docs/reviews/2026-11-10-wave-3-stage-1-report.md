@@ -1,6 +1,15 @@
 # Wave 3 — the stage-1 report — 2026-11-10
 
-**Status.** Stage 1 of the Wave 3 campaign `cmp_8e1f261023db8a26a40e0e84` has ended at its line
+**Closed.** Paul closed Wave 3 on this report at 17:33Z, with no stage 2 (DL-416). Nothing is
+released. Read once at the close, the loop pair does not clear, and Q-25's rule reads Stop, not
+the default. Of the choices the read rests on, only one would flip it; section 11 sets it out
+with the rest of the close. When the FREEZE ends is Paul's call (section 11).
+Sections 1 to 10 stand as written at stage 1's end; where the close makes a passage moot, the
+passage says so **[hypothesis — Paul's answer in the lead session's transcript and the stack's
+rows and readings on 2026-11-10 at about 17:40Z, apparatus 2.4; those records are not in this
+repository]**.
+
+**Status at stage 1's end, before the close.** Stage 1 of the Wave 3 campaign `cmp_8e1f261023db8a26a40e0e84` has ended at its line
 on Claude Code's reading of "fits", which part 2 does not contain. On that reading nothing more
 fits under $54.00. No stop happened, and the protocol is not complete. Read literally, part 2
 still admits at least one more small run, and no record says where a literal run would lead
@@ -35,6 +44,19 @@ The stage at a glance **[hypothesis — read from the stack's `runs`, `grades` a
 and `GET /api/v1/readings` on 2026-11-10 between 10:50Z and 11:10Z, apparatus 2.4, n = 161 rows;
 those records are not in this repository]**:
 
+- **Closed (section 11).** You confirmed at 17:33Z that Wave 3 closes on this report, with no
+  stage 2, so nothing is released. Read once at the close on all 64 pairs, the loop does not
+  clear: b = 8, c = 25, p = 0.0046. That is significant only because click S's 16 pending pairs
+  are read against the loop; on the 48 observed pairs it still leans to `A0`, b = 8 against c = 10,
+  p = 0.81. Q-25's rule reads **Stop**, not the default. Of the choices the read rests on, only one
+  flips it: disqualified rows count as misses, as registered. With the scratch-path
+  disqualifications counted clean, Change course would fire instead. The decision Wave 3 informs
+  is yours (Q-19, DL-377); DL-415, in PR #108 and not yet on `main`, voids its 6 November date.
+  When the FREEZE ends, at this record's merge or at step 12's published rows, is yours too. The
+  loop switch is off again (step 10).
+  The four bullets below on "fits", stage 2, part 4 and your step were written before the close
+  and are moot **[hypothesis — section 11's sources, on 2026-11-10 at about 17:40Z, apparatus 2.4;
+  those records are not in this repository]**.
 - **Spend.** Stage 1 spent $52.708356 (£39.04) of the $54.00 line, author calls included, over
   12 runs and 161 rows. $1.29 (£0.96) is left. The dearest attempt so far cost $0.86, so by part
   2's rule the largest cap that still fits is $0.43, below one click S blind attempt ($0.555 on
@@ -65,7 +87,7 @@ those records are not in this repository]**:
   that, argued from the code and not measured, can only favour `A0+L` there (K7, part 2). On cobra S, of 16 commits, 6 were clean only when
   sighted and none only when blind (p = 0.031); that comparison was not registered and was chosen
   after the rows were seen, so it describes these rows, not the cell (section 3).
-- **"Fits" — your choice.** Part 2 does not say what "fits" means. I read a run as fitting only
+- **"Fits" — your choice (moot since the close).** Part 2 does not say what "fits" means. I read a run as fitting only
   when its cap holds one attempt at the arm's expected cost, so on my reading nothing more fits.
   Read literally, a run capped at up to $0.43 on click S `A0`'s next commit still fits. You choose:
   (a) attest my reading in a decision-log row, as DL-400 recorded a reading I took, and stage 1
@@ -74,20 +96,20 @@ those records are not in this repository]**:
   worker does not bound a run's first attempt, and one dearer than $1.29 would overrun the
   campaign. That is a stop, and DL-400 would then release nothing. No attempt of the 161 cost more
   than $0.86. Section 7 has the detail.
-- **Stage 2.** It runs click S only: `A0`'s 13 pending commits (fewer if you choose (b)), then
+- **Stage 2 (moot since the close: it does not run).** It runs click S only: `A0`'s 13 pending commits (fewer if you choose (b)), then
   `A0+L`'s 16. That is about $10 to $16 of the $55.29 the release leaves, and up to about $25 if
   every attempt cost as much as the dearest so far. Each run's cap limits it but does not bound
   it: a run's first attempt is unbounded, and a later one dearer than any before it can pass the
   cap (section 9). No builder-image
   switch is needed, because click already runs on `crb-builder:local`. That image has no pytest,
   and click's dependency sets give the builder pytest for only 10 of the 29 builds (section 10).
-- **Part 4.** The statement expects 66.4 clean blind patches for review if click S `A0`'s 2 of 3
+- **Part 4 (moot since the close: the statement is recorded but not acted on).** The statement expects 66.4 clean blind patches for review if click S `A0`'s 2 of 3
   holds, or 60.8 if its 13 pending commits run at the value baseline's rate, and I give the two
   equal weight. Stage 1 has already observed 54. Stage 2 adds about 12 (or 6.8), which narrows the
   share judged mergeable from ±12.0 points to ±10.8 (or ±11.3). No cell can deliver in stage 2.
   These are path (a)'s figures: if you choose (b), I fill the statement and this report again from
   the rows at stage 1's end before step 22.
-- **Your step.** First the "fits" choice above. Then step 22, P-RELEASE-STAGE2, is yours: the
+- **Your step (moot since the close: step 22 is not filed).** First the "fits" choice above. Then step 22, P-RELEASE-STAGE2, is yours: the
   three `wave3_post.py` commands in the runbook's step 22, whose decision is now DL-400's id and
   its words verbatim. If (b) ends on a stop, nothing is released. I check the line reads $108.00
   before any stage-2 run.
@@ -205,7 +227,8 @@ figures are **interim, not tested**: the loop pair is tested once, when both arm
 are complete or, if the campaign ends first, then, with each pending commit read against the loop
 (part 1) **[hypothesis — read from the stack's `grades` table and
 `GET /api/v1/readings` on 2026-11-10, apparatus 2.4, blind, n = 16 per arm except click S; those
-records are not in this repository]**.
+records are not in this repository]**. Since the close, that one test has been made, on all 64
+pairs (section 11); the figures here stay descriptive.
 
 | cell | arm | run | builder image | observed | clean | red | refused call | budget | lint | DQ scratch path | DQ test files | Wilson 95% (blind) | scratch DQs counted clean |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -275,7 +298,8 @@ in this repository]**:
   calls and the scratch-path disqualifications, section 10), and with one attempt per commit they
   cannot be told apart. The net is 2 commits of 48 toward `A0`: cobra 8 to 4 toward `A0`, click XS
   4 to 2 toward `A0+L`. With the scratch-path disqualifications counted clean, 13 commits flip, 8
-  and 5. All of it is interim, not tested.
+  and 5. All of it is interim, not tested; the loop pair's one test, made at the close, is in
+  section 11.
 - **The loop's switch on cobra was learned in-sample (K7, part 2).** Cobra's finish gate
   (`b383c935…`) was applied at 23:44:13Z on 2026-11-09, as cobra XS `A0` finished. Its evidence, 2
   target-red first attempts of 18 blind ones at apparatus 2.4, matches the 18 blind 2.4 cobra rows
@@ -295,8 +319,8 @@ in this repository]**:
   same part against `A0+L`. On click XS it is 7 and 2 (p = 0.18). This pairs sighted and blind
   rows commit by commit; it does not pool them.
 - **What the p values are.** Part 1 registers none of the `S3` comparisons, and tests the loop
-  pair only once, when both arms of every cell are complete or the campaign ends; that test has
-  not been run. The `S3` comparisons were chosen after the rows were seen, among eight distinct
+  pair only once, when both arms of every cell are complete or the campaign ends; that test had
+  not been run at stage 1's end, and was run once at the close (section 11). The `S3` comparisons were chosen after the rows were seen, among eight distinct
   pairings (the table's "three" row sums three others), each read two ways, with the scratch-path
   disqualifications as misses and as clean, and none is corrected for that. Corrected for the
   eight, none is below 0.05 / 8, about 0.0063. Corrected for the five `S3` pairings alone, only
@@ -342,21 +366,22 @@ Each "signature it answers" cell gives the signature and its count in the first 
 change's evidence held, and "evidence keyed at" the apparatus version that evidence was keyed at,
 as each change's `learn.prevention.recorded` event records them. Click's first change,
 `de907765…`, rests on 11 blind attempts keyed at apparatus 2.2, and it is in force in apparatus 2.4
-`A0+L` rows: click XS's now and click S's in stage 2. The two sighted changes answer different
+`A0+L` rows: click XS's, and click S's in stage 2, which the close cancelled (section 11). The two sighted changes answer different
 signatures, `which` and `pip download`, with the same lever, the finish gate, and in the sighted
 stratum, not the blind one the `A0+L` arms run in **[hypothesis — read from the
 `learn.prevention.recorded` events of each change in the stack's `events` table on 2026-11-10;
 those records are not in this repository]**.
 
 The calibrated budget profile is in force for click's blind stratum. Click S `A0+L`'s body names
-no `budget_profile`, so it will pin `calibrated` at its first reservation, while every `A0` body
-names `default`. That is part 1's `A0+L` arm as registered: the loop's changes in force when the
-arm runs.
+no `budget_profile`, so it would have pinned `calibrated` at its first reservation, while every
+`A0` body names `default`. That is part 1's `A0+L` arm as registered: the loop's changes in force
+when the arm runs. Since the close, the arm does not run (section 11).
 
 **The loop's switch and the factory rows.** The switch was turned to `config` for cobra at
 2026-11-09 23:19:53Z and for click at 23:20:21Z, each with an empty overlay and the reason "Wave
 3, the `A0+L` arm (ADR-0026 item 13; DL-371)". Step 10 restores it to the state step 4 recorded:
-`auto_apply` off, never switched. The factory rows did not move during stage 1: cobra holds 3 and
+`auto_apply` off, never switched. Step 10 ran at the close, at 17:37Z, and the switch now has
+records, so it is off but no longer "never switched" (section 11). The factory rows did not move during stage 1: cobra holds 3 and
 click 0, as before the switch, so no factory run touched either repository (RT2B-3)
 **[hypothesis — read from `GET /api/v1/learn/register` and `GET /api/v1/grades?process_step=factory`
 for each repository before each `A0+L` run and on 2026-11-10 at about 10:55Z; those records are
@@ -391,8 +416,9 @@ n = 161 rows; those records are not in this repository]**.
 ## 7. Why stage 1 ended
 
 Stage 1 ended, on Claude Code's reading of "fits", because nothing more fits under $54.00 (part
-2's first end). Paul has yet to choose whether that reading stands (below). It did not end on a
-stop or with the protocol complete.
+2's first end). Paul had yet to choose whether that reading stands (below). It did not end on a
+stop or with the protocol complete. Paul then closed Wave 3 on this report (section 11), so no run
+was made on either reading and the choice below is moot.
 
 **The last run.** After click S's `S3` look the campaign had spent $51.044042, with $2.955958 left
 and a headroom of $0.797871, so a cap of up to $2.158087 fitted. Click S `A0` was queued at
@@ -456,7 +482,7 @@ cobra S and click XS have run both arms in full. Click S has run 3 of `A0`'s 16 
 `A0+L`'s **[hypothesis — read from `GET /api/v1/readings` and the remeasure plan on 2026-11-10 at
 about 10:55Z, apparatus 2.4; those records are not in this repository]**.
 
-**When DL-400 releases stage 2.** Once stage 1 has ended at its line, by either path, with a cell
+**When DL-400 releases stage 2 (moot since the close; section 11).** Once stage 1 has ended at its line, by either path, with a cell
 still waiting on a look and no stop, DL-400 releases stage 2. Paul files it at the runbook's step
 22, `POST /api/v1/campaigns/{id}/release` with `{"released_gbp": 80, "decision": …}`, the decision
 being DL-400's id and its words verbatim. If the literal path ends on a stop, nothing is released.
@@ -468,6 +494,9 @@ runbook (handbook page 13, v0.4.18); the runbook is in the private handbook, not
 repository]**.
 
 ## 8. What stage 2 buys
+
+Stage 2 does not run: Paul closed Wave 3 on this report (section 11). Sections 8 and 9 stand as
+written before the close.
 
 Part 4's statement, filled from stage 1, is in the registration's part 6:
 [the stage-2 statement amendment](2026-10-09-wave-3-registration.md#the-stage-2-statement-amendment-2026-11-10).
@@ -550,7 +579,8 @@ told.
 ## 10. Findings held for after the FREEZE
 
 None of these is a stop, and the FREEZE blocks a fix to each during the campaign. Each is for the
-post-campaign report **[hypothesis — read from the rows, events and builder images named in each
+post-campaign report (since the close, see section 11's "What stays open")
+**[hypothesis — read from the rows, events and builder images named in each
 item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this repository]**:
 
 - **Builder scratch paths may disqualify clean work.** Twelve cobra rows were disqualified for
@@ -583,7 +613,8 @@ item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this 
   reading run cannot turn it on, so no transcript was kept, and whether any builder ran click's
   tests cannot be read from the records. Sighted rows with pytest were clean in 13 of 13 [0.772,
   1.000], the rest in 17 of 27 [0.442, 0.785]. Those commits differ in era, so the gap is not
-  shown to be the cause. Stage 2's click S builds run the same way: 10 of its 29 have pytest. Giving
+  shown to be the cause. Stage 2's click S builds would have run the same way (moot since the
+  close): 10 of its 29 have pytest. Giving
   click's sets pytest means changing click's settings and rebuilding its sets in mid-campaign,
   which the FREEZE holds back; that is Paul's call **[hypothesis — the five click runs' `grades`
   rows and their `ctx_harness` labels, the `builder.discard` and `builder.egress_denied` events,
@@ -599,14 +630,15 @@ item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this 
   against $3.66 (2.06 times), click S's $7.44 against $3.42 (2.17 times) and click XS's $5.37
   against $2.70 (1.99 times). All stayed under their caps. The plan's estimates for `A0` and
   `A0+L` read 0.0.
-- **"Fits" needs one meaning.** For this campaign it is Paul's choice (section 7). Part 2 should
+- **"Fits" needs one meaning.** For this campaign it was Paul's choice (section 7), which the
+  close made moot (section 11). Part 2 should
   define it, and the worker should bound a run's first attempt, which it now leaves unbounded
   (G-938).
 - **The submit gate's login check can time out.** Cobra S `A0`'s first submit at 03:31Z was refused
   422 `builder_login_invalid` after a 60-second verification timeout. Nothing was queued or spent,
   and the resubmit at 03:41:39Z verified.
 - **The tally's `authoring_usd`** should be checked against the one author call ($0.001697) when
-  the stage-2 runs are read.
+  the rows are published (step 12); stage 2 does not run.
 - **Claude Code's cost figure is 2.5 times the bill.** The builder's CLI prices `claude-sonnet-5`
   at $5 and $25 per million tokens, not $2 and $10, and the tally takes its figure unchanged
   (section 1). A campaign line therefore buys 2.5 times fewer attempts than its money. The cause
@@ -616,3 +648,165 @@ item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this 
   repository]**. Pricing the
   recorded tokens from a table, or updating the builder's CLI, changes the tally, which the FREEZE
   blocks, and Paul has kept the tally's dollars for this campaign.
+
+## 11. The close
+
+**Paul's decision.** At 14:06:15Z Claude Code asked Paul: "Do you confirm closing Wave 3 on the
+stage-1 report, with no stage 2? Yes, or no and keep stage 2 as planned." Paul answered "Yes" at
+17:33:07Z. DL-416 records it **[hypothesis — the question and the answer in the lead session's
+transcript, 2026-11-10; it is not in this repository]**. These follow from it:
+
+- **No stage 2.** Step 22's release (P-RELEASE-STAGE2) is not filed, nothing is released, and
+  the campaign's line stays at $54.00. For this campaign, DL-416 sets aside DL-400's fixed
+  release, which no stage-1 result could have held back.
+- **"Fits" is moot.** Section 7's choice is moot: no further run is made on either reading.
+  Stage 1 ended at its line on Claude Code's reading of "fits" (section 7), with no stop; Paul's
+  close then set aside the release that reading would have triggered.
+- **The statement is not acted on.** Part 6's stage-2 statement amendment stays as written: the
+  statement was recorded there, and nothing is released on it. The closure amendment beside it
+  records this.
+- **The loop pair is read now.** Claude Code reads the close as the campaign ending before its
+  descriptive arms were complete (part 1; a choice listed below), so part 1's loop pair is read
+  now, once (below).
+- **When the FREEZE ends is Paul's call.** The FREEZE (Q-24, DL-375) holds until Wave 3
+  reports, and Q-25 publishes the result with its rows (step 12, still open). Claude Code reads
+  Wave 3 as reporting either when this record is on `main` or when step 12's rows are published.
+  Which of the two it is, is Paul's call; until then the FREEZE holds.
+
+**The loop pair at the close.** Part 1: "If the campaign ends first, it is read once then, on the
+same 64 pairs with each pending commit read against the loop, and the record says how many were
+pending." A pending `A0` commit is read as clean and a pending `A0+L` commit as a miss
+**[hypothesis — read from the stack's `grades` table (rows 619 to 779) and
+`GET /api/v1/readings` for both repositories on 2026-11-10 at about 17:40Z, apparatus 2.4,
+blind, n = 64 pairs, 48 of them observed; the test is part 1's exact two-sided McNemar test
+(`crb.core.reading.mcnemar_p`); those records are not in this repository]**:
+
+| cell | pairs | clean in both | only `A0+L` (b) | only `A0` (c) | in neither | pending pairs |
+|---|---|---|---|---|---|---|
+| cobra XS | 16 | 7 | 2 | 4 | 3 | 0 |
+| cobra S | 16 | 4 | 2 | 4 | 6 | 0 |
+| click XS | 16 | 6 | 4 | 2 | 4 | 0 |
+| click S | 16 | 0 | 0 | 15 | 1 | 16 |
+| pooled | 64 | 17 | 8 | 25 | 14 | 16 |
+
+- **What was pending.** 16 of the 64 pairs were pending, all in click S. That is 29 commit-arms:
+  `A0`'s 13 and `A0+L`'s 16. In click S, the 15 under c are `A0`'s 2 observed clean commits and
+  its 13 pending ones. The pair in neither is row 779's commit, a budget miss under `A0`.
+- **The pooled result.** b = 8 and c = 25, so (b − c) / n = −0.266, p = 0.0046. The loop does not
+  clear, because only a positive difference clears (Q-28, DL-402).
+- **Why it is significant.** The pending commits make the lean significant; they do not create
+  it. 15 of the 25 under c are click S's, where `A0+L` never ran. On the 48 observed pairs it still
+  leans to `A0`, b = 8 and c = 10, p = 0.81. This record does not read the loop as harmful.
+- **Infrastructure.** No pair was decided by infrastructure. Every reserved commit has its row,
+  and no reason served is `harness`, `outage` or `unobserved` (section 4). The read without such
+  pairs is the same read.
+- **Each cell's own difference.** These are descriptive: cobra XS −0.125, cobra S −0.125 and
+  click XS +0.125, each p = 0.69; click S −0.938 (b = 0, c = 15, p < 0.001), with all 16 of its
+  pairs pending.
+- **K7.** In-sample switches can inflate b (K7, part 2). b does not clear here, so the caveat
+  changes nothing.
+- **Power.** Part 1's simulation gave the loop test 80% power only for a difference of 18 to 25
+  points, with every pair observed (DL-412).
+
+**Q-25's branch, as the registered rule reads it.** The branches are read in the order Continue,
+Change course, Stop (Q-32, DL-411) **[hypothesis — the rates and intervals of section 3,
+recomputed with `crb.core.stats.wilson_interval`. The reachable rate is part 4's prior, XS 13 of
+23 [0.368, 0.744] and S 7 of 30 [0.118, 0.409], measured at apparatus 2.2 in the host posture.
+The stack's records are not in this repository]**:
+
+- **Continue does not fire.** No cell delivers: no `S3` reading reads `deliver`, `S1` never ran,
+  and so no cell has a proven standard (Q-27). The loop does not clear (above).
+- **Change course does not fire.** `S1` was not run in any cell, so the test author's clause
+  reads "did not move". Click S's `A0+L` counted no commit, so it has no rate to move. In each
+  complete cell, `A0+L`'s rate lies inside `A0`'s fixed-n Wilson interval:
+  - cobra XS 0.563, inside [0.444, 0.858];
+  - cobra S 0.375, inside [0.280, 0.720];
+  - click XS 0.625, inside [0.280, 0.720].
+- **Stop fires.** Three cells are complete: cobra XS, cobra S and click XS. Click S's arms ran 3
+  and 0 of 16, and it would meet the reach clause too if it were counted (0.118 ≤ 0.939). In each
+  complete cell nothing moves, and the reachable rate's lower bound is at or below `A0`'s upper
+  bound:
+  - cobra XS: 0.368 ≤ 0.858 (XS);
+  - click XS: 0.368 ≤ 0.720 (XS);
+  - cobra S: 0.118 ≤ 0.720 (S).
+
+Wave 3's branch on the registered rule is therefore **Stop**, and it is not the default.
+
+**What the read rests on.** Two separate checks, run from the lead session, recomputed the pair and the branch from the
+stack's database and the registration. Each matched Claude Code's read with no discrepancy, and
+each tried to refute it **[hypothesis — the checks' outputs in the lead session's transcript, and
+the stack's rows and readings on 2026-11-10 at about 17:40Z, apparatus 2.4; those records are not
+in this repository]**. These are the choices the read rests on:
+
+- **Disqualified rows count as misses**, as the registered rule and the readings count them. This
+  is the only one of these choices that flips the branch. The scratch-path disqualifications could instead be counted
+  clean, as an upper bound, since those rows were never graded. Cobra XS `A0` would then read 14
+  of 16 [0.640, 0.965], and `A0+L` 10 of 16, 0.625, which lies just outside, so Change course
+  would fire. Paul has not decided how those disqualifications are treated (section 10). A
+  treatment decided now would be decided knowing that it flips the branch. The registered rule
+  counts them as misses.
+- **A completed cell** is one whose two blind arms ran their 16 commits, the registration's own
+  sense ("When it is read"). Stop also fires on any narrower set of these cells that is not
+  empty.
+- **"Moves" is two-sided**, as "lies outside" reads, so a drop counts.
+- **DL-404's label is not earned.** Q-30's "insufficient — infrastructure" label (DL-404) applies
+  when a miss that makes a reading insufficient is served as an outage, a harness fault, a cancel
+  or a missing row. None is. Cobra S's three `S3` misses are served `disqualified`. Click XS's
+  three are served as two protocol misses (rows 710 and 711, whose edits were discarded when the
+  builder reached for the pytest its image lacks, section 10) and one budget miss (row 714). If
+  Paul classed cobra S's disqualifications and click XS's two discarded builds as harness faults,
+  both readings would carry the label, and Stop would rest on cobra XS alone.
+- **Paul's close counts as the campaign ending first** (part 1).
+- **The reachable rate is a prior** from apparatus 2.2 in the host posture, which Paul confirmed
+  (DL-412). Stop's reach clause hardly depends on it: the prior's lower bound would have to
+  exceed 0.720 (cobra S, click XS) or 0.858 (cobra XS) for the clause to fail, and it is 0.118 at
+  S and 0.368 at XS. Read the other way, at S an `A0` of 0 of 16 still meets it; at XS, only an
+  `A0` of 2 of 16 or fewer would not.
+
+**What Stop says, and whose decision follows.** Q-25 names the branch, and the decision Wave 3
+informs is Paul's. Q-19 (DL-377) set it "on Friday 6 November 2026, or when Wave 3 reports, if
+that is sooner". The 6 November date passed before Wave 3's first row, written on 2026-11-09.
+DL-415 (PR #108, not yet on `main`) voids the date, so Wave 3's report is the only trigger left.
+
+Stop is the rule's read of these rows: the sealed rate had already reached the reachable rate,
+the loop did not move it, and the test author never ran (`S1`'s clause reads "did not move" by
+default). It is not a finding that the loop or the test author cannot help
+**[hypothesis — part 1's pre-run power simulation and section 10's findings; the stack's records
+are not in this repository]**:
+- the loop test had 80% power only for a difference of 18 to 25 points, even with every pair
+  observed;
+- the test author never ran;
+- stage 1's measurement faults count as misses in both arms (section 10).
+
+Earlier, the carve-out session relayed Paul's plan to close on this report, fix the measurement
+and design a new wave, and called that plan "Change course". That label describes Paul's plan,
+and it came before this read was made. It is not Q-25's branch, and the relay is not Paul's
+answer. DL-416 records both.
+
+**Step 10, the loop switch.** It was restored on 2026-11-10 to `auto_apply` off with an empty
+overlay, with the reason "Wave 3 closed on the stage-1 report (DL-416); step 10 restores the
+switch to step 4's state, off":
+- for cobra, record `beaccf3a5089716e` at 17:37:10Z;
+- for click, record `c7bfbeda017d3891` at 17:37:29Z.
+
+The state differs from step 4's in one respect: the switch now has records, where step 4 read
+"never switched". The applied changes stay on each repository's chain, and they lie dormant while
+the switch is off:
+- cobra `b383c935…` and `5f1bdc05…`;
+- click `67853265…`, `de907765…`, `380316af…` and `2bf857ee…`.
+
+The factory rows did not move: cobra holds 3 and click 0 **[hypothesis — read from
+`GET /api/v1/learn/register?repo=<repo>` and `GET /api/v1/grades?process_step=factory` for each
+repository after the restore, 2026-11-10 at about 17:38Z; those records are not in this
+repository]**.
+
+**What stays open.**
+- **Step 11**, the reviews of stage 1's clean blind rows, has not run. It needs the reviewer's
+  account, which Paul creates, Claude's reviews in a fresh session and Paul's own 10 (part 3). The
+  close does not decide it.
+- **Step 12**, the published rows, has not run. Q-25 requires it whichever branch fires.
+- **When the FREEZE ends**, at this record's merge or at step 12's published rows, is Paul's call
+  (above).
+- **The decision Wave 3 informs** is Paul's (Q-19, DL-377; DL-415).
+- **Section 10's findings** were held by the FREEZE. Once it ends, they become work for the
+  carve-out session's fix pull requests and input to whatever Paul decides next.

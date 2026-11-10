@@ -17,10 +17,15 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `docs/reviews/2026-11-10-wave-3-stage-1-report.md`, reports stage 1: the spend against the $54.00
   line, the readings, the descriptive arms as interim figures, and why stage 1 ended on Claude
   Code's reading of "fits". The arms are also paired commit by commit, with the loop pair left
-  untested as part 1 requires and K7's in-sample caveat beside it. Paul chooses between attesting
-  that reading and a literal run first; click S still waits on a look. The registration's part 6
-  gains the stage-2 statement amendment, which fills part 4's template and records that Paul files
-  the release. Docs only.
+  untested until the close, as part 1 requires, and K7's in-sample caveat beside it. Paul was to
+  choose between attesting that reading and a literal run first; click S still waited on a look.
+  The registration's part 6 gains the stage-2 statement amendment, which fills part 4's template
+  and records that Paul was to file the release. Paul then closed Wave 3 on the report, with no
+  stage 2 (DL-416), so nothing is released. The report's section 11 and the registration's
+  closure amendment record the close: the loop pair, read once, does not clear; Q-25's rule reads
+  Stop, which turns on counting disqualified rows as misses, as registered (counted clean, Change
+  course would fire); and the loop switch is off again. When the FREEZE ends, at this record's
+  merge or at step 12's published rows, is Paul's call. Docs only.
 
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
