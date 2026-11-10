@@ -14,12 +14,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 
 - **A Go builder's toolchain scratch stays out of its checkout** ([#113](https://github.com/Jita81/commit-replay-bench/pull/113)). The builder
   container's `/tmp` tmpfs inherited Docker's `noexec`, so `go test` could not run the binaries
-  it builds there, and Go builders moved their build cache and temp dirs (`.gocache`, `.gotmp`,
-  `.tmp`) into `/work`. Belt 1b then read cached test output as forged go-test events and
-  disqualified twelve Wave 3 cobra builds. `builder_run_args` now states `exec` on that tmpfs
-  (ADR-0005's 2026-09-21 follow-up); `/work` was exec already, so no capability is added. Belt
-  1b keeps no ignore list: a forged file anywhere in the tree still disqualifies. No grading
-  rule or apparatus version changes.
+  it builds there. Twelve Wave 3 cobra builds were disqualified by belt 1b on build-cache and
+  temp paths under `/work` (`.gocache`, `.gotmp`, `.tmp`); that the builders moved their scratch
+  there because of `noexec` is inferred from those paths, as no transcript was kept.
+  `builder_run_args` now states `exec` on that tmpfs (ADR-0005's 2026-09-21 follow-up); `/work`
+  was exec already, so no capability is added. Belt 1b keeps no ignore list: a forged file among
+  the touched files still disqualifies. No grading rule or apparatus version changes.
 
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
