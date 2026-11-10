@@ -18,6 +18,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `crb-builder-go:local`, by Paul's choice at the click stop on 2026-11-10. The stack restarted with
   no migration on the same commit. The grading images, apparatus 2.4 and every reading body are
   unchanged. Docs only.
+
 - **The Wave 3 registration records step 3**
   ([#103](https://github.com/Jita81/commit-replay-bench/pull/103)). Part 6's step-3 amendment holds
   each mine and qualify body as sent, each cell's count, qualified-set sha256 and label sources,
