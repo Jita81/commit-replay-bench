@@ -1366,7 +1366,7 @@ click's builder could not run click's tests inside the seal, which the registere
 (`PYTHONPATH=/work:/deps/site`). Click's rows would then have measured a builder blind to its own
 test results, which cobra's builder was not.
 
-**The options Paul had.** At step 20 (the click stop) Paul had four options:
+**The options Paul had.** At the start-up runbook's step 20 (the click stop) Paul had four options:
 - **A.** Switch the builder image to `crb-builder:local` for click.
 - **B.** Run click on the Go image as it stood.
 - **C.** Build one image with Go and Python and use it for both.
@@ -1375,7 +1375,8 @@ test results, which cobra's builder was not.
 **Paul's decision.** Paul chose A on 2026-11-10 at 08:42:02Z, in their own words: "A, go ahead
 with click" **[hypothesis — Paul's own turn in the lead session's transcript, timestamped
 2026-11-10T08:42:02Z; the transcript is not in this repository]**. Paul's message names click
-only. This record reads it as leaving cobra's two S3 readings as read, with no further cobra run.
+only. This record reads it as leaving cobra's two readings as read, with no further cobra run in
+stage 1. Cobra XS ran `A0` and `A0+L`; cobra S ran its S3 look, `A0` and `A0+L`.
 
 **The change made.** One line in the stack's `env.sh` changed: `CRB_BUILDER__IMAGE` went from
 `crb-builder-go:local` to `crb-builder:local`. `CRB_BUILDER__PROXY_IMAGE` is unchanged: it
@@ -1432,7 +1433,9 @@ in this repository]**.
 
 **What it means for stage 2.** The new builder image has no Go. To run a cobra cell again, the
 builder image would have to be switched back, and that run would not match cobra's pinned
-settings. Any such run needs its own amendment and Paul's yes.
+settings. Any such run needs its own amendment and Paul's yes. This departs from step 9, which
+resumes stage 2 with no further decision: on this image, step 9 cannot run a cobra cell. The
+stage-1 report puts that to Paul.
 
 **Not in this amendment.** These are recorded at their own steps:
 - the Learn state (step 15);
