@@ -1216,8 +1216,11 @@ settings and 22:17:27Z at submit) read `auth` `api_key` with source `env` and fi
 The fingerprint is the same at both, so this is no stop **[hypothesis — read from the stack's
 `builder.login.verified` events on 2026-11-09; those rows are not in this repository]**.
 
-**Steps 1 and 2, and when they ran.** Both checks pass, and both held before the first spend.
-Neither was recorded in full before step 3, and neither bears on what step 3 found:
+**Steps 1 and 2, and when they ran.** Both checks pass, step 1 with one exception, and both held
+before the first spend. The exception: the builder's key sits in the organisation's Default
+Workspace, not a `crb-builder` Workspace, which departs from part 5's builder's-account check, item
+3, by Paul's decision ("the account and the tally" below). Neither check was recorded in full
+before step 3, and neither bears on what step 3 found:
 - **Step 1.** Apparatus `2.4`, with cobra and click registered, held before step 3: step 3's own
   runs are on both repositories and stamped 2.4 (the step-3 amendment). The builder's-account check
   ran on 2026-11-09 at 21:57:48Z. That is after step 3's runs and before the first spend, the first
@@ -1232,7 +1235,12 @@ Neither was recorded in full before step 3, and neither bears on what step 3 fou
   on 2026-11-10 at 04:12:51Z, and from run `0a7048da…`'s events; neither is in this repository]**.
 - **Why the order does not change a result.** Step 3's mine and qualify runs make no model call and
   cost $0. They use neither the builder's login nor the test author, so neither check could change
-  a qualification record. No success condition failed, so part 5's stop rule did not apply.
+  a qualification record **[hypothesis — inferred from the step-3 amendment's record of its runs:
+  none holds an evidence pack or made a model call, and each cost $0; those records are in the
+  stack, not in this repository]**. Steps 1 and 2 met their success conditions, step 1 with the
+  exception above, so part 5's stop rule did not stop the campaign at either. Step 3's condition did
+  fail: cobra XS holds 17 qualified commits against the 20, and step 3 stopped and reported it under
+  that rule (the step-3 amendment).
 
 **The account and the tally.**
 - The builder's key sits in the organisation's Default Workspace, not a `crb-builder` Workspace of
