@@ -940,22 +940,17 @@ def test_the_pricing_overlay_reprices_a_claude_code_build(
     monkeypatch.setenv(bud.PRICING_ENV, str(table))
     lines = [ev_init(), _priced_result(cost=9.99, tin=1_000, tout=500, read=2_000, write=300)]
     _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
-    # no cached or cache-write rate in the overlay: both are billed at the input rate
-    assert out.cost_usd == pytest.approx((1_000 + 300 + 2_000) * 1e-6 + 500 * 4e-6)
+    # the overlay omits the cached and cache-write rates: the default entry's stand
+    assert out.cost_usd == pytest.approx(1_000 * 1e-6 + 300 * 2.5e-6 + 2_000 * 0.2e-6 + 500 * 4e-6)
     assert out.extra["cost_source"] == "price_table" and out.extra["cli_cost_usd"] == 9.99
     ws.remove()
 
 
-@pytest.mark.parametrize("table_text", ["unpriced", "unreadable"])
 def test_an_unpriced_model_falls_back_to_the_clis_figure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table_text: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     table = tmp_path / "pricing.json"
-    table.write_text(
-        json.dumps({"claude-sonnet-5": {"known": False}})
-        if table_text == "unpriced"
-        else "{not json"
-    )
+    table.write_text(json.dumps({"claude-sonnet-5": {"known": False}}))
     monkeypatch.setenv(bud.PRICING_ENV, str(table))
     lines = [ev_init(), _priced_result(cost=0.0456, tin=700, tout=90)]
     with warnings.catch_warnings():
@@ -977,6 +972,70 @@ def test_an_unpriced_model_without_a_cli_figure_is_unknown(
     assert out.cost_usd == 0.0 and not out.cost_known
     assert out.extra["cost_source"] == "unknown" and "cli_cost_usd" not in out.extra
     ws.remove()
+
+
+@pytest.mark.parametrize(
+    "table_text",
+    ["{not json", "[1, 2]", '{"claude-sonnet-5": {"input_per_m": NaN, "output_per_m": 1}}', None],
+)
+def test_an_unreadable_price_table_makes_the_cost_unknown_not_the_clis(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table_text: str | None
+) -> None:
+    """``load_pricing``: a malformed table is an error, not a silent fallback. Falling back
+    to the CLI's figure recorded the CLI's own price list as a known cost in a capped run;
+    falling back to the defaults would ignore the deployment's prices. The cost is unknown,
+    which stops a capped run at once, and the error is kept beside the CLI's figure."""
+    table = tmp_path / "pricing.json"
+    if table_text is not None:
+        table.write_text(table_text)
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))  # None: a path that does not exist
+    lines = [ev_init(), _priced_result(cost=0.0456, tin=700, tout=90)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known
+    assert out.extra["cost_source"] == "unknown" and out.extra["cli_cost_usd"] == 0.0456
+    assert out.extra["pricing_error"]
+    assert out.tokens_in == 700 and out.tokens_out == 90  # the tokens are still metered
+    ws.remove()
+
+
+def test_one_hour_cache_writes_in_the_result_are_priced_at_twice_input(tmp_path: Path) -> None:
+    """The CLI reports its cache writes' TTL split under ``usage.cache_creation`` (field
+    names as in real CLI session transcripts); 1-hour writes are 2x input, 5-minute 1.25x."""
+    ev = json.loads(_priced_result(cost=1.0, tin=1_000, tout=100, read=5_000, write=4_000))
+    ev["usage"]["cache_creation"] = {
+        "ephemeral_1h_input_tokens": 3_000,
+        "ephemeral_5m_input_tokens": 1_000,
+    }
+    _fx, ws, out = _setup(tmp_path, FakeSpawn([ev_init(), json.dumps(ev)]), model="claude-sonnet-5")
+    expected = 1_000 * 2e-6 + 100 * 10e-6 + 5_000 * 0.2e-6 + 1_000 * 2.5e-6 + 3_000 * 4e-6
+    assert out.cost_usd == pytest.approx(expected)
+    assert out.tokens_in == 1_000 + 4_000 + 5_000
+    ws.remove()
+
+
+def test_one_hour_cache_writes_are_counted_per_message_without_a_result() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    for msg_id, write, hour in (("m1", 300, 300), ("m2", 200, 50), ("m3", 100, None)):
+        ev = json.loads(ev_assistant(text("x"), msg_id=msg_id, tin=10, tout=5))
+        ev["message"]["usage"]["cache_creation_input_tokens"] = write
+        if hour is not None:
+            ev["message"]["usage"]["cache_creation"] = {
+                "ephemeral_1h_input_tokens": hour,
+                "ephemeral_5m_input_tokens": write - hour,
+            }
+        st.feed(json.dumps(ev), keep=False)
+    assert st.cache_write_tokens() == 600 and st.cache_write_1h_tokens() == 350
+    # a malformed split never exceeds the message's writes
+    bad = json.loads(ev_assistant(text("x"), msg_id="m4", tin=10, tout=5))
+    bad["message"]["usage"]["cache_creation_input_tokens"] = 10
+    bad["message"]["usage"]["cache_creation"] = {"ephemeral_1h_input_tokens": 99}
+    st.feed(json.dumps(bad), keep=False)
+    assert st.cache_write_1h_tokens() == 360
+    # the result's usage is authoritative, and without a split every write is 5-minute
+    st.feed(_priced_result(cost=None, tin=50, tout=5, write=40), keep=False)
+    assert st.cache_write_tokens() == 40 and st.cache_write_1h_tokens() == 0
 
 
 def test_cache_writes_are_counted_per_message_without_a_result() -> None:

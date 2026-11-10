@@ -989,6 +989,61 @@ def test_cost_provenance_reaches_the_pack_notes_and_a_merge_sums_it() -> None:
     assert merged.cost_usd == pytest.approx(0.03)
     assert merged.extra["cli_cost_usd"] == pytest.approx(0.075)
     assert adapter.attempt_notes(merged)["cost_source"] == "price_table"
+    assert merged.cost_known
+    # one unpriced call makes the merged attempt's cost unknown, in either order
+    unpriced = BuildOutcome(**base, stop_reason=STOP_DONE, cost_known=False)
+    assert not adapter._merge_outcomes(first, unpriced).cost_known
+    assert not adapter._merge_outcomes(unpriced, second).cost_known
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "source", "partial"),
+    [
+        # only the first call has a CLI figure
+        (
+            {"cost_source": "price_table", "cli_cost_usd": 0.5},
+            {"cost_source": "price_table"},
+            "price_table",
+            0.5,
+        ),
+        # the reverse order
+        (
+            {"cost_source": "price_table"},
+            {"cost_source": "price_table", "cli_cost_usd": 0.5},
+            "price_table",
+            0.5,
+        ),
+        # a CLI-priced call and an unknown one
+        (
+            {"cost_source": "cli_reported", "cli_cost_usd": 0.7},
+            {"cost_source": "unknown"},
+            "mixed",
+            0.7,
+        ),
+    ],
+)
+def test_a_merge_never_carries_a_partial_cli_figure_as_if_whole(
+    a: dict[str, Any], b: dict[str, Any], source: str, partial: float
+) -> None:
+    """Review of a8581e6d: the merge spread ``first.extra`` and the second call's notes
+    under the merged provenance, so one call's ``cli_cost_usd`` survived as the attempt's."""
+    base = {"builder": "b", "model": "m", "provider": "p", "mode": "sighted"}
+    first = BuildOutcome(**base, stop_reason=STOP_DONE, extra={**a, "tool_names": []})
+    second = BuildOutcome(**base, stop_reason=STOP_DONE, extra=dict(b))
+    merged = adapter._merge_outcomes(first, second)
+    assert "cli_cost_usd" not in merged.extra
+    assert merged.extra["cost_source"] == source
+    assert merged.extra["cli_cost_usd_partial"] == pytest.approx(partial)
+    assert merged.extra["tool_names"] == []  # the rest of the first call's extra is kept
+    notes = adapter.attempt_notes(merged)
+    assert "cli_cost_usd" not in notes and notes["cli_cost_usd_partial"] == pytest.approx(partial)
+    # a partial figure stays partial when the attempt is merged again with a whole one
+    third = BuildOutcome(
+        **base, stop_reason=STOP_DONE, extra={"cost_source": source, "cli_cost_usd": 0.25}
+    )
+    again = adapter._merge_outcomes(merged, third)
+    assert "cli_cost_usd" not in again.extra
+    assert again.extra["cli_cost_usd_partial"] == pytest.approx(partial + 0.25)
 
 
 def test_preflight_repair_turn_is_one_bounded_build_with_the_findings(

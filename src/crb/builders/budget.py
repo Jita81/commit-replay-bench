@@ -34,7 +34,8 @@ Works with:   src/crb/builders/base.py (``Budget``, ``Rung``, the stop reasons),
               that ask the tracker), src/crb/builders/adapter.py (``budget_for_rung`` per
               attempt), src/crb/server/worker.py (object rungs with a ``budget`` override)
 Tested by:    tests/test_builders_base.py, tests/test_worker_budget_ladder.py
-Touch when:   a model is added or re-priced — prefer ``CRB_PRICING_JSON`` (docs/OPERATOR.md)
+Touch when:   never for a new repository (prices are per model, not per repository); a
+              model is added or re-priced — prefer ``CRB_PRICING_JSON`` (docs/OPERATOR.md)
               over editing ``DEFAULT_PRICING``; a new cap needs a stop reason in
               src/crb/builders/base.py and a place in ``exceeded``'s order.
 Claims:       ``cost_usd`` with ``cost_known=False`` is metered tokens at price zero — it
@@ -44,6 +45,7 @@ Claims:       ``cost_usd`` with ``cost_known=False`` is metered tokens at price 
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import warnings
@@ -81,19 +83,33 @@ class Pricing:
     cache_write_per_m: float | None = None
 
     def cost(
-        self, tokens_in: int, tokens_out: int, *, cached_in: int = 0, cache_write_in: int = 0
+        self,
+        tokens_in: int,
+        tokens_out: int,
+        *,
+        cached_in: int = 0,
+        cache_write_in: int = 0,
+        cache_write_1h_in: int = 0,
     ) -> float:
         """USD for one call; cached input (cache reads, a subset of ``tokens_in``) is
         billed at its own rate when the table has one, else at the input rate; cache writes
-        (``cache_write_in``, a subset of the uncached input) likewise at
-        ``cache_write_per_m``; an unknown price is always ``0.0``."""
+        (a subset of the uncached input) are billed only when the table has a
+        ``cache_write_per_m``, else at the input rate: ``cache_write_in`` (5-minute, or a
+        TTL not reported) at that rate, ``cache_write_1h_in`` at
+        :data:`CACHE_WRITE_1H_INPUT_MULTIPLE` x input; an unknown price is always ``0.0``."""
         if not self.known:
             return 0.0
         uncached = max(0, tokens_in - cached_in)
-        written = min(max(0, cache_write_in), uncached) if self.cache_write_per_m is not None else 0
-        c = (uncached - written) * self.input_per_m / 1e6 + tokens_out * self.output_per_m / 1e6
-        if written and self.cache_write_per_m is not None:
-            c += written * self.cache_write_per_m / 1e6
+        hour = five = 0
+        if self.cache_write_per_m is not None:
+            hour = min(max(0, cache_write_1h_in), uncached)
+            five = min(max(0, cache_write_in), uncached - hour)
+        c = (uncached - hour - five) * self.input_per_m / 1e6
+        c += tokens_out * self.output_per_m / 1e6
+        if five and self.cache_write_per_m is not None:
+            c += five * self.cache_write_per_m / 1e6
+        if hour:
+            c += hour * self.input_per_m * CACHE_WRITE_1H_INPUT_MULTIPLE / 1e6
         if cached_in and self.cached_input_per_m is not None:
             c += cached_in * self.cached_input_per_m / 1e6
         elif cached_in:
@@ -129,10 +145,20 @@ class Pricing:
         )
 
 
+#: A 1-hour cache write is billed at twice the input rate (Anthropic); a 5-minute one at
+#: the entry's ``cache_write_per_m`` (1.25x input for the Anthropic defaults).
+CACHE_WRITE_1H_INPUT_MULTIPLE = 2.0
+
+#: The rates :func:`load_pricing` checks are finite and non-negative.
+_REQUIRED_RATES = ("input_per_m", "output_per_m")
+_RATE_FIELDS = (*_REQUIRED_RATES, "cached_input_per_m", "cache_write_per_m")
+
+
 #: Default entries. Cerebras rates from the upstream ``model_pricing.py`` (verified
 #: 2026-06-05 against published per-token rates); Anthropic rates from the
 #: ``claude-api`` skill's model table (cached 2026-06-24); Anthropic cache writes at
-#: 1.25x input (the 5-minute TTL — a 1-hour write is 2x, so one is still undercounted).
+#: 1.25x input (the 5-minute TTL; a write the CLI reports as 1-hour is billed at
+#: :data:`CACHE_WRITE_1H_INPUT_MULTIPLE` x input, one with no TTL split as 5-minute).
 #: ``azure`` is a placeholder: Azure OpenAI pricing depends on the deployment — configure
 #: it, or cost is unknown.
 DEFAULT_PRICING: dict[str, Pricing] = {
@@ -148,10 +174,30 @@ DEFAULT_PRICING: dict[str, Pricing] = {
 PRICING_ENV = "CRB_PRICING_JSON"
 
 
+def _check_rate(model: str, field: str, entry: Mapping[str, Any]) -> None:
+    """Raise ``ValueError`` unless ``entry[field]`` is a finite, non-negative rate. An
+    absent rate passes (input/output read as 0.0, the optional rates as none); an explicit
+    ``null`` passes only for an optional rate."""
+    if field not in entry or (entry[field] is None and field not in _REQUIRED_RATES):
+        return
+    try:
+        rate = float(entry[field])
+    except (TypeError, ValueError):
+        rate = math.nan
+    if not math.isfinite(rate) or rate < 0:
+        raise ValueError(
+            f"pricing entry for {model!r}: {field} must be a finite, non-negative number, "
+            f"not {entry[field]!r}"
+        )
+
+
 def load_pricing(path: str | Path | None = None) -> dict[str, Pricing]:
     """Defaults, overlaid with a JSON file ``{model: {input_per_m, output_per_m, …}}``
-    from ``path`` or ``$CRB_PRICING_JSON``. A malformed file is an error, not a silent
-    fallback — mispriced evidence is worse than no evidence."""
+    from ``path`` or ``$CRB_PRICING_JSON``. An entry for a model the defaults price
+    inherits every field it omits from the default entry (an explicit ``null`` clears an
+    optional rate). A malformed file — or a rate that is not a finite, non-negative number:
+    a NaN cost never trips a spend cap — is an error, not a silent fallback; mispriced
+    evidence is worse than no evidence."""
     table = dict(DEFAULT_PRICING)
     src = path or os.environ.get(PRICING_ENV, "")
     if not src:
@@ -163,7 +209,14 @@ def load_pricing(path: str | Path | None = None) -> dict[str, Pricing]:
     for model, entry in data.items():
         if not isinstance(entry, Mapping):
             raise ValueError(f"pricing entry for {model!r} must be an object")
-        table[str(model)] = Pricing.from_dict(entry)
+        default = DEFAULT_PRICING.get(str(model))
+        # an omitted rate is inherited from a PRICED default only: an entry that configures
+        # an unpriced placeholder (``azure``) is the operator pricing it, so it is known
+        inherit = default is not None and default.known
+        merged = {**default.to_dict(), **entry} if inherit and default else dict(entry)
+        for field in _RATE_FIELDS:
+            _check_rate(str(model), field, merged)
+        table[str(model)] = Pricing.from_dict(merged)
     return table
 
 
@@ -201,6 +254,13 @@ COST_SOURCE_MIXED = "mixed"  # a merged attempt whose calls were priced differen
 #: ``BuildOutcome.extra`` (and pack ``notes``) keys for a build's cost provenance.
 EXTRA_COST_SOURCE = "cost_source"
 EXTRA_CLI_COST = "cli_cost_usd"
+#: a merged attempt's CLI figure when only some of its calls reported one: the sum of
+#: those, never recorded as ``cli_cost_usd`` (it would pass for the whole attempt's)
+EXTRA_CLI_COST_PARTIAL = "cli_cost_usd_partial"
+#: why the deployment's price table could not be read (the cost is then unknown)
+EXTRA_PRICING_ERROR = "pricing_error"
+#: every key :func:`merge_cost_provenance` owns in a merged ``extra``
+COST_PROVENANCE_KEYS = (EXTRA_COST_SOURCE, EXTRA_CLI_COST, EXTRA_CLI_COST_PARTIAL)
 
 
 def table_cost(
@@ -210,6 +270,7 @@ def table_cost(
     *,
     cached_in: int = 0,
     cache_write_in: int = 0,
+    cache_write_1h_in: int = 0,
     reported_cost: float | None = None,
 ) -> tuple[float, bool, str]:
     """``(cost_usd, cost_known, cost_source)`` for one build: the table price of its tokens
@@ -217,7 +278,11 @@ def table_cost(
     list, not ours), else the CLI's figure, else ``0.0`` and unknown."""
     if pricing.known:
         cost = pricing.cost(
-            tokens_in, tokens_out, cached_in=cached_in, cache_write_in=cache_write_in
+            tokens_in,
+            tokens_out,
+            cached_in=cached_in,
+            cache_write_in=cache_write_in,
+            cache_write_1h_in=cache_write_1h_in,
         )
         return cost, True, COST_SOURCE_TABLE
     if reported_cost is not None:
@@ -234,18 +299,34 @@ def cost_provenance(source: str, reported_cost: float | None) -> dict[str, Any]:
     return out
 
 
+def _cli_figure(x: Mapping[str, Any]) -> tuple[float | None, bool]:
+    """One call's (or merged attempt's) CLI figure and whether it is whole."""
+    if x.get(EXTRA_CLI_COST) is not None:
+        return float(x[EXTRA_CLI_COST]), True
+    if x.get(EXTRA_CLI_COST_PARTIAL) is not None:
+        return float(x[EXTRA_CLI_COST_PARTIAL]), False
+    return None, False
+
+
 def merge_cost_provenance(a: Mapping[str, Any], b: Mapping[str, Any]) -> dict[str, Any]:
-    """Two calls' provenance as one attempt's: the CLI figures summed (only when both
-    calls have one, else a partial sum would pass for the whole), the source kept when the
-    calls agree, else ``mixed``. Empty when neither call recorded any."""
+    """Two calls' provenance as one attempt's: the source kept when the calls agree, else
+    ``mixed``; the CLI figures summed as ``cli_cost_usd`` only when both are whole, else the
+    sum of those given as ``cli_cost_usd_partial`` (a partial sum never passes for the
+    whole). A side with no provenance at all is not a call to merge: the other side's is
+    returned as it is. Empty when neither recorded any."""
     sa, sb = a.get(EXTRA_COST_SOURCE), b.get(EXTRA_COST_SOURCE)
     if sa is None and sb is None:
         return {}
     if sa is None or sb is None:
-        return cost_provenance(str(sa or sb), (a if sa else b).get(EXTRA_CLI_COST))
-    pa, pb = a.get(EXTRA_CLI_COST), b.get(EXTRA_CLI_COST)
-    cli = float(pa) + float(pb) if pa is not None and pb is not None else None
-    return cost_provenance(str(sa) if sa == sb else COST_SOURCE_MIXED, cli)
+        one = a if sa is not None else b
+        return {k: one[k] for k in COST_PROVENANCE_KEYS if one.get(k) is not None}
+    (pa, wa), (pb, wb) = _cli_figure(a), _cli_figure(b)
+    out = cost_provenance(str(sa) if sa == sb else COST_SOURCE_MIXED, None)
+    if pa is None and pb is None:
+        return out
+    total = round((pa or 0.0) + (pb or 0.0), 6)
+    out[EXTRA_CLI_COST if wa and wb else EXTRA_CLI_COST_PARTIAL] = total
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -430,13 +511,17 @@ def budget_for_rung(rung: Rung, base: Budget) -> Budget:
 
 
 __all__ = [
+    "CACHE_WRITE_1H_INPUT_MULTIPLE",
+    "COST_PROVENANCE_KEYS",
     "COST_SOURCE_CLI",
     "COST_SOURCE_MIXED",
     "COST_SOURCE_TABLE",
     "COST_SOURCE_UNKNOWN",
     "DEFAULT_PRICING",
     "EXTRA_CLI_COST",
+    "EXTRA_CLI_COST_PARTIAL",
     "EXTRA_COST_SOURCE",
+    "EXTRA_PRICING_ERROR",
     "PRICING_ENV",
     "BudgetTracker",
     "CostMeter",

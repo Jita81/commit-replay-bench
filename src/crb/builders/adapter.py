@@ -152,7 +152,12 @@ from crb.builders.brief import (
     context_arm_for,
     novel_tokens,
 )
-from crb.builders.budget import budget_for_rung, merge_cost_provenance
+from crb.builders.budget import (
+    COST_PROVENANCE_KEYS,
+    EXTRA_PRICING_ERROR,
+    budget_for_rung,
+    merge_cost_provenance,
+)
 from crb.builders.container import (
     SEALABLE_BUILDERS,
     BuilderContainerSettings,
@@ -422,8 +427,11 @@ def note_unconfirmed_kills(outcome: BuildOutcome, kills: Sequence[UnconfirmedKil
 def attempt_notes(outcome: BuildOutcome) -> dict[str, Any]:
     """The pack notes an outcome earns: ``{kill_confirmed: False, container}`` when its
     container kill went unconfirmed, and its cost provenance (``cost_source``, the CLI's
-    own ``cli_cost_usd``) when the builder recorded one; else nothing."""
+    own ``cli_cost_usd`` or a merge's ``cli_cost_usd_partial``, a ``pricing_error``) when
+    the builder recorded one; else nothing."""
     notes = merge_cost_provenance(outcome.extra, {})
+    if outcome.extra.get(EXTRA_PRICING_ERROR):
+        notes[EXTRA_PRICING_ERROR] = str(outcome.extra[EXTRA_PRICING_ERROR])
     if outcome.extra.get(EXTRA_KILL_CONFIRMED) is False:
         notes[EXTRA_KILL_CONFIRMED] = False
         notes[EXTRA_CONTAINER] = str(outcome.extra.get(EXTRA_CONTAINER, ""))
@@ -1849,6 +1857,11 @@ def _repair_errored(second: BuildOutcome) -> bool:
     return not second.violated and second.stop_reason == STOP_MODEL_ERROR
 
 
+def _without_cost_provenance(extra: Mapping[str, Any]) -> dict[str, Any]:
+    """``extra`` less the keys :func:`merge_cost_provenance` owns."""
+    return {k: v for k, v in extra.items() if k not in COST_PROVENANCE_KEYS}
+
+
 def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
     """The two calls of a repair (the pre-flight's or the finish gate's) as ONE attempt:
     spend, turns and latency summed, errors concatenated, the repair's stop reason kept (it
@@ -1869,6 +1882,8 @@ def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
         tokens_out=first.tokens_out + second.tokens_out,
         tokens_cached=first.tokens_cached + second.tokens_cached,
         cost_usd=first.cost_usd + second.cost_usd,
+        # one unpriced call makes the summed figure an undercount, never a known cost
+        cost_known=first.cost_known and second.cost_known,
         latency_s=first.latency_s + second.latency_s,
         errors=tuple(first.errors) + tuple(second.errors),
         stop_reason=second.stop_reason or first.stop_reason,
@@ -1876,9 +1891,11 @@ def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
         transcript=tuple(first.transcript) + tuple(second.transcript),
         # an unconfirmed kill on either call is on the merged attempt; the cost provenance
         # covers both calls (the CLI figures summed, the source ``mixed`` if they differ)
+        # and is ONLY the merge's: neither call's own figure may survive the spread as the
+        # attempt's when the other call had none (a8581e6d review)
         extra={
-            **first.extra,
-            **attempt_notes(second),
+            **_without_cost_provenance(first.extra),
+            **_without_cost_provenance(attempt_notes(second)),
             **merge_cost_provenance(first.extra, second.extra),
         },
     )

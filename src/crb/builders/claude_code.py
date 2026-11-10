@@ -119,8 +119,9 @@ Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are p
 Claims:       ``done`` is the CLI's own claim and is never trusted; ``cost_usd`` is the
               CLI's token counts priced from the product's table (``DEFAULT_PRICING`` +
               ``CRB_PRICING_JSON``), the CLI's own ``total_cost_usd`` only for a model the
-              table does not price; ``extra.cost_source`` says which, ``extra.cli_cost_usd``
-              keeps the CLI's figure (docs/EVIDENCE-AND-CLAIMS.md).
+              table does not price, and unknown when the table cannot be read
+              (``extra.pricing_error``); ``extra.cost_source`` says which,
+              ``extra.cli_cost_usd`` keeps the CLI's figure (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -158,6 +159,7 @@ from crb.builders.base import (
     nested_model_call_input,
 )
 from crb.builders.budget import (
+    EXTRA_PRICING_ERROR,
     CostMeter,
     Pricing,
     cost_provenance,
@@ -554,6 +556,20 @@ def subprocess_spawn(
 # ---------------------------------------------------------------------------
 
 
+def _one_hour_writes(usage: Mapping[str, Any], written: int) -> int:
+    """The 1-hour-TTL part of a usage block's ``written`` cache-write tokens, from
+    ``usage.cache_creation.ephemeral_1h_input_tokens`` (the split the CLI's session
+    transcripts carry), never more than ``written``; ``0`` when the split is absent or
+    malformed, so those writes are priced as 5-minute, as before."""
+    split = usage.get("cache_creation")
+    if not isinstance(split, Mapping):
+        return 0
+    hour = split.get("ephemeral_1h_input_tokens")
+    if isinstance(hour, bool) or not isinstance(hour, int) or hour <= 0:
+        return 0
+    return min(hour, max(0, written))
+
+
 class StreamStats:
     """Accumulates what the stream-json events say. Tolerant of unknown shapes:
     anything it cannot read is skipped, never inferred."""
@@ -583,6 +599,9 @@ class StreamStats:
         #: the cache-WRITE part of each message's ``tokens_in`` (same keys), priced at the
         #: table's cache-write rate
         self.cache_writes_by_message: dict[str, int] = {}
+        #: the 1-hour-TTL part of each message's cache writes (same keys), when the CLI
+        #: reports the split (``usage.cache_creation.ephemeral_1h_input_tokens``)
+        self.cache_writes_1h_by_message: dict[str, int] = {}
         self.result: dict[str, Any] | None = None
         self.init: dict[str, Any] = {}
         self.last_text = ""
@@ -694,6 +713,7 @@ class StreamStats:
             int(usage.get("cache_read_input_tokens", 0) or 0),
         )
         self.cache_writes_by_message[key] = written
+        self.cache_writes_1h_by_message[key] = _one_hour_writes(usage, written)
 
     def host_view(self, text: str) -> str:
         """``text`` with the container alias replaced by the guard's host root (only
@@ -778,6 +798,15 @@ class StreamStats:
         if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
             return int(usage.get("cache_creation_input_tokens", 0) or 0)
         return sum(self.cache_writes_by_message.values())
+
+    def cache_write_1h_tokens(self) -> int:
+        """The 1-hour-TTL part of :meth:`cache_write_tokens`, from the same source; ``0``
+        where the CLI reported no TTL split (those writes are priced as 5-minute)."""
+        r = self.result or {}
+        usage = r.get("usage")
+        if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
+            return _one_hour_writes(usage, int(usage.get("cache_creation_input_tokens", 0) or 0))
+        return sum(self.cache_writes_1h_by_message.values())
 
     def reported_cost(self) -> float | None:
         """The CLI's own ``total_cost_usd`` from the result event, if it gave one."""
@@ -1015,11 +1044,20 @@ class ClaudeCodeBuilder:
         stats = StreamStats(
             GitArchaeologyGuard(cwd=workspace.root), guard, workdir_alias=self.workdir_alias
         )
+        # an unreadable deployment table is an error, not a fallback (load_pricing): the
+        # cost is UNKNOWN — never the CLI's own figure, which a capped run would then count
+        # as spend at the CLI's price list, nor the defaults the deployment overrode — so a
+        # capped run stops at once; the error is kept in ``extra.pricing_error``
+        pricing_error = ""
         try:
             table: Mapping[str, Pricing] = load_pricing()
-        except (OSError, ValueError):  # an unreadable deployment table prices nothing
+        except (OSError, ValueError) as exc:
+            pricing_error = redact_and_cap(f"{type(exc).__name__}: {exc}", max_chars=300)
             table = {}
-        pricing = price_for(self.model, table)
+        with warnings.catch_warnings():
+            if pricing_error:
+                warnings.simplefilter("ignore")  # the error says why, not "unpriced model"
+            pricing = price_for(self.model, table)
         meter = CostMeter(pricing, model=self.model)
         errors: list[str] = []
 
@@ -1041,8 +1079,9 @@ class ClaudeCodeBuilder:
                 meter.tokens_in,
                 meter.tokens_out,
                 cached_in=meter.cached_in,
-                cache_write_in=stats.cache_write_tokens(),
-                reported_cost=cli_cost,
+                cache_write_in=stats.cache_write_tokens() - stats.cache_write_1h_tokens(),
+                cache_write_1h_in=stats.cache_write_1h_tokens(),
+                reported_cost=None if pricing_error else cli_cost,
             )
             return BuildOutcome(
                 builder=self.name,
@@ -1063,7 +1102,11 @@ class ClaudeCodeBuilder:
                 errors=tuple(errors),
                 transcript=tuple(stats.events) if self.keep_transcript else (),
                 budget=budget,
-                extra={**extra, **cost_provenance(source, cli_cost)},
+                extra={
+                    **extra,
+                    **cost_provenance(source, cli_cost),
+                    **({EXTRA_PRICING_ERROR: pricing_error} if pricing_error else {}),
+                },
             )
 
         try:
