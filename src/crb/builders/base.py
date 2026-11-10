@@ -1706,10 +1706,40 @@ def _worktree_path(here: Path, a: str) -> bool:
         return False
 
 
-def _leaves_worktree(path: str) -> bool:
-    """Absolute, home-relative or ``..``-climbing — a ``git -C`` target outside the tree."""
-    p = path.replace("\\", "/")
-    return p.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", p)) or ".." in p.split("/")
+def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Path | None]:
+    """Where git runs after ``-C path`` from ``at``, and whether that is still the worktree
+    ``root`` or a directory under it. Fails closed: a home-relative, drive-lettered or
+    backslashed path, a ``..`` component (``link/..`` follows the link, so it is never
+    normalised away) and an empty component (``//work``, ``a//b``; one trailing slash is
+    fine) are refused outright. An absolute path is accepted only when ``root`` is known
+    and the path lies at or under it both as written and with symlinks resolved — the
+    sealed container's ``/work`` reaches the guard as ``root`` (``StreamStats.host_view``).
+    A relative path composes onto ``at`` (repeated ``-C`` compose as git composes them)
+    and gets the same check; with ``at`` or ``root`` unknown it cannot climb, so it
+    passes as before. ``-C ""`` leaves git where it is."""
+    if path == "":
+        return True, at
+    if path.startswith("~") or "\\" in path or re.match(r"^[A-Za-z]:", path):
+        return False, None
+    parts = (path[:-1] if path.endswith("/") else path).split("/")
+    if ".." in parts or "" in parts[1:]:
+        return False, None
+    absolute = path.startswith("/")
+    if absolute:
+        if root is None:
+            return False, None
+        target = Path(posixpath.normpath(path))
+    elif at is None:
+        return True, None
+    else:
+        target = Path(posixpath.normpath((at / path).as_posix()))
+    if root is None:
+        return True, target
+    try:
+        inside = target.is_relative_to(root) and target.resolve().is_relative_to(root.resolve())
+    except (OSError, RuntimeError, ValueError):
+        inside = False
+    return inside, target if inside else None
 
 
 _PATTERN_COMMANDS: frozenset[str] = frozenset(
@@ -2284,7 +2314,9 @@ class GitArchaeologyGuard:
     def _check_git(self, args: list[str], here: Path | None) -> str:
         """Global options that re-point git are refused; then the sub-command must be in
         ``GIT_ALLOWED`` (``stash`` gets its own message with the honest idiom), and the
-        verbs with argument rules dispatch to their handler."""
+        verbs with argument rules dispatch to their handler. ``-C`` may name only the
+        worktree root or a directory under it (:func:`_git_c_step`); the verbs then check
+        their paths from where ``-C`` put git."""
         i = 0
         while i < len(args) and args[i].startswith("-"):
             a = args[i]
@@ -2292,8 +2324,10 @@ class GitArchaeologyGuard:
                 return f"archaeology: 'git {a}' points git at another repository"
             if a in {"-C", "-c", "--namespace", "--exec-path", "--super-prefix", "--config-env"}:
                 val = args[i + 1] if i + 1 < len(args) else ""
-                if a == "-C" and _leaves_worktree(val):
-                    return f"archaeology: 'git -C {val}' leaves the worktree"
+                if a == "-C":
+                    inside, here = _git_c_step(here, self.cwd, val)
+                    if not inside:
+                        return f"archaeology: 'git -C {val}' leaves the worktree"
                 if a == "-c" and val.split("=", 1)[0] in {"core.worktree", "core.gitdir"}:
                     return f"archaeology: 'git -c {val}' points git at another repository"
                 i += 2
