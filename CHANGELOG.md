@@ -19,7 +19,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   `mutation.v2` are unchanged; no migration. Every posture id moves, so every task is qualified
   again at 2.5 (test runs, no model money), and oracle scores, controls and sign-offs are redone
   before a cell delivers. A run under a 2.4 reserved reading is refused `pool_drift`: close every
-  open 2.4 campaign before a stack takes this.
+  2.4 campaign first, and deploy only with all three fixes.
 
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click

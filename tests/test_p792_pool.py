@@ -248,7 +248,8 @@ def test_p792_a_commit_with_a_24_a0_row_is_pool_seen(backend: Backend, tmp_path:
     major, minor = APPARATUS_VERSION.split(".")
     later = f"{major}.{int(minor) + 1}"  # an apparatus after the reading's own
     cases = [
-        ([sealed_row(pool[0], arm="A0")], [pool[0]]),
+        # the POOL_SEEN_FROM boundary itself: a 2.4 row is seen, also by a later reading
+        ([sealed_row(pool[0], arm="A0", apparatus_version="2.4")], [pool[0]]),
         ([sealed_row(twin, arm="S1@gpt-oss-120b", change=changes[pool[1]])], [twin]),
         ([sealed_row(pool[2], arm="S3", apparatus_version=later)], [pool[2]]),
     ]

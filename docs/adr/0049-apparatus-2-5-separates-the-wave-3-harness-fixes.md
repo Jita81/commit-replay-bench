@@ -60,7 +60,9 @@ it; a reader separates the waves by the apparatus axis it already reads, and no 
   (`src/crb/server/worker.py`, P-797). The 2.4 readings are frozen.
 
 **Must never.** Deploy this change to a stack while a 2.4 campaign on it is open: its remaining
-runs would be refused. Close the 2.4 campaigns first.
+runs would be refused. Close the 2.4 campaigns first. Deploy 2.5 to a stack without all three
+harness fixes: rows graded at 2.5 without them would pool with rows graded with them, which is
+the blend this version exists to prevent. This change merges after, or with, the three fixes.
 
 **Open.** A 2.5 replay row still marks its commit seen for a future reserved reading
 (`POOL_SEEN_FROM = (2, 4)` in `src/crb/core/reading.py` admits every later apparatus), so the
