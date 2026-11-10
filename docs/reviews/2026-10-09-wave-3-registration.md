@@ -1374,16 +1374,21 @@ test results, which cobra's builder was not.
 
 **Paul's decision.** Paul chose A on 2026-11-10 at 08:42:02Z, in their own words: "A, go ahead
 with click" **[hypothesis — Paul's own turn in the lead session's transcript, timestamped
-2026-11-10T08:42:02Z; the transcript is not in this repository]**. With that, cobra's two S3
-readings stay as read, and no further cobra run is made.
+2026-11-10T08:42:02Z; the transcript is not in this repository]**. Paul's message names click
+only. This record reads it as leaving cobra's two S3 readings as read, with no further cobra run.
 
 **The change made.** One line in the stack's `env.sh` changed: `CRB_BUILDER__IMAGE` went from
-`crb-builder-go:local` to `crb-builder:local`. `CRB_BUILDER__PROXY_IMAGE` is unchanged. The egress
-proxy takes the builder's image unless `CRB_BUILDER__PROXY_IMAGE` names another
-(`src/crb/builders/container.py`), so click's proxy also runs in `crb-builder:local`. The first
+`crb-builder-go:local` to `crb-builder:local`. `CRB_BUILDER__PROXY_IMAGE` is unchanged: it
+already named `crb-builder:local`. So the egress proxy ran in `crb-builder:local` for cobra's cells
+and runs in it for click's. Only the builder image differs between the two repositories. The first
 click run, `7d5d4bd7b0bc42d1bc999fe28c698da4`, ran both its builder and its proxy containers in
 `crb-builder:local`, Id `sha256:116f523d…` **[hypothesis — `docker ps` and `docker inspect` on the
 run's two containers on 2026-11-10 at about 08:59Z; the containers are not in this repository]**.
+The stack's own records agree. Each `reading.reserved` event records the builder's `image` and
+`proxy_image`. Cobra's events from 04:32Z to 04:38Z read `crb-builder-go:local` and
+`crb-builder:local`, and click's from 08:58Z read `crb-builder:local` for both **[hypothesis — the
+stack's `events` table, read on 2026-11-10 at about 09:02Z, and `env.sh`'s two image lines as the
+lead session read them; neither is in this repository]**.
 The stack was restarted at 08:42:26Z by the lead session, on Paul's word:
 - The old worker stopped cleanly at 08:42:27Z. The new worker started at 08:42:29Z.
 - No migration ran: the database is at `0018`, the code's head.
