@@ -62,7 +62,9 @@ What it does: Groups every ``protocol`` row's guard refusals by (reason, command
               reading whose run would resolve another checks arm than it froze is listed
               flagged ``checks_arm_moved`` ({frozen, current}) with no request, and the
               readings frozen on the current arm speak for their cell first: one frozen on
-              another arm speaks only where its cell has none, never up to date (R6V1-1).
+              another arm speaks only where its cell has none, never up to date (R6V1-1); a
+              reserved.v1 reading asks its pool's commits whatever the miner's ``gold_clean``
+              flag (its records admit them, P-797) and none while its pool drifts.
               Writes only what a named human decided (``apply_triage``, under a lock on the
               corpus directory; a supplied command only completes a cut example) and queues
               nothing.
@@ -76,6 +78,7 @@ How:          ``triage_refusals`` (``parse_violations`` → ``normalise_reason``
               in the seeded order → ``RunRequest``; a scope-faulted arm → ``audit``, no
               request; a reserved.v1 reading off its frozen checks arm
               (``holds_its_checks_arm`` → ``_checks_arm_moved``) → ``config``, no request;
+              a drifted pinned pool (``_pool_drift_blocker``) → no request;
               rows of a cell no reading covers → ``register``; ``first_attempts`` for their
               distinct commits).
 Layer:        core — docs/ARCHITECTURE.md#43-c4-level-3--crbcore-modules (the loop itself:
@@ -127,9 +130,11 @@ from crb.core.ledger import (
     first_attempts,
     group_by_cell,
 )
+from crb.core.qualify import STATE_QUALIFIED, STATE_REVOKED
 from crb.core.reading import (
     HALT_CHECKS_ARM_MISMATCH,
     LABEL_RESERVATION,
+    REFUSAL_POOL_DRIFT,
     SCOPE_CHECKS_ARM,
     STATE_DELIVER,
     STATE_INSUFFICIENT,
@@ -161,6 +166,9 @@ from crb.core.routing import (
 )
 from crb.core.routing import (
     NEXT_NEW_READING as ROUTING_NEXT_NEW_READING,
+)
+from crb.core.routing import (
+    NEXT_NONE as ROUTING_NEXT_NONE,
 )
 from crb.core.routing import (
     NEXT_REGISTER as ROUTING_NEXT_REGISTER,
@@ -1671,11 +1679,14 @@ REASON_PENDING = "look_pending"
 #: queue the reading's pending commits, register a reading first, (``runs``) queue by hand
 #: a run this plan cannot compose, because a replay it composed would write another arm, or
 #: (``config``) restore the repository's checks arm, which moved since a reserved.v1 reading
-#: froze it, so any run of the reading would halt (RT2B-1, :attr:`RemeasureCell.checks_arm_moved`).
+#: froze it, so any run of the reading would halt (RT2B-1, :attr:`RemeasureCell.checks_arm_moved`);
+#: (``none``) nothing to queue while a reserved.v1 reading's pool drifts — the worker refuses
+#: every run of it ``pool_drift``, queued here or by hand, until the pool is restored (P-814).
 NEXT_REPLAY = ROUTING_NEXT_REPLAY
 NEXT_REGISTER = ROUTING_NEXT_REGISTER
 NEXT_BY_HAND = "runs"
 NEXT_CONFIG = ROUTING_NEXT_CONFIG
+NEXT_NONE = ROUTING_NEXT_NONE
 #: What an operator reads when a reading's pool is too small for its next look.
 MINE_MORE = "mine more history"
 
@@ -1718,7 +1729,8 @@ class RemeasureCell:
     short_by: int = 0
     note: str = ""
     #: ``replay`` (queue the requests), ``register`` (register a reading first), ``runs``
-    #: (queue by hand) or ``config`` (restore the checks arm, ``checks_arm_moved``)
+    #: (queue by hand), ``config`` (restore the checks arm, ``checks_arm_moved``) or ``none``
+    #: (restore the reading's drifted pool: every run of it would be refused ``pool_drift``)
     next_act: str = NEXT_REPLAY
     #: the context arm this entry is about: the reading's blocking arm, or the rows' own arm
     #: (``""`` for rows written before apparatus 2.4, which carry none)
@@ -2007,6 +2019,37 @@ def _off_the_checks_arm(reading: Reading, checks_arm: str | None) -> bool:
     )
 
 
+#: The pool drift a reading recovers from in place: a commit's label, relabelled back into the
+#: cell. Every other drift row (a pinned record, a commit the store lost, the posture pin) is
+#: fixed by registration — the pins are frozen and a record is append-only (P-797).
+_RELABELLABLE_DRIFT = frozenset({"capability_class", "size"})
+
+
+def _pool_drift_blocker(reading: Reading) -> str:
+    """Why a reserved.v1 reading whose pool moved since registration (P-797,
+    :attr:`Reading.pool_drift`) is served no request — ``""`` when it has not. The worker
+    refuses every run of such a reading ``pool_drift`` at submit and at claim, before anything
+    is reserved, so the plan asks for none; the note names each commit, what moved and the
+    recovery: relabel the commit when only labels moved, else register a new reading."""
+    drift = reading.pool_drift
+    if not drift:
+        return ""
+    moved = ", ".join(
+        f"{str(d.get('task_id', '')) or 'the pool'} {d.get('field', '')}" for d in drift
+    )
+    if {str(d.get("field", "")) for d in drift} <= _RELABELLABLE_DRIFT:
+        advice = "relabel the commit back into the cell, or the look waits"
+    else:
+        advice = (
+            "the pool cannot be restored in place (its pins are frozen and a record is "
+            "append-only): register a new reading of the cell, or the look waits"
+        )
+    return (
+        f"its reading's pool moved since registration ({len(drift)} drift row(s): {moved}): "
+        f"a run would be refused {REFUSAL_POOL_DRIFT} — {advice}"
+    )
+
+
 def remeasure_plan(
     rows: Iterable[GradeRow],
     *,
@@ -2019,6 +2062,7 @@ def remeasure_plan(
     deployment_posture: str | None = None,
     checks_arm: str | None = None,
     checks_arm_loop: str | None = None,
+    pool_records: Mapping[str, Mapping[str, str]] | None = None,
 ) -> RemeasurePlan:
     """What each cell needs before a reading at ``current_apparatus`` can license it.
 
@@ -2038,9 +2082,25 @@ def remeasure_plan(
       ``n_current`` the commits its look has read, ``n_needed`` the commits still needed before
       the next look, and ONE request naming exactly those commits — the pool's first
       ``next_look`` in the seeded order with no observed first attempt graded after
-      registration. A commit that is not gold-clean (``gold_clean_tasks``; the worker builds
-      only those) or whose current label moved (``task_labels``) is left out and ``short_by``
-      says so. No request at all when a replay could not write rows the reading counts
+      registration. A reading that pins its pool (:attr:`Reading.pins_pool` — a reserved.v1
+      reading of a frozen pool, never a calibration pool) is pinned to the qualification records
+      that admitted it (P-797) and the worker admits a commit by its record in the posture, never
+      the miner's ``gold_clean`` flag (ADR-0019): its commits are asked whatever that flag
+      says, and while its pool drifts (:attr:`Reading.pool_drift` — a pinned record missing
+      or not qualified, a commit relabelled out of the cell) no request at all and ``next_act``
+      ``none`` (``config`` first when its checks arm moved), since the worker refuses every
+      run of it ``pool_drift``, here or by hand (:func:`_pool_drift_blocker`). A newer record
+      in force is never drift (P-797), so the plan reads it too: ``pool_records`` maps a
+      pinned reading's id to the state of each pool commit's record in force in the pool's
+      posture (``qualified``, ``unqualified``, ``revoked``, ``legacy``). A pending commit
+      whose record the posture gate refuses — any state but ``qualified``, or ``revoked``,
+      which a run re-measures (``qualify_first``) — is left out and named, and ``short_by``
+      counts it (with none left: no request, and ``next_act`` ``runs`` though the posture
+      gate refuses them in a run queued by hand too — P-814's gap); with no entry for the
+      reading every pending commit is asked, as before. Any other
+      reading leaves out a commit that is not gold-clean (``gold_clean_tasks``) or whose
+      current label moved (``task_labels``) and ``short_by`` says so. No request at all when
+      a replay could not write rows the reading counts
       (:func:`_arm_request_blocker` — ``next_act`` ``runs``), nor when the checks arm moved
       since a reserved.v1 reading froze it (``checks_arm_moved`` ``(frozen, current)``,
       ``next_act`` ``config``): the run would halt ``reading_checks_arm_mismatch`` (RT2B-1).
@@ -2166,9 +2226,26 @@ def remeasure_plan(
             and t in task_labels
             and task_labels[t] != (cell.capability_class, cell.size)
         ]
-        not_gold = [t for t in pending if gold is not None and t not in gold]
-        askable = [t for t in pending if t not in relabelled and t not in not_gold]
+        # a pinned pool's commits are admitted by their records, never the miner's flag (P-797)
+        not_gold = [
+            t for t in pending if not reading.pins_pool and gold is not None and t not in gold
+        ]
+        # ...and refused at the posture gate by a newer record in force that is not qualified
+        # (P-797 C18: not drift): asked, it would stay pending with no shortfall said. A
+        # revoked record is measured again by the run (``qualify_first``), so it is asked
+        in_force = (pool_records or {}).get(reading.reading_id) if reading.pins_pool else None
+        refused = [
+            t
+            for t in pending
+            if in_force is not None
+            and t in in_force
+            and in_force[t] not in (STATE_QUALIFIED, STATE_REVOKED)
+        ]
+        askable = [
+            t for t in pending if t not in relabelled and t not in not_gold and t not in refused
+        ]
         moved = _checks_arm_moved(reading, arm, checks_arm, checks_arm_loop)
+        drifted = _pool_drift_blocker(reading)
         blocker = _arm_request_blocker(
             arm,
             s1_author_model=s1_author_model,
@@ -2176,7 +2253,7 @@ def remeasure_plan(
             deployment_posture=deployment_posture,
         )
         requests: tuple[RunRequest, ...] = ()
-        if askable and not blocker and not moved:
+        if askable and not blocker and not moved and not drifted:
             requests = (
                 RunRequest(
                     repo=repo,
@@ -2205,12 +2282,22 @@ def remeasure_plan(
                 f"it: a run would halt {HALT_CHECKS_ARM_MISMATCH} — restore the repository's "
                 f"{moved[0]} checks arm, or end the stage"
             )
-        elif blocker:
+        elif blocker and not drifted:
+            # a drifted pool refuses every arm's run, by hand as well: its note is what tells
             notes.append(blocker)
+        if drifted:
+            notes.append(drifted)
         if not_gold:
             notes.append(
                 f"{len(not_gold)} pending commit(s) are no longer gold-clean, and the worker "
                 "builds only a gold-clean commit: re-qualify them, or the look waits"
+            )
+        if refused:
+            states = ", ".join(sorted({in_force[t] for t in refused if in_force is not None}))
+            notes.append(
+                f"{len(refused)} pending commit(s) have a newer record in force that is not "
+                f"qualified ({states}), and the posture gate refuses them: re-qualify them in "
+                "the pool's posture, or the look waits"
             )
         if relabelled:
             notes.append(
@@ -2243,7 +2330,15 @@ def remeasure_plan(
                 n_requested=n_requested,
                 short_by=look.needed - n_requested,
                 note="; ".join(notes),
-                next_act=NEXT_CONFIG if moved else NEXT_REPLAY if requests else NEXT_BY_HAND,
+                next_act=(
+                    NEXT_CONFIG
+                    if moved
+                    else NEXT_NONE
+                    if drifted
+                    else NEXT_REPLAY
+                    if requests
+                    else NEXT_BY_HAND
+                ),
                 arm=arm,
                 reading_id=reading.reading_id,
                 next_look=look.next_look,

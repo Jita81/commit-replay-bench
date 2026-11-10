@@ -20,6 +20,16 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   [#100](https://github.com/Jita81/commit-replay-bench/pull/100), the seal that let click qualify,
   is recorded there too. No protocol value changes.
 
+- **The remeasure plan asks a pinned pool's commits by their records, not the miner's flag**
+  (P-814; [#109](https://github.com/Jita81/commit-replay-bench/pull/109)). `GET /learn/remeasure`
+  dropped a pending commit whose miner `gold_clean` was false, though the posture gate admits it
+  by its record (ADR-0019). A reading that pins its pool to those records (P-797) now asks each
+  pending commit by its record in force: `qualified` or `revoked` is asked; `unqualified` or
+  `legacy` is left out and counted in `short_by`. While its pool drifts nothing is asked: the
+  next act is `none` and the Learn page shows "Pool moved: see the note" (a moved checks arm
+  still comes first, `config`). Legacy readings are unchanged. No grading, ledger, reading rule or
+  apparatus version changes.
+
 - **authlib, joserfc and msgpack move past ten advisories** (eight in authlib, among them
   PYSEC-2026-4355 to PYSEC-2026-4360, CVE-2026-96760 and CVE-2026-116672; CVE-2026-119284 in
   joserfc; CVE-2026-114613 in msgpack;

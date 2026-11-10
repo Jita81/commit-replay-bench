@@ -20,9 +20,10 @@ matching :mod:`crb.core.learn` derivation and returns its ``to_dict()``:
   --controls <GET /oracle/{repo}/controls>`` derives from the exports;
 * ``/learn/remeasure`` — read from the repository's registered readings (ADR-0026 item 2):
   each reading waiting on its look → the commits it still needs in its seeded order, the
-  ``POST /runs`` body an operator can queue for them (gold-clean, in this deployment's
-  posture, with its test author) and what it costs; each cell with rows and no reading →
-  register one first, never a replay.
+  ``POST /runs`` body an operator can queue for them (gold-clean — or, for a reading that
+  pins its pool, admitted by its pinned records in force, and none while that pool drifts,
+  P-814 — in this deployment's posture, with its test author) and what it costs; each cell
+  with rows and no reading → register one first, never a replay.
 
 The three reads are viewer-readable and pure. The three writes (G-532) are
 operator-gated and each one carries the **same named-person decision the CLI already
@@ -42,8 +43,11 @@ the request body, so a decision cannot be filed under somebody else's name:
   applies (``submit_refusals``) before it is enqueued; refused ``reading_unregistered`` for
   a cell with no such reading, ``campaign_required`` for one whose reading names a campaign
   (DL-382), ``validation_error`` for one whose reserved reading's checks arm moved (its
-  ``checks_arm_moved`` is in the detail: the run would halt — RT2B-1), and never for a
-  what-if plan; event ``learn.remeasure.queued``.
+  ``checks_arm_moved`` is in the detail: the run would halt — RT2B-1), for one with no
+  request (no commit left to ask; a pinned pool that drifts, so the worker would refuse the
+  run ``pool_drift``; pending commits its records in force all refuse, P-814; or a replay
+  the plan could not compose), and for a what-if plan, which queues nothing; event
+  ``learn.remeasure.queued``.
 
 Nothing about *which* decision is right moves into the product: the item bodies and the
 run bodies are re-derived here from the ledger, never taken from the caller, so a write
@@ -61,8 +65,10 @@ What it does: Reduces the repo's rows with the matching ``crb.core.learn`` deriv
               can choose but never compose; a cell whose queued runs are unfinished — or
               that a campaign's live run would attempt one of its commits for (F87-2) — is
               refused and served with those runs, so money is never spent twice (P-182); a
-              cell with no request (no commit left it has not graded) is refused with the
-              plan's own reason, so nothing is queued that would repeat a commit. The plan
+              cell with no request is refused with the plan's own reason — no commit left
+              it has not graded (nothing is queued that would repeat a commit), a pinned
+              pool that drifts or pending commits its records in force all refuse (P-814:
+              the run would be refused), or a replay the plan could not compose. The plan
               reads a reserved.v1 reading of a frozen pool whatever the repository's checks
               arm is now: when a run of its entry would resolve another arm than the reading
               froze (the team's block for a learning-off request, the loop's overlay for a
@@ -178,6 +184,7 @@ from crb.server.routes.runs import (
     system_trace_id,
 )
 from crb.server.schemas import TERMINAL_STATUSES, RunCreateRequest
+from crb.store import qualifications as store_q
 from crb.store.events import lock_event_writes
 from crb.store.jobs import stage_queued
 from crb.store.ledger import DbLedger
@@ -375,10 +382,25 @@ def derive_remeasure(
         and o.reading.taxonomy in ("", GLOBAL_CLASS_SET)
     ]
     # each task's CURRENT label and whether it is gold-clean: a pending commit relabelled
-    # out of the cell, or no longer gold-clean (the worker skips it), is left out and named
+    # out of the cell, or (a legacy reading's) no longer gold-clean, is left out and named; a
+    # reserved.v1 reading's pool is admitted by the records it pinned, whose drift the
+    # readings already carry (``load_readings``, P-797), never by the miner's flag
     tasks = list(db.execute(select(Task).where(Task.repo == repo)).scalars())
     labels = {str(t.task_id): (str(t.capability_class or ""), str(t.size or "")) for t in tasks}
     gold = [str(t.task_id) for t in tasks if t.gold_clean]
+    # ...and by the record in force in the pool's posture: a newer record that is not
+    # qualified is not drift (P-797 C18), and the posture gate refuses its commit, so the plan
+    # leaves it out and says so rather than queue a request that leaves it pending
+    pool_records = {
+        o.reading.reading_id: {
+            tid: q.state
+            for tid, q in store_q.latest_by_task(
+                db, repo, o.reading.pool_posture_id, list(o.reading.pool)
+            ).items()
+        }
+        for o in outcomes
+        if o.reading.pins_pool and o.reading.pool_posture_id
+    }
     return remeasure_plan(
         rows,
         readings=outcomes,
@@ -397,6 +419,7 @@ def derive_remeasure(
         # (the team's block alone); a +L arm's run, queued by hand, under the loop's overlay
         checks_arm=current_checks_arm(factory, repo, learning=False),
         checks_arm_loop=checks,
+        pool_records=pool_records,
     )
 
 

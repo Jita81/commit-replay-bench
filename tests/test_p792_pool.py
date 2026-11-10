@@ -23,7 +23,9 @@ What it does: Relabels a pool task after registration (the CLI's ``tasks label``
               ``qualified`` record in force; proves the pool hash and the id pin the posture
               and the record ids; proves a requalification is not drift, a revoked record in
               force leaves its commit pending, and a posture move halts the run before
-              anything is qualified or reserved.
+              anything is qualified or reserved; proves ``GET /learn/remeasure`` asks a pinned
+              pool's commit whatever the miner's ``gold_clean`` flag and asks nothing while the
+              pool drifts.
 How:          The core tests register in memory (``fixtures.readings``). The route tests run
               the app on the ``backend`` fixture's store (SQLite and PostgreSQL), qualifying
               tasks through the store's writer (``qualify_pool``); the drift test reuses the
@@ -35,9 +37,11 @@ ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0026-the-context-standard.md
 Works with:   src/crb/core/reading.py (the pins, ``reserved_pool_digest`` and ``pool_seen``,
               under test), src/crb/server/reading_book.py (``pool_drift``, under test),
-              src/crb/server/routes/readings.py (the pool from records; the served drift),
-              src/crb/server/routes/runs.py (the 409 ``pool_drift``),
+              src/crb/server/routes/readings.py and src/crb/server/routes/runs.py (the
+              pool from records and the served drift; the 409 ``pool_drift``),
               src/crb/server/worker.py (the claim refusal and the posture check, under test),
+              src/crb/core/learn.py and src/crb/server/routes/learn.py (the remeasure plan
+              over a pinned pool, under test),
               src/crb/store/qualifications.py (the records a pool is read from and pinned to),
               tests/test_p792_reserved.py (the worker rig and the submit-gate stack reused),
               tests/fixtures/readings.py (``qualify_pool``, the rows and the registrations)
@@ -89,7 +93,13 @@ from fixtures.readings import (
 )
 from fixtures.server_seed import ALPHA, Env, add_users, envelope, login, make_settings, seed
 from test_p792_reserved import _r_admit, _r_refused, _r_stack, _w_rig, _w_served, _WRig
-from test_wave3_registration_rehearsal import _a0, _served_readings
+from test_wave3_registration_rehearsal import (
+    Wave3,
+    _a0,
+    _plan_entry,
+    _s3_body,
+    _served_readings,
+)
 
 try:  # tests/ is a package only if the conftest owner made it one
     from tests.conftest_store import Backend, backend, pg_schema
@@ -399,6 +409,112 @@ def test_p792_a_requalified_commit_is_not_drift_and_a_revoked_one_stays_pending(
     assert "build.start" not in rig.actions(run.id)
     assert [e.event_id for e in rig.reservations(reading)] == [res.event_id]
     assert rig.verdicts(reading, "A0") == {rig.first: (True, ""), rig.second: (None, "pending")}
+
+
+def _set_gold_clean(w: Wave3, repo: str, commit: str, gold_clean: bool) -> None:
+    """A direct edit of ``commit``'s ``Task.gold_clean`` (what a re-mine writes)."""
+    with w.env.factory() as s:
+        task = s.execute(select(Task).where(Task.repo == repo, Task.task_id == commit)).scalar_one()
+        task.gold_clean = gold_clean
+        s.commit()
+
+
+def test_p792_the_remeasure_plan_asks_a_pinned_pool_by_its_records_not_the_miners_flag(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Wave 3 finding (2026-11-09, step 14): ``GET /learn/remeasure`` left a reserved.v1
+    pool's commit out of its S3 request when the miner's ``Task.gold_clean`` was false, though
+    its pinned ``qualified`` record admits it and the core grades it gold-clean (ADR-0019) —
+    the first look was served short and then waited for good. Now a flagged commit with its
+    pinned record in force is asked, and the body the plan serves is admitted; with the commit
+    relabelled out of the cell the reading drifts, the plan asks nothing and names the drift (a
+    run of it would be refused ``pool_drift``, not served short); restoring the label restores
+    the request."""
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        key = ("cobra", "XS")
+        reading = w.readings[key]
+        whole = _plan_entry(w, key)
+        (request,) = whole["requests"]
+        commit = request["task_ids"][3]
+
+        _set_gold_clean(w, "cobra", commit, False)
+        flagged = _plan_entry(w, key)
+        assert flagged["requests"] == whole["requests"], flagged["note"]
+        assert flagged["next_act"] == "replay"
+        assert (flagged["n_requested"], flagged["short_by"]) == (whole["n_requested"], 0)
+        assert "gold-clean" not in flagged["note"] and "pool_drift" not in flagged["note"]
+        assert _r_admit(w, _s3_body(w, key)).status == STATUS_CANCELLED
+
+        assert reading["pool_qualifications"][commit]  # admitted by its pinned record
+        _label(backend.url, "cobra", commit, "perf")
+        drifted = _plan_entry(w, key)
+        assert drifted["requests"] == [] and drifted["n_requested"] == 0, drifted
+        assert drifted["next_act"] == "none", drifted
+        assert drifted["short_by"] == whole["n_requested"], drifted
+        note = drifted["note"]
+        assert f"{commit} capability_class" in note and "pool_drift" in note, note
+        # the note's recovery is the one that works here: relabel it back into the cell
+        assert "relabel the commit back into the cell" in note, note
+
+        _label(backend.url, "cobra", commit, "bug.fix")
+        assert _plan_entry(w, key)["requests"] == whole["requests"]
+
+
+def test_p814_the_remeasure_plan_reads_a_pinned_commits_record_in_force(
+    backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #107 (P-814's first gap), break and restore: a NEWER record in force that
+    is not qualified is not drift (C18), and the posture gate refuses its commit, yet the plan
+    asked it, so the run would leave it pending with no shortfall said. Now the plan reads each
+    pinned commit's record in force in the pool's posture: a revoked one is still asked (the
+    run measures it again, ``qualify_first``); a newer ``unqualified`` one is left out, counted
+    in ``short_by`` and named, with no drift; a newer ``qualified`` one restores the request."""
+    with _r_stack(backend, tmp_path, monkeypatch) as w:
+        key = ("cobra", "XS")
+        reading = w.readings[key]
+        posture_id = reading["pool_posture_id"]
+        whole = _plan_entry(w, key)
+        (request,) = whole["requests"]
+        commit = request["task_ids"][3]
+
+        with w.env.factory() as s:
+            in_force = store_q.latest(s, "cobra", commit, posture_id)
+            assert in_force is not None and in_force.is_qualified
+            store_q.revoke(s, in_force, QUAL_ENV_WITNESS_RED, "op-1", "gold control red")
+        revoked = _plan_entry(w, key)
+        assert revoked["requests"] == whole["requests"], revoked["note"]
+        assert revoked["short_by"] == whole["short_by"] and "record in force" not in revoked["note"]
+
+        qualify_pool(
+            w.env.factory,
+            "cobra",
+            [commit],
+            posture_class=reading["posture_class"],
+            posture_id=posture_id,
+            state=STATE_UNQUALIFIED,
+            code=QUAL_GOLD_NOT_GREEN,
+            salt="p814",
+        )
+        refused = _plan_entry(w, key)
+        (asked,) = refused["requests"]
+        assert asked["task_ids"] == [t for t in request["task_ids"] if t != commit], refused
+        assert refused["n_requested"] == whole["n_requested"] - 1, refused
+        assert refused["short_by"] == whole["short_by"] + 1, refused
+        assert refused["next_act"] == "replay" and "pool_drift" not in refused["note"]
+        assert (
+            "1 pending commit(s) have a newer record in force that is not qualified "
+            "(unqualified)" in refused["note"]
+        ), refused["note"]
+
+        qualify_pool(
+            w.env.factory,
+            "cobra",
+            [commit],
+            posture_class=reading["posture_class"],
+            posture_id=posture_id,
+            salt="p814-restored",
+        )
+        assert _plan_entry(w, key)["requests"] == whole["requests"]
 
 
 def test_p792_a_posture_move_halts_a_pinned_pool_before_any_reservation(
