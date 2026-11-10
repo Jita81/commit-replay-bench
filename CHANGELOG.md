@@ -13,7 +13,7 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
 - **A Claude Code build's cost is priced from the product's own table**
-  (#TBD). `cost_usd` was the CLI's `total_cost_usd` taken verbatim, and CLI 2.1.132 prices
+  ([#115](https://github.com/Jita81/commit-replay-bench/pull/115)). `cost_usd` was the CLI's `total_cost_usd` taken verbatim, and CLI 2.1.132 prices
   claude-sonnet-5 at $5/$25 against the table's $2/$10, so Wave 3 recorded $52.71 for about $21
   billed. The CLI's token counts are now priced from `DEFAULT_PRICING` plus `CRB_PRICING_JSON`,
   with cache reads at the cached rate and cache writes at 1.25x input (2x for a 1-hour write). The
