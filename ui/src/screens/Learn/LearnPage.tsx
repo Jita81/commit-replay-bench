@@ -1131,6 +1131,9 @@ function RemeasureSection({ repo }: { repo: string }) {
     )
   const p = q.data
   const unregistered = p.summary.cells_stale + p.summary.cells_thin
+  // the tile links to Runs only while some row offers a route to a run: a row whose act comes
+  // first (register a reading, restore the checks arm, restore the pool) offers none (P-814)
+  const runnable = p.cells.some((c) => c.next_act !== 'register' && c.next_act !== 'none' && !c.checks_arm_moved)
   return (
     <div className="space-y-4">
       {whatIfControls}
@@ -1158,9 +1161,11 @@ function RemeasureSection({ repo }: { repo: string }) {
           n={p.summary.cost_known_cells}
           apparatus="each cell’s own mean row cost × the commits requested (one attempt each, blind or sighted)"
           footer={
-            <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
-              Queue runs
-            </Hint>
+            runnable && (
+              <Hint as={Link} id="link.learn.runs" to={`/runs?repo=${enc(repo)}`}>
+                Queue runs
+              </Hint>
+            )
           }
         />
       </div>
