@@ -2095,6 +2095,12 @@ class GitArchaeologyGuard:
       when a cwd is known; :class:`TestFileGuard` classifies by what a path resolves
       to (finding 6c). Inline-code string concatenation (``'gi'+'t'``, finding 6b)
       and script files stay documented gaps: the sealed container is that belt.
+    * 2026-11-10 — Wave 3 (click, cobra): ``git -C /work status`` was refused because
+      any absolute ``-C`` counted as leaving the tree. ``-C`` at the worktree root or
+      below is now accepted. The container path reaches this guard already mapped to
+      the host root, so the honest case is pinned end to end in
+      ``tests/test_builders_container.py`` (``test_stream_stats_git_c_container_workdir*``),
+      and by ``git -C . status`` in the corpus.
     """
 
     def __init__(self, cwd: Path | str | None = None) -> None:
@@ -2346,7 +2352,10 @@ class GitArchaeologyGuard:
                 if a == "-C":
                     inside, here = _git_c_step(here, self.cwd, val)
                     if not inside:
-                        return f"archaeology: 'git -C {val}' leaves the worktree"
+                        return (
+                            f"archaeology: 'git -C {val}' cannot be verified to stay "
+                            "inside the worktree"
+                        )
                 if a == "-c" and val.split("=", 1)[0] in {"core.worktree", "core.gitdir"}:
                     return f"archaeology: 'git -c {val}' points git at another repository"
                 i += 2

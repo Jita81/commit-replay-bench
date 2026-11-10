@@ -669,8 +669,11 @@ _GIT_C_ACCEPT = (
     "git -C {r} checkout -- src/x.py",
 )
 
-#: … and everything else is refused, with the allowed-verb rules still applying after -C.
-_GIT_C_REFUSE = (
+#: The -C rule's own refusal text (one wording for every class it refuses).
+_GIT_C_MSG = "cannot be verified to stay inside the worktree"
+
+#: … and everything else is refused. These are refused by the -C rule itself.
+_GIT_C_REFUSE_PATH = (
     "git -C / status",
     "git -C {p} status",  # the directory above the root
     "git -C {p}/elsewhere status",
@@ -697,16 +700,6 @@ _GIT_C_REFUSE = (
     "git -C {r} -C /etc status",
     "git -C {r}/src -C ../.. status",
     "cd {p} && git -C . status",  # -C . from outside the tree is outside the tree
-    "git -C {r} log",
-    "git -C {r} show HEAD~1",
-    "git -C {r} stash list",
-    "git -C {r} diff main",
-    "git -C {r} checkout main",
-    "git -C {r} fetch",
-    "git -C {r} --git-dir=/x/.git status",
-    "git -C {r} --work-tree=/etc status",
-    "git --git-dir={r}/.git -C {r} status",
-    "git -C {r} -c core.worktree=/etc status",
     # shell expansion: bash rewrites the value before git sees it, so the literal text
     # proves nothing about where git runs (review of 184a7bf9, BLOCKING)
     'git -C {r}/"$(printf ..)" grep foo',  # hoisted to {r}/__SUBST_0__
@@ -736,6 +729,20 @@ _GIT_C_REFUSE = (
     "git -C {r}/gitlink status",  # a link inside the tree onto .git
 )
 
+#: An accepted -C does not relax the verb and option rules that follow it.
+_GIT_C_REFUSE_OTHER = (
+    "git -C {r} log",
+    "git -C {r} show HEAD~1",
+    "git -C {r} stash list",
+    "git -C {r} diff main",
+    "git -C {r} checkout main",
+    "git -C {r} fetch",
+    "git -C {r} --git-dir=/x/.git status",
+    "git -C {r} --work-tree=/etc status",
+    "git --git-dir={r}/.git -C {r} status",
+    "git -C {r} -c core.worktree=/etc status",
+)
+
 
 def test_guard_git_c_accepts_only_the_worktree_and_below(tmp_path: Path) -> None:
     """Wave 3: ``git -C /work status`` (the container's work tree) was refused because any
@@ -749,19 +756,23 @@ def test_guard_git_c_accepts_only_the_worktree_and_below(tmp_path: Path) -> None
     for tpl in _GIT_C_ACCEPT:
         cmd = tpl.format(**fill)
         assert g.check_shell(cmd) == "", cmd
-    for tpl in _GIT_C_REFUSE:
+    # the -C rule itself refuses these: another rule refusing them would hide a regression
+    for tpl in _GIT_C_REFUSE_PATH:
+        cmd = tpl.format(**fill)
+        assert _GIT_C_MSG in g.check_shell(cmd), cmd
+    for tpl in _GIT_C_REFUSE_OTHER:
         cmd = tpl.format(**fill)
         assert g.check_shell(cmd).startswith(("archaeology:", "network:")), cmd
     # the verb's paths are checked from where -C put git: x.py is under src/, not the root
     assert "not a path in the worktree" in g.check_shell(f"git -C {root} diff x.py")
     # without a known root an absolute -C cannot be verified → refused; relative as before
     blind = base.GitArchaeologyGuard()
-    assert "leaves the worktree" in blind.check_shell(f"git -C {root} status")
+    assert _GIT_C_MSG in blind.check_shell(f"git -C {root} status")
     assert blind.check_shell("git -C src status") == ""
-    assert "leaves the worktree" in blind.check_shell("git -C ../x status")
+    assert _GIT_C_MSG in blind.check_shell("git -C ../x status")
     # … but a relative -C the shell rewrites, or one into .git, is refused even blind
     for cmd in ("git -C $X status", "git -C src/* status", "git -C .git status"):
-        assert "leaves the worktree" in blind.check_shell(cmd), cmd
+        assert _GIT_C_MSG in blind.check_shell(cmd), cmd
 
 
 def test_guard_git_c_root_given_through_a_symlink(tmp_path: Path) -> None:
@@ -776,7 +787,7 @@ def test_guard_git_c_root_given_through_a_symlink(tmp_path: Path) -> None:
     for path in (real, linked, real / "src", linked / "src"):
         assert g.check_shell(f"git -C {path} status") == "", path
     for path in (f"{real}/..", f"{real}/out", f"{real}/.git", f"{real}/$X", str(tmp_path)):
-        assert "leaves the worktree" in g.check_shell(f"git -C {path} status"), path
+        assert _GIT_C_MSG in g.check_shell(f"git -C {path} status"), path
 
 
 def test_guard_git_diff_and_grep_reject_branch_names(tmp_path: Path) -> None:
