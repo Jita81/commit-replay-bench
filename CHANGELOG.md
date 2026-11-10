@@ -12,6 +12,25 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The Wave 4 registration**
+  ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
+  `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind
+  baseline against the test-author arm on click and cobra `bug.fix` XS and S, with the sighted
+  replay beside them, at apparatus 2.5 with learning off. It fixes the primary and how it is
+  read, the one money line, the pilot and its gates, the order of runs, the fixes that must be
+  deployed first, and the two amendments still to come (the ordered commit lists; the pilot's
+  outcome). It records Paul's decisions and his yes to the spends. Docs only.
+
+- **The Wave 3 stage-1 report, the stage-2 statement and the close**
+  ([#111](https://github.com/Jita81/commit-replay-bench/pull/111)). A new record,
+  `docs/reviews/2026-11-10-wave-3-stage-1-report.md`, reports stage 1: the spend against the $54.00
+  line, the readings, the arms paired commit by commit, and why stage 1 ended. The registration's
+  part 6 gains the stage-2 statement amendment. Paul then closed Wave 3 on the report, with no stage
+  2 (DL-416), so nothing is released. The report's section 11 and the registration's closure
+  amendment record the close: the loop pair, read once, does not clear; Q-25's rule reads Stop,
+  which turns on counting disqualified rows as misses, the registered rule Paul kept after the read;
+  and the loop switch is off again. The FREEZE ends at this merge. Docs only.
+
 - **The Wave 3 registration records click's builder image**
   ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
   builder-image amendment: click's cells build in `crb-builder:local` (Python), not
