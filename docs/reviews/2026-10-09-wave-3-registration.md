@@ -1606,9 +1606,10 @@ neither is in this repository]**.
 
 ### The closure amendment, 2026-11-10
 
-**What this adds.** Paul's decision to close Wave 3 on the stage-1 report, with no stage 2; part
-1's loop pair, read once at the close; Q-25's branch as the registered rule reads it; and step
-10's restore of the loop switch. The detail is in the stage-1 report's section 11.
+**What this adds.** Paul's decision to close Wave 3 on the stage-1 report, with no stage 2; part 1's
+loop pair, read once at the close; Q-25's branch as the registered rule reads it; step 10's restore
+of the loop switch; and Paul's answers after the read, on the disqualified rows and on when the
+FREEZE ends. The detail is in the stage-1 report's section 11.
 
 **The decision.** At 14:06:15Z Claude Code asked Paul: "Do you confirm closing Wave 3 on the
 stage-1 report, with no stage 2? Yes, or no and keep stage 2 as planned." Paul answered "Yes" at
@@ -1620,10 +1621,14 @@ stage-1 report, with no stage 2? Yes, or no and keep stage 2 as planned." Paul a
   it is not acted on. The choice between paths (a) and (b) is moot, and no literal run is made.
 - Claude Code reads the close as the campaign ending first (part 1; the report's section 11 lists
   this among the choices the read rests on), so part 1's loop pair is read now.
-- The FREEZE (Q-24, DL-375) holds until Wave 3 reports, and Q-25 publishes the result with its
-  rows (step 12). Claude Code reads Wave 3 as reporting either when the stage-1 report is on
-  `main` or when step 12's rows are published. Which of the two it is, is Paul's call; until then
-  the FREEZE holds.
+- The FREEZE (Q-24, DL-375) holds until Wave 3 reports, and Q-25 publishes the result with its rows
+  (step 12). Asked which event that is, Paul answered "Yes it does" at 18:49:00Z to "Does the FREEZE
+  end when #111 merges, or at step 12, when the rows are published?" In the carve-out session Paul
+  had answered "Yes" to "End the freeze at #111's merge, not at the published rows…". So the FREEZE
+  ends when the stage-1 report merges, and step 12 does not hold it **[hypothesis — Claude Code's
+  question and Paul's answer at 18:49:00Z in the lead session's transcript, and Paul's "Yes" to the
+  carve-out session's item on the FREEZE, relayed at 18:46:01Z, 2026-11-10; neither is in this
+  repository]**.
 
 **The loop pair.** It was read once, on the same 64 pairs, with each pending commit read against
 the loop: a pending `A0` commit counts as clean and a pending `A0+L` commit as a miss. Sixteen pairs
@@ -1645,16 +1650,17 @@ in this repository]**:
 - Stop fires: in each of the three complete cells, nothing moves and the reachable rate's lower
   bound is at or below `A0`'s upper bound.
 
-Of the choices the read rests on, only one flips it: the registered rule counts disqualified
-rows as misses. If the scratch-path
-disqualifications were counted clean instead, as an upper bound, cobra XS's `A0+L` would lie
-outside `A0`'s interval and Change course would fire. Paul has not decided how those rows are
-treated. No miss that makes a reading insufficient is served as an outage, a harness fault, a
-cancel or a missing row, so DL-404's label is not earned. The decision Wave 3 informs is Paul's
-(Q-19, DL-377); DL-415, in PR #108 and not yet on `main`, voids its 6 November date
-**[hypothesis — the stage-1
-report's section 11, read from the stack's rows on 2026-11-10 at about 17:40Z, apparatus 2.4; those
-records are not in this repository]**.
+Of the choices the read rests on, only one flips it: the registered rule counts disqualified rows as
+misses. If the scratch-path disqualifications were counted clean instead, as an upper bound, cobra
+XS's `A0+L` would lie outside `A0`'s interval and Change course would fire. Asked after the read,
+Paul kept the registered rule: disqualified rows count as misses, and Wave 3's verdict is left alone
+**[hypothesis — the carve-out session's question and Paul's "Yes", relayed to the lead session at
+18:46:01Z on 2026-11-10; at 18:49:00Z Paul said to take that session's commands as Paul's own;
+neither transcript is in this repository]**. No miss that makes a reading insufficient is served as
+an outage, a harness fault, a cancel or a missing row, so DL-404's label is not earned. The decision
+Wave 3 informs is Paul's (Q-19, DL-377); DL-415, in PR #108 and not yet on `main`, voids its 6
+November date **[hypothesis — the stage-1 report's section 11, read from the stack's rows on
+2026-11-10 at about 17:40Z, apparatus 2.4; those records are not in this repository]**.
 
 **Step 10.** The switch was restored to `auto_apply` off with an empty overlay:
 - cobra, record `beaccf3a5089716e` at 17:37:10Z;
