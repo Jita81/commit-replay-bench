@@ -5,8 +5,9 @@ on Claude Code's reading of "fits", which part 2 does not contain. On that readi
 fits under $54.00. No stop happened, and the protocol is not complete. Read literally, part 2
 still admits at least one more small run, and no record says where a literal run would lead
 (section 7) **[hypothesis — the campaign's tally on 2026-11-10 at about 10:55Z; those records are
-not in this repository]**. Paul chooses between attesting the reading and having the literal run
-made first. Only then can decision 9's fixed rule (Q-26, DL-400) release stage 2,
+not in this repository]**. The line is measured in Claude Code's own cost figure, which is 2.5
+times Anthropic's bill, and Paul keeps that measure (section 1). Paul chooses between attesting the reading and having the
+literal run made first. Only then can decision 9's fixed rule (Q-26, DL-400) release stage 2,
 which Paul files (the start-up runbook's step 22). This record is the registration's part 5 step
 8. Part 4's stage-2 statement is in the registration's part 6, in
 [the stage-2 statement amendment](2026-10-09-wave-3-registration.md#the-stage-2-statement-amendment-2026-11-10).
@@ -37,7 +38,11 @@ those records are not in this repository]**:
 - **Spend.** Stage 1 spent $52.708356 (£39.04) of the $54.00 line, author calls included, over
   12 runs and 161 rows. $1.29 (£0.96) is left. The dearest attempt so far cost $0.86, so by part
   2's rule the largest cap that still fits is $0.43, below one click S blind attempt ($0.555 on
-  average over its 3).
+  average over its 3). These are Claude Code's own cost figures, as registered. They price
+  `claude-sonnet-5` at 2.5 times its list price: at list prices the same rows cost about $21.09
+  (£15.62), which matches your console (section 1). You chose to keep the tally's dollars ("keep
+  tally dollars", relayed by the carve-out session on 2026-11-10), so the line and the caps stay as
+  registered and this record gives the bill beside them.
 - **No stop.** No stop-list item fired. The image Ids matched at stage 1's start and at every
   check since. One worker ran at a time. It was replaced twice, each time between runs: at 02:44Z,
   when Paul restarted the stack onto `406722a6`, and at 08:42Z, for the switch to click's builder
@@ -65,8 +70,8 @@ those records are not in this repository]**:
 - **Stage 2.** It runs click S only: `A0`'s 13 pending commits (fewer if you choose (b)), then
   `A0+L`'s 16. That is about $10 to $16 of the $55.29 the release leaves, and up to about $25 if
   every attempt cost as much as the dearest so far; each run's cap bounds it. No builder-image
-  switch is needed, because click already runs on `crb-builder:local`, but whether the builder
-  there can run click's tests is not confirmed (section 10).
+  switch is needed, because click already runs on `crb-builder:local`. That image has no pytest,
+  and click's dependency sets give the builder pytest for only 10 of the 29 builds (section 10).
 - **Part 4.** The statement expects 66.4 clean blind patches for review if click S `A0`'s 2 of 3
   holds, or 59.5 at the value baseline's rate, and I give the two equal weight. Stage 1 has already
   observed 54. Stage 2 adds about 12 (or 5.5), which narrows the share judged mergeable from ±12.0
@@ -130,6 +135,22 @@ payload of 2026-11-10 at 10:45:39Z; those records are not in this repository]**.
 and its admission are in the stack's
 `campaign.admitted` events. The builder's own sessions, the reviewer's and Claude Code's are not
 counted (DL-379).
+
+**What the bill says.** Every cost above is Claude Code's own figure for its session
+(`total_cost_usd`), which crb records unchanged. It is not Anthropic's bill, and it is 2.5 times
+the bill. Each of the 160 rows with a cost records its own tokens priced at $5 per million input
+tokens and $25 per million output, with cache reads at a tenth of the input price and cache writes
+at 1.25 times it, to within 0.03%. `claude-sonnet-5`'s list prices are $2 and $10. Paul's console
+export for the builder's API key, saved on 2026-11-10 at 12:06, shows for 9 November between 97%
+and 99% of crb's tokens for that day, priced at the list prices: $2.13, where crb's rows record
+$5.22. The export's 10 November figures stop at about 09:00Z. At the list prices the 161 rows cost
+about $21.09 (£15.62); Paul's console showed $21.13 for the month to date. The tally, the line,
+every cap and headroom, and the "fits" arithmetic in this record are all in Claude Code's figure,
+as registered, and Paul keeps them so: "keep tally dollars" (relayed by the carve-out session,
+2026-11-10). The error only ever overstates, so it cannot overspend; it buys 2.5 times fewer
+attempts than the money would (section 10) **[hypothesis — the rows' recorded costs and tokens
+from the `grades` and `evidence` tables, and Paul's two console exports (cost and tokens, 2026-10-12
+to 2026-11-10); those records are not in this repository]**.
 
 ## 2. The reading arms
 
@@ -385,8 +406,10 @@ repository]**.
   **[hypothesis — part 4's Wilson formula at n = 16; no stage-2 row exists yet]**.
 - Click S `A0+L` will pin the calibrated budget profile while `A0` runs the default, so any
   difference between them mixes the loop's checks with a budget change.
-- Every click row depends on whether the builder can run click's tests, which is not confirmed
-  (section 10).
+- Click's builder has pytest for only 10 of stage 2's 29 builds, as for 25 of stage 1's 75, so
+  every click arm measures a builder that, for most commits, has no pytest to run click's tests
+  with (section 10) **[hypothesis — the commits' parents in the stack's click clone and the
+  dependency sets' `bundle.json` files, 2026-11-10; those records are not in this repository]**.
 
 ## 9. What stage 2 runs
 
@@ -411,8 +434,8 @@ measured cost yet.
 image, so stage 2 needs no `env.sh` edit and no restart. Cobra's runs used `crb-builder-go:local`;
 cobra's stage-1 cells are complete and stage 2 runs no cobra cell. This answers the question the
 click builder-image amendment left for this report: the separate image phases it describes are not
-needed. It also means all of stage 2 runs on the image whose test-running is not confirmed
-(section 10) **[hypothesis — read from the
+needed. It also means all of stage 2 runs on an image without pytest, where click's dependency sets give
+the builder pytest for only 10 of its 29 builds (section 10) **[hypothesis — read from the
 `reading.reserved` events' builder image for click (`crb-builder:local`) and the output of the local
 image-Id check (`check_image_ids.sh`) of 2026-11-10 at 10:54:52Z, which read `crb-builder:local` as
 `116f523d…`; neither record is in this repository]**.
@@ -442,12 +465,29 @@ item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this 
 - **The time-order rule kept T-ARCH from cobra S.** The line was taught by a commit dated
   2026-04-24, and 15 of cobra S's 16 commits are older, so `A0+L` on cobra S measured roughly
   `A0` plus the finish gate. The rule works as designed.
-- **Click's builder may not see its dependencies.** The builder container mounts `/deps/site`
-  read-only, but nothing seen puts it on `PYTHONPATH`, and `crb-builder:local` has no `pytest` or
-  `uv`. The builder then tries network installs, which the seal refuses. That fits five click
-  misses: rows 710, 742 and 776 (`pip download`) and 711 and 774 (`uv run`). Whether the builder
-  can run click's tests is not confirmed; if it cannot, every click row measured a builder working
-  without them.
+- **Click's builder had pytest for only 25 of its 75 builds.** The test command in the builder's
+  brief puts the sealed dependency set `/deps/site` on `PYTHONPATH`, as designed. Click's set holds
+  pytest only when the commit's parent pins its tests in `requirements/tests.txt`: 25 builds. For
+  37, the set is built from `uv.lock`, which takes no dependency group because click's settings
+  name none, so it holds no pytest. For 13, the parent has no runtime dependencies and no set is
+  mounted. `crb-builder:local` itself has no pytest and no `uv`. The grader is unaffected: its
+  sandbox installs pytest. Six builds had their edits discarded under the command rules before
+  grading:
+  - five for network installs: rows 710, 711, 774 and 776 reached for pytest through `pip` or
+    `uv`, and 742 ran `pip download --help`;
+  - one, 726, for `git log`.
+
+  Only 710 and 776 reached the network (pypi.org, refused). Retention is off by default and a
+  reading run cannot turn it on, so no transcript was kept, and whether any builder ran click's
+  tests cannot be read from the records. Sighted rows with pytest were clean in 13 of 13 [0.772,
+  1.000], the rest in 17 of 27 [0.442, 0.785]. Those commits differ in era, so the gap is not
+  shown to be the cause. Stage 2's click S builds run the same way: 10 of its 29 have pytest. Giving
+  click's sets pytest means changing click's settings and rebuilding its sets in mid-campaign,
+  which the FREEZE holds back; that is Paul's call **[hypothesis — the five click runs' `grades`
+  rows and their `ctx_harness` labels, the `builder.discard` and `builder.egress_denied` events,
+  the parents of the commits in the stack's click clone, the dependency sets' `bundle.json` files,
+  and a check of `crb-builder:local` (`116f523d…`) in a throwaway container with no network on
+  2026-11-10; those records are not in this repository]**.
 - **The loop learns from sighted runs and old evidence.** Click's first change, `de907765…`, was
   applied at the end of a sighted `S3` run and rests on 11 blind attempts keyed
   `2.2|claude_code|claude-sonnet-5`, yet it is in force in apparatus 2.4 `A0+L` rows. Cobra's
@@ -465,3 +505,12 @@ item on 2026-11-09 and 2026-11-10, apparatus 2.4; those records are not in this 
   and the resubmit at 03:41:39Z verified.
 - **The tally's `authoring_usd`** should be checked against the one author call ($0.001697) when
   the stage-2 runs are read.
+- **Claude Code's cost figure is 2.5 times the bill.** The builder's CLI prices `claude-sonnet-5`
+  at $5 and $25 per million tokens, not $2 and $10, and the tally takes its figure unchanged
+  (section 1). A campaign line therefore buys 2.5 times fewer attempts than its money. The cause
+  is not confirmed. One possibility is the builder image's CLI, version 2.1.132 against the host's
+  2.1.292, not knowing Sonnet 5's prices **[hypothesis — `claude --version` in a throwaway
+  `crb-builder:local` container and on the host, 2026-11-10; neither output is in this
+  repository]**. Pricing the
+  recorded tokens from a table, or updating the builder's CLI, changes the tally, which the FREEZE
+  blocks, and Paul has kept the tally's dollars for this campaign.
