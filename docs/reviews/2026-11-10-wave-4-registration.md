@@ -184,7 +184,11 @@ place in that filing order within its repository, starting at 1. Each batch is f
 filed one after another, never in parallel. A seeded coin per batch (the first hex digit of
 `sha256("crb.wave4.order|" + repo + "|" + batch number)`, even or odd) picks the order
 `A0, S1, S1, A0` or `S1, A0, A0, S1`. Each arm therefore sits equally early and late within every
-batch, and neither drift in the model nor a service outage can line up with one arm by design. A
+batch, and neither steady drift in the model nor a long outage can line up with one arm by
+design. A short outage can still hit the two middle runs of one batch, which belong to one arm;
+the coin decides which arm that is. Rows still missing after the batch is filed again count as
+misses and can move the primary result, so the report lists every such row with its batch and
+arm. A
 batch that is filed again keeps the order of its first filing. All blind batches of click run
 first, then, after the image switch, all blind batches of cobra. `S3` runs are filed last and
 only while the remaining line still covers every outstanding blind row at one and a half times
@@ -300,32 +304,49 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    wave. It is read once, when every batch has been filed (and re-filed where the row rule says
    so). Until then no comparison between the arms is computed, on click or anywhere; rows are
    looked at only for the harness checks.
-2. **The interval.** Beside the p-value, a 95% interval for the mean per-commit difference, found
-   by inverting the same batch-level sign-flip test under a constant added effect: a candidate
-   value is subtracted from every commit's difference before the batch sums are flipped, and
-   the interval is every candidate the test does not reject at 0.05.
-3. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead. *No 15-point
+2. **The interval.** Beside the p-value, a 95% interval for the mean per-commit difference,
+   built from batches and not from the sign-flip test, because inverting that test is exact only
+   if the effect is the same on every commit. The estimate is the sum of all per-commit
+   differences divided by the number of commits. Its standard error treats each batch as one
+   unit: with `B` batches, `n_b` commits in batch `b`, batch sum `S_b`, estimate `d` and `N`
+   commits, it is `sqrt(B/(B−1) × Σ(S_b − n_b×d)²) / N`. The interval is the estimate plus and
+   minus that error times the 97.5% point of Student's t with `B − 1` degrees of freedom **[aspiration — this registration's design; nothing is run yet]**.
+   In simulation on the registered batch layout this interval missed the true mean in 4.3% to
+   6.9% of waves; the worst settings had a starting chance of 0.9, where the ceiling skews the
+   differences **[hypothesis — a simulation run in Claude Code's session on 2026-11-11, 4,000 to 20,000 waves a setting, seed 20261111; its script and output are not in this repository]**.
+3. **Author failures that run across batches.** The primary test treats batches as independent.
+   A long failure of the test author breaks that: it turns `S1` rows into misses in several
+   batches in a row. Those misses stay in the primary result, because an author that fails is
+   part of what `S1` is. Beside it the report gives one sensitivity result, fixed here. A batch
+   is *author-hit* if the author produced no usable test for more than half of its commits,
+   read from the runs' events. Author-hit batches that follow one another in filing order
+   within a repository form one block, which flips as a whole in the test and counts as one
+   unit in the interval. The same test and interval are then recomputed twice: with those
+   blocks, and with every author-hit batch left out. If either differs from the primary result
+   on which side of 0.05 it falls, the wave is reported as *inconclusive*, whatever the primary
+   p-value says **[aspiration — this registration's design; nothing is run yet]**.
+4. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead and the sensitivity result of item 3 on the same side. *No 15-point
    effect*: p not below 0.05 and the interval's upper end below 15 points. *Inconclusive*:
    anything else. Under option B the claim is about the average over the listed commits of both
    repositories together; nothing is claimed for either repository alone.
-4. **Every row is a miss unless clean.** Disqualified rows, missing rows, outages, turn-limit
+5. **Every row is a miss unless clean.** Disqualified rows, missing rows, outages, turn-limit
    endings and an author that produced no usable test all count as misses, under both arms. The
    product's own split is reported beside ours.
-5. **Everything else is description, with no tests.** Per-cell and per-repository results;
+6. **Everything else is description, with no tests.** Per-cell and per-repository results;
    agreement between attempt 1 and attempt 2 within an arm; `S3` against each blind arm, with the
    blind rows that the test-files check alone disqualified listed beside it, because that check
    does not run on sighted rows; a table that leaves out harness-caused misses; a table that
    leaves out commits where the author produced no usable test; the author's usable-test rate. A
    secondary table never replaces the primary.
-6. **Cause of every miss.** Classed as builder, harness or unclear with the checklist of part 7.
+7. **Cause of every miss.** Classed as builder, harness or unclear with the checklist of part 7.
    The classing is not blind: an `S1` transcript shows the authored test. So the count that
    matters for the stop below is taken from row fields, and the transcript reading is reported
    beside it.
-7. **Mergeability.** Ten clean patches per arm per repository, drawn where possible from commits
+8. **Mergeability.** Ten clean patches per arm per repository, drawn where possible from commits
    clean under both arms, compared with the real commit by a reviewer who is not told the arm:
    merge as is, merge with small edits, or do not merge. Reported as counts. Paul checks five as an
    audit of the reviewer.
-8. **Stops.** (a) The money line (part 3). (b) Four or more of the first 40 wave builds ending on
+9. **Stops.** (a) The money line (part 3). (b) Four or more of the first 40 wave builds ending on
    an outage, a provider error, a container failure or a refused allowed command, counted from row
    fields. (c) Any change to the served code after the second amendment. After (b) or (c) every
    wave row so far is set aside, the fault is repaired, and the wave starts again only under a
