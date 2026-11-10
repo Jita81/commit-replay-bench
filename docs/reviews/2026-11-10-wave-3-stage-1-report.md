@@ -36,9 +36,11 @@ is descriptive: fixed-n, and not adjusted for the sequential look. `clean` is a 
 the repository's held-out suite passed under the belts. It is not proof that the patch is correct.
 Cobra's runs used the builder image `crb-builder-go:local` and click's `crb-builder:local`. This
 record counts a disqualified row as a miss, as the readings do. At stage 1's end Paul had not
-decided how the disqualifications suspected to be harness false positives are treated (section
-10), so each arm's upper bound with them counted clean is in section 3 as well. At the close Paul
-kept them as misses, as registered (section 11).
+decided how the disqualifications suspected to be harness false positives are treated (section 10),
+so each arm's upper bound with them counted clean is in section 3 as well. At the close Paul kept
+them as misses, as registered (section 11) **[hypothesis — Paul's answers in the lead session's
+transcript up to 17:33:07Z, and the carve-out session's question and Paul's "Yes", relayed to the
+lead session at 18:46:01Z on 2026-11-10; neither transcript is in this repository]**.
 
 ## Summary for Paul
 
@@ -795,7 +797,9 @@ are not in this repository]**:
 Earlier, the carve-out session relayed Paul's plan to close on this report, fix the measurement and
 design a new wave, and called that plan "Change course". That label describes Paul's plan, and it
 came before this read was made. It is not Q-25's branch. Asked after the read, Paul left Wave 3's
-verdict at Stop (above). DL-416 records the label and Paul's answer.
+verdict at Stop (above) **[hypothesis — the carve-out session's messages to the lead session on
+2026-11-10, before the close at 17:33:07Z, and its question and Paul's "Yes", relayed at 18:46:01Z;
+neither transcript is in this repository]**. DL-416 records the label and Paul's answer.
 
 **Step 10, the loop switch.** It was restored on 2026-11-10 to `auto_apply` off with an empty
 overlay, with the reason "Wave 3 closed on the stage-1 report (DL-416); step 10 restores the
