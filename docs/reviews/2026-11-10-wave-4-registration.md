@@ -1,8 +1,8 @@
 # Wave 4 — the registration, prepared and not run — 2026-11-10
 
 **Status.** Draft for Paul Glover to read. Nothing here has been run and nothing has been spent.
-No Wave 4 run is filed until Paul has answered decision R-1 below, the fixes of part 4 are
-deployed, and Paul has said yes to each spend.
+Decision R-1 is taken: option B, the combined test. No Wave 4 run is filed until the fixes of
+part 4 are deployed and Paul has said yes to each spend.
 
 **Authority.** Paul's "yes to all four, go ahead" of 2026-11-10 (the Wave 3 closure; this design
 with a money line of $60 for stage 1 and $35 for stage 2, in real dollars; apparatus 2.5 with a
@@ -18,7 +18,13 @@ from a simulation of the registered test, not from data.
 **Review.** Two independent reviewers checked the first draft, one on the statistics and one
 against the product's code. This version takes in all fourteen of their findings **[hypothesis — the review ran in Claude Code's session on 2026-11-10; its output is not in this repository]**.
 
-## Decision R-1, for Paul: one question to answer before the pilot
+## Decision R-1: option B, the combined test
+
+**Decided 2026-11-10.** Asked to choose between A and B, Paul answered "I'm happy for you to make
+the best decisions for our products future". Claude Code chose B on that authority: it is the
+only option able to settle the effect the wave is built to find. The delegation covers the
+design; it does not cover spending, and each spend still waits for Paul's yes. The table and the
+reasoning are kept below as the record of what was weighed.
 
 The approved design assumed 40 qualified click commits in each of XS and S. The served stack
 holds fewer. Read on 2026-11-10 from `GET /api/v1/repos/<repo>/tasks`, `bug.fix` only:
@@ -283,7 +289,7 @@ Harness².
 
 | When | What |
 |---|---|
-| Now | Decision R-1: A or B. |
+| Now | Nothing: R-1 is decided (B). |
 | After #111 merges | Nothing: I merge the fix PRs under the usual rule and open the 2.5 PR. |
 | Before the pilot | The Cerebras key with `addkey`; yes to click's `tests` dependency group; pull and restart the stack. I will give the exact commands then. |
 | Before each spend | Yes to the pilot (which also registers the campaign), yes to click, yes to cobra (with its image switch). |
