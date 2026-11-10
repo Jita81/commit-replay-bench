@@ -969,6 +969,28 @@ def test_a_repair_merge_keeps_the_first_stop_unless_the_repair_violated() -> Non
     assert adapter._merge_outcomes(first, done).done is False  # a finished repair is last
 
 
+def test_cost_provenance_reaches_the_pack_notes_and_a_merge_sums_it() -> None:
+    base = {"builder": "b", "model": "m", "provider": "p", "mode": "sighted"}
+    first = BuildOutcome(
+        **base,
+        stop_reason=STOP_DONE,
+        cost_usd=0.01,
+        extra={"cost_source": "price_table", "cli_cost_usd": 0.025, "tool_names": []},
+    )
+    second = BuildOutcome(
+        **base,
+        stop_reason=STOP_DONE,
+        cost_usd=0.02,
+        extra={"cost_source": "price_table", "cli_cost_usd": 0.05},
+    )
+    assert adapter.attempt_notes(first) == {"cost_source": "price_table", "cli_cost_usd": 0.025}
+    assert adapter.attempt_notes(BuildOutcome(**base)) == {}  # a builder that records none
+    merged = adapter._merge_outcomes(first, second)
+    assert merged.cost_usd == pytest.approx(0.03)
+    assert merged.extra["cli_cost_usd"] == pytest.approx(0.075)
+    assert adapter.attempt_notes(merged)["cost_source"] == "price_table"
+
+
 def test_preflight_repair_turn_is_one_bounded_build_with_the_findings(
     pyrepo: pr.PyRepo, tmp_path: Path
 ) -> None:

@@ -41,6 +41,7 @@ import json
 import os
 import shutil
 import sys
+import warnings
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ from typing import Any
 import pytest
 
 from crb.builders import base
+from crb.builders import budget as bud
 from crb.builders import claude_code as cc
 from crb.core.execution import LocalExecutor
 from crb.core.runners import get_runner
@@ -764,7 +766,9 @@ def test_good_run_parses_stream_and_grades_clean(tmp_path: Path) -> None:
     assert out.done and out.stop_reason == base.STOP_DONE and out.errors == ()
     assert out.summary == "Fixed add()." and out.turns == 4 and out.tool_calls == 4
     assert out.tokens_in == 500 and out.tokens_out == 120  # result totals win over per-message sums
-    assert out.cost_usd == pytest.approx(0.0123) and out.cost_known  # provider-reported cost
+    # priced from the product's table (opus 5: $5/$25), not the CLI's own 0.0123
+    assert out.cost_usd == pytest.approx(500 * 5e-6 + 120 * 25e-6) and out.cost_known
+    assert out.extra["cost_source"] == "price_table" and out.extra["cli_cost_usd"] == 0.0123
     assert out.extra["tool_names"] == ["Bash", "Read", "Edit", "Bash"]
     assert out.extra["session"]["model"] == "claude-opus-5"
     assert out.transcript and out.transcript[0]["kind"] == "system"
@@ -773,7 +777,7 @@ def test_good_run_parses_stream_and_grades_clean(tmp_path: Path) -> None:
     assert (
         ref.provider == "anthropic"
         and ref.model == "claude-opus-5"
-        and ref.cost_usd == pytest.approx(0.0123)
+        and ref.cost_usd == pytest.approx(0.0055)
     )
     res = grade(
         ws, fx.task, config=fx.config, runner=get_runner(fx.config), executor=LocalExecutor()
@@ -878,9 +882,112 @@ def test_a_run_with_a_result_still_reports_the_clis_cost_and_totals(tmp_path: Pa
         ev_result(num_turns=1, cost=0.0456, tin=700, tout=90, structured={"done": False}),
     ]
     _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-opus-5")
-    assert out.cost_usd == pytest.approx(0.0456) and out.cost_known
+    assert out.cost_usd == pytest.approx(700 * 5e-6 + 90 * 25e-6) and out.cost_known
+    assert out.extra["cli_cost_usd"] == pytest.approx(0.0456)
     assert out.tokens_in == 700 and out.tokens_out == 90 and out.turns == 1
     ws.remove()
+
+
+def _priced_result(
+    *, cost: float | None, tin: int, tout: int, read: int = 0, write: int = 0
+) -> str:
+    """A ``result`` line with cache reads and cache writes in its usage, as the CLI reports a
+    real session (``input_tokens`` excludes both)."""
+    ev: dict[str, Any] = {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "num_turns": 1,
+        "result": "",
+        "session_id": "s1",
+        "structured_output": {"done": True, "summary": "ok"},
+        "usage": {
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "cache_read_input_tokens": read,
+            "cache_creation_input_tokens": write,
+        },
+        "permission_denials": [],
+    }
+    if cost is not None:
+        ev["total_cost_usd"] = cost
+    return json.dumps(ev)
+
+
+def test_cost_is_the_tables_price_of_the_tokens_not_the_clis_figure(tmp_path: Path) -> None:
+    """The Wave 3 overcount: CLI 2.1.132 priced claude-sonnet-5 at $5/$25 while the table
+    (and the bill) says $2/$10, and its ``total_cost_usd`` was taken verbatim."""
+    tin, tout, read, write = 2_000, 3_000, 400_000, 60_000
+    cli = tin * 5e-6 + tout * 25e-6 + read * 0.5e-6 + write * 6.25e-6  # the CLI's price list
+    lines = [ev_init(), _priced_result(cost=cli, tin=tin, tout=tout, read=read, write=write)]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    # sonnet 5: $2 in, $10 out, $0.20 cache read, $2.50 cache write (1.25x input)
+    expected = tin * 2e-6 + tout * 10e-6 + read * 0.2e-6 + write * 2.5e-6
+    assert out.tokens_in == tin + write + read and out.tokens_cached == read
+    assert out.cost_usd == pytest.approx(expected) and out.cost_known
+    assert out.cost_usd == pytest.approx(cli * 0.4)  # 2.5x less than the CLI said
+    assert out.extra["cost_source"] == "price_table"
+    assert out.extra["cli_cost_usd"] == pytest.approx(cli)
+    assert out.builder_ref().cost_usd == pytest.approx(expected)  # what the ledger row keeps
+    ws.remove()
+
+
+def test_the_pricing_overlay_reprices_a_claude_code_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table = tmp_path / "pricing.json"
+    table.write_text(json.dumps({"claude-sonnet-5": {"input_per_m": 1.0, "output_per_m": 4.0}}))
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))
+    lines = [ev_init(), _priced_result(cost=9.99, tin=1_000, tout=500, read=2_000, write=300)]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    # no cached or cache-write rate in the overlay: both are billed at the input rate
+    assert out.cost_usd == pytest.approx((1_000 + 300 + 2_000) * 1e-6 + 500 * 4e-6)
+    assert out.extra["cost_source"] == "price_table" and out.extra["cli_cost_usd"] == 9.99
+    ws.remove()
+
+
+@pytest.mark.parametrize("table_text", ["unpriced", "unreadable"])
+def test_an_unpriced_model_falls_back_to_the_clis_figure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, table_text: str
+) -> None:
+    table = tmp_path / "pricing.json"
+    table.write_text(
+        json.dumps({"claude-sonnet-5": {"known": False}})
+        if table_text == "unpriced"
+        else "{not json"
+    )
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))
+    lines = [ev_init(), _priced_result(cost=0.0456, tin=700, tout=90)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == pytest.approx(0.0456) and out.cost_known
+    assert out.extra["cost_source"] == "cli_reported" and out.extra["cli_cost_usd"] == 0.0456
+    ws.remove()
+
+
+def test_an_unpriced_model_without_a_cli_figure_is_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    table = tmp_path / "pricing.json"
+    table.write_text(json.dumps({"claude-sonnet-5": {"known": False}}))
+    monkeypatch.setenv(bud.PRICING_ENV, str(table))
+    lines = [ev_init(), _priced_result(cost=None, tin=700, tout=90)]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known
+    assert out.extra["cost_source"] == "unknown" and "cli_cost_usd" not in out.extra
+    ws.remove()
+
+
+def test_cache_writes_are_counted_per_message_without_a_result() -> None:
+    st = cc.StreamStats(base.GitArchaeologyGuard())
+    for msg_id, write in (("m1", 300), ("m2", 200)):
+        ev = json.loads(ev_assistant(text("x"), msg_id=msg_id, tin=10, tout=5))
+        ev["message"]["usage"]["cache_creation_input_tokens"] = write
+        st.feed(json.dumps(ev), keep=False)
+    assert st.totals() == (520, 10, 0) and st.cache_write_tokens() == 500
+    st.feed(_priced_result(cost=None, tin=50, tout=5, write=40), keep=False)
+    assert st.cache_write_tokens() == 40  # the result's usage is authoritative
 
 
 def test_tamper_is_detected_post_hoc_and_grader_disqualifies(tmp_path: Path) -> None:

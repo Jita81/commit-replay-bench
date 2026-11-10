@@ -81,8 +81,9 @@ What it is:   The Claude Code adapter — ``ClaudeCodeBuilder`` drives ``claude 
               ``crb doctor``, the admin route and the run preflight use.
 What it does: Runs the census's measured agentic path with a restricted, pre-approved tool
               set, deny rules, a minimal child environment and no session persistence;
-              meters turns, tool uses, tokens and reported cost from the stream (usage once
-              per ``message.id``, not once per content-block event); applies the
+              meters turns, tool uses and tokens from the stream (usage once per
+              ``message.id``, not once per content-block event) and prices them from the
+              product's own table (the CLI's ``total_cost_usd`` kept beside it); applies the
               test-file and shell guards and the nested-model-call tripwire (every tool
               input) post hoc (a hit is a recorded ``tamper:`` / ``archaeology:`` /
               ``network:`` error, never silently dropped); stops early on a nested model
@@ -116,7 +117,10 @@ Touch when:   never for a new repository (``auth``, ``model`` and ``bare`` are p
               test; a new model id goes in ``KNOWN_MODELS`` AND the price table in
               src/crb/builders/budget.py.
 Claims:       ``done`` is the CLI's own claim and is never trusted; ``cost_usd`` is the
-              CLI-reported figure when present (docs/EVIDENCE-AND-CLAIMS.md).
+              CLI's token counts priced from the product's table (``DEFAULT_PRICING`` +
+              ``CRB_PRICING_JSON``), the CLI's own ``total_cost_usd`` only for a model the
+              table does not price; ``extra.cost_source`` says which, ``extra.cli_cost_usd``
+              keeps the CLI's figure (docs/EVIDENCE-AND-CLAIMS.md).
 """
 
 from __future__ import annotations
@@ -153,7 +157,14 @@ from crb.builders.base import (
     emit,
     nested_model_call_input,
 )
-from crb.builders.budget import CostMeter, price_for
+from crb.builders.budget import (
+    CostMeter,
+    Pricing,
+    cost_provenance,
+    load_pricing,
+    price_for,
+    table_cost,
+)
 from crb.core.execution import (
     POST_KILL_DRAIN_S,
     SandboxUnavailable,
@@ -569,6 +580,9 @@ class StreamStats:
         #: the whole message's usage, so a message counts once and its last event wins; an
         #: event with no id is a message of its own
         self.usage_by_message: dict[str, tuple[int, int, int]] = {}
+        #: the cache-WRITE part of each message's ``tokens_in`` (same keys), priced at the
+        #: table's cache-write rate
+        self.cache_writes_by_message: dict[str, int] = {}
         self.result: dict[str, Any] | None = None
         self.init: dict[str, Any] = {}
         self.last_text = ""
@@ -673,12 +687,13 @@ class StreamStats:
             return
         # cache CREATION is real input (billed at a premium); cache READS are recorded
         # separately so "tokens in" is never a misleading 50 for a 60k-token session.
+        written = int(usage.get("cache_creation_input_tokens", 0) or 0)
         seen[key] = (
-            int(usage.get("input_tokens", 0) or 0)
-            + int(usage.get("cache_creation_input_tokens", 0) or 0),
+            int(usage.get("input_tokens", 0) or 0) + written,
             int(usage.get("output_tokens", 0) or 0),
             int(usage.get("cache_read_input_tokens", 0) or 0),
         )
+        self.cache_writes_by_message[key] = written
 
     def host_view(self, text: str) -> str:
         """``text`` with the container alias replaced by the guard's host root (only
@@ -754,6 +769,15 @@ class StreamStats:
             )
         rows = self.usage_by_message.values()
         return sum(r[0] for r in rows), sum(r[1] for r in rows), sum(r[2] for r in rows)
+
+    def cache_write_tokens(self) -> int:
+        """The cache-write part of :meth:`totals`' ``tokens_in``, from the same source (the
+        result event's usage when it is authoritative, else the per-message sum)."""
+        r = self.result or {}
+        usage = r.get("usage")
+        if isinstance(usage, dict) and (usage.get("input_tokens") or usage.get("output_tokens")):
+            return int(usage.get("cache_creation_input_tokens", 0) or 0)
+        return sum(self.cache_writes_by_message.values())
 
     def reported_cost(self) -> float | None:
         """The CLI's own ``total_cost_usd`` from the result event, if it gave one."""
@@ -991,7 +1015,12 @@ class ClaudeCodeBuilder:
         stats = StreamStats(
             GitArchaeologyGuard(cwd=workspace.root), guard, workdir_alias=self.workdir_alias
         )
-        meter = CostMeter(price_for(self.model), model=self.model)
+        try:
+            table: Mapping[str, Pricing] = load_pricing()
+        except (OSError, ValueError):  # an unreadable deployment table prices nothing
+            table = {}
+        pricing = price_for(self.model, table)
+        meter = CostMeter(pricing, model=self.model)
         errors: list[str] = []
 
         def finish(
@@ -1003,7 +1032,18 @@ class ClaudeCodeBuilder:
             errors.extend(stats.violations)
             tin, tout, cached = stats.totals()
             # tokens_in is TOTAL input (cache reads included, as CostMeter expects); cached is the subset
-            meter.add(tin + cached, tout, cached_in=cached, cost_usd=stats.reported_cost())
+            meter.add(tin + cached, tout, cached_in=cached)
+            # priced from OUR table, not the CLI's total_cost_usd (its own price list: CLI
+            # 2.1.132 priced sonnet-5 at 2.5x); the CLI figure is the unpriced-model fallback
+            cli_cost = stats.reported_cost()
+            cost, known, source = table_cost(
+                pricing,
+                meter.tokens_in,
+                meter.tokens_out,
+                cached_in=meter.cached_in,
+                cache_write_in=stats.cache_write_tokens(),
+                reported_cost=cli_cost,
+            )
             return BuildOutcome(
                 builder=self.name,
                 model=self.model,
@@ -1016,14 +1056,14 @@ class ClaudeCodeBuilder:
                 tokens_in=meter.tokens_in,
                 tokens_out=meter.tokens_out,
                 tokens_cached=meter.cached_in,
-                cost_usd=meter.cost_usd,
-                cost_known=meter.cost_known,
+                cost_usd=cost,
+                cost_known=known,
                 latency_s=time.monotonic() - started,
                 stop_reason=stop,
                 errors=tuple(errors),
                 transcript=tuple(stats.events) if self.keep_transcript else (),
                 budget=budget,
-                extra=dict(extra),
+                extra={**extra, **cost_provenance(source, cli_cost)},
             )
 
         try:

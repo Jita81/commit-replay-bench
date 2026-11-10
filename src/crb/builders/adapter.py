@@ -152,7 +152,7 @@ from crb.builders.brief import (
     context_arm_for,
     novel_tokens,
 )
-from crb.builders.budget import budget_for_rung
+from crb.builders.budget import budget_for_rung, merge_cost_provenance
 from crb.builders.container import (
     SEALABLE_BUILDERS,
     BuilderContainerSettings,
@@ -421,13 +421,13 @@ def note_unconfirmed_kills(outcome: BuildOutcome, kills: Sequence[UnconfirmedKil
 
 def attempt_notes(outcome: BuildOutcome) -> dict[str, Any]:
     """The pack notes an outcome earns: ``{kill_confirmed: False, container}`` when its
-    container kill went unconfirmed, else nothing."""
+    container kill went unconfirmed, and its cost provenance (``cost_source``, the CLI's
+    own ``cli_cost_usd``) when the builder recorded one; else nothing."""
+    notes = merge_cost_provenance(outcome.extra, {})
     if outcome.extra.get(EXTRA_KILL_CONFIRMED) is False:
-        return {
-            EXTRA_KILL_CONFIRMED: False,
-            EXTRA_CONTAINER: str(outcome.extra.get(EXTRA_CONTAINER, "")),
-        }
-    return {}
+        notes[EXTRA_KILL_CONFIRMED] = False
+        notes[EXTRA_CONTAINER] = str(outcome.extra.get(EXTRA_CONTAINER, ""))
+    return notes
 
 
 #: The worker's builder-container posture from ``CRB_BUILDER__*`` (``None`` = host);
@@ -1874,8 +1874,13 @@ def _merge_outcomes(first: BuildOutcome, second: BuildOutcome) -> BuildOutcome:
         stop_reason=second.stop_reason or first.stop_reason,
         done=second.done,
         transcript=tuple(first.transcript) + tuple(second.transcript),
-        # an unconfirmed kill on either call is on the merged attempt
-        extra={**first.extra, **attempt_notes(second)},
+        # an unconfirmed kill on either call is on the merged attempt; the cost provenance
+        # covers both calls (the CLI figures summed, the source ``mixed`` if they differ)
+        extra={
+            **first.extra,
+            **attempt_notes(second),
+            **merge_cost_provenance(first.extra, second.extra),
+        },
     )
 
 

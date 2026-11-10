@@ -185,6 +185,57 @@ def test_cost_meter_prefers_reported_cost_and_flags_unknown_pricing() -> None:
     assert bud.price_for("claude-opus-5").input_per_m == 5.0
 
 
+def test_pricing_bills_cache_writes_at_their_own_rate_and_round_trips() -> None:
+    pr = bud.Pricing(2.0, 10.0, cached_input_per_m=0.2, cache_write_per_m=2.5)
+    # 1000 in (100 cache reads, 300 cache writes, 600 plain), 50 out
+    assert pr.cost(1_000, 50, cached_in=100, cache_write_in=300) == pytest.approx(
+        600 * 2e-6 + 300 * 2.5e-6 + 100 * 0.2e-6 + 50 * 10e-6
+    )
+    # no cache-write rate: the writes are plain input, as before
+    plain = bud.Pricing(2.0, 10.0, cached_input_per_m=0.2)
+    assert plain.cost(1_000, 50, cached_in=100, cache_write_in=300) == plain.cost(
+        1_000, 50, cached_in=100
+    )
+    assert "cache_write_per_m" not in plain.to_dict()  # an entry's shape is unchanged
+    assert bud.Pricing.from_dict(pr.to_dict()) == pr
+    assert bud.DEFAULT_PRICING["claude-sonnet-5"].cache_write_per_m == 2.5
+
+
+def test_table_cost_prefers_the_table_and_records_its_source() -> None:
+    priced = bud.Pricing(2.0, 10.0)
+    assert bud.table_cost(priced, 1_000, 100, reported_cost=9.0) == (
+        pytest.approx(0.003),
+        True,
+        bud.COST_SOURCE_TABLE,
+    )
+    unpriced = bud.Pricing(0.0, 0.0, known=False)
+    assert bud.table_cost(unpriced, 1_000, 100, reported_cost=9.0) == (
+        9.0,
+        True,
+        bud.COST_SOURCE_CLI,
+    )
+    assert bud.table_cost(unpriced, 1_000, 100) == (0.0, False, bud.COST_SOURCE_UNKNOWN)
+
+
+def test_merge_cost_provenance_sums_the_cli_figures_and_flags_a_mix() -> None:
+    table = bud.cost_provenance(bud.COST_SOURCE_TABLE, 0.5)
+    assert table == {"cost_source": "price_table", "cli_cost_usd": 0.5}
+    assert bud.merge_cost_provenance(table, bud.cost_provenance("price_table", 0.25)) == {
+        "cost_source": "price_table",
+        "cli_cost_usd": 0.75,
+    }
+    # one call without a CLI figure: no partial sum passes for the whole
+    assert bud.merge_cost_provenance(table, bud.cost_provenance("price_table", None)) == {
+        "cost_source": "price_table"
+    }
+    assert bud.merge_cost_provenance(table, bud.cost_provenance("cli_reported", 0.1)) == {
+        "cost_source": "mixed",
+        "cli_cost_usd": 0.6,
+    }
+    assert bud.merge_cost_provenance(table, {}) == table
+    assert bud.merge_cost_provenance({}, {"other": 1}) == {}
+
+
 def test_load_pricing_overlay_and_malformed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
