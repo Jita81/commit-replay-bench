@@ -12,7 +12,7 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **A Go builder's toolchain scratch stays out of its checkout** (#TBD). The builder
+- **A Go builder's toolchain scratch stays out of its checkout** ([#113](https://github.com/Jita81/commit-replay-bench/pull/113)). The builder
   container's `/tmp` tmpfs inherited Docker's `noexec`, so `go test` could not run the binaries
   it builds there, and Go builders moved their build cache and temp dirs (`.gocache`, `.gotmp`,
   `.tmp`) into `/work`. Belt 1b then read cached test output as forged go-test events and
