@@ -37,8 +37,8 @@ ADRs:         docs/adr/0019-qualification-is-posture-relative.md,
               docs/adr/0026-the-context-standard.md
 Works with:   src/crb/core/reading.py (the pins, ``reserved_pool_digest`` and ``pool_seen``,
               under test), src/crb/server/reading_book.py (``pool_drift``, under test),
-              src/crb/server/routes/readings.py (the pool from records; the served drift),
-              src/crb/server/routes/runs.py (the 409 ``pool_drift``),
+              src/crb/server/routes/readings.py and src/crb/server/routes/runs.py (the
+              pool from records and the served drift; the 409 ``pool_drift``),
               src/crb/server/worker.py (the claim refusal and the posture check, under test),
               src/crb/core/learn.py and src/crb/server/routes/learn.py (the remeasure plan
               over a pinned pool, under test),
