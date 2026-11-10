@@ -492,12 +492,15 @@ const REMEASURE = {
     { label: 'feature.add · M', key: 'feature.add · M|blind|S1@claude-opus-5', reason: 'look_pending', next_act: 'runs', arm: 'S1@claude-opus-5', reading_id: 'rdg_3', next_look: 20, mode: 'blind', n_stale: 0, stale_versions: [], n_current: 0, n_needed: 20, n_requested: 0, short_by: 20, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'S1@claude-opus-5 counts only rows whose failing test claude-opus-5 wrote; this deployment’s test author is not configured', in_flight_run_ids: [] },
     // a reserved.v1 reading whose checks arm moved: flagged, and nothing to queue (RT2B-1)
     { label: 'refactor · S', key: 'refactor · S|sighted|S3', reason: 'look_pending', next_act: 'config', arm: 'S3', reading_id: 'rdg_5', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 4, n_needed: 16, n_requested: 0, short_by: 16, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'the checks arm moved from off to fmt since the reading froze it: a run would halt reading_checks_arm_mismatch — restore the repository’s off checks arm, or end the stage', in_flight_run_ids: [], checks_arm_moved: { frozen: 'off', current: 'fmt' } },
+    // a reserved.v1 reading whose pool drifted: the drift named, and nothing to queue (P-814)
+    { label: 'perf.improve · S', key: 'perf.improve · S|sighted|S3', reason: 'look_pending', next_act: 'none', arm: 'S3', reading_id: 'rdg_6', next_look: 20, mode: 'sighted', n_stale: 0, stale_versions: [], n_current: 2, n_needed: 18, n_requested: 0, short_by: 18, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'its reading’s pool moved since registration (1 drift row(s): c7 qualification): a run would be refused pool_drift — restore the pinned record or label, or the look waits', in_flight_run_ids: [] },
     // a stale cell with no reading: register one first, nothing to queue
     { label: 'test.add · XS', key: 'test.add · XS|sighted|', reason: 'stale', next_act: 'register', arm: '', reading_id: '', next_look: null, mode: 'sighted', n_stale: 12, stale_versions: ['2.1'], n_current: 0, n_needed: 20, n_requested: 0, short_by: 0, est_cost_usd: 0, est_minutes: 0, cost_known: true, repos: ['alpha'], requests: [], note: 'register a reading of this cell at apparatus 2.2 first', in_flight_run_ids: [] },
   ],
   up_to_date: [],
   cannot_clear: [{ label: 'docs.update · S', mode: 'sighted', arm: 'S3', state: 'undecided', reason: 'its reading’s pool ended before the look at 20 (15 read): mine more history', next_act: 'mine', reading_id: 'rdg_4' }],
-  summary: { cells_pending: 3, cells_stale: 1, cells_thin: 0, n_needed_total: 36, n_requested_total: 16, short_by_total: 20, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 3 },
+  // as the core sums it: every look_pending row (the config and none rows too), stale ones apart
+  summary: { cells_pending: 5, cells_stale: 1, cells_thin: 0, n_needed_total: 70, n_requested_total: 16, short_by_total: 54, est_cost_usd_total: 3.5, est_minutes_total: 11, cost_known_cells: 5 },
   note: '',
 }
 

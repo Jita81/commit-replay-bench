@@ -15,7 +15,9 @@ What it does: Shows a cell with rows and no reading offered ``register`` with no
               rungs, re-runs of one miss, two context arms); an ``insufficient`` or
               ``undecided`` reading named in ``cannot_clear`` with its reason; the arms a replay
               cannot write (``S2``, ``+L``, another test author, another posture) offered no
-              request; gold-clean and relabelled commits left out; valid ``POST /runs`` bodies;
+              request; gold-clean and relabelled commits left out, but a pinned pool's asked
+              whatever the miner's flag and none while it drifts (P-797); valid ``POST /runs``
+              bodies;
               a reserved.v1 reading's top-up on the reading's own budget profile, admitted by
               the submit gate's whitelist (P-792 C7); a reserved.v1 reading whose run would
               resolve another checks arm than it froze flagged ``checks_arm_moved`` with no
@@ -37,6 +39,7 @@ Touch when:   never for a new repository; the look rule or the counting changes 
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +51,7 @@ from crb.core.ledger import GradeRow
 from crb.core.reading import (
     ATTEMPT_RULE_RESERVED,
     OUTCOME_CEILING,
+    POOL_RULE_CALIBRATION,
     REFUSAL_POOL_SEEN,
     STATE_INSUFFICIENT,
     STATE_UNDECIDED,
@@ -273,6 +277,107 @@ def test_pending_commits_that_are_not_gold_clean_or_were_relabelled_are_left_out
     assert c.relabelled == (pool[1],)
     assert c.requests[0].task_ids == pool[2:20] and (c.n_requested, c.short_by) == (18, 2)
     assert "gold-clean" in c.note and "relabelled" in c.note
+
+
+def test_a_pinned_pool_is_asked_whatever_the_miners_flag_and_not_at_all_while_it_drifts() -> None:
+    """The Wave 3 finding (2026-11-09, step 14): the plan left a reserved.v1 reading's pending
+    commits out when the miner had flagged them not gold-clean (``tasks.gold_clean``) and
+    told the operator to re-qualify them. A pinned pool is admitted by the qualification
+    records it pinned (P-797) and the worker admits a commit by its record in the posture,
+    never by that flag (ADR-0019), so the first ``S3`` look was served short and then waited
+    for good, whatever was re-qualified. Now a pinned pool's pending commits are all asked;
+    while its pool drifts — a pinned record missing or not qualified, or the posture pin
+    lost, on any pool commit — the worker refuses every run of it ``pool_drift``, so none is
+    asked and the note names what moved. A legacy reading still leaves its flagged commits
+    out."""
+    reserved = _reserved(commits(40))
+    pool = reserved.pool
+    flagged = {pool[0], pool[5], pool[19]}
+    gold = [t for t in pool if t not in flagged]
+    (c,) = _plan([], reserved, gold_clean_tasks=gold).cells
+    assert c.requests[0].task_ids == pool[:20] and (c.n_requested, c.short_by) == (20, 0)
+    assert c.next_act == "replay"
+    assert "gold-clean" not in c.note and "pool_drift" not in c.note
+    # drift anywhere in the pool — a pending commit's record or one past the look — asks none
+    # (a revocation is a newer record, never drift: the pinned record itself reads unqualified)
+    for commit, state in ((pool[5], "missing"), (pool[30], "unqualified")):
+        row = {"task_id": commit, "field": "qualification", "registered": "q", "now": state}
+        (d,) = _plan([], replace(reserved, pool_drift=(row,)), gold_clean_tasks=gold).cells
+        assert d.requests == () and (d.n_requested, d.short_by) == (0, 20), commit
+        # nothing to queue here or by hand: every run of the reading would be refused
+        assert d.next_act == "none", commit
+        assert f"{commit} qualification" in d.note and "pool_drift" in d.note
+        # a pinned record is frozen and append-only: no restore in place, only a new reading
+        assert "register a new reading" in d.note and "relabel" not in d.note, d.note
+    unpinned = {"task_id": "", "field": "pool_posture_id", "registered": "", "now": "missing"}
+    (u,) = _plan([], replace(reserved, pool_drift=(unpinned,))).cells
+    assert u.requests == () and u.next_act == "none" and "the pool pool_posture_id" in u.note
+    assert "register a new reading" in u.note, u.note
+    # a commit the store lost, alone or beside a moved label, needs a new reading too
+    lost = {"task_id": pool[2], "field": "task", "registered": pool[2], "now": "missing"}
+    label = {"task_id": pool[3], "field": "size", "registered": "S", "now": "M"}
+    for drift in ((lost,), (label, lost)):
+        (t,) = _plan([], replace(reserved, pool_drift=drift)).cells
+        assert t.next_act == "none" and "register a new reading" in t.note, t.note
+    # only a moved label is restored in place: relabel the commit back into the cell
+    (r,) = _plan([], replace(reserved, pool_drift=(label,))).cells
+    assert r.next_act == "none" and f"{pool[3]} size" in r.note
+    assert "relabel the commit back into the cell" in r.note, r.note
+    assert "register a new reading" not in r.note, r.note
+    # and a drifted pool's note never advises queueing by hand, which the worker refuses too
+    row = {"task_id": pool[5], "field": "qualification", "registered": "q", "now": "missing"}
+    (b,) = _plan([], replace(reserved, pool_drift=(row,)), deployment_posture="elsewhere").cells
+    assert b.next_act == "none" and "this deployment grades in" not in b.note, b.note
+    (nb,) = _plan([], reserved, deployment_posture="elsewhere").cells
+    assert nb.next_act == learn.NEXT_BY_HAND and "this deployment grades in" in nb.note
+    legacy = register_reading(commits(40, "legacy"), hierarchy=("S3",))
+    lpool = legacy.pool
+    (lc,) = _plan([], legacy, gold_clean_tasks=lpool[1:]).cells
+    assert lc.requests[0].task_ids == lpool[1:20] and "gold-clean" in lc.note
+    # ...and so does a reserved reading that pins nothing (a calibration pool, P-797)
+    calibration = replace(reserved, pool_rule=POOL_RULE_CALIBRATION)
+    assert not calibration.pins_pool
+    (cc,) = _plan([], calibration, gold_clean_tasks=gold).cells
+    assert not flagged & set(cc.requests[0].task_ids) and "gold-clean" in cc.note
+
+
+def test_a_pinned_commit_the_posture_gate_refuses_by_its_record_in_force_is_named_short() -> None:
+    """CodeRabbit on #107 (P-814's first gap): a NEWER record in force that is not qualified is
+    not drift (P-797 C18), so ``pool_drift`` passes it, but the posture gate refuses its commit
+    (``posture_gate.admit``). The plan asked it anyway: the run left it pending and the plan
+    said no shortfall. Now the plan reads each pinned commit's record in force
+    (``pool_records``): an ``unqualified`` or ``legacy`` one is left out, named and counted in
+    ``short_by``; a ``revoked`` one, which the run measures again (``qualify_first``), is still
+    asked; with no entry for the reading every pending commit is asked, as before, and a
+    legacy reading is never read by its records."""
+    reserved = _reserved(commits(40))
+    pool = reserved.pool
+    states = dict.fromkeys(pool, "qualified")
+    # two refused pending, one revoked pending (asked), one refused past the look (not pending)
+    states.update(
+        {pool[2]: "unqualified", pool[7]: "legacy", pool[11]: "revoked", pool[30]: "unqualified"}
+    )
+    (c,) = _plan([], reserved, pool_records={reserved.reading_id: states}).cells
+    assert c.requests[0].task_ids == tuple(t for t in pool[:20] if t not in (pool[2], pool[7]))
+    assert (c.n_requested, c.short_by) == (18, 2) and c.next_act == "replay"
+    assert (
+        "2 pending commit(s) have a newer record in force that is not qualified "
+        "(legacy, unqualified), and the posture gate refuses them" in c.note
+    ), c.note
+    assert "pool_drift" not in c.note
+    # every pending commit refused: no request, nothing asked of the worker
+    (r,) = _plan(
+        [], reserved, pool_records={reserved.reading_id: dict.fromkeys(pool, "unqualified")}
+    ).cells
+    assert r.requests == () and (r.n_requested, r.short_by) == (0, 20) and "20 pending" in r.note
+    # no entry for the reading (another reading's): every pending commit is asked
+    (n,) = _plan([], reserved, pool_records={"rdg_other": states}).cells
+    assert n.requests[0].task_ids == pool[:20] and n.short_by == 0
+    assert "record in force" not in n.note
+    legacy = register_reading(commits(40, "legacy"), hierarchy=("S3",))
+    refused = {legacy.reading_id: dict.fromkeys(legacy.pool, "unqualified")}
+    (lc,) = _plan([], legacy, pool_records=refused).cells
+    assert lc.requests[0].task_ids == legacy.pool[:20] and "record in force" not in lc.note
 
 
 # --- counting distinct first attempts, never attempts --------------------------------------
