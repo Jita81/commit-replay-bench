@@ -12,7 +12,7 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
-- **The shell guard lets `git -C` name the work tree itself** (#TBD). Wave 3 builders ran
+- **The shell guard lets `git -C` name the work tree itself** ([#114](https://github.com/Jita81/commit-replay-bench/pull/114)). Wave 3 builders ran
   `git -C /work status` in the sealed container and were refused as "leaves the worktree",
   because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
   directory under it, as written and with links resolved; repeated `-C` compose as git composes
