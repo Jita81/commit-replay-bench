@@ -307,9 +307,23 @@ def test_a_pinned_pool_is_asked_whatever_the_miners_flag_and_not_at_all_while_it
         # nothing to queue here or by hand: every run of the reading would be refused
         assert d.next_act == "none", commit
         assert f"{commit} qualification" in d.note and "pool_drift" in d.note
+        # a pinned record is frozen and append-only: no restore in place, only a new reading
+        assert "register a new reading" in d.note and "relabel" not in d.note, d.note
     unpinned = {"task_id": "", "field": "pool_posture_id", "registered": "", "now": "missing"}
     (u,) = _plan([], replace(reserved, pool_drift=(unpinned,))).cells
     assert u.requests == () and u.next_act == "none" and "the pool pool_posture_id" in u.note
+    assert "register a new reading" in u.note, u.note
+    # a commit the store lost, alone or beside a moved label, needs a new reading too
+    lost = {"task_id": pool[2], "field": "task", "registered": pool[2], "now": "missing"}
+    label = {"task_id": pool[3], "field": "size", "registered": "S", "now": "M"}
+    for drift in ((lost,), (label, lost)):
+        (t,) = _plan([], replace(reserved, pool_drift=drift)).cells
+        assert t.next_act == "none" and "register a new reading" in t.note, t.note
+    # only a moved label is restored in place: relabel the commit back into the cell
+    (r,) = _plan([], replace(reserved, pool_drift=(label,))).cells
+    assert r.next_act == "none" and f"{pool[3]} size" in r.note
+    assert "relabel the commit back into the cell" in r.note, r.note
+    assert "register a new reading" not in r.note, r.note
     # and a drifted pool's note never advises queueing by hand, which the worker refuses too
     row = {"task_id": pool[5], "field": "qualification", "registered": "q", "now": "missing"}
     (b,) = _plan([], replace(reserved, pool_drift=(row,)), deployment_posture="elsewhere").cells

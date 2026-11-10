@@ -2025,7 +2025,7 @@ export const HINTS = {
   'text.learn.remeasure_restore_arm':
     'Nothing can be queued for this reading: its runs would halt, here or by hand, because the repository’s checks arm moved. Restore the checks arm the reading froze, or end the stage.',
   'text.learn.remeasure_restore_pool':
-    'Nothing can be queued for this reading: its pool moved since it was registered (a pinned record missing or no longer qualified, or a commit relabelled), so every run of it is refused, here or by hand. Restore the record or label the note names.',
+    'Nothing can be queued for this reading: its pool moved since it was registered, so every run of it is refused, here or by hand. Relabel a moved commit back into the cell; any other drift the note names (a pinned record, a lost commit or posture pin) cannot be restored in place, since the pins are frozen and a record is append-only, so register a new reading of the cell.',
   'link.learn.remeasure_by_hand':
     'The runs page for this repository. The reading waits on an arm this plan cannot compose a replay for (another test author, the loop switch, a factory arm or another posture), so the run is queued there by hand.',
   'link.learn.remeasure_mine':

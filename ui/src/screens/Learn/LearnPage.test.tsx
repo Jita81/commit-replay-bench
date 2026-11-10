@@ -471,7 +471,7 @@ describe('LearnPage', () => {
   })
 
   it('a reading whose pool drifted is listed with the drift and nothing to queue, here or by hand (P-814)', async () => {
-    const drifted: RemeasureCell = { ...CELL, next_act: 'none', n_requested: 0, short_by: 6, est_cost_usd: 0, requests: [], note: 'its reading’s pool moved since registration (1 drift row(s): c13 qualification): a run would be refused pool_drift — restore the pinned record or label, or the look waits' }
+    const drifted: RemeasureCell = { ...CELL, next_act: 'none', n_requested: 0, short_by: 6, est_cost_usd: 0, requests: [], note: 'its reading’s pool moved since registration (1 drift row(s): c13 qualification): a run would be refused pool_drift — the pool cannot be restored in place (its pins are frozen and a record is append-only): register a new reading of the cell, or the look waits' }
     mockApi(operatorApi({ 'GET /learn/remeasure': { ...REMEASURE, cells: [drifted] } }))
     renderApp(<LearnPage />, { route: '/learn?repo=alpha' })
     expect(await screen.findByTestId(`learn-needed-${drifted.key}`)).toHaveTextContent('a run would be refused pool_drift')
@@ -479,7 +479,7 @@ describe('LearnPage', () => {
     expect(screen.queryByRole('link', { name: 'Queue from Runs' })).toBeNull()
     // nor does the Estimated-spend tile link to Runs while no row can run
     expect(screen.queryByRole('link', { name: 'Queue runs' })).toBeNull()
-    expect(document.querySelector('[data-hint="text.learn.remeasure_restore_pool"]')).toHaveTextContent('Restore the pool first')
+    expect(document.querySelector('[data-hint="text.learn.remeasure_restore_pool"]')).toHaveTextContent('Pool moved: see the note')
   })
 
   it('an empty plan never says every cell reached the look while a reading has decided against one', async () => {

@@ -1069,7 +1069,7 @@ function RemeasureSection({ repo }: { repo: string }) {
                   // the reading's pool drifted since registration: the worker refuses every run
                   // of it pool_drift, by hand as well, so the page offers no route to one (P-814)
                   <Hint as="span" id="text.learn.remeasure_restore_pool" className="text-xs text-on-surface-muted">
-                    Restore the pool first
+                    Pool moved: see the note
                   </Hint>
                 ) : !c.requests.length ? (
                   <Hint as={Link} id="link.learn.remeasure_by_hand" to={`/runs?repo=${enc(repo)}`} className="text-sm underline underline-offset-4">

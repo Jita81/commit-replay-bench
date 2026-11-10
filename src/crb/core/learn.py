@@ -2019,21 +2019,34 @@ def _off_the_checks_arm(reading: Reading, checks_arm: str | None) -> bool:
     )
 
 
+#: The pool drift a reading recovers from in place: a commit's label, relabelled back into the
+#: cell. Every other drift row (a pinned record, a commit the store lost, the posture pin) is
+#: fixed by registration — the pins are frozen and a record is append-only (P-797).
+_RELABELLABLE_DRIFT = frozenset({"capability_class", "size"})
+
+
 def _pool_drift_blocker(reading: Reading) -> str:
     """Why a reserved.v1 reading whose pool moved since registration (P-797,
     :attr:`Reading.pool_drift`) is served no request — ``""`` when it has not. The worker
     refuses every run of such a reading ``pool_drift`` at submit and at claim, before anything
-    is reserved, so the plan asks for none; the note names each commit and what moved."""
+    is reserved, so the plan asks for none; the note names each commit, what moved and the
+    recovery: relabel the commit when only labels moved, else register a new reading."""
     drift = reading.pool_drift
     if not drift:
         return ""
     moved = ", ".join(
         f"{str(d.get('task_id', '')) or 'the pool'} {d.get('field', '')}" for d in drift
     )
+    if {str(d.get("field", "")) for d in drift} <= _RELABELLABLE_DRIFT:
+        advice = "relabel the commit back into the cell, or the look waits"
+    else:
+        advice = (
+            "the pool cannot be restored in place (its pins are frozen and a record is "
+            "append-only): register a new reading of the cell, or the look waits"
+        )
     return (
         f"its reading's pool moved since registration ({len(drift)} drift row(s): {moved}): "
-        f"a run would be refused {REFUSAL_POOL_DRIFT} — restore the pinned record or label, "
-        "or the look waits"
+        f"a run would be refused {REFUSAL_POOL_DRIFT} — {advice}"
     )
 
 

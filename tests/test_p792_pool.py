@@ -453,6 +453,8 @@ def test_p792_the_remeasure_plan_asks_a_pinned_pool_by_its_records_not_the_miner
         assert drifted["short_by"] == whole["n_requested"], drifted
         note = drifted["note"]
         assert f"{commit} capability_class" in note and "pool_drift" in note, note
+        # the note's recovery is the one that works here: relabel it back into the cell
+        assert "relabel the commit back into the cell" in note, note
 
         _label(backend.url, "cobra", commit, "bug.fix")
         assert _plan_entry(w, key)["requests"] == whole["requests"]

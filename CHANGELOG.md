@@ -18,8 +18,8 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   by its record (ADR-0019). A reading that pins its pool to those records (P-797) now asks each
   pending commit by its record in force: `qualified` or `revoked` is asked; `unqualified` or
   `legacy` is left out and counted in `short_by`. While its pool drifts nothing is asked: the
-  next act is `none` and the Learn page shows "Restore the pool first" (a moved checks arm still
-  comes first, `config`). Legacy readings are unchanged. No grading, ledger, reading rule or
+  next act is `none` and the Learn page shows "Pool moved: see the note" (a moved checks arm
+  still comes first, `config`). Legacy readings are unchanged. No grading, ledger, reading rule or
   apparatus version changes.
 
 - **authlib, joserfc and msgpack move past ten advisories** (eight in authlib, among them
