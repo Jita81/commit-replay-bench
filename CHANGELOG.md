@@ -18,6 +18,13 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   voided it. The decision log is append-only: DL-377 stays as written and DL-415 supersedes its
   date. Documentation only: no code, rule or apparatus version changes.
 
+- **The Wave 3 registration records click's builder image**
+  ([#110](https://github.com/Jita81/commit-replay-bench/pull/110)). Part 6 gains the click
+  builder-image amendment: click's cells build in `crb-builder:local` (Python), not
+  `crb-builder-go:local`, by Paul's choice at the click stop on 2026-11-10. The stack restarted with
+  no migration on the same commit. The grading images, apparatus 2.4 and every reading body are
+  unchanged. Docs only.
+
 - **The Wave 3 registration records step 3**
   ([#103](https://github.com/Jita81/commit-replay-bench/pull/103)). Part 6's step-3 amendment holds
   each mine and qualify body as sent, each cell's count, qualified-set sha256 and label sources,
