@@ -1370,8 +1370,13 @@ seal. Click's rows would then have measured a builder blind to its own test resu
 builder was not **[hypothesis — `docker image history --no-trunc` on the two builder images, read
 on 2026-11-10 at about 09:15Z: `crb-builder-go:local` has a `/usr/local/go` step and no Python
 install step, and `crb-builder:local` has `PYTHON_VERSION=3.12.11` in its environment and no Go
-step. That a builder without its tests' runtime measures worse is an inference, not a measured
-result. The images are not in this repository]**.
+step. A shell in each image (`docker run --rm --network none`), read at about 09:27Z, rules out a
+base-image runtime. In `crb-builder:local`, `go` and `gofmt` are not on `PATH`, `/usr/local/go`
+does not exist, a search of the root filesystem finds no file named `go`, and `python3` is
+Python 3.12.11. In `crb-builder-go:local`, `go` is go1.26.8 at `/usr/local/go/bin/go`, `python`,
+`python3` and `pip` are not on `PATH`, and the root filesystem has no `python3*` file. That a
+builder without its tests' runtime measures worse is an inference, not a measured result. The
+images are not in this repository]**.
 
 **The options Paul had.** At the start-up runbook's step 20 (the click stop) Paul had four options:
 - **A.** Switch the builder image to `crb-builder:local` for click.
@@ -1455,8 +1460,8 @@ Paul's yes. This departs from step 9, which resumes stage 2 with no further deci
 image, step 9 cannot run a cobra cell. The stage-1 report puts that to Paul **[hypothesis — the
 `reading.reserved` events' `treatment_body.deployment.container.image`, read from the stack's
 `events` table on 2026-11-10 at about 09:02Z (cobra's `crb-builder-go:local`, click's
-`crb-builder:local`); the image Ids and history as in "Why" above. The events are not in this
-repository]**.
+`crb-builder:local`); the image Ids, history and shell check as in "Why" above. The events are
+not in this repository]**.
 
 **Not in this amendment.** These are recorded at their own steps:
 - the Learn state (step 15);
