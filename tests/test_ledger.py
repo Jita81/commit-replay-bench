@@ -516,7 +516,7 @@ def test_a_unicode_whitespace_line_is_blank_to_every_reader(tmp_path: Path) -> N
     so a line holding only an NBSP is counted by none of them."""
     led, rows = _fill(tmp_path / "g.jsonl")
     lines = led.path.read_bytes().splitlines(keepends=True)
-    led.path.write_bytes(lines[0] + " \n".encode() + b"".join(lines[1:]))
+    led.path.write_bytes(lines[0] + b"\xc2\xa0\n" + b"".join(lines[1:]))
     assert len(list(led.rows())) == led.verify() == len(led.row_hashes()) == 4
     assert led.row_hashes() == [r.row_hash for r in rows]
 
