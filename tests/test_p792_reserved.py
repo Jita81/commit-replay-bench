@@ -123,7 +123,7 @@ import dataclasses
 import inspect
 import json
 import os
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -360,6 +360,18 @@ def test_p792_describe_unchanged_when_unset() -> None:
 
 _G_HARNESS = "harness: sandbox failed"
 _G_OUTAGE = {LABEL_FAILURE_KIND: FAILURE_OUTAGE}
+#: The apparatus the goldens were printed at: a reading's id hashes it, so they stay there.
+_G_APPARATUS = "2.4"
+
+
+def _g_row(commit: str, **kw: Any) -> GradeRow:
+    """A legacy golden row: :func:`sealed_row` stamped :data:`_G_APPARATUS`."""
+    return sealed_row(commit, apparatus_version=_G_APPARATUS, **kw)
+
+
+def _g_reading(pool: Iterable[str], **kw: Any) -> Reading:
+    """A legacy golden reading: :func:`register_reading` at :data:`_G_APPARATUS`."""
+    return register_reading(pool, apparatus=_G_APPARATUS, **kw)
 
 
 def _g_chain(rows: Sequence[GradeRow]) -> list[GradeRow]:
@@ -377,54 +389,54 @@ def _g_replay() -> tuple[Reading, list[GradeRow]]:
     """A legacy replay reading (S3 then S1, A0 descriptive of 4) over thirteen commits that
     walk every branch of the first-observed loop."""
     raw = commits(13, prefix="g")
-    p = register_reading(raw, budget=0.05).pool  # the seeded order; changes do not move it
-    reading = register_reading(
+    p = _g_reading(raw, budget=0.05).pool  # the seeded order; changes do not move it
+    reading = _g_reading(
         raw, descriptive=(("A0", 4),), budget=0.05, changes={p[1]: "chg-x", p[10]: "chg-x"}
     )
     assert reading.pool == p
     rows = [
-        sealed_row(p[0]),
-        sealed_row(p[0], clean=False, arm=S1),
-        sealed_row(p[1], clean=False),
-        *(sealed_row(p[2], clean=False, error=_G_HARNESS) for _ in range(3)),
-        sealed_row(p[3], clean=False, error=_G_HARNESS),
-        sealed_row(p[3]),
-        sealed_row(p[4], clean=False, labels=dict(_G_OUTAGE)),
-        sealed_row(p[4], clean=False),
-        sealed_row(p[5], builder_executor="local"),
-        sealed_row(p[5], clean=False),
-        sealed_row(p[6], change="chg-y", labels={"lint_reason": LINT_DISABLED_BY_CONFIG}),
-        sealed_row(p[7], change="chg-y"),
-        sealed_row(p[8], clean=False, created=BEFORE),
-        sealed_row(p[8]),
-        sealed_row(p[9], clean=False, trial="r2"),
-        sealed_row(p[10]),
-        *(sealed_row(p[11], clean=False, error=_G_HARNESS) for _ in range(2)),
-        sealed_row(p[12], clean=False, disqualified=True),
-        sealed_row(p[1], arm=S1),
-        sealed_row(p[2], arm=S1),
-        sealed_row(p[3], clean=False, arm=S1, error=_G_HARNESS),
-        sealed_row(p[0], arm="A0"),
-        sealed_row(p[1], clean=False, arm="A0"),
-        sealed_row(p[2], clean=False, arm="A0", labels=dict(_G_OUTAGE)),
-        sealed_row(p[3], arm="A0"),
-        sealed_row(p[4], arm="A0"),
-        sealed_row(p[5], clean=False, arm="A0"),
+        _g_row(p[0]),
+        _g_row(p[0], clean=False, arm=S1),
+        _g_row(p[1], clean=False),
+        *(_g_row(p[2], clean=False, error=_G_HARNESS) for _ in range(3)),
+        _g_row(p[3], clean=False, error=_G_HARNESS),
+        _g_row(p[3]),
+        _g_row(p[4], clean=False, labels=dict(_G_OUTAGE)),
+        _g_row(p[4], clean=False),
+        _g_row(p[5], builder_executor="local"),
+        _g_row(p[5], clean=False),
+        _g_row(p[6], change="chg-y", labels={"lint_reason": LINT_DISABLED_BY_CONFIG}),
+        _g_row(p[7], change="chg-y"),
+        _g_row(p[8], clean=False, created=BEFORE),
+        _g_row(p[8]),
+        _g_row(p[9], clean=False, trial="r2"),
+        _g_row(p[10]),
+        *(_g_row(p[11], clean=False, error=_G_HARNESS) for _ in range(2)),
+        _g_row(p[12], clean=False, disqualified=True),
+        _g_row(p[1], arm=S1),
+        _g_row(p[2], arm=S1),
+        _g_row(p[3], clean=False, arm=S1, error=_G_HARNESS),
+        _g_row(p[0], arm="A0"),
+        _g_row(p[1], clean=False, arm="A0"),
+        _g_row(p[2], clean=False, arm="A0", labels=dict(_G_OUTAGE)),
+        _g_row(p[3], arm="A0"),
+        _g_row(p[4], arm="A0"),
+        _g_row(p[5], clean=False, arm="A0"),
     ]
     return reading, _g_chain(rows)
 
 
 def _g_campaign(*, read: bool) -> tuple[Reading, list[GradeRow]]:
     """A campaign-named reading whose admissions were read (``run-in``) or never read."""
-    reading = register_reading(commits(4, prefix="k"), budget=0.05, campaign_id="camp-g")
+    reading = _g_reading(commits(4, prefix="k"), budget=0.05, campaign_id="camp-g")
     p = reading.pool
     rows = [
-        sealed_row(p[0], run_id="run-out"),
-        sealed_row(p[0], clean=False, run_id="run-in"),
-        sealed_row(p[1], clean=False, error=_G_HARNESS, run_id="run-in"),
-        sealed_row(p[1], run_id="run-in"),
-        sealed_row(p[2], run_id="run-out"),
-        sealed_row(p[3], run_id="run-in"),
+        _g_row(p[0], run_id="run-out"),
+        _g_row(p[0], clean=False, run_id="run-in"),
+        _g_row(p[1], clean=False, error=_G_HARNESS, run_id="run-in"),
+        _g_row(p[1], run_id="run-in"),
+        _g_row(p[2], run_id="run-out"),
+        _g_row(p[3], run_id="run-in"),
     ]
     return (with_admissions(reading, ["run-in"]) if read else reading), _g_chain(rows)
 
@@ -432,10 +444,11 @@ def _g_campaign(*, read: bool) -> tuple[Reading, list[GradeRow]]:
 def _g_forward() -> tuple[Reading, list[GradeRow]]:
     """A legacy forward reading over nine tickets, one per branch of its loop."""
     pool = commits(20, prefix="f")
-    ceiling_reading = register_reading(pool, hierarchy=("S3", S1), budget=0.05)
+    ceiling_reading = _g_reading(pool, hierarchy=("S3", S1), budget=0.05)
     ceiling = evaluate(
         ceiling_reading,
-        rows_for([True] * 20, pool, arm="S3") + rows_for([True] * 17 + [False] * 3, pool, arm=S1),
+        rows_for([True] * 20, pool, arm="S3", apparatus_version=_G_APPARATUS)
+        + rows_for([True] * 17 + [False] * 3, pool, arm=S1, apparatus_version=_G_APPARATUS),
     )
     assert ceiling.state == OUTCOME_CEILING
     recs = [_g_record(i) for i in range(9)]
@@ -451,15 +464,15 @@ def _g_forward() -> tuple[Reading, list[GradeRow]]:
     )
     reading = with_enrolment(fwd, recs)
     rows = [
-        _g_s2(recs[0]),
-        _g_s2(recs[0], result=RESULT_FAIL),
-        _g_s2(recs[1], result=RESULT_FAIL),
-        _g_s2(recs[2], clean=False, error=_G_HARNESS),
-        _g_s2(recs[3], clean=False, extra=dict(_G_OUTAGE)),
-        _g_s2(recs[4], result=RESULT_ERROR),
-        _g_s2(recs[5], model="claude-haiku-5"),
-        _g_s2(recs[6], stamp=held_out_labels(recs[7], RESULT_PASS)),
-        _g_s2(recs[7], extra={"lint_reason": LINT_DISABLED_BY_CONFIG}),
+        _g_s2_legacy(recs[0]),
+        _g_s2_legacy(recs[0], result=RESULT_FAIL),
+        _g_s2_legacy(recs[1], result=RESULT_FAIL),
+        _g_s2_legacy(recs[2], clean=False, error=_G_HARNESS),
+        _g_s2_legacy(recs[3], clean=False, extra=dict(_G_OUTAGE)),
+        _g_s2_legacy(recs[4], result=RESULT_ERROR),
+        _g_s2_legacy(recs[5], model="claude-haiku-5"),
+        _g_s2_legacy(recs[6], stamp=held_out_labels(recs[7], RESULT_PASS)),
+        _g_s2_legacy(recs[7], extra={"lint_reason": LINT_DISABLED_BY_CONFIG}),
     ]
     return reading, _g_chain(rows)
 
@@ -501,7 +514,7 @@ def _g_s2(
         "source_changed": True,
         "repo_lint_clean": None,
         "evidence_pack_hash": "h" * 64 if clean else "",
-        "apparatus_version": "2.4",
+        "apparatus_version": APPARATUS_VERSION,
         "created": "2026-09-27T14:00:00+00:00",
         "trial": "r1",
         "mode": "sighted",
@@ -524,12 +537,17 @@ def _g_s2(
     )
 
 
+def _g_s2_legacy(rec: HeldOutTests, **kw: Any) -> GradeRow:
+    """A legacy golden ``S2`` attempt: :func:`_g_s2` stamped :data:`_G_APPARATUS`."""
+    return _g_s2(rec, apparatus_version=_G_APPARATUS, **kw)
+
+
 def _g_variant_ids() -> dict[str, str]:
     """The ids of registrations that hash the optional fields a legacy reading may carry."""
     common: dict[str, Any] = {
         "repo": REPO,
         "cell": CELL,
-        "apparatus": "2.4",
+        "apparatus": _G_APPARATUS,
         "taxonomy": GLOBAL_CLASS_SET,
         "posture_class": SEALED,
         "checks_arm": "off",
@@ -784,7 +802,7 @@ def _reserved_reading(
         cell=CELL,
         hierarchy=hierarchy,
         pool=list(pool),
-        apparatus="2.4",
+        apparatus=APPARATUS_VERSION,
         taxonomy=GLOBAL_CLASS_SET,
         posture_class=SEALED,
         checks_arm="off",
@@ -1255,7 +1273,7 @@ def test_a_reserved_row_off_the_readings_checks_arm_is_scope_fault_not_a_miss() 
     assert {c["commit"]: c["scope"] for c in served["commits"] if c["scope"]} == dict.fromkeys(
         off, SCOPE_CHECKS_ARM
     )
-    plan = remeasure_plan(rows, readings=(out,), current_apparatus="2.4")
+    plan = remeasure_plan(rows, readings=(out,), current_apparatus=APPARATUS_VERSION)
     assert not plan.pending and not plan.up_to_date
     (blocked,) = plan.cannot_clear
     assert (blocked.arm, blocked.state, blocked.next_act) == ("S3", STATE_UNDECIDED, "audit")
@@ -1414,7 +1432,7 @@ def test_p792_reserved_requires_max_reruns_zero_and_a_budget_profile() -> None:
         "cell": CELL,
         "hierarchy": ("S3",),
         "pool": pool,
-        "apparatus": "2.4",
+        "apparatus": APPARATUS_VERSION,
         "taxonomy": GLOBAL_CLASS_SET,
         "posture_class": SEALED,
         "checks_arm": "off",

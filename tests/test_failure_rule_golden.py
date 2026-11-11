@@ -70,6 +70,8 @@ GOLDEN: dict[str, str] = {
     # shipped, when rule 3b read the author's ``model_error`` only at the adapter's head
     # (P-735, DL-360 amended) — never edited after release
     "2.4": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
+    # 2.5 (ADR-0049): the stamp alone moved; the rule is 2.4's, so the hash is 2.4's
+    "2.5": "08d22b5d006f77b4b60954876f6ebba145072e155379cffc83ae8548a326f661",
 }
 #: SHA-256 of the canonical JSON of ``OUTAGE_ERROR_MARKERS_V1`` (frozen at 2.3).
 V1_MARKERS_SHA256 = "c4f586326e2950b861953ea2e49bb6e2d8c4e1acf7bd19ce9231cd544364713f"
@@ -81,6 +83,8 @@ GOLDEN_SOURCE: dict[str, str] = {
     # 2.4: rewritten with the line above (DL-360), which also pinned rule 3b's helpers, and
     # again with it for P-735 (``authoring_model_error``, ``AUTHORING_AUTHOR_FAILED``)
     "2.4": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
+    # 2.5 (ADR-0049): the rule's source is 2.4's
+    "2.5": "4bc0aa97759143cb4159822ace028ba567a992d00f73cef58f728b7fed45ce60",
 }
 #: The hash of the frozen 2.3 rule's source (``derive_failure_kind_v1`` and what it calls).
 V1_SOURCE_SHA256 = "1768a6844c74c9e2c789635b33388b72960c656e0f91d9f916d60efdae54d842"

@@ -40,10 +40,16 @@ from crb.core.context_arm import rows_for_context_arm
 from crb.core.ledger import GradeRow
 from crb.core.reading import Reading
 from crb.core.routing import ControlsVerdict
+from crb.core.version import APPARATUS_VERSION
 from fixtures.readings import REPO, S1, commits, register_reading, rows_for, sealed_row
 
 PASSED = ControlsVerdict(
-    passed=True, constructible=6, total=7, escapes=0, run_id="ctl-1", apparatus_version="2.4"
+    passed=True,
+    constructible=6,
+    total=7,
+    escapes=0,
+    run_id="ctl-1",
+    apparatus_version=APPARATUS_VERSION,
 )
 
 
@@ -102,7 +108,7 @@ def test_a_sign_off_is_refused_unless_the_standard_arms_reading_delivers(tmp_pat
     assert written.schema == "crb.signoff.v5" and written.verify_hash()
     assert (written.context_arm, written.taxonomy) == (S1, "global/classes@v1")
     assert written.reading_id == reading.reading_id and written.n_tasks_at_signoff == 20
-    assert written.controls_apparatus == "2.4"
+    assert written.controls_apparatus == APPARATUS_VERSION
     # the stamps are hashed: another arm under the same hash no longer verifies
     assert not replace(written, context_arm="S3").verify_hash()
     assert not replace(written, reading_id="rdg_other").verify_hash()
