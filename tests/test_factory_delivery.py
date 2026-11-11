@@ -1291,6 +1291,72 @@ def test_deliver_hands_the_licence_cell_to_the_pr_body(harness: Harness) -> None
     assert "builder `claude-code`, model `claude-sonnet-5`" in block and "n = 14" in block
 
 
+def test_a_smaller_change_without_sizes_names_the_measured_cell_on_both_lines(
+    harness: Harness,
+) -> None:
+    """Estimated ``S``, measured ``XS``, and neither the route nor the licence names a size:
+    the size line and the block both name the measured ``XS`` cell, as ``own_cell_licence``
+    reads it — never the estimate's."""
+    build = _clean_build(harness)
+    assert build.task.size == "XS"
+    route = {**SERVED_ROUTE, "cell": {k: v for k, v in SERVED_ROUTE["cell"].items() if k != "size"}}
+    try:
+        body = dv.pr_body(multiply_item(size_estimate="S"), build, route_decision=route)
+    finally:
+        build.close()
+    assert "measured `XS` — licensed on the (`bug.fix`, `XS`) cell" in body
+    assert "- cell: (`bug.fix`, `XS`) — route **deliver**" in _cell_block(body)
+
+
+def test_redelivery_comment_carries_the_rebuilt_changes_licence(harness: Harness) -> None:
+    """A rework built by another builder on another cell: the comment names the rebuilt
+    change's own licence, said to supersede the first delivery's in the description."""
+    item = multiply_item()
+    seams = Seams()
+    kw: dict[str, Any] = {
+        "creds": dv.StaticProvider(_creds()),
+        "push_fn": seams.push,
+        "open_pr_fn": seams.open_pr,
+        "comment_pr_fn": seams.comment_pr,
+        "target_default_branch": "main",
+    }
+    b1 = _clean_build(harness)
+    try:
+        first = dv.deliver(
+            harness.repo.repo,
+            item,
+            b1,
+            verdict="accept",
+            route_decision=SERVED_ROUTE,
+            licence_cell=LICENCE_CELL,
+            **kw,
+        )
+    finally:
+        b1.close()
+    rebuilt_cell = {**LICENCE_CELL, "builder": "codex", "model": "gpt-6", "provider": "openai"}
+    b2 = _clean_build(harness)
+    try:
+        dv.deliver(
+            harness.repo.repo,
+            item,
+            b2,
+            previous=first,
+            rework_n=1,
+            after_verdict="accept_with_edit",
+            verdict="accept",
+            route_decision={**SERVED_ROUTE, "n": 21},
+            licence_cell=rebuilt_cell,
+            **kw,
+        )
+    finally:
+        b2.close()
+    (c,) = seams.comments
+    assert "it supersedes the block in the pull request description" in c["body"]
+    block = _cell_block(c["body"])
+    assert "licence read on: builder `codex`, model `gpt-6`, provider `openai`" in block
+    assert "n = 21" in block and "claude-sonnet-5" not in block
+
+
 @pytest.mark.parametrize(
     "item_id",
     ["I-1", "fake-4711.r2", "A..B", "x.lock", "UPPER_case-9"],

@@ -326,13 +326,11 @@ def fenced(lines: list[str], *, info: str = "text") -> list[str]:
 
 
 def _licensed_size(item: BacklogItem, build: BuildResult) -> str:
-    """The size of the cell a delivery is licensed on: the measured tier when the change
-    measures larger than the estimate (GOV-2), else the estimate."""
-    tiers = SIZE_TIER_NAMES
-    est, got = item.size_estimate, build.task.size
-    if got in tiers and (est not in tiers or tiers.index(got) > tiers.index(est)):
-        return got
-    return est
+    """The size of the cell a delivery is licensed on: the measured tier, larger or smaller
+    than the estimate (GOV-2, as :func:`~crb.factory.standard.own_cell_licence` reads it),
+    else the estimate when the change has no measured tier."""
+    got = build.task.size
+    return got if got in SIZE_TIER_NAMES else item.size_estimate
 
 
 UNAVAILABLE = "unavailable"
@@ -506,8 +504,8 @@ def pr_body(
         f"- apparatus: `{build.pack.apparatus.apparatus_version}` runner `{build.pack.apparatus.runner}` "
         f"executor `{build.pack.apparatus.executor.get('executor', '')}`",
         f"- ledger row: `{build.row.row_hash if build.row else '(not ledgered)'}`",
-        # GOV-2: the licence covers the size of the change delivered — the larger of the
-        # item's estimate and the diff's measured tier names the cell the route was read on
+        # GOV-2: the licence covers the size of the change delivered — the diff's measured
+        # tier, larger or smaller than the estimate, names the cell the route was read on
         f"- size: estimated `{item.size_estimate}`, measured `{build.task.size}` — licensed "
         f"on the (`{item.capability_class}`, `{_licensed_size(item, build)}`) cell",
     ]
@@ -538,10 +536,13 @@ def rework_comment(
     rework_n: int,
     after_verdict: str,
     pack_link: str = "",
+    route_decision: Mapping[str, Any] | None = None,
+    licence_cell: Mapping[str, Any] | None = None,
 ) -> str:
     """The comment a re-delivery posts on the pull request it updates: why the branch
     moved (the rework number and the verdict it answers), from which commit to which, and
-    the new build's evidence. Every string redacted."""
+    the new build's evidence — with the cell that licensed THIS build (:func:`_cell_evidence`),
+    which supersedes the first delivery's block in the description. Every string redacted."""
     belts = build.grade.belts.to_dict()
     why = (
         f"after the review verdict `{after_verdict}` asked for a rework and the rebuilt "
@@ -565,6 +566,13 @@ def rework_comment(
         f"- oracle: `{build.oracle.test_path}` sha256 `{build.oracle.test_sha256}`",
         f"- builder: `{build.rung}` trial `{build.trial}`",
         f"- ledger row: `{build.row.row_hash if build.row else '(not ledgered)'}`",
+        f"- size: estimated `{item.size_estimate}`, measured `{build.task.size}` — licensed "
+        f"on the (`{item.capability_class}`, `{_licensed_size(item, build)}`) cell",
+        "",
+        "The block below is this rebuilt change's licence; it supersedes the block in the pull "
+        "request description, which names the first delivery's.",
+        "",
+        *_cell_evidence(item, build, route_decision, licence_cell),
     ]
     return redact("\n".join(lines))
 
@@ -1017,6 +1025,8 @@ def deliver(
             rework_n=rework_n,
             after_verdict=after_verdict,
             pack_link=pack_link,
+            route_decision=route_decision,
+            licence_cell=licence_cell,
         )
         posted = ""
         comment_error = ""
