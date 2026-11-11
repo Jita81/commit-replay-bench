@@ -32,6 +32,14 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   before a cell delivers. A run under a 2.4 reserved reading is refused `pool_drift`: close every
   2.4 campaign first, and deploy only with all three fixes.
 
+- **The shell guard lets `git -C` name the work tree itself** ([#114](https://github.com/Jita81/commit-replay-bench/pull/114)). Wave 3 builders ran
+  `git -C /work status` in the sealed container and were refused as "leaves the worktree",
+  because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
+  directory under it, as written and with links resolved; repeated `-C` compose as git composes
+  them, and the verb rules then check paths from there. A `..` component, `//`, `~`, a
+  backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
+  an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
+
 - **The Wave 3 decision has no date; it is taken when Wave 3 reports** (DL-415;
   [#108](https://github.com/Jita81/commit-replay-bench/pull/108)). DL-377 set Friday 6 November
   2026, or Wave 3's report if sooner. The date passed before Wave 3's first row, so the operator
