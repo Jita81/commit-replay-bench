@@ -755,6 +755,11 @@ class StreamStats:
         rows = self.usage_by_message.values()
         if any(t > sum(r[i] for r in rows) for i, t in enumerate(self.totals())):
             return 0.0, False
+        # the same for cache writes, which carry a premium the token totals do not show
+        if self.cache_write_tokens() > sum(self.cache_writes_by_message.values()):
+            return 0.0, False
+        if self.cache_write_1h_tokens() > sum(self.cache_writes_1h_by_message.values()):
+            return 0.0, False
         total = 0.0
         for key, (tin, tout, cached) in self.usage_by_message.items():
             model = self.model_by_message.get(key, "")

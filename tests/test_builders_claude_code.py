@@ -1032,6 +1032,21 @@ def test_result_tokens_no_message_accounts_for_make_a_mixed_cost_unknown(tmp_pat
     ws.remove()
 
 
+def test_cache_writes_no_message_accounts_for_make_a_mixed_cost_unknown(tmp_path: Path) -> None:
+    """The token totals agree but the result reports cache writes no message carried:
+    their premium has no model to be priced at, so the cost is unknown."""
+    lines = [
+        ev_init("claude-sonnet-5"),
+        ev_assistant(text("a"), tin=1_000, tout=100, msg_id="m1", model="claude-sonnet-5"),
+        ev_assistant(text("b"), tin=2_000, tout=200, msg_id="m2", model="claude-opus-5"),
+        _priced_result(cost=9.99, tin=2_500, tout=300, write=500),
+    ]
+    _fx, ws, out = _setup(tmp_path, FakeSpawn(lines), model="claude-sonnet-5")
+    assert out.cost_usd == 0.0 and not out.cost_known
+    assert out.extra["cost_source"] == "unknown"
+    ws.remove()
+
+
 def test_the_builders_own_model_under_another_spelling_is_not_another_model(
     tmp_path: Path,
 ) -> None:
