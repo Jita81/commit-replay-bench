@@ -340,8 +340,10 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    A long failure of the test author breaks that: it turns `S1` rows into misses in several
    batches in a row. Those misses stay in the primary result, because an author that fails is
    part of what `S1` is. Beside it the report gives one sensitivity result, fixed here. A batch
-   is *author-hit* if the author produced no usable test for more than half of its commits,
-   read from the runs' events. Author-hit batches that follow one another in filing order
+   is *author-hit* if the author produced no usable test in more than half of its expected
+   `S1` attempts (two for each commit of the batch, each attempt counted on its own), read
+   from the runs' events. An attempt with no row, or with no event showing a usable test,
+   counts as one without a usable test. Author-hit batches that follow one another in filing order
    within a repository form one block, which flips as a whole in the test and counts as one
    unit in the interval. The same test and interval are then recomputed twice: with those
    blocks, and with every author-hit batch left out. The wave is reported as
@@ -353,8 +355,9 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
 4. **What each outcome may be called.** *Cleared*: p below 0.05 with `S1` ahead, and both sensitivity results of item 3 also below 0.05 with `S1` ahead. *No 15-point
    effect*: p not below 0.05, both sensitivity results of item 3 also not below 0.05, the
    upper end below 15 points of the primary interval and of both recomputed intervals of
-   item 3, and at least six batches with a summed difference that is not zero, and a usable test from the author for at least nine in ten of the wave's
-   `S1` rows. *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
+   item 3, and at least six batches with a summed difference that is not zero, and a usable test from the author in at least nine in ten of the wave's
+   expected `S1` attempts (two for each listed commit; an attempt with no row or no event
+   showing a usable test counts as one without). *Inconclusive*: anything else **[aspiration — this registration's design; nothing is run yet]**.
    The recomputed intervals are held to the same 15 points because a run of author-hit
    batches can leave the primary interval just under it while the interval that treats them
    as one block reaches past it; that wave is inconclusive **[aspiration — this registration's design; nothing is run yet]**.
@@ -392,7 +395,11 @@ Every item below is a rule for rows that do not exist yet **[aspiration — this
    an outage, a provider error, a container failure or a refused allowed command, counted from row
    fields. (c) Any change to the served code after the second amendment. After (b) or (c) every
    wave row so far is set aside, the fault is repaired, and the wave starts again only under a
-   new amendment to this document, written before any further run.
+   new amendment to this document, written before any further run. That amendment
+   recalculates the cut of part 3 with the campaign's whole spend so far (the pilot and every
+   set-aside wave run) in place of the pilot spend, and restates the list and the power
+   figures of R-1 for it. If the cut leaves either repository with no commit, the wave is not
+   restarted **[aspiration — this registration's design; nothing is run yet]**.
 
 **What the result will mean.** If `S1` clears, the independent test becomes the factory's default
 blind arm and the next wave certifies cells with it. If the result is "no 15-point effect", the
