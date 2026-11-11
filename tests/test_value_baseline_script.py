@@ -599,3 +599,14 @@ def test_the_header_says_when_the_rows_record_no_posture(vb: ModuleType, tmp_pat
     assert {r.posture_class for r in rows} == {""}
     head = vb.render_markdown(rows, [], apparatus="all").splitlines()[0]
     assert "; posture not recorded |" in head, head
+
+
+def test_the_header_names_no_posture_when_the_scope_holds_no_row(
+    vb: ModuleType, tmp_path: Path
+) -> None:
+    """An empty scope read no class: its header says "—" (as its apparatus does), never
+    "not recorded", which would claim rows that recorded none."""
+    p = tmp_path / "ledger.psv"
+    p.write_text("\n".join([HEADER, _row(1, clean="1", lint="1")]) + "\n", encoding="utf-8")
+    head = vb.render_markdown(vb.read_ledger(p), [], apparatus="0.0").splitlines()[0]
+    assert "apparatus —; posture — |" in head, head

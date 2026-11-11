@@ -279,10 +279,13 @@ def render_markdown(
     # (ADR-0019 §8) and the one checks arm its headline reads (ADR-0024 - never two), so every
     # figure below counts the rows the served figures beside it count (P-407, P-135).
     scoped = list(report.rows)
+    # an empty scope read no class at all ("—", as its apparatus); rows that recorded none
+    # read the one unrecorded class
+    posture_read = rep["posture_class"] or ("not recorded" if scoped else "—")
     app = (
         f"apparatus {', '.join(rep['apparatus_versions']) or '—'}"
         + (" (pooled)" if rep["pooled"] else "")
-        + f"; posture {rep['posture_class'] or 'not recorded'}"
+        + f"; posture {posture_read}"
     )
     ns, pr, pl = rep["north_star"], rep["precision"], rep["process_loss"]
     lc, rt, rates = rep["learning_curve"], rep["routing"], rep["rates"]
