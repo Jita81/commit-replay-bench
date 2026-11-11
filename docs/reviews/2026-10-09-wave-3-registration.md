@@ -194,6 +194,8 @@ row written, so none was chosen knowing a result:
   read", after this list, fixes.
 - **When (Q-19; DL-377).** The decision is taken on Friday 6 November 2026, or when Wave 3
   reports, if that is sooner.
+  *Amended 2026-11-09 (DL-415):* the date passed before Wave 3's first row and is void. The
+  decision is taken when Wave 3 reports.
 - **The open choices (Q-21; DL-378)**, each as recommended above:
   - (a) the test author is the one the deployment names now, `editblock:gpt-oss-120b` on
     Cerebras, checked at registration (step 2), and never the builder's own model;
