@@ -1,0 +1,69 @@
+# The reviewed UI-types drift: ui/src/api/types.ts against the API's OpenAPI schema.
+#
+# Read by scripts/check_ui_types_drift.py --check (CI's `types` job). One line per finding:
+#
+#     Interface.field <kind>  # why it is tolerated
+#
+# kinds: unknown-field    (types.ts declares a field the schema component does not have — the
+#                          UI reads something the server never sends; fix it, do not list it)
+#        missing-required (the schema requires a field types.ts does not declare — the server
+#                          sends it and no screen reads it through this type)
+#
+# Recorded at 0909129d, when the check landed: every finding was missing-required, none was
+# unknown-field. Each entry below is the server sending a required field that the UI's
+# hand-written type leaves out because no screen reads it through that type; none is a field
+# the UI reads and the server does not send. This list only shrinks: declare the field in
+# types.ts (or drop it from the response model) and delete its line — `--check` fails on a
+# line that no longer drifts, and on any drift that is not listed here.
+CapabilitySummary.cells_by_route missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
+CapabilitySummary.earned_coverage missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
+CapabilitySummary.profile_commits missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
+CapabilitySummary.rows missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
+CapabilitySummary.signoffs_applied missing-required  # CapabilitySummary sends it; types.ts declares a subset of CapabilitySummary and no screen reads this field
+EvidenceResponse.created missing-required  # EvidenceResponse sends it; types.ts declares a subset of EvidenceResponse and no screen reads this field
+EvidenceResponse.pack_hash missing-required  # EvidenceResponse sends it; types.ts declares a subset of EvidenceResponse and no screen reads this field
+EvidenceResponse.repo missing-required  # EvidenceResponse sends it; types.ts declares a subset of EvidenceResponse and no screen reads this field
+EvidenceResponse.run_id missing-required  # EvidenceResponse sends it; types.ts declares a subset of EvidenceResponse and no screen reads this field
+EvidenceResponse.schema missing-required  # EvidenceResponse sends it; types.ts declares a subset of EvidenceResponse and no screen reads this field
+EvidenceResponse.task_id missing-required  # EvidenceResponse sends it; types.ts declares a subset of EvidenceResponse and no screen reads this field
+ForecastBuild.buildable_p_stddev missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.components missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.costed_components missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.coverage missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.expected_clean_units missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.measured_components missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.per_component missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.policy_version missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.single_rep_band missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.timed_components missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastBuild.units_by_route missing-required  # ForecastBuildOut sends it; types.ts declares a subset of ForecastBuildOut and no screen reads this field
+ForecastReadiness.buildable_frac missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.buildable_units missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.coverage missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.earned_units missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.false_q1_total missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.measured missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.min_reps_seen missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.mix missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.mix_source missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.policy_version missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.thresholds missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+ForecastReadiness.total missing-required  # ForecastReadinessOut sends it; types.ts declares a subset of ForecastReadinessOut and no screen reads this field
+GradeRow.seq missing-required  # GradeRowOut sends it; types.ts declares a subset of GradeRowOut and no screen reads this field
+OracleCell.strength_min missing-required  # OracleCellOut sends it; types.ts declares a subset of OracleCellOut and no screen reads this field
+OracleCell.tasks missing-required  # OracleCellOut sends it; types.ts declares a subset of OracleCellOut and no screen reads this field
+OracleReport.runs missing-required  # OracleReportOut sends it; types.ts declares a subset of OracleReportOut and no screen reads this field
+OracleTask.errors missing-required  # OracleTaskOut sends it; types.ts declares a subset of OracleTaskOut and no screen reads this field
+OracleTask.note missing-required  # OracleTaskOut sends it; types.ts declares a subset of OracleTaskOut and no screen reads this field
+OracleTask.run_id missing-required  # OracleTaskOut sends it; types.ts declares a subset of OracleTaskOut and no screen reads this field
+OracleTask.scored_at missing-required  # OracleTaskOut sends it; types.ts declares a subset of OracleTaskOut and no screen reads this field
+RepoProfile.class_totals missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+RepoProfile.computed_at missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+RepoProfile.examined missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+RepoProfile.ref missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+RepoProfile.size_totals missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+RepoProfile.skipped missing-required  # RepoProfile sends it; types.ts declares a subset of RepoProfile and no screen reads this field
+Run.apparatus missing-required  # RunOut sends it; types.ts declares a subset of RunOut and no screen reads this field
+Run.retain missing-required  # RunOut sends it; types.ts declares a subset of RunOut and no screen reads this field
+RunTaskRow.first_pass_clean missing-required  # RunTaskRow sends it; types.ts declares a subset of RunTaskRow and no screen reads this field
+RunTaskRow.language missing-required  # RunTaskRow sends it; types.ts declares a subset of RunTaskRow and no screen reads this field

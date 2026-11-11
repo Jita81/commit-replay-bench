@@ -12,6 +12,22 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The UI's wire types are checked against the API's schema, and Scorecard runs weekly**
+  ([#PRNUM](https://github.com/Jita81/commit-replay-bench/pull/PRNUM)). A new script,
+  `scripts/check_ui_types_drift.py`, builds the OpenAPI document offline from the app (no
+  server, no network, no secret) and compares each interface in the hand-written
+  `ui/src/api/types.ts` that maps to a schema component: a field the component does not have,
+  or a field it requires that the interface leaves out, is drift. CI's `types` job and the
+  fresh-clone gates run it with `--check`, which fails on drift not in the reviewed
+  `scripts/ui_types_drift_allowlist.txt` and on a listed entry that no longer drifts, so the
+  list only shrinks. On `main` today every finding is a required field the server sends and
+  the UI does not declare; none is a field the UI reads that the server does not send
+  **[measured — n = 52 findings over the 71 of 172 shapes that map to a component; method:
+  `check_ui_types_drift.py --list` at `0909129d`; apparatus 2.5]**. A new workflow,
+  `.github/workflows/scorecard.yml`, runs the OpenSSF Scorecard weekly and on every push to
+  `main`, with write access only to code scanning and the OIDC token, and uploads its SARIF to
+  code scanning. Nothing in the builder, the belts, grading or the ledger changes.
+
 - **The Wave 4 registration**
   ([#117](https://github.com/Jita81/commit-replay-bench/pull/117)). A new record,
   `docs/reviews/2026-11-10-wave-4-registration.md`, registers Wave 4 before any run: the blind

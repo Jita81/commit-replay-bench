@@ -3,7 +3,8 @@
 #
 # Jobs:
 #   lint      ruff check + ruff format --check
-#   types     mypy --strict over src/crb
+#   types     mypy --strict over src/crb; ui/src/api/types.ts against the app's OpenAPI schema
+#             (scripts/check_ui_types_drift.py: no drift beyond its reviewed allowlist)
 #   code-map  every source file carries a valid Navigation header; docs/CODE-MAP.md current
 #   dod       every page/journey/stream + the product carry a definition of done; docs/dod/GAP-ANALYSIS.md current
 #   claims    every quantified sentence on an allowlisted public page carries a permitted tag,
@@ -168,6 +169,12 @@ jobs:
           uv sync -q --locked --python 3.12 --extra server --extra postgres --extra mcp --extra dev
       - name: mypy
         run: .venv/bin/mypy
+      # ui/src/api/types.ts is hand-written; this compares its field names with the OpenAPI
+      # schema the app builds offline (no server, no network) and fails on drift that is not
+      # in the reviewed scripts/ui_types_drift_allowlist.txt, or on an entry that no longer
+      # drifts. Here because this job already installs the server extras the app needs.
+      - name: UI types match the API's OpenAPI schema (no new drift)
+        run: .venv/bin/python scripts/check_ui_types_drift.py --check
 
   code-map:
     name: code-map (every file has a valid header; docs/CODE-MAP.md is current)
@@ -485,6 +492,7 @@ jobs:
           .venv/bin/python scripts/code_map.py --check
           .venv/bin/python scripts/dod_check.py --check
           .venv/bin/python scripts/claims_check.py --check
+          .venv/bin/python scripts/check_ui_types_drift.py --check
           (cd ui && npm ci --no-audit --no-fund --legacy-peer-deps && npm run typecheck && npx vitest run)
           GATES
           sudo --preserve-env=DOD_BASE,SRC,PYTHONDONTWRITEBYTECODE \
