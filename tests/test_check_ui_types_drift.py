@@ -106,6 +106,17 @@ def test_a_brace_inside_a_string_literal_does_not_end_the_body(literal: str) -> 
     assert [f.line for f in findings] == ["Thing.removed unknown-field"]
 
 
+@pytest.mark.parametrize(
+    "line",
+    ["tag: 'a // b'", "tag: 'a /* b'", "tag: string // it's a { tag", "tag: string /* it's } */"],
+)
+def test_comment_markers_in_strings_and_quotes_in_comments_stay_local(line: str) -> None:
+    """A ``//`` in a string is not a comment, a quote in a comment opens no string."""
+    shapes = m.parse_ts(f"export interface A {{\n  {line}\n  y?: number\n}}\n" + TS)
+    assert dict(shapes["A"].fields) == {"tag": False, "y": True}
+    assert dict(shapes["Base"].fields) == {"id": False}
+
+
 def test_a_shape_maps_to_a_component_that_declares_properties() -> None:
     schemas = {
         "A": _schema(["x"]),

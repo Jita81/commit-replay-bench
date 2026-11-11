@@ -91,8 +91,6 @@ ALIASES: dict[str, str] = {
 
 KINDS = ("unknown-field", "missing-required")
 
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
-_LINE_COMMENT = re.compile(r"(^|[ \t])//[^\n]*", re.MULTILINE)
 _HEAD = re.compile(
     r"^export\s+(?:interface\s+(?P<iname>\w+)(?:<[^>{]*>)?(?:\s+extends\s+(?P<ext>[^{]+?))?\s*\{"
     r"|type\s+(?P<tname>\w+)(?:<[^>=]*>)?\s*=\s*\{)",
@@ -129,10 +127,37 @@ class Finding:
 
 
 def strip_comments(text: str) -> str:
-    """types.ts with every ``/* */`` and ``//`` comment blanked (a ``//`` glued to a word —
-    ``'https://…'`` — is kept: it is not a comment)."""
-    text = _BLOCK_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
-    return _LINE_COMMENT.sub(lambda m: m.group(1), text)
+    """types.ts with every ``/* */`` and ``//`` comment blanked (newlines kept). A ``//`` or
+    ``/*`` inside a string literal (``'https://…'``) is not a comment, and a quote inside a
+    comment (``// it's``) opens no string: one scan tracks both, escapes honoured."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    quote = ""  # the open string literal's quote character, "" outside one
+    while i < n:
+        ch = text[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 1
+            elif ch == quote:
+                quote = ""
+            i += 1
+        elif text.startswith("//", i) or text.startswith("/*", i):
+            if text[i + 1] == "/":  # a line comment runs to the newline, which is kept
+                end = text.find("\n", i)
+            else:  # a block comment runs past its "*/"
+                end = text.find("*/", i + 2)
+                end = end + 2 if end >= 0 else end
+            end = n if end < 0 else end
+            out.append(re.sub(r"[^\n]", " ", text[i:end]))
+            i = end
+        else:
+            if ch in "'\"`":
+                quote = ch
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 
 def _body(text: str, open_at: int) -> str:
