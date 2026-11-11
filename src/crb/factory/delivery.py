@@ -390,10 +390,31 @@ def _cell_evidence(
     n = route.get("n")
     n_text = str(n) if isinstance(n, int) and not isinstance(n, bool) else UNAVAILABLE
     apparatus = str(route.get("apparatus_version") or "").strip()
+    withheld = ""
     if not apparatus:
         versions = route.get("apparatus_versions")
         if isinstance(versions, Sequence) and not isinstance(versions, str):
-            apparatus = ", ".join(str(v) for v in versions if str(v).strip())
+            distinct = list(dict.fromkeys(str(v).strip() for v in versions if str(v).strip()))
+            apparatus = ", ".join(distinct)
+            if len(distinct) > 1:
+                # rows from different apparatus versions are never blended into one rate
+                withheld = f"rows span apparatus {apparatus}; never pooled"
+    # The cell named is the one the rate was read on: the route's own cell, else the
+    # licence's (the loop reads the route at the size DELIVERED, larger or smaller — GOV-2).
+    route_size = str(cell.get("size") or "").strip()
+    lic_size = str(lic.get("size") or "").strip()
+    size = route_size or lic_size or _licensed_size(item, build)
+    if route_size and lic_size and route_size != lic_size:
+        # one cell's n and interval are never shown under another cell's name
+        withheld = withheld or (
+            f"the rate is the `{route_size}` cell's, the licence was read on `{lic_size}`"
+        )
+    rate_line = (
+        f"- clean rate: {UNAVAILABLE} ({withheld})"
+        if withheld
+        else f"- clean rate: {_fmt_rate(route.get('point'))} per attempt, n = {n_text}, Wilson "
+        f"95% interval [{_fmt_rate(route.get('ci_low'))}, {_fmt_rate(route.get('ci_high'))}]"
+    )
     measured_by = [cell.get(k) for k in ("builder", "model", "provider")]
     pooled = any(str(v or "").strip() == "*" for v in measured_by)
     lines = [
@@ -402,10 +423,9 @@ def _cell_evidence(
         "Read from the capability map as it stood before this run. A rate is shown only with "
         "its n, its Wilson interval, the mode, the builder+model and the apparatus version.",
         "",
-        f"- cell: (`{item.capability_class}`, `{_licensed_size(item, build)}`) — route "
+        f"- cell: (`{item.capability_class}`, `{size}`) — route "
         + (f"**{route['route']}**" if str(route.get("route") or "").strip() else UNAVAILABLE),
-        f"- clean rate: {_fmt_rate(route.get('point'))} per attempt, n = {n_text}, Wilson 95% "
-        f"interval [{_fmt_rate(route.get('ci_low'))}, {_fmt_rate(route.get('ci_high'))}]",
+        rate_line,
         f"- mode: {_shown(_rate_mode(route))}",
         f"- rate measured on: builder {_shown(measured_by[0])}, model {_shown(measured_by[1])}, "
         f"provider {_shown(measured_by[2])}"
@@ -417,7 +437,7 @@ def _cell_evidence(
         ),
         f"- licence read on: builder {_shown(lic.get('builder'))}, model "
         f"{_shown(lic.get('model'))}, provider {_shown(lic.get('provider'))}, arm "
-        f"{_shown(lic.get('arm'))}",
+        f"{_shown(lic.get('arm'))}, size {_shown(lic_size)}",
         f"- apparatus (rate): {_shown(apparatus)}",
         f"- ledger head: {UNAVAILABLE} (the delivery step does not read the chain's head; the "
         "ledger row above, when there is one, is this build's own row on it)",
