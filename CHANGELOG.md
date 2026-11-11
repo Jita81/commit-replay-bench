@@ -22,6 +22,12 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   before a cell delivers. A run under a 2.4 reserved reading is refused `pool_drift`: close every
   2.4 campaign first, and deploy only with all three fixes.
 
+- **The Wave 3 decision has no date; it is taken when Wave 3 reports** (DL-415;
+  [#108](https://github.com/Jita81/commit-replay-bench/pull/108)). DL-377 set Friday 6 November
+  2026, or Wave 3's report if sooner. The date passed before Wave 3's first row, so the operator
+  voided it. The decision log is append-only: DL-377 stays as written and DL-415 supersedes its
+  date. Documentation only: no code, rule or apparatus version changes.
+
 - **The Wave 3 stage-1 report, the stage-2 statement and the close**
   ([#111](https://github.com/Jita81/commit-replay-bench/pull/111)). A new record,
   `docs/reviews/2026-11-10-wave-3-stage-1-report.md`, reports stage 1: the spend against the $54.00
