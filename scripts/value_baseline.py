@@ -282,7 +282,7 @@ def render_markdown(
     app = (
         f"apparatus {', '.join(rep['apparatus_versions']) or '—'}"
         + (" (pooled)" if rep["pooled"] else "")
-        + (f"; posture {rep['posture_class']}" if rep["posture_class"] else "")
+        + f"; posture {rep['posture_class'] or 'not recorded'}"
     )
     ns, pr, pl = rep["north_star"], rep["precision"], rep["process_loss"]
     lc, rt, rates = rep["learning_curve"], rep["routing"], rep["rates"]

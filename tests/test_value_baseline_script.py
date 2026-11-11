@@ -586,3 +586,16 @@ def test_the_page_counts_the_exported_reviews_no_posture_class_placed(vb: Module
     line = next(x for x in out.splitlines() if "reviewed clean patches judged mergeable" in x)
     assert "n = 1 reviews" in line
     assert "2 exported review(s) placed in no single posture class, left out" in line
+
+
+def test_the_header_says_when_the_rows_record_no_posture(vb: ModuleType, tmp_path: Path) -> None:
+    """P-135: rows that recorded no posture class are still one class (``""``) and their
+    figures are printed, so the scope line says so instead of naming none."""
+    p = tmp_path / "ledger.psv"
+    p.write_text(
+        "\n".join([HEADER, _row(1, clean="1", lint="1"), _row(2)]) + "\n", encoding="utf-8"
+    )
+    rows = vb.read_ledger(p)
+    assert {r.posture_class for r in rows} == {""}
+    head = vb.render_markdown(rows, [], apparatus="all").splitlines()[0]
+    assert "; posture not recorded |" in head, head
