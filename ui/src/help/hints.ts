@@ -749,7 +749,7 @@ export const HINTS = {
   'stat.decisions.evidence':
     'On a cell row: the cell’s attempts (n), its clean rate with its 95 % Wilson interval, and the reason code that decided its route, under the apparatus in the kicker. On a re-measurement row: the rows needed to reach the rule’s first look, the estimated cost (or “cost not known” when no row recorded one), and the builder/model@provider it is re-measured on. On a factory or library row: what is missing or waiting.',
   'link.decisions.empty_map':
-    'The capability map, where every decision starts: a cell due a sign-off, a cell whose tests are too weak to trust or one whose evidence went stale appears here once the map says so.',
+    'The capability map, one place decisions come from: a cell due a sign-off, a cell whose tests are too weak to trust or one whose evidence went stale appears here once the map says so. Factory items and library entries bring decisions here too.',
   'button.decisions.act':
     'Opens the page where this decision is taken — the sign-off form with the cell chosen, the Factory item, Learn (to strengthen the tests or queue a re-measurement), the Library entry, or the Ledger, depending on the kind. Nothing is recorded until you act there.',
   'button.decisions.read':
