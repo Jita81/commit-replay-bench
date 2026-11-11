@@ -198,7 +198,12 @@ export function DecisionsPage() {
         )
       })}
       {d.ready && total === 0 && d.measured.length > 0 && (
-        <EmptyState glyph="✓" title="Nothing is waiting on a person" reason="Every measured cell is either signed or routed without a decision pending, and no factory item is blocked." />
+        <EmptyState
+          glyph="✓"
+          title="Nothing is waiting on a person"
+          reason="Every measured cell is either signed or routed without a decision pending, and no factory item is blocked. Decisions arise from the capability map — a cell due a sign-off, to strengthen or to re-measure — and from factory items that stop."
+          action={<LinkButton to="/capability" hint="link.decisions.empty_map">Read the capability map</LinkButton>}
+        />
       )}
       {d.stale.length > 0 && (
         <section aria-labelledby="stale-heading" className="mt-10">

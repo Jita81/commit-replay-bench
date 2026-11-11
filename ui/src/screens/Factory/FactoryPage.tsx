@@ -638,7 +638,22 @@ export function FactoryPage() {
 
           <Card title="Items" eyebrow="readiness → RED proof → build → review → delivery → outcome">
             {tasks.isPending && <p className="text-sm text-on-surface-muted">Loading…</p>}
-            {tasks.isError && (noBacklog(tasks.error) ? <EmptyState compact glyph="⚙" title="No factory items — no backlog registered" /> : <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />)}
+            {tasks.isError &&
+              (noBacklog(tasks.error) ? (
+                <EmptyState
+                  compact
+                  glyph="⚙"
+                  title="No factory items — no backlog registered"
+                  reason="Items appear here once a backlog is frozen, from items typed above or from tickets that arrive from your board through intake."
+                  action={
+                    <LinkButton size="sm" to={`/factory/intake?repo=${encodeURIComponent(repo)}`} hint="link.factory.empty_intake">
+                      See work arriving from your board
+                    </LinkButton>
+                  }
+                />
+              ) : (
+                <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />
+              ))}
             {tasks.data && tasks.data.length === 0 && <EmptyState compact title="No factory items yet" reason="Items appear once a factory run has worked the backlog." />}
             {tasks.data && tasks.data.length > 0 && (
               <ul className="m-0 list-none divide-y divide-border p-0">

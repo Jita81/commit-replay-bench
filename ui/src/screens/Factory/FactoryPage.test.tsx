@@ -894,6 +894,23 @@ describe('FactoryPage — the shipped contract', () => {
     expect(within(screen.getByTestId('factory-no-backlog')).getByRole('button', { name: 'Freeze a backlog…' })).toBeInTheDocument()
   })
 
+  it('the Items card with no backlog says where items come from and links to intake, its one action', async () => {
+    mockApi(
+      base({
+        'GET /auth/me': { ...PRINCIPAL, role: 'viewer' },
+        'GET /factory/alpha/backlog': () => envelope(404, 'not_found', "no backlog registered for 'alpha'"),
+        'GET /factory/alpha/tasks': () => envelope(404, 'not_found', "no backlog registered for 'alpha'"),
+      }),
+    )
+    renderApp(<FactoryPage />, { route: '/factory?repo=alpha' })
+    await waitFor(() => expect(screen.getByText('No factory items — no backlog registered')).toBeInTheDocument())
+    expect(screen.getByText(/Items appear here once a backlog is frozen/)).toBeInTheDocument()
+    const intake = screen.getByRole('link', { name: 'See work arriving from your board' })
+    expect(intake).toHaveAttribute('href', '/factory/intake?repo=alpha')
+    expect(intake).toHaveAttribute('data-hint', 'link.factory.empty_intake')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('a viewer is told an operator freezes the backlog, and is not shown the Freeze button', async () => {
     mockApi(
       base({
