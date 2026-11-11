@@ -12,6 +12,14 @@ One paragraph per pull request, newest first; the pull request holds the detail.
 written for pull requests #30 to #48 before this rule is kept, unchanged, as a dated wave report:
 [docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md](docs/reviews/2026-09-25-wave-report-since-2.0.0a1.md).
 
+- **The shell guard lets `git -C` name the work tree itself** ([#114](https://github.com/Jita81/commit-replay-bench/pull/114)). Wave 3 builders ran
+  `git -C /work status` in the sealed container and were refused as "leaves the worktree",
+  because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
+  directory under it, as written and with links resolved; repeated `-C` compose as git composes
+  them, and the verb rules then check paths from there. A `..` component, `//`, `~`, a
+  backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
+  an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
+
 - **A Go builder's toolchain scratch stays out of its checkout** ([#113](https://github.com/Jita81/commit-replay-bench/pull/113)). The builder
   container's `/tmp` tmpfs inherited Docker's `noexec`, so `go test` could not run the binaries
   it builds there. Twelve Wave 3 cobra builds were disqualified by belt 1b on build-cache and

@@ -1706,10 +1706,61 @@ def _worktree_path(here: Path, a: str) -> bool:
         return False
 
 
-def _leaves_worktree(path: str) -> bool:
-    """Absolute, home-relative or ``..``-climbing — a ``git -C`` target outside the tree."""
-    p = path.replace("\\", "/")
-    return p.startswith(("/", "~")) or bool(re.match(r"^[A-Za-z]:", p)) or ".." in p.split("/")
+#: Characters the shell expands in an unquoted word — ``$X``, ``$( … )``, backticks, globs
+#: and braces. A ``-C`` value holding one is rewritten before git runs, so its literal text
+#: proves nothing about where git ends up (``/work/.[.]`` is ``/work/..``).
+_SHELL_EXPANDS_RE = re.compile(r"[$`*?\[\]{}]")
+
+
+def _git_c_step(at: Path | None, root: Path | None, path: str) -> tuple[bool, Path | None]:
+    """Where git runs after ``-C path`` from ``at``, and whether that is still the worktree
+    ``root`` or a directory under it. Fails closed: a home-relative, drive-lettered or
+    backslashed path, anything the shell expands (``$``, a backtick, a hoisted
+    ``__SUBST_k__``/``__GROUP_k__`` substitution, ``* ? [ ] { }``), a ``.git`` component,
+    a ``..`` component (``link/..`` follows the link, so it is never normalised away) and an
+    empty component (``//work``, ``a//b``; one trailing slash is fine) are refused outright,
+    absolute or relative. An absolute path is accepted only when ``root`` is known and the
+    path lies at or under it as written (under ``root`` or its resolved spelling — the
+    sealed container's ``/work`` reaches the guard as the resolved root through
+    ``StreamStats.host_view``) and with symlinks resolved, never landing in ``.git``.
+    A relative path composes onto ``at`` (repeated ``-C`` compose as git composes them)
+    and gets the same check. With ``root`` unknown it cannot climb, so it passes as
+    before; with ``root`` known and ``at`` unknown (after ``popd``, or a ``cd`` the guard
+    could not follow) it could be a link out of the tree or onto ``.git`` that nothing can
+    resolve, so it is refused. ``-C ""`` and ``-C .`` leave git where it is."""
+    if path == "":
+        return True, at
+    if path.startswith("~") or "\\" in path or re.match(r"^[A-Za-z]:", path):
+        return False, None
+    if _SHELL_EXPANDS_RE.search(path) or _PLACEHOLDER_RE.search(path):
+        return False, None
+    if _LITERAL_PUNCT_RE.search(path):
+        return False, None
+    parts = (path[:-1] if path.endswith("/") else path).split("/")
+    if ".." in parts or "" in parts[1:] or any(p.casefold() == ".git" for p in parts):
+        return False, None
+    absolute = path.startswith("/")
+    if absolute:
+        if root is None:
+            return False, None
+        target = Path(posixpath.normpath(path))
+    elif at is None:
+        return root is None or posixpath.normpath(path) == ".", None
+    else:
+        target = Path(posixpath.normpath((at / path).as_posix()))
+    if root is None:
+        return True, target
+    try:
+        real_root = root.resolve()
+        real = target.resolve()
+        inside = (
+            (target.is_relative_to(root) or target.is_relative_to(real_root))
+            and real.is_relative_to(real_root)
+            and ".git" not in (p.casefold() for p in real.relative_to(real_root).parts)
+        )
+    except (OSError, RuntimeError, ValueError):
+        inside = False
+    return inside, target if inside else None
 
 
 _PATTERN_COMMANDS: frozenset[str] = frozenset(
@@ -2046,6 +2097,12 @@ class GitArchaeologyGuard:
       when a cwd is known; :class:`TestFileGuard` classifies by what a path resolves
       to (finding 6c). Inline-code string concatenation (``'gi'+'t'``, finding 6b)
       and script files stay documented gaps: the sealed container is that belt.
+    * 2026-11-10 — Wave 3 (click, cobra): ``git -C /work status`` was refused because
+      any absolute ``-C`` counted as leaving the tree. ``-C`` at the worktree root or
+      below is now accepted. The container path reaches this guard already mapped to
+      the host root, so the honest case is pinned end to end in
+      ``tests/test_builders_container.py`` (``test_stream_stats_git_c_container_workdir*``),
+      and as mapped by the ``git -C @WORKTREE@ …`` corpus lines.
     """
 
     def __init__(self, cwd: Path | str | None = None) -> None:
@@ -2284,7 +2341,9 @@ class GitArchaeologyGuard:
     def _check_git(self, args: list[str], here: Path | None) -> str:
         """Global options that re-point git are refused; then the sub-command must be in
         ``GIT_ALLOWED`` (``stash`` gets its own message with the honest idiom), and the
-        verbs with argument rules dispatch to their handler."""
+        verbs with argument rules dispatch to their handler. ``-C`` may name only the
+        worktree root or a directory under it (:func:`_git_c_step`); the verbs then check
+        their paths from where ``-C`` put git."""
         i = 0
         while i < len(args) and args[i].startswith("-"):
             a = args[i]
@@ -2292,8 +2351,13 @@ class GitArchaeologyGuard:
                 return f"archaeology: 'git {a}' points git at another repository"
             if a in {"-C", "-c", "--namespace", "--exec-path", "--super-prefix", "--config-env"}:
                 val = args[i + 1] if i + 1 < len(args) else ""
-                if a == "-C" and _leaves_worktree(val):
-                    return f"archaeology: 'git -C {val}' leaves the worktree"
+                if a == "-C":
+                    inside, here = _git_c_step(here, self.cwd, val)
+                    if not inside:
+                        return (
+                            f"archaeology: 'git -C {val}' cannot be verified to stay "
+                            "inside the worktree"
+                        )
                 if a == "-c" and val.split("=", 1)[0] in {"core.worktree", "core.gitdir"}:
                     return f"archaeology: 'git -c {val}' points git at another repository"
                 i += 2

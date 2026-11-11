@@ -83,6 +83,8 @@ from builders_repo import make_fixture  # noqa: E402
 HONEST = _FIXTURES / "shell_corpus.txt"
 REFUSED = _FIXTURES / "shell_corpus_refused.txt"
 PREFIXES = ("archaeology:", "network:")
+#: in an honest corpus line: the absolute path of the worktree root
+WORKTREE_TOKEN = "@WORKTREE@"
 
 #: binaries the corpus invokes through ``npx`` / ``npm exec`` — present in the fixture cwd
 LOCAL_BINS = ("jest", "vitest", "mocha", "eslint", "standard", "tsc", "prettier")
@@ -159,7 +161,9 @@ def test_corpora_are_substantial() -> None:
 
 @pytest.mark.parametrize("command", HONEST_LINES, ids=lambda c: c[:60])
 def test_honest_shell_is_never_refused(guard: GitArchaeologyGuard, command: str) -> None:
-    reason = guard.check_shell(command)
+    # ``@WORKTREE@`` stands for the absolute worktree root, as the guard sees a container's
+    # ``/work`` after ``StreamStats.host_view`` has mapped it (Wave 3, ``git -C /work``)
+    reason = guard.check_shell(command.replace(WORKTREE_TOKEN, str(guard.cwd)))
     assert reason == "", f"FALSE POSITIVE on honest shell:\n  {command!r}\n  -> {reason}"
 
 

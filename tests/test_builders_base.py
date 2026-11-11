@@ -639,6 +639,175 @@ def test_guard_git_working_tree_verbs(tmp_path: Path) -> None:
     assert "cannot be verified" in base.GitArchaeologyGuard().check_shell("git checkout src/x.py")
 
 
+def _c_tree(tmp_path: Path) -> Path:
+    """A worktree root with a source dir, a link out of the tree and a link inside it."""
+    root = _wt(tmp_path / "repo")
+    (tmp_path / "elsewhere").mkdir()
+    (root / "out").symlink_to(tmp_path / "elsewhere")
+    (root / "in").symlink_to(root / "src")
+    (root / ".git" / "refs").mkdir(parents=True)
+    (root / "gitlink").symlink_to(root / ".git")
+    return root
+
+
+#: ``git -C <target> <verb>`` — accepted only at or under the worktree root ({r}).
+_GIT_C_ACCEPT = (
+    "git -C {r} status",
+    "git -C {r}/ status",
+    "git -C {r}/src diff",
+    "git -C {r}/src/ ls-files",
+    "git -C {r}/./src status",
+    "git -C {r}/in status",  # a link that stays inside the tree
+    "git -C {r}/not-made-yet status",  # git errors; nothing outside is reached
+    "git -C {r} -C src status",  # composes to {r}/src
+    "git -C src -C {r} status",
+    "git -C . status",
+    "git -C src diff",
+    "git -C '' status",  # an empty -C leaves git where it is
+    "git -C {r}/src diff x.py",
+    "git -C {r} rev-parse --show-toplevel",
+    "git -C {r} checkout -- src/x.py",
+)
+
+#: The -C rule's own refusal text (one wording for every class it refuses).
+_GIT_C_MSG = "cannot be verified to stay inside the worktree"
+
+#: … and everything else is refused. These are refused by the -C rule itself.
+_GIT_C_REFUSE_PATH = (
+    "git -C / status",
+    "git -C {p} status",  # the directory above the root
+    "git -C {p}/elsewhere status",
+    "git -C {r}x status",  # a sibling that shares the root's prefix
+    "git -C {r}/.. status",
+    "git -C {r}/../repo status",  # `..` is refused even when it lands back inside
+    "git -C {r}/src/../.. status",
+    "git -C /work/../etc status",
+    "git -C /etc status",
+    "git -C /elsewhere status",
+    "git -C /{r} status",  # `//root`: implementation-defined on POSIX
+    "git -C {r}//src status",
+    "git -C {r}// status",
+    "git -C {r}/out status",  # a link out of the tree
+    "git -C {r}/out/.. status",
+    "git -C out status",
+    "git -C .. status",
+    "git -C src/../.. status",
+    "git -C ~ status",
+    "git -C ~/repo status",
+    "git -C C:/x status",
+    "git -C 'src\\..\\..' status",  # quoted, so the backslashes reach git
+    "git -C {r} -C .. status",  # repeated -C composing to outside
+    "git -C {r} -C /etc status",
+    "git -C {r}/src -C ../.. status",
+    "cd {p} && git -C . status",  # -C . from outside the tree is outside the tree
+    # shell expansion: bash rewrites the value before git sees it, so the literal text
+    # proves nothing about where git runs (review of 184a7bf9, BLOCKING)
+    'git -C {r}/"$(printf ..)" grep foo',  # hoisted to {r}/__SUBST_0__
+    "git -C {r}/$(printf ..) status",
+    "git -C {r}/`echo ..` status",
+    "X=..; git -C {r}/$X status",
+    "git -C {r}/${{X}} status",
+    "git -C {r}/.[.] status",  # glob matching `..`
+    "git -C {r}/.[.]/elsewhere grep foo",
+    "git -C {r}/.? status",
+    "git -C {r}/* status",
+    "git -C {r}/{{..,src}} status",  # brace expansion
+    "git -C $X status",
+    "git -C src/$X status",
+    "git -C `echo ..` status",
+    'git -C "$(echo ..)" status',
+    "git -C .[.] status",
+    "git -C src/* status",
+    "git -C {{src,..}} status",
+    "git -C ~+ status",
+    # .git is the repository's guts, not the work tree
+    "git -C {r}/.git status",
+    "git -C {r}/.git/ status",
+    "git -C {r}/.git/refs grep foo",
+    "git -C .git status",
+    "git -C src/.git status",
+    "git -C {r}/gitlink status",  # a link inside the tree onto .git
+)
+
+#: An accepted -C does not relax the verb and option rules that follow it.
+_GIT_C_REFUSE_OTHER = (
+    "git -C {r} log",
+    "git -C {r} show HEAD~1",
+    "git -C {r} stash list",
+    "git -C {r} diff main",
+    "git -C {r} checkout main",
+    "git -C {r} fetch",
+    "git -C {r} --git-dir=/x/.git status",
+    "git -C {r} --work-tree=/etc status",
+    "git --git-dir={r}/.git -C {r} status",
+    "git -C {r} -c core.worktree=/etc status",
+)
+
+
+def test_guard_git_c_accepts_only_the_worktree_and_below(tmp_path: Path) -> None:
+    """Wave 3: ``git -C /work status`` (the container's work tree) was refused because any
+    absolute ``-C`` counted as leaving the tree, wasting builder turns. ``-C`` now accepts
+    the worktree root or a directory under it, lexically AND with links resolved; every
+    climb, link out, odd spelling and repeated ``-C`` that composes outside stays refused,
+    and the verb rules still apply to what follows."""
+    root = _c_tree(tmp_path)
+    g = base.GitArchaeologyGuard(cwd=root)
+    fill = {"r": str(root), "p": str(tmp_path)}
+    for tpl in _GIT_C_ACCEPT:
+        cmd = tpl.format(**fill)
+        assert g.check_shell(cmd) == "", cmd
+    # the -C rule itself refuses these: another rule refusing them would hide a regression
+    for tpl in _GIT_C_REFUSE_PATH:
+        cmd = tpl.format(**fill)
+        assert _GIT_C_MSG in g.check_shell(cmd), cmd
+    for tpl in _GIT_C_REFUSE_OTHER:
+        cmd = tpl.format(**fill)
+        assert g.check_shell(cmd).startswith(("archaeology:", "network:")), cmd
+    # the verb's paths are checked from where -C put git: x.py is under src/, not the root
+    assert "not a path in the worktree" in g.check_shell(f"git -C {root} diff x.py")
+    # without a known root an absolute -C cannot be verified → refused; relative as before
+    blind = base.GitArchaeologyGuard()
+    assert _GIT_C_MSG in blind.check_shell(f"git -C {root} status")
+    assert blind.check_shell("git -C src status") == ""
+    assert _GIT_C_MSG in blind.check_shell("git -C ../x status")
+    # … but a relative -C the shell rewrites, or one into .git, is refused even blind
+    for cmd in ("git -C $X status", "git -C src/* status", "git -C .git status"):
+        assert _GIT_C_MSG in blind.check_shell(cmd), cmd
+
+
+def test_guard_git_c_root_given_through_a_symlink(tmp_path: Path) -> None:
+    """The guard's root may be the unresolved spelling (``Workspace.root``) while the
+    command names the resolved one (``StreamStats.host_view`` substitutes the resolved
+    ``TestFileGuard.root``): ``git -C <resolved root> status`` was refused. Containment is
+    now judged on the resolved paths; the lexical refusals still apply to both spellings."""
+    real = _c_tree(tmp_path / "real")
+    (tmp_path / "via").symlink_to(tmp_path / "real")
+    linked = tmp_path / "via" / "repo"
+    g = base.GitArchaeologyGuard(cwd=linked)
+    for path in (real, linked, real / "src", linked / "src"):
+        assert g.check_shell(f"git -C {path} status") == "", path
+    for path in (f"{real}/..", f"{real}/out", f"{real}/.git", f"{real}/$X", str(tmp_path)):
+        assert _GIT_C_MSG in g.check_shell(f"git -C {path} status"), path
+
+
+def test_guard_git_c_relative_with_the_directory_unknown(tmp_path: Path) -> None:
+    """After ``popd`` the guard no longer knows where the shell is, so a relative ``-C``
+    passed unchecked: ``pushd src && popd && git -C out status`` reached the tree ``out``
+    links to, and ``-C gitlink`` reached ``.git``. With the root known and the directory
+    unknown a relative ``-C`` is now refused (``.`` and the empty value are no-ops and
+    still pass, as does an absolute path under the root); with no root, as before."""
+    root = _c_tree(tmp_path)
+    g = base.GitArchaeologyGuard(cwd=root)
+    for target in ("out", "gitlink", "src", "in"):
+        cmd = f"pushd src && popd && git -C {target} status"
+        assert _GIT_C_MSG in g.check_shell(cmd), cmd
+    for target in (".", "./", "''", str(root), f"{root}/src"):
+        cmd = f"pushd src && popd && git -C {target} status"
+        assert g.check_shell(cmd) == "", cmd
+    blind = base.GitArchaeologyGuard()
+    assert blind.check_shell("pushd src && popd && git -C src status") == ""
+
+
 def test_guard_git_diff_and_grep_reject_branch_names(tmp_path: Path) -> None:
     """``git diff main`` compared against the branch that holds the gold commit and
     passed the old guard (only shas and ``~``/``^``/``@{`` forms were caught)."""

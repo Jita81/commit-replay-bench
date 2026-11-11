@@ -61,6 +61,7 @@ from __future__ import annotations
 import ast
 import http.server
 import importlib
+import json
 import os
 import socket
 import subprocess
@@ -1082,6 +1083,68 @@ def test_stream_stats_translates_container_paths(trial: Workspace) -> None:
     assert len(stats.violations) == 2 and "archaeology" in stats.violations[1]
     # the transcript keeps what the agent actually ran
     assert stats.bash_commands[0] == "git diff /work/src/calc/__init__.py"
+
+
+def test_stream_stats_git_c_container_workdir(trial: Workspace) -> None:
+    """Wave 3: ``git -C /work status`` names the sealed container's own work tree and was
+    refused as "leaves the worktree". Through the container alias it is the guard's root and
+    is allowed; climbing, doubled-slash and sibling spellings of it stay violations."""
+    guard = base.TestFileGuard(trial.root, pr.default_config(), [pr.TEST_SUBTRACT])
+    stats = StreamStats(GitArchaeologyGuard(cwd=trial.root), guard, workdir_alias=WORKDIR)
+    honest = (
+        f"git -C {WORKDIR} status",
+        f"git -C {WORKDIR}/ status --short",
+        f"git -C {WORKDIR}/src diff",
+        f"cd {WORKDIR} && git -C {WORKDIR} ls-files",
+    )
+    refused = (
+        f"git -C {WORKDIR}/.. status",
+        f"git -C {WORKDIR}/../etc status",
+        f"git -C /{WORKDIR} status",
+        f"git -C {WORKDIR}space status",
+        f"git -C {WORKDIR} log",
+        f"git -C {WORKDIR} -C .. status",
+    )
+    for cmd in (*honest, *refused):
+        stats.feed(
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
+            f'"input":{{"command":{json.dumps(cmd)}}}}}]}}}}',
+            keep=False,
+        )
+    assert len(stats.violations) == len(refused), stats.violations
+    for cmd, violation in zip(refused, stats.violations, strict=True):
+        assert violation.startswith("archaeology:") and cmd[:60] in violation, violation
+
+
+def test_stream_stats_git_c_container_workdir_symlinked_root(
+    trial: Workspace, tmp_path: Path
+) -> None:
+    """The git guard's root is ``Workspace.root`` as given (here reached through a symlink)
+    while ``host_view`` rewrites ``/work`` to ``TestFileGuard.root``, which is resolved:
+    ``git -C /work status`` was refused because the two spellings differ. Expansion,
+    ``.git`` and climbing through the alias stay violations."""
+    link = tmp_path / "linked-trial"
+    link.symlink_to(trial.root, target_is_directory=True)
+    guard = base.TestFileGuard(link, pr.default_config(), [pr.TEST_SUBTRACT])
+    stats = StreamStats(GitArchaeologyGuard(cwd=link), guard, workdir_alias=WORKDIR)
+    assert str(guard.root) != str(link)  # the two spellings really differ
+    honest = (f"git -C {WORKDIR} status", f"git -C {WORKDIR}/src diff")
+    refused = (
+        f"X=..; git -C {WORKDIR}/$X grep foo",
+        f'git -C {WORKDIR}/"$(printf ..)" grep foo',
+        f"git -C {WORKDIR}/.[.] status",
+        f"git -C {WORKDIR}/.git status",
+        f"git -C {WORKDIR}/.. status",
+    )
+    for cmd in (*honest, *refused):
+        stats.feed(
+            '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
+            f'"input":{{"command":{json.dumps(cmd)}}}}}]}}}}',
+            keep=False,
+        )
+    assert len(stats.violations) == len(refused), stats.violations
+    for violation in stats.violations:
+        assert violation.startswith("archaeology:"), violation
 
 
 # ---------------------------------------------------------------------------
