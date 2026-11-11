@@ -21,6 +21,22 @@ written for pull requests #30 to #48 before this rule is kept, unchanged, as a d
   an unreadable or non-finite table makes the cost unknown. `cost_source` in the outcome and the
   pack notes records which figure was used; another model's message is priced at its own rate. Existing rows, their hashes and the schema are
   unchanged.
+- **The shell guard lets `git -C` name the work tree itself** ([#114](https://github.com/Jita81/commit-replay-bench/pull/114)). Wave 3 builders ran
+  `git -C /work status` in the sealed container and were refused as "leaves the worktree",
+  because any absolute `-C` path counted as outside. `-C` now accepts the worktree root or a
+  directory under it, as written and with links resolved; repeated `-C` compose as git composes
+  them, and the verb rules then check paths from there. A `..` component, `//`, `~`, a
+  backslash, shell expansion (`$`, backticks, globs, braces), `.git`, a link out of the tree,
+  an absolute path with no known root and every `-C` that lands outside stay refused. No grading, ledger or apparatus version changes.
+
+- **A Go builder's toolchain scratch stays out of its checkout** ([#113](https://github.com/Jita81/commit-replay-bench/pull/113)). The builder
+  container's `/tmp` tmpfs inherited Docker's `noexec`, so `go test` could not run the binaries
+  it builds there. Twelve Wave 3 cobra builds were disqualified by belt 1b on build-cache and
+  temp paths under `/work` (`.gocache`, `.gotmp`, `.tmp`); that the builders moved their scratch
+  there because of `noexec` is inferred from those paths, as no transcript was kept.
+  `builder_run_args` now states `exec` on that tmpfs (ADR-0005's 2026-09-21 follow-up); `/work`
+  was exec already, so no capability is added. Belt 1b keeps no ignore list: a forged file among
+  the touched files still disqualifies. No grading rule or apparatus version changes.
 
 - **Apparatus 2.5 separates rows graded after the Wave 3 harness fixes**
   ([#116](https://github.com/Jita81/commit-replay-bench/pull/116); DL-417).
