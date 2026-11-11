@@ -28,7 +28,9 @@ What it does: Serves ``ValueReport.to_dict()`` for one repository or all of them
               with its n, interval, method and apparatus; clean → working precision (reviews or
               the labelled proxy); the process-loss share in pounds; the learning curve; the
               prospective routing precision — every figure over one posture class, named
-              in ``posture_class``. Never writes and never calls a model.
+              in ``posture_class``, and only that class's reading outcomes (each naming
+              it; others counted in ``readings_other_posture``). Never writes and never
+              calls a model.
 How:          ``DbLedger.rows`` (every repository — the pooled-review fallback needs them) →
               ``value_row_from_grade`` with each row's comparable class
               (``row_posture_class`` / ``comparable_class``, the map's rule);
@@ -183,11 +185,19 @@ def value(  # noqa: PLR0917 — FastAPI dependencies + query params
     # a pre-2.3 row the sandbox graded: in no figure, and counted (as on the map)
     report["unqualified_posture"] = len(unqualified)
     # ADR-0026: the repository's registered readings, one state per context arm (the loop on
-    # and off are two arms), with each cell's budget spent — read over every arm's rows
+    # and off are two arms), with each cell's budget spent — read over every arm's rows. Only
+    # the readings of the one posture class the figures read are served, each naming it; one
+    # of another class is counted (ADR-0019 §8). A cell's budget spans postures: unchanged
     if repo is not None:
         readings = load_readings(db, repo)
         book = ReadingBook.evaluate(readings, (g for g in grades if g.repo == repo))
-        report["readings"] = [o.to_dict() for o in book.outcomes]
+        read = report["posture_class"]
+        report["readings"] = [
+            {**o.to_dict(), "posture_class": o.reading.posture_class}
+            for o in book.outcomes
+            if o.reading.posture_class == read
+        ]
+        report["readings_other_posture"] = len(book.outcomes) - len(report["readings"])
         report["reading_budgets"] = budget_by_cell(readings)
     return report
 

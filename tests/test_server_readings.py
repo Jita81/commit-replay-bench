@@ -259,6 +259,23 @@ def test_the_loop_on_and_off_are_two_arms_on_the_map_and_value(env: Env) -> None
     assert all(c["first_attempts"]["n"] == c["attempts"] for c in xs)
 
 
+def test_value_serves_only_the_readings_of_the_posture_class_it_reads(env: Env) -> None:
+    """ADR-0019 §8 (P-135): ``/value`` reads one posture class, so the reading outcomes it
+    serves are that class's, each naming it; a reading of another class is counted, never
+    served beside figures it did not read. The cell's budget is one budget across postures
+    and is served unchanged."""
+    reading = _proven(env)
+    sealed = env.get(f"/value?repo={ALPHA}&posture={SEALED}").json()
+    (served,) = sealed["readings"]
+    assert served["reading_id"] == reading["reading_id"]
+    assert served["posture_class"] == SEALED == sealed["posture_class"]
+    assert sealed["readings_other_posture"] == 0
+    host = env.get(f"/value?repo={ALPHA}&posture=local/inplace/host-env").json()
+    assert host["posture_class"] == "local/inplace/host-env"
+    assert (host["readings"], host["readings_other_posture"]) == ([], 1)
+    assert host["reading_budgets"] == sealed["reading_budgets"] != []
+
+
 def test_a_pooled_view_is_refused_for_every_axis(env: Env) -> None:
     for query, code in (
         ("apparatus=all", "apparatus_pooling_refused"),
