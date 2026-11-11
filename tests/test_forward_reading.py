@@ -76,6 +76,7 @@ from crb.core.reading import (
     with_admissions,
     with_enrolment,
 )
+from crb.core.version import APPARATUS_VERSION
 from fixtures.posture import posture_row
 from fixtures.readings import CELL, REPO, S1, commits, register_reading, rows_for, sealed_row
 
@@ -149,7 +150,7 @@ def _s2_row(
         "source_changed": True,
         "repo_lint_clean": None,
         "evidence_pack_hash": "h" * 64 if clean else "",
-        "apparatus_version": "2.4",
+        "apparatus_version": APPARATUS_VERSION,
         "created": created,
         "trial": trial,
         "mode": "sighted",

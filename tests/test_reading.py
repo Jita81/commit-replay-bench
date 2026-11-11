@@ -99,6 +99,7 @@ from crb.core.reading import (
     with_reservations,
 )
 from crb.core.runners.pytest_runner import PytestRunner
+from crb.core.version import APPARATUS_VERSION
 from fixtures import pyrepo as pr
 from fixtures.readings import (
     AUTHOR,
@@ -944,7 +945,7 @@ def test_an_unsealed_row_of_an_admitted_run_makes_the_arm_undecided_scope_fault(
     # which scope fault (RT2B-1 names a second): the row reads unsealed, on either rule
     assert c.scope == SCOPE_UNSEALED == c.to_dict()["scope"]
     # never re-rolled: the plan asks for no attempt on the faulted arm, and says why
-    plan = learn.remeasure_plan(rows, readings=(out,), current_apparatus="2.4")
+    plan = learn.remeasure_plan(rows, readings=(out,), current_apparatus=APPARATUS_VERSION)
     assert not plan.pending and not plan.up_to_date
     (blocked,) = plan.cannot_clear
     assert (blocked.arm, blocked.state, blocked.next_act) == ("S3", STATE_UNDECIDED, "audit")

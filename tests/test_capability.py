@@ -59,16 +59,18 @@ from crb.core.routing import (
 )
 from crb.core.spec import Language, RepoConfig, classify_commit, size_tier
 from crb.core.taxonomy import GLOBAL_CLASS_SET
+from crb.core.version import APPARATUS_VERSION
 from fixtures.posture import posture_row
 
 PACK = "a" * 64
 #: routing.v2 (ADR-0025 as ADR-0026 amends it): a cell delivers only on its standard arm, read
-#: by a registered reading in the sealed posture with a measured oracle and controls at 2.4.
-#: The rows here are that world by default — sealed 2.4 rows on one certifying arm — and
-#: ``build`` / ``best`` / ``candidates`` / ``tac`` hand the map a reading per full cell, an
-#: oracle score per task and a passing controls report at 2.4, so the map's own mechanics
+#: by a registered reading in the sealed posture with a measured oracle and controls at the
+#: live apparatus. The rows here are that world by default — sealed live rows on one
+#: certifying arm — and ``build`` / ``best`` / ``candidates`` / ``tac`` hand the map a reading
+#: per full cell, an oracle score per task and a passing controls report at it, so the map's
+#: own mechanics
 #: (projections, picks, coverage, tiers) are what these tests exercise.
-LIVE = "2.4"
+LIVE = APPARATUS_VERSION
 AUTHOR = "claude-opus-5"
 ARM = f"S1@{AUTHOR}"
 SEALED = "docker/copy/sealed"
@@ -393,7 +395,7 @@ def test_render_markdown_is_a_table_with_n_and_method() -> None:
     assert out.splitlines()[4].startswith("| capability_class | size | n | clean | point | 95% CI")
     assert "`bug.fix`" in out and "`docs.update`" in out
     assert "**deliver**" in out and "**calibrate**" in out
-    assert "policy=routing.v2" in out and "apparatus=2.4" in out
+    assert "policy=routing.v2" in out and f"apparatus={LIVE}" in out
     assert m.render_markdown() == out
 
 
